@@ -11,8 +11,9 @@ rust-version = "1.90"
 hsmworks-app = { path = "crates/app" }
 
 # ECS - alpha bindings, hard-pinned; expect churn on bumps.
-# Minimal features: the flecs C compile is already the slowest step in the build.
-flecs_ecs = { version = "=0.2.2", default-features = false, features = ["flecs_base", "std"] }
+# flecs_alerts is NOT optional: flecs_ecs_sys 0.2.1's bindings.rs references
+# ecs_alert_desc_t ungated, so the sys crate only compiles with that feature on.
+flecs_ecs = { version = "=0.2.2", default-features = false, features = ["flecs_base", "std", "flecs_alerts"] }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
