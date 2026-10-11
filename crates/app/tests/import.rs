@@ -1,0 +1,193 @@
+//! M1.1 acceptance: good files import, corrupt files error - never crash.
+//! The corrupt corpus is built in code (deterministic) so it is byte-exact
+//! and reviewable; cube.stl / box.obj live in testdata/models/ for manual
+//! runs and are the same unit cube.
+
+use std::path::{Path, PathBuf};
+
+use hsmworks_app::geometry::import::{self, Format, ImportError, MAX_FACETS};
+use hsmworks_app::geometry::{cube, Mesh, Point3};
+
+fn testdata(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/models").join(name)
+}
+
+/// All facets must face away from the mesh center (imported winding sanity).
+fn assert_outward(m: &Mesh) {
+    let b = m.bounds().expect("non-empty mesh");
+    let c = b.center();
+    for t in &m.facets {
+        let centroid = Point3::new(
+            (t.a.x + t.b.x + t.c.x) / 3.0,
+            (t.a.y + t.b.y + t.c.y) / 3.0,
+            (t.a.z + t.b.z + t.c.z) / 3.0,
+        );
+        assert!(t.normal().dot(centroid - c) > 0.0, "inward facet {t:?}");
+    }
+}
+
+fn cube_reference() -> Mesh {
+    cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0))
+}
+
+// ---------- good files ----------
+
+#[test]
+fn ascii_stl_cube() {
+    let m = import::load_model(&testdata("cube.stl")).expect("cube.stl must import");
+    assert_eq!(m.len(), 12);
+    assert_outward(&m);
+    let b = m.bounds().expect("bounds");
+    assert!(b.min.x == 0.0 && b.max.z == 1.0);
+}
+
+#[test]
+fn obj_cube_matches_primitive() {
+    let m = import::load_model(&testdata("box.obj")).expect("box.obj must import");
+    assert_eq!(m, cube_reference(), "quads must fan-triangulate like cube()");
+    assert_outward(&m);
+}
+
+#[test]
+fn binary_stl_roundtrip_of_ascii_content() {
+    let ascii = import::load_model(&testdata("cube.stl")).expect("ascii");
+    let mut bytes = mesh_to_binary(&ascii);
+    // header says "solid" on purpose: size math must still pick binary
+    bytes[0..5].copy_from_slice(b"solid");
+    let m = import::parse_model(&bytes, Format::Stl).expect("binary");
+    assert_eq!(m.len(), 12);
+    for (a, b) in ascii.facets.iter().zip(&m.facets) {
+        assert_eq!(a.a.x, b.a.x);
+        assert_eq!(a.c.z, b.c.z);
+    }
+}
+
+#[test]
+fn obj_negative_and_slashed_references() {
+    let text = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf -3/-2/-1 -2 -1\n";
+    let m = import::parse_model(text.as_bytes(), Format::Obj).expect("obj");
+    assert_eq!(m.len(), 1);
+}
+
+#[test]
+fn obj_polygon_fan() {
+    // 5-gon must yield 3 triangles sharing vertex 1
+    let text = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nv 0.5 0.5 0\nf 1 2 3 4 5\n";
+    let m = import::parse_model(text.as_bytes(), Format::Obj).expect("obj");
+    assert_eq!(m.len(), 3);
+}
+
+#[test]
+fn obj_quads_sharing_edge() {
+    let text = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nf 1 2 4 3\nf 1 3 4 2\n";
+    let m = import::parse_model(text.as_bytes(), Format::Obj).expect("obj");
+    assert_eq!(m.len(), 4);
+}
+
+// ---------- corrupt files: must be clean errors ----------
+
+#[test]
+fn empty_is_not_a_mesh() {
+    assert!(matches!(import::parse_model(b"", Format::Stl), Err(ImportError::Empty)));
+    assert!(matches!(import::parse_model(b"", Format::Obj), Err(ImportError::Empty)));
+}
+
+#[test]
+fn truncated_binary_stl() {
+    let bytes = mesh_to_binary(&cube_reference());
+    let cut = &bytes[..bytes.len() - 17];
+    match import::parse_model(cut, Format::Stl) {
+        Err(ImportError::Stl(msg)) => assert!(msg.contains("does not match"), "{msg}"),
+        other => panic!("expected Stl size error, got {other:?}"),
+    }
+}
+
+#[test]
+fn huge_facet_count_is_refused_before_allocating() {
+    let mut bytes = vec![0u8; 84];
+    bytes[80..84].copy_from_slice(&(u32::MAX).to_le_bytes());
+    match import::parse_model(&bytes, Format::Stl) {
+        Err(ImportError::TooLarge) => {}
+        other => panic!("expected TooLarge, got {other:?}"),
+    }
+}
+
+#[test]
+fn ascii_nan_vertex_rejected() {
+    let text = "solid x\nfacet normal 0 0 0\nouter loop\nvertex NaN 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid x\n";
+    match import::parse_model(text.as_bytes(), Format::Stl) {
+        Err(ImportError::Stl(msg)) => assert!(msg.contains("non-finite"), "{msg}"),
+        other => panic!("expected non-finite error, got {other:?}"),
+    }
+}
+
+#[test]
+fn ascii_garbage_rejected() {
+    assert!(matches!(
+        import::parse_model(b"solid x\nthis is not stl\nendsolid x\n", Format::Stl),
+        Err(ImportError::Stl(_))
+    ));
+}
+
+#[test]
+fn obj_reference_out_of_range_rejected() {
+    let text = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 99\n";
+    match import::parse_model(text.as_bytes(), Format::Obj) {
+        Err(ImportError::Obj(msg)) => assert!(msg.contains("out of range"), "{msg}"),
+        other => panic!("expected range error, got {other:?}"),
+    }
+}
+
+#[test]
+fn obj_degenerate_facet_rejected() {
+    let text = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 1 2\n";
+    assert!(matches!(
+        import::parse_model(text.as_bytes(), Format::Obj),
+        Err(ImportError::Obj(_))
+    ));
+}
+
+#[test]
+fn binary_garbage_never_panics() {
+    // any random bytes must return Err, this loop is a smoke fuzz
+    for seed in 0..64u64 {
+        let mut data = Vec::new();
+        let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        for _ in 0..96 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            data.push((x >> 33) as u8);
+        }
+        let _ = import::parse_model(&data, Format::Stl);
+        let _ = import::parse_model(&data, Format::Obj);
+    }
+}
+
+#[test]
+fn unsupported_extension() {
+    let err = import::load_model(&testdata("cube.step")).err();
+    assert!(matches!(err, Some(ImportError::Unsupported(_))));
+}
+
+#[test]
+fn facet_cap_is_5_million() {
+    assert_eq!(MAX_FACETS, 5_000_000);
+}
+
+// ---------- helpers ----------
+
+fn mesh_to_binary(m: &Mesh) -> Vec<u8> {
+    let mut out = vec![0u8; 84];
+    let n = m.facets.len() as u32;
+    out[80..84].copy_from_slice(&n.to_le_bytes());
+    for t in &m.facets {
+        let mut rec = [0u8; 50];
+        for (pi, p) in [t.a, t.b, t.c].iter().enumerate() {
+            for (ci, c) in [p.x, p.y, p.z].iter().enumerate() {
+                let at = 12 + pi * 12 + ci * 4;
+                rec[at..at + 4].copy_from_slice(&(*c as f32).to_le_bytes());
+            }
+        }
+        out.extend_from_slice(&rec);
+    }
+    out
+}
