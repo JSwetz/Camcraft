@@ -1,0 +1,12 @@
+[package]
+name = "hsmworks-app"
+description = "Domain layer: geometry, components, commands, project io. Clean-room implementation, public sources only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flecs_ecs = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

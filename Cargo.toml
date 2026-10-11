@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["crates/app", "crates/ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+
+[workspace.dependencies]
+hsmworks-app = { path = "crates/app" }
+
+# ECS - alpha bindings, hard-pinned; expect churn on bumps.
+# Minimal features: the flecs C compile is already the slowest step in the build.
+flecs_ecs = { version = "=0.2.2", default-features = false, features = ["flecs_base", "std"] }
+
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# UI stack - imgui fork with docking; winit platform + wgpu renderer backends
+dear-imgui-rs = "0.19"
+dear-imgui-winit = "0.19"
+dear-imgui-wgpu = "0.19"
+winit = "0.30"
+rfd = "0.15"

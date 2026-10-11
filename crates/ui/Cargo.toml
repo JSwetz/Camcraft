@@ -1,0 +1,15 @@
+[package]
+name = "hsmworks-ui"
+description = "Dear ImGui shell: dockspace, menus, entity tree, 3D viewport."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hsmworks-app = { workspace = true }
+flecs_ecs = { workspace = true }
+dear-imgui-rs = { workspace = true }
+dear-imgui-winit = { workspace = true }
+dear-imgui-wgpu = { workspace = true }
+winit = { workspace = true }
+rfd = { workspace = true }
