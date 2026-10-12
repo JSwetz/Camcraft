@@ -47,8 +47,8 @@ the contract; the Goal line is what the feature list adds up to.
 Everything a machinist needs to cut a 2.5D part on a vertical mill today:
 setup, tools, 2D operations, drilling, simulation, and one trustworthy post.
 
-**Current status snapshot**: M1.1 (mesh side) and the M1.2 shell/viewport are
-in; see milestone tables for what remains.
+**Current status snapshot**: M1.1 (mesh side) and the M1.2 shell, viewport and
+job setup (stock + WCS) are in; toolpath display and units remain for the phase.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -57,8 +57,9 @@ in; see milestone tables for what remains.
       creation; repair (weld, holes) still open, for toolpath-supporting surfaces
 - ✅ **Robustness**: degenerate and corrupt models produce clean errors, never
       crashes (Prime Directive) - corrupt-input corpus tests enforce this
-- ✅ **Project save/load**: versioned single-file project (`.hsmproj` JSON v1;
-      setups, operations, tools attach as those entities land)
+- ✅ **Project save/load**: versioned single-file project (`.hsmproj` JSON, at
+      v2: rigid transforms, stock and WCS; older files migrate on load;
+      operations and tools attach as those entities land)
 - ✅ **Command foundation**: command pattern with undo/redo driving all
       UI-visible state changes from day one
 - 📋 **Units**: millimeters and inches, correct everywhere including posts
@@ -71,15 +72,22 @@ in; see milestone tables for what remains.
 
 - ⚠️ **Menu & toolbar**: menus + shortcuts shipped (File/Edit/View, Ctrl+O/S/Z/Y,
       Del, F); toolbar icons not yet (blocked on the `assets/ui/` icon set)
-- ⚠️ **Setup tree pane**: models pane with viewport-synced selection shipped;
-      setups → operations nodes arrive with M1.3
+- ⚠️ **Setup tree pane**: models pane with viewport-synced selection, plus a
+      Setup tab editing stock and work offsets; setups → operations nodes arrive with M1.3
 - ✅ **Viewport**: orbit / pan / zoom, selection highlight, frame-all, dockable
-      offscreen 3D target; stock and operations pickables arrive with their entities
+      offscreen 3D target; translucent stock and WCS triads render, stock is
+      pickable where nothing is behind it; operations pickables arrive with M1.3
 - ✅ **STEP import**: `.step`/`.stp` tessellate to meshes via
       truck (Apache-2.0, pure Rust); feature-edge wireframe in the viewport.
       B-rep *editing* and booleans remain kernel-decision territory (M1.3)
-- 📋 **Stock definition**: box, cylinder, or from model solid; user transform for raw stock
-- 📋 **WCS**: work coordinate placement and readout; multiple WCS per part, mapped to G54-G59
+- ✅ **Stock definition**: box, cylinder, or from-model-solid stock with a user
+      transform (XY center, Z bottom, yaw) and Fit-to-Models; shapes are stored
+      as parameters and re-meshed deterministically, so files stay small and
+      undo is exact. Specced from published stock-shape conventions and general
+      machining knowledge only
+- ⚠️ **WCS**: numeric origin + yaw per slot with a G54-G59 readout and viewport
+      triads; face/vertex snap-to-place is deferred (needs M1.3 selection
+      geometry). Offset codes are the published RS-274 / ISO 6983 ones
 - 📋 **Toolpath display**: colored toolpath preview with directional arrows
 
 ### M1.3 - 2D Machining
@@ -226,7 +234,7 @@ programming department.
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
-| **M1.2** | Define a job | Shell + dockable viewport + STEP import in; stock, WCS, toolpath display open | ⚠️ |
+| **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup in; toolpath display open | ⚠️ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, tool library, parameters; B-rep ops gated on kernel | 📋 |
 | **M1.4** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.5** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
