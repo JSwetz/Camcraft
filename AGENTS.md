@@ -61,10 +61,9 @@ invert: the history is the single source of truth for what undo/redo can do.
 Any UI-driven change goes through it, including parameter edits in the
 operation property panel.
 
-- `CreateOperation` / `DeleteOperation` → operation entities (create/delete
-  the entity; no raw_data)
+- `CreateOperation` / `DeleteOperation` → operation entities
 - `ChangeTool` / `EditOperationParams` → operations and setups that had a
-  tool, stock, or depth changed (write raw_data directly on command creation,
+  tool, stock, or depth changed (write the new value on command creation,
   not via systems; undo must restore the previous value)
 - `SelectEntity` → selection (which operations/models are highlighted)
 - `ActivateSetup` → the active setup
@@ -76,14 +75,14 @@ If a UI change has no command for it, that's a bug - add one.
 
 Components are auto-registered: declare them in `crates/app/src/schema.rs`
 and the startup hook (`flecs_bits::register_schema`) handles the rest, in every
-binary. CPODs are self-contained - `Copy` types with no raw pointers.
-Types with `raw_data` use per-type arenas, never global allocators; a type
-with `raw_data` must be explicitly deleted to free its allocation, and delete
-hooks must free ALL associated resources (e.g. the cached toolpath and
-rest-material meshes of a deleted operation). If a type has no
-delete hook, it must not have `raw_data` (e.g. `Setup` owns `OpRefs` raw_data
-but has no delete hook - only `World::fini()` frees it; `Stock` and `Toolpath`
-free their data on delete).
+binary. Current policy: components are Rust-owned types (`Vec`/`Box` fields),
+freed by the delete hooks flecs_ecs registers for them. The invariant that
+matters is unchanged: deleting an entity must free ALL associated resources
+(e.g. the cached toolpath and rest-material meshes of a deleted operation).
+Per-type arenas for C-style `raw_data` storage are a deferred performance
+optimization (M4.3-era), not a current requirement; if a type ever adopts
+`raw_data`, it must use a per-type arena - never a global allocator - and
+must carry a delete hook that frees everything it owns.
 
 ## Assets
 
@@ -104,14 +103,13 @@ Layering is strict: ui → app → flecs. UI panels, widgets, and dialogs must
 not use sys_* or world-level direct calls; put those in app. Only app-layer systems and commands use raw Flecs calls.
 
 Schema components live in the schema module (`crates/app/src/schema.rs`):
-component decls (POD/CPOD), extern impls (`raw_data`, `type_id`), and the
-`#[derive(Component)]` structs. Other app modules must not declare components.
+the `#[derive(Component)]` structs and their CPOD decls. Other app modules
+must not declare components.
 Geometry parts are components (`app::model::Part`); use `model::child_parts` /
 `model::child_parts_of` to traverse - in UI and systems. Components don't
 reference each other. `Part` stores `child: Entity` (not parent); systems
 query directly (no helper accessors). `decompose` stores facets directly into
-`Part`. `SceneGeometry::ensure()` is forbidden in main-thread command/undo
-paths (use the async path or rebuild on demand).
+`Part`.
 
 Check only touched files: `cargo check -p hsmworks-ui` / `-p hsmworks-app` (not
 the whole workspace, which rebuilds flecs).

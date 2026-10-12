@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> _Last updated: 2026-10-11_
+> _Last updated: 2026-10-12_
 
 ## North Star
 
@@ -47,24 +47,37 @@ the contract; the Goal line is what the feature list adds up to.
 Everything a machinist needs to cut a 2.5D part on a vertical mill today:
 setup, tools, 2D operations, drilling, simulation, and one trustworthy post.
 
-**Current status snapshot**: New project - no features implemented yet.
+**Current status snapshot**: M1.1 (mesh side) and the M1.2 shell/viewport are
+in; see milestone tables for what remains.
 
 ### M1.1 - Core Foundation & File I/O
-**Goal: a workspace that opens models and saves projects, and never crashes on bad input.**
+**Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
 
-- **STEP / IGES import**: B-rep models via an open geometry kernel
-- **Mesh import**: STL / OBJ with repair (weld, holes) for toolpath-supporting surfaces
-- **Robustness**: degenerate and corrupt models produce clean errors, never crashes (Prime Directive)
-- **Project save/load**: versioned single-file project (model refs, setups, operations, tools, parameters)
-- **Command foundation**: full command pattern - undo/redo on every state change from day one
-- **Units**: millimeters and inches, correct everywhere including posts
+- ✅ **Mesh import**: STL (binary + ASCII, sniffed) / OBJ, validated at command
+      creation; repair (weld, holes) still open, for toolpath-supporting surfaces
+- ✅ **Robustness**: degenerate and corrupt models produce clean errors, never
+      crashes (Prime Directive) - corrupt-input corpus tests enforce this
+- ✅ **Project save/load**: versioned single-file project (`.hsmproj` JSON v1;
+      setups, operations, tools attach as those entities land)
+- ✅ **Command foundation**: command pattern with undo/redo driving all
+      UI-visible state changes from day one
+- 📋 **Units**: millimeters and inches, correct everywhere including posts
+- ⏸ **STEP / IGES import**: moved to M1.3 - no B-rep kernel decision yet
+      (see Open questions); the Open dialog lists `.step`/`.stp` and refuses
+      them with a clean diagnostic until then
 
 ### M1.2 - UI Shell & Job Setup
-**Goal: real application chrome; define and display a machining setup.**
+**Goal: real application chrome; define and display a machining setup.** — ⚠️ partial
 
-- **Menu & toolbar**: main actions with icons, keyboard shortcuts
-- **Setup tree pane**: setups → operations, selection synced with the viewport
-- **Viewport**: orbit / pan / zoom, selection of model, stock, and operations
+- ⚠️ **Menu & toolbar**: menus + shortcuts shipped (File/Edit/View, Ctrl+O/S/Z/Y,
+      Del, F); toolbar icons not yet (blocked on the `assets/ui/` icon set)
+- ⚠️ **Setup tree pane**: models pane with viewport-synced selection shipped;
+      setups → operations nodes arrive with M1.3
+- ✅ **Viewport**: orbit / pan / zoom, selection highlight, frame-all, dockable
+      offscreen 3D target; stock and operations pickables arrive with their entities
+- 📋 **Stock definition**: box, cylinder, or from model solid; user transform for raw stock
+- 📋 **WCS**: work coordinate placement and readout; multiple WCS per part, mapped to G54-G59
+- 📋 **Toolpath display**: colored toolpath preview with directional arrows
 - **Stock definition**: box, cylinder, or from model solid; user transform for raw stock
 - **WCS**: work coordinate placement and readout; multiple WCS per part, mapped to G54-G59
 - **Toolpath display**: colored toolpath preview with directional arrows
@@ -72,6 +85,8 @@ setup, tools, 2D operations, drilling, simulation, and one trustworthy post.
 ### M1.3 - 2D Machining
 **Goal: a machinist can face, pocket, and contour a simple plate.**
 
+- ⏸ **STEP / IGES import**: B-rep models via an open geometry kernel - decide
+      kernel (truck vs OpenCascade binding) first; moved here from M1.1
 - **Face operation**: clean stock tops
 - **2D Contour**: islands, lead in/out (linear, arc, tangential), tabs, cutter compensation (G41/G42)
 - **2D Pocket**: with islands, spiral and zigzag entry, stock-to-leave
@@ -208,9 +223,9 @@ programming department.
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
-| **M1.1** | Model in, project saved, never crash | STEP/IGES/mesh import, save/load, undo/redo, robustness | 📋 |
-| **M1.2** | Define a job | Tree, viewport, stock, WCS, toolpath display | 📋 |
-| **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, tool library, parameters | 📋 |
+| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (STEP/IGES → M1.3; units open) | ⚠️ |
+| **M1.2** | Define a job | Shell + dockable viewport in; stock, WCS, toolpath display open | ⚠️ |
+| **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, tool library, parameters; STEP import gated on kernel | 📋 |
 | **M1.4** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.5** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
