@@ -9,20 +9,33 @@
 
 use flecs_ecs::prelude::*;
 
-use crate::geometry::{Point3, Triangle};
+use crate::geometry::{IDENTITY_Q, Point3, Triangle};
 
 /// Human-unique name of a persistent entity. The project serializer and
 /// name-based command lookup both key on this.
 #[derive(Component, Debug)]
 pub struct Name(pub String);
 
-/// Placement of a model entity. Translation-only for now; upgrade to a full
-/// rigid transform lands with M1.2 stock orientation.
-#[derive(Component, Debug, Default, Clone, Copy)]
+/// Rigid placement of a model entity: world position plus orientation as a
+/// unit quaternion (x, y, z, w). The UI exposes yaw only for now; the data
+/// model carries full orientation so stock/fixture alignment later is an
+/// editor change, not a schema change. Write it through `model::set_transform`,
+/// which guarantees the quaternion is unit.
+#[derive(Component, Debug, Clone, Copy)]
 pub struct Location {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
+    pub pos: Point3,
+    pub rot: [f64; 4],
+}
+
+impl Default for Location {
+    /// Manual: a derived `Default` would store the zero quaternion, which is
+    /// not a rotation.
+    fn default() -> Self {
+        Location {
+            pos: Point3::ZERO,
+            rot: IDENTITY_Q,
+        }
+    }
 }
 
 /// Triangulated geometry of a model. Rust-owned storage: freed on delete.
@@ -44,9 +57,4 @@ pub fn register_schema(world: &World) {
     world.component::<Location>();
     world.component::<Facets>();
     world.component::<Selected>();
-}
-
-#[must_use]
-pub fn point_of(loc: &Location) -> Point3 {
-    Point3::new(loc.x, loc.y, loc.z)
 }

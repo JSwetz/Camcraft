@@ -6,12 +6,15 @@
 
 use flecs_ecs::prelude::World;
 
-use crate::geometry::{Point3, Triangle};
+use crate::geometry::{
+    Point3, Triangle, quat_conjugate, quat_rotate_point, transform_inverse_point,
+};
 use crate::model;
 
 /// Nearest named model whose facet sits along `origin + t*dir`, `t > 0`.
 /// Double-sided; degenerate or non-finite geometry is skipped, never fatal
-/// (Prime Directive).
+/// (Prime Directive). Entities' rigid placements are honored by transforming
+/// the ray into each entity's local frame.
 #[must_use]
 pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<String> {
     if !origin.iter().all(|v| v.is_finite()) || !dir.iter().all(|v| v.is_finite()) {
@@ -24,9 +27,17 @@ pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<Strin
         let Some(tris) = model::facets_of(world, &entity) else {
             continue;
         };
-        let loc = model::location_of(world, &entity).unwrap_or(Point3::ZERO);
+        // One inverse rigid transform of the ray per entity, instead of one
+        // shift per triangle. Rotations are unit quats, so distances along
+        // the local ray equal world distances: depths stay comparable.
+        let loc = model::transform_of(world, &entity).unwrap_or_default();
+        let o_local = transform_inverse_point(o, loc.pos, loc.rot);
+        let d_local = quat_rotate_point(quat_conjugate(loc.rot), d);
+        if !(o_local.is_finite() && d_local.is_finite()) {
+            continue;
+        }
         for t in tris {
-            let Some(hit_t) = ray_triangle(t, loc, o, d) else {
+            let Some(hit_t) = ray_triangle(t, o_local, d_local) else {
                 continue;
             };
             if best.as_ref().is_none_or(|(b, _)| hit_t < *b) {
@@ -37,12 +48,10 @@ pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<Strin
     best.map(|(_, name)| name)
 }
 
-/// Ray/triangle crossing in world space; the ray direction need not be
-/// normalized. Returns t along the ray.
-fn ray_triangle(facet: Triangle, off: Point3, origin: Point3, dir: Point3) -> Option<f64> {
-    let a = shift(facet.a, off);
-    let b = shift(facet.b, off);
-    let c = shift(facet.c, off);
+/// Ray/triangle crossing in the entity's local frame; the ray direction need
+/// not be normalized. Returns t along the ray.
+fn ray_triangle(facet: Triangle, origin: Point3, dir: Point3) -> Option<f64> {
+    let (a, b, c) = (facet.a, facet.b, facet.c);
     if !(a.is_finite() && b.is_finite() && c.is_finite()) {
         return None;
     }
@@ -70,8 +79,4 @@ fn ray_triangle(facet: Triangle, off: Point3, origin: Point3, dir: Point3) -> Op
     } else {
         None
     }
-}
-
-fn shift(p: Point3, o: Point3) -> Point3 {
-    Point3::new(p.x + o.x, p.y + o.y, p.z + o.z)
 }

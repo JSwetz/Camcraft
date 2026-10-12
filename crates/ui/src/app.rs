@@ -10,7 +10,7 @@ use std::sync::Arc;
 use dear_imgui_rs::{ConfigFlags, Context};
 use dear_imgui_wgpu::{wgpu, ExternalTextureId, FramebufferExtent, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
-use hsmworks_app::geometry::Point3;
+use hsmworks_app::geometry::transform_point;
 use hsmworks_app::{model, pick};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -510,21 +510,17 @@ fn collect_parts(state: &State) -> Vec<(Vec<[f32; 3]>, bool)> {
         .map(|(_, entity)| {
             let tris = model::facets_of(&state.world, &entity).unwrap_or_default();
             let selected = model::is_selected(&state.world, &entity);
-            let loc = model::location_of(&state.world, &entity).unwrap_or(Point3::ZERO);
+            let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
             let mut verts = Vec::with_capacity(tris.len() * 3);
             for t in tris {
                 for p in [t.a, t.b, t.c] {
-                    let p = moved(p, loc);
+                    let p = transform_point(p, loc.pos, loc.rot);
                     verts.push([ftoz(p.x), ftoz(p.y), ftoz(p.z)]);
                 }
             }
             (verts, selected)
         })
         .collect()
-}
-
-fn moved(p: Point3, o: Point3) -> Point3 {
-    Point3::new(p.x + o.x, p.y + o.y, p.z + o.z)
 }
 
 fn ftoz(v: f64) -> f32 {

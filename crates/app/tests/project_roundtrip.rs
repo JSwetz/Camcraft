@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use hsmworks_app::commands::{History, ImportModel};
-use hsmworks_app::geometry::{cube, Point3};
+use hsmworks_app::geometry::{IDENTITY_Q, cube, Point3};
 use hsmworks_app::model;
 use hsmworks_app::project::{self, ProjectError};
 use hsmworks_app::world::new_world;
@@ -70,12 +70,79 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    let text = r#"{"version": 2, "entities": []}"#;
+    // Anything newer than this build's format stays refused; v1 migrates
+    // (see v1_file_migrates).
+    let text = r#"{"version": 3, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(2)) => {}
+        Err(ProjectError::UnsupportedVersion(3)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
+}
+
+#[test]
+fn v1_file_migrates_to_v2() {
+    // A literal v1 project: no rotation field anywhere (v2 default + step-up).
+    let text = r#"{
+        "version": 1,
+        "entities": [{
+            "name": "legacy",
+            "translation": [1.0, 2.0, 3.0],
+            "facets": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]]
+        }]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v1 must migrate");
+    let e = model::find_by_name(&world, "legacy").expect("entity");
+    let loc = model::transform_of(&world, &e).expect("location");
+    assert_eq!((loc.pos.x, loc.pos.y, loc.pos.z), (1.0, 2.0, 3.0));
+    assert_eq!(loc.rot, IDENTITY_Q, "v1 translations mean identity");
+    assert_eq!(model::facets_of(&world, &e).map(|t| t.len()), Some(1));
+}
+
+#[test]
+fn rotation_survives_round_trip() {
+    use hsmworks_app::geometry::quat_from_yaw;
+    use hsmworks_app::schema::Location;
+    use std::f64::consts::FRAC_PI_2;
+
+    let path = tmp_path("rot");
+    let world = new_world();
+    let e = model::spawn(&world, "tilt");
+    model::set_facets(&world, &e, cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0)).facets);
+    model::set_transform(
+        &world,
+        &e,
+        Location {
+            pos: Point3::new(5.0, 0.0, 0.0),
+            rot: quat_from_yaw(FRAC_PI_2),
+        },
+    );
+    project::save(&world, &path).expect("save");
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    let _ = std::fs::remove_file(&path);
+
+    let e2 = model::find_by_name(&world2, "tilt").expect("loaded");
+    let loc = model::transform_of(&world2, &e2).expect("location");
+    assert_eq!((loc.pos.x, loc.pos.y, loc.pos.z), (5.0, 0.0, 0.0));
+    // Local (1,0,0) must land at world (5,1,0) after the yaw-90 rotation.
+    let w = hsmworks_app::geometry::transform_point(Point3::new(1.0, 0.0, 0.0), loc.pos, loc.rot);
+    assert!((w.x - 5.0).abs() < 1e-12 && (w.y - 1.0).abs() < 1e-12 && w.z.abs() < 1e-12);
+}
+
+#[test]
+fn garbage_rotation_loads_as_identity() {
+    // Prime Directive: a hand-corrupted quaternion is a logged fallback,
+    // not a NaN geometry bomb.
+    let text = r#"{"version": 2, "entities": [{"name": "g", "translation": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 0.0]}]}"#;
+    let world = new_world();
+    project::open(&world, text).expect("opens");
+    let e = model::find_by_name(&world, "g").expect("entity");
+    assert_eq!(
+        model::transform_of(&world, &e).expect("location").rot,
+        IDENTITY_Q
+    );
 }
 
 #[test]

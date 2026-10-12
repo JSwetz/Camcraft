@@ -4,12 +4,13 @@
 use flecs_ecs::prelude::World;
 
 use crate::commands::{Command, CommandError};
-use crate::geometry::{Point3, Triangle};
+use crate::geometry::Triangle;
 use crate::model;
+use crate::schema::Location;
 
 pub struct DeleteEntity {
     name: String,
-    location: Point3,
+    location: Location,
     facets: Option<Vec<Triangle>>,
 }
 
@@ -22,7 +23,7 @@ impl DeleteEntity {
         };
         Ok(DeleteEntity {
             name: name.to_string(),
-            location: model::location_of(world, &entity).unwrap_or(Point3::ZERO),
+            location: model::transform_of(world, &entity).unwrap_or_default(),
             facets: model::facets_of(world, &entity),
         })
     }
@@ -40,7 +41,7 @@ impl Command for DeleteEntity {
             return; // already restored (idempotent redo path)
         }
         let entity = model::spawn(world, &self.name);
-        model::set_location(world, &entity, self.location);
+        model::set_transform(world, &entity, self.location);
         if let Some(tris) = &self.facets {
             model::set_facets(world, &entity, tris.clone());
         }

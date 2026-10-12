@@ -1,8 +1,9 @@
 //! Ray picking: nearest model along the ray, misses and degenerate rays
-//! return None - never a panic.
+//! return None - never a panic. Includes rigid (rotated) placements.
 
 use hsmworks_app::commands::{Command, ImportModel};
-use hsmworks_app::geometry::{cube, Mesh, Point3};
+use hsmworks_app::geometry::{cube, Mesh, Point3, quat_from_yaw};
+use hsmworks_app::schema::Location;
 use hsmworks_app::{model, pick, world::new_world};
 
 fn cube_at(origin: Point3) -> Mesh {
@@ -41,6 +42,28 @@ fn non_finite_ray_is_none_not_crash() {
     let nan = f64::NAN;
     assert_eq!(pick::first_hit(&world, [nan, 0.0, 0.0], [0.0, 0.0, -1.0]), None);
     assert_eq!(pick::first_hit(&world, [0.0, 0.0, 0.0], [f64::INFINITY, 0.0, 0.0]), None);
+}
+
+#[test]
+fn rotated_cube_picks_where_it_actually_is() {
+    // Unit cube at origin, yawed 90 deg about Z, translated to x=5: it then
+    // spans x in [4,5], y in [0,1]. The pre-rotation footprint (x in [5,6])
+    // must miss.
+    let world = new_world();
+    ImportModel::from_mesh("a", cube_at(Point3::ZERO)).apply(&world);
+    let e = model::find_by_name(&world, "a").expect("entity");
+    model::set_transform(
+        &world,
+        &e,
+        Location {
+            pos: Point3::new(5.0, 0.0, 0.0),
+            rot: quat_from_yaw(std::f64::consts::FRAC_PI_2),
+        },
+    );
+    let found = pick::first_hit(&world, [4.5, 0.5, 10.0], [0.0, 0.0, -1.0]);
+    assert_eq!(found.as_deref(), Some("a"));
+    let miss = pick::first_hit(&world, [5.5, 0.5, 10.0], [0.0, 0.0, -1.0]);
+    assert_eq!(miss, None, "rotation must move the geometry, not the ray");
 }
 
 #[test]

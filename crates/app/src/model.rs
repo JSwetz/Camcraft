@@ -9,7 +9,7 @@
 use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::{Entity, World};
 
-use crate::geometry::{Point3, Triangle};
+use crate::geometry::{IDENTITY_Q, Point3, Triangle, normalize_quat};
 use crate::schema::{Facets, Location, Name, Selected};
 
 /// Create a named model entity at the origin with no geometry yet.
@@ -25,12 +25,31 @@ pub fn set_facets(world: &World, entity: &Entity, tris: Vec<Triangle>) {
     entity.entity_view(world).set(Facets { tris });
 }
 
+/// Set the translation half of the placement, keeping any existing rotation.
 pub fn set_location(world: &World, entity: &Entity, p: Point3) {
-    entity.entity_view(world).set(Location {
-        x: p.x,
-        y: p.y,
-        z: p.z,
-    });
+    let rot = entity
+        .entity_view(world)
+        .try_get::<&Location>(|l| l.rot)
+        .unwrap_or(IDENTITY_Q);
+    entity.entity_view(world).set(Location { pos: p, rot });
+}
+
+/// Set the full rigid placement. Normalizes the quaternion at this single
+/// write chokepoint: a zero or non-finite `rot` (a hand-edited file, a bad
+/// parameter) becomes identity with a logged diagnostic, never NaN geometry
+/// (Prime Directive).
+pub fn set_transform(world: &World, entity: &Entity, mut loc: Location) {
+    match normalize_quat(loc.rot) {
+        Some(q) => loc.rot = q,
+        None => {
+            eprintln!(
+                "model: rotation {:?} is not a usable quaternion; using identity",
+                loc.rot
+            );
+            loc.rot = IDENTITY_Q;
+        }
+    }
+    entity.entity_view(world).set(loc);
 }
 
 /// Delete an entity; Rust-owned components free via flecs's drop hooks.
@@ -43,11 +62,16 @@ pub fn facets_of(world: &World, entity: &Entity) -> Option<Vec<Triangle>> {
     entity.entity_view(world).try_get::<&Facets>(|f| f.tris.clone())
 }
 
+/// Translation only - the common read for position-oriented code. Use
+/// [`transform_of`] when orientation matters (render, pick, serialization).
 #[must_use]
 pub fn location_of(world: &World, entity: &Entity) -> Option<Point3> {
-    entity
-        .entity_view(world)
-        .try_get::<&Location>(|l| Point3::new(l.x, l.y, l.z))
+    entity.entity_view(world).try_get::<&Location>(|l| l.pos)
+}
+
+#[must_use]
+pub fn transform_of(world: &World, entity: &Entity) -> Option<Location> {
+    entity.entity_view(world).try_get::<&Location>(|l| *l)
 }
 
 /// Resolve an entity by its `Name` component (commands reference entities by

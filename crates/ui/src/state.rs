@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use dear_imgui_rs::TextureId;
 use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{CommandError, DeleteEntity, History, ImportModel, SelectEntity};
-use hsmworks_app::geometry::Point3;
+use hsmworks_app::geometry::transform_point;
 use hsmworks_app::{model, project, world::new_world};
 
 use crate::viewport::Camera;
@@ -225,11 +225,12 @@ impl State {
             let Some(tris) = model::facets_of(&self.world, &entity) else {
                 continue;
             };
-            let loc = model::location_of(&self.world, &entity).unwrap_or(Point3::ZERO);
+            let loc = model::transform_of(&self.world, &entity).unwrap_or_default();
             for t in tris {
                 for p in [t.a, t.b, t.c] {
+                    let p = transform_point(p, loc.pos, loc.rot);
                     for axis in 0..3 {
-                        let v = [p.x + loc.x, p.y + loc.y, p.z + loc.z][axis];
+                        let v = [p.x, p.y, p.z][axis];
                         if v.is_finite() {
                             min[axis] = min[axis].min(v);
                             max[axis] = max[axis].max(v);
