@@ -302,15 +302,18 @@ impl App {
         match button {
             MouseButton::Middle | MouseButton::Right => self.state.drag = None,
             MouseButton::Left => {
-                // A press-and-release under 3 logical px is a click: pick.
+                // A press-and-release under 4 logical px is a click: pick.
+                // Past that it was an orbit drag - end it here instead.
                 let Some(press) = self.left_press.take() else {
                     return;
                 };
+                if self.state.drag == Some(DragMode::Orbit) {
+                    self.state.drag = None;
+                }
                 let p = self.cursor_pos;
-                let moved = ((p[0] - press[0]) * (p[0] - press[0])
-                    + (p[1] - press[1]) * (p[1] - press[1]))
-                .sqrt();
-                if moved <= 3.0 && self.inside_viewport(p) {
+                let dx = p[0] - press[0];
+                let dy = p[1] - press[1];
+                if (dx * dx + dy * dy).sqrt() <= 4.0 && self.inside_viewport(p) {
                     self.pick_at(p);
                 }
             }
@@ -334,6 +337,12 @@ impl App {
             return;
         };
         let hit = pick::first_hit(&self.state.world, origin, dir);
+        // Status is the feedback channel: "nothing happened" should be
+        // impossible to believe when a pick always says what it did.
+        self.state.status = match &hit {
+            Some(name) => format!("selected {name}"),
+            None => String::from("no model under the cursor"),
+        };
         self.state.pending.push_back(CommandKind::Select(hit));
     }
 
@@ -557,7 +566,19 @@ impl ApplicationHandler for App {
                 match self.state.drag {
                     Some(DragMode::Orbit) => self.state.cam.orbit(delta[0], delta[1]),
                     Some(DragMode::Pan) => self.state.cam.pan(delta[0], delta[1]),
-                    None => {}
+                    None => {
+                        // A left-drag past a small threshold becomes an
+                        // orbit, so the primary button does something
+                        // everywhere; a short press stays a pick.
+                        if let Some(press) = self.left_press {
+                            let dx = self.cursor_pos[0] - press[0];
+                            let dy = self.cursor_pos[1] - press[1];
+                            if (dx * dx + dy * dy).sqrt() > 4.0 {
+                                self.state.drag = Some(DragMode::Orbit);
+                                self.state.cam.orbit(delta[0], delta[1]);
+                            }
+                        }
+                    }
                 }
             }
             WindowEvent::MouseInput {

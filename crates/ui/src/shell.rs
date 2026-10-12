@@ -5,8 +5,8 @@
 //! never open in the middle of an ImGui frame.
 
 use dear_imgui_rs::{
-    Condition, DockLayout, DockLayoutApply, DockNodeFlags, DockSplit, Key, Ui, WindowFlags,
-    WindowKey,
+    Condition, DockLayout, DockLayoutApply, DockNodeFlags, DockSplit, Key, StyleVar, Ui,
+    WindowFlags, WindowKey,
 };
 
 use crate::state::{CommandKind, State};
@@ -38,58 +38,49 @@ pub fn build(ui: &Ui, state: &mut State) {
     // The main menu bar must be issued outside any window.
     menu_bar(ui, state);
 
-    let display = ui.io().display_size();
-    let status_h = 4.0 + ui.text_line_height();
-
-    if ui
-        .window("##host")
-        .flags(
-            WindowFlags::NO_TITLE_BAR
-                | WindowFlags::NO_COLLAPSE
-                | WindowFlags::NO_MOVE
-                | WindowFlags::NO_RESIZE
-                | WindowFlags::NO_BACKGROUND
-                | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS
-                | WindowFlags::NO_DOCKING
-                | WindowFlags::NO_NAV_INPUTS,
-        )
-        .size([display[0], (display[1] - status_h).max(1.0)], Condition::Always)
-        .position([0.0, 0.0], Condition::Always)
-        .build(|| {
-            // A dockspace filling the host; the panels below land inside it.
-            let size = ui.content_region_avail();
-            let mut space = ui
-                .dockspace()
-                .current_window(size)
-                .flags(DockNodeFlags::AUTO_HIDE_TAB_BAR);
-            let layout = dock_layout();
-            if let Some(layout) = layout.as_ref() {
-                space = space.layout(layout, DockLayoutApply::IfMissing);
-            }
-            // Stable root id for this dock tree.
-            let host = space.root_id(ui.get_id("hsm-dockspace"));
-            match host.build() {
-                Ok(_) => panels(ui, state),
-                Err(err) => {
-                    // Show chrome rather than a blank frame if docking fails.
-                    ui.text(format!("dockspace unavailable: {err}"));
-                    tree::models_panel(ui, state);
-                    viewport_panel(ui, state);
-                }
-            }
-        })
-        .is_none()
-    {
-        return;
+    // Dockspace over the main viewport. ImGui derives its host window and
+    // reserves the menu-bar strip automatically, so panels can never sit
+    // under the menu (a hand-rolled full-screen host window did).
+    let layout = dock_layout();
+    let mut space = ui.dockspace().flags(DockNodeFlags::AUTO_HIDE_TAB_BAR);
+    if let Some(layout) = layout.as_ref() {
+        space = space.layout(layout, DockLayoutApply::IfMissing);
+    }
+    match space.build() {
+        Ok(_) => panels(ui, state),
+        Err(err) => {
+            // Show chrome rather than a blank frame if docking fails.
+            let display = ui.io().display_size();
+            let line_h = ui.text_line_height();
+            ui.window("##dockerror")
+                .flags(WindowFlags::NO_TITLE_BAR | WindowFlags::NO_MOVE)
+                .position([8.0, line_h * 2.0], Condition::Always)
+                .size([display[0] - 16.0, line_h * 4.0], Condition::Always)
+                .build(|| {
+                    ui.text_wrapped(format!(
+                        "dockspace unavailable: {err}\nThe panels are floating instead."
+                    ));
+                });
+            panels(ui, state);
+        }
     }
 
+    status_bar(ui, state);
+}
+
+/// Bottom status strip. Padding and height are computed from the font so
+/// the line never clips outside the window.
+fn status_bar(ui: &Ui, state: &State) {
+    let display = ui.io().display_size();
+    let line = ui.text_line_height();
+    let status_h = line + 8.0;
+    let _pad = ui.push_style_var(StyleVar::WindowPadding([8.0, 4.0]));
     ui.window("##status")
         .flags(
             WindowFlags::NO_TITLE_BAR
                 | WindowFlags::NO_COLLAPSE
                 | WindowFlags::NO_MOVE
                 | WindowFlags::NO_RESIZE
-                | WindowFlags::NO_BACKGROUND
                 | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS
                 | WindowFlags::NO_DOCKING
                 | WindowFlags::NO_NAV_INPUTS,
@@ -199,7 +190,7 @@ fn viewport_help(ui: &Ui, hovered: bool, state: &State) {
     let hint = match state.drag {
         Some(crate::state::DragMode::Orbit) => "orbit",
         Some(crate::state::DragMode::Pan) => "pan",
-        None => "LMB pick · MMB orbit · RMB pan · wheel zoom · F frame",
+        None => "LMB pick / drag-orbit · MMB orbit · RMB pan · wheel · F frame",
     };
     let pad = 6.0;
     let [sw, sh] = ui.calc_text_size(hint);
