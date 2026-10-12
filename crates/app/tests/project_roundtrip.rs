@@ -3,7 +3,9 @@
 
 use std::path::PathBuf;
 
-use hsmworks_app::commands::{History, ImportModel};
+use hsmworks_app::commands::{History, ImportModel, SetStock, SetWcsOrigin};
+use hsmworks_app::schema::Location;
+use hsmworks_app::stock::StockShape;
 use hsmworks_app::geometry::{IDENTITY_Q, cube, Point3};
 use hsmworks_app::model;
 use hsmworks_app::project::{self, ProjectError};
@@ -103,7 +105,6 @@ fn v1_file_migrates_to_v2() {
 #[test]
 fn rotation_survives_round_trip() {
     use hsmworks_app::geometry::quat_from_yaw;
-    use hsmworks_app::schema::Location;
     use std::f64::consts::FRAC_PI_2;
 
     let path = tmp_path("rot");
@@ -156,4 +157,135 @@ fn corrupt_project_is_a_clean_error() {
         project::open(&world, r#"{"version": 1, "entities": [{"name": 5}]}"#),
         Err(ProjectError::Corrupt(_))
     ));
+}
+
+fn at(x: f64, y: f64, z: f64) -> Location {
+    Location {
+        pos: Point3::new(x, y, z),
+        rot: IDENTITY_Q,
+    }
+}
+
+#[test]
+fn stock_and_wcs_round_trip() {
+    let path = tmp_path("setup");
+    let world = populated_world();
+    let mut history = History::default();
+    let boxy = StockShape::Box {
+        dx: 60.0,
+        dy: 60.0,
+        dz: 30.0,
+    };
+    history.execute(&world, SetStock::new(&world, boxy.clone(), at(1.0, 2.0, -1.0)).unwrap());
+    history
+        .execute(&world, SetWcsOrigin::new(&world, "G54", at(12.5, -3.0, 0.5)).unwrap());
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "setup round-trip must be byte-identical");
+    // Parametric stock persists parameters, never regenerated floats.
+    let stock_dto = first
+        .split("\"name\": \"Stock\"")
+        .nth(1)
+        .expect("stock entity in file");
+    let stock_dto = &stock_dto[..stock_dto.find("\"name\"").unwrap_or(stock_dto.len())];
+    assert!(stock_dto.contains("\"stock\""), "parameters persisted");
+    assert!(!stock_dto.contains("facets"), "box stock stores no facets");
+
+    let names: Vec<String> = project::collect(&world2)
+        .entities
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+    assert_eq!(names, ["G54", "Stock", "block_a", "block_b"]);
+
+    let stock = model::find_by_name(&world2, "Stock").expect("stock loaded");
+    assert_eq!(model::stock_def_of(&world2, &stock), Some(boxy));
+    assert_eq!(model::facets_of(&world2, &stock).map(|t| t.len()), Some(12));
+    assert_eq!(
+        model::transform_of(&world2, &stock).map(|l| [l.pos.x, l.pos.y, l.pos.z]),
+        Some([1.0, 2.0, -1.0])
+    );
+    let g54 = model::find_by_name(&world2, "G54").expect("wcs loaded");
+    assert!(model::is_wcs(&world2, &g54));
+    assert_eq!(model::facets_of(&world2, &g54), None);
+    assert_eq!(
+        model::transform_of(&world2, &g54).map(|l| [l.pos.x, l.pos.y, l.pos.z]),
+        Some([12.5, -3.0, 0.5])
+    );
+}
+
+#[test]
+fn from_model_stock_round_trips_through_facets() {
+    let path = tmp_path("frommodel");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        ImportModel::from_mesh("src", cube(Point3::ZERO, Point3::new(2.0, 3.0, 1.0))),
+    );
+    history.execute(
+        &world,
+        SetStock::new(
+            &world,
+            StockShape::FromModel { source: "src".into() },
+            Location::default(),
+        )
+        .unwrap(),
+    );
+    project::save(&world, &path).expect("save");
+
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    let _ = std::fs::remove_file(&path);
+    let stock = model::find_by_name(&world2, "Stock").expect("stock loaded");
+    assert_eq!(
+        model::stock_def_of(&world2, &stock),
+        Some(StockShape::FromModel {
+            source: "src".into()
+        })
+    );
+    // The source is absent here, yet the stock still shows its geometry:
+    // FromModel facets came through the file, not through a live copy.
+    assert_eq!(model::facets_of(&world2, &stock).map(|t| t.len()), Some(12));
+    assert!(
+        project::collect(&world2).entities.len() >= 2,
+        "Stock and src persist"
+    );
+}
+
+#[test]
+fn corrupt_stock_and_wcs_fields_are_refused() {
+    let cases = [
+        // negative dimension
+        r#"{"version": 2, "entities": [{"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock", "stock": {"box": {"dx": -5.0, "dy": 1.0, "dz": 1.0}}}]}"#,
+        // table-defying size
+        r#"{"version": 2, "entities": [{"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock", "stock": {"box": {"dx": 5000000.0, "dy": 1.0, "dz": 1.0}}}]}"#,
+        // stock must be named Stock
+        r#"{"version": 2, "entities": [{"name": "Billet", "translation": [0.0, 0.0, 0.0], "kind": "stock", "stock": {"cylinder": {"diameter": 10.0, "height": 1.0}}}]}"#,
+        // parametric stock carrying a facet array
+        r#"{"version": 2, "entities": [{"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock", "stock": {"cylinder": {"diameter": 10.0, "height": 1.0}}, "facets": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]]}]}"#,
+        // offsets are tags, not solids
+        r#"{"version": 2, "entities": [{"name": "G54", "translation": [0.0, 0.0, 0.0], "kind": "wcs", "facets": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]]}]}"#,
+        // not a machine slot
+        r#"{"version": 2, "entities": [{"name": "G60", "translation": [0.0, 0.0, 0.0], "kind": "wcs"}]}"#,
+        // from-model stock with nothing to show
+        r#"{"version": 2, "entities": [{"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock", "stock": {"from_model": {"source": "gone"}}}]}"#,
+    ];
+    for text in cases {
+        let world = new_world();
+        assert!(
+            matches!(project::open(&world, text), Err(ProjectError::Corrupt(_))),
+            "must refuse: {text}"
+        );
+        assert!(
+            model::named_entities(&world).is_empty(),
+            "refused file must leave the world untouched"
+        );
+    }
 }

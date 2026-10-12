@@ -12,11 +12,7 @@ use crate::commands::{Command, CommandError};
 use crate::geometry::{Triangle, normalize_quat};
 use crate::model;
 use crate::schema::{Location, STOCK_NAME, StockDef};
-use crate::stock::{self, StockShape};
-
-/// Stock larger than a real machine table by three orders of magnitude is a
-/// typo, not a setup.
-const MAX_STOCK_DIM: f64 = 1_000_000.0;
+use crate::stock::{self, MAX_STOCK_DIM, StockShape};
 
 pub struct SetStock {
     shape: StockShape,
@@ -37,16 +33,7 @@ impl SetStock {
                 "stock parameters must be finite and positive: {shape:?}"
             )));
         }
-        let oversized = match &shape {
-            StockShape::Box { dx, dy, dz } => dx > &MAX_STOCK_DIM
-                || dy > &MAX_STOCK_DIM
-                || dz > &MAX_STOCK_DIM,
-            StockShape::Cylinder { diameter, height } => {
-                diameter > &MAX_STOCK_DIM || height > &MAX_STOCK_DIM
-            }
-            StockShape::FromModel { .. } => false,
-        };
-        if oversized {
+        if !shape.is_bounded() {
             return Err(CommandError::Invalid(format!(
                 "stock dimensions exceed {MAX_STOCK_DIM:e} mm"
             )));

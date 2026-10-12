@@ -17,6 +17,10 @@ use crate::geometry::{Aabb, Point3, Triangle, cube, cylinder};
 /// viewport, cheap enough to re-mesh on every parameter edit.
 pub const CYLINDER_SEGMENTS: u32 = 32;
 
+/// Stock larger than a real machine table by three orders of magnitude is a
+/// typo, not a setup. Shared by the command layer and the project loader.
+pub const MAX_STOCK_DIM: f64 = 1_000_000.0;
+
 /// The stock solid.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StockShape {
@@ -38,6 +42,21 @@ impl StockShape {
             StockShape::Box { dx, dy, dz } => positive(*dx) && positive(*dy) && positive(*dz),
             StockShape::Cylinder { diameter, height } => positive(*diameter) && positive(*height),
             StockShape::FromModel { source } => !source.is_empty(),
+        }
+    }
+
+    /// No dimension above `MAX_STOCK_DIM`; vacuously true for FromModel
+    /// (whose geometry came from an already-imported model).
+    #[must_use]
+    pub fn is_bounded(&self) -> bool {
+        match self {
+            StockShape::Box { dx, dy, dz } => {
+                *dx <= MAX_STOCK_DIM && *dy <= MAX_STOCK_DIM && *dz <= MAX_STOCK_DIM
+            }
+            StockShape::Cylinder { diameter, height } => {
+                *diameter <= MAX_STOCK_DIM && *height <= MAX_STOCK_DIM
+            }
+            StockShape::FromModel { .. } => true,
         }
     }
 }
@@ -160,6 +179,37 @@ mod tests {
             source: String::new()
         }
         .is_sane());
+    }
+
+    #[test]
+    fn absurd_dimensions_are_unbounded() {
+        assert!(
+            !StockShape::Box {
+                dx: 1.0e7,
+                dy: 1.0,
+                dz: 1.0
+            }
+            .is_bounded()
+        );
+        assert!(!StockShape::Cylinder {
+            diameter: f64::INFINITY,
+            height: 1.0
+        }
+        .is_bounded());
+        assert!(
+            StockShape::Box {
+                dx: MAX_STOCK_DIM,
+                dy: 1.0,
+                dz: 1.0
+            }
+            .is_bounded()
+        );
+        assert!(
+            StockShape::FromModel {
+                source: "m".into()
+            }
+            .is_bounded()
+        );
     }
 
     #[test]
