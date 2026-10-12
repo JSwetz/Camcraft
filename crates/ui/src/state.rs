@@ -247,8 +247,7 @@ impl Default for State {
 }
 
 fn pick_mesh_file() -> Option<PathBuf> {
-    // STEP is listed so selection yields a clean "unsupported file type"
-    // diagnostic - the B-rep kernel lands with M1.3, not before.
+    // STEP arrives tessellated through truck (mesh, not B-rep).
     rfd::FileDialog::new()
         .add_filter("Mesh", &["stl", "obj", "step", "stp"])
         .pick_file()

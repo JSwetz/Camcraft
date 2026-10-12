@@ -1,9 +1,10 @@
-//! Mesh file importers (STL, OBJ). Public API: `load_model` / `parse_*`.
+//! Mesh file importers (STL, OBJ, STEP). Public API: `load_model` / `parse_*`.
 //!
 //! All parsers take a byte slice so the size is known before anything is
 //! allocated; the facet/vertex caps below are enforced pre-allocation.
 
 pub mod obj;
+pub mod step;
 pub mod stl;
 
 use std::path::{Path, PathBuf};
@@ -29,6 +30,8 @@ pub enum ImportError {
     Stl(String),
     #[error("corrupt OBJ: {0}")]
     Obj(String),
+    #[error("corrupt STEP: {0}")]
+    Step(String),
     #[error("imported mesh contains non-finite coordinates")]
     NonFinite,
     #[error("unsupported file type: {0}")]
@@ -39,6 +42,7 @@ pub enum ImportError {
 pub enum Format {
     Stl,
     Obj,
+    Step,
 }
 
 /// Load a model from disk, dispatching on extension.
@@ -56,6 +60,7 @@ pub fn parse_model(data: &[u8], format: Format) -> Result<Mesh, ImportError> {
     let mesh = match format {
         Format::Stl => stl::parse(data)?,
         Format::Obj => obj::parse(data)?,
+        Format::Step => step::parse(data)?,
     };
     // Belt-and-gate: each importer checks finiteness at the parse site, and
     // nothing enters the world without passing here either.
@@ -74,6 +79,7 @@ fn format_from_path(path: &Path) -> Result<Format, ImportError> {
     match ext.as_str() {
         "stl" => Ok(Format::Stl),
         "obj" => Ok(Format::Obj),
+        "step" | "stp" => Ok(Format::Step),
         _ => Err(ImportError::Unsupported(
             path.file_name()
                 .map(PathBuf::from)
@@ -89,7 +95,7 @@ mod tests {
 
     #[test]
     fn unsupported_extension_is_an_error_not_a_panic() {
-        let err = load_model(Path::new("thing.step")).err();
+        let err = load_model(Path::new("thing.iges")).err();
         assert!(matches!(err, Some(ImportError::Unsupported(_))));
     }
 }

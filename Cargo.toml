@@ -28,3 +28,13 @@ dear-imgui-wgpu = "0.19"
 winit = "0.30"
 rfd = "0.15"
 pollster = "0.4"
+
+# STEP reading - truck geometry stack (ricosjp), pure Rust, Apache-2.0. The
+# Sept-2024 mutual version set; hard-pinned because the crates are alpha.
+# meshalgo's default features pull vtkio -> lzma-sys (C code): keep it off and
+# take only `tessellation` (which enables `filters` + spade, both pure Rust).
+truck-stepio = "=0.3.0"
+truck-topology = "=0.6.0"
+truck-polymesh = "=0.6.0"
+truck-meshalgo = { version = "=0.4.0", default-features = false, features = ["tessellation"] }
+ruststep = "=0.4.0"

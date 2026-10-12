@@ -62,9 +62,9 @@ in; see milestone tables for what remains.
 - ✅ **Command foundation**: command pattern with undo/redo driving all
       UI-visible state changes from day one
 - 📋 **Units**: millimeters and inches, correct everywhere including posts
-- ⏸ **STEP / IGES import**: moved to M1.3 - no B-rep kernel decision yet
-      (see Open questions); the Open dialog lists `.step`/`.stp` and refuses
-      them with a clean diagnostic until then
+- ⏸ **IGES import**: still refused with a clean diagnostic - no IGES
+      translator exists in pure Rust. STEP import shipped early, in M1.2
+      (below), via the truck tessellator
 
 ### M1.2 - UI Shell & Job Setup
 **Goal: real application chrome; define and display a machining setup.** — ⚠️ partial
@@ -75,18 +75,20 @@ in; see milestone tables for what remains.
       setups → operations nodes arrive with M1.3
 - ✅ **Viewport**: orbit / pan / zoom, selection highlight, frame-all, dockable
       offscreen 3D target; stock and operations pickables arrive with their entities
+- ✅ **STEP import**: `.step`/`.stp` tessellate to meshes via
+      truck (Apache-2.0, pure Rust); feature-edge wireframe in the viewport.
+      B-rep *editing* and booleans remain kernel-decision territory (M1.3)
 - 📋 **Stock definition**: box, cylinder, or from model solid; user transform for raw stock
 - 📋 **WCS**: work coordinate placement and readout; multiple WCS per part, mapped to G54-G59
 - 📋 **Toolpath display**: colored toolpath preview with directional arrows
-- **Stock definition**: box, cylinder, or from model solid; user transform for raw stock
-- **WCS**: work coordinate placement and readout; multiple WCS per part, mapped to G54-G59
-- **Toolpath display**: colored toolpath preview with directional arrows
 
 ### M1.3 - 2D Machining
 **Goal: a machinist can face, pocket, and contour a simple plate.**
 
-- ⏸ **STEP / IGES import**: B-rep models via an open geometry kernel - decide
-      kernel (truck vs OpenCascade binding) first; moved here from M1.1
+- ⏸ **IGES import + B-rep operations**: STEP import already landed (M1.2,
+      truck). Face/island recognition and boolean stock ops need the kernel
+      decision - truck (already linked for import) vs an OpenCascade binding;
+      benchmark truck's booleans before committing
 - **Face operation**: clean stock tops
 - **2D Contour**: islands, lead in/out (linear, arc, tangential), tabs, cutter compensation (G41/G42)
 - **2D Pocket**: with islands, spiral and zigzag entry, stock-to-leave
@@ -223,9 +225,9 @@ programming department.
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
-| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (STEP/IGES → M1.3; units open) | ⚠️ |
-| **M1.2** | Define a job | Shell + dockable viewport in; stock, WCS, toolpath display open | ⚠️ |
-| **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, tool library, parameters; STEP import gated on kernel | 📋 |
+| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
+| **M1.2** | Define a job | Shell + dockable viewport + STEP import in; stock, WCS, toolpath display open | ⚠️ |
+| **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, tool library, parameters; B-rep ops gated on kernel | 📋 |
 | **M1.4** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.5** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
@@ -240,11 +242,13 @@ programming department.
 
 ## Open questions & deferred
 
-- **Geometry kernel**: leading candidate is [ricosjp/truck](https://github.com/ricosjp/truck)
-  (Apache-2.0, Rust-native B-rep: truck-topology/geometry/meshalgo + truck-stepio STEP IO) -
-  pure Rust, no C++ toolchain risk, license-clean for the clean-room posture. Bench against
-  OpenCascade (import breadth) before M1.3 commits to either; no proprietary kernel internals
-  may be studied for implementation hints either way (clean-room cuts both ways)
+- **Geometry kernel**: [ricosjp/truck](https://github.com/ricosjp/truck) (Apache-2.0,
+  Rust-native B-rep: truck-topology/geometry/meshalgo + truck-stepio STEP IO) is now
+  LINKED and ships STEP→mesh import (M1.2) - pure Rust, no C++ toolchain risk,
+  license-clean for the clean-room posture. Its boolean/offset quality for toolpath
+  operations is still unbuilt here: bench truck vs an OpenCascade binding before M1.3
+  commits to either for booleans; no proprietary kernel internals may be studied for
+  implementation hints either way (clean-room cuts both ways)
 - **Post scripting runtime**: which embedded language (QuickJS / Lua / Rust-native DSL) -
   decide before M3.3; must be sandboxed like other scripts
 - **Simulation stock representation**: adaptive dexel vs. sparse voxel octree vs. signed distance field - decide before M1.5.

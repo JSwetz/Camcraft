@@ -164,8 +164,68 @@ fn binary_garbage_never_panics() {
 
 #[test]
 fn unsupported_extension() {
-    let err = import::load_model(&testdata("cube.step")).err();
+    // Dispatch happens on the extension, before any file read.
+    let err = import::load_model(Path::new("model.iges")).err();
     assert!(matches!(err, Some(ImportError::Unsupported(_))));
+}
+
+// ---------- STEP (truck tessellator) ----------
+
+#[test]
+fn step_box_matches_primitive_corner_set() {
+    let m = import::load_model(&testdata("box.step")).expect("box.step must import");
+    assert_eq!(m.len(), 12, "a box is 12 triangles, whatever the fan order");
+    let b = m.bounds().expect("bounds");
+    assert!(b.min.x == 0.0 && b.min.y == 0.0 && b.min.z == 0.0, "{b:?}");
+    assert!(b.max.x == 1.0 && b.max.y == 1.0 && b.max.z == 1.0, "{b:?}");
+    for t in &m.facets {
+        let n = t.normal();
+        assert!(n.x != 0.0 || n.y != 0.0 || n.z != 0.0, "degenerate facet leaked: {t:?}");
+    }
+}
+
+/// Provenance: this AP214 file is from the ruststep project's Apache-2.0
+/// test corpus (ricosjp/ruststep) - a real-world export, not our geometry.
+#[test]
+fn step_real_world_file_imports() {
+    let m = import::load_model(&testdata("sample_ap214.step")).expect("must import");
+    assert!(m.len() > 100, "faceted part should tessellate to >100 facets, got {}", m.len());
+    let b = m.bounds().expect("bounds");
+    assert!(b.min.x.is_finite() && b.max.z.is_finite());
+}
+
+#[test]
+fn step_garbage_is_clean_error_never_panic() {
+    // Valid-syntax-but-wrong shapes: every one must Err (or at worst import
+    // empty), none may panic, per the Prime Directive.
+    let header_only = "ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n";
+    let no_data = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('a'),'2;1');\nFILE_NAME('','2020',(()),(()),'','','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nEND-ISO-10303-21;\n";
+    let not_utf8 = [0xFFu8, 0xFE, 0x00, 0x01];
+    let empty_data = "ISO-10303-21;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
+    for case in [
+        import::parse_model(b"", Format::Step),
+        import::parse_model(b"hello step", Format::Step),
+        import::parse_model(header_only.as_bytes(), Format::Step),
+        import::parse_model(no_data.as_bytes(), Format::Step),
+        import::parse_model(empty_data.as_bytes(), Format::Step),
+        import::parse_model(&not_utf8, Format::Step),
+    ] {
+        assert!(case.is_err(), "corrupt STEP must error, got Ok");
+    }
+}
+
+#[test]
+fn step_binary_garbage_never_panics() {
+    // deterministic smoke-fuzz over the STEP parser
+    for seed in 0..32u64 {
+        let mut data = b"ISO-10303-21;DATA;".to_vec();
+        let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        for _ in 0..256 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            data.push((x >> 33) as u8);
+        }
+        let _ = import::parse_model(&data, Format::Step);
+    }
 }
 
 #[test]

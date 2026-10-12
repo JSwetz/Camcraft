@@ -1,10 +1,16 @@
 //! M1.1 acceptance: everything is a command, undo/redo is exact, and
 //! malformed input never enters the history.
 
+use std::path::{Path, PathBuf};
+
 use hsmworks_app::commands::{CommandError, DeleteEntity, History, ImportModel};
 use hsmworks_app::geometry::{cube, Mesh, Point3};
 use hsmworks_app::model;
 use hsmworks_app::world::new_world;
+
+fn testdata(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/models").join(name)
+}
 
 fn cube_mesh() -> Mesh {
     cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0))
@@ -30,6 +36,29 @@ fn import_undo_redo_roundtrip() {
 
     assert!(history.can_undo()); // the command is back on the done stack
     assert!(!history.can_redo());
+}
+
+#[test]
+fn step_import_undo_redo_roundtrip() {
+    let world = new_world();
+    let mut history = History::default();
+
+    let command = ImportModel::new(&testdata("box.step")).expect("box.step must parse");
+    history.execute(&world, command);
+    assert_eq!(facet_count(&world, "box"), Some(12));
+
+    assert!(history.undo(&world));
+    assert_eq!(facet_count(&world, "box"), None);
+
+    assert!(history.redo(&world));
+    assert_eq!(facet_count(&world, "box"), Some(12));
+}
+
+#[test]
+fn iges_fails_at_construction_with_honest_error() {
+    // Construction must refuse by type, not by a failed filesystem read.
+    let err = ImportModel::new(Path::new("model.iges")).err();
+    assert!(matches!(err, Some(CommandError::UnsupportedType(_))), "{err:?}");
 }
 
 #[test]
