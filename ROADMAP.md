@@ -225,9 +225,11 @@ programming department.
 
 ## Open questions & deferred
 
-- **Geometry kernel**: OpenCascade vs. a leaner homegrown B-rep. Leaning OpenCascade for
-  import breadth - but its LGPL/MPL obligations need a review before it's committed,
-  and no proprietary kernel internals may be studied for implementation hints (clean-room cuts both ways)
+- **Geometry kernel**: leading candidate is [ricosjp/truck](https://github.com/ricosjp/truck)
+  (Apache-2.0, Rust-native B-rep: truck-topology/geometry/meshalgo + truck-stepio STEP IO) -
+  pure Rust, no C++ toolchain risk, license-clean for the clean-room posture. Bench against
+  OpenCascade (import breadth) before M1.3 commits to either; no proprietary kernel internals
+  may be studied for implementation hints either way (clean-room cuts both ways)
 - **Post scripting runtime**: which embedded language (QuickJS / Lua / Rust-native DSL) -
   decide before M3.3; must be sandboxed like other scripts
 - **Simulation stock representation**: adaptive dexel vs. sparse voxel octree vs. signed distance field - decide before M1.5.

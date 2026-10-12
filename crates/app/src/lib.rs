@@ -4,4 +4,9 @@
 //! documentation of commercial CAM workflows and published technical
 //! literature. No HSMWorks source, binaries, or assets were consulted.
 
+pub mod commands;
 pub mod geometry;
+pub mod model;
+pub mod project;
+pub mod schema;
+pub mod world;
