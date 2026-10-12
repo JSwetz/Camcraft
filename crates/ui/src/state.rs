@@ -240,6 +240,24 @@ impl State {
                 }
             }
         }
+        // A work offset parked far from the parts is still "all": frame
+        // their origins even though they carry no geometry.
+        for (_, entity) in model::named_entities(&self.world) {
+            if !model::is_wcs(&self.world, &entity) {
+                continue;
+            }
+            let Some(loc) = model::transform_of(&self.world, &entity) else {
+                continue;
+            };
+            for axis in 0..3 {
+                let v = [loc.pos.x, loc.pos.y, loc.pos.z][axis];
+                if v.is_finite() {
+                    min[axis] = min[axis].min(v);
+                    max[axis] = max[axis].max(v);
+                    any = true;
+                }
+            }
+        }
         if !any {
             self.cam = Camera::default();
             self.status = String::from("nothing to frame");

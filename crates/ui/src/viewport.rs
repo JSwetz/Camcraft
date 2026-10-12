@@ -65,18 +65,76 @@ fn fs_edge(in: VSOut) -> @location(0) vec4<f32> {
     let warm = vec3<f32>(0.55, 0.35, 0.05);
     return vec4<f32>(mix(dark, warm, in.sel), 1.0);
 }
+
+// Stock: same flat shading, cool steel tint, translucent - the model must
+// read through the raw material. Selected stock is warmer and denser.
+@fragment
+fn fs_stock(in: VSOut) -> @location(0) vec4<f32> {
+    let cr = cross(dpdx(in.world), dpdy(in.world));
+    let len = length(cr);
+    let n = select(vec3<f32>(0.0, 0.0, 1.0), cr / len, len > 1e-9);
+    let key_dir = normalize(vec3<f32>(0.45, 0.60, 0.66));
+    let key = abs(dot(n, key_dir));
+    let light = 0.55 + 0.45 * key;
+    let base = vec3<f32>(0.42, 0.50, 0.62) * light;
+    let hot = vec3<f32>(0.98, 0.72, 0.20) * light;
+    return vec4<f32>(mix(base, hot, in.sel), mix(0.30, 0.55, in.sel));
+}
+
+// Overlay lines (WCS triads, world axes): position + explicit color, no
+// lighting - reference geometry must stay legible at any zoom.
+struct LineOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) rgb: vec3<f32>,
+};
+
+@vertex
+fn vs_line(@location(0) pos: vec3<f32>, @location(1) rgb: vec3<f32>) -> LineOut {
+    var out: LineOut;
+    out.clip = u.mvp * vec4<f32>(pos, 1.0);
+    out.rgb = rgb;
+    return out;
+}
+
+@fragment
+fn fs_line(in: LineOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(in.rgb, 1.0);
+}
 ";
+
+/// Overlay line vertex: vec3 position + vec3 color.
+const OVERLAY_STRIDE: u64 = 24;
+
+/// One triangle-soup part for the GPU: world-space vertices (transform
+/// applied by the caller), plus selection and stock-kind flags. Stock parts
+/// are drawn last, blended, by a separate pipeline.
+pub struct GpuPart {
+    pub verts: Vec<[f32; 3]>,
+    pub selected: bool,
+    pub stock: bool,
+}
 
 pub struct View3D {
     pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
+    stock_pipeline: wgpu::RenderPipeline,
+    overlay_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
+    /// Total indices; `[0, model_index_count)` are models, the rest stock
+    /// (set_document partitions parts models-first).
     index_count: u32,
+    model_index_count: u32,
     edge_buf: wgpu::Buffer,
+    /// Pairs of u32 line indices; `[0, model_edge_count)` are model edges,
+    /// the rest stock edges. Edges are per-part, so a stock face coplanar
+    /// with a model face cannot weld the two into a seam-less blob.
     edge_count: u32,
+    model_edge_count: u32,
+    overlay_buf: wgpu::Buffer,
+    overlay_count: u32,
     _color_tex: wgpu::Texture,
     color_view: wgpu::TextureView,
     _depth_tex: wgpu::Texture,
@@ -241,6 +299,124 @@ impl View3D {
             cache: None,
         });
 
+        // Translucent stock: blended over whatever the opaque pass left,
+        // never writing depth (models stay pickable-and-visible through it).
+        let stock_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport3d-stock"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_stock"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::Zero,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Non-indexed lines for the WCS triads and world axes: their own
+        // vertex layout (pos + rgb), no lighting, depth-tested but never
+        // occluded-by-write.
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport3d-overlay"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_line"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: OVERLAY_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_line"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
         // 4-byte placeholders keep the empty-document path simple.
         let dummy = |label, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -253,19 +429,26 @@ impl View3D {
         let vertex_buf = dummy("viewport3d-vbuf", wgpu::BufferUsages::VERTEX);
         let index_buf = dummy("viewport3d-ibuf", wgpu::BufferUsages::INDEX);
         let edge_buf = dummy("viewport3d-ebuf", wgpu::BufferUsages::INDEX);
+        let overlay_buf = dummy("viewport3d-obuf", wgpu::BufferUsages::VERTEX);
 
         let targets = make_targets(device, format, width, height);
 
         View3D {
             pipeline,
             line_pipeline,
+            stock_pipeline,
+            overlay_pipeline,
             bind_group,
             uniform,
             vertex_buf,
             index_buf,
             index_count: 0,
+            model_index_count: 0,
             edge_buf,
             edge_count: 0,
+            model_edge_count: 0,
+            overlay_buf,
+            overlay_count: 0,
             _color_tex: targets.color,
             color_view: targets.color_view,
             _depth_tex: targets.depth,
@@ -300,34 +483,47 @@ impl View3D {
         self.height = height;
     }
 
-    /// Replace the GPU document. Each part is world-space triangles
-    /// (translation applied by the caller) plus a selection flag.
-    pub fn set_document(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, parts: &[(&[[f32; 3]], bool)]) {
+    /// Replace the GPU document. Parts are world-space triangle soup (the
+    /// caller applies rigid transforms) tagged with selection and stock
+    /// kind; partitioning for the draw order happens here, not in the
+    /// caller, so a sloppy caller still gets models-first, stock-last.
+    pub fn set_document(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, parts: &[GpuPart]) {
+        let mut order: Vec<&GpuPart> = parts.iter().filter(|p| !p.stock).collect();
+        order.extend(parts.iter().filter(|p| p.stock));
+
         let mut verts: Vec<u8> = Vec::new();
         let mut idx: Vec<u32> = Vec::new();
-        let mut positions: Vec<[f32; 3]> = Vec::new();
+        let mut edges: Vec<u32> = Vec::new();
         let mut vertex_count = 0u32;
-        for (tris, selected) in parts {
-            let sel: f32 = if *selected { 1.0 } else { 0.0 };
-            for v in *tris {
+        let mut model_indices = 0u32;
+        let mut model_edges = 0u32;
+        for part in &order {
+            let sel: f32 = if part.selected { 1.0 } else { 0.0 };
+            for v in &part.verts {
                 for c in v {
                     verts.extend_from_slice(&c.to_le_bytes());
                 }
                 verts.extend_from_slice(&sel.to_le_bytes());
-                positions.push(*v);
             }
-            let n = tris.len() as u32;
+            let n = part.verts.len() as u32;
             idx.extend(vertex_count..vertex_count + n);
+            // CAD-style wire per part: crease and boundary edges only, and
+            // never welded across parts - a stock face coplanar with a
+            // model face must not erase either solid's outline.
+            edges.extend(feature_edges(&part.verts).into_iter().map(|i| i + vertex_count));
             vertex_count += n;
+            if !part.stock {
+                model_indices = idx.len() as u32;
+                model_edges = edges.len() as u32;
+            }
         }
         if verts.is_empty() {
             self.index_count = 0; // render() then draws nothing, just clears
+            self.model_index_count = 0;
             self.edge_count = 0;
+            self.model_edge_count = 0;
             return;
         }
-        // CAD-style wire: crease and boundary edges only, not every facet
-        // seam - flat runs of triangles must read as one shaded surface.
-        let edges = feature_edges(&positions);
         let vertex_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport3d-vbuf"),
             size: verts.len() as u64,
@@ -354,8 +550,34 @@ impl View3D {
         self.vertex_buf = vertex_buf;
         self.index_buf = index_buf;
         self.index_count = idx.len() as u32;
+        self.model_index_count = model_indices;
         self.edge_buf = edge_buf;
         self.edge_count = edges.len() as u32;
+        self.model_edge_count = model_edges;
+    }
+
+    /// Replace the overlay line set: pairs of `[x, y, z, r, g, b]` vertices
+    /// drawn non-indexed after every solid - the WCS triads and world axes.
+    pub fn set_overlay(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, lines: &[[f32; 6]]) {
+        if lines.is_empty() {
+            self.overlay_count = 0; // render() then skips the draw entirely
+            return;
+        }
+        let mut data = Vec::with_capacity(lines.len() * 24);
+        for v in lines {
+            for c in v {
+                data.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport3d-obuf"),
+            size: data.len() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&buf, 0, &data);
+        self.overlay_buf = buf;
+        self.overlay_count = lines.len() as u32;
     }
 
     /// Encode the 3D pass into the offscreen target. `eye` is the camera
@@ -409,17 +631,36 @@ impl View3D {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        // One bind group for the frame: every pipeline shares the layout,
+        // so switching pipelines mid-pass needs no resource rebinds. Draw
+        // order is opaque models, their wire, then translucent stock with
+        // its wire on top, then the reference-geometry overlay last.
+        pass.set_bind_group(0, &self.bind_group, &[]);
         if self.index_count > 0 {
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
             pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..self.index_count, 0, 0..1);
-            if self.edge_count > 0 {
+            pass.set_pipeline(&self.pipeline);
+            pass.draw_indexed(0..self.model_index_count, 0, 0..1);
+            pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
+            if self.model_edge_count > 0 {
                 pass.set_pipeline(&self.line_pipeline);
-                pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..self.edge_count, 0, 0..1);
+                pass.draw_indexed(0..self.model_edge_count, 0, 0..1);
             }
+            if self.model_index_count < self.index_count {
+                pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_pipeline(&self.stock_pipeline);
+                pass.draw_indexed(self.model_index_count..self.index_count, 0, 0..1);
+                pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
+                if self.model_edge_count < self.edge_count {
+                    pass.set_pipeline(&self.line_pipeline);
+                    pass.draw_indexed(self.model_edge_count..self.edge_count, 0, 0..1);
+                }
+            }
+        }
+        if self.overlay_count > 0 {
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_vertex_buffer(0, self.overlay_buf.slice(..));
+            pass.draw(0..self.overlay_count, 0..1);
         }
     }
 }

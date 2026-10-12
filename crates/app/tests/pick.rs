@@ -75,3 +75,34 @@ fn empty_world_picks_nothing() {
     );
     assert_eq!(model::named_entities(&world).len(), 0);
 }
+
+#[test]
+fn models_win_over_stock_and_stock_is_pickable() {
+    use hsmworks_app::commands::SetStock;
+    use hsmworks_app::stock::StockShape;
+
+    let world = new_world();
+    ImportModel::from_mesh("part", cube_at(Point3::ZERO)).apply(&world);
+    SetStock::new(
+        &world,
+        StockShape::Box {
+            dx: 10.0,
+            dy: 10.0,
+            dz: 10.0,
+        },
+        Location::default(),
+    )
+    .expect("sane box")
+    .apply(&world);
+
+    // Through the stock, at the model: the model wins at any depth.
+    assert_eq!(
+        pick::first_hit(&world, [0.5, 0.5, 20.0], [0.0, 0.0, -1.0]).as_deref(),
+        Some("part")
+    );
+    // Stock with empty space behind it is still pickable.
+    assert_eq!(
+        pick::first_hit(&world, [4.0, 4.0, 20.0], [0.0, 0.0, -1.0]).as_deref(),
+        Some("Stock")
+    );
+}

@@ -11,10 +11,16 @@ use crate::geometry::{
 };
 use crate::model;
 
-/// Nearest named model whose facet sits along `origin + t*dir`, `t > 0`.
+/// Nearest named solid whose facet sits along `origin + t*dir`, `t > 0`.
 /// Double-sided; degenerate or non-finite geometry is skipped, never fatal
 /// (Prime Directive). Entities' rigid placements are honored by transforming
 /// the ray into each entity's local frame.
+///
+/// Models win at any depth; stock is a fallback. The translucent box is
+/// always in the way, and clicking "through the stock at the model" is what
+/// the CAM user means (the roadmap's stock-is-pickable promise: click stock
+/// where nothing is behind it). WCS entities never carry facets, so the
+/// facet test already excludes them from picking.
 #[must_use]
 pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<String> {
     if !origin.iter().all(|v| v.is_finite()) || !dir.iter().all(|v| v.is_finite()) {
@@ -22,7 +28,8 @@ pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<Strin
     }
     let o = Point3::new(origin[0], origin[1], origin[2]);
     let d = Point3::new(dir[0], dir[1], dir[2]);
-    let mut best: Option<(f64, String)> = None;
+    let mut best_model: Option<(f64, String)> = None;
+    let mut best_stock: Option<(f64, String)> = None;
     for (name, entity) in model::named_entities(world) {
         let Some(tris) = model::facets_of(world, &entity) else {
             continue;
@@ -36,16 +43,21 @@ pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<Strin
         if !(o_local.is_finite() && d_local.is_finite()) {
             continue;
         }
+        let bucket = if model::is_stock(world, &entity) {
+            &mut best_stock
+        } else {
+            &mut best_model
+        };
         for t in tris {
             let Some(hit_t) = ray_triangle(t, o_local, d_local) else {
                 continue;
             };
-            if best.as_ref().is_none_or(|(b, _)| hit_t < *b) {
-                best = Some((hit_t, name.clone()));
+            if bucket.as_ref().is_none_or(|(b, _)| hit_t < *b) {
+                *bucket = Some((hit_t, name.clone()));
             }
         }
     }
-    best.map(|(_, name)| name)
+    best_model.or(best_stock).map(|(_, name)| name)
 }
 
 /// Ray/triangle crossing in the entity's local frame; the ray direction need

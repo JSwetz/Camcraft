@@ -10,7 +10,8 @@ use std::sync::Arc;
 use dear_imgui_rs::{ConfigFlags, Context};
 use dear_imgui_wgpu::{wgpu, ExternalTextureId, FramebufferExtent, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
-use hsmworks_app::geometry::transform_point;
+use hsmworks_app::geometry::{transform_point, Point3};
+use hsmworks_app::schema::STOCK_NAME;
 use hsmworks_app::{model, pick};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -20,7 +21,7 @@ use winit::window::{Window, WindowId};
 
 use crate::shell;
 use crate::state::{CommandKind, DragMode, State};
-use crate::viewport::View3D;
+use crate::viewport::{GpuPart, View3D};
 
 #[must_use]
 pub fn run() -> i32 {
@@ -425,9 +426,9 @@ impl App {
 
         if state.doc_version != *doc_synced || sel_dirty {
             let parts = collect_parts(state);
-            let refs: Vec<(&[[f32; 3]], bool)> =
-                parts.iter().map(|(v, s)| (v.as_slice(), *s)).collect();
-            view.set_document(device, queue, &refs);
+            view.set_document(device, queue, &parts);
+            let overlay = collect_overlay(state);
+            view.set_overlay(device, queue, &overlay);
             *doc_synced = state.doc_version;
         }
 
@@ -502,25 +503,82 @@ fn state_drain_and_quit(app: &mut App, el: &ActiveEventLoop) {
     }
 }
 
-/// Flatten the world into triangle soup (world space + selection flag).
-/// World-space vertices for the GPU: three `[f32;3]` rows per triangle.
-fn collect_parts(state: &State) -> Vec<(Vec<[f32; 3]>, bool)> {
-    model::named_entities(&state.world)
+/// Flatten the world into GPU parts: models by name first, then the stock
+/// solid (it renders translucent, so it must be submitted last).
+fn collect_parts(state: &State) -> Vec<GpuPart> {
+    let mut parts: Vec<GpuPart> = model::model_entities(&state.world)
         .into_iter()
-        .map(|(_, entity)| {
-            let tris = model::facets_of(&state.world, &entity).unwrap_or_default();
-            let selected = model::is_selected(&state.world, &entity);
-            let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
-            let mut verts = Vec::with_capacity(tris.len() * 3);
-            for t in tris {
-                for p in [t.a, t.b, t.c] {
-                    let p = transform_point(p, loc.pos, loc.rot);
-                    verts.push([ftoz(p.x), ftoz(p.y), ftoz(p.z)]);
-                }
-            }
-            (verts, selected)
+        .map(|(_, entity)| GpuPart {
+            verts: world_verts(state, &entity),
+            selected: model::is_selected(&state.world, &entity),
+            stock: false,
         })
-        .collect()
+        .collect();
+    if let Some(entity) = model::find_by_name(&state.world, STOCK_NAME)
+        && model::is_stock(&state.world, &entity)
+    {
+        parts.push(GpuPart {
+            verts: world_verts(state, &entity),
+            selected: model::is_selected(&state.world, &entity),
+            stock: true,
+        });
+    }
+    parts
+}
+
+/// World-space vertices for the GPU: three `[f32;3]` rows per triangle,
+/// rigid transform applied here so the shader stays transform-free.
+fn world_verts(state: &State, entity: &flecs_ecs::prelude::Entity) -> Vec<[f32; 3]> {
+    let tris = model::facets_of(&state.world, entity).unwrap_or_default();
+    let loc = model::transform_of(&state.world, entity).unwrap_or_default();
+    let mut verts = Vec::with_capacity(tris.len() * 3);
+    for t in tris {
+        for p in [t.a, t.b, t.c] {
+            let p = transform_point(p, loc.pos, loc.rot);
+            verts.push([ftoz(p.x), ftoz(p.y), ftoz(p.z)]);
+        }
+    }
+    verts
+}
+
+/// Reference-geometry overlay: world origin axes (dimmed) plus one colored
+/// triad per defined work offset. Length scales with the model extent, with
+/// a floor so an empty or tiny document still shows orientation.
+fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
+    let extent = model::solid_world_aabb(&state.world)
+        .map(|b| {
+            (b.max.x - b.min.x)
+                .max(b.max.y - b.min.y)
+                .max(b.max.z - b.min.z)
+        })
+        .unwrap_or(0.0);
+    let len = (extent * 0.25).max(10.0);
+    let axes: [([f32; 3], [f64; 3]); 3] = [
+        ([0.85, 0.22, 0.18], [len, 0.0, 0.0]),
+        ([0.20, 0.78, 0.30], [0.0, len, 0.0]),
+        ([0.28, 0.48, 0.95], [0.0, 0.0, len]),
+    ];
+    let mut out: Vec<[f32; 6]> = Vec::new();
+    for (rgb, tip) in &axes {
+        let dim = [rgb[0] * 0.55, rgb[1] * 0.55, rgb[2] * 0.55];
+        // World origin, unrotated.
+        out.push([0.0, 0.0, 0.0, dim[0], dim[1], dim[2]]);
+        out.push([ftoz(tip[0]), ftoz(tip[1]), ftoz(tip[2]), dim[0], dim[1], dim[2]]);
+    }
+    for (_, entity) in model::named_entities(&state.world) {
+        if !model::is_wcs(&state.world, &entity) {
+            continue;
+        }
+        let Some(loc) = model::transform_of(&state.world, &entity) else {
+            continue;
+        };
+        for (rgb, tip) in &axes {
+            let p = transform_point(Point3::new(tip[0], tip[1], tip[2]), loc.pos, loc.rot);
+            out.push([ftoz(loc.pos.x), ftoz(loc.pos.y), ftoz(loc.pos.z), rgb[0], rgb[1], rgb[2]]);
+            out.push([ftoz(p.x), ftoz(p.y), ftoz(p.z), rgb[0], rgb[1], rgb[2]]);
+        }
+    }
+    out
 }
 
 fn ftoz(v: f64) -> f32 {
