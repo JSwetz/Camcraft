@@ -38,3 +38,35 @@ fn camera_frame_all_on_empty_world_is_polite() {
     state.drain_actions();
     assert_eq!(state.status, "nothing to frame");
 }
+
+#[test]
+fn import_completes_on_the_worker_thread() {
+    use hsmworks_ui::state::{CommandKind, State};
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/models/cube.stl");
+    let mut state = State::new();
+    state.pending.push_back(CommandKind::ImportFile(path));
+    state.settle(); // pumps the worker to its result
+    assert!(state.status.starts_with("imported cube"), "{:?}", state.status);
+    assert!(state.history.can_undo());
+
+    state.pending.push_back(CommandKind::Undo);
+    state.settle();
+    assert!(!state.history.can_undo());
+    assert!(state.history.can_redo());
+}
+
+#[test]
+fn corrupt_import_errors_on_the_worker_never_panics() {
+    use hsmworks_ui::state::{CommandKind, State};
+
+    let mut state = State::new();
+    // Dispatch refuses by extension before reading; no IGES kernel exists.
+    state
+        .pending
+        .push_back(CommandKind::ImportFile(std::path::PathBuf::from("x.iges")));
+    state.settle();
+    assert!(state.status.starts_with("import refused"), "{:?}", state.status);
+    assert!(!state.history.can_undo());
+}

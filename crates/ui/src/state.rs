@@ -4,13 +4,19 @@
 //! Panel code never mutates the world directly - it queues a `CommandKind`,
 //! which is executed once per frame outside the ImGui borrow (dialog code
 //! must not run mid-frame).
+//!
+//! File imports run the parse/tessellation on a worker thread so a heavy
+//! STEP never freezes the window; the resulting `ImportModel` command is
+//! executed on this thread, so the history stays the single source of truth.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, TryRecvError};
+use std::time::{Duration, Instant};
 
 use dear_imgui_rs::TextureId;
 use flecs_ecs::prelude::World;
-use hsmworks_app::commands::{DeleteEntity, History, ImportModel, SelectEntity};
+use hsmworks_app::commands::{CommandError, DeleteEntity, History, ImportModel, SelectEntity};
 use hsmworks_app::geometry::Point3;
 use hsmworks_app::{model, project, world::new_world};
 
@@ -63,6 +69,15 @@ pub struct State {
     pub cam: Camera,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
+    /// Receiver for the in-flight import worker (None when idle). The worker
+    /// runs `ImportModel::new` off-thread and sends the finished command back.
+    import_rx: Option<mpsc::Receiver<Result<ImportModel, CommandError>>>,
+    /// Path currently being imported on the worker; drives the status text.
+    import_file: Option<PathBuf>,
+    /// Wall-clock start of the live import, for an elapsed-seconds readout.
+    import_started: Option<Instant>,
+    /// Imports queued while one is already running (drained FIFO on finish).
+    import_queue: VecDeque<PathBuf>,
 }
 
 impl State {
@@ -81,13 +96,38 @@ impl State {
             cam: Camera::default(),
             pending: VecDeque::new(),
             request_quit: false,
+            import_rx: None,
+            import_file: None,
+            import_started: None,
+            import_queue: VecDeque::new(),
         }
     }
 
-    /// Run every queued action; at most one per kind is lost-none, FIFO.
+    /// Run every queued action, then poll the import worker once. Safe to
+    /// call every frame; never blocks.
     pub fn drain_actions(&mut self) {
         while let Some(action) = self.pending.pop_front() {
             self.run(action);
+        }
+        self.poll_import();
+    }
+
+    /// Drive the queue and the import worker to completion, blocking. For
+    /// tests and headless runs only - the interactive loop never calls this.
+    pub fn settle(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            self.drain_actions();
+            if self.pending.is_empty() && self.import_rx.is_none() && self.import_queue.is_empty() {
+                return;
+            }
+            if Instant::now() >= deadline {
+                self.abandon_imports();
+                self.status = String::from("import timed out");
+                eprintln!("settle: queued work did not finish before the deadline");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
         }
     }
 
@@ -100,6 +140,7 @@ impl State {
             }
             CommandKind::ImportFile(path) => self.import_path(path),
             CommandKind::NewDocument => {
+                self.abandon_imports();
                 model::clear_named(&self.world);
                 self.history.clear();
                 self.doc_version += 1;
@@ -214,20 +255,127 @@ impl State {
     }
 
     fn import_path(&mut self, path: PathBuf) {
-        // Validation happens at command construction: a corrupt file never
-        // enters the history (AGENTS.md "validate early").
-        match ImportModel::new(&path) {
+        // Parsing happens at command construction, like everything else -
+        // it just happens to be off-thread now, so a heavy STEP tessellates
+        // while the window keeps painting.
+        if self.import_rx.is_some() {
+            self.status = format!("queued {} for import", file_label(&path));
+            self.import_queue.push_back(path);
+            return;
+        }
+        self.begin_import(path);
+    }
+
+    fn begin_import(&mut self, path: PathBuf) {
+        self.status = format!("importing {}…", file_label(&path));
+        self.import_file = Some(path.clone());
+        self.import_started = Some(Instant::now());
+        let (tx, rx) = mpsc::channel();
+        let worker_path = path.clone();
+        let spawned = std::thread::Builder::new()
+            .name("hsmworks-import".to_string())
+            .spawn(move || {
+                // No World here: pure file + geometry work, Send across.
+                let result = ImportModel::new(&worker_path);
+                // A dropped rx means the document changed or we are closing;
+                // the command is simply never applied.
+                if tx.send(result).is_err() {
+                    eprintln!("import: result discarded, no receiver");
+                }
+            });
+        match spawned {
+            Ok(_) => self.import_rx = Some(rx),
+            Err(err) => {
+                // Thread exhaustion must not lose the import: run inline.
+                eprintln!("import: worker spawn failed ({err}); running inline");
+                let result = ImportModel::new(&path);
+                self.finish_import(result);
+            }
+        }
+    }
+
+    /// Called on this thread when a worker result arrives (or inline
+    /// fallback completes). Execution stays a normal history command.
+    fn finish_import(&mut self, result: Result<ImportModel, CommandError>) {
+        self.import_file = None;
+        let secs = self
+            .import_started
+            .take()
+            .map_or(0.0, |t| t.elapsed().as_secs_f64());
+        match result {
             Ok(command) => {
                 let name = command.name.clone();
                 self.history.execute(&self.world, command);
                 self.doc_version += 1;
-                self.status = format!("imported {name}");
+                self.status = if secs >= 2.0 {
+                    format!("imported {name} in {secs:.1}s")
+                } else {
+                    format!("imported {name}")
+                };
             }
             Err(err) => self.status = format!("import refused: {err}"),
         }
     }
 
+    /// Non-blocking worker check; call once per frame. Also starts the next
+    /// queued import when the worker is free.
+    fn poll_import(&mut self) {
+        // take() first so no borrow of self straddles the mutation arms.
+        let outcome = match &self.import_rx {
+            Some(rx) => match rx.try_recv() {
+                Ok(result) => Some(Ok(result)),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(Err(())),
+            },
+            None => None,
+        };
+        match outcome {
+            Some(Ok(result)) => {
+                self.import_rx = None;
+                self.finish_import(result);
+            }
+            Some(Err(())) => {
+                // Thread died without sending (a panic in the parser): the
+                // Prime Directive says surface it, never hang waiting.
+                self.import_rx = None;
+                self.import_file = None;
+                self.import_started = None;
+                self.status = String::from("import failed: worker lost");
+                eprintln!("import: worker thread exited without a result");
+            }
+            None => {}
+        }
+        // Still running: keep the elapsed readout honest in the status bar.
+        if self.import_rx.is_some()
+            && let Some(t0) = self.import_started
+        {
+            let secs = t0.elapsed().as_secs_f64();
+            if secs >= 1.0 {
+                let label =
+                    self.import_file.as_deref().map_or_else(|| "model".to_string(), file_label);
+                self.status = format!("importing {label}… {secs:.0}s");
+            }
+        }
+        if self.import_rx.is_none()
+            && let Some(next) = self.import_queue.pop_front()
+        {
+            self.begin_import(next);
+        }
+    }
+
+    /// Drop any live/queued imports because the document is being replaced.
+    /// A worker still running finishes in the background and discards itself.
+    fn abandon_imports(&mut self) {
+        if self.import_rx.take().is_some() {
+            eprintln!("import: document changed; pending import discarded");
+        }
+        self.import_queue.clear();
+        self.import_file = None;
+        self.import_started = None;
+    }
+
     fn open_project_path(&mut self, path: PathBuf) {
+        self.abandon_imports();
         model::clear_named(&self.world);
         self.history.clear();
         match project::load(&self.world, &path) {
@@ -238,6 +386,14 @@ impl State {
             Err(err) => self.status = format!("open failed: {err}"),
         }
     }
+}
+
+/// Short human name for a file path, for status text.
+fn file_label(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("model")
+        .to_string()
 }
 
 impl Default for State {

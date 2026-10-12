@@ -38,3 +38,9 @@ truck-topology = "=0.6.0"
 truck-polymesh = "=0.6.0"
 truck-meshalgo = { version = "=0.4.0", default-features = false, features = ["tessellation"] }
 ruststep = "=0.4.0"
+
+# Third-party code is optimized even in dev builds: an unoptimized truck
+# tessellation or wgpu pass is 5-20x slower and makes imports feel like
+# freezes. Our own crates keep full debug settings. One-time rebuild cost.
+[profile.dev.package."*"]
+opt-level = 2
