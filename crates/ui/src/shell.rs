@@ -9,6 +9,7 @@ use dear_imgui_rs::{
     WindowFlags, WindowKey,
 };
 
+use crate::setup;
 use crate::state::{CommandKind, State};
 use crate::tree;
 
@@ -17,16 +18,18 @@ pub(crate) fn viewport_key() -> Option<WindowKey> {
     WindowKey::new("viewport", "Viewport").ok()
 }
 
-/// Declarative startup layout: tree on the left, 3D filling the rest.
-/// Applied only when the dock tree is missing (first run or lost layout);
-/// after that the user's arrangement persists in the ImGui ini.
+/// Declarative startup layout: tree + setup as left tabs, 3D filling the
+/// rest. Applied only when the dock tree is missing (first run or lost
+/// layout); the layout is rebuilt every launch because the ini file is not
+/// persisted, so panels can be added without migration.
 fn dock_layout() -> Option<DockLayout> {
     let tree = WindowKey::new("models", "Models").ok()?;
+    let setup_key = WindowKey::new("setup", "Setup").ok()?;
     let view = viewport_key()?;
     Some(DockLayout::split(
         DockSplit::Left,
         0.24,
-        DockLayout::tabs([tree]),
+        DockLayout::tabs([tree, setup_key]),
         DockLayout::tabs([view]),
     ))
 }
@@ -138,6 +141,7 @@ fn menu_bar(ui: &Ui, state: &mut State) {
 
 fn panels(ui: &Ui, state: &mut State) {
     tree::models_panel(ui, state);
+    setup::setup_panel(ui, state);
     viewport_panel(ui, state);
 }
 

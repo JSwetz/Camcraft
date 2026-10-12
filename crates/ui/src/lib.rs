@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod headless;
+pub mod setup;
 pub mod shell;
 pub mod state;
 pub mod tree;

@@ -16,8 +16,12 @@ use std::time::{Duration, Instant};
 
 use dear_imgui_rs::TextureId;
 use flecs_ecs::prelude::World;
-use hsmworks_app::commands::{CommandError, DeleteEntity, History, ImportModel, SelectEntity};
-use hsmworks_app::geometry::transform_point;
+use hsmworks_app::commands::{
+    CommandError, DeleteEntity, History, ImportModel, SelectEntity, SetStock, SetWcsOrigin,
+};
+use hsmworks_app::geometry::{quat_from_yaw, transform_point, Point3};
+use hsmworks_app::schema::{Location, STOCK_NAME, WCS_SLOTS};
+use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::{model, project, world::new_world};
 
 use crate::viewport::Camera;
@@ -34,9 +38,86 @@ pub enum CommandKind {
     Undo,
     Redo,
     DeleteSelected,
+    DeleteByName(String),
     Select(Option<String>),
     FrameAll,
     Quit,
+    /// The Setup pane's shape+placement draft; the command itself is built
+    /// here, so validation and status reporting live in one place.
+    SetStock {
+        shape: StockShape,
+        pos: [f64; 3],
+        yaw_deg: f64,
+    },
+    /// Box stock that wraps every model's world AABB plus `margin` mm.
+    StockFit {
+        margin: f64,
+    },
+    SetWcs {
+        slot: String,
+        pos: [f64; 3],
+        yaw_deg: f64,
+    },
+}
+
+/// Editable fields of the Setup pane's stock group. Transient UI state,
+/// never authoritative: the world's `StockDef` is, refetched by
+/// [`State::sync_setup_ui`] whenever the document moves under the pane.
+#[derive(Clone, Debug)]
+pub struct StockUi {
+    /// 0 = box, 1 = cylinder, 2 = from model (radio order in the pane).
+    pub shape: i32,
+    pub dx: f64,
+    pub dy: f64,
+    pub dz: f64,
+    pub diameter: f64,
+    pub height: f64,
+    pub source: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub yaw_deg: f64,
+    pub fit_margin: f64,
+}
+
+impl Default for StockUi {
+    fn default() -> Self {
+        // A billet that fits a hand-held part: plausible first numbers beat
+        // zeros, which the command layer would only refuse.
+        StockUi {
+            shape: 0,
+            dx: 60.0,
+            dy: 60.0,
+            dz: 30.0,
+            diameter: 40.0,
+            height: 20.0,
+            source: String::new(),
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            yaw_deg: 0.0,
+            fit_margin: 2.0,
+        }
+    }
+}
+
+/// Editable fields of the Setup pane's WCS group; see [`StockUi`] for the
+/// transient-ness rule. `slot` indexes [`WCS_SLOTS`].
+#[derive(Clone, Debug, Default)]
+pub struct WcsUi {
+    pub slot: usize,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub yaw_deg: f64,
+}
+
+/// Yaw in degrees of a (pure-yaw) quaternion: the exact inverse of
+/// `quat_from_yaw`, and the Z-twist of any other rotation. Display/draft
+/// only - the data model keeps the full quaternion through Apply.
+#[must_use]
+pub fn quat_yaw_deg(q: [f64; 4]) -> f64 {
+    (2.0 * q[2].atan2(q[3])).to_degrees()
 }
 
 /// Which viewport drag is live; ephemeral UI state, deliberately not
@@ -78,6 +159,11 @@ pub struct State {
     import_started: Option<Instant>,
     /// Imports queued while one is already running (drained FIFO on finish).
     import_queue: VecDeque<PathBuf>,
+    /// Setup pane drafts (ephemeral; see [`StockUi`]).
+    pub stock_ui: StockUi,
+    pub wcs_ui: WcsUi,
+    /// `doc_version` the drafts were last refetched at.
+    ui_synced_doc: u64,
 }
 
 impl State {
@@ -100,6 +186,58 @@ impl State {
             import_file: None,
             import_started: None,
             import_queue: VecDeque::new(),
+            stock_ui: StockUi::default(),
+            wcs_ui: WcsUi::default(),
+            ui_synced_doc: 0,
+        }
+    }
+
+    /// Refetch the Setup pane's drafts from the world after any document
+    /// change (Apply, Undo, Open...). Between bumps the user's in-progress
+    /// typing is left alone; a refused command changes nothing, so the
+    /// offending values stay visible for correction (Prime Directive).
+    pub fn sync_setup_ui(&mut self) {
+        if self.ui_synced_doc == self.doc_version {
+            return;
+        }
+        self.ui_synced_doc = self.doc_version;
+        if let Some(entity) = model::find_by_name(&self.world, STOCK_NAME)
+            && model::is_stock(&self.world, &entity)
+        {
+            if let Some(loc) = model::transform_of(&self.world, &entity) {
+                self.stock_ui.x = loc.pos.x;
+                self.stock_ui.y = loc.pos.y;
+                self.stock_ui.z = loc.pos.z;
+                self.stock_ui.yaw_deg = quat_yaw_deg(loc.rot);
+            }
+            match model::stock_def_of(&self.world, &entity) {
+                Some(StockShape::Box { dx, dy, dz }) => {
+                    self.stock_ui.shape = 0;
+                    self.stock_ui.dx = dx;
+                    self.stock_ui.dy = dy;
+                    self.stock_ui.dz = dz;
+                }
+                Some(StockShape::Cylinder { diameter, height }) => {
+                    self.stock_ui.shape = 1;
+                    self.stock_ui.diameter = diameter;
+                    self.stock_ui.height = height;
+                }
+                Some(StockShape::FromModel { source }) => {
+                    self.stock_ui.shape = 2;
+                    self.stock_ui.source = source;
+                }
+                None => {}
+            }
+        }
+        if let Some(loc) = WCS_SLOTS
+            .get(self.wcs_ui.slot)
+            .and_then(|slot| model::find_by_name(&self.world, slot))
+            .and_then(|entity| model::transform_of(&self.world, &entity))
+        {
+            self.wcs_ui.x = loc.pos.x;
+            self.wcs_ui.y = loc.pos.y;
+            self.wcs_ui.z = loc.pos.z;
+            self.wcs_ui.yaw_deg = quat_yaw_deg(loc.rot);
         }
     }
 
@@ -208,6 +346,68 @@ impl State {
             }
             CommandKind::FrameAll => self.frame_all(),
             CommandKind::Quit => self.request_quit = true,
+            CommandKind::DeleteByName(name) => {
+                match DeleteEntity::new(&self.world, &name) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("deleted {name}");
+                    }
+                    Err(err) => self.status = format!("delete failed: {err}"),
+                }
+            }
+            CommandKind::SetStock { shape, pos, yaw_deg } => {
+                let location = Location {
+                    pos: Point3::new(pos[0], pos[1], pos[2]),
+                    rot: quat_from_yaw(yaw_deg.to_radians()),
+                };
+                match SetStock::new(&self.world, shape, location) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = String::from("stock set");
+                    }
+                    Err(err) => self.status = format!("stock not set: {err}"),
+                }
+            }
+            CommandKind::StockFit { margin } => {
+                let Some(bounds) = model::solid_world_aabb(&self.world) else {
+                    self.status = String::from("nothing to fit: no models in the document");
+                    return;
+                };
+                let Some((shape, pos)) = stock::fit_box(&bounds, margin) else {
+                    self.status = String::from("stock fit refused: models have no usable extent");
+                    return;
+                };
+                // Fit replaces size and XY/Z placement; a deliberately
+                // oriented stock keeps its rotation.
+                let rot = model::find_by_name(&self.world, STOCK_NAME)
+                    .and_then(|entity| model::transform_of(&self.world, &entity))
+                    .map_or_else(|| Location::default().rot, |loc| loc.rot);
+                let location = Location { pos, rot };
+                match SetStock::new(&self.world, shape, location) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = String::from("stock fitted to models");
+                    }
+                    Err(err) => self.status = format!("stock not fitted: {err}"),
+                }
+            }
+            CommandKind::SetWcs { slot, pos, yaw_deg } => {
+                let location = Location {
+                    pos: Point3::new(pos[0], pos[1], pos[2]),
+                    rot: quat_from_yaw(yaw_deg.to_radians()),
+                };
+                match SetWcsOrigin::new(&self.world, &slot, location) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("{slot} origin set");
+                    }
+                    Err(err) => self.status = format!("offset not set: {err}"),
+                }
+            }
         }
     }
 

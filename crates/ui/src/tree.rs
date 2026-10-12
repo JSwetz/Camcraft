@@ -1,5 +1,8 @@
-//! Entity tree panel: lists named models, click = `Select` command.
+//! Entity tree panel: lists models, click = `Select` command.
 //! Provenance: our own pane, specced from public CAM object-manager trees.
+//!
+//! Stock and work offsets are setup furniture, not models: they are edited
+//! in the Setup pane and deliberately filtered out here (`model_entities`).
 
 use dear_imgui_rs::{Ui, WindowKey};
 use hsmworks_app::model;
@@ -11,7 +14,7 @@ pub fn models_panel(ui: &Ui, state: &mut State) {
         return;
     };
     ui.window(key.label("Models")).build(|| {
-        let entities = model::named_entities(&state.world);
+        let entities = model::model_entities(&state.world);
         if entities.is_empty() {
             ui.text_wrapped(
                 "No models yet.\n\nFile > Open Model (Ctrl+O)\nor drag a file onto the window.\n\n\
