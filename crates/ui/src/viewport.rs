@@ -16,7 +16,7 @@ const VERTEX_STRIDE: u64 = 16;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 const SHADER: &str = "
-struct U { mvp: mat4x4<f32> };
+struct U { mvp: mat4x4<f32>, eye: vec3<f32> };
 @group(0) @binding(0) var<uniform> u: U;
 
 struct VSOut {
@@ -36,28 +36,45 @@ fn vs_main(@location(0) pos: vec3<f32>, @location(1) sel: f32) -> VSOut {
 
 // Flat shading: STL/OBJ facets carry no smooth normals, so recover the
 // face normal from screen-space derivatives of the world position.
+// Key + fill give the broad gradient; a view-dependent specular adds the
+// CAD-style sheen that makes facet angles readable at a glance.
 @fragment
 fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
     let cr = cross(dpdx(in.world), dpdy(in.world));
     let len = length(cr);
     let n = select(vec3<f32>(0.0, 0.0, 1.0), cr / len, len > 1e-9);
+    let key_dir = normalize(vec3<f32>(0.45, 0.60, 0.66));
     // abs(): two-sided, so flipped windings never render unlit-black.
-    let key = abs(dot(n, normalize(vec3<f32>(0.45, 0.60, 0.66))));
+    let key = abs(dot(n, key_dir));
     let fill = abs(dot(n, normalize(vec3<f32>(-0.55, 0.25, 0.40))));
-    let light = 0.38 + 0.55 * key + 0.18 * fill;
-    let base = vec4<f32>(0.66, 0.70, 0.76, 1.0) * light;
-    let hot = vec4<f32>(0.98, 0.72, 0.20, 1.0) * light;
-    return mix(base, hot, in.sel);
+    let light = 0.34 + 0.52 * key + 0.18 * fill;
+    let to_eye = normalize(u.eye - in.world);
+    let halfv = normalize(key_dir + to_eye);
+    let spec = pow(max(abs(dot(n, halfv)), 0.0), 24.0) * 0.35 * key;
+    let base = vec3<f32>(0.66, 0.70, 0.76) * light + vec3<f32>(spec);
+    let hot = vec3<f32>(0.98, 0.72, 0.20) * light + vec3<f32>(spec);
+    return vec4<f32>(mix(base, hot, in.sel), 1.0);
+}
+
+// Facet edges: dark over the shaded pass, warm when the part is selected.
+@fragment
+fn fs_edge(in: VSOut) -> @location(0) vec4<f32> {
+    let dark = vec3<f32>(0.06, 0.07, 0.09);
+    let warm = vec3<f32>(0.55, 0.35, 0.05);
+    return vec4<f32>(mix(dark, warm, in.sel), 1.0);
 }
 ";
 
 pub struct View3D {
     pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     index_count: u32,
+    edge_buf: wgpu::Buffer,
+    edge_count: u32,
     _color_tex: wgpu::Texture,
     color_view: wgpu::TextureView,
     _depth_tex: wgpu::Texture,
@@ -97,9 +114,11 @@ impl View3D {
             immediate_size: 0,
         });
 
+        // mat4x4 (64) + eye vec3 (aligned to 64, padded to the 80-byte
+        // uniform stride).
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport3d-uniform"),
-            size: 64,
+            size: 80,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -164,6 +183,62 @@ impl View3D {
             cache: None,
         });
 
+        // Facet edges over the shaded pass. No culling (back-face wire is
+        // hidden by depth anyway) and a negative slope bias so the lines
+        // win the depth test against the faces they lie on.
+        let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport3d-lines"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                // Lines may not carry a depth bias in wgpu 30, so edges win
+                // ties against the faces they lie on via LessEqual instead.
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_edge"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
         // 4-byte placeholders keep the empty-document path simple.
         let dummy = |label, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -175,16 +250,20 @@ impl View3D {
         };
         let vertex_buf = dummy("viewport3d-vbuf", wgpu::BufferUsages::VERTEX);
         let index_buf = dummy("viewport3d-ibuf", wgpu::BufferUsages::INDEX);
+        let edge_buf = dummy("viewport3d-ebuf", wgpu::BufferUsages::INDEX);
 
         let targets = make_targets(device, format, width, height);
 
         View3D {
             pipeline,
+            line_pipeline,
             bind_group,
             uniform,
             vertex_buf,
             index_buf,
             index_count: 0,
+            edge_buf,
+            edge_count: 0,
             _color_tex: targets.color,
             color_view: targets.color_view,
             _depth_tex: targets.depth,
@@ -237,8 +316,16 @@ impl View3D {
             idx.extend(vertex_count..vertex_count + n);
             vertex_count += n;
         }
+        // One part's triangles are consecutive vertices, so triangle t spans
+        // 3t..3t+2 in the shared buffer: append its three edges as a LineList.
+        let mut edges: Vec<u32> = Vec::with_capacity(idx.len() * 2);
+        for t in 0..vertex_count / 3 {
+            let (a, b, c) = (t * 3, t * 3 + 1, t * 3 + 2);
+            edges.extend_from_slice(&[a, b, b, c, c, a]);
+        }
         if verts.is_empty() {
             self.index_count = 0; // render() then draws nothing, just clears
+            self.edge_count = 0;
             return;
         }
         let vertex_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -256,20 +343,41 @@ impl View3D {
             mapped_at_creation: false,
         });
         queue.write_buffer(&index_buf, 0, &idx_bytes);
+        let edge_bytes: Vec<u8> = edges.iter().flat_map(|i| i.to_le_bytes()).collect();
+        let edge_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport3d-ebuf"),
+            size: edge_bytes.len() as u64,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&edge_buf, 0, &edge_bytes);
         self.vertex_buf = vertex_buf;
         self.index_buf = index_buf;
         self.index_count = idx.len() as u32;
+        self.edge_buf = edge_buf;
+        self.edge_count = edges.len() as u32;
     }
 
-    /// Encode the 3D pass into the offscreen target.
-    pub fn render(&self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, mvp: &[[f32; 4]; 4]) {
-        let mut data = [0u8; 64];
+    /// Encode the 3D pass into the offscreen target. `eye` is the camera
+    /// position in world space, for the specular term.
+    pub fn render(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        mvp: &[[f32; 4]; 4],
+        eye: [f32; 3],
+    ) {
+        let mut data = [0u8; 80];
         let mut o = 0usize;
         for col in mvp {
             for v in col {
                 data[o..o + 4].copy_from_slice(&v.to_le_bytes());
                 o += 4;
             }
+        }
+        for v in eye {
+            data[o..o + 4].copy_from_slice(&v.to_le_bytes());
+            o += 4;
         }
         queue.write_buffer(&self.uniform, 0, &data);
 
@@ -307,6 +415,11 @@ impl View3D {
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
             pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.index_count, 0, 0..1);
+            if self.edge_count > 0 {
+                pass.set_pipeline(&self.line_pipeline);
+                pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..self.edge_count, 0, 0..1);
+            }
         }
     }
 }
@@ -428,6 +541,13 @@ impl Camera {
             self.target[1] + self.dist * cp * self.yaw.sin(),
             self.target[2] + self.dist * self.pitch.sin(),
         ]
+    }
+
+    /// Camera position as f32, for the shader's specular term.
+    #[must_use]
+    pub fn eye_f32(&self) -> [f32; 3] {
+        let finite = |v: f64| if v.is_finite() { v as f32 } else { 0.0 };
+        std::array::from_fn(|i| finite(self.eye()[i]))
     }
 
     /// Forward from eye toward target, normalized.

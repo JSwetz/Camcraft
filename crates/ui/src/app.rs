@@ -366,7 +366,8 @@ impl App {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("hsmworks-frame"),
         });
-        view.render(queue, &mut encoder, &mvp);
+        let eye = state.cam.eye_f32();
+        view.render(queue, &mut encoder, &mvp, eye);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("imgui-pass"),
