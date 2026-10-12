@@ -18,6 +18,14 @@ impl ImportModel {
     /// Parse + validate now; a corrupt file is a construction error and
     /// never reaches the history.
     pub fn new(path: &Path) -> Result<Self, CommandError> {
+        // STEP/IGES need the B-rep kernel (M1.3); refuse by extension, not
+        // by a failed read, so the user gets the honest diagnostic.
+        match path.extension().and_then(|e| e.to_str()) {
+            Some(ext) if matches!(ext.to_ascii_lowercase().as_str(), "step" | "stp" | "iges" | "igs") => {
+                return Err(CommandError::UnsupportedType(ext.to_ascii_uppercase()));
+            }
+            _ => {}
+        }
         let mesh = import::load_model(path)?;
         let name = path
             .file_stem()

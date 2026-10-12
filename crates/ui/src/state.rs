@@ -39,6 +39,9 @@ pub struct State {
     pub status: String,
     /// Bumped whenever documents changed; drives GPU re-upload of meshes.
     pub doc_version: u64,
+    /// Bumped whenever selection changed; re-sends the vertex stream (the
+    /// selection tint is baked per vertex) without re-uploading geometry.
+    pub selection_version: u64,
     /// 3D render target exposed to ImGui (None while headless / pre-GPU).
     pub viewport_tex: Option<TextureId>,
     /// Logical-pixel size the Viewport panel reported last frame; drives
@@ -57,6 +60,7 @@ impl State {
             history: History::default(),
             status: String::from("ready"),
             doc_version: 0,
+            selection_version: 0,
             viewport_tex: None,
             viewport_size: [960.0, 540.0],
             cam: Camera::default(),
@@ -140,8 +144,11 @@ impl State {
                 }
             }
             CommandKind::Select(name) => {
-                History::execute_ephemeral(&self.world, SelectEntity::new(&self.world, name.as_deref()));
-                self.doc_version += 1; // selection tints change the render
+                History::execute_ephemeral(
+                    &self.world,
+                    SelectEntity::new(&self.world, name.as_deref()),
+                );
+                self.selection_version = self.selection_version.wrapping_add(1);
             }
             CommandKind::FrameAll => self.frame_all(),
             CommandKind::Quit => self.request_quit = true,

@@ -4,10 +4,32 @@
 //! Everything the menus touch goes through `State::pending` - dialogs must
 //! never open in the middle of an ImGui frame.
 
-use dear_imgui_rs::{Condition, Key, MouseButton, Ui, WindowFlags};
+use dear_imgui_rs::{
+    Condition, DockLayout, DockLayoutApply, DockNodeFlags, DockSplit, Key, MouseButton, Ui,
+    WindowFlags, WindowKey,
+};
 
 use crate::state::{CommandKind, State};
 use crate::tree;
+
+/// Stable identity for the 3D panel; shared by the layout and the window.
+pub(crate) fn viewport_key() -> Option<WindowKey> {
+    WindowKey::new("viewport", "Viewport").ok()
+}
+
+/// Declarative startup layout: tree on the left, 3D filling the rest.
+/// Applied only when the dock tree is missing (first run or lost layout);
+/// after that the user's arrangement persists in the ImGui ini.
+fn dock_layout() -> Option<DockLayout> {
+    let tree = WindowKey::new("models", "Models").ok()?;
+    let view = viewport_key()?;
+    Some(DockLayout::split(
+        DockSplit::Left,
+        0.24,
+        DockLayout::tabs([tree]),
+        DockLayout::tabs([view]),
+    ))
+}
 
 /// Build one frame of UI; queued actions run via `State::drain_actions`.
 pub fn build(ui: &Ui, state: &mut State) {
@@ -36,10 +58,25 @@ pub fn build(ui: &Ui, state: &mut State) {
         .build(|| {
             // A dockspace filling the host; the panels below land inside it.
             let size = ui.content_region_avail();
-            if ui.dockspace().current_window(size).build().is_err() {
-                ui.text("dockspace unavailable");
+            let mut space = ui
+                .dockspace()
+                .current_window(size)
+                .flags(DockNodeFlags::AUTO_HIDE_TAB_BAR);
+            let layout = dock_layout();
+            if let Some(layout) = layout.as_ref() {
+                space = space.layout(layout, DockLayoutApply::IfMissing);
             }
-            panels(ui, state);
+            // Stable root id for this dock tree.
+            let host = space.root_id(ui.get_id("hsm-dockspace"));
+            match host.build() {
+                Ok(_) => panels(ui, state),
+                Err(err) => {
+                    // Show chrome rather than a blank frame if docking fails.
+                    ui.text(format!("dockspace unavailable: {err}"));
+                    tree::models_panel(ui, state);
+                    viewport_panel(ui, state);
+                }
+            }
         })
         .is_none()
     {
@@ -114,7 +151,10 @@ fn panels(ui: &Ui, state: &mut State) {
 }
 
 fn viewport_panel(ui: &Ui, state: &mut State) {
-    ui.window("Viewport").build(|| {
+    let Some(key) = viewport_key() else {
+        return;
+    };
+    ui.window(key.label("Viewport")).build(|| {
         let Some(tex) = state.viewport_tex else {
             ui.text("3D viewport not initialized");
             return;
@@ -125,7 +165,12 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
         }
         ui.image(tex, size);
 
-        if !ui.io().want_capture_mouse() && ui.is_item_hovered() {
+        // Camera controls: MMB orbits, RMB pans, wheel zooms (cursor-
+        // centered). The hover test uses the raw window rect, not
+        // is_item_hovered: a single large Image can report no hover while
+        // the cursor is inside the panel.
+        let hovered = ui.is_window_hovered();
+        if hovered && !ui.io().want_capture_mouse() {
             let delta = ui.io().mouse_delta();
             if ui.is_mouse_down(MouseButton::Middle) {
                 state.cam.orbit(delta[0], delta[1]);
@@ -133,12 +178,59 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
             if ui.is_mouse_down(MouseButton::Right) {
                 state.cam.pan(delta[0], delta[1]);
             }
-            let wheel = ui.io().mouse_wheel();
-            if wheel != 0.0 {
-                state.cam.zoom(wheel);
+        }
+        let wheel = ui.io().mouse_wheel();
+        if wheel != 0.0 && hovered {
+            // Cursor-centered zoom: map the pointer into the image rect's
+            // normalized device coords (x right, y up).
+            let ([rx0, ry0], [rx1, ry1]) = ui.item_rect();
+            let (mw, mh) = (rx1 - rx0, ry1 - ry0);
+            let [mx, my] = ui.io().mouse_pos();
+            if mw > 1.0 && mh > 1.0 && mx >= rx0 && mx <= rx1 && my >= ry0 && my <= ry1 {
+                let ndc = [
+                    (mx - rx0) / mw * 2.0 - 1.0,
+                    1.0 - (my - ry0) / mh * 2.0,
+                ];
+                state.cam.dolly_cursor(ndc, f64::from(mw / mh), wheel);
             }
         }
+        viewport_help(ui, hovered);
     });
+}
+
+/// Corner hint: empty by default, live mode string while dragging.
+fn viewport_help(ui: &Ui, hovered: bool) {
+    if !hovered {
+        return;
+    }
+    let hint = if ui.is_mouse_down(MouseButton::Middle) {
+        "orbit"
+    } else if ui.is_mouse_down(MouseButton::Right) {
+        "pan"
+    } else {
+        "MMB orbit · RMB pan · wheel zoom · F frame all"
+    };
+    let pad = 6.0;
+    let [sw, sh] = ui.calc_text_size(hint);
+    // item_rect is screen space, matching io.MousePos and window positions.
+    let (_, img_max) = ui.item_rect();
+    let pos = [img_max[0] - sw - pad * 2.0, img_max[1] - sh - pad * 2.0];
+    ui.window("##vcue")
+        .flags(
+            WindowFlags::NO_TITLE_BAR
+                | WindowFlags::NO_BACKGROUND
+                | WindowFlags::NO_MOVE
+                | WindowFlags::NO_DOCKING
+                | WindowFlags::NO_NAV
+                | WindowFlags::NO_NAV_INPUTS
+                | WindowFlags::NO_FOCUS_ON_APPEARING
+                | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS,
+        )
+        .position(pos, Condition::Always)
+        .size([sw + pad * 2.0, sh + pad * 2.0], Condition::Always)
+        .build(|| {
+            ui.text(hint);
+        });
 }
 
 fn shortcuts(ui: &Ui, state: &mut State) {

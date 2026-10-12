@@ -522,6 +522,57 @@ impl Camera {
         }
     }
 
+    /// Dolly toward the cursor, keeping the world point under it fixed.
+    /// `ndc` is the cursor in normalized device coords (x right, y up,
+    /// both -1..1) and `aspect` the viewport width/height. Returns the new
+    /// target, or None on a degenerate ray (caller keeps plain behavior).
+    pub fn dolly_cursor(
+        &mut self,
+        ndc: [f32; 2],
+        aspect: f64,
+        wheel_steps: f32,
+    ) -> Option<[f64; 3]> {
+        let (fx, fy, fz) = self.fwd();
+        let (rx, ry, rz) = self.basis_right();
+        let (ux, uy, uz) = self.basis_up();
+        let g = (std::f64::consts::FRAC_PI_6).tan(); // half-height at d = 1
+        let aspect = if aspect.is_finite() && aspect > 1e-6 {
+            aspect
+        } else {
+            1.0
+        };
+        let (nx, ny) = (f64::from(ndc[0]), f64::from(ndc[1]));
+        if !nx.is_finite() || !ny.is_finite() {
+            return None;
+        }
+        let dir = [
+            fx + nx * g * aspect * rx + ny * g * ux,
+            fy + nx * g * aspect * ry + ny * g * uy,
+            fz + nx * g * aspect * rz + ny * g * uz,
+        ];
+        let (tx, ty, tz) = (self.target[0], self.target[1], self.target[2]);
+        let (ex, ey, ez) = (self.eye()[0], self.eye()[1], self.eye()[2]);
+        // Closest point on the ray to the current target.
+        let (wx, wy, wz) = (tx - ex, ty - ey, tz - ez);
+        let dd = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+        if !dd.is_finite() || dd <= 1e-12 {
+            return None;
+        }
+        let s = (wx * dir[0] + wy * dir[1] + wz * dir[2]) / dd;
+        let (px, py, pz) = (ex + dir[0] * s, ey + dir[1] * s, ez + dir[2] * s);
+        let old_dist = self.dist;
+        self.zoom(wheel_steps);
+        let k = self.dist / old_dist;
+        if !k.is_finite() || k <= 0.0 {
+            return None;
+        }
+        self.target = [px + (tx - px) * k, py + (ty - py) * k, pz + (tz - pz) * k];
+        if self.target.iter().any(|t| !t.is_finite()) {
+            return None;
+        }
+        Some(self.target)
+    }
+
     /// Center the camera on a bounding sphere.
     #[must_use]
     pub fn frame(center: [f64; 3], radius: f64) -> Camera {

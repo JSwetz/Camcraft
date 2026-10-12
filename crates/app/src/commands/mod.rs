@@ -21,6 +21,8 @@ pub enum CommandError {
     NameConflict(String),
     #[error(transparent)]
     Import(#[from] crate::geometry::ImportError),
+    #[error("'{0}' import arrives with the B-rep kernel (M1.3); import a mesh (STL/OBJ) for now")]
+    UnsupportedType(String),
 }
 
 pub trait Command {

@@ -19,7 +19,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::shell;
-use crate::state::State;
+use crate::state::{CommandKind, State};
 use crate::viewport::View3D;
 
 #[must_use]
@@ -58,6 +58,10 @@ struct App {
     external: Option<ExternalTextureId>,
     config: Option<wgpu::SurfaceConfiguration>,
     doc_synced: u64,
+    /// Selection changed (or the document was re-sent) since last frame;
+    /// app.rs re-sends meshes because the renderer caches external texture
+    /// views by id and the vertex stream bakes selection state.
+    sel_synced: u64,
     exit_code: i32,
 }
 
@@ -77,6 +81,7 @@ impl App {
             external: None,
             config: None,
             doc_synced: u64::MAX,
+            sel_synced: u64::MAX,
             exit_code: 0,
         }
     }
@@ -286,6 +291,7 @@ impl App {
             external,
             config,
             doc_synced,
+            sel_synced,
             exit_code,
             ..
         } = self;
@@ -326,7 +332,9 @@ impl App {
 
         // UI first: the panels report their size, the GPU pass follows.
         let frame = ctx.begin_frame();
+        let sel_dirty = state.selection_version != *sel_synced;
         shell::build(frame.ui(), state);
+        *sel_synced = state.selection_version;
 
         let want = (
             (f64::from(state.viewport_size[0]) * scale).max(1.0) as u32,
@@ -340,7 +348,7 @@ impl App {
             eprintln!("external texture update: {err}");
         }
 
-        if state.doc_version != *doc_synced {
+        if state.doc_version != *doc_synced || sel_dirty {
             let parts = collect_parts(state);
             let refs: Vec<(&[[f32; 3]], bool)> =
                 parts.iter().map(|(v, s)| (v.as_slice(), *s)).collect();
@@ -469,6 +477,12 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(size) => self.on_resize(*size),
             WindowEvent::RedrawRequested => self.draw(el),
+            // Import validation lives in the command (app layer); the shell
+            // only queues, so a dropped corrupt/unsupported file surfaces
+            // as the same honest status as File > Open.
+            WindowEvent::DroppedFile(path) => {
+                self.state.pending.push_back(CommandKind::ImportFile(path.to_path_buf()));
+            }
             _ => {}
         }
     }
