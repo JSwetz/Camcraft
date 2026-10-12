@@ -522,6 +522,38 @@ impl Camera {
         }
     }
 
+    /// Ray through an NDC cursor position (x right, y up, -1..1):
+    /// (origin, normalized direction), or None on degenerate math.
+    #[must_use]
+    pub fn ray_through(&self, ndc: [f32; 2], aspect: f64) -> Option<([f64; 3], [f64; 3])> {
+        let (fx, fy, fz) = self.fwd();
+        let (rx, ry, rz) = self.basis_right();
+        let (ux, uy, uz) = self.basis_up();
+        let g = (std::f64::consts::FRAC_PI_6).tan(); // half-height at d = 1
+        let aspect = if aspect.is_finite() && aspect > 1e-6 {
+            aspect
+        } else {
+            1.0
+        };
+        let (nx, ny) = (f64::from(ndc[0]), f64::from(ndc[1]));
+        let dir = [
+            fx + nx * g * aspect * rx + ny * g * ux,
+            fy + nx * g * aspect * ry + ny * g * uy,
+            fz + nx * g * aspect * rz + ny * g * uz,
+        ];
+        let len2 = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+        if !len2.is_finite() || len2 < 1e-24 {
+            return None;
+        }
+        let inv = 1.0 / len2.sqrt();
+        let dir = [dir[0] * inv, dir[1] * inv, dir[2] * inv];
+        let origin = self.eye();
+        if !dir.iter().all(|v| v.is_finite()) || !origin.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        Some((origin, dir))
+    }
+
     /// Dolly toward the cursor, keeping the world point under it fixed.
     /// `ndc` is the cursor in normalized device coords (x right, y up,
     /// both -1..1) and `aspect` the viewport width/height. Returns the new

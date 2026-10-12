@@ -33,6 +33,14 @@ pub enum CommandKind {
     Quit,
 }
 
+/// Which viewport drag is live; ephemeral UI state, deliberately not
+/// undoable (AGENTS.md). app.rs owns it from raw winit events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragMode {
+    Orbit,
+    Pan,
+}
+
 pub struct State {
     pub world: World,
     pub history: History,
@@ -47,6 +55,11 @@ pub struct State {
     /// Logical-pixel size the Viewport panel reported last frame; drives
     /// offscreen target sizing (shell writes it, app reads it).
     pub viewport_size: [f32; 2],
+    /// Viewport image rect in logical screen coords; the shell publishes it
+    /// each frame, app.rs hit-tests raw pointer events against it.
+    pub viewport_rect: ([f32; 2], [f32; 2]),
+    /// Live viewport drag (orbit/pan), driven by app.rs from winit events.
+    pub drag: Option<DragMode>,
     pub cam: Camera,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
@@ -63,6 +76,8 @@ impl State {
             selection_version: 0,
             viewport_tex: None,
             viewport_size: [960.0, 540.0],
+            viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
+            drag: None,
             cam: Camera::default(),
             pending: VecDeque::new(),
             request_quit: false,

@@ -15,8 +15,8 @@ pub fn models_panel(ui: &Ui, state: &mut State) {
         if entities.is_empty() {
             ui.text_wrapped(
                 "No models yet.\n\nFile > Open Model (Ctrl+O)\nor drag a file onto the window.\n\n\
-                 In the viewport: middle-drag orbits, right-drag pans, wheel zooms toward the \
-                 cursor, F frames all.",
+                 In the viewport: click selects, middle-drag orbits, right-drag pans, \
+                 wheel zooms toward the cursor, F frames all.",
             );
             return;
         }

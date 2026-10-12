@@ -7,6 +7,7 @@
 pub mod commands;
 pub mod geometry;
 pub mod model;
+pub mod pick;
 pub mod project;
 pub mod schema;
 pub mod world;

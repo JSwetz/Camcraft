@@ -5,8 +5,8 @@
 //! never open in the middle of an ImGui frame.
 
 use dear_imgui_rs::{
-    Condition, DockLayout, DockLayoutApply, DockNodeFlags, DockSplit, Key, MouseButton, Ui,
-    WindowFlags, WindowKey,
+    Condition, DockLayout, DockLayoutApply, DockNodeFlags, DockSplit, Key, Ui, WindowFlags,
+    WindowKey,
 };
 
 use crate::state::{CommandKind, State};
@@ -165,25 +165,18 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
         }
         ui.image(tex, size);
 
-        // Camera controls: MMB orbits, RMB pans, wheel zooms (cursor-
-        // centered). The hover test uses the raw window rect, not
-        // is_item_hovered: a single large Image can report no hover while
-        // the cursor is inside the panel.
+        // Publish the image rect (logical screen coords) so app.rs can
+        // hit-test raw winit pointer events against it: ImGui's hover/capture
+        // bookkeeping over docked windows proved unreliable for button drags,
+        // so orbit/pan/pick bypass it entirely.
+        let viewport_rect = ui.item_rect();
+        state.viewport_rect = viewport_rect;
         let hovered = ui.is_window_hovered();
-        if hovered && !ui.io().want_capture_mouse() {
-            let delta = ui.io().mouse_delta();
-            if ui.is_mouse_down(MouseButton::Middle) {
-                state.cam.orbit(delta[0], delta[1]);
-            }
-            if ui.is_mouse_down(MouseButton::Right) {
-                state.cam.pan(delta[0], delta[1]);
-            }
-        }
         let wheel = ui.io().mouse_wheel();
         if wheel != 0.0 && hovered {
             // Cursor-centered zoom: map the pointer into the image rect's
             // normalized device coords (x right, y up).
-            let ([rx0, ry0], [rx1, ry1]) = ui.item_rect();
+            let ([rx0, ry0], [rx1, ry1]) = viewport_rect;
             let (mw, mh) = (rx1 - rx0, ry1 - ry0);
             let [mx, my] = ui.io().mouse_pos();
             if mw > 1.0 && mh > 1.0 && mx >= rx0 && mx <= rx1 && my >= ry0 && my <= ry1 {
@@ -194,21 +187,19 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
                 state.cam.dolly_cursor(ndc, f64::from(mw / mh), wheel);
             }
         }
-        viewport_help(ui, hovered);
+        viewport_help(ui, hovered, state);
     });
 }
 
-/// Corner hint: empty by default, live mode string while dragging.
-fn viewport_help(ui: &Ui, hovered: bool) {
-    if !hovered {
+/// Corner hint: control legend, or the live mode string while dragging.
+fn viewport_help(ui: &Ui, hovered: bool, state: &State) {
+    if !hovered && state.drag.is_none() {
         return;
     }
-    let hint = if ui.is_mouse_down(MouseButton::Middle) {
-        "orbit"
-    } else if ui.is_mouse_down(MouseButton::Right) {
-        "pan"
-    } else {
-        "MMB orbit · RMB pan · wheel zoom · F frame all"
+    let hint = match state.drag {
+        Some(crate::state::DragMode::Orbit) => "orbit",
+        Some(crate::state::DragMode::Pan) => "pan",
+        None => "LMB pick · MMB orbit · RMB pan · wheel zoom · F frame",
     };
     let pad = 6.0;
     let [sw, sh] = ui.calc_text_size(hint);

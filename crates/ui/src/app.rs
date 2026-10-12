@@ -11,15 +11,15 @@ use dear_imgui_rs::{ConfigFlags, Context};
 use dear_imgui_wgpu::{wgpu, ExternalTextureId, FramebufferExtent, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use hsmworks_app::geometry::Point3;
-use hsmworks_app::model;
+use hsmworks_app::{model, pick};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::shell;
-use crate::state::{CommandKind, State};
+use crate::state::{CommandKind, DragMode, State};
 use crate::viewport::View3D;
 
 #[must_use]
@@ -62,6 +62,10 @@ struct App {
     /// app.rs re-sends meshes because the renderer caches external texture
     /// views by id and the vertex stream bakes selection state.
     sel_synced: u64,
+    /// Last cursor position in logical px; delta base for viewport drags.
+    cursor_pos: [f32; 2],
+    /// Left-press origin, so release can tell a click (pick) from a drag.
+    left_press: Option<[f32; 2]>,
     exit_code: i32,
 }
 
@@ -82,6 +86,8 @@ impl App {
             config: None,
             doc_synced: u64::MAX,
             sel_synced: u64::MAX,
+            cursor_pos: [0.0, 0.0],
+            left_press: None,
             exit_code: 0,
         }
     }
@@ -269,6 +275,66 @@ impl App {
         config.width = w;
         config.height = h;
         surface.configure(device, config);
+    }
+
+    /// Viewport drags/picks are driven from raw winit events, not ImGui
+    /// hover state: a single large Image inside a docked window proved
+    /// unreliable for button tracking. Clicks only start inside the image
+    /// rect; the drag then continues even past its edges.
+    fn inside_viewport(&self, p: [f32; 2]) -> bool {
+        let ([x0, y0], [x1, y1]) = self.state.viewport_rect;
+        x1 > x0 && y1 > y0 && p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1
+    }
+
+    fn on_press(&mut self, button: &MouseButton) {
+        if !self.inside_viewport(self.cursor_pos) {
+            return;
+        }
+        match button {
+            MouseButton::Middle => self.state.drag = Some(DragMode::Orbit),
+            MouseButton::Right => self.state.drag = Some(DragMode::Pan),
+            MouseButton::Left => self.left_press = Some(self.cursor_pos),
+            _ => {} // Back/Forward/Other: no viewport binding
+        }
+    }
+
+    fn on_release(&mut self, button: &MouseButton) {
+        match button {
+            MouseButton::Middle | MouseButton::Right => self.state.drag = None,
+            MouseButton::Left => {
+                // A press-and-release under 3 logical px is a click: pick.
+                let Some(press) = self.left_press.take() else {
+                    return;
+                };
+                let p = self.cursor_pos;
+                let moved = ((p[0] - press[0]) * (p[0] - press[0])
+                    + (p[1] - press[1]) * (p[1] - press[1]))
+                .sqrt();
+                if moved <= 3.0 && self.inside_viewport(p) {
+                    self.pick_at(p);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Raycast at a logical-px point inside the viewport; queues Select
+    /// (None on a miss, which clears selection - standard CAM behavior).
+    fn pick_at(&mut self, p: [f32; 2]) {
+        let ([x0, y0], [x1, y1]) = self.state.viewport_rect;
+        let (w, h) = (x1 - x0, y1 - y0);
+        if w <= 1.0 || h <= 1.0 {
+            return;
+        }
+        let ndc = [
+            (p[0] - x0) / w * 2.0 - 1.0,
+            1.0 - (p[1] - y0) / h * 2.0,
+        ];
+        let Some((origin, dir)) = self.state.cam.ray_through(ndc, f64::from(w / h)) else {
+            return;
+        };
+        let hit = pick::first_hit(&self.state.world, origin, dir);
+        self.state.pending.push_back(CommandKind::Select(hit));
     }
 
     fn draw(&mut self, el: &ActiveEventLoop) {
@@ -483,6 +549,27 @@ impl ApplicationHandler for App {
             WindowEvent::DroppedFile(path) => {
                 self.state.pending.push_back(CommandKind::ImportFile(path.to_path_buf()));
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor());
+                let pos = position.to_logical::<f32>(scale);
+                let delta = [pos.x - self.cursor_pos[0], pos.y - self.cursor_pos[1]];
+                self.cursor_pos = [pos.x, pos.y];
+                match self.state.drag {
+                    Some(DragMode::Orbit) => self.state.cam.orbit(delta[0], delta[1]),
+                    Some(DragMode::Pan) => self.state.cam.pan(delta[0], delta[1]),
+                    None => {}
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button,
+                ..
+            } => self.on_press(button),
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button,
+                ..
+            } => self.on_release(button),
             _ => {}
         }
     }
