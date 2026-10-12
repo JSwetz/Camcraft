@@ -10,7 +10,7 @@ use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::{Entity, World};
 
 use crate::geometry::{Point3, Triangle};
-use crate::schema::{Facets, Location, Name};
+use crate::schema::{Facets, Location, Name, Selected};
 
 /// Create a named model entity at the origin with no geometry yet.
 #[must_use]
@@ -72,4 +72,26 @@ pub fn named_entities(world: &World) -> Vec<(String, Entity)> {
     });
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+/// Names of all currently-selected entities.
+#[must_use]
+pub fn selected_names(world: &World) -> Vec<String> {
+    named_entities(world)
+        .into_iter()
+        .filter(|(_, e)| e.entity_view(world).has(Selected))
+        .map(|(name, _)| name)
+        .collect()
+}
+
+pub fn is_selected(world: &World, entity: &Entity) -> bool {
+    entity.entity_view(world).has(Selected)
+}
+
+/// Destruct every named entity (new/open document). Rust-owned components
+/// free through flecs's drop hooks.
+pub fn clear_named(world: &World) {
+    for (_, entity) in named_entities(world) {
+        remove(world, &entity);
+    }
 }

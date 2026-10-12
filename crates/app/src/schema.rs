@@ -31,6 +31,11 @@ pub struct Facets {
     pub tris: Vec<Triangle>,
 }
 
+/// Selection marker (tag). Only `SelectEntity` writes it (AGENTS.md: changes
+/// go through commands); the tree and viewport read it to highlight.
+#[derive(Component, Debug)]
+pub struct Selected;
+
 /// Registers every schema component with a fresh world. Called by
 /// `world::new_world()` so every binary (and every test) gets identical
 /// registration.
@@ -38,6 +43,7 @@ pub fn register_schema(world: &World) {
     world.component::<Name>();
     world.component::<Location>();
     world.component::<Facets>();
+    world.component::<Selected>();
 }
 
 #[must_use]

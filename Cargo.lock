@@ -1078,6 +1078,7 @@ dependencies = [
  "dear-imgui-winit",
  "flecs_ecs",
  "hsmworks-app",
+ "pollster",
  "rfd",
  "winit",
 ]

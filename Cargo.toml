@@ -20,8 +20,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # UI stack - imgui fork with docking; winit platform + wgpu renderer backends
+# No direct wgpu dep: hsmworks-ui uses dear_imgui_wgpu::wgpu so types match the
+# renderer exactly (wgpu is re-exported, version-selected by the wgpu-30 feature).
 dear-imgui-rs = "0.19"
 dear-imgui-winit = "0.19"
 dear-imgui-wgpu = "0.19"
 winit = "0.30"
 rfd = "0.15"
+pollster = "0.4"

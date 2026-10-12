@@ -5,11 +5,13 @@
 
 pub mod delete_entity;
 pub mod import_model;
+pub mod select_entity;
 
 use flecs_ecs::prelude::World;
 
 pub use delete_entity::DeleteEntity;
 pub use import_model::ImportModel;
+pub use select_entity::SelectEntity;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
@@ -63,6 +65,18 @@ impl History {
             }
             None => false,
         }
+    }
+
+    /// Run a command without touching either stack. Selection is a command
+    /// (AGENTS.md) but is deliberately not on the undo timeline.
+    pub fn execute_ephemeral(world: &World, command: impl Command) {
+        command.apply(world);
+    }
+
+    /// Drop all history; used when a document replaces the current one.
+    pub fn clear(&mut self) {
+        self.done.clear();
+        self.redo.clear();
     }
 
     pub fn can_undo(&self) -> bool {
