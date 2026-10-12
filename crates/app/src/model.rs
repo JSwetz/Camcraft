@@ -9,8 +9,9 @@
 use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::{Entity, World};
 
-use crate::geometry::{IDENTITY_Q, Point3, Triangle, normalize_quat};
-use crate::schema::{Facets, Location, Name, Selected};
+use crate::geometry::{Aabb, IDENTITY_Q, Point3, Triangle, normalize_quat, transform_point};
+use crate::schema::{Facets, Location, Name, Selected, StockDef, Wcs};
+use crate::stock::StockShape;
 
 /// Create a named model entity at the origin with no geometry yet.
 #[must_use]
@@ -96,6 +97,66 @@ pub fn named_entities(world: &World) -> Vec<(String, Entity)> {
     });
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+/// The named entities that are models - the user's parts. Stock and WCS
+/// entities are setup furniture and live in the Setup pane, so the tree and
+/// "fit to models" must skip them.
+#[must_use]
+pub fn model_entities(world: &World) -> Vec<(String, Entity)> {
+    named_entities(world)
+        .into_iter()
+        .filter(|(_, e)| !is_stock(world, e) && !is_wcs(world, e))
+        .collect()
+}
+
+#[must_use]
+pub fn is_stock(world: &World, entity: &Entity) -> bool {
+    entity.entity_view(world).try_get::<&StockDef>(|_| ()).is_some()
+}
+
+#[must_use]
+pub fn is_wcs(world: &World, entity: &Entity) -> bool {
+    entity.entity_view(world).has(Wcs)
+}
+
+/// The stock parameters of this entity, if it is the stock solid.
+#[must_use]
+pub fn stock_def_of(world: &World, entity: &Entity) -> Option<StockShape> {
+    entity.entity_view(world).try_get::<&StockDef>(|s| s.shape.clone())
+}
+
+/// World-space bounding box of all model geometry. Stock and WCS are excluded
+/// on purpose: fitting stock to a set that contains the stock would grow
+/// forever on repeated Fit.
+#[must_use]
+pub fn solid_world_aabb(world: &World) -> Option<Aabb> {
+    let mut min = [f64::MAX; 3];
+    let mut max = [f64::MIN; 3];
+    let mut any = false;
+    for (_, entity) in model_entities(world) {
+        let Some(tris) = facets_of(world, &entity) else {
+            continue;
+        };
+        let loc = transform_of(world, &entity).unwrap_or_default();
+        for t in tris {
+            for p in [t.a, t.b, t.c] {
+                let p = transform_point(p, loc.pos, loc.rot);
+                for axis in 0..3 {
+                    let v = [p.x, p.y, p.z][axis];
+                    if v.is_finite() {
+                        min[axis] = min[axis].min(v);
+                        max[axis] = max[axis].max(v);
+                        any = true;
+                    }
+                }
+            }
+        }
+    }
+    any.then(|| Aabb {
+        min: Point3::new(min[0], min[1], min[2]),
+        max: Point3::new(max[0], max[1], max[2]),
+    })
 }
 
 /// Names of all currently-selected entities.

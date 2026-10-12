@@ -6,12 +6,18 @@ use flecs_ecs::prelude::World;
 use crate::commands::{Command, CommandError};
 use crate::geometry::Triangle;
 use crate::model;
-use crate::schema::Location;
+use crate::schema::{Location, StockDef, Wcs};
+use crate::stock::StockShape;
 
 pub struct DeleteEntity {
     name: String,
     location: Location,
     facets: Option<Vec<Triangle>>,
+    /// Non-`None` restores the `StockDef` component; `wcs` restores the
+    /// `Wcs` tag. Together they keep stock and work offsets undoable with
+    /// their kind intact.
+    stock: Option<StockShape>,
+    wcs: bool,
 }
 
 impl DeleteEntity {
@@ -25,6 +31,8 @@ impl DeleteEntity {
             name: name.to_string(),
             location: model::transform_of(world, &entity).unwrap_or_default(),
             facets: model::facets_of(world, &entity),
+            stock: model::stock_def_of(world, &entity),
+            wcs: model::is_wcs(world, &entity),
         })
     }
 }
@@ -44,6 +52,14 @@ impl Command for DeleteEntity {
         model::set_transform(world, &entity, self.location);
         if let Some(tris) = &self.facets {
             model::set_facets(world, &entity, tris.clone());
+        }
+        if let Some(shape) = &self.stock {
+            entity
+                .entity_view(world)
+                .set(StockDef { shape: shape.clone() });
+        }
+        if self.wcs {
+            entity.entity_view(world).add(Wcs);
         }
     }
 }

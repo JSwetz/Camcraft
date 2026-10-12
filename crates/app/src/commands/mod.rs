@@ -6,12 +6,16 @@
 pub mod delete_entity;
 pub mod import_model;
 pub mod select_entity;
+pub mod set_stock;
+pub mod set_wcs;
 
 use flecs_ecs::prelude::World;
 
 pub use delete_entity::DeleteEntity;
 pub use import_model::ImportModel;
 pub use select_entity::SelectEntity;
+pub use set_stock::SetStock;
+pub use set_wcs::SetWcsOrigin;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
@@ -19,6 +23,8 @@ pub enum CommandError {
     NotFound(String),
     #[error("an entity named '{0}' already exists")]
     NameConflict(String),
+    #[error("invalid parameters: {0}")]
+    Invalid(String),
     #[error(transparent)]
     Import(#[from] crate::geometry::ImportError),
     #[error("'{0}' import is not supported yet; import a STEP, STL, or OBJ file instead")]
