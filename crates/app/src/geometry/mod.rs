@@ -13,7 +13,7 @@ pub mod import;
 mod primitives;
 
 pub use import::{ImportError, load_model};
-pub use primitives::cube;
+pub use primitives::{cube, cylinder};
 
 /// A point in world space. f64 throughout the domain layer; the GPU converts
 /// to f32 at the draw boundary, never the other way around.
@@ -238,7 +238,8 @@ impl Mesh {
 
     /// Reject any non-finite coordinate; called by importers before a Mesh
     /// exists in the world (Prime Directive: validate early).
-    fn all_finite(&self) -> bool {
+    #[must_use]
+    pub fn all_finite(&self) -> bool {
         self.facets
             .iter()
             .all(|t| t.a.is_finite() && t.b.is_finite() && t.c.is_finite())

@@ -10,4 +10,5 @@ pub mod model;
 pub mod pick;
 pub mod project;
 pub mod schema;
+pub mod stock;
 pub mod world;
