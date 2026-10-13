@@ -19,7 +19,7 @@ use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     CommandError, DeleteEntity, History, ImportModel, SelectEntity, SetStock, SetWcsOrigin,
 };
-use hsmworks_app::geometry::{quat_from_yaw, transform_point, Point3};
+use hsmworks_app::geometry::{quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::schema::{Location, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::{model, project, world::new_world};
@@ -55,9 +55,14 @@ pub enum CommandKind {
         margin: f64,
         shape: i32,
     },
+    /// Work offset: slot origin plus full orientation as yaw-pitch-roll
+    /// degrees (R = Rz ⊗ Ry ⊗ Rx). The world stores a unit quaternion;
+    /// pure-yaw setups use roll = pitch = 0.
     SetWcs {
         slot: String,
         pos: [f64; 3],
+        roll_deg: f64,
+        pitch_deg: f64,
         yaw_deg: f64,
     },
 }
@@ -111,6 +116,11 @@ pub struct WcsUi {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+    /// Orientation as yaw-pitch-roll degrees (see [`CommandKind::SetWcs`]).
+    /// The quick-turn buttons in the pane compose onto these, so the draft
+    /// always round-trips with the world's quaternion.
+    pub roll_deg: f64,
+    pub pitch_deg: f64,
     pub yaw_deg: f64,
     /// XY grid point last clicked (row-major north-to-south, west-to-east;
     /// 4 = center). Display-only highlight; the world stores the position.
@@ -254,7 +264,10 @@ impl State {
                 self.wcs_ui.x = loc.pos.x;
                 self.wcs_ui.y = loc.pos.y;
                 self.wcs_ui.z = loc.pos.z;
-                self.wcs_ui.yaw_deg = quat_yaw_deg(loc.rot);
+                let (roll, pitch, yaw) = quat_to_euler(loc.rot);
+                self.wcs_ui.roll_deg = roll.to_degrees();
+                self.wcs_ui.pitch_deg = pitch.to_degrees();
+                self.wcs_ui.yaw_deg = yaw.to_degrees();
                 self.wcs_ui.placed = true;
             }
             None => {
@@ -265,6 +278,8 @@ impl State {
                     self.wcs_ui.x = 0.0;
                     self.wcs_ui.y = 0.0;
                     self.wcs_ui.z = 0.0;
+                    self.wcs_ui.roll_deg = 0.0;
+                    self.wcs_ui.pitch_deg = 0.0;
                     self.wcs_ui.yaw_deg = 0.0;
                     self.wcs_ui.placed = false;
                 }
@@ -437,10 +452,27 @@ impl State {
                     Err(err) => self.status = format!("stock not fitted: {err}"),
                 }
             }
-            CommandKind::SetWcs { slot, pos, yaw_deg } => {
+            CommandKind::SetWcs {
+                slot,
+                pos,
+                roll_deg,
+                pitch_deg,
+                yaw_deg,
+            } => {
+                // The axis-angle builders quietly substitute identity for
+                // non-finite angles; refuse that here rather than silently
+                // dropping a NaN rotation (Prime Directive).
+                if !roll_deg.is_finite() || !pitch_deg.is_finite() || !yaw_deg.is_finite() {
+                    self.status = format!("offset not set: {slot} rotation angles must be finite");
+                    return;
+                }
                 let location = Location {
                     pos: Point3::new(pos[0], pos[1], pos[2]),
-                    rot: quat_from_yaw(yaw_deg.to_radians()),
+                    rot: quat_from_euler(
+                        roll_deg.to_radians(),
+                        pitch_deg.to_radians(),
+                        yaw_deg.to_radians(),
+                    ),
                 };
                 match SetWcsOrigin::new(&self.world, &slot, location) {
                     Ok(command) => {

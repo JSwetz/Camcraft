@@ -102,6 +102,72 @@ pub fn quat_conjugate(q: [f64; 4]) -> [f64; 4] {
     [-q[0], -q[1], -q[2], q[3]]
 }
 
+/// Hamilton product `r` ⊗ `q`: applying it to a point rotates by `q` first,
+/// then by `r`. Provenance: published quaternion algebra.
+#[must_use]
+pub fn quat_mul(r: [f64; 4], q: [f64; 4]) -> [f64; 4] {
+    [
+        r[3] * q[0] + r[0] * q[3] + r[1] * q[2] - r[2] * q[1],
+        r[3] * q[1] + r[1] * q[3] + r[2] * q[0] - r[0] * q[2],
+        r[3] * q[2] + r[2] * q[3] + r[0] * q[1] - r[1] * q[0],
+        r[3] * q[3] - (r[0] * q[0] + r[1] * q[1] + r[2] * q[2]),
+    ]
+}
+
+/// Rotation by `rad` about one unit world axis: 0 = X, 1 = Y, 2 = Z.
+/// Non-finite input yields identity, an unknown axis too.
+#[must_use]
+pub fn quat_from_axis_angle(axis: usize, rad: f64) -> [f64; 4] {
+    if !rad.is_finite() {
+        return IDENTITY_Q;
+    }
+    let (s, c) = (0.5f64 * rad).sin_cos();
+    let mut q = [0.0, 0.0, 0.0, c];
+    match axis {
+        0 => q[0] = s,
+        1 => q[1] = s,
+        2 => q[2] = s,
+        _ => return IDENTITY_Q,
+    }
+    q
+}
+
+/// An orientation from yaw-pitch-roll Tait-Bryan angles (radians):
+/// R = Rz(yaw) ⊗ Ry(pitch) ⊗ Rx(roll), i.e. a point is rolled about X
+/// first, then pitched about Y, then yawed about Z. Provenance: standard
+/// rigid-transform math, same formulas as any graphics reference.
+#[must_use]
+pub fn quat_from_euler(roll: f64, pitch: f64, yaw: f64) -> [f64; 4] {
+    quat_mul(
+        quat_from_axis_angle(2, yaw),
+        quat_mul(
+            quat_from_axis_angle(1, pitch),
+            quat_from_axis_angle(0, roll),
+        ),
+    )
+}
+
+/// The inverse of [`quat_from_euler`]: `(roll, pitch, yaw)` in radians. At
+/// pitch = ±90° (gimbal lock) the split between roll and yaw is ambiguous,
+/// so roll is reported as 0 and yaw carries the whole twist; re-encoding
+/// still yields the same rotation, which is what the UI round-trip needs.
+#[must_use]
+pub fn quat_to_euler(q: [f64; 4]) -> (f64, f64, f64) {
+    let (x, y, z, w) = (q[0], q[1], q[2], q[3]);
+    let sinp = (2.0 * (w * y - x * z)).clamp(-1.0, 1.0);
+    if sinp.abs() >= 1.0 - 1e-12 {
+        let pitch = std::f64::consts::FRAC_PI_2.copysign(sinp);
+        let yaw = (-2.0 * (x * y - z * w)).atan2(1.0 - 2.0 * (x * x + z * z));
+        (0.0, pitch, yaw)
+    } else {
+        (
+            (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y)),
+            sinp.asin(),
+            (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z)),
+        )
+    }
+}
+
 /// Rotate `p` by unit quaternion `q` (v' = v + w·t + qv×t with t = 2·qv×v).
 /// Pass the conjugate for the inverse rotation.
 #[must_use]
@@ -321,5 +387,73 @@ mod tests {
     fn yaw_of_nonfinite_is_identity() {
         assert_eq!(quat_from_yaw(f64::NAN), IDENTITY_Q);
         assert_eq!(quat_from_yaw(f64::INFINITY), IDENTITY_Q);
+    }
+
+    /// Unit quaternions describe the same rotation when equal up to sign.
+    fn same_rotation(a: [f64; 4], b: [f64; 4]) -> bool {
+        let dot: f64 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+        (dot.abs() - 1.0).abs() < 1e-9
+    }
+
+    #[test]
+    fn quat_multiplies_apply_right_to_left() {
+        // q = qz ⊗ qy rotates a point by qy first: Ry(90) takes +Z to +X,
+        // then Rz(45) turns +X toward +Y by 45 degrees.
+        let q = quat_mul(
+            quat_from_axis_angle(2, 45f64.to_radians()),
+            quat_from_axis_angle(1, 90f64.to_radians()),
+        );
+        let p = quat_rotate_point(q, Point3::new(0.0, 0.0, 1.0));
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((p.x - h).abs() < 1e-12 && (p.y - h).abs() < 1e-12 && p.z.abs() < 1e-12, "{p:?}");
+    }
+
+    #[test]
+    fn axis_quarters_are_exact_and_guards_hold() {
+        // Rx(+90): +Z -> -Y (y to z, z to -y for a right-handed turn).
+        let p = quat_rotate_point(quat_from_axis_angle(0, 90f64.to_radians()), Point3::new(0.0, 0.0, 1.0));
+        assert!(p.x.abs() < 1e-12 && (p.y + 1.0).abs() < 1e-12 && p.z.abs() < 1e-12, "{p:?}");
+        assert_eq!(quat_from_axis_angle(2, f64::NAN), IDENTITY_Q);
+        assert_eq!(quat_from_axis_angle(7, 1.0), IDENTITY_Q, "unknown axis");
+        assert_eq!(quat_from_euler(0.0, 0.0, 0.7), quat_from_yaw(0.7));
+    }
+
+    #[test]
+    fn euler_round_trips_to_the_same_rotation() {
+        for (r, p, y) in [
+            (0.0, 0.0, 0.0),
+            (30.0, -45.0, 60.0),
+            (-170.0, 12.0, 179.0),
+            (90.0, 90.0, 90.0),
+            (0.0, 180.0, 0.0),
+        ] {
+            let rad = [r, p, y].map(f64::to_radians);
+            let q1 = quat_from_euler(rad[0], rad[1], rad[2]);
+            let (e0, e1, e2) = quat_to_euler(q1);
+            let q2 = quat_from_euler(e0, e1, e2);
+            assert!(same_rotation(q1, q2), "euler round trip {r},{p},{y}");
+            if p.abs() < 89.0 {
+                // Off gimbal the angles themselves come back.
+                let back = [e0.to_degrees(), e1.to_degrees(), e2.to_degrees()];
+                for (got, want) in back.iter().zip([r, p, y]) {
+                    assert!((got - want).abs() < 1e-9, "{r},{p},{y} -> {back:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn euler_gimbal_lock_keeps_the_rotation() {
+        // pitch = +90: roll and yaw split ambiguously; the extraction
+        // reports roll 0 and folds it into yaw, and the rotation survives.
+        let q = quat_from_euler(30f64.to_radians(), 90f64.to_radians(), 20f64.to_radians());
+        let (r, p, y) = quat_to_euler(q);
+        assert_eq!(r, 0.0);
+        assert!((p - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{p}");
+        assert!(same_rotation(q, quat_from_euler(r, p, y)));
+        // And a documented control case: yaw 30 at gimbal decodes exact.
+        let q = quat_from_euler(0.0, 90f64.to_radians(), 30f64.to_radians());
+        let (_, _, y) = quat_to_euler(q);
+        assert!((y.to_degrees() - 30.0).abs() < 1e-9, "{}", y.to_degrees());
     }
 }

@@ -32,8 +32,13 @@ impl SetWcsOrigin {
             )));
         }
         let mut location = location;
+        if !location.rot.iter().all(|v| v.is_finite()) {
+            return Err(CommandError::Invalid(
+                "work offset rotation must be finite (check the angle inputs)".into(),
+            ));
+        }
         location.rot = normalize_quat(location.rot).ok_or_else(|| {
-            CommandError::Invalid("work offset rotation is not a quaternion".into())
+            CommandError::Invalid("work offset rotation is degenerate (zero norm)".into())
         })?;
         if !location.pos.is_finite() {
             return Err(CommandError::Invalid("work offset placement must be finite".into()));

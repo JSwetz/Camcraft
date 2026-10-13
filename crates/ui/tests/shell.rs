@@ -349,6 +349,8 @@ fn set_wcs_creates_offset_undo_removes_and_bad_slot_refuses() {
     state.pending.push_back(CommandKind::SetWcs {
         slot: "G55".into(),
         pos: [10.0, 5.0, 0.0],
+        roll_deg: 0.0,
+        pitch_deg: 0.0,
         yaw_deg: 90.0,
     });
     state.drain_actions();
@@ -367,6 +369,8 @@ fn set_wcs_creates_offset_undo_removes_and_bad_slot_refuses() {
     state.pending.push_back(CommandKind::SetWcs {
         slot: "G53".into(),
         pos: [0.0, 0.0, 0.0],
+        roll_deg: 0.0,
+        pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
@@ -426,6 +430,8 @@ fn anchor_grid_places_origin_on_the_stock_box() {
     state.pending.push_back(CommandKind::SetWcs {
         slot: "G54".into(),
         pos: p,
+        roll_deg: 0.0,
+        pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
@@ -453,6 +459,8 @@ fn origin_undo_leaves_no_stale_readout() {
     state.pending.push_back(CommandKind::SetWcs {
         slot: "G55".into(),
         pos: [12.0, 3.0, -1.0],
+        roll_deg: 0.0,
+        pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();
@@ -473,6 +481,64 @@ fn origin_undo_leaves_no_stale_readout() {
 }
 
 #[test]
+fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
+    use hsmworks_app::geometry::{Point3, transform_point};
+    use hsmworks_app::model;
+    use hsmworks_ui::state::{CommandKind, State};
+
+    let mut state = State::new();
+    // A spindle that points along world -Y is a +90 roll about X.
+    state.pending.push_back(CommandKind::SetWcs {
+        slot: "G54".into(),
+        pos: [10.0, 0.0, 0.0],
+        roll_deg: 90.0,
+        pitch_deg: 0.0,
+        yaw_deg: 0.0,
+    });
+    state.drain_actions();
+    assert_eq!(state.status, "G54 origin set");
+    let g54 = model::find_by_name(&state.world, "G54").expect("origin");
+    let loc = model::transform_of(&state.world, &g54).expect("location");
+    let tip = transform_point(Point3::new(0.0, 0.0, 1.0), loc.pos, loc.rot);
+    assert!(
+        (tip.x - 10.0).abs() < 1e-9 && (tip.y + 1.0).abs() < 1e-9 && tip.z.abs() < 1e-9,
+        "local +Z must point -Y: {tip:?}"
+    );
+
+    // The pane's draft decodes back to the same angles (round trip).
+    state.sync_setup_ui();
+    assert!((state.wcs_ui.roll_deg - 90.0).abs() < 1e-9, "{:?}", state.wcs_ui.roll_deg);
+    assert!(state.wcs_ui.pitch_deg.abs() < 1e-9 && state.wcs_ui.yaw_deg.abs() < 1e-9);
+
+    // A second tilt replaces the first; undo returns exactly to it.
+    state.pending.push_back(CommandKind::SetWcs {
+        slot: "G54".into(),
+        pos: [10.0, 0.0, 0.0],
+        roll_deg: 0.0,
+        pitch_deg: 90.0,
+        yaw_deg: 0.0,
+    });
+    state.drain_actions();
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    let loc = model::transform_of(&state.world, &g54).expect("first tilt back");
+    let tip = transform_point(Point3::new(0.0, 0.0, 1.0), loc.pos, loc.rot);
+    assert!((tip.y + 1.0).abs() < 1e-9 && tip.z.abs() < 1e-9, "{tip:?}");
+
+    // A NaN angle is refused visibly and creates nothing (Prime Directive).
+    state.pending.push_back(CommandKind::SetWcs {
+        slot: "G55".into(),
+        pos: [0.0, 0.0, 0.0],
+        roll_deg: f64::NAN,
+        pitch_deg: 0.0,
+        yaw_deg: 0.0,
+    });
+    state.drain_actions();
+    assert!(state.status.starts_with("offset not set"), "{:?}", state.status);
+    assert!(model::find_by_name(&state.world, "G55").is_none());
+}
+
+#[test]
 fn setup_furniture_stays_out_of_the_model_list() {
     use hsmworks_app::model;
     use hsmworks_ui::state::{CommandKind, State};
@@ -489,6 +555,8 @@ fn setup_furniture_stays_out_of_the_model_list() {
     state.pending.push_back(CommandKind::SetWcs {
         slot: "G54".into(),
         pos: [0.0, 0.0, 0.0],
+        roll_deg: 0.0,
+        pitch_deg: 0.0,
         yaw_deg: 0.0,
     });
     state.drain_actions();

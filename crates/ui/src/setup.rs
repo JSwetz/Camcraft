@@ -14,7 +14,19 @@ use hsmworks_app::model;
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::StockShape;
 
+use hsmworks_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
+
 use crate::state::{CommandKind, State, quat_yaw_deg};
+
+/// Quarter-turn buttons: `(label, world axis, sign)`, right-hand rule.
+const QUARTER_TURNS: [(&str, usize, f64); 6] = [
+    ("X+", 0, 1.0),
+    ("X-", 0, -1.0),
+    ("Y+", 1, 1.0),
+    ("Y-", 1, -1.0),
+    ("Z+", 2, 1.0),
+    ("Z-", 2, -1.0),
+];
 
 pub fn setup_panel(ui: &Ui, state: &mut State) {
     let Ok(key) = WindowKey::new("setup", "Setup") else {
@@ -135,7 +147,10 @@ fn wcs_group(ui: &Ui, state: &mut State) {
                 state.wcs_ui.x = loc.pos.x;
                 state.wcs_ui.y = loc.pos.y;
                 state.wcs_ui.z = loc.pos.z;
-                state.wcs_ui.yaw_deg = quat_yaw_deg(loc.rot);
+                let (r, p, y) = quat_to_euler(loc.rot);
+                state.wcs_ui.roll_deg = r.to_degrees();
+                state.wcs_ui.pitch_deg = p.to_degrees();
+                state.wcs_ui.yaw_deg = y.to_degrees();
                 state.wcs_ui.placed = true;
             }
             None => {
@@ -143,6 +158,8 @@ fn wcs_group(ui: &Ui, state: &mut State) {
                 state.wcs_ui.x = 0.0;
                 state.wcs_ui.y = 0.0;
                 state.wcs_ui.z = 0.0;
+                state.wcs_ui.roll_deg = 0.0;
+                state.wcs_ui.pitch_deg = 0.0;
                 state.wcs_ui.yaw_deg = 0.0;
                 state.wcs_ui.placed = false;
             }
@@ -151,7 +168,38 @@ fn wcs_group(ui: &Ui, state: &mut State) {
     ui.input_double("X origin##wcs_x", &mut state.wcs_ui.x);
     ui.input_double("Y origin##wcs_y", &mut state.wcs_ui.y);
     ui.input_double("Z origin##wcs_z", &mut state.wcs_ui.z);
-    ui.input_double("Rotation (yaw deg)##wcs_yaw", &mut state.wcs_ui.yaw_deg);
+    // Full orientation: not every machine axes its coordinates the same way,
+    // so the offset needs to rotate to fit the machine, not just yaw. The
+    // workflow (pick an origin, orient the axes) is specced from published
+    // CAM setup documentation; numeric roll/pitch/yaw is ours. Composition:
+    // R = Rz(yaw) * Ry(pitch) * Rx(roll) about the world axes.
+    ui.input_double("Tilt about X (roll)##wcs_roll", &mut state.wcs_ui.roll_deg);
+    ui.input_double("Tilt about Y (pitch)##wcs_pitch", &mut state.wcs_ui.pitch_deg);
+    ui.input_double("Turn about Z (yaw)##wcs_yaw", &mut state.wcs_ui.yaw_deg);
+    ui.text("Quarter-turns about world axes:");
+    for (i, (label, axis, sign)) in QUARTER_TURNS.iter().enumerate() {
+        if i > 0 {
+            ui.same_line();
+        }
+        if ui.button(format!("Turn {label}##wcs_turn{i}")) {
+            let q = quat_from_euler(
+                state.wcs_ui.roll_deg.to_radians(),
+                state.wcs_ui.pitch_deg.to_radians(),
+                state.wcs_ui.yaw_deg.to_radians(),
+            );
+            let turn = quat_from_axis_angle(*axis, sign * 90.0f64.to_radians());
+            let (r, p, y) = quat_to_euler(quat_mul(turn, q));
+            state.wcs_ui.roll_deg = r.to_degrees();
+            state.wcs_ui.pitch_deg = p.to_degrees();
+            state.wcs_ui.yaw_deg = y.to_degrees();
+        }
+    }
+    ui.same_line();
+    if ui.button("Level##wcs_level") {
+        state.wcs_ui.roll_deg = 0.0;
+        state.wcs_ui.pitch_deg = 0.0;
+        state.wcs_ui.yaw_deg = 0.0;
+    }
 
     // Box-point anchoring (feedback 5): place the origin with one click on a
     // 3x3 XY compass grid of the stock box, at Bottom/Middle/Top Z; with no
@@ -198,6 +246,8 @@ fn wcs_group(ui: &Ui, state: &mut State) {
                         state.pending.push_back(CommandKind::SetWcs {
                             slot: slot.to_string(),
                             pos,
+                            roll_deg: state.wcs_ui.roll_deg,
+                            pitch_deg: state.wcs_ui.pitch_deg,
                             yaw_deg: state.wcs_ui.yaw_deg,
                         });
                     }
@@ -214,6 +264,8 @@ fn wcs_group(ui: &Ui, state: &mut State) {
         state.pending.push_back(CommandKind::SetWcs {
             slot: slot.to_string(),
             pos: [state.wcs_ui.x, state.wcs_ui.y, state.wcs_ui.z],
+            roll_deg: state.wcs_ui.roll_deg,
+            pitch_deg: state.wcs_ui.pitch_deg,
             yaw_deg: state.wcs_ui.yaw_deg,
         });
     }

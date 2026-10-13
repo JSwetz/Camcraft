@@ -768,6 +768,8 @@ mod gizmo_tests {
         state.pending.push_back(CommandKind::SetWcs {
             slot: slot.to_string(),
             pos,
+            roll_deg: 0.0,
+            pitch_deg: 0.0,
             yaw_deg,
         });
         state.drain_actions();

@@ -90,8 +90,12 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
       are stored as parameters and re-meshed deterministically, so files stay
       small and undo is exact. Specced from published stock-shape conventions
       and general machining knowledge only
-- ✅ **WCS**: numeric origin + yaw per slot with a G54-G59 readout and viewport
-      triads, plus box-point placing: a 3x3 XY compass grid of the stock box
+- ✅ **WCS**: numeric origin and full orientation per slot (roll/pitch/yaw plus
+      90° turns about the world axes, so an offset can fit any machine's axis
+      convention; machines axis their coordinates differently, so the WCS
+      orientation is its own setup choice - specced from published CAM setup
+      documentation, behavior only) with a G54-G59 readout and viewport triads,
+      plus box-point placing: a 3x3 XY compass grid of the stock box
       (model bounds when there is no stock) at bottom/middle/top Z, one click
       setting the selected offset to an exact box point. True face/vertex
       snapping on model faces is deferred (needs M1.3 selection geometry).
