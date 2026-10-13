@@ -11,6 +11,7 @@
 
 pub mod import;
 mod primitives;
+pub mod slice;
 
 pub use import::{ImportError, load_model};
 pub use primitives::{cube, cylinder};

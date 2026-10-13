@@ -26,7 +26,7 @@ pub const SCALE: f64 = 1e6;
 /// Coordinate magnitude guard: |mm| must stay far below i64::MAX / SCALE
 /// (about 9.2e12) so quantization can never wrap. Half that horizon is still
 /// a thousand times any machine travel.
-const COORD_LIMIT: f64 = 1e12;
+pub(crate) const COORD_LIMIT: f64 = 1e12;
 
 /// Round-join arc flattening: maximum radial error in units. 5e3 = 5 um -
 /// finer than CAM gouge tolerances, coarse enough that a full circle at
@@ -177,24 +177,37 @@ pub struct Region {
 
 impl Region {
     /// Accept any loop set - overlapping outer loops from several solids,
-    /// holes in either orientation, self-crossing chains from a sliced
-    /// figure-eight - and normalize. This is the only entry from raw
-    /// geometry; never build Region by assignment. The semantics: loops are
-    /// shells, so non-nesting loops carry material jointly (two overlapping
-    /// boxes union, their overlap is not a void), while a loop nested in
-    /// another at odd depth is a hole. Implementation: decompose each
-    /// self-crossing loop by even-odd, orient by nesting parity, then fuse
-    /// with a non-zero union (see the Clipper2 fill-rule docs).
+    /// holes in either orientation - and normalize. This is the only entry
+    /// from sketched/raw geometry; never build Region by assignment (see
+    /// also `from_slices`, which relaxes the self-crossing refusal for
+    /// slicer output). The semantics: loops are shells, so non-nesting
+    /// loops carry material jointly (two overlapping boxes union, their
+    /// overlap is not a void), while a loop nested in another at odd depth
+    /// is a hole. Implementation: orient by nesting parity, then fuse with
+    /// a non-zero union (see the Clipper2 fill-rule docs).
     pub fn new(loops: Vec<Loop>) -> Result<Region, GeoError> {
-        // 1. A loop that crosses itself is not a boundary of anything real
-        //    (a closed shell never slices into one); its "area" is convention
-        //    dependent, so refuse it rather than half-compute (Prime
-        //    Directive). The per-loop even-odd decomposition is the
-        //    detector: a simple loop yields exactly one path.
+        Self::normalize(loops, false)
+    }
+
+    /// Region from sliced-shell output, where a self-crossing cycle is a
+    /// real boundary (two lobes touching along a line: the shell encloses
+    /// both) rather than ambiguous user input, so the even-odd decomposition
+    /// is kept instead of refused. Everything else is `new`'s contract.
+    pub fn from_slices(loops: Vec<Loop>) -> Result<Region, GeoError> {
+        Self::normalize(loops, true)
+    }
+
+    fn normalize(loops: Vec<Loop>, decompose_crossings: bool) -> Result<Region, GeoError> {
+        // 1. A loop that crosses itself is not a boundary of anything a
+        //    sketch could mean; its "area" is convention dependent. For
+        //    sketch input (`new`) refuse rather than half-compute (Prime
+        //    Directive); for slicer output (`from_slices`) the even-odd
+        //    decomposition IS the canonical reading, so keep the pieces.
+        //    A simple loop yields exactly one path either way.
         let mut simple: Vec<Loop> = Vec::new();
         for l in &loops {
             let dec = union_subjects_64(&vec![l.to_path64()?], FillRule::EvenOdd);
-            if dec.len() > 1 {
+            if dec.len() > 1 && !decompose_crossings {
                 return Err(GeoError::Invalid("loop crosses itself".into()));
             }
             for o in dec {
@@ -274,20 +287,14 @@ impl Region {
         inside
     }
 
-    /// Region area in mm^2: absolute loop areas corrected by nesting
-    /// parity, which is orientation-independent by construction.
+    /// Region area in mm^2: the signed loop-area sum. On a normalized
+    /// region the winding number equals the material indicator (outer
+    /// CCW = +1, hole CW brings its interior back to 0, an island inside
+    /// a hole to +1, ...), so the integral is the sum of signed shoelace
+    /// areas - exact, O(n), and unlike a per-loop containment test it
+    /// cannot be fooled by loops that touch at a shared vertex.
     pub fn area(&self) -> f64 {
-        let mut total = 0.0f64;
-        for (i, l) in self.loops.iter().enumerate() {
-            let depth = self.loops.iter().enumerate().filter(|(j, o)| *j != i && o.contains_xy(first_point(l))).count();
-            let a = l.area().abs();
-            if depth % 2 == 0 {
-                total += a;
-            } else {
-                total -= a;
-            }
-        }
-        total
+        self.loops.iter().map(Loop::area).sum()
     }
 
     pub fn union(&self, other: &Region) -> Result<Region, GeoError> {
@@ -343,10 +350,6 @@ impl Region {
             Point2::new(0.0, side),
         ])?])
     }
-}
-
-fn first_point(l: &Loop) -> Point2 {
-    *l.points().first().unwrap_or(&Point2 { x: 0.0, y: 0.0 })
 }
 
 fn to_paths(loops: &[Loop]) -> Result<Paths64, GeoError> {
