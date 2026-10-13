@@ -253,20 +253,26 @@ impl ContourParams {
     /// Cut levels from `top_z` down to `bottom_z`, always ending exactly
     /// at the bottom (same snap rule as facing rows).
     fn levels(&self) -> Vec<f64> {
-        let span = self.top_z - self.bottom_z;
-        if span <= 0.0 {
-            return vec![self.bottom_z];
-        }
-        let tol = span * 1e-9;
-        let mut zs = Vec::new();
-        let mut z = self.top_z;
-        while z > self.bottom_z + tol {
-            zs.push(z);
-            z -= self.stepdown;
-        }
-        zs.push(self.bottom_z);
-        zs
+        cut_levels(self.top_z, self.bottom_z, self.stepdown)
     }
+}
+
+/// Cut levels from `top` down to `bottom`, snapped so the last level is
+/// `bottom` exactly. Shared by depth-stepping operations.
+fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
+    let span = top - bottom;
+    if span <= 0.0 {
+        return vec![bottom];
+    }
+    let tol = span * 1e-9;
+    let mut zs = Vec::new();
+    let mut z = top;
+    while z > bottom + tol {
+        zs.push(z);
+        z -= stepdown;
+    }
+    zs.push(bottom);
+    zs
 }
 
 /// Offset-contour `region` (a material cross-section): every level walks
@@ -598,6 +604,398 @@ fn dist(a: Point2, b: Point2) -> f64 {
     ((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)).sqrt()
 }
 
+/// True when `p` sits on some loop edge, within a nanometer - exact-zero
+/// float tests cannot work here: a computed point on an edge (a chord's
+/// midpoint) has round-off of a few ulps against the cross product, and
+/// boundary points otherwise read as neither inside nor on. The tolerance
+/// is far under the micron quantization of the geometry and far over the
+/// cancellation error.
+pub fn on_boundary(region: &Region, p: Point2) -> bool {
+    const TOL: f64 = 1e-9;
+    for l in region.loops() {
+        let pts = l.points();
+        let n = pts.len();
+        for i in 0..n {
+            let a = pts[i];
+            let b = pts[(i + 1) % n];
+            let d = Point2::new(b.x - a.x, b.y - a.y);
+            let c = Point2::new(p.x - a.x, p.y - a.y);
+            let cross = c.x * d.y - c.y * d.x;
+            let dd = d.x * d.x + d.y * d.y;
+            if dd == 0.0 || cross * cross > TOL * TOL * dd {
+                continue;
+            }
+            let u = (c.x * d.x + c.y * d.y) / dd;
+            if (-TOL..=1.0 + TOL).contains(&u) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+// ---- pocketing ----
+
+/// How a pocket is filled: straight rows back and forth, or closed rings
+/// marching inward.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PocketStrategy {
+    Zigzag,
+    Waterline,
+}
+
+/// 2D pocketing: clear every bit of material inside a region down to
+/// `bottom_z`. Islands (region holes) are never entered; the cutter
+/// center stays inside the region eroded by the tool radius, so the tool
+/// edge never crosses a wall it is meant to leave standing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PocketParams {
+    pub tool_diameter: f64,
+    /// Distance between successive rows (zigzag) or rings (waterline).
+    /// Validated against the tool radius: a wider step leaves bands the
+    /// path never reaches, and that is refused rather than accepted
+    /// silently.
+    pub stepover: f64,
+    pub stock_to_leave: f64,
+    pub clearance_z: f64,
+    /// First cut level; material is engaged from here down.
+    pub top_z: f64,
+    pub bottom_z: f64,
+    pub stepdown: f64,
+    pub feed: f64,
+    pub plunge_feed: f64,
+    /// Zigzag: the first row runs -X to +X. Waterline: rings are
+    /// travelled with material on the left of the cut.
+    pub climb: bool,
+    pub strategy: PocketStrategy,
+}
+
+impl PocketParams {
+    fn validate(&self) -> Result<(), GenError> {
+        let finite = [
+            self.tool_diameter,
+            self.stock_to_leave,
+            self.clearance_z,
+            self.top_z,
+            self.bottom_z,
+            self.stepdown,
+            self.stepover,
+            self.feed,
+            self.plunge_feed,
+        ]
+        .into_iter()
+        .all(f64::is_finite);
+        if !finite {
+            return Err(GenError::Invalid("parameters must be finite".into()));
+        }
+        if self.tool_diameter <= 0.0 || self.stepdown <= 0.0 {
+            return Err(GenError::Invalid("diameter and stepdown must be positive".into()));
+        }
+        if self.stepover <= 0.0 {
+            return Err(GenError::Invalid("stepover must be positive".into()));
+        }
+        // Two parallel cut lines a stepover apart cover every point
+        // between them (distance at most stepover/2 to the nearer one),
+        // and zigzag puts grazing rows on the extreme coverage centers,
+        // so stepover <= diameter covers the region. Waterline's innermost
+        // ring can stand a whole stepover from the material it collapses
+        // around, so it must stay within one radius.
+        let reach = match self.strategy {
+            PocketStrategy::Zigzag => self.tool_diameter,
+            PocketStrategy::Waterline => self.tool_diameter * 0.5,
+        };
+        if self.stepover > reach {
+            return Err(GenError::Invalid(
+                "stepover leaves bands the tool cannot reach".into(),
+            ));
+        }
+        if self.feed <= 0.0 || self.plunge_feed <= 0.0 {
+            return Err(GenError::Invalid("feeds must be positive".into()));
+        }
+        if self.stock_to_leave < 0.0 {
+            return Err(GenError::Invalid("stock to leave must not be negative".into()));
+        }
+        if self.top_z < self.bottom_z {
+            return Err(GenError::Invalid("cut top below cut bottom".into()));
+        }
+        if self.clearance_z < self.top_z {
+            return Err(GenError::Invalid("clearance plane below the first cut level".into()));
+        }
+        Ok(())
+    }
+}
+
+/// Pocket `region` (the material to remove; its loops' interiors are
+/// islands to leave standing). The cutter-center area is the region
+/// eroded by `r + leave` - the opposite sign to contouring, because here
+/// the tool must stay inside the material rather than outside it. Every
+/// feed point lies in that area, so the tool edge never crosses a wall.
+///
+/// Transitions: between levels the tool lifts to `clearance_z`, rapids
+/// over and plunges again; within a level a straight connection between
+/// two cut segments is kept as a Feed exactly when [`chord_clears`]
+/// proves it never leaves the cutter-center area (boundary grazing counts
+/// as staying in - it is the tangency wall passes are built on), and
+/// otherwise it becomes lift-rapid-plunge. Rapids inside the footprint
+/// below the safe plane are the verifier's business (step 7).
+pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
+    p.validate()?;
+    if region.is_empty() {
+        return Err(GenError::Empty("empty pocket region".into()));
+    }
+    let r = p.tool_diameter * 0.5;
+    let center = region.offset(-(r + p.stock_to_leave))?;
+    if center.is_empty() {
+        // Material exists that no legal tool position can reach.
+        return Err(GenError::Invalid("pocket is narrower than the tool".into()));
+    }
+    let passes = match p.strategy {
+        PocketStrategy::Zigzag => zigzag_passes(&center, p)?,
+        PocketStrategy::Waterline => waterline_passes(&center, p)?,
+    };
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut first = true;
+    for &z in &zs {
+        for pass in &passes {
+            if pass.len() < 2 {
+                continue;
+            }
+            let entry = pass[0];
+            if !first {
+                let cur = b.at();
+                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+            }
+            b.push(
+                MoveKind::Rapid,
+                Point3::new(entry.x, entry.y, p.clearance_z),
+                None,
+            );
+            b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(p.plunge_feed));
+            first = false;
+            for q in &pass[1..] {
+                b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(p.feed));
+            }
+        }
+    }
+    let cur = b.at();
+    b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+
+    let path = b.finish();
+    if !path.all_finite() {
+        return Err(GenError::Invalid("path left the finite horizon".into()));
+    }
+    Ok(path)
+}
+
+/// Serpentine rows across the cutter-center area, each scanline split
+/// where the even-odd parity says material stands (islands fall out of
+/// the interval walk for free). Rows band [lo.y, hi.y] at `stepover` with
+/// the extremes kept: a row on the area's own boundary is the pass whose
+/// edge grazes the wall, and dropping it would leave the wall's last band
+/// standing.
+fn zigzag_passes(center: &Region, p: &PocketParams) -> Result<Vec<Vec<Point2>>, GenError> {
+    let (lo, hi) = match center.bounds() {
+        Some(b) => b,
+        None => return Err(GenError::Empty("empty pocket region".into())),
+    };
+    let ys = band(lo.y, hi.y, 0.0, p.stepover);
+    let mut passes: Vec<Vec<Point2>> = Vec::new();
+    let mut cur: Vec<Point2> = Vec::new();
+    for (i, &y) in ys.iter().enumerate() {
+        let segs = scan_row(center, y, y == hi.y);
+        let left_to_right = p.climb == (i % 2 == 0);
+        for k in 0..segs.len() {
+            let (x0, x1) = segs[if left_to_right { k } else { segs.len() - 1 - k }];
+            let (s, e) = if left_to_right {
+                (Point2::new(x0, y), Point2::new(x1, y))
+            } else {
+                (Point2::new(x1, y), Point2::new(x0, y))
+            };
+            let join = match cur.last() {
+                Some(&prev) => chord_clears(center, prev, s),
+                None => false,
+            };
+            if join {
+                // The corner matters: the connection feeds prev -> s (the
+                // tested chord) and only then along the row to e. Pushing
+                // only e would cut prev -> e, a diagonal the join test
+                // never proved.
+                cur.push(s);
+                cur.push(e);
+            } else {
+                if cur.len() >= 2 {
+                    passes.push(std::mem::take(&mut cur));
+                }
+                cur = vec![s, e];
+            }
+        }
+    }
+    if cur.len() >= 2 {
+        passes.push(cur);
+    }
+    Ok(passes)
+}
+
+/// Concentric rings marching inward: ring k is the cutter-center area
+/// eroded by `k * stepover`, travelled closed. Offsets are taken from
+/// `center` at absolute distances (never buffer-of-buffer), so micron
+/// quantization cannot compound across rings.
+fn waterline_passes(center: &Region, p: &PocketParams) -> Result<Vec<Vec<Point2>>, GenError> {
+    let (lo, hi) = match center.bounds() {
+        Some(b) => b,
+        None => return Err(GenError::Empty("empty pocket region".into())),
+    };
+    // Erosion by more than the diagonal can never be non-empty; the cap
+    // only fires if some Clipper path stops shrinking.
+    let cap = (dist(lo, hi) / p.stepover + 10.0).max(16.0) as u32;
+    let mut passes: Vec<Vec<Point2>> = Vec::new();
+    let mut cur: Vec<Point2> = Vec::new();
+    for k in 0..=cap {
+        let ring = if k == 0 {
+            center.clone()
+        } else {
+            center.offset(-f64::from(k) * p.stepover)?
+        };
+        if ring.is_empty() {
+            if cur.len() >= 2 {
+                passes.push(cur);
+            }
+            return Ok(passes);
+        }
+        let mut loops: Vec<&Loop> = ring.loops().iter().collect();
+        loops.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
+        for l in loops {
+            let pts: Vec<Point2> = if p.climb {
+                l.points().to_vec()
+            } else {
+                l.points().iter().rev().copied().collect()
+            };
+            if pts.len() < 2 {
+                continue;
+            }
+            let join = match cur.last() {
+                Some(&prev) => chord_clears(center, prev, pts[0]),
+                None => false,
+            };
+            if !join {
+                if cur.len() >= 2 {
+                    passes.push(std::mem::take(&mut cur));
+                }
+                cur = Vec::new();
+            }
+            cur.extend_from_slice(&pts);
+            cur.push(pts[0]);
+        }
+    }
+    Err(GenError::Invalid(
+        "waterline rings did not converge; check the stepover".into(),
+    ))
+}
+
+/// Intersect the horizontal line `y` with `region`'s loops and pair the
+/// crossings by even-odd parity: the cut intervals of one scanline.
+/// Crossing rule matches `Region::contains` exactly (lower endpoint
+/// inclusive); when the row is the region's top edge it flips to
+/// upper-inclusive so the grazing wall pass still finds its intervals.
+fn scan_row(region: &Region, y: f64, upper_inclusive: bool) -> Vec<(f64, f64)> {
+    let mut xs: Vec<f64> = Vec::new();
+    for l in region.loops() {
+        let pts = l.points();
+        let n = pts.len();
+        for i in 0..n {
+            let a = pts[i];
+            let b = pts[(i + 1) % n];
+            let (ylo, yhi) = if a.y <= b.y { (a.y, b.y) } else { (b.y, a.y) };
+            let hit = if upper_inclusive {
+                ylo < y && y <= yhi
+            } else {
+                ylo <= y && y < yhi
+            };
+            if hit {
+                xs.push(a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y));
+            }
+        }
+    }
+    xs.sort_by(f64::total_cmp);
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k + 1 < xs.len() {
+        // A zero-width pair is a tangent vertex or the closing double
+        // count of a vertex shared by two edges: nothing to cut.
+        if xs[k + 1] - xs[k] > 1e-9 {
+            out.push((xs[k], xs[k + 1]));
+        }
+        k += 2;
+    }
+    out
+}
+
+/// True when the straight chord `a` -> `b` never passes outside the
+/// closed region: both ends in it, no loop edge properly crossing the
+/// open chord, and the chord midpoint inside or on the boundary. Without
+/// a proper crossing the open chord lies in one connected piece of the
+/// plane complement, so the midpoint decides for all of it - and a chord
+/// running along a boundary edge is exactly the tangency a wall pass is,
+/// so grazing reads as clear.
+pub fn chord_clears(region: &Region, a: Point2, b: Point2) -> bool {
+    if (!region.contains(a) && !on_boundary(region, a))
+        || (!region.contains(b) && !on_boundary(region, b))
+    {
+        return false;
+    }
+    if a == b {
+        return true;
+    }
+    let d = Point2::new(b.x - a.x, b.y - a.y);
+    let m = Point2::new(a.x + d.x * 0.5, a.y + d.y * 0.5);
+    let eps = 1e-9;
+    for l in region.loops() {
+        let pts = l.points();
+        let n = pts.len();
+        for i in 0..n {
+            let c = pts[i];
+            let e = pts[(i + 1) % n];
+            let g = Point2::new(e.x - c.x, e.y - c.y);
+            let ca = Point2::new(c.x - a.x, c.y - a.y);
+            let den = d.x * g.y - d.y * g.x;
+            if den == 0.0 {
+                // Parallel to this edge: touching it is decided by the
+                // midpoint test below (a graze along a boundary line is
+                // exactly what wall and hole-ceiling passes are).
+                continue;
+            }
+            let t = (ca.x * g.y - ca.y * g.x) / den;
+            let u = (ca.x * d.y - ca.y * d.x) / den;
+            if !(eps < t && t < 1.0 - eps) {
+                continue;
+            }
+            if u > eps && u < 1.0 - eps {
+                return false; // crosses the open edge: a real crossing
+            }
+            if u >= -eps && u <= 1.0 + eps {
+                // The chord goes through a loop vertex. That cuts the
+                // boundary only if the two edges meeting there are on
+                // opposite sides of the chord line; both on one side is
+                // tangency (a fillet touching the straight it joins).
+                let j = if u < 0.5 { i } else { (i + 1) % n };
+                let p0 = pts[(j + n - 1) % n];
+                let p2 = pts[(j + 1) % n];
+                let h0 = (p0.x - a.x) * d.y - (p0.y - a.y) * d.x;
+                let h2 = (p2.x - a.x) * d.y - (p2.y - a.y) * d.x;
+                if h0 * h2 < 0.0 {
+                    return false;
+                }
+            }
+        }
+    }
+    // No proper crossing: the open chord lives in one connected piece of
+    // the plane minus the loops, and the midpoint decides which. This
+    // also decides every parallel/graze case (on_boundary is tolerant).
+    region.contains(m) || on_boundary(region, m)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -655,5 +1053,58 @@ mod tests {
         assert_eq!(k, vec![(3.25, 4.75), (1.25, 2.75)]);
         // Tabs touching end to end leave nothing to cut.
         assert_eq!(r.tab_keeps(4, 1.0 + 1e-9), Vec::new());
+    }
+
+    fn sq(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop {
+        Loop::new(vec![
+            Point2::new(x0, y0),
+            Point2::new(x1, y0),
+            Point2::new(x1, y1),
+            Point2::new(x0, y1),
+        ])
+        .expect("test loops are valid")
+    }
+
+    #[test]
+    fn scan_row_agrees_with_contains() {
+        // 40x40 plate with a 10x10 island dead center.
+        let region = Region::new(vec![sq(0.0, 0.0, 40.0, 40.0), sq(15.0, 15.0, 25.0, 25.0)])
+            .expect("nested loops");
+        let segs = scan_row(&region, 20.0, false);
+        assert_eq!(segs, vec![(0.0, 15.0), (25.0, 40.0)]);
+        for &(a, b) in &segs {
+            assert!(region.contains(Point2::new((a + b) * 0.5, 20.0)));
+        }
+        assert!(!region.contains(Point2::new(20.0, 20.0)), "island interior");
+
+        // The island's local minimum row (y = 15) has both bottom edges
+        // counted by the lower-inclusive rule and splits like any other
+        // straddling row; only a local maximum bridges. At y = 25 the
+        // island contributes no crossings, and the one interval's points
+        // over the island's span graze its top wall without entering it.
+        assert_eq!(scan_row(&region, 15.0, false), vec![(0.0, 15.0), (25.0, 40.0)]);
+        assert_eq!(scan_row(&region, 25.0, false), vec![(0.0, 40.0)]);
+
+        // The topmost row needs the upper-inclusive flip to find its
+        // crossings at all.
+        assert_eq!(scan_row(&region, 40.0, false), Vec::new());
+        assert_eq!(scan_row(&region, 40.0, true), vec![(0.0, 40.0)]);
+    }
+
+    #[test]
+    fn chord_clears_separates_grazing_from_crossing() {
+        let region = Region::new(vec![sq(0.0, 0.0, 40.0, 40.0), sq(15.0, 15.0, 25.0, 25.0)])
+            .expect("nested loops");
+        let p = |x: f64, y: f64| Point2::new(x, y);
+        // Through the island: refused.
+        assert!(!chord_clears(&region, p(5.0, 20.0), p(35.0, 20.0)));
+        // Along the outer wall: the tangency a row connector uses.
+        assert!(chord_clears(&region, p(40.0, 5.0), p(40.0, 35.0)));
+        // Inside material, no crossings.
+        assert!(chord_clears(&region, p(5.0, 5.0), p(10.0, 35.0)));
+        // Starting outside: refused.
+        assert!(!chord_clears(&region, p(-1.0, 5.0), p(35.0, 20.0)));
+        // Boundary corners read as closed-inside.
+        assert!(chord_clears(&region, p(40.0, 40.0), p(40.0, 30.0)));
     }
 }

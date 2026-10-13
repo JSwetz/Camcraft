@@ -5,7 +5,10 @@
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::machining2d::{contour, face, ContourParams, FaceParams, GenError, Lead};
+use hsmworks_app::machining2d::{
+    chord_clears, contour, face, on_boundary, pocket, ContourParams, FaceParams, GenError, Lead,
+    PocketParams, PocketStrategy,
+};
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
     Region::new(vec![Loop::new(vec![
@@ -496,6 +499,326 @@ fn contour_is_deterministic() {
     let b = contour(&r, &cp()).unwrap();
     assert_eq!(a, b);
     assert!(a.is_chained() && a.all_finite());
+}
+
+// ---- pocket -------------------------------------------------------------
+
+fn pp() -> PocketParams {
+    PocketParams {
+        tool_diameter: 10.0,
+        stepover: 5.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        top_z: 0.0,
+        bottom_z: -6.0,
+        stepdown: 3.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        strategy: PocketStrategy::Zigzag,
+    }
+}
+
+fn in_closed(r: &Region, q: (f64, f64)) -> bool {
+    let p = Point2::new(q.0, q.1);
+    r.contains(p) || on_boundary(r, p)
+}
+
+/// The level's cutter-center polyline in path order, with the flag saying
+/// whether each point was reached by a plunge (a subpath start after a
+/// hop) rather than by feeding from the previous point. Pocket paths only:
+/// the one non-feed move at cut depth a pocket makes is an entry plunge.
+fn polyline_at(t: &Toolpath, z: f64) -> (Vec<(f64, f64)>, Vec<bool>) {
+    let mut pts = Vec::new();
+    let mut lifted = Vec::new();
+    for m in &t.moves {
+        match m.kind {
+            MoveKind::Feed if m.from.z == z && m.to.z == z => {
+                if pts.is_empty() {
+                    pts.push((m.from.x, m.from.y));
+                    lifted.push(true);
+                }
+                pts.push((m.to.x, m.to.y));
+                lifted.push(false);
+            }
+            MoveKind::Plunge if m.to.z == z => {
+                pts.push((m.to.x, m.to.y));
+                lifted.push(true);
+            }
+            _ => {}
+        }
+    }
+    (pts, lifted)
+}
+
+fn levels_3_zs() -> [f64; 3] {
+    [0.0, -3.0, -6.0]
+}
+
+#[test]
+fn zigzag_fills_a_square_with_one_plunge_per_level() {
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let center = region.offset(-5.0).expect("offset");
+    let t = pocket(&region, &pp()).expect("valid");
+    assert!(t.is_chained() && t.all_finite());
+    assert_eq!(plunge_xy(&t).len(), 3, "one entry per level, rows stay engaged");
+
+    let pts = level_xy(&t, -6.0);
+    let ys: Vec<f64> = {
+        let mut v: Vec<f64> = pts.iter().map(|q| q.1).collect();
+        v.sort_by(f64::total_cmp);
+        v.dedup();
+        v
+    };
+    assert_eq!(ys, vec![5.0, 10.0, 15.0, 20.0, 25.0]);
+    for q in &pts {
+        assert!(in_closed(&center, *q), "feed point {q:?} outside the center area");
+    }
+    // Five 20 mm rows plus four 5 mm connectors, all at cut depth.
+    assert!((level_len(&t, -6.0) - 120.0).abs() < 1e-9);
+}
+
+#[test]
+fn zigzag_hops_over_islands_and_leaves_them_standing() {
+    let region = Region::new(vec![
+        Loop::new(vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(40.0, 0.0),
+            Point2::new(40.0, 40.0),
+            Point2::new(0.0, 40.0),
+        ])
+        .unwrap(),
+        Loop::new(vec![
+            Point2::new(15.0, 15.0),
+            Point2::new(25.0, 15.0),
+            Point2::new(25.0, 25.0),
+            Point2::new(15.0, 25.0),
+        ])
+        .unwrap(),
+    ])
+    .unwrap();
+    // Where the tool center may not go because of the island (rounded
+    // corners): `center` is the exact grown area, so `in_closed` below is
+    // the gouge check; the distance test is a loose physical cross-check.
+    let center = region.offset(-5.0).expect("offset");
+    let t = pocket(&region, &pp()).expect("valid");
+    // Four subpaths per level: one entry plus three island-crossing hops.
+    assert_eq!(plunge_xy(&t).len(), 12);
+
+    for z in levels_3_zs() {
+        let (pts, lifted) = polyline_at(&t, z);
+        for q in &pts {
+            assert!(in_closed(&center, *q), "point {q:?} outside the center area");
+            // Distance from the point to the island rect [15,25]^2.
+            let dx = (15.0 - q.0).max(q.0 - 25.0).max(0.0);
+            let dy = (15.0 - q.1).max(q.1 - 25.0).max(0.0);
+            assert!((dx * dx + dy * dy).sqrt() > 5.0 - 1e-3, "point {q:?} in the island");
+        }
+        // Consecutive centers never cross the island while feeding: every
+        // chord either provably clears the center area or is a subpath
+        // start the tool plunged into.
+        for i in 1..pts.len() {
+            let a = Point2::new(pts[i - 1].0, pts[i - 1].1);
+            let b = Point2::new(pts[i].0, pts[i].1);
+            if !chord_clears(&center, a, b) {
+                assert!(lifted[i], "gouging feed chord {:?} -> {:?}", pts[i - 1], pts[i]);
+            }
+        }
+    }
+}
+
+#[test]
+fn pocket_stock_to_leave_insets_the_whole_path() {
+    let mut p = pp();
+    p.stock_to_leave = 2.0;
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let t = pocket(&region, &p).expect("valid");
+    let pts = level_xy(&t, -6.0);
+    let min = |v: &[f64]| v.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = |v: &[f64]| v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let xs: Vec<f64> = pts.iter().map(|q| q.0).collect();
+    let ys: Vec<f64> = pts.iter().map(|q| q.1).collect();
+    assert_eq!((min(&xs), max(&xs), min(&ys), max(&ys)), (7.0, 23.0, 7.0, 23.0));
+}
+
+#[test]
+fn waterline_cuts_concentric_rings_until_collapse() {
+    let mut p = pp();
+    p.strategy = PocketStrategy::Waterline;
+    p.tool_diameter = 8.0;
+    p.stepover = 2.0;
+    p.top_z = 0.0;
+    p.bottom_z = 0.0;
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let center = region.offset(-4.0).expect("offset");
+    let t = pocket(&region, &p).expect("valid");
+    assert!(t.is_chained() && t.all_finite());
+    let (pts, lifted) = polyline_at(&t, 0.0);
+    for q in &pts {
+        assert!(in_closed(&center, *q), "ring point {q:?} outside the center area");
+    }
+    for i in 1..pts.len() {
+        let a = Point2::new(pts[i - 1].0, pts[i - 1].1);
+        let b = Point2::new(pts[i].0, pts[i].1);
+        if !chord_clears(&center, a, b) {
+            assert!(lifted[i], "gouging ring chord {:?} -> {:?}", pts[i - 1], pts[i]);
+        }
+    }
+    // Ring k is [4+2k, 26-2k]^2 for k = 0..5; k = 6 is empty.
+    let min = |v: &[f64]| v.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = |v: &[f64]| v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let xs: Vec<f64> = pts.iter().map(|q| q.0).collect();
+    let ys: Vec<f64> = pts.iter().map(|q| q.1).collect();
+    assert_eq!((min(&xs), max(&xs), min(&ys), max(&ys)), (4.0, 26.0, 4.0, 26.0));
+    // The innermost ring: the 2 mm box [14,16]^2 was reached and closed.
+    assert!(pts.iter().any(|q| (q.0 - 14.0).abs() < 1e-9 && (q.1 - 16.0).abs() < 1e-9));
+    let n_rings = plunge_xy(&t).len();
+    assert!((1..=6).contains(&n_rings), "rings: {n_rings}");
+}
+
+#[test]
+fn waterline_stays_clear_of_an_island() {
+    let region = Region::new(vec![
+        Loop::new(vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(40.0, 0.0),
+            Point2::new(40.0, 40.0),
+            Point2::new(0.0, 40.0),
+        ])
+        .unwrap(),
+        Loop::new(vec![
+            Point2::new(15.0, 15.0),
+            Point2::new(25.0, 15.0),
+            Point2::new(25.0, 25.0),
+            Point2::new(15.0, 25.0),
+        ])
+        .unwrap(),
+    ])
+    .unwrap();
+    let mut p = pp();
+    p.strategy = PocketStrategy::Waterline;
+    p.stepover = 2.5;
+    let center = region.offset(-5.0).expect("offset");
+    let t = pocket(&region, &p).expect("valid");
+    for z in levels_3_zs() {
+        let (pts, lifted) = polyline_at(&t, z);
+        for q in &pts {
+            assert!(in_closed(&center, *q), "ring point {q:?} outside the center area");
+            let dx = (15.0 - q.0).max(q.0 - 25.0).max(0.0);
+            let dy = (15.0 - q.1).max(q.1 - 25.0).max(0.0);
+            assert!((dx * dx + dy * dy).sqrt() > 5.0 - 1e-3, "point {q:?} in the island");
+        }
+        for i in 1..pts.len() {
+            let a = Point2::new(pts[i - 1].0, pts[i - 1].1);
+            let b = Point2::new(pts[i].0, pts[i].1);
+            if !chord_clears(&center, a, b) {
+                assert!(lifted[i], "gouging ring chord {:?} -> {:?}", pts[i - 1], pts[i]);
+            }
+        }
+    }
+}
+
+#[test]
+fn pocket_refuses_bad_input() {
+    let sq = rect(0.0, 0.0, 20.0, 20.0);
+    let cases = [
+        {
+            let mut p = pp();
+            p.stepover = 0.0;
+            p
+        },
+        {
+            let mut p = pp();
+            p.tool_diameter = f64::NAN;
+            p
+        },
+        {
+            let mut p = pp();
+            p.stepover = 11.0; // beyond tool reach for zigzag
+            p
+        },
+        {
+            let mut p = pp();
+            p.feed = 0.0;
+            p
+        },
+        {
+            let mut p = pp();
+            p.stock_to_leave = -1.0;
+            p
+        },
+        {
+            let mut p = pp();
+            p.bottom_z = 1.0; // bottom above top
+            p
+        },
+        {
+            let mut p = pp();
+            p.clearance_z = -1.0; // under the first cut level
+            p
+        },
+        {
+            let mut p = pp();
+            p.stepdown = 0.0;
+            p
+        },
+        {
+            // Waterline's tighter coverage bound: inside zigzag's limit.
+            let mut p = pp();
+            p.strategy = PocketStrategy::Waterline;
+            p.tool_diameter = 8.0;
+            p.stepover = 5.0; // > r = 4
+            p
+        },
+    ];
+    for p in cases {
+        assert!(matches!(pocket(&sq, &p), Err(GenError::Invalid(_))), "{p:?}");
+    }
+    // The same numbers zigzag accepts.
+    let mut ok = pp();
+    ok.tool_diameter = 8.0;
+    ok.stepover = 5.0;
+    assert!(pocket(&sq, &ok).is_ok());
+    // Narrower than the tool: material no legal position can reach.
+    assert!(matches!(
+        pocket(&rect(0.0, 0.0, 8.0, 8.0), &pp()),
+        Err(GenError::Invalid(_))
+    ));
+    assert!(matches!(
+        pocket(&Region::empty(), &pp()),
+        Err(GenError::Empty(_))
+    ));
+}
+
+#[test]
+fn pocket_is_deterministic() {
+    let r = Region::new(vec![
+        Loop::new(vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(40.0, 0.0),
+            Point2::new(40.0, 40.0),
+            Point2::new(0.0, 40.0),
+        ])
+        .unwrap(),
+        Loop::new(vec![
+            Point2::new(15.0, 15.0),
+            Point2::new(25.0, 15.0),
+            Point2::new(25.0, 25.0),
+            Point2::new(15.0, 25.0),
+        ])
+        .unwrap(),
+    ])
+    .unwrap();
+    for s in [PocketStrategy::Zigzag, PocketStrategy::Waterline] {
+        let mut p = pp();
+        p.strategy = s;
+        if s == PocketStrategy::Waterline {
+            p.stepover = 2.0;
+        }
+        let a = pocket(&r, &p).unwrap();
+        let b = pocket(&r, &p).unwrap();
+        assert_eq!(a, b, "{s:?}");
+    }
 }
 
 
