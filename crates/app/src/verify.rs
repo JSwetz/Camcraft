@@ -1,0 +1,346 @@
+//! Static verification of generated toolpaths: warnings a path can carry
+//! before anything is posted.
+//!
+//! Provenance: segment intersection by the orientation predicate is
+//! textbook computational geometry (O'Rourke, "Computational Geometry in
+//! C", public material); the tool-reach checks formalize the shop
+//! practice of comparing cutter reach against wall height (machine-tool
+//! handbooks). The rest-material model below is our own conservative
+//! approximation, stated in full where it is used. No vendor source was
+//! consulted.
+//!
+//! Four checks, each with the exact condition that raises it:
+//!
+//! - [`Warning::Crossing`] - two Feed moves whose Z ranges overlap cross
+//!   in XY. Proper crossings only: touching at a shared vertex (a closed
+//!   trace loop, a serpentine join) is not a crossing.
+//! - [`Warning::Gouge`] - a cutter center closer to a region boundary
+//!   than `r - leave - tol`, i.e. the disc bites past the finish surface
+//!   it is supposed to touch. Engrave paths (trace) deliberately sit on
+//!   boundaries, so `Mode::Engrave` skips it.
+//! - [`Warning::ShankHit`] - uncut material inside the shank or holder
+//!   annulus above the current cut. Rest material: at a boundary sample
+//!   q (region and stock loop vertices and edge midpoints, nudged a hair
+//!   inside so membership is unambiguous), material survives above height h iff
+//!   `h < m(q)`, where `m(q)` is the stock top when q is part (never cut)
+//!   or, when q is removable stock, the deepest cut level whose path
+//!   swept q. A band bottomed at `cut_z + flute_len` (shank) or
+//!   `cut_z + flute_len + shank_len` (holder) with radius above the
+//!   flute's to q, with material still above it, collides. Sampling at
+//!   vertices and edge midpoints is conservative, not exact.
+//! - [`Warning::RapidInStock`] - a *lateral* rapid below the clearance
+//!   plane whose XY path still has material above it. Vertical rapids
+//!   are the tool retracting through its own kerf and stay exempt.
+//!
+//! Conservative by design: it may warn where nothing is wrong (a wall
+//! thinner than the sampling, an exotic holder shape), it must never
+//! stay silent about the four classes above. The hard post-gate that
+//! blocks on these lands with the post processor (M2.3); until then the
+//! operation layer attaches them to the operation for display.
+
+use crate::cl::{MoveKind, Toolpath};
+use crate::geo2d::{Point2, Region};
+use crate::geometry::Point3;
+
+/// The cutting tool and what rides above it. Radii are coaxial with the
+/// spindle; lengths stack upward from the cut edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolGeom {
+    pub radius: f64,
+    /// Usable flute length below the shank.
+    pub flute_len: f64,
+    pub shank_radius: f64,
+    pub shank_len: f64,
+    pub holder_radius: f64,
+    pub holder_len: f64,
+}
+
+/// What the path means, which decides which laws apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// Pocket/slot: material is removed from inside the region.
+    Area,
+    /// Contour/face: the path trims the region's boundary.
+    Boundary,
+    /// Trace: the cutter center runs on the boundary itself; laws that
+    /// assume tangency do not apply.
+    Engrave,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VerifyContext<'a> {
+    pub region: &'a Region,
+    /// The stock prism footprint; pass it when part islands must be
+    /// checked too - otherwise the region stands in for it.
+    pub stock: Option<&'a Region>,
+    pub tool: &'a ToolGeom,
+    pub mode: Mode,
+    /// Top of the stock column in Z (the surface the tool starts from).
+    pub stock_top_z: f64,
+    /// Safe plane: rapids must live at or above it.
+    pub clearance_z: f64,
+    /// Finish allowance already baked into the path offsets.
+    pub stock_to_leave: f64,
+    /// Radial tolerance for the gouge law.
+    pub gouge_tol: f64,
+    /// Margin for "below the clearance plane" and "moved in XY".
+    pub z_tol: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Warning {
+    /// Feed moves `moves[0]` and `moves[1]` cross in XY at shared depth.
+    Crossing { moves: [usize; 2] },
+    /// Move `move`'s cutter center is inside the finish surface.
+    Gouge { at: usize },
+    /// Move `move` carries shank/holder through material; `part` marks
+    /// whether the offended material is the part/an island (never to be
+    /// cut) rather than stock the op simply has not cleared yet.
+    ShankHit { at: usize, part: bool },
+    /// Rapid `move` travels under the clearance plane through stock.
+    RapidInStock { at: usize },
+    /// Defensive: a non-finite coordinate (generators gate this out).
+    NonFinite { at: usize },
+}
+
+impl core::fmt::Display for Warning {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Warning::Crossing { moves } => write!(
+                f,
+                "feed moves {} and {} cross in XY at shared depth",
+                moves[0], moves[1]
+            ),
+            Warning::Gouge { at } => {
+                write!(f, "move {at} cuts past the finish surface")
+            }
+            Warning::ShankHit { at, part } => write!(
+                f,
+                "shank/holder at move {at} collides with the {}",
+                if *part { "part or an island" } else { "uncut stock" }
+            ),
+            Warning::RapidInStock { at } => {
+                write!(f, "rapid move {at} travels below the clearance plane inside stock")
+            }
+            Warning::NonFinite { at } => write!(f, "move {at} has a non-finite coordinate"),
+        }
+    }
+}
+
+fn xy(p3: &Point3) -> Point2 {
+    Point2::new(p3.x, p3.y)
+}
+
+/// Squared XY distance from `p` to segment `a`-`b`.
+fn dist2_seg(p: Point2, a: Point2, b: Point2) -> f64 {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let dd = dx * dx + dy * dy;
+    if dd <= f64::EPSILON {
+        let (ex, ey) = (p.x - a.x, p.y - a.y);
+        return ex * ex + ey * ey;
+    }
+    let t = (((p.x - a.x) * dx + (p.y - a.y) * dy) / dd).clamp(0.0, 1.0);
+    let (ex, ey) = (a.x + t * dx - p.x, a.y + t * dy - p.y);
+    ex * ex + ey * ey
+}
+
+fn orient(a: Point2, b: Point2, c: Point2) -> f64 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+/// Proper transversal crossing of two XY segments: each endpoint pair
+/// strictly straddles the other's line. Shared or touching endpoints
+/// give a zero orientation and are not crossings.
+fn proper_cross(a0: Point2, a1: Point2, b0: Point2, b1: Point2) -> bool {
+    let (oa, ob) = (orient(a0, a1, b0), orient(a0, a1, b1));
+    let (oc, od) = (orient(b0, b1, a0), orient(b0, b1, a1));
+    oa != 0.0
+        && ob != 0.0
+        && oc != 0.0
+        && od != 0.0
+        && ((oa > 0.0) != (ob > 0.0))
+        && ((oc > 0.0) != (od > 0.0))
+}
+
+/// XY samples of every boundary: loop vertices plus edge midpoints, so a
+/// wall is represented by more than its corners, each nudged a hair
+/// toward the loop's vertex mean. The nudge keeps membership off the
+/// parity knife-edge: just inside an outer loop is region material, just
+/// inside a hole loop is the island - the point a reach law must classify
+/// unambiguously.
+fn boundary_samples(region: &Region) -> Vec<Point2> {
+    const NUDGE: f64 = 0.05;
+    let mut out = Vec::new();
+    for l in region.loops() {
+        let pts = l.points();
+        if pts.is_empty() {
+            continue;
+        }
+        let (mx, my) = pts.iter().fold((0.0, 0.0), |s, q| (s.0 + q.x, s.1 + q.y));
+        let (mx, my) = (mx / pts.len() as f64, my / pts.len() as f64);
+        for i in 0..pts.len() {
+            let a = pts[i];
+            let b = pts[(i + 1) % pts.len()];
+            for q in [a, Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)] {
+                let (dx, dy) = (mx - q.x, my - q.y);
+                let d = (dx * dx + dy * dy).sqrt();
+                out.push(if d > f64::EPSILON {
+                    Point2::new(q.x + NUDGE * dx / d, q.y + NUDGE * dy / d)
+                } else {
+                    q
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Verify a generated path. Quadratic in feed count (crossings), linear
+/// per sample for the rest; called by the operation layer after
+/// generation, never on a systems hot path.
+pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
+    let mut warns: Vec<Warning> = Vec::new();
+    let r = cx.tool.radius;
+
+    for (i, m) in path.moves.iter().enumerate() {
+        if !(m.from.is_finite() && m.to.is_finite()) {
+            warns.push(Warning::NonFinite { at: i });
+        }
+    }
+
+    // (a) Crossing: Feed-Feed pairs, proper XY crossings at shared depth.
+    let feeds: Vec<(usize, Point2, Point2, f64, f64)> = path
+        .moves
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.kind == MoveKind::Feed)
+        .map(|(i, m)| (i, xy(&m.from), xy(&m.to), m.from.z, m.to.z))
+        .collect();
+    for (ai, &(ia, a0, a1, za0, za1)) in feeds.iter().enumerate() {
+        for &(ib, b0, b1, zb0, zb1) in feeds.iter().skip(ai + 1) {
+            let z_hit = zb0.max(zb1).min(za0.max(za1)) >= zb0.min(zb1).max(za0.min(za1));
+            if z_hit && proper_cross(a0, a1, b0, b1) {
+                warns.push(Warning::Crossing { moves: [ia, ib] });
+            }
+        }
+    }
+
+    // (b) Gouge: tangency law d(center, boundary) >= r - leave - tol.
+    if cx.mode != Mode::Engrave {
+        for (i, m) in path.moves.iter().enumerate() {
+            if m.kind == MoveKind::Rapid {
+                continue;
+            }
+            let p = xy(&m.to);
+            let mut d2 = f64::INFINITY;
+            for l in cx.region.loops() {
+                let pts = l.points();
+                for k in 0..pts.len() {
+                    d2 = d2.min(dist2_seg(p, pts[k], pts[(k + 1) % pts.len()]));
+                }
+            }
+            if d2.sqrt() < r - cx.stock_to_leave - cx.gouge_tol {
+                warns.push(Warning::Gouge { at: i });
+            }
+        }
+    }
+
+    // Cutting (non-rapid) XY segments with the level they cut at: a
+    // segment's whole disc sweep clears its column down to `to.z`
+    // (plunges are degenerate segments at their XY).
+    let cut: Vec<(Point2, Point2, f64)> = path
+        .moves
+        .iter()
+        .filter(|m| m.kind != MoveKind::Rapid)
+        .map(|m| (xy(&m.from), xy(&m.to), m.to.z))
+        .collect();
+    // Material footprint for the reach laws: the stock prism when given,
+    // the region standing in for it otherwise.
+    let in_stock = |q: Point2| -> bool { cx.stock.map_or_else(|| cx.region.contains(q), |s| s.contains(q)) };
+    // m(q): the surface height of remaining material in q's column.
+    let surface = |q: Point2| -> f64 {
+        let r2 = (r + 1e-9) * (r + 1e-9);
+        let cleared = cut
+            .iter()
+            .filter(|(a, b, _)| dist2_seg(q, *a, *b) <= r2)
+            .map(|(_, _, z)| *z)
+            .min_by(f64::total_cmp)
+            .unwrap_or(f64::INFINITY);
+        cleared.min(cx.stock_top_z)
+    };
+
+    // (c) Shank/holder reach against rest material.
+    if cx.mode != Mode::Engrave {
+        // Both boundaries matter: the region's loops carry the part
+        // islands (holes in the region), the stock's carry its outer
+        // walls wherever they stand beyond the region.
+        let mut samples = boundary_samples(cx.region);
+        if let Some(s) = cx.stock {
+            samples.extend(boundary_samples(s));
+        }
+        let bands = [
+            (cx.tool.flute_len, cx.tool.shank_radius, cx.tool.shank_len),
+            (
+                cx.tool.flute_len + cx.tool.shank_len,
+                cx.tool.holder_radius,
+                cx.tool.holder_len,
+            ),
+        ];
+        for (i, m) in path.moves.iter().enumerate() {
+            if m.kind == MoveKind::Rapid {
+                continue;
+            }
+            let p = xy(&m.to);
+            for &(above, band_r, band_len) in &bands {
+                if band_r <= r || band_len <= 0.0 {
+                    continue;
+                }
+                let h0 = m.to.z + above;
+                let r2 = (band_r + 1e-9) * (band_r + 1e-9);
+                let mut hit = None;
+                for q in &samples {
+                    let dd = dist2_seg(*q, p, p);
+                    if dd > r2 || dd <= (r + cx.gouge_tol) * (r + cx.gouge_tol) {
+                        continue; // outside this band's annulus
+                    }
+                    if !in_stock(*q) {
+                        continue;
+                    }
+                    if h0 < surface(*q) {
+                        hit = Some(!cx.region.contains(*q));
+                        if hit == Some(true) {
+                            break; // report the worst offender
+                        }
+                    }
+                }
+                if let Some(part) = hit {
+                    warns.push(Warning::ShankHit { at: i, part });
+                }
+            }
+        }
+    }
+
+    // (d) Rapids: lateral travel under the clearance plane inside stock.
+    for (i, m) in path.moves.iter().enumerate() {
+        if m.kind != MoveKind::Rapid {
+            continue;
+        }
+        let (a, b) = (xy(&m.from), xy(&m.to));
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        if dx * dx + dy * dy <= cx.z_tol * cx.z_tol {
+            continue; // vertical retract through the tool's own kerf
+        }
+        let low = m.from.z.min(m.to.z);
+        if low >= cx.clearance_z - cx.z_tol {
+            continue;
+        }
+        let mid = Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+        let bad = [a, mid, b].into_iter().any(|q| in_stock(q) && low < surface(q));
+        if bad {
+            warns.push(Warning::RapidInStock { at: i });
+        }
+    }
+
+    warns
+}
