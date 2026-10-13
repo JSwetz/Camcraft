@@ -79,7 +79,10 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
       pickable where nothing is behind it; operations pickables arrive with M1.3.
       The triad never doubles the dimmed world-origin axes (they are drawn only
       when no offset claims machine zero), and gizmo tips carry live X/Y/Z labels
-      projected through the camera
+      projected through the camera. The world-origin axes are also hideable - a
+      Models-pane view toggle for when a G5x offset sits away from machine zero
+      and two gizmos read as clutter; offset triads are setup, not furniture,
+      and always show
 - ✅ **STEP import**: `.step`/`.stp` tessellate to meshes via
       truck (Apache-2.0, pure Rust); feature-edge wireframe in the viewport.
       B-rep *editing* and booleans remain kernel-decision territory (M1.3)

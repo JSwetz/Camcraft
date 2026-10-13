@@ -14,6 +14,12 @@ pub fn models_panel(ui: &Ui, state: &mut State) {
         return;
     };
     ui.window(key.label("Models")).build(|| {
+        // View toggle, not a command (AGENTS.md ephemeral UI state, like the
+        // camera): hides the dimmed world origin axes - the coordinate
+        // system a model lands on - while setting up G5x offsets. Real work
+        // offset triads are setup, not furniture, and always show.
+        ui.checkbox("Show world origin axes", &mut state.show_world_axes);
+        ui.separator();
         let entities = model::model_entities(&state.world);
         if entities.is_empty() {
             ui.text_wrapped(

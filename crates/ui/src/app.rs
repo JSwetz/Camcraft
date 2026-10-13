@@ -63,12 +63,12 @@ struct App {
     /// app.rs re-sends meshes because the renderer caches external texture
     /// views by id and the vertex stream bakes selection state.
     sel_synced: u64,
-    /// Anchor-mode drafts (pick mode, source, Z level, highlighted point)
-    /// baked into the overlay at last send. They change with the Setup pane
-    /// widgets, which don't bump `doc_version`, so they gate a rebuild of
-    /// their own (pick-mode markers would otherwise lag a click by a
-    /// document edit).
-    draft_synced: [u64; 4],
+    /// View-affecting state the overlay is baked from but the document does
+    /// not carry (anchor-mode drafts, world-axes visibility). It changes
+    /// with pane widgets that don't bump `doc_version`, so it gates a
+    /// rebuild of its own (pick-mode markers would otherwise lag a click by
+    /// a document edit).
+    draft_synced: [u64; 5],
     /// Last cursor position in logical px; delta base for viewport drags.
     cursor_pos: [f32; 2],
     /// Left-press origin, so release can tell a click (pick) from a drag.
@@ -93,7 +93,7 @@ impl App {
             config: None,
             doc_synced: u64::MAX,
             sel_synced: u64::MAX,
-            draft_synced: [0; 4],
+            draft_synced: [0; 5],
             cursor_pos: [0.0, 0.0],
             left_press: None,
             exit_code: 0,
@@ -457,6 +457,7 @@ impl App {
             state.wcs_ui.anchor_source as u64,
             state.wcs_ui.anchor_z as u64,
             state.wcs_ui.anchor_xy as u64,
+            u64::from(state.show_world_axes),
         ];
         if state.doc_version != *doc_synced || sel_dirty || draft_key != *draft_synced {
             let parts = collect_parts(state);
@@ -655,7 +656,10 @@ fn gizmo_len(state: &State) -> f64 {
 /// Which origin gizmos to draw (feedback 6): a triad per defined work
 /// offset, plus the dimmed world axes - unless some triad already sits
 /// exactly on the world origin, in which case its own lines are the world
-/// axes and drawing both reads as a duplicated gizmo.
+/// axes and drawing both reads as a duplicated gizmo, or the Models panel
+/// has the axes hidden: two gizmos around a moved G5x read as clutter, and
+/// the world axes are context furniture, not setup. The triads stay: they
+/// are the work offsets themselves.
 fn gizmos(state: &State) -> Vec<Gizmo> {
     let mut out: Vec<Gizmo> = Vec::new();
     for (_, entity) in model::named_entities(&state.world) {
@@ -680,7 +684,7 @@ fn gizmos(state: &State) -> Vec<Gizmo> {
             && (1.0 - g.rot[3].abs()).abs() < 1e-6;
         on_spot && unrotated
     });
-    if !claims_origin {
+    if !claims_origin && state.show_world_axes {
         out.push(Gizmo {
             pos: [0.0, 0.0, 0.0],
             rot: [0.0, 0.0, 0.0, 1.0],
@@ -947,6 +951,23 @@ mod gizmo_tests {
         let mut state = State::new();
         set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 90.0);
         assert_eq!(collect_overlay(&state).len(), 12, "the triad no longer claims the axes");
+    }
+
+    #[test]
+    fn hiding_the_world_axes_leaves_the_offset_triads_alone() {
+        let mut state = State::new();
+        state.show_world_axes = false;
+        assert!(collect_overlay(&state).is_empty(), "nothing but hidden furniture");
+        assert!(overlay_labels(&state, 1.0).is_empty(), "and no labels for it");
+        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        assert_eq!(collect_overlay(&state).len(), 6, "the work offset still shows");
+        assert_eq!(overlay_labels(&state, 1.0).len(), 3);
+        assert!(
+            overlay_labels(&state, 1.0)
+                .iter()
+                .all(|(_, rgb, _)| rgb[0].max(rgb[1]).max(rgb[2]) > 0.5),
+            "only the bright triad labels remain, no dimmed world letters"
+        );
     }
 }
 

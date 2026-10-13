@@ -177,6 +177,12 @@ pub struct State {
     /// Live viewport drag (orbit/pan), driven by app.rs from winit events.
     pub drag: Option<DragMode>,
     pub cam: Camera,
+    /// Show the dimmed world origin axes in the viewport. View state like
+    /// the camera - not undoable, not saved - toggled from the Models panel;
+    /// the triads of real work offsets are always shown, because they are
+    /// setup, not decoration. Hiding the world axes is for the moment a
+    /// G5x offset sits away from machine zero and two gizmos read as clutter.
+    pub show_world_axes: bool,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -209,6 +215,7 @@ impl State {
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
             drag: None,
             cam: Camera::default(),
+            show_world_axes: true,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,
