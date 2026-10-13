@@ -9,8 +9,12 @@
 
 use flecs_ecs::prelude::*;
 
+use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
+use crate::operation::{GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
+use crate::tools::Tool;
+use crate::verify::Warning;
 
 /// Human-unique name of a persistent entity. The project serializer and
 /// name-based command lookup both key on this.
@@ -65,6 +69,37 @@ pub struct StockDef {
 #[derive(Component, Debug)]
 pub struct Wcs;
 
+/// A cutting tool definition, on the entity named by the catalog or the
+/// user. Tools never have facets; operations and the verifier read their
+/// numbers through `model::tool_of`.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ToolDef {
+    pub tool: Tool,
+}
+
+/// A machining operation's definition: which tool, which geometry source
+/// (by name), the parameters, and the stamp of the world state the last
+/// successful generation saw (`None` until `GenerateOperation` runs).
+/// Status is derived from `stamp` vs the live world - nothing here stores
+/// "stale". (`gen` would be the obvious name, but it is a reserved keyword
+/// in this Rust edition.)
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct Operation {
+    pub tool: String,
+    pub src: SrcRef,
+    pub params: OpParams,
+    pub stamp: Option<GenStamp>,
+}
+
+/// The cached result of generating an operation: the path plus the
+/// warnings `verify` attached to it. Deleting the operation entity frees
+/// both through the Rust-owned drop hooks (AGENTS.md resource invariant).
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+pub struct Toolpath {
+    pub path: ClPath,
+    pub warnings: Vec<Warning>,
+}
+
 /// The single stock entity's name. Identity by name, like everything else:
 /// tree, undo, and save all reach stock through this.
 pub const STOCK_NAME: &str = "Stock";
@@ -82,4 +117,7 @@ pub fn register_schema(world: &World) {
     world.component::<Selected>();
     world.component::<StockDef>();
     world.component::<Wcs>();
+    world.component::<ToolDef>();
+    world.component::<Operation>();
+    world.component::<Toolpath>();
 }

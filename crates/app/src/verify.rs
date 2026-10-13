@@ -87,7 +87,11 @@ pub struct VerifyContext<'a> {
     pub z_tol: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Serde derives: the operation layer persists warnings with the cached
+/// path (project v3 `OperationDto.cache`), so the enum is also a file
+/// format - variant names are that contract, keep them stable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Warning {
     /// Feed moves `moves[0]` and `moves[1]` cross in XY at shared depth.
     Crossing { moves: [usize; 2] },

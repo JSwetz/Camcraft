@@ -6,18 +6,25 @@ use flecs_ecs::prelude::World;
 use crate::commands::{Command, CommandError};
 use crate::geometry::Triangle;
 use crate::model;
-use crate::schema::{Location, StockDef, Wcs};
+use crate::schema::{Location, Operation, StockDef, ToolDef, Toolpath, Wcs};
 use crate::stock::StockShape;
+use crate::tools::Tool;
 
 pub struct DeleteEntity {
     name: String,
     location: Location,
     facets: Option<Vec<Triangle>>,
     /// Non-`None` restores the `StockDef` component; `wcs` restores the
-    /// `Wcs` tag. Together they keep stock and work offsets undoable with
-    /// their kind intact.
+    /// `Wcs` tag. Together with the CAM components below they keep every
+    /// kind of named entity undoable with its kind intact.
     stock: Option<StockShape>,
     wcs: bool,
+    tool: Option<Tool>,
+    operation: Option<Operation>,
+    /// The generated path and its warnings, restored with the operation
+    /// they belong to (AGENTS.md: deleting frees, undoing must restore
+    /// ALL associated resources - in both directions).
+    path: Option<Toolpath>,
 }
 
 impl DeleteEntity {
@@ -33,6 +40,9 @@ impl DeleteEntity {
             facets: model::facets_of(world, &entity),
             stock: model::stock_def_of(world, &entity),
             wcs: model::is_wcs(world, &entity),
+            tool: model::tool_of(world, &entity),
+            operation: model::operation_of(world, &entity),
+            path: model::toolpath_of(world, &entity),
         })
     }
 }
@@ -60,6 +70,17 @@ impl Command for DeleteEntity {
         }
         if self.wcs {
             entity.entity_view(world).add(Wcs);
+        }
+        if let Some(tool) = &self.tool {
+            entity
+                .entity_view(world)
+                .set(ToolDef { tool: tool.clone() });
+        }
+        if let Some(operation) = &self.operation {
+            entity.entity_view(world).set(operation.clone());
+        }
+        if let Some(path) = &self.path {
+            entity.entity_view(world).set(path.clone());
         }
     }
 }

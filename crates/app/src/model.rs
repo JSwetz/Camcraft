@@ -10,8 +10,11 @@ use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::{Entity, World};
 
 use crate::geometry::{Aabb, IDENTITY_Q, Point3, Triangle, normalize_quat, transform_point};
-use crate::schema::{Facets, Location, Name, Selected, StockDef, Wcs, STOCK_NAME};
+use crate::schema::{
+    Facets, Location, Name, Operation, Selected, StockDef, ToolDef, Toolpath, Wcs, STOCK_NAME,
+};
 use crate::stock::StockShape;
+use crate::tools::Tool;
 
 /// Create a named model entity at the origin with no geometry yet.
 #[must_use]
@@ -100,13 +103,16 @@ pub fn named_entities(world: &World) -> Vec<(String, Entity)> {
 }
 
 /// The named entities that are models - the user's parts. Stock and WCS
-/// entities are setup furniture and live in the Setup pane, so the tree and
-/// "fit to models" must skip them.
+/// entities are setup furniture and live in the Setup pane; tools and
+/// operations are CAM data; so the tree, the GPU part list and "fit to
+/// models" must skip all of them.
 #[must_use]
 pub fn model_entities(world: &World) -> Vec<(String, Entity)> {
     named_entities(world)
         .into_iter()
-        .filter(|(_, e)| !is_stock(world, e) && !is_wcs(world, e))
+        .filter(|(_, e)| {
+            !is_stock(world, e) && !is_wcs(world, e) && !is_tool(world, e) && !is_operation(world, e)
+        })
         .collect()
 }
 
@@ -124,6 +130,76 @@ pub fn is_wcs(world: &World, entity: &Entity) -> bool {
 #[must_use]
 pub fn stock_def_of(world: &World, entity: &Entity) -> Option<StockShape> {
     entity.entity_view(world).try_get::<&StockDef>(|s| s.shape.clone())
+}
+
+#[must_use]
+pub fn is_tool(world: &World, entity: &Entity) -> bool {
+    entity.entity_view(world).try_get::<&ToolDef>(|_| ()).is_some()
+}
+
+#[must_use]
+pub fn is_operation(world: &World, entity: &Entity) -> bool {
+    entity.entity_view(world).try_get::<&Operation>(|_| ()).is_some()
+}
+
+/// The tool definition, if this entity is a tool.
+#[must_use]
+pub fn tool_of(world: &World, entity: &Entity) -> Option<Tool> {
+    entity.entity_view(world).try_get::<&ToolDef>(|t| t.tool.clone())
+}
+
+/// The operation definition, if this entity is an operation.
+#[must_use]
+pub fn operation_of(world: &World, entity: &Entity) -> Option<Operation> {
+    entity.entity_view(world).try_get::<&Operation>(|o| o.clone())
+}
+
+/// The cached path and its warnings, if this operation has been generated.
+#[must_use]
+pub fn toolpath_of(world: &World, entity: &Entity) -> Option<Toolpath> {
+    entity.entity_view(world).try_get::<&Toolpath>(|t| t.clone())
+}
+
+/// Facets with the entity's rigid transform applied - the frame the
+/// slicers, regions and generators work in.
+#[must_use]
+pub fn world_facets(world: &World, entity: &Entity) -> Option<Vec<Triangle>> {
+    let tris = facets_of(world, entity)?;
+    let loc = transform_of(world, entity).unwrap_or_default();
+    Some(
+        tris.into_iter()
+            .map(|t| Triangle::new(
+                transform_point(t.a, loc.pos, loc.rot),
+                transform_point(t.b, loc.pos, loc.rot),
+                transform_point(t.c, loc.pos, loc.rot),
+            ))
+            .collect(),
+    )
+}
+
+/// World-space bounds of one entity's geometry, `None` if it has none.
+#[must_use]
+pub fn entity_world_aabb(world: &World, entity: &Entity) -> Option<Aabb> {
+    let tris = world_facets(world, entity)?;
+    let mut min = [f64::MAX; 3];
+    let mut max = [f64::MIN; 3];
+    let mut any = false;
+    for t in tris {
+        for p in [t.a, t.b, t.c] {
+            for axis in 0..3 {
+                let v = [p.x, p.y, p.z][axis];
+                if v.is_finite() {
+                    min[axis] = min[axis].min(v);
+                    max[axis] = max[axis].max(v);
+                    any = true;
+                }
+            }
+        }
+    }
+    any.then(|| Aabb {
+        min: Point3::new(min[0], min[1], min[2]),
+        max: Point3::new(max[0], max[1], max[2]),
+    })
 }
 
 /// World-space bounding box of all model geometry. Stock and WCS are excluded

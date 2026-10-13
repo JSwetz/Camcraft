@@ -3,9 +3,13 @@
 
 use std::path::PathBuf;
 
-use hsmworks_app::commands::{History, ImportModel, SetStock, SetWcsOrigin};
+use hsmworks_app::commands::{
+    AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, SetWcsOrigin,
+};
+use hsmworks_app::operation::{OpParams, SrcRef};
 use hsmworks_app::schema::Location;
 use hsmworks_app::stock::StockShape;
+use hsmworks_app::tools::{Tool, catalog};
 use hsmworks_app::geometry::{IDENTITY_Q, cube, Point3};
 use hsmworks_app::model;
 use hsmworks_app::project::{self, ProjectError};
@@ -72,12 +76,12 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1 migrates
-    // (see v1_file_migrates).
-    let text = r#"{"version": 3, "entities": []}"#;
+    // Anything newer than this build's format stays refused; v1/v2 migrate
+    // (see v1_file_migrates / v2_file_migrates_to_v3).
+    let text = r#"{"version": 4, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(3)) => {}
+        Err(ProjectError::UnsupportedVersion(4)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -281,6 +285,200 @@ fn corrupt_stock_and_wcs_fields_are_refused() {
         let world = new_world();
         assert!(
             matches!(project::open(&world, text), Err(ProjectError::Corrupt(_))),
+            "must refuse: {text}"
+        );
+        assert!(
+            model::named_entities(&world).is_empty(),
+            "refused file must leave the world untouched"
+        );
+    }
+}
+
+fn catalog_tool(name: &str) -> Tool {
+    catalog()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, t)| t)
+        .expect("catalog entry")
+}
+
+#[test]
+fn tools_and_generated_operations_round_trip() {
+    let path = tmp_path("cam");
+    let world = new_world();
+    let mut history = History::default();
+    let boxy = StockShape::Box {
+        dx: 60.0,
+        dy: 60.0,
+        dz: 20.0,
+    };
+    history.execute(
+        &world,
+        SetStock::new(&world, boxy, Location::default()).expect("box stock"),
+    );
+    history.execute(
+        &world,
+        AddTool::new(&world, "EM-0400-2FL", catalog_tool("EM-0400-2FL")).expect("add tool"),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Face1",
+            "EM-0400-2FL",
+            SrcRef::Stock,
+            OpParams::Face {
+                stepover: 3.0,
+                clearance_z: 25.0,
+                cut_z: 19.5,
+                feed: 1200.0,
+                plunge_feed: 300.0,
+                climb: true,
+            },
+        )
+        .expect("create op"),
+    );
+    history
+        .execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "CAM round-trip must be byte-identical");
+    assert!(first.contains("\"tool\"") && first.contains("\"operation\""), "the v3 payloads are in the file: {first}");
+
+    let names: Vec<String> = project::collect(&world2)
+        .entities
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+    assert_eq!(names, ["EM-0400-2FL", "Face1", "Stock"]);
+
+    // The tool is the catalog definition again, and it is not geometry.
+    let tool = model::find_by_name(&world2, "EM-0400-2FL").expect("tool loaded");
+    assert!(model::is_tool(&world2, &tool));
+    assert_eq!(model::tool_of(&world2, &tool), Some(catalog_tool("EM-0400-2FL")));
+    assert_eq!(model::facets_of(&world2, &tool), None);
+
+    // The operation component - including the stamp the cache was taken
+    // for - survives untouched, so it reads Ok, not Stale, after a load.
+    let src1 = model::find_by_name(&world, "Face1").expect("source op");
+    let src2 = model::find_by_name(&world2, "Face1").expect("loaded op");
+    assert!(model::is_operation(&world2, &src2));
+    assert_eq!(
+        model::operation_of(&world2, &src2),
+        model::operation_of(&world, &src1)
+    );
+    assert_eq!(
+        model::operation_of(&world2, &src2).map(|o| o.stamp.is_some()),
+        Some(true)
+    );
+    // The cached path replays exactly: same moves, same byte values.
+    assert_eq!(
+        model::toolpath_of(&world2, &src2).map(|t| t.path),
+        model::toolpath_of(&world, &src1).map(|t| t.path)
+    );
+    assert!(model::toolpath_of(&world2, &src2).is_some_and(|t| !t.path.moves.is_empty()));
+
+    // No operation leaked geometry or a stock definition either.
+    let file = project::collect(&world2);
+    let op_dto = file.entities.iter().find(|e| e.name == "Face1").expect("op dto");
+    assert!(op_dto.operation.is_some() && op_dto.tool.is_none() && op_dto.facets.is_none());
+}
+
+#[test]
+fn v2_file_migrates_to_v3() {
+    // A literal v2 project: no tool or operation fields anywhere. The
+    // chained migration only carries the version forward.
+    let text = r#"{
+        "version": 2,
+        "entities": [
+            {"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock",
+             "stock": {"box": {"dx": 40.0, "dy": 40.0, "dz": 10.0}}},
+            {"name": "part", "translation": [1.0, 2.0, 3.0],
+             "facets": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]]}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v2 must migrate");
+    let stock = model::find_by_name(&world, "Stock").expect("stock");
+    assert_eq!(
+        model::stock_def_of(&world, &stock),
+        Some(StockShape::Box {
+            dx: 40.0,
+            dy: 40.0,
+            dz: 10.0
+        })
+    );
+    let part = model::find_by_name(&world, "part").expect("part");
+    assert_eq!(model::facets_of(&world, &part).map(|t| t.len()), Some(1));
+
+    // Saving stamps the file as current: the migration is a one-way door.
+    let path = tmp_path("mig");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains("\"version\": 3"),
+        "migrated file must be v3: {saved}"
+    );
+}
+
+#[test]
+fn corrupt_tool_and_operation_fields_are_refused() {
+    // Reusable payloads; `$tool` / `$face` are substituted below so the
+    // JSON bodies stay single-brace and readable.
+    let face = r#""params": {"face": {"stepover": 3.0, "clearance_z": 25.0, "cut_z": 19.5, "feed": 1200.0, "plunge_feed": 300.0, "climb": true}}"#;
+    let tool = r#"{"kind": "end_mill", "diameter": 4.0, "corner_r": 0.0, "flute_len": 12.0, "shank_d": 6.0, "shank_len": 40.0, "holder_d": 44.0, "holder_len": 35.0, "material_group": "general", "rpm": 10000.0, "feed": 1200.0}"#;
+    let bad_tool = tool.replace("\"diameter\": 4.0", "\"diameter\": -4.0");
+    let bad_face = face.replace("\"stepover\": 3.0", "\"stepover\": -3.0");
+    let cases = [
+        // a tool entity without its definition
+        r#"{"version": 3, "entities": [{"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool"}]}"#
+            .to_string(),
+        // negative diameter
+        r#"{"version": 3, "entities": [{"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool", "tool": $tool}]}"#
+            .replace("$tool", &bad_tool),
+        // setup names are not tool names
+        r#"{"version": 3, "entities": [{"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "tool", "tool": $tool}]}"#
+            .replace("$tool", tool),
+        // a plain model wearing tool parameters
+        r#"{"version": 3, "entities": [{"name": "m", "translation": [0.0, 0.0, 0.0], "tool": $tool}]}"#
+            .replace("$tool", tool),
+        // an operation without its definition
+        r#"{"version": 3, "entities": [{"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation"}]}"#
+            .to_string(),
+        // an operation that cuts with nothing
+        r#"{"version": 3, "entities": [{"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation", "operation": {"tool": "", "src": "stock", $face}}]}"#
+            .replace("$face", face),
+        // an operation with an empty geometry-source name
+        r#"{"version": 3, "entities": [{"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation", "operation": {"tool": "T", "src": {"entity": {"name": ""}}, $face}}]}"#
+            .replace("$face", face),
+        // operations have no geometry of their own
+        r#"{"version": 3, "entities": [{"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation", "facets": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]], "operation": {"tool": "T", "src": "stock", $face}}]}"#
+            .replace("$face", face),
+        // insane parameters
+        r#"{"version": 3, "entities": [{"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation", "operation": {"tool": "T", "src": "stock", $face}}]}"#
+            .replace("$face", &bad_face),
+        // a cache that carries no path
+        r#"{"version": 3, "entities": [{"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation", "operation": {"tool": "T", "src": "stock", $face, "cache": {"moves": [], "warnings": []}}}]}"#
+            .replace("$face", face),
+        // a cache whose moves do not chain
+        r#"{"version": 3, "entities": [{"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation", "operation": {"tool": "T", "src": "stock", $face, "cache": {"moves": [{"kind": "rapid", "from": [-100.0, -100.0, 25.0], "to": [1.0, 0.0, 25.0]}, {"kind": "feed", "from": [0.0, 0.0, 25.0], "to": [0.0, 0.0, 19.5], "feed": 300.0}], "warnings": []}}}]}"#
+            .replace("$face", face),
+    ];
+    for text in cases {
+        let world = new_world();
+        assert!(
+            matches!(
+                project::open(&world, &text),
+                Err(ProjectError::Corrupt(_))
+            ),
             "must refuse: {text}"
         );
         assert!(

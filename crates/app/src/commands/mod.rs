@@ -5,17 +5,23 @@
 
 pub mod delete_entity;
 pub mod import_model;
+pub mod operation;
 pub mod select_entity;
 pub mod set_stock;
 pub mod set_wcs;
+pub mod tool;
 
 use flecs_ecs::prelude::World;
 
 pub use delete_entity::DeleteEntity;
 pub use import_model::ImportModel;
+pub use operation::{
+    CreateOperation, DeleteOperation, EditOperationLinks, EditOperationParams, GenerateOperation,
+};
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
 pub use set_wcs::SetWcsOrigin;
+pub use tool::{AddTool, ChangeTool, DeleteTool};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
@@ -29,6 +35,8 @@ pub enum CommandError {
     Import(#[from] crate::geometry::ImportError),
     #[error("'{0}' import is not supported yet; import a STEP, STL, or OBJ file instead")]
     UnsupportedType(String),
+    #[error("could not generate the toolpath: {0}")]
+    Machining(String),
 }
 
 pub trait Command {

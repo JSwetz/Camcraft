@@ -1,4 +1,4 @@
-//! Project save/load: `.hsmproj`, JSON, version 2.
+//! Project save/load: `.hsmproj`, JSON, version 3.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -10,19 +10,30 @@
 //! a v2 file written before stock existed still parses. Parametric stock is
 //! persisted as PARAMETERS only - `stock::stock_mesh` regenerates identical
 //! facets in any build (see `stock.rs`), keeping files small and round-trips
-//! exact. v1 files migrate on load: translation-only placements mean identity.
+//! exact. v3 adds `kind` values `tool`/`operation` with a `tool`/`operation`
+//! payload; CAM data is persisted as definition plus the cached path (paths
+//! are expensive to recompute, and staleness recomputes anyway). v1/v2
+//! files migrate on load, one version step at a time.
 
 use std::path::Path;
 
 use flecs_ecs::prelude::World;
 use serde::{Deserialize, Serialize};
 
+use crate::cl::{Move, MoveKind, Toolpath};
+use crate::geo2d::Point2;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
+use crate::machining2d::{Lead, PocketStrategy};
 use crate::model;
-use crate::schema::{Location, StockDef, Wcs, STOCK_NAME, WCS_SLOTS};
+use crate::operation::{GenStamp, OpParams, SrcRef};
+use crate::schema::{
+    Location, Operation, StockDef, ToolDef, Toolpath as ToolpathCache, Wcs, STOCK_NAME, WCS_SLOTS,
+};
 use crate::stock::{self, StockShape};
+use crate::tools::{Tool, ToolKind};
+use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 2;
+pub const PROJECT_VERSION: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -48,6 +59,8 @@ pub enum EntityKind {
     Model,
     Stock,
     Wcs,
+    Tool,
+    Operation,
 }
 
 /// The file mirror of `StockShape`, kept separate so the domain enum can
@@ -96,6 +109,476 @@ impl StockDto {
     }
 }
 
+/// The file mirror of `tools::Tool`; same reason as `StockDto`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ToolDto {
+    pub kind: ToolKindDto,
+    pub diameter: f64,
+    pub corner_r: f64,
+    pub flute_len: f64,
+    pub shank_d: f64,
+    pub shank_len: f64,
+    pub holder_d: f64,
+    pub holder_len: f64,
+    pub material_group: String,
+    pub rpm: f64,
+    pub feed: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKindDto {
+    EndMill,
+    BallNose,
+    BullNose,
+}
+
+impl ToolDto {
+    fn from_tool(t: &Tool) -> Self {
+        ToolDto {
+            kind: match t.kind {
+                ToolKind::EndMill => ToolKindDto::EndMill,
+                ToolKind::BallNose => ToolKindDto::BallNose,
+                ToolKind::BullNose => ToolKindDto::BullNose,
+            },
+            diameter: t.diameter,
+            corner_r: t.corner_r,
+            flute_len: t.flute_len,
+            shank_d: t.shank_d,
+            shank_len: t.shank_len,
+            holder_d: t.holder_d,
+            holder_len: t.holder_len,
+            material_group: t.material_group.clone(),
+            rpm: t.rpm,
+            feed: t.feed,
+        }
+    }
+
+    fn to_tool(&self) -> Tool {
+        Tool {
+            kind: match self.kind {
+                ToolKindDto::EndMill => ToolKind::EndMill,
+                ToolKindDto::BallNose => ToolKind::BallNose,
+                ToolKindDto::BullNose => ToolKind::BullNose,
+            },
+            diameter: self.diameter,
+            corner_r: self.corner_r,
+            flute_len: self.flute_len,
+            shank_d: self.shank_d,
+            shank_len: self.shank_len,
+            holder_d: self.holder_d,
+            holder_len: self.holder_len,
+            material_group: self.material_group.clone(),
+            rpm: self.rpm,
+            feed: self.feed,
+        }
+    }
+}
+
+/// The file mirror of `operation::SrcRef` (names, like everywhere else).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SrcDto {
+    Stock,
+    Entity { name: String },
+}
+
+/// The file mirror of `operation::OpParams`, tool-free by the same rule as
+/// the domain type: the diameter lives in the tool, never a parameter.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamsDto {
+    Face {
+        stepover: f64,
+        clearance_z: f64,
+        cut_z: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+    },
+    Contour {
+        stock_to_leave: f64,
+        clearance_z: f64,
+        retract_z: f64,
+        top_z: f64,
+        bottom_z: f64,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        lead: LeadDto,
+        tolerance: f64,
+        tab_count: u32,
+        tab_width: f64,
+        tab_height: f64,
+    },
+    Pocket {
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: f64,
+        top_z: f64,
+        bottom_z: f64,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        strategy: StrategyDto,
+    },
+    Slot {
+        a: [f64; 2],
+        b: [f64; 2],
+        width: f64,
+        stock_to_leave: f64,
+        clearance_z: f64,
+        top_z: f64,
+        bottom_z: f64,
+        stepdown: f64,
+        stepover: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+    },
+    Trace {
+        clearance_z: f64,
+        top_z: f64,
+        bottom_z: f64,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LeadDto {
+    None,
+    Linear { length: f64 },
+    Arc { radius: f64 },
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StrategyDto {
+    Zigzag,
+    Waterline,
+}
+
+impl ParamsDto {
+    fn from_params(p: &OpParams) -> Self {
+        match p {
+            OpParams::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb } => {
+                ParamsDto::Face {
+                    stepover: *stepover,
+                    clearance_z: *clearance_z,
+                    cut_z: *cut_z,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                }
+            }
+            OpParams::Contour {
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                lead,
+                tolerance,
+                tab_count,
+                tab_width,
+                tab_height,
+            } => ParamsDto::Contour {
+                stock_to_leave: *stock_to_leave,
+                clearance_z: *clearance_z,
+                retract_z: *retract_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                lead: match lead {
+                    Lead::None => LeadDto::None,
+                    Lead::Linear { length } => LeadDto::Linear { length: *length },
+                    Lead::Arc { radius } => LeadDto::Arc { radius: *radius },
+                },
+                tolerance: *tolerance,
+                tab_count: *tab_count,
+                tab_width: *tab_width,
+                tab_height: *tab_height,
+            },
+            OpParams::Pocket {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                strategy,
+            } => ParamsDto::Pocket {
+                stepover: *stepover,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: *clearance_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                strategy: match strategy {
+                    PocketStrategy::Zigzag => StrategyDto::Zigzag,
+                    PocketStrategy::Waterline => StrategyDto::Waterline,
+                },
+            },
+            OpParams::Slot {
+                a,
+                b,
+                width,
+                stock_to_leave,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                stepover,
+                feed,
+                plunge_feed,
+                climb,
+            } => ParamsDto::Slot {
+                a: [a.x, a.y],
+                b: [b.x, b.y],
+                width: *width,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: *clearance_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                stepover: *stepover,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+            },
+            OpParams::Trace { clearance_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb } => {
+                ParamsDto::Trace {
+                    clearance_z: *clearance_z,
+                    top_z: *top_z,
+                    bottom_z: *bottom_z,
+                    stepdown: *stepdown,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                }
+            }
+        }
+    }
+
+    fn to_params(&self) -> OpParams {
+        match self {
+            ParamsDto::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb } => {
+                OpParams::Face {
+                    stepover: *stepover,
+                    clearance_z: *clearance_z,
+                    cut_z: *cut_z,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                }
+            }
+            ParamsDto::Contour {
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                lead,
+                tolerance,
+                tab_count,
+                tab_width,
+                tab_height,
+            } => OpParams::Contour {
+                stock_to_leave: *stock_to_leave,
+                clearance_z: *clearance_z,
+                retract_z: *retract_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                lead: match lead {
+                    LeadDto::None => Lead::None,
+                    LeadDto::Linear { length } => Lead::Linear { length: *length },
+                    LeadDto::Arc { radius } => Lead::Arc { radius: *radius },
+                },
+                tolerance: *tolerance,
+                tab_count: *tab_count,
+                tab_width: *tab_width,
+                tab_height: *tab_height,
+            },
+            ParamsDto::Pocket {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                strategy,
+            } => OpParams::Pocket {
+                stepover: *stepover,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: *clearance_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                strategy: match strategy {
+                    StrategyDto::Zigzag => PocketStrategy::Zigzag,
+                    StrategyDto::Waterline => PocketStrategy::Waterline,
+                },
+            },
+            ParamsDto::Slot {
+                a,
+                b,
+                width,
+                stock_to_leave,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                stepover,
+                feed,
+                plunge_feed,
+                climb,
+            } => OpParams::Slot {
+                a: Point2::new(a[0], a[1]),
+                b: Point2::new(b[0], b[1]),
+                width: *width,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: *clearance_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                stepover: *stepover,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+            },
+            ParamsDto::Trace { clearance_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb } => {
+                OpParams::Trace {
+                    clearance_z: *clearance_z,
+                    top_z: *top_z,
+                    bottom_z: *bottom_z,
+                    stepdown: *stepdown,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                }
+            }
+        }
+    }
+}
+
+/// One CL move: kind, endpoints, contact feed (absent for rapids).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct MoveDto {
+    pub kind: MoveKindDto,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feed: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MoveKindDto {
+    Rapid,
+    Feed,
+    Plunge,
+}
+
+/// The cached generation output: path plus the warnings that came with it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PathDto {
+    pub moves: Vec<MoveDto>,
+    pub warnings: Vec<Warning>,
+}
+
+/// An operation as files hold it: definition, the stamp the last generate
+/// saw (raw digest; its meaning lives in `operation::current_stamp`), and
+/// the cache that stamp was taken for. `stamp` present without a cache (or
+/// the reverse, e.g. after an edit clears the stamp but keeps the old path
+/// on screen) is legitimate and reads Stale.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct OperationDto {
+    pub tool: String,
+    pub src: SrcDto,
+    pub params: ParamsDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stamp: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<PathDto>,
+}
+
+impl MoveDto {
+    fn from_move(m: &Move) -> Self {
+        MoveDto {
+            kind: match m.kind {
+                MoveKind::Rapid => MoveKindDto::Rapid,
+                MoveKind::Feed => MoveKindDto::Feed,
+                MoveKind::Plunge => MoveKindDto::Plunge,
+            },
+            from: [m.from.x, m.from.y, m.from.z],
+            to: [m.to.x, m.to.y, m.to.z],
+            feed: m.feed,
+        }
+    }
+
+    fn to_move(self) -> Move {
+        Move::new(
+            match self.kind {
+                MoveKindDto::Rapid => MoveKind::Rapid,
+                MoveKindDto::Feed => MoveKind::Feed,
+                MoveKindDto::Plunge => MoveKind::Plunge,
+            },
+            Point3::new(self.from[0], self.from[1], self.from[2]),
+            Point3::new(self.to[0], self.to[1], self.to[2]),
+            self.feed,
+        )
+    }
+}
+
+impl PathDto {
+    fn from_cache(t: &ToolpathCache) -> Self {
+        PathDto {
+            moves: t.path.moves.iter().map(MoveDto::from_move).collect(),
+            warnings: t.warnings.clone(),
+        }
+    }
+
+    fn to_cache(&self) -> ToolpathCache {
+        ToolpathCache {
+            path: Toolpath::new(self.moves.iter().map(|m| m.to_move()).collect()),
+            warnings: self.warnings.clone(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct EntityDto {
     pub name: String,
@@ -112,6 +595,13 @@ pub struct EntityDto {
     /// Stock parameters; present exactly when `kind == Some(Stock)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stock: Option<StockDto>,
+    /// Tool definition; present exactly when `kind == Some(Tool)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ToolDto>,
+    /// Operation definition (+ cached path); present exactly when
+    /// `kind == Some(Operation)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<OperationDto>,
 }
 
 fn identity_rotation() -> [f64; 4] {
@@ -155,16 +645,40 @@ pub fn collect(world: &World) -> ProjectFile {
                 Some(EntityKind::Stock)
             } else if model::is_wcs(world, &entity) {
                 Some(EntityKind::Wcs)
+            } else if model::is_tool(world, &entity) {
+                Some(EntityKind::Tool)
+            } else if model::is_operation(world, &entity) {
+                Some(EntityKind::Operation)
             } else {
                 None
             };
             let stock = model::stock_def_of(world, &entity).map(|s| StockDto::from_shape(&s));
-            // Parametric stock regenerates its facets on load, and offsets
-            // never have geometry, so neither writes a facet array.
-            let facets = match (&kind, &stock) {
-                (Some(EntityKind::Wcs), _) => None,
-                (Some(EntityKind::Stock), Some(StockDto::Box { .. }))
-                | (Some(EntityKind::Stock), Some(StockDto::Cylinder { .. })) => None,
+            let tool = model::tool_of(world, &entity).map(|t| ToolDto::from_tool(&t));
+            let operation = model::operation_of(world, &entity).map(|op| OperationDto {
+                tool: op.tool,
+                src: match &op.src {
+                    SrcRef::Stock => SrcDto::Stock,
+                    SrcRef::Entity(name) => SrcDto::Entity {
+                        name: name.clone(),
+                    },
+                },
+                params: ParamsDto::from_params(&op.params),
+                stamp: op.stamp.map(|g| g.0),
+                cache: model::toolpath_of(world, &entity).map(|c| PathDto::from_cache(&c)),
+            });
+            // Parametric stock regenerates its facets on load; offsets, tools
+            // and operations never have geometry, so none writes a facet
+            // array.
+            let facets = match &kind {
+                Some(EntityKind::Wcs) | Some(EntityKind::Tool) | Some(EntityKind::Operation) => None,
+                Some(EntityKind::Stock)
+                    if matches!(
+                        stock,
+                        Some(StockDto::Box { .. }) | Some(StockDto::Cylinder { .. })
+                    ) =>
+                {
+                    None
+                }
                 _ => model::facets_of(world, &entity).map(facets_to_dto),
             };
             EntityDto {
@@ -174,6 +688,8 @@ pub fn collect(world: &World) -> ProjectFile {
                 facets,
                 kind,
                 stock,
+                tool,
+                operation,
             }
         })
         .collect();
@@ -205,7 +721,8 @@ pub fn open(world: &World, text: &str) -> Result<(), ProjectError> {
 fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectError> {
     // Migration hook: step UP one version at a time, each migration exact,
     // before any entity touches the world. Anything newer than this build
-    // remains refused.
+    // remains refused. The chain must run its steps sequentially - a v1
+    // file passes through v2's effects before v3's are applied.
     if file.version == 1 {
         // v1 -> v2: entities gained `rotation`; v1 had translation-only
         // placements, so identity is the exact migration. Kind and stock
@@ -213,7 +730,13 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         for dto in &mut file.entities {
             dto.rotation = IDENTITY_Q;
         }
-        file.version = PROJECT_VERSION;
+        file.version = 2;
+    }
+    if file.version == 2 {
+        // v2 -> v3: `kind` gained tool/operation and their payload fields
+        // appeared; every existing entity keeps its fields and defaults
+        // the new ones (absent), which is exactly what a v2 file meant.
+        file.version = 3;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
@@ -264,6 +787,32 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
             EntityKind::Wcs => {
                 entity.entity_view(world).add(Wcs);
             }
+            EntityKind::Tool => {
+                // validate_kind already refused a missing or insane one.
+                let tool = dto
+                    .tool
+                    .ok_or_else(|| corrupt("tool entity without a definition"))?
+                    .to_tool();
+                entity.entity_view(world).set(ToolDef { tool });
+            }
+            EntityKind::Operation => {
+                let odto = dto
+                    .operation
+                    .ok_or_else(|| corrupt("operation entity without a definition"))?;
+                let src = match &odto.src {
+                    SrcDto::Stock => SrcRef::Stock,
+                    SrcDto::Entity { name } => SrcRef::Entity(name.clone()),
+                };
+                entity.entity_view(world).set(Operation {
+                    tool: odto.tool,
+                    src,
+                    params: odto.params.to_params(),
+                    stamp: odto.stamp.map(GenStamp),
+                });
+                if let Some(cache) = &odto.cache {
+                    entity.entity_view(world).set(cache.to_cache());
+                }
+            }
         }
     }
     Ok(())
@@ -275,11 +824,20 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
 fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> {
     match kind {
         EntityKind::Model => {
-            if dto.stock.is_some() {
-                return Err(corrupt(format!("'{}' carries stock parameters", dto.name)));
+            if dto.stock.is_some() || dto.tool.is_some() || dto.operation.is_some() {
+                return Err(corrupt(format!(
+                    "'{}' is a model carrying setup or CAM parameters",
+                    dto.name
+                )));
             }
         }
         EntityKind::Stock => {
+            if dto.tool.is_some() || dto.operation.is_some() {
+                return Err(corrupt(format!(
+                    "'{}' is stock carrying tool or operation parameters",
+                    dto.name
+                )));
+            }
             if dto.name != STOCK_NAME {
                 return Err(corrupt(format!(
                     "a stock entity must be named '{STOCK_NAME}', found '{}'",
@@ -316,10 +874,85 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
                     WCS_SLOTS.join(", ")
                 )));
             }
-            if dto.facets.is_some() || dto.stock.is_some() {
+            if dto.facets.is_some()
+                || dto.stock.is_some()
+                || dto.tool.is_some()
+                || dto.operation.is_some()
+            {
                 return Err(corrupt(format!("'{}' is an offset, not a solid", dto.name)));
+            }
+        }
+        EntityKind::Tool => {
+            if dto.name == STOCK_NAME || WCS_SLOTS.contains(&dto.name.as_str()) {
+                return Err(corrupt(format!(
+                    "'{}' is reserved for setup furniture, not a tool",
+                    dto.name
+                )));
+            }
+            if dto.name.is_empty() {
+                return Err(corrupt("a tool entity must be named"));
+            }
+            if dto.facets.is_some() || dto.stock.is_some() || dto.operation.is_some() {
+                return Err(corrupt(format!("'{}' is a tool, not a solid", dto.name)));
+            }
+            let Some(tool) = &dto.tool else {
+                return Err(corrupt("tool entity without a definition"));
+            };
+            if !tool.to_tool().is_sane() {
+                return Err(corrupt(format!("tool parameters are not usable: {tool:?}")));
+            }
+        }
+        EntityKind::Operation => {
+            if dto.name.is_empty() {
+                return Err(corrupt("an operation entity must be named"));
+            }
+            if dto.facets.is_some() || dto.stock.is_some() || dto.tool.is_some() {
+                return Err(corrupt(format!(
+                    "'{}' is an operation, not a solid or a tool",
+                    dto.name
+                )));
+            }
+            let Some(op) = &dto.operation else {
+                return Err(corrupt("operation entity without a definition"));
+            };
+            if op.tool.is_empty() {
+                return Err(corrupt(format!("'{}' names no tool", dto.name)));
+            }
+            if let SrcDto::Entity { name } = &op.src
+                && name.is_empty()
+            {
+                return Err(corrupt(format!("'{}' has an empty geometry source", dto.name)));
+            }
+            let params = op.params.to_params();
+            if !params.is_sane() {
+                return Err(corrupt(format!(
+                    "operation parameters are not usable for a {} operation '{}'",
+                    params.kind(),
+                    dto.name
+                )));
+            }
+            if let Some(cache) = &op.cache {
+                let path = cl_path(&cache.moves);
+                if path.is_empty() {
+                    return Err(corrupt(format!(
+                        "'{}' carries a cached path with no moves",
+                        dto.name
+                    )));
+                }
+                if !path.all_finite() {
+                    return Err(corrupt(format!("'{}' cache has non-finite moves", dto.name)));
+                }
+                if !path.is_chained() {
+                    return Err(corrupt(format!("'{}' cache is not a linked path", dto.name)));
+                }
             }
         }
     }
     Ok(())
+}
+
+/// Moves only, for the cache's structural checks (the warnings ride along
+/// untouched; `Warning`'s serde shape is its own contract).
+fn cl_path(moves: &[MoveDto]) -> Toolpath {
+    Toolpath::new(moves.iter().map(|m| m.to_move()).collect())
 }

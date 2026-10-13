@@ -1,0 +1,158 @@
+//! Tool commands: add, edit and delete tool entities. Validation is all
+//! at construction (AGENTS.md: malformed input never enters the history);
+//! `apply` is a pure world write so redo replays identically.
+//!
+//! Provenance: our own command model; identity by name, snapshot-and-
+//! restore inverses, like every sibling command.
+
+use flecs_ecs::prelude::World;
+
+use crate::commands::{Command, CommandError};
+use crate::model;
+use crate::schema::{Location, STOCK_NAME, WCS_SLOTS, ToolDef};
+use crate::tools::Tool;
+
+fn reserved(name: &str) -> Option<CommandError> {
+    if name.is_empty() {
+        return Some(CommandError::Invalid("tool name must not be empty".into()));
+    }
+    if name == STOCK_NAME || WCS_SLOTS.contains(&name) {
+        return Some(CommandError::Invalid(format!(
+            "'{name}' is reserved for setup furniture"
+        )));
+    }
+    None
+}
+
+/// Create a tool entity with the given definition.
+pub struct AddTool {
+    name: String,
+    tool: Tool,
+}
+
+impl AddTool {
+    pub fn new(world: &World, name: &str, tool: Tool) -> Result<Self, CommandError> {
+        if let Some(err) = reserved(name) {
+            return Err(err);
+        }
+        if !tool.is_sane() {
+            return Err(CommandError::Invalid(format!(
+                "tool parameters must be finite and positive: {tool:?}"
+            )));
+        }
+        if model::find_by_name(world, name).is_some() {
+            return Err(CommandError::NameConflict(name.to_string()));
+        }
+        Ok(AddTool {
+            name: name.to_string(),
+            tool,
+        })
+    }
+}
+
+impl Command for AddTool {
+    fn apply(&self, world: &World) {
+        let entity = match model::find_by_name(world, &self.name) {
+            Some(entity) => entity,
+            None => model::spawn(world, &self.name),
+        };
+        entity
+            .entity_view(world)
+            .set(ToolDef { tool: self.tool.clone() });
+    }
+
+    fn invert(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            model::remove(world, &entity);
+        }
+    }
+}
+
+/// Replace a tool's definition (the tool library's edit path). Operations
+/// that reference the tool read the new numbers and derive Stale from the
+/// stamp mismatch - no cascade writes here.
+pub struct ChangeTool {
+    name: String,
+    prev: Tool,
+    next: Tool,
+}
+
+impl ChangeTool {
+    pub fn new(world: &World, name: &str, next: Tool) -> Result<Self, CommandError> {
+        if !next.is_sane() {
+            return Err(CommandError::Invalid(format!(
+                "tool parameters must be finite and positive: {next:?}"
+            )));
+        }
+        let Some(entity) = model::find_by_name(world, name) else {
+            return Err(CommandError::NotFound(name.to_string()));
+        };
+        let prev = model::tool_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not a tool")))?;
+        Ok(ChangeTool {
+            name: name.to_string(),
+            prev,
+            next,
+        })
+    }
+}
+
+impl Command for ChangeTool {
+    fn apply(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            entity
+                .entity_view(world)
+                .set(ToolDef { tool: self.next.clone() });
+        }
+    }
+
+    fn invert(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            entity
+                .entity_view(world)
+                .set(ToolDef { tool: self.prev.clone() });
+        }
+    }
+}
+
+/// Delete a tool entity; the snapshot restores it identically, undoable
+/// like every other persistent object.
+pub struct DeleteTool {
+    name: String,
+    tool: Tool,
+    location: Location,
+}
+
+impl DeleteTool {
+    pub fn new(world: &World, name: &str) -> Result<Self, CommandError> {
+        let Some(entity) = model::find_by_name(world, name) else {
+            return Err(CommandError::NotFound(name.to_string()));
+        };
+        let tool = model::tool_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not a tool")))?;
+        Ok(DeleteTool {
+            name: name.to_string(),
+            tool,
+            location: model::transform_of(world, &entity).unwrap_or_default(),
+        })
+    }
+}
+
+impl Command for DeleteTool {
+    fn apply(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            model::remove(world, &entity);
+        }
+    }
+
+    fn invert(&self, world: &World) {
+        if model::find_by_name(world, &self.name).is_some() {
+            return; // already restored (idempotent redo path)
+        }
+        let entity = model::spawn(world, &self.name);
+        model::set_transform(world, &entity, self.location);
+        entity
+            .entity_view(world)
+            .set(ToolDef { tool: self.tool.clone() });
+    }
+}
