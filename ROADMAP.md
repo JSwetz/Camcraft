@@ -76,18 +76,26 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
       Setup tab editing stock and work offsets; setups → operations nodes arrive with M1.3
 - ✅ **Viewport**: orbit / pan / zoom, selection highlight, frame-all, dockable
       offscreen 3D target; translucent stock and WCS triads render, stock is
-      pickable where nothing is behind it; operations pickables arrive with M1.3
+      pickable where nothing is behind it; operations pickables arrive with M1.3.
+      The triad never doubles the dimmed world-origin axes (they are drawn only
+      when no offset claims machine zero), and gizmo tips carry live X/Y/Z labels
+      projected through the camera
 - ✅ **STEP import**: `.step`/`.stp` tessellate to meshes via
       truck (Apache-2.0, pure Rust); feature-edge wireframe in the viewport.
       B-rep *editing* and booleans remain kernel-decision territory (M1.3)
 - ✅ **Stock definition**: box, cylinder, or from-model-solid stock with a user
-      transform (XY center, Z bottom, yaw) and Fit-to-Models; shapes are stored
-      as parameters and re-meshed deterministically, so files stay small and
-      undo is exact. Specced from published stock-shape conventions and general
-      machining knowledge only
-- ⚠️ **WCS**: numeric origin + yaw per slot with a G54-G59 readout and viewport
-      triads; face/vertex snap-to-place is deferred (needs M1.3 selection
-      geometry). Offset codes are the published RS-274 / ISO 6983 ones
+      transform (XY center, Z bottom, yaw) and Fit-to-Models; Fit honors the
+      selected shape (a cylinder fit takes the margin-padded footprint diagonal,
+      so the model's corners clear) instead of always producing a box; shapes
+      are stored as parameters and re-meshed deterministically, so files stay
+      small and undo is exact. Specced from published stock-shape conventions
+      and general machining knowledge only
+- ✅ **WCS**: numeric origin + yaw per slot with a G54-G59 readout and viewport
+      triads, plus box-point placing: a 3x3 XY compass grid of the stock box
+      (model bounds when there is no stock) at bottom/middle/top Z, one click
+      setting the selected offset to an exact box point. True face/vertex
+      snapping on model faces is deferred (needs M1.3 selection geometry).
+      Offset codes are the published RS-274 / ISO 6983 ones
 - 📋 **Toolpath display**: colored toolpath preview with directional arrows
 
 ### M1.3 - 2D Machining
@@ -189,7 +197,12 @@ own.
 
 - **Post template engine**: an embedded scripting runtime so users own their posts (a clean-room design: no adaptation of the original .post JavaScript files)
 - **Built-in posts**: Fanuc, Haas, Siemens 840D, Heidenhain, Mazak - each with conformance tests against a golden G-code suite
-- **Machine definitions**: travel, tool changer, spindle, coolant - driving simulation limits and post output
+- **Machine definitions**: a machine group in the Setup pane - select or edit a
+      machine, its name shown in the setup, with axis travel, tool changer,
+      spindle and coolant - driving simulation limits and post output. The
+      user-facing workflow (pick a machine, edit it, see it on the setup) is
+      specced from published CAM user documentation only; no vendor strings,
+      templates, or post files are copied or adapted
 - **RTCP output**: G43.4 / A-angles correctly emitted for trunnion and tilting-head machines
 - **Post debugging**: block-by-block trace from toolpath to line of G-code
 
