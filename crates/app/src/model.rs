@@ -10,7 +10,7 @@ use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::{Entity, World};
 
 use crate::geometry::{Aabb, IDENTITY_Q, Point3, Triangle, normalize_quat, transform_point};
-use crate::schema::{Facets, Location, Name, Selected, StockDef, Wcs};
+use crate::schema::{Facets, Location, Name, Selected, StockDef, Wcs, STOCK_NAME};
 use crate::stock::StockShape;
 
 /// Create a named model entity at the origin with no geometry yet.
@@ -159,6 +159,57 @@ pub fn solid_world_aabb(world: &World) -> Option<Aabb> {
     })
 }
 
+/// World-space bounding box of the Stock solid, if any. The WCS origin
+/// anchor grid places on this box when stock exists, else on the model
+/// bounds - the "pick a point on the model or the stock box" rule.
+#[must_use]
+pub fn stock_world_aabb(world: &World) -> Option<Aabb> {
+    let entity = find_by_name(world, STOCK_NAME)?;
+    if !is_stock(world, &entity) {
+        return None;
+    }
+    let tris = facets_of(world, &entity)?;
+    let loc = transform_of(world, &entity).unwrap_or_default();
+    let mut min = [f64::MAX; 3];
+    let mut max = [f64::MIN; 3];
+    let mut any = false;
+    for t in tris {
+        for p in [t.a, t.b, t.c] {
+            let p = transform_point(p, loc.pos, loc.rot);
+            for axis in 0..3 {
+                let v = [p.x, p.y, p.z][axis];
+                if v.is_finite() {
+                    min[axis] = min[axis].min(v);
+                    max[axis] = max[axis].max(v);
+                    any = true;
+                }
+            }
+        }
+    }
+    any.then(|| Aabb {
+        min: Point3::new(min[0], min[1], min[2]),
+        max: Point3::new(max[0], max[1], max[2]),
+    })
+}
+
+/// One of the 27 box-anchor points: `index` on each axis picks the low
+/// corner (0), the center (1), or the high corner (2) of `b`. Used by the
+/// Setup pane's origin-placement grid. Centers are exact averages of
+/// finite bounds, so a symmetric box anchors its faces at x=y=0.
+#[must_use]
+pub fn anchor_point(b: &Aabb, index: [usize; 3]) -> [f64; 3] {
+    let pick = |lo: f64, hi: f64, i: usize| match i {
+        0 => lo,
+        2 => hi,
+        _ => (lo + hi) * 0.5,
+    };
+    [
+        pick(b.min.x, b.max.x, index[0]),
+        pick(b.min.y, b.max.y, index[1]),
+        pick(b.min.z, b.max.z, index[2]),
+    ]
+}
+
 /// Names of all currently-selected entities.
 #[must_use]
 pub fn selected_names(world: &World) -> Vec<String> {
@@ -178,5 +229,27 @@ pub fn is_selected(world: &World, entity: &Entity) -> bool {
 pub fn clear_named(world: &World) {
     for (_, entity) in named_entities(world) {
         remove(world, &entity);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::anchor_point;
+    use crate::geometry::{Aabb, Point3};
+
+    #[test]
+    fn anchor_points_are_corners_centers_and_face_mid() {
+        let b = Aabb {
+            min: Point3::new(-30.0, -20.0, 0.0),
+            max: Point3::new(30.0, 20.0, 10.0),
+        };
+        assert_eq!(anchor_point(&b, [0, 0, 0]), [-30.0, -20.0, 0.0]);
+        assert_eq!(anchor_point(&b, [2, 2, 2]), [30.0, 20.0, 10.0]);
+        assert_eq!(anchor_point(&b, [1, 1, 2]), [0.0, 0.0, 10.0]); // top face center
+        assert_eq!(anchor_point(&b, [2, 1, 0]), [30.0, 0.0, 0.0]); // +X bottom edge mid
+        assert_eq!(anchor_point(&b, [0, 2, 1]), [-30.0, 20.0, 5.0]);
+        // Grid indices come from UI positions; anything out of range lands on
+        // the center rather than misbehaving.
+        assert_eq!(anchor_point(&b, [5, 5, 5]), [0.0, 0.0, 5.0]);
     }
 }

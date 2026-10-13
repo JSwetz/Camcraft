@@ -112,6 +112,15 @@ pub struct WcsUi {
     pub y: f64,
     pub z: f64,
     pub yaw_deg: f64,
+    /// XY grid point last clicked (row-major north-to-south, west-to-east;
+    /// 4 = center). Display-only highlight; the world stores the position.
+    pub anchor_xy: usize,
+    /// Z level grid clicks use: 0 bottom, 1 middle, 2 top of the anchor box.
+    pub anchor_z: usize,
+    /// Whether the selected slot currently has a placed origin entity. Lets
+    /// `sync_setup_ui` zero the readout when an origin is undone without
+    /// wiping typing into a never-placed slot.
+    pub(crate) placed: bool,
 }
 
 /// Yaw in degrees of a (pure-yaw) quaternion: the exact inverse of
@@ -189,7 +198,12 @@ impl State {
             import_started: None,
             import_queue: VecDeque::new(),
             stock_ui: StockUi::default(),
-            wcs_ui: WcsUi::default(),
+            wcs_ui: WcsUi {
+                // Neutral highlight: center-middle, before any pick.
+                anchor_xy: 4,
+                anchor_z: 1,
+                ..WcsUi::default()
+            },
             ui_synced_doc: 0,
         }
     }
@@ -231,15 +245,30 @@ impl State {
                 None => {}
             }
         }
-        if let Some(loc) = WCS_SLOTS
+        let placed = WCS_SLOTS
             .get(self.wcs_ui.slot)
             .and_then(|slot| model::find_by_name(&self.world, slot))
-            .and_then(|entity| model::transform_of(&self.world, &entity))
-        {
-            self.wcs_ui.x = loc.pos.x;
-            self.wcs_ui.y = loc.pos.y;
-            self.wcs_ui.z = loc.pos.z;
-            self.wcs_ui.yaw_deg = quat_yaw_deg(loc.rot);
+            .and_then(|entity| model::transform_of(&self.world, &entity));
+        match placed {
+            Some(loc) => {
+                self.wcs_ui.x = loc.pos.x;
+                self.wcs_ui.y = loc.pos.y;
+                self.wcs_ui.z = loc.pos.z;
+                self.wcs_ui.yaw_deg = quat_yaw_deg(loc.rot);
+                self.wcs_ui.placed = true;
+            }
+            None => {
+                // Show zero only when an origin this slot *had* disappeared
+                // (undo): stale numbers for a deleted entity are a lie.
+                // Typing into a never-placed slot survives other edits.
+                if self.wcs_ui.placed {
+                    self.wcs_ui.x = 0.0;
+                    self.wcs_ui.y = 0.0;
+                    self.wcs_ui.z = 0.0;
+                    self.wcs_ui.yaw_deg = 0.0;
+                    self.wcs_ui.placed = false;
+                }
+            }
         }
     }
 

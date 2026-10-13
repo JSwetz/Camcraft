@@ -136,6 +136,7 @@ fn wcs_group(ui: &Ui, state: &mut State) {
                 state.wcs_ui.y = loc.pos.y;
                 state.wcs_ui.z = loc.pos.z;
                 state.wcs_ui.yaw_deg = quat_yaw_deg(loc.rot);
+                state.wcs_ui.placed = true;
             }
             None => {
                 // Never-placed slot: machine zero is the honest default.
@@ -143,6 +144,7 @@ fn wcs_group(ui: &Ui, state: &mut State) {
                 state.wcs_ui.y = 0.0;
                 state.wcs_ui.z = 0.0;
                 state.wcs_ui.yaw_deg = 0.0;
+                state.wcs_ui.placed = false;
             }
         }
     }
@@ -150,6 +152,61 @@ fn wcs_group(ui: &Ui, state: &mut State) {
     ui.input_double("Y origin##wcs_y", &mut state.wcs_ui.y);
     ui.input_double("Z origin##wcs_z", &mut state.wcs_ui.z);
     ui.input_double("Rotation (yaw deg)##wcs_yaw", &mut state.wcs_ui.yaw_deg);
+
+    // Box-point anchoring (feedback 5): place the origin with one click on a
+    // 3x3 XY compass grid of the stock box, at Bottom/Middle/Top Z; with no
+    // stock the reference is the model bounds. Behavior specced from
+    // published CAM setup practice; the grid and its math are ours.
+    ui.spacing();
+    let on_stock = model::stock_world_aabb(&state.world);
+    let reference = on_stock.or_else(|| model::solid_world_aabb(&state.world));
+    match &reference {
+        Some(b) => {
+            ui.text(if on_stock.is_some() {
+                "Anchor point (stock box)"
+            } else {
+                "Anchor point (model bounds)"
+            });
+            let mut z_level = state.wcs_ui.anchor_z.min(2) as i32;
+            ui.radio_button_int("Bottom", &mut z_level, 0);
+            ui.same_line();
+            ui.radio_button_int("Middle", &mut z_level, 1);
+            ui.same_line();
+            ui.radio_button_int("Top", &mut z_level, 2);
+            state.wcs_ui.anchor_z = z_level.clamp(0, 2) as usize;
+            // Seen from +Z looking down: X east, Y north.
+            const COMPASS: [&str; 9] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"];
+            for row in 0..3usize {
+                for col in 0..3usize {
+                    let k = row * 3 + col;
+                    if col > 0 {
+                        ui.same_line();
+                    }
+                    let code = COMPASS[k];
+                    let clicked = if state.wcs_ui.anchor_xy == k {
+                        ui.button(format!("[{code}]"))
+                    } else {
+                        ui.button(code)
+                    };
+                    if clicked {
+                        state.wcs_ui.anchor_xy = k;
+                        // Column is the X index; north (row 0) is max Y.
+                        let pos = model::anchor_point(b, [col, 2 - row, state.wcs_ui.anchor_z]);
+                        let slot = *WCS_SLOTS
+                            .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
+                            .unwrap_or(&WCS_SLOTS[0]);
+                        state.pending.push_back(CommandKind::SetWcs {
+                            slot: slot.to_string(),
+                            pos,
+                            yaw_deg: state.wcs_ui.yaw_deg,
+                        });
+                    }
+                }
+            }
+        }
+        None => ui.text("Import a model or set stock to anchor the origin on a point."),
+    }
+
     if ui.button("Set Origin") {
         let slot = *WCS_SLOTS
             .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))

@@ -400,6 +400,79 @@ fn delete_by_name_round_trips_stock() {
 }
 
 #[test]
+fn anchor_grid_places_origin_on_the_stock_box() {
+    // A grid click in the pane boils down to these two helpers feeding the
+    // existing SetWcs command; pin their contract end to end.
+    use hsmworks_app::model;
+    use hsmworks_app::stock::StockShape;
+    use hsmworks_ui::state::{CommandKind, State};
+
+    let mut state = State::new();
+    state.pending.push_back(box_stock(
+        StockShape::Box {
+            dx: 60.0,
+            dy: 40.0,
+            dz: 20.0,
+        },
+        [10.0, -5.0, 0.0],
+    ));
+    state.drain_actions();
+    let b = model::stock_world_aabb(&state.world).expect("stock box");
+    assert_eq!((b.min.x, b.min.y, b.min.z), (-20.0, -25.0, 0.0));
+    assert_eq!((b.max.x, b.max.y, b.max.z), (40.0, 15.0, 20.0));
+
+    // "NE / Top": max X, max Y, max Z of the stock box.
+    let p = model::anchor_point(&b, [2, 2, 2]);
+    state.pending.push_back(CommandKind::SetWcs {
+        slot: "G54".into(),
+        pos: p,
+        yaw_deg: 0.0,
+    });
+    state.drain_actions();
+    let g54 = model::find_by_name(&state.world, "G54").expect("origin");
+    let loc = model::transform_of(&state.world, &g54).expect("location");
+    assert_eq!((loc.pos.x, loc.pos.y, loc.pos.z), (40.0, 15.0, 20.0));
+
+    // Undo removes the origin; undoing once more removes the stock, and
+    // then there is no anchor box at all.
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    assert!(model::find_by_name(&state.world, "G54").is_none());
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    assert!(model::stock_world_aabb(&state.world).is_none());
+}
+
+#[test]
+fn origin_undo_leaves_no_stale_readout() {
+    use hsmworks_app::model;
+    use hsmworks_ui::state::{CommandKind, State};
+
+    let mut state = State::new();
+    state.wcs_ui.slot = 1; // G55
+    state.pending.push_back(CommandKind::SetWcs {
+        slot: "G55".into(),
+        pos: [12.0, 3.0, -1.0],
+        yaw_deg: 0.0,
+    });
+    state.drain_actions();
+    state.sync_setup_ui();
+    assert_eq!(state.wcs_ui.x, 12.0);
+    assert_eq!(state.wcs_ui.y, 3.0);
+    assert_eq!(state.wcs_ui.z, -1.0);
+
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    state.sync_setup_ui();
+    assert!(model::find_by_name(&state.world, "G55").is_none());
+    assert_eq!(
+        (state.wcs_ui.x, state.wcs_ui.y, state.wcs_ui.z),
+        (0.0, 0.0, 0.0),
+        "the readout follows reality after an undo"
+    );
+}
+
+#[test]
 fn setup_furniture_stays_out_of_the_model_list() {
     use hsmworks_app::model;
     use hsmworks_ui::state::{CommandKind, State};
