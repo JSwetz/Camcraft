@@ -557,7 +557,8 @@ impl View3D {
     }
 
     /// Replace the overlay line set: pairs of `[x, y, z, r, g, b]` vertices
-    /// drawn non-indexed after every solid - the WCS triads and world axes.
+    /// drawn non-indexed after every solid - the WCS triads, world axes and
+    /// cached toolpaths (the producers cap the list before it gets here).
     pub fn set_overlay(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, lines: &[[f32; 6]]) {
         if lines.is_empty() {
             self.overlay_count = 0; // render() then skips the draw entirely

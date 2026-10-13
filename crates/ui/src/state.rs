@@ -183,6 +183,11 @@ pub struct State {
     /// setup, not decoration. Hiding the world axes is for the moment a
     /// G5x offset sits away from machine zero and two gizmos read as clutter.
     pub show_world_axes: bool,
+    /// Show cached toolpaths beyond the selected operation's: with this on,
+    /// every generated path draws (dimmed where unselected) instead of only
+    /// the one the tree highlights. View state like the camera - not
+    /// undoable, not saved; the overlay rebuild gate reads it.
+    pub show_all_paths: bool,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -216,6 +221,7 @@ impl State {
             drag: None,
             cam: Camera::default(),
             show_world_axes: true,
+            show_all_paths: false,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,

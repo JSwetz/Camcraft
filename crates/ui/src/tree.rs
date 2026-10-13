@@ -19,6 +19,8 @@ pub fn models_panel(ui: &Ui, state: &mut State) {
         // system a model lands on - while setting up G5x offsets. Real work
         // offset triads are setup, not furniture, and always show.
         ui.checkbox("Show world origin axes", &mut state.show_world_axes);
+        // Also view state, not a command: which cached paths are on screen.
+        ui.checkbox("Show all toolpaths", &mut state.show_all_paths);
         ui.separator();
         let entities = model::model_entities(&state.world);
         if entities.is_empty() {

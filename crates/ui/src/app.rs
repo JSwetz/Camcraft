@@ -10,6 +10,7 @@ use std::sync::Arc;
 use dear_imgui_rs::{ConfigFlags, Context};
 use dear_imgui_wgpu::{wgpu, ExternalTextureId, FramebufferExtent, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
+use hsmworks_app::cl::MoveKind;
 use hsmworks_app::geometry::{Aabb, Point3, transform_point};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::{model, pick};
@@ -64,11 +65,11 @@ struct App {
     /// views by id and the vertex stream bakes selection state.
     sel_synced: u64,
     /// View-affecting state the overlay is baked from but the document does
-    /// not carry (anchor-mode drafts, world-axes visibility). It changes
-    /// with pane widgets that don't bump `doc_version`, so it gates a
-    /// rebuild of its own (pick-mode markers would otherwise lag a click by
-    /// a document edit).
-    draft_synced: [u64; 5],
+    /// not carry (anchor-mode drafts, world-axes visibility, the
+    /// show-all-toolpaths toggle). It changes with pane widgets that don't
+    /// bump `doc_version`, so it gates a rebuild of its own (pick-mode
+    /// markers would otherwise lag a click by a document edit).
+    draft_synced: [u64; 6],
     /// Last cursor position in logical px; delta base for viewport drags.
     cursor_pos: [f32; 2],
     /// Left-press origin, so release can tell a click (pick) from a drag.
@@ -93,7 +94,7 @@ impl App {
             config: None,
             doc_synced: u64::MAX,
             sel_synced: u64::MAX,
-            draft_synced: [0; 5],
+            draft_synced: [0; 6],
             cursor_pos: [0.0, 0.0],
             left_press: None,
             exit_code: 0,
@@ -458,6 +459,7 @@ impl App {
             state.wcs_ui.anchor_z as u64,
             state.wcs_ui.anchor_xy as u64,
             u64::from(state.show_world_axes),
+            u64::from(state.show_all_paths),
         ];
         if state.doc_version != *doc_synced || sel_dirty || draft_key != *draft_synced {
             let parts = collect_parts(state);
@@ -638,7 +640,148 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
             }
         }
     }
+    out.extend(toolpath_lines(state));
+    capped(out)
+}
+
+/// Overlay palette for cached paths: feed green, rapid blue, plunge red.
+/// Provenance: our own display choice; the three-way move vocabulary
+/// follows the RS-274 motion words, not any vendor's screen.
+const FEED_RGB: [f32; 3] = [0.20, 0.85, 0.35];
+const RAPID_RGB: [f32; 3] = [0.30, 0.50, 0.95];
+const PLUNGE_RGB: [f32; 3] = [0.92, 0.30, 0.25];
+/// Unselected operations under "Show all toolpaths" draw behind the
+/// selected one.
+const OTHERS_DIM: f32 = 0.45;
+/// One direction chevron per this much feed travel.
+const CHEVRON_SPACING: f64 = 10.0;
+/// Vertex budget for the overlay buffer (24 bytes each, ~25 MB). Past it
+/// the line list is truncated with a logged diagnostic - never silently,
+/// and never by refusing to draw at all.
+const MAX_OVERLAY_VERTICES: usize = 1 << 20;
+
+/// One overlay line: two `[x, y, z, r, g, b]` vertices.
+fn push_line(out: &mut Vec<[f32; 6]>, a: Point3, b: Point3, c: [f32; 3]) {
+    out.push([ftoz(a.x), ftoz(a.y), ftoz(a.z), c[0], c[1], c[2]]);
+    out.push([ftoz(b.x), ftoz(b.y), ftoz(b.z), c[0], c[1], c[2]]);
+}
+
+/// The cached CL paths as overlay segments: one line per move in its kind
+/// color, with direction chevrons along feed travel. The selected
+/// operation always draws bright; other operations show dimmed only under
+/// "Show all toolpaths". Staleness is not a display state here - what is
+/// drawn is the cache itself, and the tree is where a stale path is
+/// called out (step 10).
+pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
+    let mut out = Vec::new();
+    let arm = chevron_arm(state);
+    for (_, entity) in model::named_entities(&state.world) {
+        let Some(cache) = model::toolpath_of(&state.world, &entity) else {
+            continue;
+        };
+        let selected = model::is_selected(&state.world, &entity);
+        if !selected && !state.show_all_paths {
+            continue;
+        }
+        let dim = if selected { 1.0 } else { OTHERS_DIM };
+        for m in &cache.path.moves {
+            if out.len() + 10 > MAX_OVERLAY_VERTICES {
+                // A pathological cache (millions of file-loaded moves)
+                // must not allocate millions of segments either.
+                eprintln!(
+                    "overlay: the cached paths outgrew the {MAX_OVERLAY_VERTICES}-vertex \
+                     display budget; the rest is truncated (the full path still posts)"
+                );
+                out.truncate(out.len() & !1);
+                return out;
+            }
+            let base = match m.kind {
+                MoveKind::Rapid => RAPID_RGB,
+                MoveKind::Feed => FEED_RGB,
+                MoveKind::Plunge => PLUNGE_RGB,
+            };
+            let c = [base[0] * dim, base[1] * dim, base[2] * dim];
+            push_line(&mut out, m.from, m.to, c);
+            if m.kind == MoveKind::Feed {
+                chevrons(&mut out, m.from, m.to, c, arm);
+            }
+        }
+    }
     out
+}
+
+/// Chevron size follows the document: 1% of the solid extent, floored so
+/// a small part still reads direction.
+fn chevron_arm(state: &State) -> f64 {
+    let extent = model::solid_world_aabb(&state.world)
+        .map(|b| {
+            (b.max.x - b.min.x)
+                .max(b.max.y - b.min.y)
+                .max(b.max.z - b.min.z)
+        })
+        .unwrap_or(0.0);
+    (extent * 0.01).max(0.6)
+}
+
+/// Two trailing wings at each mark: the apex sits on the path and the
+/// wings sweep backwards, so the pair reads as motion, not a diamond.
+/// A feed too short to hold legible wings gets no chevrons at all.
+fn chevrons(out: &mut Vec<[f32; 6]>, from: Point3, to: Point3, c: [f32; 3], arm: f64) {
+    let d = to - from;
+    let len2 = d.dot(d);
+    let min2 = (2.0 * arm) * (2.0 * arm);
+    if !len2.is_finite() || len2 <= min2 {
+        return;
+    }
+    let len = len2.sqrt();
+    let dir = Point3::new(d.x / len, d.y / len, d.z / len);
+    // Any perpendicular works for the wing spread; a steep feed can't use
+    // Z as the helper, so it takes X.
+    let refv = if dir.z.abs() > 0.99 {
+        Point3::new(1.0, 0.0, 0.0)
+    } else {
+        Point3::new(0.0, 0.0, 1.0)
+    };
+    let n0 = refv.cross(dir);
+    let n2 = n0.dot(n0);
+    if !n2.is_finite() || n2 <= f64::EPSILON {
+        return;
+    }
+    let nl = n2.sqrt();
+    let n = Point3::new(n0.x / nl, n0.y / nl, n0.z / nl);
+    let count = ((len / CHEVRON_SPACING).floor().max(1.0) as usize).min(10_000);
+    let (back, spread) = (arm * 0.8, arm * 0.45);
+    for i in 0..count {
+        let t = len * (i as f64 + 0.5) / count as f64;
+        let q = Point3::new(
+            from.x + dir.x * t,
+            from.y + dir.y * t,
+            from.z + dir.z * t,
+        );
+        for s in [-1.0, 1.0] {
+            let tip = Point3::new(
+                q.x - dir.x * back + n.x * spread * s,
+                q.y - dir.y * back + n.y * spread * s,
+                q.z - dir.z * back + n.z * spread * s,
+            );
+            push_line(out, q, tip, c);
+        }
+    }
+}
+
+/// The whole overlay's hard ceiling, enforced at the one place every line
+/// producer passes through: truncate on even pairs (never half a line)
+/// and say so in the log.
+fn capped(mut lines: Vec<[f32; 6]>) -> Vec<[f32; 6]> {
+    if lines.len() > MAX_OVERLAY_VERTICES {
+        eprintln!(
+            "overlay: {} vertices exceed the display budget; the rest of this frame's \
+             lines are dropped",
+            lines.len()
+        );
+        lines.truncate(MAX_OVERLAY_VERTICES & !1);
+    }
+    lines
 }
 
 /// Triad extent for the current document (never smaller than 10 mm).
@@ -1093,5 +1236,155 @@ mod anchor_tests {
             (quat_yaw_deg(loc.rot) - 30.0).abs() < 1e-9,
             "the draft orientation rides along with the clicked position"
         );
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    //! The display half of M1.3: a generated path shows as colored lines
+    //! with direction chevrons, and the toggle says how much of that is on
+    //! screen. The tool/operation commands run straight off the history -
+    //! the buttons that queue them are step 10; the producer feeding the
+    //! overlay buffer is what these pin down.
+
+    use super::*;
+    use hsmworks_app::commands::{AddTool, CreateOperation, GenerateOperation};
+    use hsmworks_app::operation::{OpParams, SrcRef};
+    use hsmworks_app::stock::StockShape;
+    use hsmworks_app::tools::catalog;
+
+    fn state_with_generated_path() -> State {
+        let mut state = State::new();
+        state.pending.push_back(CommandKind::SetStock {
+            shape: StockShape::Box {
+                dx: 60.0,
+                dy: 60.0,
+                dz: 20.0,
+            },
+            pos: [0.0, 0.0, 0.0],
+            yaw_deg: 0.0,
+        });
+        state.drain_actions();
+        let em = catalog()
+            .into_iter()
+            .find(|(n, _)| *n == "EM-0400-2FL")
+            .map(|(_, t)| t)
+            .expect("catalog entry");
+        state
+            .history
+            .execute(&state.world, AddTool::new(&state.world, "EM-0400-2FL", em).expect("tool"));
+        state.history.execute(
+            &state.world,
+            CreateOperation::new(
+                &state.world,
+                "Face1",
+                "EM-0400-2FL",
+                SrcRef::Stock,
+                OpParams::Face {
+                    stepover: 3.0,
+                    clearance_z: 25.0,
+                    cut_z: 19.5,
+                    feed: 1200.0,
+                    plunge_feed: 300.0,
+                    climb: true,
+                },
+            )
+            .expect("operation"),
+        );
+        state.history.execute(
+            &state.world,
+            GenerateOperation::new(&state.world, "Face1").expect("generate"),
+        );
+        state
+    }
+
+    fn select(state: &mut State, name: Option<&str>) {
+        state.pending.push_back(CommandKind::Select(
+            name.map(|n| n.to_string()),
+        ));
+        state.drain_actions();
+    }
+
+    #[test]
+    fn nothing_shows_until_the_op_is_selected() {
+        let state = state_with_generated_path();
+        assert!(toolpath_lines(&state).is_empty(), "an unselected path stays hidden by default");
+    }
+
+    #[test]
+    fn selecting_the_operation_brings_its_path_up() {
+        let mut state = state_with_generated_path();
+        select(&mut state, Some("Face1"));
+        let lines = toolpath_lines(&state);
+        assert!(!lines.is_empty());
+        let cache = model::find_by_name(&state.world, "Face1")
+            .and_then(|e| model::toolpath_of(&state.world, &e))
+            .expect("cache");
+        assert!(
+            lines.len() > cache.path.moves.len() * 2,
+            "chevrons ride on top of the move lines"
+        );
+        // One vertex pair per move minimum: every move's own segment made it.
+        assert!(lines.iter().all(|v| v[3] <= 1.0 && v[4] <= 1.0 && v[5] <= 1.0));
+        let green = lines.iter().any(|v| v[3..6] == FEED_RGB);
+        let blue = lines.iter().any(|v| v[3..6] == RAPID_RGB);
+        let red = lines.iter().any(|v| v[3..6] == PLUNGE_RGB);
+        assert!(green && blue && red, "feed, rapid and plunge each show: {green} {blue} {red}");
+    }
+
+    #[test]
+    fn deselecting_hides_the_path_again() {
+        let mut state = state_with_generated_path();
+        select(&mut state, Some("Face1"));
+        assert!(!toolpath_lines(&state).is_empty());
+        select(&mut state, None);
+        assert!(toolpath_lines(&state).is_empty(), "no lingering path after deselect");
+    }
+
+    #[test]
+    fn show_all_dims_instead_of_hiding() {
+        let mut state = state_with_generated_path();
+        state.show_all_paths = true;
+        let lines = toolpath_lines(&state);
+        assert!(!lines.is_empty(), "the toggle draws unselected paths");
+        assert!(
+            lines.iter().all(|v| v[3] < 0.5 && v[4] < 0.5 && v[5] < 0.5),
+            "everything behind the selection is dimmed"
+        );
+        select(&mut state, Some("Face1"));
+        let bright = toolpath_lines(&state)
+            .iter()
+            .any(|v| v[3..6] == FEED_RGB || v[3..6] == RAPID_RGB || v[3..6] == PLUNGE_RGB);
+        assert!(bright, "the selected one draws at full strength");
+    }
+
+    #[test]
+    fn collect_overlay_adds_the_path_after_the_furniture() {
+        let mut state = state_with_generated_path();
+        select(&mut state, Some("Face1"));
+        let all = collect_overlay(&state);
+        let paths = toolpath_lines(&state);
+        assert_eq!(all.len(), 6 + paths.len(), "world axes first, then the path");
+    }
+
+    #[test]
+    fn the_cap_truncates_on_whole_lines() {
+        let over = vec![[0.0f32; 6]; MAX_OVERLAY_VERTICES + 3];
+        let out = capped(over);
+        assert_eq!(out.len(), MAX_OVERLAY_VERTICES & !1);
+        assert_eq!(out.len() % 2, 0, "never half a line");
+    }
+
+    #[test]
+    fn degenerate_feeds_get_no_chevrons() {
+        // A zero-length feed is the pathological cache entry; it must draw
+        // its (zero-length) segment and nothing else - no NaN marker.
+        let mut out = Vec::new();
+        let p = Point3::new(1.0, 2.0, 3.0);
+        chevrons(&mut out, p, p, FEED_RGB, 2.0);
+        assert!(out.is_empty());
+        let mut out = Vec::new();
+        chevrons(&mut out, p, Point3::new(1.0, 2.0, 3.5), FEED_RGB, 2.0);
+        assert!(out.is_empty(), "a feed shorter than two chevron arms stays plain");
     }
 }
