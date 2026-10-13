@@ -8,7 +8,8 @@ use common::{gen_to_cltext, write_golden};
 
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::machining2d::{
-    contour, face, pocket, ContourParams, FaceParams, Lead, PocketParams, PocketStrategy,
+    contour, face, pocket, slot, trace, ContourParams, FaceParams, Lead, PocketParams,
+    PocketStrategy, SlotParams, TraceParams,
 };
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
@@ -20,6 +21,13 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
     ])
     .unwrap()])
     .unwrap()
+}
+
+/// 40x20 plate with an 8x8 through hole centered on (20,10).
+fn plate_with_hole() -> Region {
+    let mut loops = rect(0.0, 0.0, 40.0, 20.0).loops().to_vec();
+    loops.extend_from_slice(rect(16.0, 6.0, 24.0, 14.0).loops());
+    Region::new(loops).unwrap()
 }
 
 /// Two loops through Region::new: outer square with a centered square
@@ -90,14 +98,7 @@ fn contour_plate_with_hole_matches_golden() {
         tab_width: 0.0,
         tab_height: 0.0,
     };
-    let r = {
-        let outer = rect(0.0, 0.0, 40.0, 20.0);
-        let hole = rect(16.0, 6.0, 24.0, 14.0);
-        let mut loops: Vec<Loop> = outer.loops().to_vec();
-        loops.extend_from_slice(hole.loops());
-        Region::new(loops).unwrap()
-    };
-    let t = contour(&r, &p).unwrap();
+    let t = contour(&plate_with_hole(), &p).unwrap();
     write_golden("contour_plate_with_hole.cl", &gen_to_cltext(&t));
 }
 
@@ -142,4 +143,63 @@ fn pocket_waterline_matches_golden() {
     };
     let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();
     write_golden("pocket_waterline_plate_with_island.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn slot_fullwidth_centerline_matches_golden() {
+    // Tool fills the channel (dia 10 = width 10): one centerline row per
+    // level, the everyday slot.
+    let p = SlotParams {
+        tool_diameter: 10.0,
+        width: 10.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        top_z: 0.0,
+        bottom_z: -6.0,
+        stepdown: 3.0,
+        stepover: 5.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    let t = slot(Point2::new(0.0, 0.0), Point2::new(60.0, 0.0), &p).unwrap();
+    write_golden("slot_fullwidth_centerline.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn slot_wide_channel_rows_matches_golden() {
+    // Width 20 with a 6 mm tool, stepover 4: several serpentine rows,
+    // each shortened by the round-end reach sqrt(h^2 - d^2) - the case
+    // where the closed-form stadium math must agree with a Clipper offset.
+    let p = SlotParams {
+        tool_diameter: 6.0,
+        width: 20.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        top_z: 0.0,
+        bottom_z: -4.0,
+        stepdown: 4.0,
+        stepover: 4.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    let t = slot(Point2::new(-10.0, 0.0), Point2::new(50.0, 0.0), &p).unwrap();
+    write_golden("slot_wide_channel_rows.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn trace_plate_with_hole_matches_golden() {
+    // Engraving: cutter center exactly on both loops, at every level.
+    let p = TraceParams {
+        clearance_z: 5.0,
+        top_z: 0.0,
+        bottom_z: -2.0,
+        stepdown: 1.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    let t = trace(&plate_with_hole(), &p).unwrap();
+    write_golden("trace_plate_with_hole.cl", &gen_to_cltext(&t));
 }

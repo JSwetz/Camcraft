@@ -1,9 +1,10 @@
 //! 2D machining generators: region + parameters in, CL path out.
 //!
 //! Provenance: serpentine facing, offset contouring, zigzag and waterline
-//! pocketing are textbook CAM strategies as described in machine-tool
-//! handbooks and published CAM literature; every number (parameter model,
-//! entry/exit overruns, snap rules) is ours. Pure module: no flecs, no
+//! pocketing, stadium slotting rows and engraved trace paths are textbook
+//! CAM strategies as described in machine-tool handbooks and published CAM
+//! literature; every number (parameter model, entry/exit overruns, snap
+//! rules) is ours. Pure module: no flecs, no
 //! world access - the command layer resolves geometry into regions, this
 //! module only cuts them.
 //!
@@ -273,6 +274,48 @@ fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
     }
     zs.push(bottom);
     zs
+}
+
+/// Run XY passes at each of the cut levels: every pass starts with a lift
+/// (except the very first entry) and a rapid transfer along the clearance
+/// plane, then plunges at the pass start and feeds along it. The builder
+/// drops zero-length moves, so the first entry's lift collapses when the
+/// path already starts at clearance above the entry point. Rapids
+/// therefore always run at `clearance_z`, never inside the cut. Shared by
+/// the depth-stepping area operations (pocket, slot, trace).
+fn run_levels(
+    b: &mut PathBuilder,
+    passes: &[Vec<Point2>],
+    zs: &[f64],
+    clearance_z: f64,
+    feed: f64,
+    plunge_feed: f64,
+) {
+    let mut first = true;
+    for &z in zs {
+        for pass in passes {
+            let Some((entry, rest)) = pass.split_first() else {
+                continue;
+            };
+            if rest.is_empty() {
+                continue;
+            }
+            if !first {
+                let cur = b.at();
+                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, clearance_z), None);
+            }
+            b.push(
+                MoveKind::Rapid,
+                Point3::new(entry.x, entry.y, clearance_z),
+                None,
+            );
+            b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(plunge_feed));
+            first = false;
+            for q in rest {
+                b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
+            }
+        }
+    }
 }
 
 /// Offset-contour `region` (a material cross-section): every level walks
@@ -756,29 +799,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    let mut first = true;
-    for &z in &zs {
-        for pass in &passes {
-            if pass.len() < 2 {
-                continue;
-            }
-            let entry = pass[0];
-            if !first {
-                let cur = b.at();
-                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
-            }
-            b.push(
-                MoveKind::Rapid,
-                Point3::new(entry.x, entry.y, p.clearance_z),
-                None,
-            );
-            b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(p.plunge_feed));
-            first = false;
-            for q in &pass[1..] {
-                b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(p.feed));
-            }
-        }
-    }
+    run_levels(&mut b, &passes, &zs, p.clearance_z, p.feed, p.plunge_feed);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
@@ -930,6 +951,218 @@ fn scan_row(region: &Region, y: f64, upper_inclusive: bool) -> Vec<(f64, f64)> {
         k += 2;
     }
     out
+}
+
+/// Slotting: a straight channel between two XY points, cleared in rows
+/// parallel to its axis. The channel is the stadium swept by a disc of
+/// radius `width / 2` along `a` -> `b`; shrinking a stadium is narrowing
+/// one, so the cutter-center area is in closed form - the stadium of
+/// half-width `h = width / 2 - r - leave` on the same endpoints, no
+/// Clipper round trip. `h < 0` means no tool position keeps the edge
+/// inside the walls; `h == 0` is the everyday full-width slot - one row
+/// on the centerline, the tool's own edges sweeping the walls.
+///
+/// Rows band the width `[-h, h]` at `stepover` (same snap law as facing
+/// and pocket rows), and the row at offset `d` runs `a - q u + d n` to
+/// `b + q u + d n` with `q = sqrt(h^2 - d^2)`, so each row reaches the
+/// round ends exactly as far as it can. The center area is convex, so
+/// the serpentine joins with lateral feeds and no in-cut rapids are
+/// even possible.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlotParams {
+    pub tool_diameter: f64,
+    /// Width of the finished channel.
+    pub width: f64,
+    pub stock_to_leave: f64,
+    pub clearance_z: f64,
+    /// First cut level; material is engaged from here down.
+    pub top_z: f64,
+    pub bottom_z: f64,
+    pub stepdown: f64,
+    pub stepover: f64,
+    pub feed: f64,
+    pub plunge_feed: f64,
+    /// The first row runs from `a` toward `b`; rows alternate from there.
+    pub climb: bool,
+}
+
+impl SlotParams {
+    fn validate(&self) -> Result<(), GenError> {
+        let finite = [
+            self.tool_diameter,
+            self.width,
+            self.stock_to_leave,
+            self.clearance_z,
+            self.top_z,
+            self.bottom_z,
+            self.stepdown,
+            self.stepover,
+            self.feed,
+            self.plunge_feed,
+        ]
+        .into_iter()
+        .all(f64::is_finite);
+        if !finite {
+            return Err(GenError::Invalid("parameters must be finite".into()));
+        }
+        if self.tool_diameter <= 0.0 || self.stepdown <= 0.0 {
+            return Err(GenError::Invalid("diameter and stepdown must be positive".into()));
+        }
+        if self.stepover <= 0.0 {
+            return Err(GenError::Invalid("stepover must be positive".into()));
+        }
+        if self.stepover > self.tool_diameter {
+            return Err(GenError::Invalid(
+                "stepover leaves bands the tool cannot reach".into(),
+            ));
+        }
+        if self.feed <= 0.0 || self.plunge_feed <= 0.0 {
+            return Err(GenError::Invalid("feeds must be positive".into()));
+        }
+        if self.width <= 0.0 {
+            return Err(GenError::Invalid("slot width must be positive".into()));
+        }
+        if self.stock_to_leave < 0.0 {
+            return Err(GenError::Invalid("stock to leave must not be negative".into()));
+        }
+        if self.top_z < self.bottom_z {
+            return Err(GenError::Invalid("cut top below cut bottom".into()));
+        }
+        if self.clearance_z < self.top_z {
+            return Err(GenError::Invalid("clearance plane below the first cut level".into()));
+        }
+        Ok(())
+    }
+}
+
+/// Mill the slot between `a` and `b` (see [`SlotParams`] for the shape
+/// and the row law). One serpentine pass per level; `run_levels` lifts
+/// and plunges only between levels.
+pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> {
+    p.validate()?;
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len == 0.0 || !len.is_finite() {
+        return Err(GenError::Invalid("slot endpoints must be distinct".into()));
+    }
+    let r = p.tool_diameter * 0.5;
+    let h = p.width * 0.5 - r - p.stock_to_leave;
+    if h < 0.0 {
+        return Err(GenError::Invalid("slot is narrower than the tool".into()));
+    }
+    let u = Point2::new(dx / len, dy / len);
+    let n = Point2::new(-u.y, u.x);
+    let ds = band(-h, h, 0.0, p.stepover);
+    let mut pass: Vec<Point2> = Vec::with_capacity(2 * ds.len());
+    for (i, &d) in ds.iter().enumerate() {
+        let q = (h * h - d * d).max(0.0).sqrt();
+        let s = Point2::new(a.x - u.x * q + n.x * d, a.y - u.y * q + n.y * d);
+        let e = Point2::new(b.x + u.x * q + n.x * d, b.y + u.y * q + n.y * d);
+        // Even rows run a -> b under climb; odd rows return. The join is
+        // then a short lateral step at the far end, never a diagonal.
+        let (s, e) = if p.climb == (i % 2 == 0) { (s, e) } else { (e, s) };
+        pass.push(s);
+        pass.push(e);
+    }
+
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+    let mut bld = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    run_levels(&mut bld, &[pass], &zs, p.clearance_z, p.feed, p.plunge_feed);
+    let cur = bld.at();
+    bld.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+
+    let path = bld.finish();
+    if !path.all_finite() {
+        return Err(GenError::Invalid("path left the finite horizon".into()));
+    }
+    Ok(path)
+}
+
+/// 2D tracing: the cutter center runs exactly on the region's loops at
+/// successive depths - the drawn line itself, engraved (the plan's
+/// "buffer 0"). Wall finishing is contour's job; how the tool EDGE gets
+/// onto the line (G41/G42, or an r-offset at the post) is the same
+/// recorded-compensation question contour already defers to M1.5.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TraceParams {
+    pub clearance_z: f64,
+    /// First cut level; material is engaged from here down.
+    pub top_z: f64,
+    pub bottom_z: f64,
+    pub stepdown: f64,
+    pub feed: f64,
+    pub plunge_feed: f64,
+    /// Canonical (material-on-the-left) travel; conventional reverses
+    /// each loop.
+    pub climb: bool,
+}
+
+impl TraceParams {
+    fn validate(&self) -> Result<(), GenError> {
+        let finite = [
+            self.clearance_z,
+            self.top_z,
+            self.bottom_z,
+            self.stepdown,
+            self.feed,
+            self.plunge_feed,
+        ]
+        .into_iter()
+        .all(f64::is_finite);
+        if !finite {
+            return Err(GenError::Invalid("parameters must be finite".into()));
+        }
+        if self.stepdown <= 0.0 {
+            return Err(GenError::Invalid("stepdown must be positive".into()));
+        }
+        if self.feed <= 0.0 || self.plunge_feed <= 0.0 {
+            return Err(GenError::Invalid("feeds must be positive".into()));
+        }
+        if self.top_z < self.bottom_z {
+            return Err(GenError::Invalid("cut top below cut bottom".into()));
+        }
+        if self.clearance_z < self.top_z {
+            return Err(GenError::Invalid("clearance plane below the first cut level".into()));
+        }
+        Ok(())
+    }
+}
+
+/// Trace every loop of `region` - outer loops and holes alike are just
+/// lines to engrave - ordered by `|area|` descending for determinism,
+/// each traversal closed so the ring's cut joins at its start.
+pub fn trace(region: &Region, p: &TraceParams) -> Result<Toolpath, GenError> {
+    p.validate()?;
+    if region.is_empty() {
+        return Err(GenError::Empty("empty trace region".into()));
+    }
+    let mut loops: Vec<&Loop> = region.loops().iter().collect();
+    loops.sort_by(|x, y| y.area().abs().total_cmp(&x.area().abs()));
+    let mut passes: Vec<Vec<Point2>> = Vec::with_capacity(loops.len());
+    for l in &loops {
+        let mut pass: Vec<Point2> = if p.climb {
+            l.points().to_vec()
+        } else {
+            l.points().iter().rev().copied().collect()
+        };
+        if let Some(&start) = pass.first() {
+            pass.push(start);
+        }
+        passes.push(pass);
+    }
+
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    run_levels(&mut b, &passes, &zs, p.clearance_z, p.feed, p.plunge_feed);
+    let cur = b.at();
+    b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+
+    let path = b.finish();
+    if !path.all_finite() {
+        return Err(GenError::Invalid("path left the finite horizon".into()));
+    }
+    Ok(path)
 }
 
 /// True when the straight chord `a` -> `b` never passes outside the

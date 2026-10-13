@@ -1,13 +1,14 @@
-//! Face and contour generator goldens: row counts, offsets and spacings
-//! are exact hand-computable numbers, and face rapids may only appear at
-//! the path ends (contour legitimately rapids between loops and hops
-//! over tabs - at the clearance/retract planes).
+//! Face, contour, pocket, slot and trace generator goldens: row counts,
+//! offsets and spacings are exact hand-computable numbers, and rapids may
+//! only appear where the strategy says (face: at the path ends; contour:
+//! between loops and at the hop planes; pocket/slot/trace: only at the
+//! clearance plane).
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::machining2d::{
-    chord_clears, contour, face, on_boundary, pocket, ContourParams, FaceParams, GenError, Lead,
-    PocketParams, PocketStrategy,
+    chord_clears, contour, face, on_boundary, pocket, slot, trace, ContourParams, FaceParams,
+    GenError, Lead, PocketParams, PocketStrategy, SlotParams, TraceParams,
 };
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
@@ -526,8 +527,9 @@ fn in_closed(r: &Region, q: (f64, f64)) -> bool {
 
 /// The level's cutter-center polyline in path order, with the flag saying
 /// whether each point was reached by a plunge (a subpath start after a
-/// hop) rather than by feeding from the previous point. Pocket paths only:
-/// the one non-feed move at cut depth a pocket makes is an entry plunge.
+/// hop) rather than by feeding from the previous point. Area and engrave
+/// paths only (pocket, slot, trace): the one non-feed move at cut depth
+/// they make is an entry plunge.
 fn polyline_at(t: &Toolpath, z: f64) -> (Vec<(f64, f64)>, Vec<bool>) {
     let mut pts = Vec::new();
     let mut lifted = Vec::new();
@@ -819,6 +821,300 @@ fn pocket_is_deterministic() {
         let b = pocket(&r, &p).unwrap();
         assert_eq!(a, b, "{s:?}");
     }
+}
+
+// ---- slot and trace -----------------------------------------------------
+
+fn sp() -> SlotParams {
+    SlotParams {
+        tool_diameter: 10.0,
+        width: 10.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        top_z: 0.0,
+        bottom_z: -6.0,
+        stepdown: 3.0,
+        stepover: 5.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    }
+}
+
+fn tp() -> TraceParams {
+    TraceParams {
+        clearance_z: 5.0,
+        top_z: 0.0,
+        bottom_z: -2.0,
+        stepdown: 1.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    }
+}
+
+/// Distance from p to the segment a -> b: the stadium membership test (a
+/// point is in the stadium of half-width h iff it is within h of the axis
+/// segment).
+fn seg_dist(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let dd = dx * dx + dy * dy;
+    let t = if dd == 0.0 {
+        0.0
+    } else {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / dd).clamp(0.0, 1.0)
+    };
+    (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dy)
+}
+
+#[test]
+fn slot_the_tool_fills_the_channel_and_runs_the_centerline() {
+    let (a, b) = (Point2::new(0.0, 0.0), Point2::new(40.0, 0.0));
+    let t = slot(a, b, &sp()).expect("valid"); // h = 0: one row
+    assert!(t.is_chained() && t.all_finite());
+    for &z in &levels_3_zs() {
+        let (pts, lifted) = polyline_at(&t, z);
+        assert_eq!(pts, vec![(0.0, 0.0), (40.0, 0.0)]);
+        assert!(lifted[0] && lifted[1..].iter().all(|&l| !l));
+        assert!((level_len(&t, z) - 40.0).abs() < 1e-9);
+    }
+    assert_eq!(plunge_xy(&t).len(), 3, "one plunge per level, no in-cut lift");
+    for m in t.moves.iter().filter(|m| m.kind == MoveKind::Rapid) {
+        assert!(m.from.z == 5.0 || m.to.z == 5.0, "rapid inside the cut: {m:?}");
+    }
+}
+
+#[test]
+fn slot_offsets_rows_across_a_wide_channel() {
+    let (a, b) = (Point2::new(0.0, 0.0), Point2::new(40.0, 0.0));
+    let p = SlotParams {
+        tool_diameter: 6.0,
+        width: 20.0,
+        stepover: 4.0,
+        bottom_z: 0.0,
+        ..sp()
+    };
+    let t = slot(a, b, &p).expect("valid"); // h = 7: rows -7, -3, 1, 5, 7
+    let (s40, s48, s24) = (40f64.sqrt(), 48f64.sqrt(), 24f64.sqrt());
+    let want = vec![
+        (0.0, -7.0),
+        (40.0, -7.0),
+        (40.0 + s40, -3.0),
+        (-s40, -3.0),
+        (-s48, 1.0),
+        (40.0 + s48, 1.0),
+        (40.0 + s24, 5.0),
+        (-s24, 5.0),
+        (0.0, 7.0),
+        (40.0, 7.0),
+    ];
+    let (pts, _) = polyline_at(&t, 0.0);
+    assert_eq!(pts, want, "serpentine rows, each reaching its round end by sqrt(h^2 - d^2)");
+    assert_eq!(
+        t.moves.iter().filter(|m| m.kind == MoveKind::Feed).count(),
+        want.len() - 1,
+        "joins are feeds: the center area is convex"
+    );
+    assert_eq!(plunge_xy(&t).len(), 1);
+    for q in &pts {
+        assert!(
+            seg_dist(*q, (0.0, 0.0), (40.0, 0.0)) <= 7.0 + 1e-9,
+            "center left the area: {q:?}"
+        );
+    }
+    let max_x = pts.iter().map(|q| q.0).fold(f64::NEG_INFINITY, f64::max);
+    let min_x = pts.iter().map(|q| q.0).fold(f64::INFINITY, f64::min);
+    assert_eq!(max_x, 40.0 + s48);
+    assert_eq!(min_x, -s48);
+}
+
+#[test]
+fn conventional_slot_starts_at_the_far_end() {
+    let p = SlotParams {
+        tool_diameter: 6.0,
+        width: 20.0,
+        stepover: 4.0,
+        bottom_z: 0.0,
+        climb: false,
+        ..sp()
+    };
+    let t = slot(Point2::new(0.0, 0.0), Point2::new(40.0, 0.0), &p).unwrap();
+    let (pts, _) = polyline_at(&t, 0.0);
+    assert_eq!(pts[0], (40.0, -7.0), "conventional enters at +x");
+    assert_eq!(pts[1], (0.0, -7.0));
+    let mut ys: Vec<f64> = pts.iter().map(|q| q.1).collect();
+    ys.sort_by(f64::total_cmp);
+    ys.dedup();
+    assert_eq!(ys, vec![-7.0, -3.0, 1.0, 5.0, 7.0], "same rows, reversed travel");
+}
+
+#[test]
+fn slot_stock_to_leave_narrows_the_center_area() {
+    let p = SlotParams {
+        tool_diameter: 6.0,
+        width: 20.0,
+        stock_to_leave: 2.0,
+        stepover: 2.0,
+        bottom_z: 0.0,
+        ..sp()
+    };
+    let t = slot(Point2::new(0.0, 0.0), Point2::new(40.0, 0.0), &p).unwrap();
+    let (pts, _) = polyline_at(&t, 0.0);
+    // h = 10 - 3 - 2: rows reach +-5 lateral, sqrt(24) past the ends.
+    for q in &pts {
+        assert!(
+            seg_dist(*q, (0.0, 0.0), (40.0, 0.0)) <= 5.0 + 1e-9,
+            "cut into the allowance: {q:?}"
+        );
+    }
+    let mut ys: Vec<f64> = pts.iter().map(|q| q.1).collect();
+    ys.sort_by(f64::total_cmp);
+    ys.dedup();
+    assert_eq!(ys, vec![-5.0, -3.0, -1.0, 1.0, 3.0, 5.0]);
+    let max_x = pts.iter().map(|q| q.0).fold(f64::NEG_INFINITY, f64::max);
+    assert_eq!(max_x, 40.0 + 24f64.sqrt());
+}
+
+#[test]
+fn slot_refuses_bad_input() {
+    let (a, b) = (Point2::new(0.0, 0.0), Point2::new(40.0, 0.0));
+    let cases: Vec<(&str, SlotParams)> = vec![
+        ("tool wider than the slot", SlotParams { tool_diameter: 12.0, ..sp() }),
+        ("stepover beyond the tool", SlotParams { stepover: 11.0, ..sp() }),
+        ("zero width", SlotParams { width: 0.0, ..sp() }),
+        ("non-finite width", SlotParams { width: f64::NAN, ..sp() }),
+        ("leave eats the slot", SlotParams { stock_to_leave: 6.0, ..sp() }),
+        ("negative leave", SlotParams { stock_to_leave: -1.0, ..sp() }),
+        ("top below bottom", SlotParams { bottom_z: 1.0, ..sp() }),
+        ("clearance below the cut", SlotParams { clearance_z: -2.0, ..sp() }),
+        ("zero feed", SlotParams { feed: 0.0, ..sp() }),
+        ("zero stepdown", SlotParams { stepdown: 0.0, ..sp() }),
+    ];
+    for (name, p) in cases {
+        assert!(
+            matches!(slot(a, b, &p), Err(GenError::Invalid(_))),
+            "{name}: expected a clean refusal"
+        );
+    }
+    assert!(
+        matches!(slot(a, a, &sp()), Err(GenError::Invalid(_))),
+        "coincident endpoints"
+    );
+    assert!(
+        matches!(slot(a, Point2::new(f64::INFINITY, 0.0), &sp()), Err(GenError::Invalid(_))),
+        "non-finite endpoints"
+    );
+}
+
+#[test]
+fn slot_is_deterministic() {
+    let p = SlotParams {
+        tool_diameter: 6.0,
+        width: 20.0,
+        stepover: 4.0,
+        ..sp()
+    };
+    let (a, b) = (Point2::new(-3.0, 2.0), Point2::new(21.0, 8.0)); // any old angle
+    let x = slot(a, b, &p).unwrap();
+    let y = slot(a, b, &p).unwrap();
+    assert_eq!(x, y);
+    assert!(x.is_chained() && x.all_finite());
+}
+
+#[test]
+fn trace_runs_exactly_on_the_boundary() {
+    let r = rect(0.0, 0.0, 20.0, 20.0);
+    let p = TraceParams { bottom_z: 0.0, ..tp() };
+    let t = trace(&r, &p).expect("valid");
+    let (pts, lifted) = polyline_at(&t, 0.0);
+    assert_eq!(pts.len(), 5, "closed walk of a 4-vertex loop");
+    assert_eq!(pts[0], pts[4], "the traversal returns to its plunge point");
+    assert!(lifted[0] && lifted[1..].iter().all(|&l| !l));
+    let corners = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)];
+    for q in &pts[..4] {
+        assert!(corners.iter().any(|c| c == q), "left the boundary: {q:?}");
+    }
+    assert!((level_len(&t, 0.0) - 80.0).abs() < 1e-9);
+    assert!(shoelace(&pts[..4]) > 0.0, "climb keeps the interior on the left");
+    assert_eq!(plunge_xy(&t).len(), 1);
+}
+
+#[test]
+fn trace_conventional_reverses_the_walk() {
+    let r = rect(0.0, 0.0, 20.0, 20.0);
+    let p = TraceParams { bottom_z: 0.0, climb: false, ..tp() };
+    let t = trace(&r, &p).unwrap();
+    let (pts, _) = polyline_at(&t, 0.0);
+    assert!(shoelace(&pts[..4]) < 0.0, "conventional runs the loop backwards");
+    assert_eq!(pts[0], pts[4]);
+}
+
+#[test]
+fn trace_cuts_every_loop_at_every_level() {
+    let r = Region::new(vec![
+        Loop::new(vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(20.0, 0.0),
+            Point2::new(20.0, 20.0),
+            Point2::new(0.0, 20.0),
+        ])
+        .unwrap(),
+        Loop::new(vec![
+            Point2::new(8.0, 8.0),
+            Point2::new(12.0, 8.0),
+            Point2::new(12.0, 12.0),
+            Point2::new(8.0, 12.0),
+        ])
+        .unwrap(),
+    ])
+    .unwrap();
+    let t = trace(&r, &tp()).expect("valid"); // zs 0, -1, -2
+    assert_eq!(plunge_xy(&t).len(), 6, "two loops at three levels");
+    for m in t.moves.iter().filter(|m| m.kind == MoveKind::Rapid) {
+        assert!(m.from.z == 5.0 || m.to.z == 5.0, "rapid inside the cut: {m:?}");
+    }
+    let verts: Vec<(f64, f64)> = r
+        .loops()
+        .iter()
+        .flat_map(|l| l.points().iter().map(|q| (q.x, q.y)))
+        .collect();
+    for &z in &[0.0, -1.0, -2.0] {
+        let (pts, _) = polyline_at(&t, z);
+        assert_eq!(pts.len(), 10, "both rings closed at {z}: {pts:?}");
+        for q in &pts {
+            assert!(verts.iter().any(|v| v == q), "point off the sketch: {q:?}");
+        }
+        assert!((level_len(&t, z) - 96.0).abs() < 1e-9, "80 outer + 16 hole");
+    }
+}
+
+#[test]
+fn trace_refuses_bad_input() {
+    assert!(
+        matches!(trace(&Region::empty(), &tp()), Err(GenError::Empty(_))),
+        "empty region"
+    );
+    let r = rect(0.0, 0.0, 10.0, 10.0);
+    let cases: Vec<(&str, TraceParams)> = vec![
+        ("non-finite clearance", TraceParams { clearance_z: f64::NAN, ..tp() }),
+        ("zero stepdown", TraceParams { stepdown: 0.0, ..tp() }),
+        ("top below bottom", TraceParams { bottom_z: 1.0, ..tp() }),
+        ("clearance below the cut", TraceParams { clearance_z: -3.0, ..tp() }),
+        ("zero feed", TraceParams { feed: 0.0, ..tp() }),
+        ("zero plunge feed", TraceParams { plunge_feed: 0.0, ..tp() }),
+    ];
+    for (name, p) in cases {
+        assert!(matches!(trace(&r, &p), Err(GenError::Invalid(_))), "{name}");
+    }
+}
+
+#[test]
+fn trace_is_deterministic() {
+    let r = rect(0.0, 0.0, 10.0, 10.0);
+    let a = trace(&r, &tp()).unwrap();
+    let b = trace(&r, &tp()).unwrap();
+    assert_eq!(a, b);
+    assert!(a.is_chained() && a.all_finite());
 }
 
 
