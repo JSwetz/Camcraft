@@ -33,6 +33,13 @@ pollster = "0.4"
 # Sept-2024 mutual version set; hard-pinned because the crates are alpha.
 # meshalgo's default features pull vtkio -> lzma-sys (C code): keep it off and
 # take only `tessellation` (which enables `filters` + spade, both pure Rust).
+# Polygon booleans/offset - pure-Rust port (BSL-1.0) of the published Clipper2,
+# backing crates/app/src/geo2d.rs. Hard-pinned (young project); the `clipper2`
+# crate alternative is rejected because it builds C++ (our posture is pure Rust,
+# same reasoning as meshalgo's off defaults above). Notice text in
+# assets/ui/LICENSES.md.
+clipper2-rust = "=1.2.0"
+
 truck-stepio = "=0.3.0"
 truck-topology = "=0.6.0"
 truck-polymesh = "=0.6.0"

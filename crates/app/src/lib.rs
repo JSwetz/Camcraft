@@ -5,6 +5,7 @@
 //! literature. No HSMWorks source, binaries, or assets were consulted.
 
 pub mod commands;
+pub mod geo2d;
 pub mod geometry;
 pub mod model;
 pub mod pick;
