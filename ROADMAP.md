@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> _Last updated: 2026-10-13_
+> _Last updated: 2026-10-14_
 
 ## North Star
 
@@ -47,8 +47,11 @@ the contract; the Goal line is what the feature list adds up to.
 Everything a machinist needs to cut a 2.5D part on a vertical mill today:
 setup, tools, 2D operations, drilling, simulation, and one trustworthy post.
 
-**Current status snapshot**: M1.1 (mesh side) and the M1.2 shell, viewport and
-job setup (stock + WCS) are in; toolpath display and units remain for the phase.
+**Current status snapshot**: M1.1 (mesh side), the M1.2 shell, viewport, job
+setup (stock + WCS) and toolpath display, and M1.3 2D machining (face,
+contour, pocket, slot, trace over mesh-sliced geometry, with the tool
+library, operation parameters and verification warnings) are in; units and
+toolbar icons remain for the phase, then drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -58,8 +61,8 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
 - ✅ **Robustness**: degenerate and corrupt models produce clean errors, never
       crashes (Prime Directive) - corrupt-input corpus tests enforce this
 - ✅ **Project save/load**: versioned single-file project (`.hsmproj` JSON, at
-      v2: rigid transforms, stock and WCS; older files migrate on load;
-      operations and tools attach as those entities land)
+      v3: tools, operations and their cached, verified toolpaths; older files
+      migrate on load through chained steps, v1→2→3, never skipping one)
 - ✅ **Command foundation**: command pattern with undo/redo driving all
       UI-visible state changes from day one
 - 📋 **Units**: millimeters and inches, correct everywhere including posts
@@ -74,8 +77,9 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
       Del, F); toolbar icons not yet - the icon-source blocker is gone (free
       attribution-safe sets per AGENTS.md, primary pick Tabler Icons/MIT;
       converting them into `assets/ui/` and wiring `icons.rs` is open work)
-- ⚠️ **Setup tree pane**: models pane with viewport-synced selection, plus a
-      Setup tab editing stock and work offsets; setups → operations nodes arrive with M1.3
+- ✅ **Setup tree pane**: models pane with viewport-synced selection plus an
+      Operations section (name, type, derived never/OK/STALE status, warning
+      counts), and a Setup tab editing stock and work offsets
 - ✅ **Viewport**: orbit / pan / zoom, selection highlight, frame-all, dockable
       offscreen 3D target; translucent stock and WCS triads render, stock is
       pickable where nothing is behind it; operations pickables arrive with M1.3.
@@ -110,22 +114,59 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
       highlights and what places cannot drift apart. True face/vertex
       snapping on model faces is deferred (needs M1.3 selection geometry).
       Offset codes are the published RS-274 / ISO 6983 ones
-- 📋 **Toolpath display**: colored toolpath preview with directional arrows
+- ✅ **Toolpath display**: generated paths render in the viewport - green
+      feed, blue rapid, red plunge, with directional chevrons along the feed
+      moves; the selected operation draws bright, others dim under a
+      Models-pane "Show all toolpaths" toggle (view state, like the camera)
 
 ### M1.3 - 2D Machining
-**Goal: a machinist can face, pocket, and contour a simple plate.**
+**Goal: a machinist can face, pocket, and contour a simple plate.** — ⚠️ partial
+
+Operation geometry comes from slicing meshes at Z (the same construction the
+feature-edge wireframe uses): STL, OBJ and STEP-derived models all take the
+identical path, and planar-face vertices are exact in XY. Feature-edge-driven
+operations wait on the kernel decision below. Even-odd region algebra and
+round-join offsetting run through clipper2-rust (BSL-1.0, a pure-Rust port of
+published Clipper2) behind our own `geo2d` wrapper. Staleness is derived on
+read from a generation stamp (stock params + transforms + geometry digests),
+never stored, so a pane can't show a stale OK about a stale path; every
+command - including generation, which runs in the command's constructor -
+undoes and redoes exactly, replaying byte-identical paths.
 
 - ⏸ **IGES import + B-rep operations**: STEP import already landed (M1.2,
       truck). Face/island recognition and boolean stock ops need the kernel
       decision - truck (already linked for import) vs an OpenCascade binding;
-      benchmark truck's booleans before committing
-- **Face operation**: clean stock tops
-- **2D Contour**: islands, lead in/out (linear, arc, tangential), tabs, cutter compensation (G41/G42)
-- **2D Pocket**: with islands, spiral and zigzag entry, stock-to-leave
-- **Slot and Trace**: straight slots with corner radii; trace of 2D curves
-- **Tool library**: end mills, bull-nose, ball nose; shank/holder/stub definition; a homegrown speeds-and-feeds database by material group (never a copy of the Machining Data Handbook)
-- **Operation parameters**: heights (clearance/retract/feed/top/bottom), depth passes and stepover, tolerance, climb vs conventional
-- **Verification**: pre-post self-intersection and gouge warning on every generated path
+      benchmark truck's booleans before committing. The 2D ops above work
+      without it, from meshes
+- ✅ **Face operation**: serpentine rows over the stock or model footprint at
+      the cut Z, with rapids only at the ends
+- ⚠️ **2D Contour**: islands (even-odd region sets), climb vs conventional,
+      linear and arc lead in/out, tabs as skipped segments, per-level
+      stepdowns, tolerance-driven arc tessellation. Missing: tangential
+      leads, and G41/G42 output - the compensation side is recorded in the
+      parameters but the path is cutter-center until the post emits it (M1.5)
+- ⚠️ **2D Pocket**: zigzag (scanline parity walk; islands fall out of the
+      even-odd set) and waterline (inward buffers), stock-to-leave as a
+      region shrink, per-level stepdowns with retract between levels.
+      Missing: spiral entry and ramp/helical plunges (M2.1 has the entry
+      family); plunge entries are vertical today
+- ✅ **Slot and Trace**: slots as stadium regions between two points (corner
+      radii from width and tool); trace runs the region's loops themselves,
+      level by level
+- ✅ **Tool library**: end/ball/bull-nose entities with shank, holder and
+      stickout, a starter catalog of standard metric sizes, and our own
+      speeds-and-feeds numbers by material group (never a copy of the
+      Machining Data Handbook); referenced operations read STALE after an
+      edit - no silent cascade
+- ✅ **Operation parameters**: heights (clearance/retract/feed/top/bottom),
+      stepdowns and stepover, tolerance, climb vs conventional, feeds and
+      plunge feeds - full property page; parameter edits ride the history
+      like everything else
+- ✅ **Verification**: every generated path is checked before it caches -
+      self-intersection, gouge against the region boundary at tool radius,
+      shank/holder vs live stock above the cut level, rapids below the
+      clearance plane - and the warnings surface in the tree and property
+      page. The blocking post-gate lands with the post itself (M1.5/M2.3)
 
 ### M1.4 - Drilling
 **Goal: a complete hole list is machined correctly.**
@@ -261,8 +302,8 @@ programming department.
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
-| **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup in; toolpath display open | ⚠️ |
-| **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, tool library, parameters; B-rep ops gated on kernel | 📋 |
+| **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display; toolbar icons open | ⚠️ |
+| **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.5** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
