@@ -127,6 +127,14 @@ pub struct WcsUi {
     pub anchor_xy: usize,
     /// Z level grid clicks use: 0 bottom, 1 middle, 2 top of the anchor box.
     pub anchor_z: usize,
+    /// Which box the anchor points live on: 0 = stock box, 1 = model bounds.
+    /// The pane states it explicitly; a chosen source that doesn't exist
+    /// falls back to the other, with a note (app::anchor_reference).
+    pub anchor_source: usize,
+    /// Viewport picking mode: the anchor points of the current level show as
+    /// clickable markers in the viewport. Transient UI mode, not undoable
+    /// (AGENTS.md) - the origin change it triggers is the command.
+    pub pick_anchor: bool,
     /// Whether the selected slot currently has a placed origin entity. Lets
     /// `sync_setup_ui` zero the readout when an origin is undone without
     /// wiping typing into a never-placed slot.

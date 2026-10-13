@@ -10,8 +10,8 @@ use std::sync::Arc;
 use dear_imgui_rs::{ConfigFlags, Context};
 use dear_imgui_wgpu::{wgpu, ExternalTextureId, FramebufferExtent, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
-use hsmworks_app::geometry::{transform_point, Point3};
-use hsmworks_app::schema::STOCK_NAME;
+use hsmworks_app::geometry::{Aabb, Point3, transform_point};
+use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::{model, pick};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -63,6 +63,12 @@ struct App {
     /// app.rs re-sends meshes because the renderer caches external texture
     /// views by id and the vertex stream bakes selection state.
     sel_synced: u64,
+    /// Anchor-mode drafts (pick mode, source, Z level, highlighted point)
+    /// baked into the overlay at last send. They change with the Setup pane
+    /// widgets, which don't bump `doc_version`, so they gate a rebuild of
+    /// their own (pick-mode markers would otherwise lag a click by a
+    /// document edit).
+    draft_synced: [u64; 4],
     /// Last cursor position in logical px; delta base for viewport drags.
     cursor_pos: [f32; 2],
     /// Left-press origin, so release can tell a click (pick) from a drag.
@@ -87,6 +93,7 @@ impl App {
             config: None,
             doc_synced: u64::MAX,
             sel_synced: u64::MAX,
+            draft_synced: [0; 4],
             cursor_pos: [0.0, 0.0],
             left_press: None,
             exit_code: 0,
@@ -330,6 +337,26 @@ impl App {
         if w <= 1.0 || h <= 1.0 {
             return;
         }
+        // Anchor picking wins over entity picking: in pick mode a click ON a
+        // marker places the origin there (same command the pane grid
+        // queues); a click beside one still picks normally, so the viewport
+        // never stops behaving like the viewport.
+        if self.state.wcs_ui.pick_anchor
+            && let Some((k, pos)) = anchor_hit(&self.state, p, 12.0)
+        {
+            let slot = *WCS_SLOTS
+                .get(self.state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
+                .unwrap_or(&WCS_SLOTS[0]);
+            self.state.wcs_ui.anchor_xy = k;
+            self.state.pending.push_back(CommandKind::SetWcs {
+                slot: slot.to_string(),
+                pos,
+                roll_deg: self.state.wcs_ui.roll_deg,
+                pitch_deg: self.state.wcs_ui.pitch_deg,
+                yaw_deg: self.state.wcs_ui.yaw_deg,
+            });
+            return;
+        }
         let ndc = [
             (p[0] - x0) / w * 2.0 - 1.0,
             1.0 - (p[1] - y0) / h * 2.0,
@@ -368,6 +395,7 @@ impl App {
             config,
             doc_synced,
             sel_synced,
+            draft_synced,
             exit_code,
             ..
         } = self;
@@ -424,12 +452,19 @@ impl App {
             eprintln!("external texture update: {err}");
         }
 
-        if state.doc_version != *doc_synced || sel_dirty {
+        let draft_key = [
+            u64::from(state.wcs_ui.pick_anchor),
+            state.wcs_ui.anchor_source as u64,
+            state.wcs_ui.anchor_z as u64,
+            state.wcs_ui.anchor_xy as u64,
+        ];
+        if state.doc_version != *doc_synced || sel_dirty || draft_key != *draft_synced {
             let parts = collect_parts(state);
             view.set_document(device, queue, &parts);
             let overlay = collect_overlay(state);
             view.set_overlay(device, queue, &overlay);
             *doc_synced = state.doc_version;
+            *draft_synced = draft_key;
         }
 
         let (ew, eh) = view.extent();
@@ -582,6 +617,26 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
             out.push([ftoz(p.x), ftoz(p.y), ftoz(p.z), c[0], c[1], c[2]]);
         }
     }
+    if state.wcs_ui.pick_anchor {
+        // Virtual vertices (feedback): a small 3-axis cross per anchor of
+        // the chosen level, so the box points can be picked where they
+        // actually are; the pane-highlighted one is drawn brighter.
+        let arm = (gizmo_len(state) * 0.09).max(0.5);
+        for (k, (pt, _)) in anchor_points(state).iter().enumerate() {
+            let c = if k == state.wcs_ui.anchor_xy.min(8) {
+                [0.98, 0.98, 0.60]
+            } else {
+                [0.82, 0.68, 0.22]
+            };
+            for axis in 0..3 {
+                let (mut a, mut b) = (*pt, *pt);
+                a[axis] -= arm;
+                b[axis] += arm;
+                out.push([ftoz(a[0]), ftoz(a[1]), ftoz(a[2]), c[0], c[1], c[2]]);
+                out.push([ftoz(b[0]), ftoz(b[1]), ftoz(b[2]), c[0], c[1], c[2]]);
+            }
+        }
+    }
     out
 }
 
@@ -635,6 +690,87 @@ fn gizmos(state: &State) -> Vec<Gizmo> {
     out
 }
 
+/// Compass names for the 3x3 XY anchor grid, row-major north-to-south,
+/// west-to-east (viewed from +Z: X east, Y north). Point `k` has XY
+/// indices `[k % 3, 2 - k / 3]` in the box's lo/center/hi axes.
+const COMPASS: [&str; 9] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"];
+
+/// Which box the anchor points live on, per the pane's explicit choice
+/// (feedback: "a dropdown under WCS that states if the origin is on stock
+/// or on model"), falling back honestly to the other when the chosen one
+/// doesn't exist. Returns the box and which one it is, for the pane note.
+pub(crate) fn anchor_reference(state: &State) -> Option<(Aabb, &'static str)> {
+    let stock = || model::stock_world_aabb(&state.world).map(|b| (b, "stock box"));
+    let solid = || model::solid_world_aabb(&state.world).map(|b| (b, "model bounds"));
+    if state.wcs_ui.anchor_source == 1 {
+        solid().or_else(stock)
+    } else {
+        stock().or_else(solid)
+    }
+}
+
+/// The nine anchor points of the current Z level, in grid order, with their
+/// compass names. The pane buttons and the viewport markers both come from
+/// here, so what you click and what you see are the same points by
+/// construction.
+pub(crate) fn anchor_points(state: &State) -> Vec<([f64; 3], &'static str)> {
+    let Some((b, _)) = anchor_reference(state) else {
+        return Vec::new();
+    };
+    let z = state.wcs_ui.anchor_z.min(2);
+    (0..9)
+        .map(|k| (model::anchor_point(&b, [k % 3, 2 - k / 3, z]), COMPASS[k]))
+        .collect()
+}
+
+/// Nearest on-screen anchor marker to a logical-px click, within `radius`
+/// px. Markers are overlay lines with no pickable geometry and no depth
+/// pass, so selection is screen-space nearest-within-threshold; points
+/// behind the camera never win.
+pub(crate) fn anchor_hit(state: &State, p: [f32; 2], radius: f32) -> Option<(usize, [f64; 3])> {
+    let ([x0, y0], [x1, y1]) = state.viewport_rect;
+    let (w, h) = (x1 - x0, y1 - y0);
+    if w <= 1.0 || h <= 1.0 {
+        return None;
+    }
+    let mvp = state.cam.mvp(f64::from(w) / f64::from(h));
+    let pts = anchor_points(state);
+    let mut best: Option<(f32, usize)> = None;
+    for (k, (pt, _)) in pts.iter().enumerate() {
+        let Some(uv) = project_uv(&mvp, *pt) else {
+            continue;
+        };
+        let dx = x0 + uv[0] * w - p[0];
+        let dy = y0 + uv[1] * h - p[1];
+        let d2 = dx * dx + dy * dy;
+        if d2 <= radius * radius && best.is_none_or(|(bd, _)| d2 < bd) {
+            best = Some((d2, k));
+        }
+    }
+    best.map(|(_, k)| (k, pts[k].0))
+}
+
+/// Clip-projection of a world point through the column-major `mvp` to
+/// viewport uv (x right, y down from the top edge); None behind the camera
+/// or at degenerate `w`. Shared by the gizmo labels and anchor picking.
+pub(crate) fn project_uv(mvp: &[[f32; 4]; 4], p: [f64; 3]) -> Option<[f32; 2]> {
+    // Column-major mvp: clip_i = sum_c mvp[c][i] * v_c.
+    let v = [p[0] as f32, p[1] as f32, p[2] as f32, 1.0f32];
+    let mut clip = [0.0f32; 4];
+    for (i, out_i) in clip.iter_mut().enumerate() {
+        *out_i = mvp[0][i] * v[0] + mvp[1][i] * v[1] + mvp[2][i] * v[2] + mvp[3][i] * v[3];
+    }
+    let w = clip[3];
+    if !w.is_finite() || w <= 1e-6 {
+        return None; // behind the camera or degenerate
+    }
+    let (ndc_x, ndc_y) = (clip[0] / w, clip[1] / w);
+    if !ndc_x.is_finite() || !ndc_y.is_finite() {
+        return None;
+    }
+    Some([(ndc_x + 1.0) * 0.5, (1.0 - ndc_y) * 0.5])
+}
+
 /// Screen-space labels for the gizmos just drawn (feedback 7): each axis
 /// tip gets its letter, projected through the same camera math. Entries are
 /// (uv within the viewport image, linear rgb, text); tips behind the camera
@@ -655,21 +791,9 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                 base,
                 gizmo.rot,
             );
-            // Column-major mvp: clip_i = sum_c mvp[c][i] * v_c.
-            let v = [p.x as f32, p.y as f32, p.z as f32, 1.0f32];
-            let mut clip = [0.0f32; 4];
-            for (i, out_i) in clip.iter_mut().enumerate() {
-                *out_i = mvp[0][i] * v[0] + mvp[1][i] * v[1] + mvp[2][i] * v[2] + mvp[3][i] * v[3];
-            }
-            let w = clip[3];
-            if !w.is_finite() || w <= 1e-6 {
-                continue; // behind the camera or degenerate
-            }
-            let (ndc_x, ndc_y) = (clip[0] / w, clip[1] / w);
-            if !ndc_x.is_finite() || !ndc_y.is_finite() {
+            let Some(uv) = project_uv(&mvp, [p.x, p.y, p.z]) else {
                 continue;
-            }
-            let uv = [(ndc_x + 1.0) * 0.5, (1.0 - ndc_y) * 0.5];
+            };
             let c = if gizmo.world_axes {
                 [rgb[0] * 0.65, rgb[1] * 0.65, rgb[2] * 0.65]
             } else {
@@ -823,5 +947,130 @@ mod gizmo_tests {
         let mut state = State::new();
         set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 90.0);
         assert_eq!(collect_overlay(&state).len(), 12, "the triad no longer claims the axes");
+    }
+}
+
+#[cfg(test)]
+mod anchor_tests {
+    //! The pane buttons, the viewport markers and the click hit-test all
+    //! read the same anchor helpers; these pin that shared math down.
+
+    use super::*;
+    use crate::state::{CommandKind, quat_yaw_deg};
+    use hsmworks_app::stock::StockShape;
+
+    fn stock_box(state: &mut State, dx: f64, dy: f64, dz: f64, pos: [f64; 3]) {
+        state.pending.push_back(CommandKind::SetStock {
+            shape: StockShape::Box { dx, dy, dz },
+            pos,
+            yaw_deg: 0.0,
+        });
+        state.drain_actions();
+    }
+
+    /// Box 60x40x20, XY-centered at (10, -5), bottom at z=0:
+    /// corners span (-20,-25,0)..(40,15,20).
+    fn state_with_stock() -> State {
+        let mut state = State::new();
+        stock_box(&mut state, 60.0, 40.0, 20.0, [10.0, -5.0, 0.0]);
+        state
+    }
+
+    #[test]
+    fn anchors_need_a_reference_and_prefer_the_chosen_source() {
+        let mut state = State::new();
+        assert!(anchor_reference(&state).is_none(), "empty world anchors nothing");
+        stock_box(&mut state, 60.0, 40.0, 20.0, [0.0, 0.0, 0.0]);
+        state.wcs_ui.anchor_source = 0;
+        assert_eq!(anchor_reference(&state).map(|(_, w)| w), Some("stock box"));
+        state.wcs_ui.anchor_source = 1;
+        assert_eq!(
+            anchor_reference(&state).map(|(_, w)| w),
+            Some("stock box"),
+            "no model bounds yet - fall back to stock, and the pane says so"
+        );
+    }
+
+    #[test]
+    fn the_nine_markers_are_the_box_points_of_the_chosen_level() {
+        let mut state = state_with_stock();
+        state.wcs_ui.anchor_z = 2;
+        let pts = anchor_points(&state);
+        assert_eq!(pts.len(), 9);
+        assert_eq!(pts[0], ([-20.0, 15.0, 20.0], "NW"));
+        assert_eq!(pts[2], ([40.0, 15.0, 20.0], "NE"));
+        assert_eq!(pts[4], ([10.0, -5.0, 20.0], "C"));
+        assert_eq!(pts[8], ([40.0, -25.0, 20.0], "SE"));
+        state.wcs_ui.anchor_z = 0;
+        assert_eq!(anchor_points(&state)[6], ([-20.0, -25.0, 0.0], "SW"));
+        state.wcs_ui.anchor_z = 1;
+        assert_eq!(anchor_points(&state)[1], ([10.0, 15.0, 10.0], "N"));
+    }
+
+    #[test]
+    fn markers_appear_in_the_overlay_only_in_pick_mode() {
+        let mut state = state_with_stock();
+        assert_eq!(collect_overlay(&state).len(), 6, "world axes only");
+        state.wcs_ui.pick_anchor = true;
+        let lines = collect_overlay(&state);
+        assert_eq!(lines.len(), 6 + 9 * 6, "nine crosses plus the axes");
+        assert!(
+            lines[6..].iter().any(|v| v[3] > 0.9 && v[4] > 0.9),
+            "the pane-highlighted anchor (center, draft default) is brightest"
+        );
+        assert!(
+            lines[6..].iter().any(|v| (v[3] - 0.82).abs() < 0.01),
+            "the others are yellow"
+        );
+    }
+
+    #[test]
+    fn clicking_a_marker_selects_exactly_the_anchor_it_draws() {
+        let mut state = state_with_stock();
+        state.wcs_ui.pick_anchor = true;
+        state.wcs_ui.anchor_z = 2;
+        state.viewport_rect = ([0.0, 0.0], [800.0, 600.0]);
+        let mvp = state.cam.mvp(800.0 / 600.0);
+        let pts = anchor_points(&state);
+        for (k, (pt, _)) in pts.iter().enumerate() {
+            let Some(uv) = project_uv(&mvp, *pt) else {
+                panic!("marker {k} ({}) off-screen from the default camera", pts[k].1);
+            };
+            let (hit_k, hit_pos) =
+                anchor_hit(&state, [uv[0] * 800.0, uv[1] * 600.0], 8.0).expect("own position hits self");
+            assert_eq!((hit_k, hit_pos), (k, *pt), "nearest marker to a click is the one drawn there");
+        }
+        // A degenerate rect (pre-layout) can never hit, so no phantom origin.
+        state.viewport_rect = ([0.0, 0.0], [0.0, 0.0]);
+        assert!(anchor_hit(&state, [4.0, 4.0], 12.0).is_none());
+    }
+
+    #[test]
+    fn a_marker_click_queues_the_same_placement_as_the_grid() {
+        // The end of the viewport path: a picked anchor point plus the pane
+        // drafts lands exactly like the button grid's command would.
+        let mut state = state_with_stock();
+        state.wcs_ui.anchor_z = 2;
+        state.viewport_rect = ([0.0, 0.0], [800.0, 600.0]);
+        let mvp = state.cam.mvp(800.0 / 600.0);
+        let pts = anchor_points(&state);
+        let uv = project_uv(&mvp, pts[8].0).expect("SE visible");
+        let (_, pos) = anchor_hit(&state, [uv[0] * 800.0, uv[1] * 600.0], 8.0).expect("hit SE");
+        assert_eq!(pos, [40.0, -25.0, 20.0]);
+        state.pending.push_back(CommandKind::SetWcs {
+            slot: "G54".to_string(),
+            pos,
+            roll_deg: 0.0,
+            pitch_deg: 0.0,
+            yaw_deg: 30.0,
+        });
+        state.drain_actions();
+        let entity = model::find_by_name(&state.world, "G54").expect("origin entity");
+        let loc = model::transform_of(&state.world, &entity).expect("location");
+        assert_eq!([loc.pos.x, loc.pos.y, loc.pos.z], [40.0, -25.0, 20.0]);
+        assert!(
+            (quat_yaw_deg(loc.rot) - 30.0).abs() < 1e-9,
+            "the draft orientation rides along with the clicked position"
+        );
     }
 }

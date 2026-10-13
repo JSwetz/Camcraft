@@ -201,20 +201,29 @@ fn wcs_group(ui: &Ui, state: &mut State) {
         state.wcs_ui.yaw_deg = 0.0;
     }
 
-    // Box-point anchoring (feedback 5): place the origin with one click on a
-    // 3x3 XY compass grid of the stock box, at Bottom/Middle/Top Z; with no
-    // stock the reference is the model bounds. Behavior specced from
-    // published CAM setup practice; the grid and its math are ours.
+    // Box-point anchoring (feedback 5, revised): the reference box is an
+    // explicit choice - stock or model - and the nine points of the chosen
+    // level can be clicked in the viewport as markers instead of hunting
+    // through the button grid. The buttons and the markers share
+    // `crate::app::anchor_points`, so what you click, what highlights, and
+    // what places are the same points by construction. Behavior specced
+    // from published CAM setup practice; the grid and its math are ours.
     ui.spacing();
-    let on_stock = model::stock_world_aabb(&state.world);
-    let reference = on_stock.or_else(|| model::solid_world_aabb(&state.world));
-    match &reference {
-        Some(b) => {
-            ui.text(if on_stock.is_some() {
-                "Anchor point (stock box)"
-            } else {
-                "Anchor point (model bounds)"
-            });
+    const SOURCES: [&str; 2] = ["Stock box", "Model bounds"];
+    ui.combo(
+        "Anchor on##wcs_src",
+        &mut state.wcs_ui.anchor_source,
+        &SOURCES,
+        |s| Cow::Borrowed(*s),
+    );
+    match crate::app::anchor_reference(state) {
+        Some((_, what)) => {
+            let chosen = *SOURCES
+                .get(state.wcs_ui.anchor_source.min(1))
+                .unwrap_or(&SOURCES[0]);
+            if !chosen.eq_ignore_ascii_case(what) {
+                ui.text(format!("No {chosen} defined - anchoring on {what}."));
+            }
             let mut z_level = state.wcs_ui.anchor_z.min(2) as i32;
             ui.radio_button_int("Bottom", &mut z_level, 0);
             ui.same_line();
@@ -222,30 +231,36 @@ fn wcs_group(ui: &Ui, state: &mut State) {
             ui.same_line();
             ui.radio_button_int("Top", &mut z_level, 2);
             state.wcs_ui.anchor_z = z_level.clamp(0, 2) as usize;
-            // Seen from +Z looking down: X east, Y north.
-            const COMPASS: [&str; 9] = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"];
+            ui.checkbox(
+                "Pick markers in viewport##wcs_pick",
+                &mut state.wcs_ui.pick_anchor,
+            );
+            if state.wcs_ui.pick_anchor {
+                ui.text("Click a yellow marker in the viewport to set the origin.");
+            }
+            let pts = crate::app::anchor_points(state);
             for row in 0..3usize {
                 for col in 0..3usize {
                     let k = row * 3 + col;
                     if col > 0 {
                         ui.same_line();
                     }
-                    let code = COMPASS[k];
+                    let code = pts.get(k).map_or("?", |(_, name)| *name);
                     let clicked = if state.wcs_ui.anchor_xy == k {
                         ui.button(format!("[{code}]"))
                     } else {
                         ui.button(code)
                     };
-                    if clicked {
+                    if clicked
+                        && let Some((pos, _)) = pts.get(k)
+                    {
                         state.wcs_ui.anchor_xy = k;
-                        // Column is the X index; north (row 0) is max Y.
-                        let pos = model::anchor_point(b, [col, 2 - row, state.wcs_ui.anchor_z]);
                         let slot = *WCS_SLOTS
                             .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
                             .unwrap_or(&WCS_SLOTS[0]);
                         state.pending.push_back(CommandKind::SetWcs {
                             slot: slot.to_string(),
-                            pos,
+                            pos: *pos,
                             roll_deg: state.wcs_ui.roll_deg,
                             pitch_deg: state.wcs_ui.pitch_deg,
                             yaw_deg: state.wcs_ui.yaw_deg,
