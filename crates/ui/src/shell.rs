@@ -166,6 +166,21 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
         // so orbit/pan/pick bypass it entirely.
         let viewport_rect = ui.item_rect();
         state.viewport_rect = viewport_rect;
+
+        // Axis letters over the gizmo tips (feedback 7). Projected through
+        // the same camera math every frame, so they track orbit/zoom live.
+        let ([rx0, ry0], [rx1, ry1]) = viewport_rect;
+        let (rw, rh) = (rx1 - rx0, ry1 - ry0);
+        if rw > 1.0 && rh > 1.0 {
+            let labels = crate::app::overlay_labels(state, (rw / rh) as f64);
+            if !labels.is_empty() {
+                let dl = ui.get_window_draw_list();
+                for (uv, rgb, text) in labels {
+                    let pos = [rx0 + uv[0] * rw, ry0 + uv[1] * rh];
+                    dl.add_text(pos, [rgb[0], rgb[1], rgb[2], 1.0], text);
+                }
+            }
+        }
         let hovered = ui.is_window_hovered();
         let wheel = ui.io().mouse_wheel();
         if wheel != 0.0 && hovered {

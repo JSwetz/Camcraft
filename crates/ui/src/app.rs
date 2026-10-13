@@ -541,10 +541,52 @@ fn world_verts(state: &State, entity: &flecs_ecs::prelude::Entity) -> Vec<[f32; 
     verts
 }
 
+/// One origin gizmo to draw: a triad at `pos`/`rot`; the dimmed variant is
+/// the neutral world origin shown while no work offset claims that corner.
+pub(crate) struct Gizmo {
+    pub pos: [f64; 3],
+    pub rot: [f64; 4],
+    /// Triad axes sit on X/Y/Z at this exact position with no rotation.
+    pub world_axes: bool,
+}
+
+/// Axis colors and tip offsets shared by the line overlay and the labels.
+const AXES: [([f32; 3], [f64; 3]); 3] = [
+    ([0.85, 0.22, 0.18], [1.0, 0.0, 0.0]),
+    ([0.20, 0.78, 0.30], [0.0, 1.0, 0.0]),
+    ([0.28, 0.48, 0.95], [0.0, 0.0, 1.0]),
+];
+
+const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
+
 /// Reference-geometry overlay: world origin axes (dimmed) plus one colored
 /// triad per defined work offset. Length scales with the model extent, with
 /// a floor so an empty or tiny document still shows orientation.
 fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
+    let len = gizmo_len(state);
+    let mut out: Vec<[f32; 6]> = Vec::new();
+    for gizmo in gizmos(state) {
+        let (px, py, pz) = (ftoz(gizmo.pos[0]), ftoz(gizmo.pos[1]), ftoz(gizmo.pos[2]));
+        for (rgb, dir) in &AXES {
+            let p = transform_point(
+                Point3::new(dir[0] * len, dir[1] * len, dir[2] * len),
+                Point3::new(gizmo.pos[0], gizmo.pos[1], gizmo.pos[2]),
+                gizmo.rot,
+            );
+            let c = if gizmo.world_axes {
+                [rgb[0] * 0.55, rgb[1] * 0.55, rgb[2] * 0.55]
+            } else {
+                *rgb
+            };
+            out.push([px, py, pz, c[0], c[1], c[2]]);
+            out.push([ftoz(p.x), ftoz(p.y), ftoz(p.z), c[0], c[1], c[2]]);
+        }
+    }
+    out
+}
+
+/// Triad extent for the current document (never smaller than 10 mm).
+fn gizmo_len(state: &State) -> f64 {
     let extent = model::solid_world_aabb(&state.world)
         .map(|b| {
             (b.max.x - b.min.x)
@@ -552,19 +594,15 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
                 .max(b.max.z - b.min.z)
         })
         .unwrap_or(0.0);
-    let len = (extent * 0.25).max(10.0);
-    let axes: [([f32; 3], [f64; 3]); 3] = [
-        ([0.85, 0.22, 0.18], [len, 0.0, 0.0]),
-        ([0.20, 0.78, 0.30], [0.0, len, 0.0]),
-        ([0.28, 0.48, 0.95], [0.0, 0.0, len]),
-    ];
-    let mut out: Vec<[f32; 6]> = Vec::new();
-    for (rgb, tip) in &axes {
-        let dim = [rgb[0] * 0.55, rgb[1] * 0.55, rgb[2] * 0.55];
-        // World origin, unrotated.
-        out.push([0.0, 0.0, 0.0, dim[0], dim[1], dim[2]]);
-        out.push([ftoz(tip[0]), ftoz(tip[1]), ftoz(tip[2]), dim[0], dim[1], dim[2]]);
-    }
+    (extent * 0.25).max(10.0)
+}
+
+/// Which origin gizmos to draw (feedback 6): a triad per defined work
+/// offset, plus the dimmed world axes - unless some triad already sits
+/// exactly on the world origin, in which case its own lines are the world
+/// axes and drawing both reads as a duplicated gizmo.
+fn gizmos(state: &State) -> Vec<Gizmo> {
+    let mut out: Vec<Gizmo> = Vec::new();
     for (_, entity) in model::named_entities(&state.world) {
         if !model::is_wcs(&state.world, &entity) {
             continue;
@@ -572,10 +610,72 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
         let Some(loc) = model::transform_of(&state.world, &entity) else {
             continue;
         };
-        for (rgb, tip) in &axes {
-            let p = transform_point(Point3::new(tip[0], tip[1], tip[2]), loc.pos, loc.rot);
-            out.push([ftoz(loc.pos.x), ftoz(loc.pos.y), ftoz(loc.pos.z), rgb[0], rgb[1], rgb[2]]);
-            out.push([ftoz(p.x), ftoz(p.y), ftoz(p.z), rgb[0], rgb[1], rgb[2]]);
+        out.push(Gizmo {
+            pos: [loc.pos.x, loc.pos.y, loc.pos.z],
+            rot: loc.rot,
+            world_axes: false,
+        });
+    }
+    let claims_origin = out.iter().any(|g| {
+        let on_spot = g.pos[0].abs() < 1e-3 && g.pos[1].abs() < 1e-3 && g.pos[2].abs() < 1e-3;
+        // Unit quaternion up to sign: [0,0,0,±1] is identity rotation.
+        let unrotated = g.rot[0].abs() < 1e-6
+            && g.rot[1].abs() < 1e-6
+            && g.rot[2].abs() < 1e-6
+            && (1.0 - g.rot[3].abs()).abs() < 1e-6;
+        on_spot && unrotated
+    });
+    if !claims_origin {
+        out.push(Gizmo {
+            pos: [0.0, 0.0, 0.0],
+            rot: [0.0, 0.0, 0.0, 1.0],
+            world_axes: true,
+        });
+    }
+    out
+}
+
+/// Screen-space labels for the gizmos just drawn (feedback 7): each axis
+/// tip gets its letter, projected through the same camera math. Entries are
+/// (uv within the viewport image, linear rgb, text); tips behind the camera
+/// or at degenerate `w` are skipped.
+pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 3], &'static str)> {
+    let len = gizmo_len(state);
+    let mvp = state.cam.mvp(aspect);
+    let mut out = Vec::new();
+    for gizmo in gizmos(state) {
+        let base = Point3::new(gizmo.pos[0], gizmo.pos[1], gizmo.pos[2]);
+        for (axis, (rgb, dir)) in AXES.iter().enumerate() {
+            let p = transform_point(
+                Point3::new(
+                    base.x + dir[0] * len * 1.08,
+                    base.y + dir[1] * len * 1.08,
+                    base.z + dir[2] * len * 1.08,
+                ),
+                base,
+                gizmo.rot,
+            );
+            // Column-major mvp: clip_i = sum_c mvp[c][i] * v_c.
+            let v = [p.x as f32, p.y as f32, p.z as f32, 1.0f32];
+            let mut clip = [0.0f32; 4];
+            for (i, out_i) in clip.iter_mut().enumerate() {
+                *out_i = mvp[0][i] * v[0] + mvp[1][i] * v[1] + mvp[2][i] * v[2] + mvp[3][i] * v[3];
+            }
+            let w = clip[3];
+            if !w.is_finite() || w <= 1e-6 {
+                continue; // behind the camera or degenerate
+            }
+            let (ndc_x, ndc_y) = (clip[0] / w, clip[1] / w);
+            if !ndc_x.is_finite() || !ndc_y.is_finite() {
+                continue;
+            }
+            let uv = [(ndc_x + 1.0) * 0.5, (1.0 - ndc_y) * 0.5];
+            let c = if gizmo.world_axes {
+                [rgb[0] * 0.65, rgb[1] * 0.65, rgb[2] * 0.65]
+            } else {
+                *rgb
+            };
+            out.push((uv, c, AXIS_NAMES[axis]));
         }
     }
     out
@@ -653,5 +753,73 @@ impl ApplicationHandler for App {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
+    }
+}
+
+#[cfg(test)]
+mod gizmo_tests {
+    //! The overlay's gizmo rules (feedbacks 6 and 7) are pure world reads;
+    //! these pin them down without a GPU.
+
+    use super::*;
+    use crate::state::CommandKind;
+
+    fn set_origin(state: &mut State, slot: &str, pos: [f64; 3], yaw_deg: f64) {
+        state.pending.push_back(CommandKind::SetWcs {
+            slot: slot.to_string(),
+            pos,
+            yaw_deg,
+        });
+        state.drain_actions();
+    }
+
+    #[test]
+    fn a_fresh_world_shows_only_the_world_axes() {
+        let state = State::new();
+        let lines = collect_overlay(&state);
+        assert_eq!(lines.len(), 6, "three dimmed axes");
+        assert!(lines[0][3] < 0.5, "world axes are dimmed");
+    }
+
+    #[test]
+    fn an_origin_placed_at_machine_zero_does_not_duplicate_the_gizmo() {
+        let mut state = State::new();
+        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 0.0);
+        let lines = collect_overlay(&state);
+        assert_eq!(lines.len(), 6, "the triad replaces the world axes");
+        assert!(lines[0][3] > 0.5, "the single gizmo is the bright triad");
+        let labels = overlay_labels(&state, 1.0);
+        assert_eq!(labels.len(), 3, "one letter per triad axis, no ghost set");
+        assert!(
+            labels.iter().all(|(_, rgb, _)| rgb[0].max(rgb[1]).max(rgb[2]) > 0.5),
+            "all labels are bright"
+        );
+    }
+
+    #[test]
+    fn a_moved_origin_shows_axes_and_triad_together() {
+        let mut state = State::new();
+        set_origin(&mut state, "G54", [50.0, 0.0, 0.0], 0.0);
+        assert_eq!(collect_overlay(&state).len(), 12, "both gizmos");
+        let labels = overlay_labels(&state, 1.0);
+        assert_eq!(labels.len(), 6, "three tips per gizmo, both gizmos");
+        let xs: Vec<f32> = labels
+            .iter()
+            .filter(|(_, _, text)| *text == "X")
+            .map(|(_, rgb, _)| rgb[0])
+            .collect();
+        assert!(
+            xs.iter().any(|r| *r > 0.8) && xs.iter().any(|r| *r < 0.6),
+            "one bright and one dimmed X: {xs:?}"
+        );
+    }
+
+    #[test]
+    fn a_rotated_offset_at_the_origin_still_shows_the_world_axes() {
+        // Yaw 90 moves the triad axes off X/Y/Z - the coincidence was about
+        // lines, not just the origin point.
+        let mut state = State::new();
+        set_origin(&mut state, "G54", [0.0, 0.0, 0.0], 90.0);
+        assert_eq!(collect_overlay(&state).len(), 12, "the triad no longer claims the axes");
     }
 }
