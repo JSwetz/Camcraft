@@ -90,12 +90,17 @@ must carry a delete hook that frees everything it owns.
 the fonts. The UI must render them — loading the files alone isn't enough;
 wired-in usage in each panel's draw code is required.
 
-Icon sources: `icons8.com` - buy the
-paid "designer pack" (attribution-free) - never the free tier (requires
-attribution). 32x32 PNGs are fine; render at 16px. All icons referenced from
-`crates/ui/src/icons.rs`. Icons and post-processor templates (see below) must
-be original or licensed without attribution — never adapted from HSMWorks
-material.
+Icon sources: free, attribution-safe sets only - MIT/ISC/Apache-2.0/BSL
+licensed libraries may be bundled without crediting end users; primary pick is
+[Tabler Icons](https://tabler-icons.io) (MIT). Never icons8's free tier
+(requires attribution), never paid-without-need. 32x32 PNGs are fine; render
+at 16px. Keep the copyright/license texts of any bundled set in
+`assets/ui/LICENSES.md` (this is also the home for third-party notices like
+clipper2-rust's BSL text) - retention is a license condition, not a credit.
+Operation-specific glyphs are drawn original when no generic set fits. All
+icons referenced from `crates/ui/src/icons.rs`. Icons and post-processor
+templates (see below) must be original or licensed without attribution —
+never adapted from HSMWorks material.
 
 ## Dependencies
 

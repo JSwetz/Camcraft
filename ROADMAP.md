@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> _Last updated: 2026-10-12_
+> _Last updated: 2026-10-13_
 
 ## North Star
 
@@ -71,7 +71,9 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
 **Goal: real application chrome; define and display a machining setup.** — ⚠️ partial
 
 - ⚠️ **Menu & toolbar**: menus + shortcuts shipped (File/Edit/View, Ctrl+O/S/Z/Y,
-      Del, F); toolbar icons not yet (blocked on the `assets/ui/` icon set)
+      Del, F); toolbar icons not yet - the icon-source blocker is gone (free
+      attribution-safe sets per AGENTS.md, primary pick Tabler Icons/MIT;
+      converting them into `assets/ui/` and wiring `icons.rs` is open work)
 - ⚠️ **Setup tree pane**: models pane with viewport-synced selection, plus a
       Setup tab editing stock and work offsets; setups → operations nodes arrive with M1.3
 - ✅ **Viewport**: orbit / pan / zoom, selection highlight, frame-all, dockable
