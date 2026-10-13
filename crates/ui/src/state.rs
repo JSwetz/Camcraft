@@ -17,11 +17,15 @@ use std::time::{Duration, Instant};
 use dear_imgui_rs::TextureId;
 use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
-    CommandError, DeleteEntity, History, ImportModel, SelectEntity, SetStock, SetWcsOrigin,
+    AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation, DeleteTool,
+    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, SelectEntity,
+    SetStock, SetWcsOrigin,
 };
 use hsmworks_app::geometry::{quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
-use hsmworks_app::schema::{Location, STOCK_NAME, WCS_SLOTS};
+use hsmworks_app::operation::{OpParams, SrcRef};
+use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
+use hsmworks_app::tools::{catalog, Tool, ToolKind};
 use hsmworks_app::{model, project, world::new_world};
 
 use crate::viewport::Camera;
@@ -65,6 +69,32 @@ pub enum CommandKind {
         pitch_deg: f64,
         yaw_deg: f64,
     },
+    /// Tool library: create a tool entity (catalog row or hand-typed page).
+    AddTool { name: String, tool: Tool },
+    /// Tool library: replace a tool entity's numbers (referencing
+    /// operations read Stale from their stamp - no cascade writes).
+    ChangeTool { name: String, tool: Tool },
+    DeleteTool(String),
+    /// New operation entity; deliberately never generated until
+    /// [`CommandKind::GenerateOperation`] runs.
+    CreateOperation {
+        name: String,
+        tool: String,
+        src: SrcRef,
+        params: OpParams,
+    },
+    /// The properties page's parameter draft.
+    EditOperationParams { name: String, params: OpParams },
+    /// Retarget an operation's tool and/or source (combo changes).
+    EditOperationLinks {
+        name: String,
+        tool: Option<String>,
+        src: Option<SrcRef>,
+    },
+    DeleteOperation(String),
+    /// Generate and verify the cached path. The command does the work at
+    /// construction, synchronously; status arrives with the result.
+    GenerateOperation(String),
 }
 
 /// Editable fields of the Setup pane's stock group. Transient UI state,
@@ -141,6 +171,150 @@ pub struct WcsUi {
     pub(crate) placed: bool,
 }
 
+/// Editable fields of the Properties pane's operation page. Transient UI
+/// state, never authoritative: the world's `Operation` component is,
+/// refetched by [`State::sync_ops_ui`] whenever the selection or the
+/// document moves under the pane (same typing rule as [`StockUi`]). With
+/// no operation selected the same draft is the "new operation" form.
+#[derive(Clone, Debug)]
+pub struct OpUi {
+    /// Operation this draft mirrors; empty = nothing selected.
+    pub name: String,
+    /// Tool entity the operation cuts with.
+    pub tool: String,
+    /// 0 = the stock solid, 1 = a named model (`SrcRef`).
+    pub src_kind: usize,
+    /// Model name when `src_kind == 1`.
+    pub src_name: String,
+    /// The parameter set; the kind the fields show is `params.kind()`.
+    pub params: OpParams,
+}
+
+impl Default for OpUi {
+    fn default() -> Self {
+        OpUi {
+            name: String::new(),
+            tool: String::new(),
+            src_kind: 0,
+            src_name: String::new(),
+            // A facing pass over a small billet: sane numbers until edited,
+            // zeros would only be refused by the command layer.
+            params: OpParams::Face {
+                stepover: 3.0,
+                clearance_z: 25.0,
+                cut_z: 0.0,
+                feed: 1200.0,
+                plunge_feed: 300.0,
+                climb: true,
+            },
+        }
+    }
+}
+
+impl OpUi {
+    /// Snapshot an operation component into draft form.
+    #[must_use]
+    pub fn from_op(name: &str, op: &OperationDef) -> Self {
+        let (src_kind, src_name) = match &op.src {
+            SrcRef::Stock => (0, String::new()),
+            SrcRef::Entity(n) => (1, n.clone()),
+        };
+        OpUi {
+            name: name.to_string(),
+            tool: op.tool.clone(),
+            src_kind,
+            src_name,
+            params: op.params.clone(),
+        }
+    }
+
+    /// The source the drafts describe, for the queue.
+    #[must_use]
+    pub fn src(&self) -> SrcRef {
+        if self.src_kind == 0 {
+            SrcRef::Stock
+        } else {
+            SrcRef::Entity(self.src_name.clone())
+        }
+    }
+}
+
+/// Editable fields of the Tool Library pane's tool page; see [`StockUi`]
+/// for the transient-ness rule. `exists` records whether `name` resolved
+/// to a tool entity when the draft was fetched: Apply edits, Add creates.
+#[derive(Clone, Debug)]
+pub struct ToolUi {
+    pub name: String,
+    pub exists: bool,
+    /// 0 end mill, 1 ball nose, 2 bull nose.
+    pub kind: usize,
+    pub diameter: f64,
+    pub corner_r: f64,
+    pub flute_len: f64,
+    pub shank_d: f64,
+    pub shank_len: f64,
+    pub holder_d: f64,
+    pub holder_len: f64,
+    pub material_group: String,
+    pub rpm: f64,
+    pub feed: f64,
+}
+
+impl Default for ToolUi {
+    fn default() -> Self {
+        // An unnamed copy of the catalog's smallest mill: plausible
+        // starting numbers beat zeros the commands would only refuse.
+        let starter = catalog().remove(0);
+        ToolUi::from_tool("", &starter.1, false)
+    }
+}
+
+impl ToolUi {
+    #[must_use]
+    pub fn from_tool(name: &str, t: &Tool, exists: bool) -> Self {
+        ToolUi {
+            name: name.to_string(),
+            exists,
+            kind: match t.kind {
+                ToolKind::EndMill => 0,
+                ToolKind::BallNose => 1,
+                ToolKind::BullNose => 2,
+            },
+            diameter: t.diameter,
+            corner_r: t.corner_r,
+            flute_len: t.flute_len,
+            shank_d: t.shank_d,
+            shank_len: t.shank_len,
+            holder_d: t.holder_d,
+            holder_len: t.holder_len,
+            material_group: t.material_group.clone(),
+            rpm: t.rpm,
+            feed: t.feed,
+        }
+    }
+
+    #[must_use]
+    pub fn to_tool(&self) -> Tool {
+        Tool {
+            kind: match self.kind {
+                1 => ToolKind::BallNose,
+                2 => ToolKind::BullNose,
+                _ => ToolKind::EndMill,
+            },
+            diameter: self.diameter,
+            corner_r: self.corner_r,
+            flute_len: self.flute_len,
+            shank_d: self.shank_d,
+            shank_len: self.shank_len,
+            holder_d: self.holder_d,
+            holder_len: self.holder_len,
+            material_group: self.material_group.clone(),
+            rpm: self.rpm,
+            feed: self.feed,
+        }
+    }
+}
+
 /// Yaw in degrees of a (pure-yaw) quaternion: the exact inverse of
 /// `quat_from_yaw`, and the Z-twist of any other rotation. Display/draft
 /// only - the data model keeps the full quaternion through Apply.
@@ -202,8 +376,19 @@ pub struct State {
     /// Setup pane drafts (ephemeral; see [`StockUi`]).
     pub stock_ui: StockUi,
     pub wcs_ui: WcsUi,
-    /// `doc_version` the drafts were last refetched at.
+    /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
+    pub op_ui: OpUi,
+    pub tool_ui: ToolUi,
+    /// `doc_version` the setup drafts were last refetched at.
     ui_synced_doc: u64,
+    /// (draft identity, `doc_version` it was fetched at) per pane; see
+    /// [`State::sync_ops_ui`] for the rule.
+    op_synced: (String, u64),
+    tool_synced: (String, u64),
+    /// Dock visibility of the two new panes: the CAM menu reopens a panel
+    /// the user closed with its X (the `opened` flag on the window).
+    pub show_properties: bool,
+    pub show_tools: bool,
 }
 
 impl State {
@@ -235,7 +420,13 @@ impl State {
                 anchor_z: 1,
                 ..WcsUi::default()
             },
+            op_ui: OpUi::default(),
+            tool_ui: ToolUi::default(),
             ui_synced_doc: 0,
+            op_synced: (String::new(), 0),
+            tool_synced: (String::new(), 0),
+            show_properties: true,
+            show_tools: true,
         }
     }
 
@@ -306,6 +497,87 @@ impl State {
                 }
             }
         }
+    }
+
+    /// Refetch the Properties pane's draft after any document or selection
+    /// change. While a real operation is selected its draft always mirrors
+    /// the world; the "new operation" form survives document bumps, since
+    /// there is no reality to refetch until it is added.
+    pub fn sync_ops_ui(&mut self) {
+        let sel = self.selected_operation();
+        let ident = sel.clone().unwrap_or_default();
+        if self.op_synced == (ident.clone(), self.doc_version) {
+            return;
+        }
+        let identity_changed = self.op_synced.0 != ident;
+        self.op_synced = (ident, self.doc_version);
+        match sel {
+            Some(name) => {
+                if let Some(entity) = model::find_by_name(&self.world, &name)
+                    && let Some(op) = model::operation_of(&self.world, &entity)
+                {
+                    self.op_ui = OpUi::from_op(&name, &op);
+                }
+            }
+            None if identity_changed => {
+                let n = self.operation_count() + 1;
+                self.op_ui = OpUi {
+                    name: format!("Operation{n}"),
+                    tool: self.tool_names().pop().unwrap_or_default(),
+                    ..OpUi::default()
+                };
+            }
+            None => {}
+        }
+    }
+
+    /// Refetch the Tool Library pane's draft after document changes. The
+    /// name decides the mode: it resolves to a tool entity (mirror it,
+    /// `exists = true` - even after an undo brought it back), to nothing
+    /// (keep the typed numbers with `exists = false`, so a deleted tool's
+    /// page doubles as re-add), or is empty (the untouched New page).
+    pub fn sync_tool_ui(&mut self) {
+        if self.tool_synced == (self.tool_ui.name.clone(), self.doc_version) {
+            return;
+        }
+        let ident = self.tool_ui.name.clone();
+        self.tool_synced = (ident.clone(), self.doc_version);
+        if ident.is_empty() {
+            return;
+        }
+        match model::find_by_name(&self.world, &ident).and_then(|e| model::tool_of(&self.world, &e))
+        {
+            Some(tool) => self.tool_ui = ToolUi::from_tool(&ident, &tool, true),
+            None => self.tool_ui.exists = false,
+        }
+    }
+
+    /// Name of the selected entity if it is an operation (single selection
+    /// in practice; the first one wins).
+    #[must_use]
+    pub fn selected_operation(&self) -> Option<String> {
+        model::selected_names(&self.world).into_iter().find(|name| {
+            model::find_by_name(&self.world, name)
+                .is_some_and(|e| model::is_operation(&self.world, &e))
+        })
+    }
+
+    /// Names of the tool entities, in document order.
+    #[must_use]
+    pub fn tool_names(&self) -> Vec<String> {
+        model::named_entities(&self.world)
+            .into_iter()
+            .filter(|(_, e)| model::is_tool(&self.world, e))
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    #[must_use]
+    fn operation_count(&self) -> usize {
+        model::named_entities(&self.world)
+            .into_iter()
+            .filter(|(_, e)| model::is_operation(&self.world, e))
+            .count()
     }
 
     /// Run every queued action, then poll the import worker once. Safe to
@@ -502,6 +774,108 @@ impl State {
                         self.status = format!("{slot} origin set");
                     }
                     Err(err) => self.status = format!("offset not set: {err}"),
+                }
+            }
+            CommandKind::AddTool { name, tool } => {
+                match AddTool::new(&self.world, &name, tool) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("tool {name} added");
+                    }
+                    Err(err) => self.status = format!("tool not added: {err}"),
+                }
+            }
+            CommandKind::ChangeTool { name, tool } => {
+                match ChangeTool::new(&self.world, &name, tool) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("tool {name} updated");
+                    }
+                    Err(err) => self.status = format!("tool not updated: {err}"),
+                }
+            }
+            CommandKind::DeleteTool(name) => {
+                match DeleteTool::new(&self.world, &name) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("deleted tool {name}");
+                    }
+                    Err(err) => self.status = format!("tool not deleted: {err}"),
+                }
+            }
+            CommandKind::CreateOperation {
+                name,
+                tool,
+                src,
+                params,
+            } => {
+                match CreateOperation::new(&self.world, &name, &tool, src, params) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("operation {name} created");
+                    }
+                    Err(err) => self.status = format!("operation not created: {err}"),
+                }
+            }
+            CommandKind::EditOperationParams { name, params } => {
+                match EditOperationParams::new(&self.world, &name, params) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("parameters updated for {name}");
+                    }
+                    Err(err) => self.status = format!("parameters not updated: {err}"),
+                }
+            }
+            CommandKind::EditOperationLinks { name, tool, src } => {
+                let links = EditOperationLinks::new(
+                    &self.world,
+                    &name,
+                    tool.as_deref(),
+                    src,
+                );
+                match links {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("links updated for {name}");
+                    }
+                    Err(err) => self.status = format!("links not updated: {err}"),
+                }
+            }
+            CommandKind::DeleteOperation(name) => {
+                match DeleteOperation::new(&self.world, &name) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("deleted operation {name}");
+                    }
+                    Err(err) => self.status = format!("operation not deleted: {err}"),
+                }
+            }
+            CommandKind::GenerateOperation(name) => {
+                // Generation happens in the constructor (a refusal writes
+                // nothing); the status line reports what was produced.
+                match GenerateOperation::new(&self.world, &name) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        let cache = model::find_by_name(&self.world, &name)
+                            .and_then(|e| model::toolpath_of(&self.world, &e));
+                        self.status = match cache {
+                            Some(tp) => format!(
+                                "generated {name}: {} move(s), {} warning(s)",
+                                tp.path.len(),
+                                tp.warnings.len()
+                            ),
+                            None => format!("generated {name}"),
+                        };
+                    }
+                    Err(err) => self.status = format!("generate failed: {err}"),
                 }
             }
         }

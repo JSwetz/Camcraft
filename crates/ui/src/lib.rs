@@ -5,9 +5,11 @@
 
 pub mod app;
 pub mod headless;
+pub mod properties;
 pub mod setup;
 pub mod shell;
 pub mod state;
+pub mod tool_library;
 pub mod tree;
 pub mod viewport;
 

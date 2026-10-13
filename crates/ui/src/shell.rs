@@ -9,8 +9,10 @@ use dear_imgui_rs::{
     WindowFlags, WindowKey,
 };
 
+use crate::properties;
 use crate::setup;
 use crate::state::{CommandKind, State};
+use crate::tool_library;
 use crate::tree;
 
 /// Stable identity for the 3D panel; shared by the layout and the window.
@@ -25,11 +27,13 @@ pub(crate) fn viewport_key() -> Option<WindowKey> {
 fn dock_layout() -> Option<DockLayout> {
     let tree = WindowKey::new("models", "Models").ok()?;
     let setup_key = WindowKey::new("setup", "Setup").ok()?;
+    let props = WindowKey::new("properties", "Properties").ok()?;
+    let tools = WindowKey::new("tools", "Tool Library").ok()?;
     let view = viewport_key()?;
     Some(DockLayout::split(
         DockSplit::Left,
         0.24,
-        DockLayout::tabs([tree, setup_key]),
+        DockLayout::tabs([tree, setup_key, props, tools]),
         DockLayout::tabs([view]),
     ))
 }
@@ -137,11 +141,36 @@ fn menu_bar(ui: &Ui, state: &mut State) {
         }
         drop(view);
     }
+    if let Some(cam) = ui.begin_menu("CAM") {
+        // Pane openers: closed dock tabs are re-shown by setting the flag
+        // the panel consumes through its `opened` writeback.
+        if ui.menu_item("New Operation") {
+            state.show_properties = true;
+        }
+        if ui.menu_item("Tool Library...") {
+            state.show_tools = true;
+        }
+        ui.separator();
+        let sel = state.selected_operation();
+        if ui.menu_item_enabled_selected("Generate##cam", None::<&str>, false, sel.is_some())
+            && let Some(name) = sel.clone()
+        {
+            state.pending.push_back(CommandKind::GenerateOperation(name));
+        }
+        if ui.menu_item_enabled_selected("Delete Operation", None::<&str>, false, sel.is_some())
+            && let Some(name) = sel
+        {
+            state.pending.push_back(CommandKind::DeleteOperation(name));
+        }
+        drop(cam);
+    }
 }
 
 fn panels(ui: &Ui, state: &mut State) {
     tree::models_panel(ui, state);
     setup::setup_panel(ui, state);
+    properties::properties_panel(ui, state);
+    tool_library::tools_panel(ui, state);
     viewport_panel(ui, state);
 }
 
