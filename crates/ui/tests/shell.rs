@@ -191,7 +191,10 @@ fn stock_fit_wraps_models_and_double_fit_does_not_grow() {
     let bounds = model::solid_world_aabb(&state.world).expect("model extent");
     state
         .pending
-        .push_back(CommandKind::StockFit { margin: 2.0 });
+        .push_back(CommandKind::StockFit {
+            margin: 2.0,
+            shape: 0,
+        });
     state.drain_actions();
     assert_eq!(state.status, "stock fitted to models");
     let stock = model::find_by_name(&state.world, STOCK_NAME).expect("stock");
@@ -206,7 +209,10 @@ fn stock_fit_wraps_models_and_double_fit_does_not_grow() {
     // The stock is not a model: fitting twice must not inflate it.
     state
         .pending
-        .push_back(CommandKind::StockFit { margin: 2.0 });
+        .push_back(CommandKind::StockFit {
+            margin: 2.0,
+            shape: 0,
+        });
     state.drain_actions();
     let stock = model::find_by_name(&state.world, STOCK_NAME).expect("still stock");
     assert_eq!(
@@ -217,13 +223,118 @@ fn stock_fit_wraps_models_and_double_fit_does_not_grow() {
 }
 
 #[test]
+fn cylinder_fit_keeps_the_cylinder_choice() {
+    // Feedback 4: fit ignored the selected shape and rebuilt the stock as a
+    // box, after which the pane snapped the radio back to Box - the cylinder
+    // looked broken in both Apply-then-Fit and plain Fit flows.
+    use hsmworks_app::model;
+    use hsmworks_app::schema::STOCK_NAME;
+    use hsmworks_app::stock::StockShape;
+    use hsmworks_ui::state::{CommandKind, State};
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/models/cube.stl");
+    let mut state = State::new();
+    state.pending.push_back(CommandKind::ImportFile(path));
+    state.settle();
+    assert!(state.status.starts_with("imported"), "{:?}", state.status);
+
+    state.stock_ui.shape = 1; // the user picks "Cylinder" in the pane
+    state
+        .pending
+        .push_back(CommandKind::StockFit {
+            margin: 2.0,
+            shape: 1,
+        });
+    state.drain_actions();
+    assert_eq!(state.status, "stock fitted to models");
+    let stock = model::find_by_name(&state.world, STOCK_NAME).expect("stock");
+    let Some(StockShape::Cylinder { diameter, height }) = model::stock_def_of(&state.world, &stock)
+    else {
+        panic!("cylinder fit must produce cylinder stock");
+    };
+    let bounds = model::solid_world_aabb(&state.world).expect("model extent");
+    let diag = ((bounds.max.x - bounds.min.x) + 4.0).hypot((bounds.max.y - bounds.min.y) + 4.0);
+    let eps = 1e-9;
+    assert!(diameter >= diag - eps, "{diameter} must reach the padded diagonal");
+    assert!(
+        height >= (bounds.max.z - bounds.min.z) + 4.0 - eps,
+        "{height}"
+    );
+
+    // And the draft must agree with the world after the resync, so the
+    // radio never silently reverts.
+    state.sync_setup_ui();
+    assert_eq!(state.stock_ui.shape, 1, "radio stays on Cylinder");
+    assert!((state.stock_ui.diameter - diameter).abs() < eps);
+
+    // Double cylinder fit stays idempotent (stock excluded from the bounds).
+    state
+        .pending
+        .push_back(CommandKind::StockFit {
+            margin: 2.0,
+            shape: 1,
+        });
+    state.drain_actions();
+    let stock = model::find_by_name(&state.world, STOCK_NAME).expect("still stock");
+    assert_eq!(
+        model::stock_def_of(&state.world, &stock),
+        Some(StockShape::Cylinder { diameter, height }),
+        "double cylinder fit must be idempotent"
+    );
+
+    // Undo unwinds one fit at a time, restoring the exact parameters: the
+    // first fit created the stock, so the second undo removes it.
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    let stock = model::find_by_name(&state.world, STOCK_NAME).expect("stock after one undo");
+    assert_eq!(
+        model::stock_def_of(&state.world, &stock),
+        Some(StockShape::Cylinder { diameter, height }),
+        "undo of an idempotent re-fit leaves the same cylinder"
+    );
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    assert!(
+        model::find_by_name(&state.world, STOCK_NAME).is_none(),
+        "undoing the creating fit removes the stock"
+    );
+}
+
+#[test]
+fn from_model_stock_refuses_fit_with_a_clear_status() {
+    use hsmworks_app::model;
+    use hsmworks_app::schema::STOCK_NAME;
+    use hsmworks_ui::state::{CommandKind, State};
+
+    let mut state = State::new();
+    state
+        .pending
+        .push_back(CommandKind::StockFit {
+            margin: 2.0,
+            shape: 2,
+        });
+    state.drain_actions();
+    assert!(
+        state.status.contains("follows its source"),
+        "{:?}",
+        state.status
+    );
+    assert!(!state.history.can_undo());
+    assert!(model::find_by_name(&state.world, STOCK_NAME).is_none());
+}
+
+#[test]
 fn stock_fit_without_models_is_a_polite_status() {
     use hsmworks_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state
         .pending
-        .push_back(CommandKind::StockFit { margin: 2.0 });
+        .push_back(CommandKind::StockFit {
+            margin: 2.0,
+            shape: 0,
+        });
     state.drain_actions();
     assert_eq!(state.status, "nothing to fit: no models in the document");
     assert!(!state.history.can_undo());

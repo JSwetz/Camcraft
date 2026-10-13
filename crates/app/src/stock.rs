@@ -87,12 +87,12 @@ pub fn stock_mesh(shape: &StockShape) -> Option<Vec<Triangle>> {
     }
 }
 
-/// Box stock that wraps `bounds` on every side by `margin`, plus the
-/// placement that puts it there (XY-centered, bottom at `min.z - margin`).
-/// Refuses a non-finite/negative margin and a zero-extent model: an
-/// invisible stock is worse than no stock.
-#[must_use]
-pub fn fit_box(bounds: &Aabb, margin: f64) -> Option<(StockShape, Point3)> {
+/// Shared guards and measurements for fitting stock to a model set: finite
+/// non-negative margin, finite bounds, positive extents once the margin is
+/// applied. Returns the padded dimensions and the placement that centers the
+/// footprint in XY with the bottom at `min.z - margin`. An invisible stock is
+/// worse than no stock, so degenerate input yields `None`.
+fn fit_measures(bounds: &Aabb, margin: f64) -> Option<([f64; 3], Point3)> {
     if !margin.is_finite() || margin < 0.0 {
         return None;
     }
@@ -100,22 +100,43 @@ pub fn fit_box(bounds: &Aabb, margin: f64) -> Option<(StockShape, Point3)> {
     if !(min.is_finite() && max.is_finite()) {
         return None;
     }
-    let (dx, dy, dz) = (
+    let dims = [
         (max.x - min.x) + 2.0 * margin,
         (max.y - min.y) + 2.0 * margin,
         (max.z - min.z) + 2.0 * margin,
-    );
-    if !(positive(dx) && positive(dy) && positive(dz)) {
+    ];
+    if !(positive(dims[0]) && positive(dims[1]) && positive(dims[2])) {
         return None;
     }
     Some((
-        StockShape::Box { dx, dy, dz },
-        Point3::new(
-            (min.x + max.x) * 0.5,
-            (min.y + max.y) * 0.5,
-            min.z - margin,
-        ),
+        dims,
+        Point3::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5, min.z - margin),
     ))
+}
+
+/// Box stock that wraps `bounds` on every side by `margin`.
+#[must_use]
+pub fn fit_box(bounds: &Aabb, margin: f64) -> Option<(StockShape, Point3)> {
+    let ([dx, dy, dz], pos) = fit_measures(bounds, margin)?;
+    Some((StockShape::Box { dx, dy, dz }, pos))
+}
+
+/// Cylinder stock that wraps `bounds`: the diameter is the diagonal of the
+/// margin-padded footprint (a circle contains the whole model, which an
+/// extent-width one would not), the height spans z plus margins. Written
+/// from general machining knowledge, same as `fit_box`.
+#[must_use]
+pub fn fit_cylinder(bounds: &Aabb, margin: f64) -> Option<(StockShape, Point3)> {
+    let ([wx, wy, wz], pos) = fit_measures(bounds, margin)?;
+    // Finite positive inputs keep hypot finite (no overflow at real scale).
+    let diameter = wx.hypot(wy);
+    if !diameter.is_finite() {
+        return None;
+    }
+    Some((StockShape::Cylinder {
+        diameter,
+        height: wz,
+    }, pos))
 }
 
 #[cfg(test)]
@@ -248,6 +269,59 @@ mod tests {
         assert!(
             lo.x <= -0.99 && hi.x >= 11.0 && lo.z <= -0.99 && hi.z >= 2.99,
             "lo {lo:?} hi {hi:?}"
+        );
+    }
+
+    #[test]
+    fn fit_cylinder_contains_the_whole_footprint() {
+        // A long thin rectangle: an extent-width cylinder would clip the
+        // corners, so the fitted diameter must reach the diagonal.
+        let b = Aabb {
+            min: Point3::new(-10.0, -1.0, 1.0),
+            max: Point3::new(10.0, 1.0, 3.0),
+        };
+        let (shape, pos) = fit_cylinder(&b, 1.0).expect("fits");
+        let StockShape::Cylinder { diameter, height } = shape else {
+            panic!("cylinder fit yields a cylinder");
+        };
+        assert!((height - 4.0).abs() < 1e-12, "{height}");
+        assert!((diameter - (22.0f64.hypot(4.0))).abs() < 1e-9, "{diameter}");
+        assert!((pos.x).abs() < 1e-12 && pos.y.abs() < 1e-12 && (pos.z - 0.0).abs() < 1e-12, "{pos:?}");
+        // The padded rectangle's corners must lie inside the circle.
+        let r = diameter * 0.5;
+        assert!((11.0f64.hypot(2.0)) <= r + 1e-9);
+        // And the mesh honors the convention: XY-centered, z in [0, h].
+        let m = Mesh::from_facets(stock_mesh(&shape).expect("sane"));
+        let local = m.bounds().expect("facets");
+        assert_eq!(local.min.z, 0.0);
+        assert!((local.max.z - height).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fit_cylinder_shares_the_box_guards() {
+        let flat = Aabb {
+            min: Point3::ZERO,
+            max: Point3::new(10.0, 10.0, 0.0),
+        };
+        assert!(fit_cylinder(&flat, 0.0).is_none());
+        assert!(fit_cylinder(&flat, 1.0).is_some());
+        assert!(fit_cylinder(
+            &Aabb {
+                min: Point3::ZERO,
+                max: Point3::new(1.0, 1.0, f64::NAN),
+            },
+            1.0
+        )
+        .is_none());
+        assert!(
+            fit_cylinder(
+                &Aabb {
+                    min: Point3::ZERO,
+                    max: Point3::new(1.0, 1.0, 1.0),
+                },
+                -0.5
+            )
+            .is_none()
         );
     }
 

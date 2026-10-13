@@ -49,9 +49,11 @@ pub enum CommandKind {
         pos: [f64; 3],
         yaw_deg: f64,
     },
-    /// Box stock that wraps every model's world AABB plus `margin` mm.
+    /// Stock that wraps every model's world AABB plus `margin` mm, shaped
+    /// like the pane's radio selection at click time (0 box, 1 cylinder).
     StockFit {
         margin: f64,
+        shape: i32,
     },
     SetWcs {
         slot: String,
@@ -370,12 +372,24 @@ impl State {
                     Err(err) => self.status = format!("stock not set: {err}"),
                 }
             }
-            CommandKind::StockFit { margin } => {
+            CommandKind::StockFit { margin, shape: radio } => {
+                if radio == 2 {
+                    // From-model stock IS its source's shape; there is
+                    // nothing to wrap. Refuse visibly, never guess.
+                    self.status = String::from(
+                        "from-model stock follows its source: choose Box or Cylinder to fit",
+                    );
+                    return;
+                }
                 let Some(bounds) = model::solid_world_aabb(&self.world) else {
                     self.status = String::from("nothing to fit: no models in the document");
                     return;
                 };
-                let Some((shape, pos)) = stock::fit_box(&bounds, margin) else {
+                let Some((shape, pos)) = (if radio == 1 {
+                    stock::fit_cylinder(&bounds, margin)
+                } else {
+                    stock::fit_box(&bounds, margin)
+                }) else {
                     self.status = String::from("stock fit refused: models have no usable extent");
                     return;
                 };

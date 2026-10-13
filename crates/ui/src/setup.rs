@@ -103,6 +103,7 @@ fn stock_group(ui: &Ui, state: &mut State) {
     if ui.button("Fit to Models") {
         state.pending.push_back(CommandKind::StockFit {
             margin: state.stock_ui.fit_margin,
+            shape: state.stock_ui.shape,
         });
     }
     let has_stock = model::find_by_name(&state.world, STOCK_NAME)
