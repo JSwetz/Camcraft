@@ -260,6 +260,23 @@ impl Region {
         &self.loops
     }
 
+    /// Axis-aligned XY box of all vertices, (min, max); None when empty.
+    /// Generators band their passes with this; it bounds the boundary
+    /// points, which for the polygonized regions here is exact enough -
+    /// round-join arcs bulge past their chord by at most ARC_TOL_UNITS.
+    pub fn bounds(&self) -> Option<(Point2, Point2)> {
+        let mut it = self.loops.iter().flat_map(|l| l.points().iter());
+        let first = it.next()?;
+        let mut box_ = (Point2::new(first.x, first.y), Point2::new(first.x, first.y));
+        for p in it {
+            box_.0.x = box_.0.x.min(p.x);
+            box_.0.y = box_.0.y.min(p.y);
+            box_.1.x = box_.1.x.max(p.x);
+            box_.1.y = box_.1.y.max(p.y);
+        }
+        Some(box_)
+    }
+
     fn from_paths(paths: Paths64) -> Region {
         Region {
             loops: paths
