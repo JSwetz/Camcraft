@@ -95,9 +95,12 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
       convention; machines axis their coordinates differently, so the WCS
       orientation is its own setup choice - specced from published CAM setup
       documentation, behavior only) with a G54-G59 readout and viewport triads,
-      plus box-point placing: a 3x3 XY compass grid of the stock box
-      (model bounds when there is no stock) at bottom/middle/top Z, one click
-      setting the selected offset to an exact box point. True face/vertex
+      plus box-point placing: an explicit stock-or-model reference (with a
+      visible note when the chosen one is missing and the other stands in),
+      a 3x3 XY compass grid at bottom/middle/top Z, and a viewport pick mode
+      that draws the nine points of the current level as clickable markers -
+      buttons and markers share one anchor helper, so what you click, what
+      highlights and what places cannot drift apart. True face/vertex
       snapping on model faces is deferred (needs M1.3 selection geometry).
       Offset codes are the published RS-274 / ISO 6983 ones
 - 📋 **Toolpath display**: colored toolpath preview with directional arrows
