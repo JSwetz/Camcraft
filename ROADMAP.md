@@ -91,8 +91,10 @@ job setup (stock + WCS) are in; toolpath display and units remain for the phase.
       small and undo is exact. Specced from published stock-shape conventions
       and general machining knowledge only
 - ✅ **WCS**: numeric origin and full orientation per slot (roll/pitch/yaw plus
-      90° turns about the world axes, so an offset can fit any machine's axis
-      convention; machines axis their coordinates differently, so the WCS
+      90° turns about the world axes - which apply on press, so the viewport
+      triad moves with the button instead of waiting for a re-apply - so an
+      offset can fit any machine's axis convention; machines axis their
+      coordinates differently, so the WCS
       orientation is its own setup choice - specced from published CAM setup
       documentation, behavior only) with a G54-G59 readout and viewport triads,
       plus box-point placing: an explicit stock-or-model reference (with a

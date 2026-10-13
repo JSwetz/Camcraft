@@ -176,22 +176,13 @@ fn wcs_group(ui: &Ui, state: &mut State) {
     ui.input_double("Tilt about X (roll)##wcs_roll", &mut state.wcs_ui.roll_deg);
     ui.input_double("Tilt about Y (pitch)##wcs_pitch", &mut state.wcs_ui.pitch_deg);
     ui.input_double("Turn about Z (yaw)##wcs_yaw", &mut state.wcs_ui.yaw_deg);
-    ui.text("Quarter-turns about world axes:");
+    ui.text("Quarter-turns about world axes (apply immediately):");
     for (i, (label, axis, sign)) in QUARTER_TURNS.iter().enumerate() {
         if i > 0 {
             ui.same_line();
         }
         if ui.button(format!("Turn {label}##wcs_turn{i}")) {
-            let q = quat_from_euler(
-                state.wcs_ui.roll_deg.to_radians(),
-                state.wcs_ui.pitch_deg.to_radians(),
-                state.wcs_ui.yaw_deg.to_radians(),
-            );
-            let turn = quat_from_axis_angle(*axis, sign * 90.0f64.to_radians());
-            let (r, p, y) = quat_to_euler(quat_mul(turn, q));
-            state.wcs_ui.roll_deg = r.to_degrees();
-            state.wcs_ui.pitch_deg = p.to_degrees();
-            state.wcs_ui.yaw_deg = y.to_degrees();
+            turn_wcs(state, *axis, *sign);
         }
     }
     ui.same_line();
@@ -199,6 +190,7 @@ fn wcs_group(ui: &Ui, state: &mut State) {
         state.wcs_ui.roll_deg = 0.0;
         state.wcs_ui.pitch_deg = 0.0;
         state.wcs_ui.yaw_deg = 0.0;
+        apply_wcs_drafts(state);
     }
 
     // Box-point anchoring (feedback 5, revised): the reference box is an
@@ -255,16 +247,10 @@ fn wcs_group(ui: &Ui, state: &mut State) {
                         && let Some((pos, _)) = pts.get(k)
                     {
                         state.wcs_ui.anchor_xy = k;
-                        let slot = *WCS_SLOTS
-                            .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
-                            .unwrap_or(&WCS_SLOTS[0]);
-                        state.pending.push_back(CommandKind::SetWcs {
-                            slot: slot.to_string(),
-                            pos: *pos,
-                            roll_deg: state.wcs_ui.roll_deg,
-                            pitch_deg: state.wcs_ui.pitch_deg,
-                            yaw_deg: state.wcs_ui.yaw_deg,
-                        });
+                        state.wcs_ui.x = pos[0];
+                        state.wcs_ui.y = pos[1];
+                        state.wcs_ui.z = pos[2];
+                        apply_wcs_drafts(state);
                     }
                 }
             }
@@ -273,16 +259,7 @@ fn wcs_group(ui: &Ui, state: &mut State) {
     }
 
     if ui.button("Set Origin") {
-        let slot = *WCS_SLOTS
-            .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
-            .unwrap_or(&WCS_SLOTS[0]);
-        state.pending.push_back(CommandKind::SetWcs {
-            slot: slot.to_string(),
-            pos: [state.wcs_ui.x, state.wcs_ui.y, state.wcs_ui.z],
-            roll_deg: state.wcs_ui.roll_deg,
-            pitch_deg: state.wcs_ui.pitch_deg,
-            yaw_deg: state.wcs_ui.yaw_deg,
-        });
+        apply_wcs_drafts(state);
     }
 
     ui.spacing();
@@ -306,5 +283,112 @@ fn wcs_group(ui: &Ui, state: &mut State) {
             }
         }
         table.end();
+    }
+}
+
+/// Queue the WCS drafts (position + orientation) as one `SetWcs` command.
+/// The spatial controls - turns, Level, the compass grid, viewport marker
+/// clicks - use it so the gizmo follows the button press instead of waiting
+/// for a re-apply; the numeric fields still wait for Set Origin, so typing
+/// doesn't write one command per keystroke. A refused command leaves the
+/// drafts visible for correction (validation lives in the command).
+fn apply_wcs_drafts(state: &mut State) {
+    let slot = *WCS_SLOTS
+        .get(state.wcs_ui.slot.min(WCS_SLOTS.len() - 1))
+        .unwrap_or(&WCS_SLOTS[0]);
+    state.pending.push_back(CommandKind::SetWcs {
+        slot: slot.to_string(),
+        pos: [state.wcs_ui.x, state.wcs_ui.y, state.wcs_ui.z],
+        roll_deg: state.wcs_ui.roll_deg,
+        pitch_deg: state.wcs_ui.pitch_deg,
+        yaw_deg: state.wcs_ui.yaw_deg,
+    });
+}
+
+/// Quarter-turn the draft orientation about a world axis and apply, so the
+/// triad moves where the user is looking (their feedback: turning should
+/// update the gizmo, not wait for a re-apply). Composition is `turn * draft`
+/// - about world axes, matching the label over the buttons.
+fn turn_wcs(state: &mut State, axis: usize, sign: f64) {
+    let q = quat_from_euler(
+        state.wcs_ui.roll_deg.to_radians(),
+        state.wcs_ui.pitch_deg.to_radians(),
+        state.wcs_ui.yaw_deg.to_radians(),
+    );
+    let turn = quat_from_axis_angle(axis, sign * 90.0f64.to_radians());
+    let (r, p, y) = quat_to_euler(quat_mul(turn, q));
+    state.wcs_ui.roll_deg = r.to_degrees();
+    state.wcs_ui.pitch_deg = p.to_degrees();
+    state.wcs_ui.yaw_deg = y.to_degrees();
+    apply_wcs_drafts(state);
+}
+
+#[cfg(test)]
+mod turn_tests {
+    //! The turn/Level buttons are commands of their own now: the world -
+    //! and with it the viewport gizmo - moves on the press.
+
+    use super::*;
+    use hsmworks_app::geometry::{Point3, transform_point};
+
+    fn place(state: &mut State, pos: [f64; 3], yaw_deg: f64) {
+        state.pending.push_back(CommandKind::SetWcs {
+            slot: "G54".to_string(),
+            pos,
+            roll_deg: 0.0,
+            pitch_deg: 0.0,
+            yaw_deg,
+        });
+        state.drain_actions();
+    }
+
+    fn location(state: &State, slot: &str) -> hsmworks_app::schema::Location {
+        let entity = model::find_by_name(&state.world, slot).expect("offset entity");
+        model::transform_of(&state.world, &entity).expect("location")
+    }
+
+    #[test]
+    fn a_turn_moves_the_world_not_just_the_drafts() {
+        let mut state = State::new();
+        place(&mut state, [10.0, 0.0, 0.0], 0.0);
+        state.sync_setup_ui();
+        turn_wcs(&mut state, 0, 1.0); // X+ quarter about the world X
+        state.drain_actions();
+        let loc = location(&state, "G54");
+        assert_eq!([loc.pos.x, loc.pos.y, loc.pos.z], [10.0, 0.0, 0.0]);
+        // Right-hand +90 about X takes +Z to -Y.
+        let p = transform_point(Point3::new(0.0, 0.0, 1.0), loc.pos, loc.rot);
+        assert!([(p.x - 10.0), (p.y + 1.0), p.z].iter().all(|v| v.abs() < 1e-9), "{p:?}");
+    }
+
+    #[test]
+    fn four_turns_about_one_axis_return_to_the_start() {
+        let mut state = State::new();
+        place(&mut state, [0.0, 0.0, 0.0], 30.0);
+        state.sync_setup_ui();
+        for _ in 0..4 {
+            turn_wcs(&mut state, 2, 1.0);
+        }
+        state.drain_actions();
+        let loc = location(&state, "G54");
+        // Same rotation as the 30-degree start: quaternion equal up to sign.
+        let start = quat_from_euler(0.0, 0.0, 30.0f64.to_radians());
+        let dot: f64 = start.iter().zip(loc.rot).map(|(a, b)| a * b).sum();
+        assert!((dot.abs() - 1.0).abs() < 1e-9, "closed the circle: {:?}", loc.rot);
+    }
+
+    #[test]
+    fn turning_an_unplaced_slot_applies_the_typed_position() {
+        let mut state = State::new();
+        state.wcs_ui.slot = 1; // G55
+        state.wcs_ui.x = 5.0;
+        turn_wcs(&mut state, 1, -1.0); // Y- quarter
+        state.drain_actions();
+        let loc = location(&state, "G55");
+        assert_eq!([loc.pos.x, loc.pos.y, loc.pos.z], [5.0, 0.0, 0.0]);
+        // Right-hand -90 about Y takes +X to +Z: the drafts, not just a
+        // rotation, rode along.
+        let p = transform_point(Point3::new(1.0, 0.0, 0.0), loc.pos, loc.rot);
+        assert!([(p.x - 5.0), p.y, (p.z - 1.0)].iter().all(|v| v.abs() < 1e-9), "{p:?}");
     }
 }
