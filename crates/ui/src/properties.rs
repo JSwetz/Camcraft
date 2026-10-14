@@ -70,9 +70,19 @@ fn contents(ui: &Ui, state: &mut State) {
 
     // Tool: an existing operation retargets immediately (a discrete event,
     // like the WCS slot switch); the new-op form just updates the draft.
+    // A combo renders each item as a Selectable at its popup root, and
+    // ImGui asserts on an empty label there ("empty ID at the root of a
+    // window") - so a draft that names no tool (the fresh form, before any
+    // selection resyncs it) must never join the list; it adopts the first
+    // tool instead, so the preview and a later Add say the same thing. With
+    // no tools at all the combo is inert and the hint below explains.
     let mut tools = state.tool_names();
-    if !tools.contains(&state.op_ui.tool) {
+    if !state.op_ui.tool.is_empty() && !tools.contains(&state.op_ui.tool) {
         tools.push(state.op_ui.tool.clone());
+    } else if state.op_ui.tool.is_empty()
+        && let Some(first) = tools.first()
+    {
+        state.op_ui.tool = first.clone();
     }
     let mut t_idx = tools
         .iter()
@@ -90,7 +100,7 @@ fn contents(ui: &Ui, state: &mut State) {
             });
         }
     }
-    if tools.first().is_none_or(|t| t.is_empty()) {
+    if tools.is_empty() {
         ui.text_wrapped("No tools in the document - add one in the Tool Library.");
     }
 
