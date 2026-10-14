@@ -8,7 +8,6 @@
 //! would silently take the last frame's color - one uniform means one
 //! upload per frame and one draw call.
 
-use std::collections::HashMap;
 
 use dear_imgui_wgpu::wgpu;
 
@@ -1022,115 +1021,20 @@ fn normalize(v: [f64; 3]) -> (f64, f64, f64) {
     (v[0] / l, v[1] / l, v[2] / l)
 }
 
-/// Wireframe of a triangle soup: boundary edges (one face) and creases
-/// (two faces bending past ~40 degrees) are emitted; facet seams inside a
-/// flat or smoothly-bent run stay hidden so shading carries the surface.
-/// Endpoints are welded by quantized position (1/4096 mm), so STL's
-/// duplicated corners count as shared. Non-manifold edges are drawn rather
-/// than silently dropped - a wrong-but-visible line beats a missing one.
+/// Wireframe of a triangle soup: boundary edges and creases only, facet
+/// seams inside a flat or smoothly-bent run stay hidden. The rule itself
+/// lives in the app layer (`geometry::feature`, shared with M1.5 face and
+/// chain topology); this is the adapter into the GPU index list. Welding
+/// is per part, as the caller splits the soup that way.
 fn feature_edges(verts: &[[f32; 3]]) -> Vec<u32> {
-    type Pos = (i64, i64, i64);
-    type EdgeKey = (Pos, Pos);
-
-    fn q(v: [f32; 3]) -> Pos {
-        let s = |x: f32| (f64::from(x) * 4096.0).round() as i64;
-        (s(v[0]), s(v[1]), s(v[2]))
-    }
-    fn edge_key(keys: &[Pos], i: usize, j: usize) -> EdgeKey {
-        let (ki, kj) = (keys[i], keys[j]);
-        if ki <= kj {
-            (ki, kj)
-        } else {
-            (kj, ki)
-        }
-    }
-    fn unit_normal(verts: &[[f32; 3]], t: usize) -> Option<[f64; 3]> {
-        let (a, b, c) = (verts[t * 3], verts[t * 3 + 1], verts[t * 3 + 2]);
-        let e1 = [
-            f64::from(b[0] - a[0]),
-            f64::from(b[1] - a[1]),
-            f64::from(b[2] - a[2]),
-        ];
-        let e2 = [
-            f64::from(c[0] - a[0]),
-            f64::from(c[1] - a[1]),
-            f64::from(c[2] - a[2]),
-        ];
-        let n = [
-            e1[1] * e2[2] - e1[2] * e2[1],
-            e1[2] * e2[0] - e1[0] * e2[2],
-            e1[0] * e2[1] - e1[1] * e2[0],
-        ];
-        let len2 = n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
-        if len2.is_finite() && len2 > 1e-24 {
-            let inv = 1.0 / len2.sqrt();
-            Some([n[0] * inv, n[1] * inv, n[2] * inv])
-        } else {
-            None
-        }
-    }
-
-    let tri_count = verts.len() / 3;
-    if tri_count == 0 {
-        return Vec::new();
-    }
-    let keys: Vec<Pos> = verts.iter().copied().map(q).collect();
-
-    #[derive(Clone, Copy)]
-    struct Side {
-        first: usize,
-        other: usize,
-        count: u32,
-    }
-    let mut shared: HashMap<EdgeKey, Side> = HashMap::new();
-    for t in 0..tri_count {
-        for (i, j) in [
-            (3 * t, 3 * t + 1),
-            (3 * t + 1, 3 * t + 2),
-            (3 * t + 2, 3 * t),
-        ] {
-            shared
-                .entry(edge_key(&keys, i, j))
-                .and_modify(|s| s.other = t)
-                .or_insert(Side {
-                    first: t,
-                    other: t,
-                    count: 0,
-                })
-                .count += 1;
-        }
-    }
-
-    let cos_crease = 40.0f64.to_radians().cos();
-    let mut out: Vec<u32> = Vec::new();
-    for t in 0..tri_count {
-        for (i, j) in [
-            (3 * t, 3 * t + 1),
-            (3 * t + 1, 3 * t + 2),
-            (3 * t + 2, 3 * t),
-        ] {
-            let Some(side) = shared.get(&edge_key(&keys, i, j)) else {
-                continue;
-            };
-            if side.first != t {
-                continue; // only the owning triangle emits an edge once
-            }
-            let feature = if side.count == 2 {
-                match (unit_normal(verts, t), unit_normal(verts, side.other)) {
-                    (Some(x), Some(y)) => {
-                        x[0] * y[0] + x[1] * y[1] + x[2] * y[2] < cos_crease
-                    }
-                    _ => true,
-                }
-            } else {
-                true // boundary (count 1) or non-manifold (count 3+)
-            };
-            if feature {
-                out.extend_from_slice(&[i as u32, j as u32]);
-            }
-        }
-    }
-    out
+    let pts: Vec<[f64; 3]> = verts
+        .iter()
+        .map(|v| [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])])
+        .collect();
+    hsmworks_app::geometry::feature::feature_edges(&pts)
+        .into_iter()
+        .flat_map(|e| [e.i, e.j])
+        .collect()
 }
 
 /// Column-major matrix product: `out[c][r] = sum_k a[k][r] * b[c][k]`.
@@ -1147,59 +1051,3 @@ fn mat_mul(a: [[f64; 4]; 4], b: [[f64; 4]; 4]) -> [[f32; 4]; 4] {
     })
 }
 
-#[cfg(test)]
-mod edge_tests {
-    use super::feature_edges;
-    use hsmworks_app::geometry::{cube, Point3};
-
-    fn flat_row() -> Vec<[f32; 3]> {
-        // A 2x1 rectangle tiled with four coplanar triangles: no interior
-        // seam may be drawn, all border edges must be.
-        let quad = |x0: f32| {
-            [
-                [[x0, 0.0, 0.0], [x0 + 1.0, 1.0, 0.0], [x0 + 1.0, 0.0, 0.0]],
-                [[x0, 0.0, 0.0], [x0, 1.0, 0.0], [x0 + 1.0, 1.0, 0.0]],
-            ]
-        };
-        quad(0.0).into_iter().chain(quad(1.0)).flatten().collect()
-    }
-
-    #[test]
-    fn coplanar_seam_is_not_an_edge() {
-        // The 2x1 rectangle: 6 border edges, but neither the internal
-        // vertical nor either diagonal (all coplanar seams).
-        let edges = feature_edges(&flat_row());
-        assert_eq!(edges.len() / 2, 6);
-    }
-
-    #[test]
-    fn closed_cube_shows_its_twelve_box_edges() {
-        let mesh = cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0));
-        let verts: Vec<[f32; 3]> = mesh
-            .facets
-            .iter()
-            .flat_map(|t| {
-                [
-                    [t.a.x as f32, t.a.y as f32, t.a.z as f32],
-                    [t.b.x as f32, t.b.y as f32, t.b.z as f32],
-                    [t.c.x as f32, t.c.y as f32, t.c.z as f32],
-                ]
-            })
-            .collect();
-        let edges = feature_edges(&verts);
-        assert_eq!(edges.len() / 2, 12, "a cube is 12 crease edges, no seams");
-    }
-
-    #[test]
-    fn empty_and_degenerate_inputs_stay_finite() {
-        assert!(feature_edges(&[]).is_empty());
-        let nan = [
-            [f32::NAN, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [1.0, 0.0, 0.0],
-        ];
-        // Degenerate normals are drawn as (suspect) edges, never a panic.
-        let e = feature_edges(&nan);
-        assert_eq!(e.len(), 6);
-    }
-}

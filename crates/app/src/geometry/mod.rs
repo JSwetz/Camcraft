@@ -9,6 +9,7 @@
 //! validated finite before it reaches a mesh. Facet/vertex counts are capped
 //! before any bulk allocation, so a corrupt header cannot OOM us.
 
+pub mod feature;
 pub mod import;
 mod primitives;
 pub mod slice;
