@@ -6,6 +6,7 @@
 pub mod actions;
 pub mod app;
 pub mod browser;
+pub mod form;
 pub mod headless;
 pub mod icons;
 pub mod operations;

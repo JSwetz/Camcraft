@@ -17,6 +17,7 @@ use hsmworks_app::stock::StockShape;
 
 use hsmworks_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
 
+use crate::form;
 use crate::state::{CommandKind, State, quat_yaw_deg};
 
 /// Quarter-turn buttons: `(label, world axis, sign)`, right-hand rule.
@@ -39,8 +40,10 @@ pub(crate) fn stock_page(ui: &Ui, state: &mut State) {
 
     match state.stock_ui.shape {
         1 => {
-            ui.input_double("Diameter##stk_d", &mut state.stock_ui.diameter);
-            ui.input_double("Height##stk_h", &mut state.stock_ui.height);
+            form::field(ui, "Diameter");
+            ui.input_double("##stk_d", &mut state.stock_ui.diameter);
+            form::field(ui, "Height");
+            ui.input_double("##stk_h", &mut state.stock_ui.height);
         }
         2 => {
             let names: Vec<String> = model::model_entities(&state.world)
@@ -54,7 +57,8 @@ pub(crate) fn stock_page(ui: &Ui, state: &mut State) {
                     .iter()
                     .position(|n| *n == state.stock_ui.source)
                     .unwrap_or(names.len() - 1);
-                if ui.combo("Source##stk_src", &mut idx, &names, |n| {
+                form::field(ui, "Source");
+                if ui.combo("##stk_src", &mut idx, &names, |n| {
                     Cow::Borrowed(n.as_str())
                 })
                     && let Some(name) = names.get(idx)
@@ -64,20 +68,28 @@ pub(crate) fn stock_page(ui: &Ui, state: &mut State) {
             }
         }
         _ => {
-            ui.input_double("Length (X)##stk_dx", &mut state.stock_ui.dx);
-            ui.input_double("Width (Y)##stk_dy", &mut state.stock_ui.dy);
-            ui.input_double("Height (Z)##stk_dz", &mut state.stock_ui.dz);
+            form::field(ui, "Length (X)");
+            ui.input_double("##stk_dx", &mut state.stock_ui.dx);
+            form::field(ui, "Width (Y)");
+            ui.input_double("##stk_dy", &mut state.stock_ui.dy);
+            form::field(ui, "Height (Z)");
+            ui.input_double("##stk_dz", &mut state.stock_ui.dz);
         }
     }
 
     ui.spacing();
-    ui.input_double("X center##stk_x", &mut state.stock_ui.x);
-    ui.input_double("Y center##stk_y", &mut state.stock_ui.y);
-    ui.input_double("Z bottom##stk_z", &mut state.stock_ui.z);
-    ui.input_double("Rotation (yaw deg)##stk_yaw", &mut state.stock_ui.yaw_deg);
+    form::field(ui, "X center");
+    ui.input_double("##stk_x", &mut state.stock_ui.x);
+    form::field(ui, "Y center");
+    ui.input_double("##stk_y", &mut state.stock_ui.y);
+    form::field(ui, "Z bottom");
+    ui.input_double("##stk_z", &mut state.stock_ui.z);
+    form::field(ui, "Rotation (yaw deg)");
+    ui.input_double("##stk_yaw", &mut state.stock_ui.yaw_deg);
 
     ui.spacing();
-    ui.input_double("Fit margin##stk_margin", &mut state.stock_ui.fit_margin);
+    form::field(ui, "Fit margin");
+    ui.input_double("##stk_margin", &mut state.stock_ui.fit_margin);
     if ui.button("Apply##stk") {
         let shape = match state.stock_ui.shape {
             1 => StockShape::Cylinder {
@@ -125,27 +137,37 @@ pub(crate) fn wcs_page(ui: &Ui, state: &mut State, slot: usize) {
     if state.wcs_ui.slot != slot {
         load_wcs_slot(state, slot);
     }
-    ui.input_double("X origin##wcs_x", &mut state.wcs_ui.x);
-    ui.input_double("Y origin##wcs_y", &mut state.wcs_ui.y);
-    ui.input_double("Z origin##wcs_z", &mut state.wcs_ui.z);
+    form::field(ui, "X origin");
+    ui.input_double("##wcs_x", &mut state.wcs_ui.x);
+    form::field(ui, "Y origin");
+    ui.input_double("##wcs_y", &mut state.wcs_ui.y);
+    form::field(ui, "Z origin");
+    ui.input_double("##wcs_z", &mut state.wcs_ui.z);
     // Full orientation: not every machine axes its coordinates the same way,
     // so the offset needs to rotate to fit the machine, not just yaw. The
     // workflow (pick an origin, orient the axes) is specced from published
     // CAM setup documentation; numeric roll/pitch/yaw is ours. Composition:
     // R = Rz(yaw) * Ry(pitch) * Rx(roll) about the world axes.
-    ui.input_double("Tilt about X (roll)##wcs_roll", &mut state.wcs_ui.roll_deg);
-    ui.input_double("Tilt about Y (pitch)##wcs_pitch", &mut state.wcs_ui.pitch_deg);
-    ui.input_double("Turn about Z (yaw)##wcs_yaw", &mut state.wcs_ui.yaw_deg);
+    form::field(ui, "Tilt about X (roll)");
+    ui.input_double("##wcs_roll", &mut state.wcs_ui.roll_deg);
+    form::field(ui, "Tilt about Y (pitch)");
+    ui.input_double("##wcs_pitch", &mut state.wcs_ui.pitch_deg);
+    form::field(ui, "Turn about Z (yaw)");
+    ui.input_double("##wcs_yaw", &mut state.wcs_ui.yaw_deg);
     ui.text("Quarter-turns about world axes (apply immediately):");
-    for (i, (label, axis, sign)) in QUARTER_TURNS.iter().enumerate() {
-        if i > 0 {
+    // Two rows of three, hand-test feedback: positives over negatives, so
+    // each row reads as one handedness. One row of seven overflowed the
+    // narrower pane (and the axis pairs lost their visual order).
+    for (k, i) in [0usize, 2, 4, 1, 3, 5].into_iter().enumerate() {
+        if k > 0 && k % 3 != 0 {
             ui.same_line();
         }
+        let (label, axis, sign) = QUARTER_TURNS[i];
         if ui.button(format!("Turn {label}##wcs_turn{i}")) {
-            turn_wcs(state, *axis, *sign);
+            turn_wcs(state, axis, sign);
         }
     }
-    ui.same_line();
+    ui.new_line();
     if ui.button("Level##wcs_level") {
         state.wcs_ui.roll_deg = 0.0;
         state.wcs_ui.pitch_deg = 0.0;
@@ -162,8 +184,9 @@ pub(crate) fn wcs_page(ui: &Ui, state: &mut State, slot: usize) {
     // from published CAM setup practice; the grid and its math are ours.
     ui.spacing();
     const SOURCES: [&str; 2] = ["Stock box", "Model bounds"];
+    form::field(ui, "Anchor on");
     ui.combo(
-        "Anchor on##wcs_src",
+        "##wcs_src",
         &mut state.wcs_ui.anchor_source,
         &SOURCES,
         |s| Cow::Borrowed(*s),

@@ -26,6 +26,7 @@ use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::catalog;
 
 use crate::browser::kind_name;
+use crate::form;
 use crate::setup;
 use crate::state::{CommandKind, ErrorScope, State, UiTarget};
 
@@ -89,7 +90,8 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         Some(name) => ui.text(format!("Operation: {name}")),
         None => {
             // Typing the name is not an event; it rides the next Add command.
-            let _ = ui.input_text("Name##op_name", &mut state.op_ui.name);
+            form::field(ui, "Name");
+            let _ = ui.input_text("##op_name", &mut state.op_ui.name);
         }
     }
     let target = state.op_ui.name.clone();
@@ -100,7 +102,8 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
 
     // Type: swapping the draft's variant, carrying over the shared numbers.
     let mut kind_idx = kind_index(state.op_ui.params.kind());
-    if ui.combo("Type##op_kind", &mut kind_idx, TYPES.as_slice(), |t| {
+    form::field(ui, "Type");
+    if ui.combo("##op_kind", &mut kind_idx, TYPES.as_slice(), |t| {
         Cow::Borrowed(*t)
     }) {
         let top = stock_top(&state.world);
@@ -128,7 +131,8 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         .iter()
         .position(|t| *t == state.op_ui.tool)
         .unwrap_or(0);
-    if ui.combo("Tool##op_tool", &mut t_idx, &tools, |t| Cow::Borrowed(t.as_str()))
+    form::field(ui, "Tool");
+    if ui.combo("##op_tool", &mut t_idx, &tools, |t| Cow::Borrowed(t.as_str()))
         && let Some(name) = tools.get(t_idx)
     {
         state.op_ui.tool = name.clone();
@@ -165,7 +169,8 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         },
         _ => 0,
     };
-    if ui.combo("Source##op_src", &mut s_idx, src_items.as_slice(), |s| {
+    form::field(ui, "Source");
+    if ui.combo("##op_src", &mut s_idx, src_items.as_slice(), |s| {
         Cow::Borrowed(s.as_str())
     }) {
         let src = if s_idx == 0 {
@@ -286,24 +291,36 @@ fn tool_page(ui: &Ui, state: &mut State, name: &str) {
         ui.text(format!("Tool: {}", state.tool_ui.name));
     } else {
         // Typing the name is not an event; it rides the next Add command.
-        let _ = ui.input_text("Name##tool_name", &mut state.tool_ui.name);
+        form::field(ui, "Name");
+        let _ = ui.input_text("##tool_name", &mut state.tool_ui.name);
     }
     let mut k = state.tool_ui.kind.min(2);
-    if ui.combo("Type##tool_kind", &mut k, TOOL_KINDS.as_slice(), |t| {
+    form::field(ui, "Type");
+    if ui.combo("##tool_kind", &mut k, TOOL_KINDS.as_slice(), |t| {
         Cow::Borrowed(*t)
     }) {
         state.tool_ui.kind = k;
     }
-    ui.input_double("Diameter##t_d", &mut state.tool_ui.diameter);
-    ui.input_double("Corner radius##t_cr", &mut state.tool_ui.corner_r);
-    ui.input_double("Flute length##t_fl", &mut state.tool_ui.flute_len);
-    ui.input_double("Shank diameter##t_sd", &mut state.tool_ui.shank_d);
-    ui.input_double("Shank length##t_sl", &mut state.tool_ui.shank_len);
-    ui.input_double("Holder diameter##t_hd", &mut state.tool_ui.holder_d);
-    ui.input_double("Holder length##t_hl", &mut state.tool_ui.holder_len);
-    let _ = ui.input_text("Material group##t_mat", &mut state.tool_ui.material_group);
-    ui.input_double("Spindle rpm##t_rpm", &mut state.tool_ui.rpm);
-    ui.input_double("Feed (mm/min)##t_feed", &mut state.tool_ui.feed);
+    form::field(ui, "Diameter");
+    ui.input_double("##t_d", &mut state.tool_ui.diameter);
+    form::field(ui, "Corner radius");
+    ui.input_double("##t_cr", &mut state.tool_ui.corner_r);
+    form::field(ui, "Flute length");
+    ui.input_double("##t_fl", &mut state.tool_ui.flute_len);
+    form::field(ui, "Shank diameter");
+    ui.input_double("##t_sd", &mut state.tool_ui.shank_d);
+    form::field(ui, "Shank length");
+    ui.input_double("##t_sl", &mut state.tool_ui.shank_len);
+    form::field(ui, "Holder diameter");
+    ui.input_double("##t_hd", &mut state.tool_ui.holder_d);
+    form::field(ui, "Holder length");
+    ui.input_double("##t_hl", &mut state.tool_ui.holder_len);
+    form::field(ui, "Material group");
+    let _ = ui.input_text("##t_mat", &mut state.tool_ui.material_group);
+    form::field(ui, "Spindle rpm");
+    ui.input_double("##t_rpm", &mut state.tool_ui.rpm);
+    form::field(ui, "Feed (mm/min)");
+    ui.input_double("##t_feed", &mut state.tool_ui.feed);
 
     ui.spacing();
     if state.tool_ui.exists {
@@ -428,11 +445,16 @@ fn params_fields(ui: &Ui, state: &mut State) {
             plunge_feed,
             climb,
         } => {
-            ui.input_double("Stepover (Y spacing)##f_so", stepover);
-            ui.input_double("Clearance Z##f_clr", clearance_z);
-            ui.input_double("Cut Z##f_cut", cut_z);
-            ui.input_double("Feed (mm/min)##f_feed", feed);
-            ui.input_double("Plunge feed (mm/min)##f_pl", plunge_feed);
+            form::field(ui, "Stepover (Y spacing)");
+            ui.input_double("##f_so", stepover);
+            form::field(ui, "Clearance Z");
+            ui.input_double("##f_clr", clearance_z);
+            form::field(ui, "Cut Z");
+            ui.input_double("##f_cut", cut_z);
+            form::field(ui, "Feed (mm/min)");
+            ui.input_double("##f_feed", feed);
+            form::field(ui, "Plunge feed (mm/min)");
+            ui.input_double("##f_pl", plunge_feed);
             ui.checkbox("Climb milling", climb);
         }
         OpParams::Contour {
@@ -451,21 +473,30 @@ fn params_fields(ui: &Ui, state: &mut State) {
             tab_width,
             tab_height,
         } => {
-            ui.input_double("Stock to leave##c_stl", stock_to_leave);
-            ui.input_double("Clearance Z##c_clr", clearance_z);
-            ui.input_double("Retract Z (between passes)##c_ret", retract_z);
-            ui.input_double("Top Z##c_top", top_z);
-            ui.input_double("Bottom Z##c_bot", bottom_z);
-            ui.input_double("Stepdown##c_sd", stepdown);
-            ui.input_double("Feed (mm/min)##c_feed", feed);
-            ui.input_double("Plunge feed (mm/min)##c_pl", plunge_feed);
+            form::field(ui, "Stock to leave");
+            ui.input_double("##c_stl", stock_to_leave);
+            form::field(ui, "Clearance Z");
+            ui.input_double("##c_clr", clearance_z);
+            form::field(ui, "Retract Z (between passes)");
+            ui.input_double("##c_ret", retract_z);
+            form::field(ui, "Top Z");
+            ui.input_double("##c_top", top_z);
+            form::field(ui, "Bottom Z");
+            ui.input_double("##c_bot", bottom_z);
+            form::field(ui, "Stepdown");
+            ui.input_double("##c_sd", stepdown);
+            form::field(ui, "Feed (mm/min)");
+            ui.input_double("##c_feed", feed);
+            form::field(ui, "Plunge feed (mm/min)");
+            ui.input_double("##c_pl", plunge_feed);
             ui.checkbox("Climb milling", climb);
             let mut lead_idx = match lead {
                 Lead::None => 0,
                 Lead::Linear { .. } => 1,
                 Lead::Arc { .. } => 2,
             };
-            if ui.combo("Lead in/out##c_lead", &mut lead_idx, LEADS.as_slice(), |t| {
+            form::field(ui, "Lead in/out");
+            if ui.combo("##c_lead", &mut lead_idx, LEADS.as_slice(), |t| {
                 Cow::Borrowed(*t)
             }) {
                 *lead = match lead_idx {
@@ -476,19 +507,25 @@ fn params_fields(ui: &Ui, state: &mut State) {
             }
             match lead {
                 Lead::Linear { length } => {
-                    ui.input_double("Lead length##c_lead_len", length);
+                    form::field(ui, "Lead length");
+                    ui.input_double("##c_lead_len", length);
                 }
                 Lead::Arc { radius } => {
-                    ui.input_double("Lead arc radius##c_lead_r", radius);
+                    form::field(ui, "Lead arc radius");
+                    ui.input_double("##c_lead_r", radius);
                 }
                 Lead::None => {}
             }
-            ui.input_double("Tolerance##c_tol", tolerance);
+            form::field(ui, "Tolerance");
+            ui.input_double("##c_tol", tolerance);
+            form::field(ui, "Tab count");
             let mut tabs = f64::from(*tab_count);
-            ui.input_double("Tab count##c_tabs", &mut tabs);
+            ui.input_double("##c_tabs", &mut tabs);
             *tab_count = tabs.clamp(0.0, 99.0).round().max(0.0) as u32;
-            ui.input_double("Tab width##c_tabw", tab_width);
-            ui.input_double("Tab height##c_tabh", tab_height);
+            form::field(ui, "Tab width");
+            ui.input_double("##c_tabw", tab_width);
+            form::field(ui, "Tab height");
+            ui.input_double("##c_tabh", tab_height);
         }
         OpParams::Pocket {
             stepover,
@@ -502,20 +539,29 @@ fn params_fields(ui: &Ui, state: &mut State) {
             climb,
             strategy,
         } => {
-            ui.input_double("Stepover##p_so", stepover);
-            ui.input_double("Stock to leave##p_stl", stock_to_leave);
-            ui.input_double("Clearance Z##p_clr", clearance_z);
-            ui.input_double("Top Z##p_top", top_z);
-            ui.input_double("Bottom Z##p_bot", bottom_z);
-            ui.input_double("Stepdown##p_sd", stepdown);
-            ui.input_double("Feed (mm/min)##p_feed", feed);
-            ui.input_double("Plunge feed (mm/min)##p_pl", plunge_feed);
+            form::field(ui, "Stepover");
+            ui.input_double("##p_so", stepover);
+            form::field(ui, "Stock to leave");
+            ui.input_double("##p_stl", stock_to_leave);
+            form::field(ui, "Clearance Z");
+            ui.input_double("##p_clr", clearance_z);
+            form::field(ui, "Top Z");
+            ui.input_double("##p_top", top_z);
+            form::field(ui, "Bottom Z");
+            ui.input_double("##p_bot", bottom_z);
+            form::field(ui, "Stepdown");
+            ui.input_double("##p_sd", stepdown);
+            form::field(ui, "Feed (mm/min)");
+            ui.input_double("##p_feed", feed);
+            form::field(ui, "Plunge feed (mm/min)");
+            ui.input_double("##p_pl", plunge_feed);
             ui.checkbox("Climb milling", climb);
             let mut st_idx = match strategy {
                 PocketStrategy::Zigzag => 0,
                 PocketStrategy::Waterline => 1,
             };
-            if ui.combo("Strategy##p_strat", &mut st_idx, STRATEGIES.as_slice(), |t| {
+            form::field(ui, "Strategy");
+            if ui.combo("##p_strat", &mut st_idx, STRATEGIES.as_slice(), |t| {
                 Cow::Borrowed(*t)
             }) {
                 *strategy = if st_idx == 1 {
@@ -539,19 +585,32 @@ fn params_fields(ui: &Ui, state: &mut State) {
             plunge_feed,
             climb,
         } => {
-            ui.input_double("A X##s_ax", &mut a.x);
-            ui.input_double("A Y##s_ay", &mut a.y);
-            ui.input_double("B X##s_bx", &mut b.x);
-            ui.input_double("B Y##s_by", &mut b.y);
-            ui.input_double("Slot width##s_w", width);
-            ui.input_double("Stock to leave##s_stl", stock_to_leave);
-            ui.input_double("Clearance Z##s_clr", clearance_z);
-            ui.input_double("Top Z##s_top", top_z);
-            ui.input_double("Bottom Z##s_bot", bottom_z);
-            ui.input_double("Stepdown##s_sd", stepdown);
-            ui.input_double("Stepover##s_so", stepover);
-            ui.input_double("Feed (mm/min)##s_feed", feed);
-            ui.input_double("Plunge feed (mm/min)##s_pl", plunge_feed);
+            form::field(ui, "A X");
+            ui.input_double("##s_ax", &mut a.x);
+            form::field(ui, "A Y");
+            ui.input_double("##s_ay", &mut a.y);
+            form::field(ui, "B X");
+            ui.input_double("##s_bx", &mut b.x);
+            form::field(ui, "B Y");
+            ui.input_double("##s_by", &mut b.y);
+            form::field(ui, "Slot width");
+            ui.input_double("##s_w", width);
+            form::field(ui, "Stock to leave");
+            ui.input_double("##s_stl", stock_to_leave);
+            form::field(ui, "Clearance Z");
+            ui.input_double("##s_clr", clearance_z);
+            form::field(ui, "Top Z");
+            ui.input_double("##s_top", top_z);
+            form::field(ui, "Bottom Z");
+            ui.input_double("##s_bot", bottom_z);
+            form::field(ui, "Stepdown");
+            ui.input_double("##s_sd", stepdown);
+            form::field(ui, "Stepover");
+            ui.input_double("##s_so", stepover);
+            form::field(ui, "Feed (mm/min)");
+            ui.input_double("##s_feed", feed);
+            form::field(ui, "Plunge feed (mm/min)");
+            ui.input_double("##s_pl", plunge_feed);
             ui.checkbox("Climb milling", climb);
         }
         OpParams::Trace {
@@ -563,12 +622,18 @@ fn params_fields(ui: &Ui, state: &mut State) {
             plunge_feed,
             climb,
         } => {
-            ui.input_double("Clearance Z##t_clr", clearance_z);
-            ui.input_double("Top Z##t_top", top_z);
-            ui.input_double("Bottom Z##t_bot", bottom_z);
-            ui.input_double("Stepdown##t_sd", stepdown);
-            ui.input_double("Feed (mm/min)##t_feed", feed);
-            ui.input_double("Plunge feed (mm/min)##t_pl", plunge_feed);
+            form::field(ui, "Clearance Z");
+            ui.input_double("##t_clr", clearance_z);
+            form::field(ui, "Top Z");
+            ui.input_double("##t_top", top_z);
+            form::field(ui, "Bottom Z");
+            ui.input_double("##t_bot", bottom_z);
+            form::field(ui, "Stepdown");
+            ui.input_double("##t_sd", stepdown);
+            form::field(ui, "Feed (mm/min)");
+            ui.input_double("##t_feed", feed);
+            form::field(ui, "Plunge feed (mm/min)");
+            ui.input_double("##t_pl", plunge_feed);
             ui.checkbox("Climb milling", climb);
         }
     }
