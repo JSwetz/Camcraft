@@ -1,11 +1,17 @@
-//! Feature-edge weld: crease/boundary extraction off a triangle soup.
+//! Feature edges and face clustering: crease/boundary extraction off a
+//! triangle soup, the planar faces they bound, and the position-keyed
+//! ids that survive STEP ordering and re-tessellation.
 //! Lifted from `crates/ui/src/viewport.rs` (its `edge_tests`) in M1.5
 //! step 1, re-based on the 1 µm f64 lattice, plus the lattice pins the
-//! old f32 version could not express.
+//! old f32 version could not express; clustering added in step 2.
 
 use hsmworks_app::geometry::cube;
-use hsmworks_app::geometry::feature::{feature_edges, EdgeKind};
-use hsmworks_app::geometry::{Mesh, Point3};
+use hsmworks_app::geometry::feature::{
+    digest_of, feature_edges, features_of_facets, EdgeKind, FaceKind, Features, LoopKind,
+};
+use hsmworks_app::geometry::{Mesh, Point3, Triangle};
+use hsmworks_app::model;
+use hsmworks_app::world::new_world;
 
 fn flat(mesh: &Mesh) -> Vec<[f64; 3]> {
     mesh.facets
@@ -111,4 +117,235 @@ fn non_manifold_edge_is_emitted_once_and_tagged() {
     let nman = edges.iter().filter(|e| e.kind == EdgeKind::NonManifold).count();
     assert_eq!(nman, 1, "the shared seam is one visible line");
     assert_eq!(edges.len(), 7, "plus the six remaining rims");
+}
+
+// ===================== face clustering (step 2) =====================
+
+fn pt(p: [f64; 3]) -> Point3 {
+    Point3::new(p[0], p[1], p[2])
+}
+
+fn tris(pts: &[[f64; 3]]) -> Vec<Triangle> {
+    pts
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|c| Triangle::new(pt(c[0]), pt(c[1]), pt(c[2])))
+        .collect()
+}
+
+/// One planar quad as two triangles, ordered `a b c / a c d`.
+fn quad(a: [f64; 3], b: [f64; 3], c: [f64; 3], d: [f64; 3]) -> Vec<[f64; 3]> {
+    vec![a, b, c, a, c, d]
+}
+
+/// An axis-aligned box's 12 facets, CCW seen from outside (mirrors
+/// `geometry::cube`, but as raw rows so variants can reuse the corners).
+fn box_rows(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> Vec<[f64; 3]> {
+    let p = |i: usize| match i {
+        0 => [x0, y0, z0],
+        1 => [x1, y0, z0],
+        2 => [x1, y1, z0],
+        3 => [x0, y1, z0],
+        4 => [x0, y0, z1],
+        5 => [x1, y0, z1],
+        6 => [x1, y1, z1],
+        _ => [x0, y1, z1],
+    };
+    [(3, 2, 1, 0), (4, 5, 6, 7), (0, 1, 5, 4), (2, 3, 7, 6), (1, 2, 6, 5), (3, 0, 4, 7)]
+        .into_iter()
+        .flat_map(|(a, b, c, d)| quad(p(a), p(b), p(c), p(d)))
+        .collect()
+}
+
+/// The same box with its top face split into four quads: 18 facets.
+fn box_rows_subdivided_top(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> Vec<[f64; 3]> {
+    let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+    let mut rows = vec![
+        quad([x0, y0, z1], [cx, y0, z1], [cx, cy, z1], [x0, cy, z1]),
+        quad([cx, y0, z1], [x1, y0, z1], [x1, cy, z1], [cx, cy, z1]),
+        quad([x0, cy, z1], [cx, cy, z1], [cx, y1, z1], [x0, y1, z1]),
+        quad([cx, cy, z1], [x1, cy, z1], [x1, y1, z1], [cx, y1, z1]),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<[f64; 3]>>();
+    // Everything but the top: bottom and the four walls.
+    let p = |i: usize| match i {
+        0 => [x0, y0, z0],
+        1 => [x1, y0, z0],
+        2 => [x1, y1, z0],
+        3 => [x0, y1, z0],
+        4 => [x0, y0, z1],
+        5 => [x1, y0, z1],
+        6 => [x1, y1, z1],
+        _ => [x0, y1, z1],
+    };
+    for (a, b, c, d) in [(3, 2, 1, 0), (0, 1, 5, 4), (2, 3, 7, 6), (1, 2, 6, 5), (3, 0, 4, 7)] {
+        rows.extend(quad(p(a), p(b), p(c), p(d)));
+    }
+    rows
+}
+
+/// Faces whose plane is (near) horizontal at `z`, both windings accepted.
+fn horizontal_faces(f: &Features) -> Vec<u64> {
+    f.faces
+        .iter()
+        .filter(|x| x.kind == FaceKind::Planar && x.normal[2] > 0.5)
+        .map(|x| x.id)
+        .collect()
+}
+
+fn faces_at_z(f: &Features, z: f64) -> Vec<&hsmworks_app::geometry::feature::Face> {
+    f.faces
+        .iter()
+        .filter(|x| x.kind == FaceKind::Planar && x.normal[2] > 0.5 && (x.offset - z).abs() < 1e-6)
+        .collect()
+}
+
+#[test]
+fn subdivided_planar_top_stays_one_face_with_the_same_id() {
+    let plain = features_of_facets(&tris(&box_rows(0.0, 0.0, 0.0, 4.0, 4.0, 1.0)));
+    let subdiv = features_of_facets(&tris(&box_rows_subdivided_top(0.0, 0.0, 0.0, 4.0, 4.0, 1.0)));
+    assert_eq!(plain.faces.len(), 6);
+    assert_eq!(subdiv.faces.len(), 6, "the 2x2 grid on top must not split the face");
+    let top_plain = faces_at_z(&plain, 1.0);
+    let top_subdiv = faces_at_z(&subdiv, 1.0);
+    assert_eq!((top_plain.len(), top_subdiv.len()), (1, 1));
+    assert_eq!(
+        top_plain[0].id, top_subdiv[0].id,
+        "face ids key on boundary corners, which interior tessellation cannot move"
+    );
+    assert_eq!(top_subdiv[0].facets.len(), 8, "but the facets are still all there");
+    assert_eq!(top_subdiv[0].loops.len(), 1);
+    // The ring walks every rim segment, midpoints included - identity
+    // ignores them (face_id folds collinear runs), geometry keeps them.
+    assert_eq!(top_subdiv[0].loops[0].verts.len(), 8);
+}
+
+#[test]
+fn face_ids_survive_facet_reordering() {
+    // STEP iterates its shape table in nondeterministic order; a
+    // position-keyed id must not care.
+    let rows = box_rows(0.0, 0.0, 0.0, 2.0, 3.0, 1.0);
+    let mut back = rows.clone();
+    back.reverse();
+    let mut ids_a: Vec<u64> = features_of_facets(&tris(&rows)).faces.iter().map(|f| f.id).collect();
+    let mut ids_b: Vec<u64> = features_of_facets(&tris(&back)).faces.iter().map(|f| f.id).collect();
+    ids_a.sort_unstable();
+    ids_b.sort_unstable();
+    assert_eq!(ids_a, ids_b);
+    // The content digest is order-free too - that's what keys the cache.
+    assert_eq!(digest_of(&tris(&rows)), digest_of(&tris(&back)));
+}
+
+#[test]
+fn plate_with_a_square_hole_yields_outer_and_hole_loops() {
+    let (o0, o1, o2, o3) = ([0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]);
+    let (i0, i1, i2, i3) = ([1.5, 1.5], [2.5, 1.5], [2.5, 2.5], [1.5, 2.5]);
+    let on = |p: [f64; 2], z: f64| [p[0], p[1], z];
+    let mut rows = Vec::new();
+    // Top and bottom annuli (z=1 and z=0).
+    for z in [1.0, 0.0] {
+        rows.extend(quad(on(o0, z), on(o1, z), on(i1, z), on(i0, z)));
+        rows.extend(quad(on(o1, z), on(o2, z), on(i2, z), on(i1, z)));
+        rows.extend(quad(on(o2, z), on(o3, z), on(i3, z), on(i2, z)));
+        rows.extend(quad(on(o3, z), on(o0, z), on(i0, z), on(i3, z)));
+    }
+    // Outer walls and hole walls (the hole walls face inward).
+    rows.extend(quad(on(o0, 1.0), on(o1, 1.0), on(o1, 0.0), on(o0, 0.0)));
+    rows.extend(quad(on(o1, 1.0), on(o2, 1.0), on(o2, 0.0), on(o1, 0.0)));
+    rows.extend(quad(on(o2, 1.0), on(o3, 1.0), on(o3, 0.0), on(o2, 0.0)));
+    rows.extend(quad(on(o3, 1.0), on(o0, 1.0), on(o0, 0.0), on(o3, 0.0)));
+    rows.extend(quad(on(i1, 1.0), on(i0, 1.0), on(i0, 0.0), on(i1, 0.0)));
+    rows.extend(quad(on(i2, 1.0), on(i1, 1.0), on(i1, 0.0), on(i2, 0.0)));
+    rows.extend(quad(on(i3, 1.0), on(i2, 1.0), on(i2, 0.0), on(i3, 0.0)));
+    rows.extend(quad(on(i0, 1.0), on(i3, 1.0), on(i3, 0.0), on(i0, 0.0)));
+
+    let f = features_of_facets(&tris(&rows));
+    // 2 annuli + 4 outer walls + 4 hole walls; adjacent walls meet at
+    // 90 degrees, so each stays its own face.
+    assert_eq!(f.faces.len(), 10);
+    for z in [1.0, 0.0] {
+        let tops = faces_at_z(&f, z);
+        assert_eq!(tops.len(), 1, "the annulus at z={z} is one face");
+        let loops = &tops[0].loops;
+        assert_eq!(loops.len(), 2);
+        let kinds: Vec<LoopKind> = loops.iter().map(|l| l.kind).collect();
+        assert!(
+            kinds.contains(&LoopKind::Outer) && kinds.contains(&LoopKind::Hole),
+            "{kinds:?}"
+        );
+        for l in loops {
+            assert_eq!(l.verts.len(), 4);
+        }
+        let hole = loops.iter().find(|l| l.kind == LoopKind::Hole).unwrap();
+        for &v in &hole.verts {
+            let p = f.verts[v as usize];
+            let inside = (1.4..2.6).contains(&p[0]) && (1.4..2.6).contains(&p[1]);
+            assert!(inside, "the hole ring sits on the hole, not the rim");
+        }
+    }
+    // Top and bottom annuli are separate faces despite equal-area rings.
+    let a = faces_at_z(&f, 1.0)[0].id;
+    let b = faces_at_z(&f, 0.0)[0].id;
+    assert_ne!(a, b, "one millimetre apart is two machinable planes, not one");
+    assert_eq!(horizontal_faces(&f).len(), 2);
+}
+
+#[test]
+fn coplanar_boxes_touching_at_a_vertex_stay_separate_faces() {
+    let mut rows = box_rows(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+    rows.extend(box_rows(1.0, 1.0, 1.0, 2.0, 2.0, 2.0));
+    let f = features_of_facets(&tris(&rows));
+    assert_eq!(f.faces.len(), 12, "two boxes, twelve faces, one shared corner");
+    let touch = faces_at_z(&f, 1.0);
+    assert_eq!(touch.len(), 2, "A's top and B's bottom are coplanar but unmerged");
+    assert_ne!(touch[0].id, touch[1].id);
+}
+
+#[test]
+fn absurd_soup_yields_degenerate_faces_and_never_panics() {
+    let rows = vec![
+        [f64::NAN, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        // Beyond the weld range: refused, never clamped onto real points.
+        [1e300, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [1.0, 1.0, 0.0],
+        // One honest triangle among the garbage.
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0],
+    ];
+    let f = features_of_facets(&tris(&rows));
+    assert_eq!(f.facet_face.len(), 3);
+    assert_eq!(f.faces.len(), 3);
+    let planar = f.faces.iter().filter(|x| x.kind == FaceKind::Planar).count();
+    assert_eq!(planar, 1, "only the honest triangle earns a plane");
+    let good = f.faces.iter().find(|x| x.kind == FaceKind::Planar).unwrap();
+    assert_eq!(good.loops.len(), 1);
+    assert_eq!(good.loops[0].kind, LoopKind::Outer);
+    assert_eq!(good.loops[0].verts.len(), 3);
+}
+
+#[test]
+fn features_of_caches_by_content_not_by_frame() {
+    let world = new_world();
+    let e = model::spawn(&world, "cached");
+    model::set_facets(&world, &e, tris(&box_rows(0.0, 0.0, 0.0, 2.0, 2.0, 1.0)));
+    let f1 = model::features_of(&world, &e);
+    let f2 = model::features_of(&world, &e);
+    assert!(std::sync::Arc::ptr_eq(&f1.unwrap(), &f2.unwrap()), "second ask is a cache hit");
+    // Moving the model must NOT recompute: ids resolve in the local frame.
+    model::set_location(&world, &e, Point3::new(250.0, -70.0, 3.0));
+    let f3 = model::features_of(&world, &e).unwrap();
+    let f2 = model::features_of(&world, &e).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&f2, &f3), "translation is not new content");
+    // New facets are new content: a different Arc, different ids.
+    model::set_facets(&world, &e, tris(&box_rows(0.0, 0.0, 0.0, 2.0, 2.0, 2.0)));
+    let f4 = model::features_of(&world, &e).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&f3, &f4));
+    assert_eq!(f4.faces.len(), 6);
 }

@@ -9,6 +9,7 @@
 use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::{Entity, World};
 
+use crate::geometry::feature::{self, Features};
 use crate::geometry::{Aabb, IDENTITY_Q, Point3, Triangle, normalize_quat, transform_point};
 use crate::schema::{
     Facets, Location, Name, Operation, Selected, StockDef, ToolDef, Toolpath, Wcs, STOCK_NAME,
@@ -64,6 +65,47 @@ pub fn remove(world: &World, entity: &Entity) {
 #[must_use]
 pub fn facets_of(world: &World, entity: &Entity) -> Option<Vec<Triangle>> {
     entity.entity_view(world).try_get::<&Facets>(|f| f.tris.clone())
+}
+
+thread_local! {
+    /// Cap-8 MRU of analyzed meshes, keyed by local-facet content digest.
+    /// Faces resolve in the LOCAL frame, so transforms never invalidate an
+    /// entry; correctness is independent of hits - this is pure fuel for
+    /// per-frame hover (M1.5).
+    static FEATURES_CACHE: std::cell::RefCell<Vec<(u64, std::sync::Arc<Features>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Feature topology (faces, loops, feature edges) of a model's LOCAL
+/// facets, memoized by content. `None` only for a facet-less entity;
+/// garbage facets still return complete (degenerate-tagged) features.
+#[must_use]
+pub fn features_of(world: &World, entity: &Entity) -> Option<std::sync::Arc<Features>> {
+    let tris = facets_of(world, entity)?;
+    Some(features_of_local(&tris))
+}
+
+/// The cache chokepoint, exposed for callers already holding the facets.
+#[must_use]
+pub fn features_of_local(tris: &[Triangle]) -> std::sync::Arc<Features> {
+    if tris.is_empty() {
+        return std::sync::Arc::new(Features::default());
+    }
+    let key = feature::digest_of(tris);
+    FEATURES_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
+            let entry = cache.remove(i);
+            cache.push(entry.clone()); // MRU bump
+            return entry.1;
+        }
+        let f = std::sync::Arc::new(feature::features_of_facets(tris));
+        if cache.len() >= 8 {
+            cache.remove(0);
+        }
+        cache.push((key, f.clone()));
+        f
+    })
 }
 
 /// Translation only - the common read for position-oriented code. Use
