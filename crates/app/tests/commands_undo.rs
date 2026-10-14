@@ -335,3 +335,204 @@ fn delete_stock_undo_restores_kind() {
     let e = model::find_by_name(&world, STOCK_NAME).unwrap();
     assert!(model::is_stock(&world, &e));
 }
+
+// ===================== M1.5 step 5: SetOperationGeometry =====================
+
+use hsmworks_app::commands::{
+    AddTool, CreateOperation, EditOperationLinks, GenerateOperation, SetOperationGeometry,
+};
+use hsmworks_app::geometry::feature::FaceKind;
+use hsmworks_app::operation::{self, FeatureSel, GeoSel, OpParams, SrcRef};
+use hsmworks_app::tools::catalog;
+
+fn cat_tool(name: &str) -> hsmworks_app::tools::Tool {
+    catalog()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, t)| t)
+        .expect("catalog entry")
+}
+
+fn face_params() -> OpParams {
+    OpParams::Face {
+        stepover: 3.0,
+        clearance_z: 25.0,
+        cut_z: 4.5,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    }
+}
+
+/// Planar top face id of a box mesh placed with +z up.
+fn top_face(world: &flecs_ecs::prelude::World, name: &str) -> FeatureSel {
+    let e = model::find_by_name(world, name).expect("entity exists");
+    let f = model::features_of(world, &e).expect("features");
+    FeatureSel::Face(
+        f.faces
+            .iter()
+            .find(|fa| matches!(fa.kind, FaceKind::Planar) && fa.normal[2] > 0.9)
+            .map(|fa| fa.id)
+            .expect("a planar top face"),
+    )
+}
+
+fn op_src(world: &flecs_ecs::prelude::World, name: &str) -> SrcRef {
+    let e = model::find_by_name(world, name).expect("op exists");
+    model::operation_of(world, &e).expect("operation").src
+}
+
+/// Stock → op with a tool, ready to receive geometry picks. Returns the
+/// top-face pick of the imported box part.
+fn selection_fixture() -> (
+    flecs_ecs::prelude::World,
+    History,
+    FeatureSel,
+) {
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, AddTool::new(&world, "EM-0600-4FL", cat_tool("EM-0600-4FL")).expect("tool"));
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    history.execute(
+        &world,
+        SetStock::new(
+            &world,
+            StockShape::Box { dx: 40.0, dy: 40.0, dz: 20.0 },
+            Location::default(),
+        )
+        .expect("stock"),
+    );
+    let cmd = CreateOperation::new(
+        &world,
+        "G1",
+        "EM-0600-4FL",
+        SrcRef::Stock,
+        face_params(),
+    )
+    .expect("create");
+    history.execute(&world, cmd);
+    let top = top_face(&world, "part");
+    (world, history, top)
+}
+
+#[test]
+fn geometry_pick_undo_redo_is_byte_exact() {
+    let (world, mut history, top) = selection_fixture();
+    let pick = GeoSel { entity: "part".into(), feature: top };
+
+    // Undo from any base restores the exact previous component bytes,
+    // stamp included - staleness is derived, never stored.
+    assert_eq!(op_src(&world, "G1"), SrcRef::Stock);
+    history
+        .execute(&world, SetOperationGeometry::new(&world, "G1", vec![pick.clone()]).expect("pick"));
+    assert_eq!(op_src(&world, "G1"), SrcRef::Selection(vec![pick.clone()]));
+
+    assert!(history.undo(&world));
+    assert_eq!(op_src(&world, "G1"), SrcRef::Stock, "undo restores the stock base");
+    assert!(history.redo(&world));
+    assert_eq!(op_src(&world, "G1"), SrcRef::Selection(vec![pick]));
+
+    // Entity base: the selection replaces a named model, undo returns
+    // to that model - not to Stock - byte-exact.
+    let other = GeoSel { entity: STOCK_NAME.into(), feature: top_face(&world, STOCK_NAME) };
+    history.execute(
+        &world,
+        EditOperationLinks::new(&world, "G1", None, Some(SrcRef::Entity("part".into())))
+            .expect("retarget"),
+    );
+    history
+        .execute(&world, SetOperationGeometry::new(&world, "G1", vec![other.clone()]).expect("stock-top pick"));
+    assert!(history.undo(&world));
+    assert_eq!(op_src(&world, "G1"), SrcRef::Entity("part".into()), "undo lands on the Entity base");
+    assert!(history.redo(&world));
+    assert_eq!(op_src(&world, "G1"), SrcRef::Selection(vec![other]));
+}
+
+#[test]
+fn duplicate_picks_collapse_at_construction() {
+    let (world, mut history, top) = selection_fixture();
+    let a = GeoSel { entity: "part".into(), feature: top };
+    let b = GeoSel { entity: STOCK_NAME.into(), feature: top_face(&world, STOCK_NAME) };
+    let cmd = SetOperationGeometry::new(&world, "G1", vec![a.clone(), a.clone(), b.clone()])
+        .expect("valid picks");
+    history.execute(&world, cmd);
+    assert_eq!(op_src(&world, "G1"), SrcRef::Selection(vec![a, b]), "order kept, repeats dropped");
+}
+
+#[test]
+fn reselecting_the_same_geometry_stays_fresh() {
+    // The stamp survives the pick command, so re-picking what an
+    // already-generated op has is status-OK by derivation - a
+    // different pick would flip it to Stale on its own.
+    let (world, mut history, top) = selection_fixture();
+    let pick = GeoSel { entity: "part".into(), feature: top };
+    history.execute(
+        &world,
+        SetOperationGeometry::new(&world, "G1", vec![pick.clone()]).expect("pick"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "G1").expect("generate"));
+    let op_before = {
+        let e = model::find_by_name(&world, "G1").expect("G1");
+        model::operation_of(&world, &e).expect("op")
+    };
+    history.execute(
+        &world,
+        SetOperationGeometry::new(&world, "G1", vec![pick.clone(), pick]).expect("re-pick"),
+    );
+    let e = model::find_by_name(&world, "G1").expect("G1");
+    let op_after = model::operation_of(&world, &e).expect("op");
+    assert_eq!(op_after, op_before, "same geometry, same stamp, same bytes");
+    assert_eq!(operation::status_of(&world, &e), operation::OpStatus::Ok);
+}
+
+#[test]
+fn set_geometry_refusals_never_write_the_world() {
+    let (world, mut history, top) = selection_fixture();
+    history.execute(&world, SetWcsOrigin::new(&world, "G55", Location::default()).expect("wcs"));
+    let before = op_src(&world, "G1");
+
+    // Op that does not exist: NotFound.
+    let ghost = GeoSel { entity: "part".into(), feature: top };
+    assert!(matches!(
+        SetOperationGeometry::new(&world, "no-op", vec![ghost.clone()]),
+        Err(CommandError::NotFound(_))
+    ));
+    // Empty pick list: the clearing command is a links edit, not this.
+    assert!(matches!(
+        SetOperationGeometry::new(&world, "G1", vec![]),
+        Err(CommandError::Invalid(_))
+    ));
+    // Entity gone: NotFound, not a silent stale pick.
+    assert!(matches!(
+        SetOperationGeometry::new(
+            &world,
+            "G1",
+            vec![GeoSel { entity: "gone".into(), feature: top }]
+        ),
+        Err(CommandError::NotFound(_))
+    ));
+    // A work offset has no geometry to select from.
+    assert!(matches!(
+        SetOperationGeometry::new(
+            &world,
+            "G1",
+            vec![GeoSel { entity: "G55".into(), feature: top }]
+        ),
+        Err(CommandError::Invalid(_))
+    ));
+    // An id that resolves nowhere in the entity: refused at construction.
+    assert!(matches!(
+        SetOperationGeometry::new(
+            &world,
+            "G1",
+            vec![GeoSel { entity: "part".into(), feature: FeatureSel::Face(7) }]
+        ),
+        Err(CommandError::Invalid(_))
+    ));
+
+    assert_eq!(op_src(&world, "G1"), before, "every refusal left the world alone");
+    let _ = &history; // history untouched: nothing constructed entered it
+}

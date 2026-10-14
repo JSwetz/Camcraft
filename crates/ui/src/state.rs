@@ -19,10 +19,10 @@ use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, SelectEntity,
-    SetStock, SetWcsOrigin,
+    SetOperationGeometry, SetStock, SetWcsOrigin,
 };
 use hsmworks_app::geometry::{quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
-use hsmworks_app::operation::{OpParams, SrcRef};
+use hsmworks_app::operation::{GeoSel, OpParams, SrcRef};
 use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
@@ -91,6 +91,9 @@ pub enum CommandKind {
         tool: Option<String>,
         src: Option<SrcRef>,
     },
+    /// The op's full feature pick list (Geometry section, M1.5 step 7
+    /// drives this; adding a chip sends the list with it appended).
+    SetOperationGeometry { name: String, items: Vec<GeoSel> },
     DeleteOperation(String),
     /// Generate and verify the cached path. The command does the work at
     /// construction, synchronously; status arrives with the result.
@@ -1043,6 +1046,21 @@ impl State {
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Operation, format!("links not updated: {err}"));
+                    }
+                }
+            }
+            CommandKind::SetOperationGeometry { name, items } => {
+                match SetOperationGeometry::new(&self.world, &name, items) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("geometry selection updated for {name}");
+                    }
+                    Err(err) => {
+                        self.refuse(
+                            ErrorScope::Operation,
+                            format!("geometry selection not updated: {err}"),
+                        );
                     }
                 }
             }
