@@ -7,7 +7,8 @@
 
 use hsmworks_app::geometry::cube;
 use hsmworks_app::geometry::feature::{
-    digest_of, feature_edges, features_of_facets, EdgeKind, FaceKind, Features, LoopKind,
+    chains, digest_of, feature_edges, features_of_facets, Chain, EdgeKind, FaceKind, Features,
+    LoopKind,
 };
 use hsmworks_app::geometry::{Mesh, Point3, Triangle};
 use hsmworks_app::model;
@@ -348,4 +349,90 @@ fn features_of_caches_by_content_not_by_frame() {
     let f4 = model::features_of(&world, &e).unwrap();
     assert!(!std::sync::Arc::ptr_eq(&f3, &f4));
     assert_eq!(f4.faces.len(), 6);
+}
+
+// ===================== edge chains (step 3) =====================
+
+/// A flat n-sided fan disc at z=0, radius r (open underside - a face,
+/// not a solid, is all the rim test needs).
+fn ngon_rows(n: usize, r: f64) -> Vec<[f64; 3]> {
+    let tau = std::f64::consts::TAU;
+    let p = |i: usize| {
+        let a = tau * i as f64 / n as f64;
+        [r * a.cos(), r * a.sin(), 0.0]
+    };
+    let mut rows = Vec::new();
+    for i in 0..n {
+        rows.push([0.0, 0.0, 0.0]);
+        rows.push(p(i));
+        rows.push(p(i + 1));
+    }
+    rows
+}
+
+#[test]
+fn box_edges_never_chain() {
+    let f = features_of_facets(&tris(&box_rows(0.0, 0.0, 0.0, 2.0, 3.0, 1.0)));
+    let cs = chains(&f);
+    assert_eq!(cs.len(), 12, "every box corner turns 90 degrees: nothing chains");
+    assert!(cs.iter().all(|c| c.edges.len() == 1 && !c.closed));
+}
+
+#[test]
+fn sixteen_gon_rim_is_one_closed_chain() {
+    let rows = ngon_rows(16, 12.0);
+    let f = features_of_facets(&tris(&rows));
+    let cs = chains(&f);
+    assert_eq!(cs.len(), 1);
+    assert!(cs[0].closed, "22.5-degree chord turns pass the 30-degree rule");
+    assert_eq!(cs[0].edges.len(), 16);
+    // Chain ids must not care about STEP's facet order.
+    let mut back = rows.clone();
+    back.reverse();
+    let cs2 = chains(&features_of_facets(&tris(&back)));
+    assert_eq!(cs[0].id, cs2[0].id);
+}
+
+#[test]
+fn collinear_crease_line_chains_into_one() {
+    // A flat 3x1 sheet (three quads) meeting a standing sheet at 90
+    // degrees along the y=0 edge: the seam is three collinear crease
+    // edges and must read as one pickable chain.
+    let mut rows = Vec::new();
+    for i in 0..3 {
+        let x0 = i as f64;
+        rows.extend(quad(
+            [x0, 0.0, 0.0],
+            [x0 + 1.0, 0.0, 0.0],
+            [x0 + 1.0, 1.0, 0.0],
+            [x0, 1.0, 0.0],
+        ));
+        rows.extend(quad(
+            [x0, 0.0, 0.0],
+            [x0 + 1.0, 0.0, 0.0],
+            [x0 + 1.0, 0.0, 1.0],
+            [x0, 0.0, 1.0],
+        ));
+    }
+    let f = features_of_facets(&tris(&rows));
+    let cs = chains(&f);
+    let crease: Vec<&Chain> = cs
+        .iter()
+        .filter(|c| c.edges.iter().all(|&i| f.edges[i as usize].kind == EdgeKind::Crease))
+        .collect();
+    assert_eq!(crease.len(), 1, "the seam is one chain, not three segments");
+    assert_eq!(crease[0].edges.len(), 3);
+    assert!(!crease[0].closed);
+}
+
+#[test]
+fn coarse_nine_gon_fragments_the_documented_limit() {
+    let f = features_of_facets(&tris(&ngon_rows(9, 12.0)));
+    let cs = chains(&f);
+    assert_eq!(
+        cs.len(),
+        9,
+        "40-degree turns beat the 30-degree rule - revisit when STEP arcs land"
+    );
+    assert!(cs.iter().all(|c| c.edges.len() == 1 && !c.closed));
 }

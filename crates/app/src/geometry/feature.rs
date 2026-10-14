@@ -24,6 +24,11 @@
 //! nondeterministic shell order and model moves (they resolve in the
 //! entity's local frame).
 //!
+//! Edge chains (M1.5 step 3) stitch those feature edges into the runs a
+//! user picks with one click: tangent-continuous paths of edges that are
+//! collinear to within [`CHAIN_TANGENT_DEG`] and bound a face in common,
+//! so a box corner splits but a milled rim loops closed.
+//!
 //! Robustness bar (AGENTS.md Prime Directive): vertices that refuse to
 //! weld (non-finite) never alias real lattice points; their edges are
 //! emitted as [`EdgeKind::Degenerate`] - a wrong-but-visible line beats a
@@ -941,4 +946,250 @@ fn turn_nonzero(p: Pos, q: Pos, r: Pos) -> bool {
     [term(1, 2), term(2, 0), term(0, 1)]
         .into_iter()
         .any(|x| !matches!(x, Some(false)))
+}
+
+// ===================== edge chains (step 3) =====================
+
+/// Maximum directed turn, in degrees, at a shared vertex for two feature
+/// edges to count as one chain. 30° means circles tessellated with >= 12
+/// chords chain closed while 90° box corners split - the one tuning point
+/// for chain sensitivity.
+pub const CHAIN_TANGENT_DEG: f64 = 30.0;
+
+/// Stable chain identity: hash of the chain's maximal straight-run corner
+/// keys (collinear rim subdivision cannot move them, same trick as
+/// [`face_id`]) plus the closed flag. Curved loops key on their chords -
+/// a coarse circle's id changes with its tessellation, the same
+/// documented coarse-mesh limit as fragmentation itself.
+pub type ChainId = u64;
+
+/// A tangent-continuous run of feature edges: the unit Edge-mode picking
+/// selects, and the centerline source open-chain passes consume.
+#[derive(Clone, Debug)]
+pub struct Chain {
+    /// Indices into [`Features::edges`], in walk order.
+    pub edges: Vec<u32>,
+    /// The walk returned to its start (a machining loop, not a trail).
+    pub closed: bool,
+    pub id: ChainId,
+}
+
+/// Group feature edges into tangent-continuous chains. Two edges join at
+/// a shared welded vertex iff they bound at least one face in common (so
+/// the two edges of two unrelated solids touching at a vertex never
+/// merge) and the directed turn between them is at most
+/// [`CHAIN_TANGENT_DEG`]. Total on any input, like [`features_of_facets`].
+#[must_use]
+pub fn chains(features: &Features) -> Vec<Chain> {
+    let n = features.edges.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let sentinel = (i64::MIN, i64::MIN, i64::MIN);
+    let lattice: Vec<Pos> = features.verts.iter().map(|p| weld_pos(p).unwrap_or(sentinel)).collect();
+
+    // Faces each edge bounds (distinct face ids over its incident facets).
+    let efaces: Vec<Vec<u32>> = features
+        .edges
+        .iter()
+        .map(|e| {
+            let mut fs: Vec<u32> = Vec::new();
+            for slot in 0..(e.n_facets as usize).min(3) {
+                let fi = features
+                    .facet_face
+                    .get(e.facets[slot] as usize)
+                    .copied()
+                    .unwrap_or(u32::MAX);
+                if !fs.contains(&fi) {
+                    fs.push(fi);
+                }
+            }
+            fs
+        })
+        .collect();
+
+    // Join pairs per shared vertex.
+    let mut incident: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (i, e) in features.edges.iter().enumerate() {
+        incident.entry(e.a).or_default().push(i as u32);
+        if e.b != e.a {
+            incident.entry(e.b).or_default().push(i as u32);
+        }
+    }
+    let cos_max = CHAIN_TANGENT_DEG.to_radians().cos();
+    let mut parent: Vec<u32> = (0..n as u32).collect();
+    for (v, list) in &incident {
+        let Some(q) = lattice.get(*v as usize).copied() else {
+            continue;
+        };
+        for x in 0..list.len() {
+            for y in (x + 1)..list.len() {
+                let (ia, ib) = (list[x] as usize, list[y] as usize);
+                let (ea, eb) = (&features.edges[ia], &features.edges[ib]);
+                if !shares_face(&efaces[ia], &efaces[ib]) {
+                    continue;
+                }
+                let (pa, pb) = (
+                    lattice.get(other_end(ea, *v) as usize).copied(),
+                    lattice.get(other_end(eb, *v) as usize).copied(),
+                );
+                if let (Some(pa), Some(pb)) = (pa, pb)
+                    && tangent_at(q, pa, pb, cos_max)
+                {
+                    union(&mut parent, list[x], list[y]);
+                }
+            }
+        }
+    }
+
+    // Group by component, walk each into trails. Within a trail, the next
+    // edge is the straightest unused turn - at branch vertices (where
+    // three or more mutually tangent edges meet) that keeps chains from
+    // zigzagging; a trail that cannot return to its start is Open.
+    let mut comps: HashMap<u32, Vec<u32>> = HashMap::new();
+    for i in 0..n as u32 {
+        comps.entry(find(&mut parent, i)).or_default().push(i);
+    }
+    let mut comps: Vec<Vec<u32>> = comps.into_values().collect();
+    for es in &mut comps {
+        es.sort_unstable();
+    }
+    comps.sort_by_key(|es| es[0]);
+
+    let mut out: Vec<Chain> = Vec::new();
+    for es in comps {
+        // Component adjacency: vertex -> [(edge slot, far vertex)].
+        let mut adj: HashMap<u32, Vec<(usize, u32)>> = HashMap::new();
+        let mut deg: HashMap<u32, u32> = HashMap::new();
+        for (k, &ei) in es.iter().enumerate() {
+            let e = &features.edges[ei as usize];
+            *deg.entry(e.a).or_default() += 1;
+            adj.entry(e.a).or_default().push((k, e.b));
+            if e.b != e.a {
+                *deg.entry(e.b).or_default() += 1;
+                adj.entry(e.b).or_default().push((k, e.a));
+            }
+        }
+        let mut used = vec![false; es.len()];
+        while let Some(k0) = (0..es.len()).find(|&k| !used[k]) {
+            // Euler start: an odd-degree endpoint if any, else either end.
+            let e0 = features.edges[es[k0] as usize];
+            let v0 = if deg.get(&e0.b).copied().unwrap_or(0) % 2 == 1 {
+                e0.b
+            } else {
+                e0.a
+            };
+            used[k0] = true;
+            let mut trail = vec![es[k0]];
+            let mut cur = other_end(&e0, v0);
+            let mut prev = v0;
+            while let Some(cands) = adj.get(&cur) {
+                let mut pick: Option<(f64, usize, u32)> = None;
+                for &(k, nxt) in cands {
+                    if used[k] {
+                        continue;
+                    }
+                    // Straightest unused continuation; unrankable (an
+                    // unweldable position) still walks, ranked last.
+                    let rank = match (
+                        lattice.get(prev as usize),
+                        lattice.get(cur as usize),
+                        lattice.get(nxt as usize),
+                    ) {
+                        (Some(p), Some(q), Some(r)) => {
+                            let (d1, d2) = (delta(*p, *q), delta(*q, *r));
+                            let dot = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2];
+                            let m = (norm2(d1) * norm2(d2)).sqrt();
+                            if m > 0.0 && m.is_finite() {
+                                dot / m
+                            } else {
+                                f64::MIN
+                            }
+                        }
+                        _ => f64::MIN,
+                    };
+                    match pick {
+                        None => pick = Some((rank, k, nxt)),
+                        Some((best, _, _)) if rank > best => pick = Some((rank, k, nxt)),
+                        _ => {}
+                    }
+                }
+                let Some((_, k, nxt)) = pick else { break };
+                used[k] = true;
+                trail.push(es[k]);
+                prev = cur;
+                cur = nxt;
+                if cur == v0 {
+                    break;
+                }
+            }
+            let closed = cur == v0 && trail.len() >= 3;
+            let mut segs: Vec<(Pos, Pos)> = Vec::new();
+            let vs = trail_verts(&features.edges, &trail, v0);
+            let ring = if closed { &vs[..vs.len() - 1] } else { &vs[..] };
+            ring_segments(ring, &lattice, closed, &mut segs);
+            out.push(Chain {
+                edges: trail,
+                closed,
+                id: chain_id(segs, closed),
+            });
+        }
+    }
+    out.sort_by_key(|c| (c.id, c.edges.first().copied().unwrap_or(0)));
+    out
+}
+
+/// The vertex of `e` that is not `v` (self-loop edges return `v`).
+fn other_end(e: &TopEdge, v: u32) -> u32 {
+    if e.a == v {
+        e.b
+    } else {
+        e.a
+    }
+}
+
+fn shares_face(a: &[u32], b: &[u32]) -> bool {
+    a.iter().any(|x| b.contains(x))
+}
+
+/// Directed turn test at `q`: incoming `pa -> q`, outgoing `q -> pb`.
+fn tangent_at(q: Pos, pa: Pos, pb: Pos, cos_max: f64) -> bool {
+    let (u, w) = (delta(pa, q), delta(q, pb));
+    let dot = u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
+    let m = (norm2(u) * norm2(w)).sqrt();
+    m > 0.0 && m.is_finite() && dot.is_finite() && dot >= cos_max * m
+}
+
+fn delta(p: Pos, q: Pos) -> [f64; 3] {
+    [
+        q.0 as i128 as f64 - p.0 as i128 as f64,
+        q.1 as i128 as f64 - p.1 as i128 as f64,
+        q.2 as i128 as f64 - p.2 as i128 as f64,
+    ]
+}
+
+fn norm2(v: [f64; 3]) -> f64 {
+    v[0] * v[0] + v[1] * v[1] + v[2] * v[2]
+}
+
+/// Walk-ordered vertex list of a trail of edges (one extra: the end).
+fn trail_verts(edges: &[TopEdge], trail: &[u32], start: u32) -> Vec<u32> {
+    let mut vs = Vec::with_capacity(trail.len() + 1);
+    vs.push(start);
+    let mut cur = start;
+    for &ei in trail {
+        let e = &edges[ei as usize];
+        cur = other_end(e, cur);
+        vs.push(cur);
+    }
+    vs
+}
+
+fn chain_id(mut segs: Vec<(Pos, Pos)>, closed: bool) -> ChainId {
+    segs.sort_unstable();
+    segs.dedup();
+    let mut h = DefaultHasher::new();
+    closed.hash(&mut h);
+    segs.hash(&mut h);
+    h.finish()
 }
