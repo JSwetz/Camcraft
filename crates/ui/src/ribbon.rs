@@ -22,6 +22,13 @@ const CELL_W: f32 = 56.0;
 /// Horizontal gap between cells (and across dividers) - matches the
 /// ItemSpacing pushed in `bar`, so group widths are computable.
 const GAP: f32 = 4.0;
+/// The window padding `bar` pushes (h, v). `height` must account for the
+/// vertical pair - content starts `PAD_V` below the window top and the
+/// captions hang `PAD_V` above the bottom - a height without them clipped
+/// the group names (hand-test: "the titles under the icons are not
+/// visible").
+const PAD_H: f32 = 8.0;
+const PAD_V: f32 = 4.0;
 
 /// One ribbon button: what it shows, whether it acts, what it does.
 /// `run` is a plain fn pointer (no captures) so a surface can never
@@ -102,7 +109,7 @@ fn cell_h(ui: &Ui) -> f32 {
 /// panels can never slide under the strip.
 #[must_use]
 pub(crate) fn height(ui: &Ui) -> f32 {
-    cell_h(ui) + 2.0 + 1.0 + 2.0 + ui.text_line_height()
+    2.0 * PAD_V + cell_h(ui) + 2.0 + 1.0 + 2.0 + ui.text_line_height()
 }
 
 /// The whole strip at `y` (just below the menu bar).
@@ -123,7 +130,7 @@ pub(crate) fn bar(ui: &Ui, state: &mut State, y: f32) {
         .position([0.0, y], Condition::Always)
         .size([display[0], height(ui)], Condition::Always)
         .build(|| {
-            let _pad = ui.push_style_var(StyleVar::WindowPadding([8.0, 4.0]));
+            let _pad = ui.push_style_var(StyleVar::WindowPadding([PAD_H, PAD_V]));
             let _spc = ui.push_style_var(StyleVar::ItemSpacing([GAP, 2.0]));
             let h = cell_h(ui);
 

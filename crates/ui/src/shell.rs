@@ -33,21 +33,22 @@ fn dock_root_id() -> Id {
 }
 
 /// Declarative startup layout: the browser tree on the left, the viewport
-/// filling the middle, the contextual Operations pane on the right. Applied
-/// only when the dock tree is missing (first run or lost layout); the layout
-/// is rebuilt every launch because the ini file is not persisted, so panels
-/// can be moved without migration.
+/// DOMINANT in the middle (~two-thirds of the width - it is the thing you
+/// look at, hand-test feedback), the contextual Operations pane on the
+/// right. Applied only when the dock tree is missing (first run or lost
+/// layout); the layout is rebuilt every launch because the ini file is not
+/// persisted, so panels can be moved without migration.
 fn dock_layout() -> Option<DockLayout> {
     let browser = WindowKey::new("browser", "Browser").ok()?;
     let view = viewport_key()?;
     let ops = WindowKey::new("operations", "Operations").ok()?;
     Some(DockLayout::split(
         DockSplit::Left,
-        0.22,
+        0.17,
         DockLayout::tabs([browser]),
         DockLayout::split(
             DockSplit::Right,
-            0.28,
+            0.22,
             DockLayout::tabs([view]),
             DockLayout::tabs([ops]),
         ),
