@@ -48,10 +48,11 @@ Everything a machinist needs to cut a 2.5D part on a vertical mill today:
 setup, tools, 2D operations, drilling, simulation, and one trustworthy post.
 
 **Current status snapshot**: M1.1 (mesh side), the M1.2 shell, viewport, job
-setup (stock + WCS) and toolpath display, and M1.3 2D machining (face,
-contour, pocket, slot, trace over mesh-sliced geometry, with the tool
-library, operation parameters and verification warnings) are in; units and
-toolbar icons remain for the phase, then drilling and the first post.
+setup (stock + WCS) and toolpath display, M1.3 2D machining (face, contour,
+pocket, slot, trace over mesh-sliced geometry, with the tool library,
+operation parameters and verification warnings), and the M1.4 ribbon/browser
+UI/UX rework are in; units remain for the early phase, then feature
+selection, drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -71,15 +72,16 @@ toolbar icons remain for the phase, then drilling and the first post.
       (below), via the truck tessellator
 
 ### M1.2 - UI Shell & Job Setup
-**Goal: real application chrome; define and display a machining setup.** — ⚠️ partial
+**Goal: real application chrome; define and display a machining setup.** — ✅
 
-- ⚠️ **Menu & toolbar**: menus + shortcuts shipped (File/Edit/View, Ctrl+O/S/Z/Y,
-      Del, F); toolbar icons not yet - the icon-source blocker is gone (free
-      attribution-safe sets per AGENTS.md, primary pick Tabler Icons/MIT;
-      converting them into `assets/ui/` and wiring `icons.rs` is open work)
+- ✅ **Menu & toolbar**: menus + shortcuts shipped (File/Edit/View/CAM,
+      Ctrl+O/S/Z/Y, Del, F); the toolbar-icons item closed in M1.4 - the
+      ribbon renders Tabler Icons (MIT) from `assets/ui/` through `icons.rs`
 - ✅ **Setup tree pane**: models pane with viewport-synced selection plus an
       Operations section (name, type, derived never/OK/STALE status, warning
-      counts), and a Setup tab editing stock and work offsets
+      counts), and a Setup tab editing stock and work offsets (re-surfaced as
+      the M1.4 Browser tree and contextual Operations pane; same facts, same
+      commands underneath)
 - ✅ **Viewport**: orbit / pan / zoom, selection highlight, frame-all, dockable
       offscreen 3D target; translucent stock and WCS triads render, stock is
       pickable where nothing is behind it; operations pickables arrive with M1.3.
@@ -112,7 +114,7 @@ toolbar icons remain for the phase, then drilling and the first post.
       that draws the nine points of the current level as clickable markers -
       buttons and markers share one anchor helper, so what you click, what
       highlights and what places cannot drift apart. True face/vertex
-      snapping on model faces is deferred (needs M1.3 selection geometry).
+      snapping on model faces is deferred to M1.5 (Feature Selection).
       Offset codes are the published RS-274 / ISO 6983 ones
 - ✅ **Toolpath display**: generated paths render in the viewport - green
       feed, blue rapid, red plunge, with directional chevrons along the feed
@@ -144,7 +146,7 @@ undoes and redoes exactly, replaying byte-identical paths.
       linear and arc lead in/out, tabs as skipped segments, per-level
       stepdowns, tolerance-driven arc tessellation. Missing: tangential
       leads, and G41/G42 output - the compensation side is recorded in the
-      parameters but the path is cutter-center until the post emits it (M1.5)
+      parameters but the path is cutter-center until the post emits it (M1.7)
 - ⚠️ **2D Pocket**: zigzag (scanline parity walk; islands fall out of the
       even-odd set) and waterline (inward buffers), stock-to-leave as a
       region shrink, per-level stepdowns with retract between levels.
@@ -166,9 +168,64 @@ undoes and redoes exactly, replaying byte-identical paths.
       self-intersection, gouge against the region boundary at tool radius,
       shank/holder vs live stock above the cut level, rapids below the
       clearance plane - and the warnings surface in the tree and property
-      page. The blocking post-gate lands with the post itself (M1.5/M2.3)
+      page. The blocking post-gate lands with the post itself (M1.7/M2.3)
 
-### M1.4 - Drilling
+### M1.4 - UI/UX Rework: Ribbon & Browser
+**Goal: the workflow sits on the surface - one persistent pane per kind of
+work, and no button that fails silently.** — ⚠️ partial
+
+Prompted by the M1.3 hand-test verdict. Layout and behavior patterns were
+specced from public CAM shell conventions only (clean-room: our own strings,
+our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
+
+- ✅ **Ribbon bar**: a persistent command strip over the viewport, grouped
+      File / Setup / Create / Modify / Inspect, with per-button Tabler icons
+      and contextual disabling whose tooltip states the reason (closes the
+      M1.2 toolbar-icons item)
+- ✅ **Browser tree**: the left dock pane nests Setup (stock, G54-G59),
+      Models, Tools and Operations; per-node type icons, status badges
+      (never/OK/STALE plus warning counts), and eye toggles for model and
+      path visibility - view state like the camera, never a command; hidden
+      models are transparent to picking, so a click selects what you SEE
+- ✅ **Contextual Operations pane**: one right-hand pane pages by target -
+      operation parameters and status, the tool page (the standalone Tool
+      Library window is gone), stock and WCS pages, model info - replacing
+      the four pop-out-looking tabs
+- ✅ **No silent refusals**: every command refusal renders inline under the
+      action that caused it, and risky buttons pre-validate (disabled with
+      the reason on hover) - the three M1.3 hand-test bugs, fixed at the
+      plumbing level, not just those three widgets
+- ✅ **What-gets-cut preview**: selecting an operation draws its region
+      loops in the viewport at cut Z, straight from the generators' own
+      region builder (`operation::region_of`), and hovering a model
+      highlights the facet under the cursor (`pick::first_hit_f`) - the
+      facet-index hook M1.5 feature picking builds on
+- ⏸ **View cube + viewport navigation bar**: deferred to the M1.5 viewport
+      work; the only open item here
+
+### M1.5 - Feature Selection
+**Goal: pick a face or an edge chain and machine that - not just whole
+models.** — 📋
+
+The first customer of M1.4's `first_hit_f` facet indices. Planar-face
+clustering runs off the feature-edge weld already proven in the viewport
+overlay (mesh-based - no geometry-kernel commitment; that stays the M1.3
+⏸ open question).
+
+- 📋 **Facet → feature**: weld mesh facets into planar faces and edge
+      chains, exposed as stable ids per model revision (`app::geometry`,
+      lifted out of `viewport.rs`)
+- 📋 **Pick modes**: viewport selection modes - whole model (today's
+      behavior), face, edge, vertex
+- 📋 **Boundary-driven operations**: contour a selected face/edge chain
+      instead of a stock section (`SrcRef::Faces`), islands from the
+      selection
+- 📋 **WCS face/vertex snap**: the true snapping deferred from M1.2's
+      box-point placement
+- 📋 **View cube + navigation bar**: the viewport affordances deferred
+      from M1.4
+
+### M1.6 - Drilling
 **Goal: a complete hole list is machined correctly.**
 
 - **Drill cycles**: spot, drill, peck (chip-breaking), deep-hole with dwell
@@ -177,7 +234,7 @@ undoes and redoes exactly, replaying byte-identical paths.
 - **Hole recognition**: extract holes from the model into an operation automatically
 - **Canned-cycle posting**: G73/G81/G83/G84 output, not retracted point-to-point moves
 
-### M1.5 - Simulation & Post (Release 0.1.0)
+### M1.7 - Simulation & Post (Release 0.1.0)
 **Goal: verified output - first public release.**
 
 - **Move simulation**: rapid vs feed differentiation, feedrate readout, play/pause/scrub
@@ -302,10 +359,12 @@ programming department.
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
-| **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display; toolbar icons open | ⚠️ |
+| **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
-| **M1.4** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
-| **M1.5** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
+| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5 | ⚠️ |
+| **M1.5** | Pick a face, not just a model | Face/edge clustering, pick modes, boundary-driven ops, WCS snapping | 📋 |
+| **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
+| **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
 | **M2.2** | Finish 3D to tolerance | Parallel, waterline, scallop, contour family | 📋 |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
@@ -327,7 +386,7 @@ programming department.
   implementation hints either way (clean-room cuts both ways)
 - **Post scripting runtime**: which embedded language (QuickJS / Lua / Rust-native DSL) -
   decide before M3.3; must be sandboxed like other scripts
-- **Simulation stock representation**: adaptive dexel vs. sparse voxel octree vs. signed distance field - decide before M1.5.
+- **Simulation stock representation**: adaptive dexel vs. sparse voxel octree vs. signed distance field - decide before M1.7.
   The voxel grid models the *machined block for simulation only*: operation geometry and tolerance checks still evaluate against
   B-rep/mesh, so discretized stock is the verification layer, not the source of truth (an SDF is the closest cousin to a particle
   approach and keeps the exact remaining-material queries gouge checks need)
@@ -338,8 +397,8 @@ programming department.
   to confirm the literature we're implementing from is unencumbered
 - **Probing / workpiece verification**: deferred until post Phase 2 (which probing protocol
   sets first - RS238 or Renishaw-style macros?)
-- **Feature recognition**: automatic hole/pocket/slot recognition beyond M1.4 basics -
-  deferred; M3.1 associativity will need some of it anyway
+- **Feature recognition**: automatic hole/pocket/slot recognition beyond M1.5 selection
+  and M1.6 basics - deferred; M3.1 associativity will need some of it anyway
 - **Machine simulation kinematics fidelity**: full controller emulation is out of scope;
   we simulate geometry and limits, not the control loop
 - **SolidWorks link**: HSMWorks was a SolidWorks add-in; this implementation is a
