@@ -8,17 +8,29 @@
 //! command (AGENTS.md). Tool leaves deliberately push no `Select`: a tool
 //! node must not arm the Del key against the delete path models use.
 //!
+//! Rows are drawn as one full-width bar (a `###`-id'd Selectable) with the
+//! type glyph and label laid over it - the same invisible-button-plus-ink
+//! pattern the ribbon cells use - and models/operations carry a right-edge
+//! eye: visibility is view state like the checkboxes (not a command, not
+//! saved), and purely display: a hidden model still feeds stock and paths,
+//! a hidden path still posts. Hiding must never silently change what the
+//! machine does.
+//!
 //! Status badges are computed on read (`operation::status_of`) - never
 //! stored - so a line cannot lie about the world.
 
 use dear_imgui_rs::{Ui, WindowKey};
 use hsmworks_app::model;
-use hsmworks_app::operation::{self, OpStatus};
+use hsmworks_app::operation::{self, OpStatus, OpType};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::tools::ToolKind;
 
 use crate::actions;
+use crate::icons::Icon;
 use crate::state::{CommandKind, State, UiTarget};
+
+/// Tree icon edge (AGENTS.md: 32px sources render at 16).
+const INK: f32 = 16.0;
 
 pub fn browser_panel(ui: &Ui, state: &mut State) {
     let Ok(key) = WindowKey::new("browser", "Browser") else {
@@ -40,6 +52,16 @@ pub(crate) fn kind_name(kind: ToolKind) -> &'static str {
     }
 }
 
+fn op_icon(kind: OpType) -> Icon {
+    match kind {
+        OpType::Face => Icon::Face,
+        OpType::Contour => Icon::Contour,
+        OpType::Pocket => Icon::Pocket,
+        OpType::Slot => Icon::Slot,
+        OpType::Trace => Icon::Trace,
+    }
+}
+
 fn contents(ui: &Ui, state: &mut State) {
     // View toggles, not commands (AGENTS.md ephemeral UI state, like the
     // camera): the world-origin axes and the non-selected toolpaths.
@@ -47,38 +69,167 @@ fn contents(ui: &Ui, state: &mut State) {
     ui.checkbox("Show all toolpaths", &mut state.show_all_paths);
 
     let target = state.pane_target();
-    setup_group(ui, state, &target);
-    models_group(ui, state, &target);
-    tools_group(ui, state, &target);
-    operations_group(ui, state, &target);
+    group(ui, state, "Setup", |ui, state| setup_group(ui, state, &target));
+    group(ui, state, "Models", |ui, state| models_group(ui, state, &target));
+    group(ui, state, "Tools", |ui, state| tools_group(ui, state, &target));
+    group(
+        ui,
+        state,
+        "Operations",
+        |ui, state| operations_group(ui, state, &target),
+    );
+}
+
+/// A tree row spec: id, glyph, texts, states. `eye` marks rows whose
+/// visibility the user can toggle; `hidden` then draws the name and glyph
+/// dimmed with an eye-off at the right edge.
+#[derive(Clone, Copy)]
+struct Row<'a> {
+    id: &'a str,
+    icon: Icon,
+    label: &'a str,
+    suffix: &'a str,
+    active: bool,
+    eye: bool,
+    hidden: bool,
+}
+
+impl<'a> Row<'a> {
+    fn plain(id: &'a str, icon: Icon, label: &'a str, suffix: &'a str, active: bool) -> Self {
+        Row {
+            id,
+            icon,
+            label,
+            suffix,
+            active,
+            eye: false,
+            hidden: false,
+        }
+    }
+}
+
+/// Draw one row; returns (row clicked, eye clicked). The eye's invisible
+/// button is submitted BEFORE the full-width Selectable so it wins the
+/// hover-id, and the Selectable's `ItemHoverable` then refuses clicks
+/// landing on the eye - one pass-through per pixel, no double action.
+fn row(ui: &Ui, state: &State, spec: &Row) -> (bool, bool) {
+    let line = ui.text_line_height();
+    let row_h = (INK + 2.0).max(line + 4.0);
+    let [x, y] = ui.cursor_screen_pos();
+    let avail = ui.content_region_avail()[0];
+    let mut eye_hit = false;
+    let mut eye_hot = false;
+    let eye_x = x + avail - INK - 6.0;
+    let text_y = y + (row_h - line) * 0.5;
+    if spec.eye {
+        ui.set_cursor_screen_pos([eye_x, y + (row_h - INK) * 0.5]);
+        eye_hit = ui.invisible_button(format!("eye###b{}", spec.id), [INK, INK]);
+        // The eye's own hover, sampled now: after the Selectable the "last
+        // item" is the row, not the button.
+        eye_hot = ui.is_item_hovered();
+        ui.set_cursor_screen_pos([x, y]);
+    }
+    let id = format!("###b{}", spec.id);
+    let clicked = ui
+        .selectable_config(id.as_str())
+        .selected(spec.active)
+        .size([0.0, row_h])
+        .build();
+
+    let dl = ui.get_window_draw_list();
+    let ink = if spec.hidden {
+        [0.5, 0.5, 0.55, 1.0]
+    } else {
+        [0.92, 0.92, 0.95, 1.0]
+    };
+    let iy = y + (row_h - INK) * 0.5;
+    if let Some(tex) = state.icon(spec.icon) {
+        let g = if spec.hidden { 0.55 } else { 1.0 };
+        dl.add_image(
+            tex,
+            [x + 2.0, iy],
+            [x + 2.0 + INK, iy + INK],
+            [0.0, 0.0],
+            [1.0, 1.0],
+            [g, g, g, 1.0],
+        );
+    }
+    dl.add_text([x + INK + 8.0, text_y], ink, spec.label);
+    if !spec.suffix.is_empty() {
+        let [lw, _] = ui.calc_text_size(spec.label);
+        dl.add_text(
+            [x + INK + 8.0 + lw + 8.0, text_y],
+            [0.62, 0.62, 0.68, 1.0],
+            spec.suffix,
+        );
+    }
+    if spec.eye {
+        let which = if spec.hidden { Icon::EyeOff } else { Icon::Toolpaths };
+        if let Some(tex) = state.icon(which) {
+            let g = if spec.hidden { 0.55 } else { 0.85 };
+            dl.add_image(
+                tex,
+                [eye_x, y + (row_h - INK) * 0.5],
+                [eye_x + INK, y + (row_h - INK) * 0.5 + INK],
+                [0.0, 0.0],
+                [1.0, 1.0],
+                [g, g, g, 1.0],
+            );
+        }
+        if eye_hot {
+            let tip = if spec.hidden { "Show" } else { "Hide" };
+            ui.tooltip_text(format!("{tip} in the viewport (view state; geometry still cuts)"));
+        }
+    }
+    (clicked, eye_hit)
+}
+
+/// Group header plus open scope, drawing `children` only when the node is
+/// open. The push token pops the tree on DROP, so children must render
+/// while it is alive - hence the closure, not a bool the caller acts on.
+/// Full-width hover bar (`span_avail_width`), open by default.
+fn group<F: FnOnce(&Ui, &mut State)>(ui: &Ui, state: &mut State, label: &str, children: F) {
+    let id = format!("{label}###browser_{}", label.to_lowercase());
+    let Some(_node) = ui
+        .tree_node_config(id.as_str())
+        .default_open(true)
+        .span_avail_width(true)
+        .push()
+    else {
+        return;
+    };
+    children(ui, state);
 }
 
 fn setup_group(ui: &Ui, state: &mut State, target: &UiTarget) {
-    let Some(_node) = ui.tree_node_config("Setup###browser_setup").default_open(true).push() else {
-        return;
-    };
     // The stock page doubles as the create-stock form, so the node is a
     // destination whether or not the entity exists yet.
-    let active = *target == UiTarget::Stock;
-    if ui.selectable_config("Stock###browser_stock").selected(active).build() {
+    let spec = Row::plain(
+        "stock",
+        Icon::Stock,
+        "Stock",
+        "",
+        *target == UiTarget::Stock,
+    );
+    let (hit, _) = row(ui, state, &spec);
+    if hit {
         actions::target(state, UiTarget::Stock);
         if model::find_by_name(&state.world, STOCK_NAME).is_some() {
             state.pending.push_back(CommandKind::Select(Some(STOCK_NAME.to_string())));
         }
     }
     for (i, slot) in WCS_SLOTS.iter().enumerate() {
-        let active = *target == UiTarget::WcsSlot(i);
         let placed = model::find_by_name(&state.world, slot).is_some();
-        let label = if placed {
-            (*slot).to_string()
-        } else {
-            format!("{slot}  -")
-        };
-        if ui
-            .selectable_config(label.as_str())
-            .selected(active)
-            .build()
-        {
+        let spec = Row::plain(
+            "wcs",
+            Icon::WorkOffset,
+            slot,
+            if placed { "" } else { "not placed" },
+            *target == UiTarget::WcsSlot(i),
+        );
+        // id must stay unique across the same-named rows: fold the slot in.
+        let (hit, _) = row_named(ui, state, &spec, &format!("wcs{i}"));
+        if hit {
             actions::target(state, UiTarget::WcsSlot(i));
             if placed {
                 state.pending.push_back(CommandKind::Select(Some((*slot).to_string())));
@@ -87,10 +238,17 @@ fn setup_group(ui: &Ui, state: &mut State, target: &UiTarget) {
     }
 }
 
-fn models_group(ui: &Ui, state: &mut State, target: &UiTarget) {
-    let Some(_node) = ui.tree_node_config("Models###browser_models").default_open(true).push() else {
-        return;
+/// `row` with an id override, for rows whose display label repeats
+/// (the six WCS slots read their entity name).
+fn row_named(ui: &Ui, state: &State, spec: &Row, id: &str) -> (bool, bool) {
+    let owned = Row {
+        id,
+        ..*spec
     };
+    row(ui, state, &owned)
+}
+
+fn models_group(ui: &Ui, state: &mut State, target: &UiTarget) {
     // Setup furniture (stock, offsets) and CAM entities are filtered out of
     // the model list by `model_entities` itself.
     let entities = model::model_entities(&state.world);
@@ -103,8 +261,22 @@ fn models_group(ui: &Ui, state: &mut State, target: &UiTarget) {
     }
     for (name, entity) in entities {
         let selected = model::is_selected(&state.world, &entity);
+        let hidden = state.hidden_models.contains(&name);
         let active = *target == UiTarget::Model(name.clone()) || selected;
-        if ui.selectable_config(name.as_str()).selected(active).build() {
+        let spec = Row {
+            id: "model",
+            icon: Icon::Model,
+            label: &name,
+            suffix: if hidden { " (hidden)" } else { "" },
+            active,
+            eye: true,
+            hidden,
+        };
+        let (hit, eye) = row_named(ui, state, &spec, &format!("model{name}"));
+        if eye {
+            State::toggle_visibility(&mut state.hidden_models, &name);
+        }
+        if hit {
             actions::target(state, UiTarget::Model(name.clone()));
             state.pending.push_back(CommandKind::Select(Some(name)));
         }
@@ -112,9 +284,6 @@ fn models_group(ui: &Ui, state: &mut State, target: &UiTarget) {
 }
 
 fn tools_group(ui: &Ui, state: &mut State, target: &UiTarget) {
-    let Some(_node) = ui.tree_node_config("Tools###browser_tools").default_open(true).push() else {
-        return;
-    };
     let tools: Vec<(String, hsmworks_app::tools::Tool)> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_tool(&state.world, e))
@@ -124,9 +293,11 @@ fn tools_group(ui: &Ui, state: &mut State, target: &UiTarget) {
         ui.text_wrapped("None yet - the Tool page has a catalog to add from.");
     }
     for (name, tool) in tools {
+        let suffix = format!("Ø{} {}", tool.diameter, kind_name(tool.kind));
         let active = *target == UiTarget::Tool(name.clone());
-        let label = format!("{}  Ø{} {}", name, tool.diameter, kind_name(tool.kind));
-        if ui.selectable_config(label.as_str()).selected(active).build() {
+        let spec = Row::plain("tool", Icon::Tools, &name, &suffix, active);
+        let (hit, _) = row_named(ui, state, &spec, &format!("tool{name}"));
+        if hit {
             // Target only: no Select, so browsing tools never arms Del.
             actions::target(state, UiTarget::Tool(name));
         }
@@ -134,9 +305,6 @@ fn tools_group(ui: &Ui, state: &mut State, target: &UiTarget) {
 }
 
 fn operations_group(ui: &Ui, state: &mut State, target: &UiTarget) {
-    let Some(_node) = ui.tree_node_config("Operations###browser_ops").default_open(true).push() else {
-        return;
-    };
     let names: Vec<String> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_operation(&state.world, e))
@@ -144,7 +312,7 @@ fn operations_group(ui: &Ui, state: &mut State, target: &UiTarget) {
         .collect();
     if names.is_empty() {
         ui.text_wrapped(
-            "No operations yet.\n\nAdd a tool (Tools above), then\nCAM > New Operation.",
+            "No operations yet.\n\nAdd a tool (Tools above), then\nribbon > Create, or\nCAM > New Operation.",
         );
         return;
     }
@@ -152,9 +320,12 @@ fn operations_group(ui: &Ui, state: &mut State, target: &UiTarget) {
         let Some(entity) = model::find_by_name(&state.world, &name) else {
             continue;
         };
-        let kind = model::operation_of(&state.world, &entity)
-            .map(|op| op.params.kind().to_string())
-            .unwrap_or_default();
+        let (kind, icon) = model::operation_of(&state.world, &entity)
+            .map(|op| {
+                let k = op.params.kind();
+                (k.to_string(), op_icon(k))
+            })
+            .unwrap_or_else(|| (String::new(), Icon::Generate));
         let tag = match operation::status_of(&state.world, &entity) {
             OpStatus::Never => "never",
             OpStatus::Ok => "ok",
@@ -169,9 +340,23 @@ fn operations_group(ui: &Ui, state: &mut State, target: &UiTarget) {
         } else {
             String::new()
         };
-        let label = format!("{name}  {kind}  {tag}{warn_text}");
+        let suffix = format!("{kind}  {tag}{warn_text}");
+        let hidden = state.hidden_paths.contains(&name);
         let active = *target == UiTarget::Operation(name.clone());
-        if ui.selectable_config(label.as_str()).selected(active).build() {
+        let spec = Row {
+            id: "op",
+            icon,
+            label: &name,
+            suffix: &suffix,
+            active,
+            eye: true,
+            hidden,
+        };
+        let (hit, eye) = row_named(ui, state, &spec, &format!("op{name}"));
+        if eye {
+            State::toggle_visibility(&mut state.hidden_paths, &name);
+        }
+        if hit {
             actions::target(state, UiTarget::Operation(name.clone()));
             state.pending.push_back(CommandKind::Select(Some(name)));
         }

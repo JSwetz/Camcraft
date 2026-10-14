@@ -358,6 +358,16 @@ pub struct State {
     /// consumer falls back to text (see [`crate::icons`]).
     pub icons: Option<crate::icons::Icons>,
     pub cam: Camera,
+    /// Models hidden in the viewport (eye toggle in the browser). View
+    /// state like the camera - not undoable, not saved; a hidden model
+    /// still cuts: visibility is display, not suppression (a toolpath
+    /// computed from it keeps running - hiding geometry must never
+    /// silently change what the machine does).
+    pub hidden_models: Vec<String>,
+    /// Operations whose cached path stays undrawn (eye toggle per op).
+    /// Same rule: the path still exists and posts.
+    pub hidden_paths: Vec<String>,
+
     /// Show the dimmed world origin axes in the viewport. View state like
     /// the camera - not undoable, not saved - toggled from the Models panel;
     /// the triads of real work offsets are always shown, because they are
@@ -481,6 +491,8 @@ impl State {
             drag: None,
             viewport_hot: false,
             icons: None,
+            hidden_models: Vec::new(),
+            hidden_paths: Vec::new(),
             cam: Camera::default(),
             show_world_axes: true,
             show_all_paths: false,
@@ -705,6 +717,21 @@ impl State {
             .into_iter()
             .filter(|(_, e)| model::is_operation(&self.world, e))
             .count()
+    }
+
+    /// Texture for a glyph slot (`None` headless or after a failed decode;
+    /// every consumer must degrade to text, never to nothing).
+    #[must_use]
+    pub(crate) fn icon(&self, which: crate::icons::Icon) -> Option<TextureId> {
+        self.icons.as_ref().and_then(|i| i.texture(which))
+    }
+
+    /// Flip one name's visibility in a browser eye list.
+    pub(crate) fn toggle_visibility(list: &mut Vec<String>, name: &str) {
+        match list.iter().position(|n| n == name) {
+            Some(i) => drop(list.remove(i)),
+            None => list.push(name.to_string()),
+        }
     }
 
     /// Run every queued action, then poll the import worker once. Safe to

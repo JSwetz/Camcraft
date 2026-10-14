@@ -66,10 +66,11 @@ struct App {
     sel_synced: u64,
     /// View-affecting state the overlay is baked from but the document does
     /// not carry (anchor-mode drafts, world-axes visibility, the
-    /// show-all-toolpaths toggle). It changes with pane widgets that don't
-    /// bump `doc_version`, so it gates a rebuild of its own (pick-mode
-    /// markers would otherwise lag a click by a document edit).
-    draft_synced: [u64; 6],
+    /// show-all-toolpaths toggle, the browser eye lists). It changes with
+    /// pane widgets that don't bump `doc_version`, so it gates a rebuild of
+    /// its own (pick-mode markers would otherwise lag a click by a
+    /// document edit).
+    draft_synced: [u64; 8],
     /// Last cursor position in logical px; delta base for viewport drags.
     cursor_pos: [f32; 2],
     /// Left-press origin, so release can tell a click (pick) from a drag.
@@ -94,7 +95,7 @@ impl App {
             config: None,
             doc_synced: u64::MAX,
             sel_synced: u64::MAX,
-            draft_synced: [0; 6],
+            draft_synced: [0; 8],
             cursor_pos: [0.0, 0.0],
             left_press: None,
             exit_code: 0,
@@ -373,10 +374,21 @@ impl App {
             return;
         };
         let hit = pick::first_hit(&self.state.world, origin, dir);
+        // A hidden model is display-off, not gone: it still feeds stock
+        // and paths. Clicking what the user chose not to show is an honest
+        // miss that says why; picking *through* hidden geometry needs a
+        // filtered ray (step 5's `first_hit_f`), not a silent lie here.
+        let blocked = hit
+            .as_ref()
+            .is_some_and(|name| self.state.hidden_models.iter().any(|h| h == name));
+        let hit = if blocked { None } else { hit };
         // Status is the feedback channel: "nothing happened" should be
         // impossible to believe when a pick always says what it did.
         self.state.status = match &hit {
             Some(name) => format!("selected {name}"),
+            None if blocked => {
+                String::from("a hidden model is under the cursor - show it in the browser to pick it")
+            }
             None => String::from("no model under the cursor"),
         };
         self.state.pending.push_back(CommandKind::Select(hit));
@@ -467,6 +479,8 @@ impl App {
             state.wcs_ui.anchor_xy as u64,
             u64::from(state.show_world_axes),
             u64::from(state.show_all_paths),
+            fold_names(&state.hidden_models),
+            fold_names(&state.hidden_paths),
         ];
         if state.doc_version != *doc_synced || sel_dirty || draft_key != *draft_synced {
             let parts = collect_parts(state);
@@ -548,11 +562,31 @@ fn state_drain_and_quit(app: &mut App, el: &ActiveEventLoop) {
     }
 }
 
+/// Order-sensitive FNV-1a fold over a name list, seeded by its length: the
+/// GPU rebuild gate needs a cheap "did this set change" key for the browser
+/// visibility lists (they are user-sized; nothing hashes per frame
+/// otherwise). The length goes into the seed so a same-fold alias across a
+/// count change is impossible, and the 64-bit body makes an accidental
+/// collision on lists of equal size vanishingly unlikely.
+fn fold_names(list: &[String]) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64 ^ ((list.len() as u64).wrapping_mul(0x517c_c1b7_2722_0a95));
+    for name in list {
+        for b in name.bytes() {
+            h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h = (h ^ 0xff).wrapping_mul(0x0000_0100_0000_01b3); // separator
+    }
+    h
+}
+
 /// Flatten the world into GPU parts: models by name first, then the stock
-/// solid (it renders translucent, so it must be submitted last).
+/// solid (it renders translucent, so it must be submitted last). Browser-eye
+/// hidden models are simply not uploaded: hiding is display, not deletion —
+/// their facets still feed stock, paths and the ray below.
 fn collect_parts(state: &State) -> Vec<GpuPart> {
     let mut parts: Vec<GpuPart> = model::model_entities(&state.world)
         .into_iter()
+        .filter(|(name, _)| !state.hidden_models.iter().any(|h| h == name))
         .map(|(_, entity)| GpuPart {
             verts: world_verts(state, &entity),
             selected: model::is_selected(&state.world, &entity),
@@ -676,13 +710,18 @@ fn push_line(out: &mut Vec<[f32; 6]>, a: Point3, b: Point3, c: [f32; 3]) {
 /// The cached CL paths as overlay segments: one line per move in its kind
 /// color, with direction chevrons along feed travel. The selected
 /// operation always draws bright; other operations show dimmed only under
-/// "Show all toolpaths". Staleness is not a display state here - what is
-/// drawn is the cache itself, and the tree is where a stale path is
-/// called out (step 10).
+/// "Show all toolpaths", and never at all when hidden by its browser eye.
+/// Staleness is not a display state here - what is drawn is the cache
+/// itself, and the tree is where a stale path is called out (step 10).
 pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
     let mut out = Vec::new();
     let arm = chevron_arm(state);
-    for (_, entity) in model::named_entities(&state.world) {
+    for (name, entity) in model::named_entities(&state.world) {
+        // Browser-eye hidden: the cache still exists and still posts, it
+        // just does not draw (display state, never a geometry change).
+        if state.hidden_paths.contains(&name) {
+            continue;
+        }
         let Some(cache) = model::toolpath_of(&state.world, &entity) else {
             continue;
         };
@@ -1255,7 +1294,8 @@ mod path_tests {
     //! overlay buffer is what these pin down.
 
     use super::*;
-    use hsmworks_app::commands::{AddTool, CreateOperation, GenerateOperation};
+    use hsmworks_app::commands::{AddTool, CreateOperation, GenerateOperation, ImportModel};
+    use hsmworks_app::geometry::cube;
     use hsmworks_app::operation::{OpParams, SrcRef};
     use hsmworks_app::stock::StockShape;
     use hsmworks_app::tools::catalog;
@@ -1393,5 +1433,48 @@ mod path_tests {
         let mut out = Vec::new();
         chevrons(&mut out, p, Point3::new(1.0, 2.0, 3.5), FEED_RGB, 2.0);
         assert!(out.is_empty(), "a feed shorter than two chevron arms stays plain");
+    }
+
+    #[test]
+    fn the_eye_hides_a_path_without_touching_the_cache() {
+        let mut state = state_with_generated_path();
+        select(&mut state, Some("Face1"));
+        assert!(!toolpath_lines(&state).is_empty());
+        State::toggle_visibility(&mut state.hidden_paths, "Face1");
+        assert!(toolpath_lines(&state).is_empty(), "hidden: nothing draws");
+        let cache = model::find_by_name(&state.world, "Face1")
+            .and_then(|e| model::toolpath_of(&state.world, &e))
+            .expect("hiding is display: the path still exists");
+        assert!(!cache.path.moves.is_empty());
+        State::toggle_visibility(&mut state.hidden_paths, "Face1");
+        assert!(!toolpath_lines(&state).is_empty(), "the second click shows it again");
+    }
+
+    #[test]
+    fn hiding_a_model_undraws_only_its_triangles() {
+        let mut state = state_with_generated_path();
+        state.history.execute(
+            &state.world,
+            ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 10.0))),
+        );
+        let with = collect_parts(&state);
+        State::toggle_visibility(&mut state.hidden_models, "part");
+        let hidden = collect_parts(&state);
+        assert_eq!(with.len(), hidden.len() + 1, "just the model leaves the buffer");
+        assert_eq!(model::model_entities(&state.world).len(), 1, "the entity is not gone");
+    }
+
+    #[test]
+    fn the_visibility_fold_follows_the_lists() {
+        // The rebuild gate is the only consumer: a stale key would leave a
+        // toggle visually dead for the session, so the fold must separate
+        // every set difference, including reordering and regrouping.
+        let l = |names: &[&str]| -> Vec<String> { names.iter().map(|s| s.to_string()).collect() };
+        assert_eq!(fold_names(&l(&[])), fold_names(&l(&[])));
+        assert_ne!(fold_names(&l(&[])), fold_names(&l(&["x"])));
+        assert_ne!(fold_names(&l(&["a"])), fold_names(&l(&["ab"])));
+        assert_ne!(fold_names(&l(&["a"])), fold_names(&l(&["a", ""])));
+        assert_ne!(fold_names(&l(&["a", "b"])), fold_names(&l(&["ab"])));
+        assert_ne!(fold_names(&l(&["a", "b"])), fold_names(&l(&["b", "a"])));
     }
 }

@@ -35,11 +35,13 @@ pub(crate) enum Icon {
     Generate,
     FrameAll,
     Toolpaths,
+    Model,
+    EyeOff,
 }
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 18] = [
+    pub(crate) const ALL: [Icon; 20] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -58,6 +60,8 @@ impl Icon {
         Icon::Generate,
         Icon::FrameAll,
         Icon::Toolpaths,
+        Icon::Model,
+        Icon::EyeOff,
     ];
 
     fn png(self) -> &'static [u8] {
@@ -80,6 +84,8 @@ impl Icon {
             Icon::Generate => include_bytes!("../../../assets/ui/player-play.png"),
             Icon::FrameAll => include_bytes!("../../../assets/ui/maximize.png"),
             Icon::Toolpaths => include_bytes!("../../../assets/ui/eye.png"),
+            Icon::Model => include_bytes!("../../../assets/ui/cube.png"),
+            Icon::EyeOff => include_bytes!("../../../assets/ui/eye-off.png"),
         }
     }
 }
