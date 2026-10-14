@@ -360,7 +360,9 @@ fn generation_failure_refuses_the_command_and_writes_nothing() {
     let e = model::find_by_name(&world, "part").expect("part");
     model::set_location(&world, &e, Point3::new(0.0, 0.0, 200.0));
 
-    let err = GenerateOperation::new(&world, "Contour1").err().expect("must fail");
+    let Err(err) = GenerateOperation::new(&world, "Contour1") else {
+        panic!("must fail");
+    };
     assert!(matches!(err, CommandError::Machining(_)), "{err:?}");
     // Nothing half-wrote: the old cache and its stamp stand.
     assert_eq!(cache(&world, "Contour1").map(|c| c.path), Some(first_path));
@@ -509,4 +511,328 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
     };
     assert_eq!(operation::region_of(&world, &ghost), None);
+}
+
+// ===================== M1.5 step 4: selection sources =====================
+
+use hsmworks_app::geometry::feature::{self, FaceKind};
+use hsmworks_app::geometry::Triangle;
+use hsmworks_app::operation::{FeatureSel, GeoSel};
+
+/// Planar face id of the box part's top (world normal +z, identity pose).
+fn top_face_of(world: &World, name: &str) -> u64 {
+    let e = model::find_by_name(world, name).expect("part exists");
+    let f = model::features_of(world, &e).expect("features");
+    f.faces
+        .iter()
+        .find(|fa| matches!(fa.kind, FaceKind::Planar) && fa.normal[2] > 0.9)
+        .map(|fa| fa.id)
+        .expect("a planar top face")
+}
+
+/// Planar face id of one vertical wall.
+fn wall_face_of(world: &World, name: &str) -> u64 {
+    let e = model::find_by_name(world, name).expect("part exists");
+    let f = model::features_of(world, &e).expect("features");
+    f.faces
+        .iter()
+        .find(|fa| matches!(fa.kind, FaceKind::Planar) && fa.normal[2].abs() < 0.5)
+        .map(|fa| fa.id)
+        .expect("a vertical wall face")
+}
+
+/// The rim chain of a flat n-gon disc: closed at 16 chords.
+fn rim_chain_of(world: &World, name: &str) -> u64 {
+    let e = model::find_by_name(world, name).expect("part exists");
+    let f = model::features_of(world, &e).expect("features");
+    feature::chains(&f)
+        .into_iter()
+        .find(|c| c.closed)
+        .map(|c| c.id)
+        .expect("the rim chains closed at this tessellation")
+}
+
+/// Any chain of an entity - a box's are all single open edges, which is
+/// fine when only the chain's identity (not its region) is under test.
+fn any_chain_of(world: &World, name: &str) -> u64 {
+    let e = model::find_by_name(world, name).expect("part exists");
+    let f = model::features_of(world, &e).expect("features");
+    feature::chains(&f)
+        .into_iter()
+        .next()
+        .map(|c| c.id)
+        .expect("a faceted model has chains")
+}
+
+/// A 16-chord flat disc of radius r at z = 0, as an importable mesh.
+fn disc_mesh(r: f64) -> hsmworks_app::geometry::Mesh {
+    let tau = std::f64::consts::TAU;
+    let p = |i: usize| {
+        let a = tau * i as f64 / 16.0;
+        Point3::new(r * a.cos(), r * a.sin(), 0.0)
+    };
+    let facets: Vec<Triangle> = (0..16)
+        .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
+        .collect();
+    hsmworks_app::geometry::Mesh { facets }
+}
+
+fn sel(entity: &str, feature: FeatureSel) -> SrcRef {
+    SrcRef::Selection(vec![GeoSel {
+        entity: entity.to_string(),
+        feature,
+    }])
+}
+
+fn face_sel_params() -> OpParams {
+    OpParams::Face {
+        stepover: 3.0,
+        clearance_z: 25.0,
+        cut_z: 4.5,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    }
+}
+
+fn box_part_world() -> (World, History) {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    (world, history)
+}
+
+#[test]
+fn a_selected_face_bounds_facing_and_contour() {
+    let (world, mut history) = box_part_world();
+    let top = FeatureSel::Face(top_face_of(&world, "part"));
+
+    // Contour: the face's outline is the boundary; generation is the
+    // normal command path end to end.
+    let cmd = CreateOperation::new(&world, "C1", "EM-0600-4FL", sel("part", top), contour_params());
+    history.execute(&world, cmd.expect("create contour on selection"));
+    let op = model::operation_of(&world, &model::find_by_name(&world, "C1").expect("C1")).expect("op");
+    let region = operation::region_of(&world, &op).expect("the picked face bounds a region");
+    assert_eq!(region.loops().len(), 1, "one square boundary, nothing else");
+    let xs: Vec<f64> = region.loops()[0].points().iter().map(|p| p.x).collect();
+    let ys: Vec<f64> = region.loops()[0].points().iter().map(|p| p.y).collect();
+    assert!(xs.iter().all(|x| (0.0..=10.0).contains(x)) && xs.iter().any(|x| *x > 9.0));
+    assert!(ys.iter().all(|y| (0.0..=10.0).contains(y)) && ys.iter().any(|y| *y > 9.0));
+    history.execute(&world, GenerateOperation::new(&world, "C1").expect("generate"));
+    assert!(!cache(&world, "C1").expect("cache").path.is_empty());
+    assert_eq!(status(&world, "C1"), OpStatus::Ok);
+
+    // Face: same region, cut plane from the parameter.
+    let cmd = CreateOperation::new(&world, "F1", "EM-0600-4FL", sel("part", top), face_sel_params());
+    history.execute(&world, cmd.expect("create face on selection"));
+    let op = model::operation_of(&world, &model::find_by_name(&world, "F1").expect("F1")).expect("op");
+    assert!(!operation::region_of(&world, &op).expect("footprint").is_empty());
+}
+
+#[test]
+fn a_vertical_or_tilted_pick_refuses_with_the_fix_in_the_message() {
+    let (world, _history) = box_part_world();
+    let wall = FeatureSel::Face(wall_face_of(&world, "part"));
+    let op = |params: OpParams| Operation {
+        tool: "EM-0600-4FL".into(),
+        src: sel("part", wall),
+        params,
+        stamp: None,
+    };
+    // Facing a wall: refused, and the message says what to pick instead.
+    let face = op(face_sel_params());
+    assert_eq!(operation::region_of(&world, &face), None);
+    let e = operation::generate(&world, &face).expect_err("wall cannot be faced");
+    assert!(matches!(e, hsmworks_app::machining2d::GenError::Invalid(_)));
+    assert!(e.to_string().contains("not horizontal"), "{e}");
+
+    // Contouring a whole wall face: its rim collapses to a line from
+    // above; the honest boundary is the top edge chain, and the refusal
+    // says so.
+    let contour = op(contour_params());
+    assert_eq!(operation::region_of(&world, &contour), None);
+    let e = operation::generate(&world, &contour)
+        .expect_err("a wall face bounds no area in XY");
+    assert!(e.to_string().contains("projects to a line"), "{e}");
+}
+
+#[test]
+fn closed_chain_rims_bound_and_double_picks_collapse_to_one_loop() {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("disc", disc_mesh(12.0)));
+
+    let rim = FeatureSel::Chain(rim_chain_of(&world, "disc"));
+    let op = Operation {
+        tool: "EM-0600-4FL".into(),
+        src: sel("disc", rim),
+        params: contour_params(),
+        stamp: None,
+    };
+    let region = operation::region_of(&world, &op).expect("the rim chain bounds the disc");
+    assert_eq!(region.loops().len(), 1);
+    assert!(region.loops()[0].points().len() >= 16, "the chord ring survives");
+
+    // The same rim picked twice is one boundary, not a zero-wide sliver.
+    let twice = Operation {
+        src: SrcRef::Selection(vec![
+            GeoSel { entity: "disc".into(), feature: rim },
+            GeoSel { entity: "disc".into(), feature: rim },
+        ]),
+        ..op.clone()
+    };
+    let r2 = operation::region_of(&world, &twice).expect("deduped");
+    assert_eq!(r2.loops().len(), 1, "coincident rims count once");
+
+    // The same rim picked as the sheet's face is the same ring: a face's
+    // boundary loop and its chain agree, and together they stay one loop.
+    // A sheet face whose ring-walk failed to close (LoopKind::Open) is
+    // the case the "open sheet" refusal serves; this rim closes cleanly.
+    let sheet = FeatureSel::Face({
+        let e = model::find_by_name(&world, "disc").expect("disc");
+        let f = model::features_of(&world, &e).expect("features");
+        f.faces
+            .iter()
+            .find(|fa| matches!(fa.kind, FaceKind::Planar))
+            .map(|fa| fa.id)
+            .expect("the disc is one planar face")
+    });
+    let sheet_op = Operation {
+        src: sel("disc", sheet),
+        ..op.clone()
+    };
+    let r3 = operation::region_of(&world, &sheet_op).expect("the face ring bounds the disc");
+    assert_eq!(r3.loops().len(), 1);
+    let both = Operation {
+        src: SrcRef::Selection(vec![
+            GeoSel { entity: "disc".into(), feature: sheet },
+            GeoSel { entity: "disc".into(), feature: rim },
+        ]),
+        ..op.clone()
+    };
+    let r4 = operation::region_of(&world, &both).expect("face+rim dedupe");
+    assert_eq!(r4.loops().len(), 1, "one ring whether picked as face, chain, or both");
+}
+
+#[test]
+fn pocket_refuses_an_open_run() {
+    let (world, _history) = box_part_world();
+    // A box edge is its own chain at this tessellation (90-degree
+    // corners never join) - exactly the open run a Pocket must refuse.
+    let e = model::find_by_name(&world, "part").expect("part");
+    let f = model::features_of(&world, &e).expect("features");
+    let open = feature::chains(&f)
+        .into_iter()
+        .find(|c| !c.closed)
+        .map(|c| FeatureSel::Chain(c.id))
+        .expect("box chains are open runs");
+    let op = Operation {
+        tool: "EM-0600-4FL".into(),
+        src: sel("part", open),
+        params: OpParams::Pocket {
+            stepover: 3.0,
+            stock_to_leave: 0.0,
+            clearance_z: 10.0,
+            top_z: 5.0,
+            bottom_z: 0.0,
+            stepdown: 2.5,
+            feed: 800.0,
+            plunge_feed: 200.0,
+            climb: true,
+            strategy: hsmworks_app::machining2d::PocketStrategy::Zigzag,
+        },
+        stamp: None,
+    };
+    assert_eq!(operation::region_of(&world, &op), None, "nothing to draw");
+    let err = operation::generate(&world, &op).expect_err("pocket refuses");
+    assert!(err.to_string().contains("closed chain"), "{err}");
+}
+
+#[test]
+fn selection_staleness_tracks_content_not_counts() {
+    let (world, mut history) = box_part_world();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    let top_a = top_face_of(&world, "part");
+    let src_a = sel("part", FeatureSel::Face(top_a));
+    let params = face_sel_params();
+    let cmd = CreateOperation::new(&world, "S1", "EM-0600-4FL", src_a.clone(), params.clone());
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "S1").expect("generate"));
+    assert_eq!(status(&world, "S1"), OpStatus::Ok);
+
+    // Swapping the picked face - same entity, same item count - moves
+    // the digest. A stamp keyed on counts would miss exactly this.
+    let wall = wall_face_of(&world, "part");
+    let src_b = sel("part", FeatureSel::Face(wall));
+    let sa = operation::current_stamp(&world, "EM-0600-4FL", &src_a, &params);
+    let sb = operation::current_stamp(&world, "EM-0600-4FL", &src_b, &params);
+    assert_ne!(sa, sb, "a different face is different geometry");
+
+    // Moving the part moves it too (the region swings out from under
+    // the cut), and moving it back lands on the stored stamp again.
+    let part = model::find_by_name(&world, "part").expect("part");
+    model::set_transform(&world, &part, at(4.0, 0.0, 0.0));
+    assert_eq!(status(&world, "S1"), OpStatus::Stale);
+    model::set_transform(&world, &part, at(0.0, 0.0, 0.0));
+    assert_eq!(status(&world, "S1"), OpStatus::Ok);
+
+    // Face vs Chain on one entity are distinguishable, and so is item
+    // order (the pick list is the user's, not a bag).
+    let chain = FeatureSel::Chain(any_chain_of(&world, "part"));
+    let sc = operation::current_stamp(&world, "EM-0600-4FL", &sel("part", chain), &params);
+    assert_ne!(sa, sc);
+    let ab = SrcRef::Selection(vec![
+        GeoSel { entity: "part".into(), feature: FeatureSel::Face(top_a) },
+        GeoSel { entity: "part".into(), feature: FeatureSel::Face(wall) },
+    ]);
+    let ba = SrcRef::Selection(vec![
+        GeoSel { entity: "part".into(), feature: FeatureSel::Face(wall) },
+        GeoSel { entity: "part".into(), feature: FeatureSel::Face(top_a) },
+    ]);
+    assert_ne!(
+        operation::current_stamp(&world, "EM-0600-4FL", &ab, &params),
+        operation::current_stamp(&world, "EM-0600-4FL", &ba, &params),
+    );
+}
+
+#[test]
+fn a_vanished_selection_previews_nothing_and_goes_stale() {
+    let (world, mut history) = box_part_world();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    let top = FeatureSel::Face(top_face_of(&world, "part"));
+    let cmd = CreateOperation::new(&world, "V1", "EM-0600-4FL", sel("part", top), face_sel_params());
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "V1").expect("generate"));
+    assert_eq!(status(&world, "V1"), OpStatus::Ok);
+
+    history.execute(&world, DeleteEntity::new(&world, "part").expect("delete part"));
+    let op = model::operation_of(&world, &model::find_by_name(&world, "V1").expect("V1")).expect("op");
+    assert_eq!(operation::region_of(&world, &op), None, "a dead pick draws nothing");
+    assert_eq!(status(&world, "V1"), OpStatus::Stale);
+}
+
+#[test]
+fn selection_commands_validate_at_construction() {
+    let (world, mut history) = box_part_world();
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    // Empty picks, vanished entities and offsets never reach the world.
+    assert!(CreateOperation::new(&world, "B", "EM-0400-2FL", SrcRef::Selection(vec![]), face_params()).is_err());
+    let bad = sel("gone", FeatureSel::Face(7));
+    assert!(matches!(
+        CreateOperation::new(&world, "B", "EM-0400-2FL", bad, face_params()),
+        Err(CommandError::NotFound(_))
+    ));
+    let offset = sel("G54", FeatureSel::Face(7));
+    assert!(CreateOperation::new(&world, "B", "EM-0400-2FL", offset, face_params()).is_err());
+    let blank = SrcRef::Selection(vec![GeoSel { entity: String::new(), feature: FeatureSel::Face(7) }]);
+    assert!(CreateOperation::new(&world, "B", "EM-0400-2FL", blank, face_params()).is_err());
+    // A real pick creates cleanly (the id itself is only checked at
+    // generation - it is a geometry hash, not a pointer).
+    let top = FeatureSel::Face(top_face_of(&world, "part"));
+    assert!(CreateOperation::new(&world, "OK", "EM-0400-2FL", sel("part", top), face_params()).is_ok());
 }

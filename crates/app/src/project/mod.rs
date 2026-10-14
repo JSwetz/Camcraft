@@ -25,7 +25,7 @@ use crate::geo2d::Point2;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
 use crate::machining2d::{Lead, PocketStrategy};
 use crate::model;
-use crate::operation::{GenStamp, OpParams, SrcRef};
+use crate::operation::{FeatureSel, GenStamp, GeoSel, OpParams, SrcRef};
 use crate::schema::{
     Location, Operation, StockDef, ToolDef, Toolpath as ToolpathCache, Wcs, STOCK_NAME, WCS_SLOTS,
 };
@@ -181,6 +181,24 @@ impl ToolDto {
 pub enum SrcDto {
     Stock,
     Entity { name: String },
+    Selection { items: Vec<GeoSelDto> },
+}
+
+/// The file mirror of `operation::GeoSel`: a named entity and one of its
+/// feature ids. Ids are geometry hashes (stable ids), not positions, so a
+/// saved pick survives save/load and facet reorder.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GeoSelDto {
+    pub entity: String,
+    pub feature: FeatureSelDto,
+}
+
+/// The file mirror of `operation::FeatureSel`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureSelDto {
+    Face { id: u64 },
+    Chain { id: u64 },
 }
 
 /// The file mirror of `operation::OpParams`, tool-free by the same rule as
@@ -661,6 +679,18 @@ pub fn collect(world: &World) -> ProjectFile {
                     SrcRef::Entity(name) => SrcDto::Entity {
                         name: name.clone(),
                     },
+                    SrcRef::Selection(items) => SrcDto::Selection {
+                        items: items
+                            .iter()
+                            .map(|g| GeoSelDto {
+                                entity: g.entity.clone(),
+                                feature: match g.feature {
+                                    FeatureSel::Face(id) => FeatureSelDto::Face { id },
+                                    FeatureSel::Chain(id) => FeatureSelDto::Chain { id },
+                                },
+                            })
+                            .collect(),
+                    },
                 },
                 params: ParamsDto::from_params(&op.params),
                 stamp: op.stamp.map(|g| g.0),
@@ -802,6 +832,18 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
                 let src = match &odto.src {
                     SrcDto::Stock => SrcRef::Stock,
                     SrcDto::Entity { name } => SrcRef::Entity(name.clone()),
+                    SrcDto::Selection { items } => SrcRef::Selection(
+                        items
+                            .iter()
+                            .map(|g| GeoSel {
+                                entity: g.entity.clone(),
+                                feature: match g.feature {
+                                    FeatureSelDto::Face { id } => FeatureSel::Face(id),
+                                    FeatureSelDto::Chain { id } => FeatureSel::Chain(id),
+                                },
+                            })
+                            .collect(),
+                    ),
                 };
                 entity.entity_view(world).set(Operation {
                     tool: odto.tool,
@@ -922,6 +964,14 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
                 && name.is_empty()
             {
                 return Err(corrupt(format!("'{}' has an empty geometry source", dto.name)));
+            }
+            if let SrcDto::Selection { items } = &op.src
+                && (items.is_empty() || items.iter().any(|g| g.entity.is_empty()))
+            {
+                return Err(corrupt(format!(
+                    "'{}' has an empty or half-named geometry selection",
+                    dto.name
+                )));
             }
             let params = op.params.to_params();
             if !params.is_sane() {

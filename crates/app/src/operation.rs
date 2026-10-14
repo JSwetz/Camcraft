@@ -30,6 +30,13 @@
 //! Meshes are sliced because STEP import is tessellate-only (no curve data
 //! survives), which is also what makes STL, OBJ and STEP sources take the
 //! identical path.
+//!
+//! A `SrcRef::Selection` builds its region from the picked features
+//! instead: faces contribute their boundary loops projected to XY, closed
+//! edge chains their ring projected to XY, coincident rims dedupe. Face
+//! ops demand a near-horizontal face, Pocket demands a closed boundary,
+//! and open runs preview nothing until the centerline-capable generators
+//! arrive (M1.5 step 8) - the same refusal `generate` raises.
 
 use std::hash::Hasher;
 
@@ -38,7 +45,9 @@ use flecs_ecs::prelude::World;
 use crate::cl::Toolpath;
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Triangle;
+use crate::geometry::feature::{self, LoopKind};
 use crate::geometry::slice::{self, SliceError};
+use crate::geometry::{Point3, transform_point};
 use crate::machining2d::{
     self, ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, SlotParams,
     TraceParams,
@@ -56,6 +65,40 @@ pub enum SrcRef {
     Stock,
     /// Another named entity's geometry.
     Entity(String),
+    /// A feature selection: faces and edge chains picked off named
+    /// entities, resolved by their geometry-hash ids at generation
+    /// (M1.5). An empty list is refused by the command layer.
+    Selection(Vec<GeoSel>),
+}
+
+/// One selected feature of one named entity. Identity is the feature's
+/// geometry hash, not an index or a facet count: re-imports, facet
+/// reorder and rigid moves all keep a pick pointing at the same feature
+/// (see `geometry::feature`'s stable-id design).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeoSel {
+    pub entity: String,
+    pub feature: FeatureSel,
+}
+
+/// What kind of feature was picked; the numbers are [`FaceId`] and
+/// [`ChainId`] hashes, never positional.
+///
+/// [`FaceId`]: crate::geometry::feature::FaceId
+/// [`ChainId`]: crate::geometry::feature::ChainId
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FeatureSel {
+    Face(crate::geometry::feature::FaceId),
+    Chain(crate::geometry::feature::ChainId),
+}
+
+impl core::fmt::Display for FeatureSel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            FeatureSel::Face(id) => write!(f, "face {id:#x}"),
+            FeatureSel::Chain(id) => write!(f, "edge chain {id:#x}"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -545,6 +588,50 @@ pub fn current_stamp(
                 }
             }
         }
+        SrcRef::Selection(items) => {
+            // b'L', not b'S': the Stock arm already owns that byte, and a
+            // digest that collides across source kinds is a staleness bug.
+            h.write_u8(b'L');
+            h.write_usize(items.len());
+            let mut digested: Vec<&str> = Vec::new();
+            for g in items {
+                h.write_u8(match g.feature {
+                    FeatureSel::Face(_) => 0,
+                    FeatureSel::Chain(_) => 1,
+                });
+                h.write_usize(g.entity.len());
+                h.write(g.entity.as_bytes());
+                let id = match g.feature {
+                    FeatureSel::Face(id) | FeatureSel::Chain(id) => id,
+                };
+                h.write_u64(id);
+                // The pick resolves against this entity's LOCAL features
+                // (ids are transform-free) and projects through its
+                // transform, so both belong in the digest. The order-free
+                // geometry digest means a re-import that keeps the same
+                // features stays fresh, and any real change goes stale -
+                // including a different mesh that happens to repeat the
+                // facet count.
+                let entity = model::find_by_name(world, &g.entity)?;
+                if !digested.contains(&g.entity.as_str()) {
+                    digested.push(g.entity.as_str());
+                    let loc = model::transform_of(world, &entity).unwrap_or_default();
+                    for v in [
+                        loc.pos.x,
+                        loc.pos.y,
+                        loc.pos.z,
+                        loc.rot[0],
+                        loc.rot[1],
+                        loc.rot[2],
+                        loc.rot[3],
+                    ] {
+                        w(&mut h, v);
+                    }
+                    let tris = model::facets_of(world, &entity)?;
+                    h.write_u64(feature::digest_of(&tris));
+                }
+            }
+        }
     }
     Some(GenStamp(h.finish()))
 }
@@ -588,25 +675,54 @@ struct Material {
 }
 
 fn material_of(world: &World, src: &SrcRef) -> Result<Material, GenError> {
-    let name = match src {
-        SrcRef::Stock => crate::schema::STOCK_NAME,
-        SrcRef::Entity(name) => name.as_str(),
-    };
+    match src {
+        SrcRef::Stock => named_material(world, crate::schema::STOCK_NAME, "no stock: set up stock first"),
+        SrcRef::Entity(name) => {
+            named_material(world, name, &format!("no entity named '{name}'"))
+        }
+        SrcRef::Selection(items) => {
+            // Union of the distinct selected entities (stock is a legal
+            // pick): what the generators stand in and what verification
+            // sweeps. The region itself comes from the features.
+            let mut facets = Vec::new();
+            let mut top = f64::NEG_INFINITY;
+            let mut seen: Vec<&str> = Vec::new();
+            for g in items {
+                if seen.contains(&g.entity.as_str()) {
+                    continue;
+                }
+                seen.push(g.entity.as_str());
+                let m = named_material(
+                    world,
+                    &g.entity,
+                    &format!("the selection names '{}', which is gone", g.entity),
+                )?;
+                facets.extend(m.facets);
+                top = top.max(m.top);
+            }
+            usable(facets, top, "the selection")
+        }
+    }
+}
+
+fn named_material(world: &World, name: &str, gone: &str) -> Result<Material, GenError> {
     let Some(entity) = model::find_by_name(world, name) else {
-        return Err(GenError::Invalid(match src {
-            SrcRef::Stock => "no stock: set up stock first".into(),
-            SrcRef::Entity(_) => format!("no entity named '{name}'"),
-        }));
+        return Err(GenError::Invalid(gone.to_string()));
     };
     let facets = model::world_facets(world, &entity).unwrap_or_default();
     let top = model::entity_world_aabb(world, &entity)
         .map(|b| b.max.z)
         .unwrap_or(f64::NAN);
+    usable(facets, top, name)
+}
+
+/// The shared sanity gate: every vertex finite, a real top.
+fn usable(facets: Vec<Triangle>, top: f64, label: &str) -> Result<Material, GenError> {
     if !facets.iter().all(|t| t.a.is_finite() && t.b.is_finite() && t.c.is_finite())
         || !top.is_finite()
     {
         return Err(GenError::Invalid(format!(
-            "'{name}' has no usable geometry to machine"
+            "'{label}' has no usable geometry to machine"
         )));
     }
     Ok(Material { facets, top })
@@ -665,8 +781,31 @@ fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> {
 /// (Prime Directive: a wrong preview is as bad as a wrong toolpath).
 #[must_use]
 pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
+    if let SrcRef::Selection(items) = &op.src
+        && !matches!(op.params, OpParams::Slot { .. })
+    {
+        return selection_region(world, items, &op.params).ok();
+    }
     let material = material_of(world, &op.src).ok()?;
     region_for(&material, &op.params).ok()
+}
+
+/// The source dispatch shared by `generate` and `region_of`: a selection
+/// resolves its picked features, anything else slices its material, and
+/// Slot keeps its closed-form stadium regardless of source (its boundary
+/// is the two endpoints, not the model).
+fn region_for_src(
+    world: &World,
+    src: &SrcRef,
+    params: &OpParams,
+    material: &Material,
+) -> Result<Region, GenError> {
+    match src {
+        SrcRef::Selection(items) if !matches!(params, OpParams::Slot { .. }) => {
+            selection_region(world, items, params)
+        }
+        _ => region_for(material, params),
+    }
 }
 
 /// The per-kind region build, shared by `generate` and `region_of` so the
@@ -681,6 +820,188 @@ fn region_for(material: &Material, params: &OpParams) -> Result<Region, GenError
         | OpParams::Trace { top_z, .. } => section(&material.facets, *top_z),
         OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
     }
+}
+
+/// Largest tilt from horizontal, in degrees, a Face operation accepts for
+/// a selected planar face: past it the facing footprint would lie about
+/// the area being cleared.
+const FACE_TILT_MAX_DEG: f64 = 60.0;
+/// Shoelace area below which a projected loop is a traced line rather
+/// than a boundary. 1e-9 mm² is far under weld-lattice noise and far
+/// above an actual face.
+const DEGENERATE_AREA: f64 = 1e-9;
+
+/// The cutting region of a feature selection: each picked face gives its
+/// closed boundary loops, each closed chain its ring, projected to XY,
+/// coincident rims counted once; `Region::new` then settles holes by
+/// nesting parity. Refusals are the Prime Directive's kind - a tilted
+/// face for a facing pass, an open chain for a Pocket, an open sheet,
+/// each named in the message, each with the fix stated.
+fn selection_region(
+    world: &World,
+    items: &[GeoSel],
+    params: &OpParams,
+) -> Result<Region, GenError> {
+    let facing = matches!(params, OpParams::Face { .. });
+    let pocket = matches!(params, OpParams::Pocket { .. });
+    let mut loops: Vec<Loop> = Vec::new();
+    let mut rims: Vec<Vec<(i64, i64)>> = Vec::new();
+    for g in items {
+        let Some(entity) = model::find_by_name(world, &g.entity) else {
+            return Err(GenError::Invalid(format!(
+                "the selection names '{}', which is gone",
+                g.entity
+            )));
+        };
+        let Some(features) = model::features_of(world, &entity) else {
+            return Err(GenError::Invalid(format!(
+                "'{}' has no geometry to select from",
+                g.entity
+            )));
+        };
+        let loc = model::transform_of(world, &entity).unwrap_or_default();
+        let label = format!("{} of '{}'", g.feature, g.entity);
+        match g.feature {
+            FeatureSel::Face(fid) => {
+                let Some(f) = features.faces.iter().find(|f| f.id == fid) else {
+                    return Err(GenError::Invalid(format!(
+                        "{label} is no longer in the model: re-pick it"
+                    )));
+                };
+                let n = transform_point(
+                    Point3::new(f.normal[0], f.normal[1], f.normal[2]),
+                    Point3::ZERO,
+                    loc.rot,
+                );
+                if facing && n.z.abs() < FACE_TILT_MAX_DEG.to_radians().cos() {
+                    return Err(GenError::Invalid(format!(
+                        "{label} is not horizontal - a facing pass needs a floor; machine its boundary with a 2D Contour instead"
+                    )));
+                }
+                if f.loops.iter().all(|l| matches!(l.kind, LoopKind::Open)) {
+                    return Err(GenError::Invalid(format!(
+                        "{label} is an open sheet; select its edge chain instead"
+                    )));
+                }
+                for l in &f.loops {
+                    if matches!(l.kind, LoopKind::Open) {
+                        continue;
+                    }
+                    let pts: Vec<Point2> = l
+                        .verts
+                        .iter()
+                        .filter_map(|&vi| features.verts.get(vi as usize))
+                        .map(|p| {
+                            let w =
+                                transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
+                            Point2::new(w.x, w.y)
+                        })
+                        .collect();
+                    push_loop(&label, pts, &mut loops, &mut rims)?;
+                }
+            }
+            FeatureSel::Chain(cid) => {
+                let cs = feature::chains(&features);
+                let Some(c) = cs.iter().find(|c| c.id == cid) else {
+                    return Err(GenError::Invalid(format!(
+                        "{label} is no longer in the model: re-pick it"
+                    )));
+                };
+                if !c.closed {
+                    if pocket {
+                        return Err(GenError::Invalid(format!(
+                            "{label} is an open run - a 2D Pocket cannot end mid-edge; select a closed chain"
+                        )));
+                    }
+                    // Contour/Trace/Face: an open run bounds no area; the
+                    // centerline passes of step 8 are its consumers.
+                    continue;
+                }
+                let pts: Vec<Point2> = feature::chain_points(&features, c)
+                    .iter()
+                    .map(|p| {
+                        let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
+                        Point2::new(w.x, w.y)
+                    })
+                    .collect();
+                push_loop(&label, pts, &mut loops, &mut rims)?;
+            }
+        }
+    }
+    if loops.is_empty() {
+        return Err(GenError::Empty(
+            "nothing in the selection bounds an area".into(),
+        ));
+    }
+    Region::new(loops).map_err(Into::into)
+}
+
+/// Accept one selected boundary: refuse what collapses to a line seen
+/// from above, and count a rim already in the region once - two faces
+/// meeting at an edge share it, and a coincident double loop would be a
+/// zero-wide sliver.
+fn push_loop(
+    label: &str,
+    pts: Vec<Point2>,
+    loops: &mut Vec<Loop>,
+    rims: &mut Vec<Vec<(i64, i64)>>,
+) -> Result<(), GenError> {
+    let mut key: Vec<(i64, i64)> = pts
+        .iter()
+        .map(|p| {
+            (
+                (p.x * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64,
+                (p.y * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64,
+            )
+        })
+        .collect();
+    // Same drop Loop::new does - consecutive repeats and the closing
+    // wrap - so the collapse check below sees the ring the loop would
+    // actually be.
+    key.dedup();
+    if key.len() > 1 && key.first() == key.last() {
+        key.pop();
+    }
+    if key.len() < 3 {
+        // A vertical wall seen from above, or a chain that runs up one:
+        // nothing encloses.
+        return Err(GenError::Invalid(format!(
+            "{label} projects to a line from above and bounds no area; select a horizontal face or a closed edge chain around the part"
+        )));
+    }
+    let canon = canon_ring(&key);
+    if rims.contains(&canon) {
+        return Ok(());
+    }
+    let loop_ = Loop::new(pts)?;
+    if loop_.area().abs() < DEGENERATE_AREA {
+        return Err(GenError::Invalid(format!(
+            "{label} projects to a line from above and bounds no area; select a horizontal face or a closed edge chain around the part"
+        )));
+    }
+    rims.push(canon);
+    loops.push(loop_);
+    Ok(())
+}
+
+/// Rotate- and mirror-canonical form of a quantized ring: the
+/// lexicographic minimum over its 2n walks. Compared exactly, never by
+/// hash - a colliding dedupe key would silently drop a real boundary.
+fn canon_ring(ring: &[(i64, i64)]) -> Vec<(i64, i64)> {
+    let n = ring.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut best: Option<Vec<(i64, i64)>> = None;
+    for start in 0..n {
+        for step in [1usize, 2] {
+            let walk: Vec<(i64, i64)> = (0..n).map(|k| ring[(start + k * step) % n]).collect();
+            if best.as_ref().is_none_or(|b| walk < *b) {
+                best = Some(walk);
+            }
+        }
+    }
+    best.unwrap_or_default()
 }
 
 /// Generate the path for an operation as the world stands now, and verify
@@ -709,7 +1030,7 @@ pub fn generate(
     // `region.contains`, so this only widens what counts as material.
     let stock_region = match &op.src {
         SrcRef::Stock => None,
-        SrcRef::Entity(_) => model::find_by_name(world, crate::schema::STOCK_NAME)
+        SrcRef::Entity(_) | SrcRef::Selection(_) => model::find_by_name(world, crate::schema::STOCK_NAME)
             .and_then(|e| model::world_facets(world, &e))
             .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
             .filter(|r| !r.is_empty()),
@@ -727,7 +1048,7 @@ pub fn generate(
     // Region + path per kind.
     let (region, path) = match &op.params {
         OpParams::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb } => {
-            let region = region_for(&material, &op.params)?;
+            let region = region_for_src(world, &op.src, &op.params, &material)?;
             let path = machining2d::face(
                 &region,
                 &FaceParams {
@@ -758,7 +1079,7 @@ pub fn generate(
             tab_width,
             tab_height,
         } => {
-            let region = region_for(&material, &op.params)?;
+            let region = region_for_src(world, &op.src, &op.params, &material)?;
             let path = machining2d::contour(
                 &region,
                 &ContourParams {
@@ -793,7 +1114,7 @@ pub fn generate(
             climb,
             strategy,
         } => {
-            let region = region_for(&material, &op.params)?;
+            let region = region_for_src(world, &op.src, &op.params, &material)?;
             let path = machining2d::pocket(
                 &region,
                 &PocketParams {
@@ -843,7 +1164,7 @@ pub fn generate(
                     climb: *climb,
                 },
             )?;
-            let region = region_for(&material, &op.params)?;
+            let region = region_for_src(world, &op.src, &op.params, &material)?;
             (region, path)
         }
         OpParams::Trace {
@@ -855,7 +1176,7 @@ pub fn generate(
             plunge_feed,
             climb,
         } => {
-            let region = region_for(&material, &op.params)?;
+            let region = region_for_src(world, &op.src, &op.params, &material)?;
             let path = machining2d::trace(
                 &region,
                 &TraceParams {

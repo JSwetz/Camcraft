@@ -40,6 +40,34 @@ fn valid_src(world: &World, src: &SrcRef) -> Result<(), CommandError> {
                 None => Err(CommandError::NotFound(name.clone())),
             }
         }
+        SrcRef::Selection(items) => {
+            if items.is_empty() {
+                return Err(CommandError::Invalid(
+                    "a selection source needs at least one feature".into(),
+                ));
+            }
+            // Feature ids resolve at generation (they are geometry
+            // hashes, not pointers); the entity behind each must exist
+            // and be a solid, and that is all construction can promise.
+            for g in items {
+                if g.entity.is_empty() {
+                    return Err(CommandError::Invalid(
+                        "a selected feature names no entity".into(),
+                    ));
+                }
+                match model::find_by_name(world, &g.entity) {
+                    Some(e) if model::is_wcs(world, &e) => {
+                        return Err(CommandError::Invalid(format!(
+                            "'{}' is a work offset, not a solid",
+                            g.entity
+                        )));
+                    }
+                    Some(_) => {}
+                    None => return Err(CommandError::NotFound(g.entity.clone())),
+                }
+            }
+            Ok(())
+        }
     }
 }
 

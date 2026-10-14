@@ -1139,6 +1139,62 @@ pub fn chains(features: &Features) -> Vec<Chain> {
     out
 }
 
+/// The chain's vertex positions in walk order, closing vertex dropped for
+/// closed chains - a ring [`chains`] can be consumed from: projected to
+/// XY it is a machining boundary, walked in Z it is a centerline pass.
+/// Local frame, like the rest of [`Features`]. A self-loop edge stops the
+/// walk (it has no far end to step to).
+#[must_use]
+pub fn chain_points(features: &Features, chain: &Chain) -> Vec<[f64; 3]> {
+    let Some(&first) = chain.edges.first() else {
+        return Vec::new();
+    };
+    let e0 = match features.edges.get(first as usize) {
+        Some(e) => e,
+        None => return Vec::new(),
+    };
+    // The walk's start vertex: the end of the first edge that the second
+    // edge does NOT touch - the trail then continues through the shared
+    // vertex. A lone edge starts at its plain `a` end (order is stable).
+    let v0 = match chain.edges.get(1).and_then(|&i| features.edges.get(i as usize)) {
+        Some(e1) => {
+            if e0.a == e1.a || e0.a == e1.b {
+                e0.b
+            } else {
+                e0.a
+            }
+        }
+        None => e0.a,
+    };
+    // A dangling vertex index would mean a `Features` whose parts were not
+    // built together; the walk stops there and the consumer's own
+    // too-few-points check does the refusing - never a phantom point.
+    let mut out: Vec<[f64; 3]> = Vec::with_capacity(chain.edges.len() + 1);
+    let mut cur = v0;
+    let Some(p0) = features.verts.get(cur as usize).copied() else {
+        return out;
+    };
+    out.push(p0);
+    for &ei in &chain.edges {
+        let Some(e) = features.edges.get(ei as usize) else {
+            break;
+        };
+        let nxt = other_end(e, cur);
+        if nxt == cur {
+            break; // self-loop: no far end, the walk ends where it stands
+        }
+        let Some(pn) = features.verts.get(nxt as usize).copied() else {
+            break;
+        };
+        out.push(pn);
+        cur = nxt;
+    }
+    if chain.closed {
+        out.pop();
+    }
+    out
+}
+
 /// The vertex of `e` that is not `v` (self-loop edges return `v`).
 fn other_end(e: &TopEdge, v: u32) -> u32 {
     if e.a == v {

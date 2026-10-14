@@ -218,6 +218,11 @@ impl OpUi {
         let (src_kind, src_name) = match &op.src {
             SrcRef::Stock => (0, String::new()),
             SrcRef::Entity(n) => (1, n.clone()),
+            // The combo cannot express a feature pick - the Geometry
+            // section does (M1.5 step 7). Until then a selection mirrors
+            // as kind 2, which `src` below keeps out of the queue: the
+            // pane never rewrites a selection's source by accident.
+            SrcRef::Selection(_) => (2, String::new()),
         };
         OpUi {
             name: name.to_string(),
