@@ -19,7 +19,7 @@ use hsmworks_app::machining2d::{Lead, PocketStrategy};
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
 
-use crate::state::{CommandKind, State};
+use crate::state::{CommandKind, ErrorScope, State};
 
 /// Radio/combo order = `OpType` discriminants (Face, Contour, Pocket, Slot,
 /// Trace); `kind_index` and `retype` must agree with this list.
@@ -31,13 +31,13 @@ pub fn properties_panel(ui: &Ui, state: &mut State) {
     if !state.show_properties {
         return;
     }
-    let Ok(key) = WindowKey::new("properties", "Properties") else {
+    let Ok(key) = WindowKey::new("operations", "Operations") else {
         return;
     };
     // The `opened` flag flips false when the user closes the dock tab; the
     // CAM menu reopens the pane by setting `show_properties` again.
     let mut open = state.show_properties;
-    ui.window(key.label("Properties")).opened(&mut open).build(|| {
+    ui.window(key.label("Operations")).opened(&mut open).build(|| {
         contents(ui, state);
     });
     state.show_properties = open;
@@ -191,8 +191,24 @@ fn contents(ui: &Ui, state: &mut State) {
             ui.text_wrapped("Apply is a no-op until a parameter differs from the operation.");
         }
     } else {
+        // Pre-validate at the click site (the command still validates -
+        // defense in depth): a dead-looking button was the bug report.
+        let name = state.op_ui.name.clone();
+        let tool = state.op_ui.tool.clone();
+        let block = if name.trim().is_empty() {
+            Some("Name the operation first.")
+        } else if model::find_by_name(&state.world, &name).is_some() {
+            Some("That name is already in the document.")
+        } else if tool.trim().is_empty()
+            || !model::find_by_name(&state.world, &tool)
+                .is_some_and(|e| model::is_tool(&state.world, &e))
+        {
+            Some("No tool to cut with yet - add one in the Tool Library.")
+        } else {
+            None
+        };
+        let dis = ui.begin_disabled_with_cond(block.is_some());
         if ui.button("Add Operation") {
-            let (name, tool) = (state.op_ui.name.clone(), state.op_ui.tool.clone());
             let src = state.op_ui.src();
             let params = state.op_ui.params.clone();
             state.pending.push_back(CommandKind::CreateOperation {
@@ -202,6 +218,14 @@ fn contents(ui: &Ui, state: &mut State) {
                 params,
             });
         }
+        dis.end();
+        if let Some(why) = block {
+            ui.same_line();
+            ui.text_wrapped(why);
+        }
+    }
+    if let Some(msg) = state.error_for(ErrorScope::Operation) {
+        ui.text_colored([1.0, 0.35, 0.35, 1.0], msg);
     }
 }
 

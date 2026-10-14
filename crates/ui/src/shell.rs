@@ -27,7 +27,7 @@ pub(crate) fn viewport_key() -> Option<WindowKey> {
 fn dock_layout() -> Option<DockLayout> {
     let tree = WindowKey::new("models", "Models").ok()?;
     let setup_key = WindowKey::new("setup", "Setup").ok()?;
-    let props = WindowKey::new("properties", "Properties").ok()?;
+    let props = WindowKey::new("operations", "Operations").ok()?;
     let tools = WindowKey::new("tools", "Tool Library").ok()?;
     let view = viewport_key()?;
     Some(DockLayout::split(

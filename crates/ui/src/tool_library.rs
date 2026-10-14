@@ -10,7 +10,7 @@ use dear_imgui_rs::{Ui, WindowKey};
 use hsmworks_app::model;
 use hsmworks_app::tools::{ToolKind, catalog};
 
-use crate::state::{CommandKind, State, ToolUi};
+use crate::state::{CommandKind, ErrorScope, State, ToolUi};
 
 const TOOL_KINDS: [&str; 3] = ["End mill", "Ball nose", "Bull nose"];
 
@@ -86,14 +86,36 @@ fn contents(ui: &Ui, state: &mut State) {
             let name = state.tool_ui.name.clone();
             state.pending.push_back(CommandKind::DeleteTool(name));
         }
-    } else if ui.button("Add##tool") {
+    } else {
+        // Pre-validate at the click site (the command still validates, as
+        // defense in depth): an empty or taken name used to be refused
+        // silently two panes away, which read as a dead Add button. A name
+        // typed this frame has not synced yet, so check the world directly.
         let name = state.tool_ui.name.clone();
-        let tool = state.tool_ui.to_tool();
-        state.pending.push_back(CommandKind::AddTool { name, tool });
+        let block = if name.trim().is_empty() {
+            Some("Name the tool first.")
+        } else if model::find_by_name(&state.world, &name).is_some() {
+            Some("That name is already in the document.")
+        } else {
+            None
+        };
+        let dis = ui.begin_disabled_with_cond(block.is_some());
+        if ui.button("Add##tool") {
+            let tool = state.tool_ui.to_tool();
+            state.pending.push_back(CommandKind::AddTool { name, tool });
+        }
+        dis.end();
+        if let Some(why) = block {
+            ui.same_line();
+            ui.text_wrapped(why);
+        }
     }
     ui.same_line();
     if ui.button("New##tool") {
-        state.tool_ui = ToolUi::default();
+        state.tool_ui = state.new_tool_draft();
+    }
+    if let Some(msg) = state.error_for(ErrorScope::Tool) {
+        ui.text_colored([1.0, 0.35, 0.35, 1.0], msg);
     }
 
     ui.separator();
@@ -101,11 +123,18 @@ fn contents(ui: &Ui, state: &mut State) {
     for (name, tool) in catalog() {
         ui.text(format!("{name}  Ø{}", tool.diameter));
         ui.same_line();
+        let taken = model::find_by_name(&state.world, name).is_some();
+        let dis = ui.begin_disabled_with_cond(taken);
         if ui.button(format!("Add##cat_{name}")) {
             state.pending.push_back(CommandKind::AddTool {
                 name: name.to_string(),
                 tool: tool.clone(),
             });
+        }
+        dis.end();
+        if taken {
+            ui.same_line();
+            ui.text("(in document)");
         }
     }
 }

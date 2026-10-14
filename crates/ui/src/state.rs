@@ -389,6 +389,22 @@ pub struct State {
     /// the user closed with its X (the `opened` flag on the window).
     pub show_properties: bool,
     pub show_tools: bool,
+    /// The last command's refusal, tagged with the pane it belongs to, so
+    /// the failing pane can show the reason inline. The bottom status strip
+    /// alone was invisible enough that "Add does nothing" read as a dead
+    /// button. Cleared by every command that runs (see [`State::run`]).
+    pub feedback: Option<(ErrorScope, String)>,
+}
+
+/// Which pane a refused command's message belongs to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ErrorScope {
+    /// The Tool Library page (add/update/delete a tool).
+    Tool,
+    /// The Properties page (create/edit/generate/delete an operation).
+    Operation,
+    /// The Setup pane (stock and work offsets).
+    Setup,
 }
 
 impl State {
@@ -420,14 +436,49 @@ impl State {
                 anchor_z: 1,
                 ..WcsUi::default()
             },
-            op_ui: OpUi::default(),
-            tool_ui: ToolUi::default(),
+            // First-launch drafts carry plausible names: an empty Name
+            // field made the Add buttons look dead (refused silently).
+            op_ui: OpUi {
+                name: String::from("Operation1"),
+                ..OpUi::default()
+            },
+            tool_ui: ToolUi {
+                name: String::from("Tool1"),
+                ..ToolUi::default()
+            },
             ui_synced_doc: 0,
             op_synced: (String::new(), 0),
             tool_synced: (String::new(), 0),
             show_properties: true,
             show_tools: true,
+            feedback: None,
         }
+    }
+
+    /// The refusal a pane of this scope should show inline, if the last
+    /// command to run was a refusal that belongs to it.
+    #[must_use]
+    pub fn error_for(&self, scope: ErrorScope) -> Option<&str> {
+        self.feedback
+            .as_ref()
+            .filter(|(s, _)| *s == scope)
+            .map(|(_, msg)| msg.as_str())
+    }
+
+    /// A blank tool page with a numbered name: New starts a real draft,
+    /// not an empty field the Add button would only refuse.
+    #[must_use]
+    pub fn new_tool_draft(&self) -> ToolUi {
+        let n = self.tool_names().len() + 1;
+        let starter = catalog().remove(0);
+        ToolUi::from_tool(&format!("Tool{n}"), &starter.1, false)
+    }
+
+    /// Record a refusal: status strip for everyone, tagged message for the
+    /// pane that caused it.
+    fn refuse(&mut self, scope: ErrorScope, msg: String) {
+        self.status.clone_from(&msg);
+        self.feedback = Some((scope, msg));
     }
 
     /// Refetch the Setup pane's drafts from the world after any document
@@ -609,6 +660,9 @@ impl State {
     }
 
     fn run(&mut self, action: CommandKind) {
+        // Whatever ran, the banner shows only the newest outcome: a later
+        // command (even a successful one) retires an old refusal.
+        self.feedback = None;
         match action {
             CommandKind::OpenModelDialog => {
                 if let Some(path) = pick_mesh_file() {
@@ -692,7 +746,7 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("deleted {name}");
                     }
-                    Err(err) => self.status = format!("delete failed: {err}"),
+                    Err(err) => self.refuse(ErrorScope::Setup, format!("delete failed: {err}")),
                 }
             }
             CommandKind::SetStock { shape, pos, yaw_deg } => {
@@ -706,20 +760,26 @@ impl State {
                         self.doc_version += 1;
                         self.status = String::from("stock set");
                     }
-                    Err(err) => self.status = format!("stock not set: {err}"),
+                    Err(err) => self.refuse(ErrorScope::Setup, format!("stock not set: {err}")),
                 }
             }
             CommandKind::StockFit { margin, shape: radio } => {
                 if radio == 2 {
                     // From-model stock IS its source's shape; there is
                     // nothing to wrap. Refuse visibly, never guess.
-                    self.status = String::from(
-                        "from-model stock follows its source: choose Box or Cylinder to fit",
+                    self.refuse(
+                        ErrorScope::Setup,
+                        String::from(
+                            "from-model stock follows its source: choose Box or Cylinder to fit",
+                        ),
                     );
                     return;
                 }
                 let Some(bounds) = model::solid_world_aabb(&self.world) else {
-                    self.status = String::from("nothing to fit: no models in the document");
+                    self.refuse(
+                        ErrorScope::Setup,
+                        String::from("nothing to fit: no models in the document"),
+                    );
                     return;
                 };
                 let Some((shape, pos)) = (if radio == 1 {
@@ -727,7 +787,10 @@ impl State {
                 } else {
                     stock::fit_box(&bounds, margin)
                 }) else {
-                    self.status = String::from("stock fit refused: models have no usable extent");
+                    self.refuse(
+                        ErrorScope::Setup,
+                        String::from("stock fit refused: models have no usable extent"),
+                    );
                     return;
                 };
                 // Fit replaces size and XY/Z placement; a deliberately
@@ -742,7 +805,7 @@ impl State {
                         self.doc_version += 1;
                         self.status = String::from("stock fitted to models");
                     }
-                    Err(err) => self.status = format!("stock not fitted: {err}"),
+                    Err(err) => self.refuse(ErrorScope::Setup, format!("stock not fitted: {err}")),
                 }
             }
             CommandKind::SetWcs {
@@ -756,7 +819,10 @@ impl State {
                 // non-finite angles; refuse that here rather than silently
                 // dropping a NaN rotation (Prime Directive).
                 if !roll_deg.is_finite() || !pitch_deg.is_finite() || !yaw_deg.is_finite() {
-                    self.status = format!("offset not set: {slot} rotation angles must be finite");
+                    self.refuse(
+                        ErrorScope::Setup,
+                        format!("offset not set: {slot} rotation angles must be finite"),
+                    );
                     return;
                 }
                 let location = Location {
@@ -773,7 +839,7 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("{slot} origin set");
                     }
-                    Err(err) => self.status = format!("offset not set: {err}"),
+                    Err(err) => self.refuse(ErrorScope::Setup, format!("offset not set: {err}")),
                 }
             }
             CommandKind::AddTool { name, tool } => {
@@ -783,7 +849,7 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("tool {name} added");
                     }
-                    Err(err) => self.status = format!("tool not added: {err}"),
+                    Err(err) => self.refuse(ErrorScope::Tool, format!("tool not added: {err}")),
                 }
             }
             CommandKind::ChangeTool { name, tool } => {
@@ -793,7 +859,7 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("tool {name} updated");
                     }
-                    Err(err) => self.status = format!("tool not updated: {err}"),
+                    Err(err) => self.refuse(ErrorScope::Tool, format!("tool not updated: {err}")),
                 }
             }
             CommandKind::DeleteTool(name) => {
@@ -803,7 +869,7 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("deleted tool {name}");
                     }
-                    Err(err) => self.status = format!("tool not deleted: {err}"),
+                    Err(err) => self.refuse(ErrorScope::Tool, format!("tool not deleted: {err}")),
                 }
             }
             CommandKind::CreateOperation {
@@ -818,7 +884,9 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("operation {name} created");
                     }
-                    Err(err) => self.status = format!("operation not created: {err}"),
+                    Err(err) => {
+                        self.refuse(ErrorScope::Operation, format!("operation not created: {err}"));
+                    }
                 }
             }
             CommandKind::EditOperationParams { name, params } => {
@@ -828,7 +896,12 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("parameters updated for {name}");
                     }
-                    Err(err) => self.status = format!("parameters not updated: {err}"),
+                    Err(err) => {
+                        self.refuse(
+                            ErrorScope::Operation,
+                            format!("parameters not updated: {err}"),
+                        );
+                    }
                 }
             }
             CommandKind::EditOperationLinks { name, tool, src } => {
@@ -844,7 +917,9 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("links updated for {name}");
                     }
-                    Err(err) => self.status = format!("links not updated: {err}"),
+                    Err(err) => {
+                        self.refuse(ErrorScope::Operation, format!("links not updated: {err}"));
+                    }
                 }
             }
             CommandKind::DeleteOperation(name) => {
@@ -854,7 +929,9 @@ impl State {
                         self.doc_version += 1;
                         self.status = format!("deleted operation {name}");
                     }
-                    Err(err) => self.status = format!("operation not deleted: {err}"),
+                    Err(err) => {
+                        self.refuse(ErrorScope::Operation, format!("operation not deleted: {err}"));
+                    }
                 }
             }
             CommandKind::GenerateOperation(name) => {
@@ -875,7 +952,7 @@ impl State {
                             None => format!("generated {name}"),
                         };
                     }
-                    Err(err) => self.status = format!("generate failed: {err}"),
+                    Err(err) => self.refuse(ErrorScope::Operation, format!("generate failed: {err}")),
                 }
             }
         }

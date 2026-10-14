@@ -9,7 +9,7 @@ use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::STOCK_NAME;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
-use hsmworks_ui::state::{CommandKind, State, ToolUi};
+use hsmworks_ui::state::{CommandKind, ErrorScope, State, ToolUi};
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -317,6 +317,57 @@ fn retargeting_a_tool_and_bad_params() {
     state.drain_actions();
     assert!(state.status.starts_with("parameters not updated"), "{:?}", state.status);
     assert_eq!(stored_params(&state, "Face1"), face_params(), "world unchanged");
+}
+
+#[test]
+fn first_launch_drafts_carry_names_not_blanks() {
+    let state = State::new();
+    assert_eq!(state.tool_ui.name, "Tool1", "Add is never aimed at an empty name");
+    assert_eq!(state.op_ui.name, "Operation1");
+    // New drafts number past what the document already holds.
+    let mut state = state;
+    state.pending.push_back(box_stock(20.0));
+    state.pending.push_back(CommandKind::AddTool {
+        name: "Tool1".into(),
+        tool: catalog_tool("EM-0400-2FL"),
+    });
+    state.drain_actions();
+    assert_eq!(state.new_tool_draft().name, "Tool2");
+}
+
+#[test]
+fn refusals_are_tagged_to_their_pane_and_cleared_by_the_next_command() {
+    let mut state = State::new();
+    state.pending.push_back(box_stock(20.0));
+    // A nameless tool draft is refused; the message belongs to the Tool page.
+    state.pending.push_back(CommandKind::AddTool {
+        name: String::new(),
+        tool: catalog_tool("EM-0400-2FL"),
+    });
+    state.drain_actions();
+    assert!(state.status.starts_with("tool not added"), "{:?}", state.status);
+    assert!(state.error_for(ErrorScope::Tool).is_some());
+    assert_eq!(state.error_for(ErrorScope::Operation), None, "not this pane's business");
+
+    // Any command that runs retires the banner, successful or not.
+    state.pending.push_back(CommandKind::AddTool {
+        name: "EM-0400-2FL".into(),
+        tool: catalog_tool("EM-0400-2FL"),
+    });
+    state.drain_actions();
+    assert_eq!(state.error_for(ErrorScope::Tool), None, "the success cleared it");
+
+    // And an operation refusal lands on the operation scope, not the tool's.
+    state.pending.push_back(CommandKind::CreateOperation {
+        name: "Face1".into(),
+        tool: String::new(),
+        src: SrcRef::Stock,
+        params: face_params(),
+    });
+    state.drain_actions();
+    assert!(state.status.starts_with("operation not created"), "{:?}", state.status);
+    assert!(state.error_for(ErrorScope::Operation).is_some());
+    assert_eq!(state.error_for(ErrorScope::Tool), None);
 }
 
 #[test]
