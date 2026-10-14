@@ -167,7 +167,6 @@ pub(crate) fn wcs_page(ui: &Ui, state: &mut State, slot: usize) {
             turn_wcs(state, axis, sign);
         }
     }
-    ui.new_line();
     if ui.button("Level##wcs_level") {
         state.wcs_ui.roll_deg = 0.0;
         state.wcs_ui.pitch_deg = 0.0;
