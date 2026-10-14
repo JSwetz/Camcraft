@@ -385,10 +385,14 @@ pub struct State {
     /// [`State::sync_ops_ui`] for the rule.
     op_synced: (String, u64),
     tool_synced: (String, u64),
-    /// Dock visibility of the two new panes: the CAM menu reopens a panel
-    /// the user closed with its X (the `opened` flag on the window).
-    pub show_properties: bool,
-    pub show_tools: bool,
+    /// Which entity the docked context panes edit right now. Ephemeral view
+    /// state like the camera - not a command, not undoable (AGENTS.md); the
+    /// selection its clicks mirror is the command. [`State::pane_target`]
+    /// validates it against the world every frame, so a target that
+    /// disappears under it (delete, undo) falls back to the selection on
+    /// its own. Replaces the old per-pane show-flags and the `.opened()`
+    /// dance: the panes are persistent, what changes is their subject.
+    pub ui_target: UiTarget,
     /// The last command's refusal, tagged with the pane it belongs to, so
     /// the failing pane can show the reason inline. The bottom status strip
     /// alone was invisible enough that "Add does nothing" read as a dead
@@ -405,6 +409,45 @@ pub enum ErrorScope {
     Operation,
     /// The Setup pane (stock and work offsets).
     Setup,
+}
+
+/// What the docked context panes should edit. Set by tree/ribbon clicks and
+/// the menu through [`crate::actions::target`]; view state, never a command
+/// (the `Select` a click mirrors into the world is the command).
+#[derive(Clone, Debug, PartialEq)]
+pub enum UiTarget {
+    /// Nothing targeted: panes fall back to the world selection.
+    None,
+    /// The stock solid (its page doubles as the creation form).
+    Stock,
+    /// One of [`hsmworks_app::schema::WCS_SLOTS`], by index.
+    WcsSlot(usize),
+    Model(String),
+    Tool(String),
+    Operation(String),
+}
+
+impl UiTarget {
+    /// Whether this target still has something to show: named entities
+    /// must exist with the component they were targeted for (an undone
+    /// operation stops holding the pane), slot indexes must be real, and
+    /// the stock page survives having no stock yet - creating it is what
+    /// that form is for.
+    #[must_use]
+    pub fn resolves_in(&self, world: &World) -> bool {
+        match self {
+            UiTarget::None => false,
+            UiTarget::Stock => true,
+            UiTarget::WcsSlot(i) => *i < WCS_SLOTS.len(),
+            UiTarget::Model(name) => model::model_entities(world)
+                .into_iter()
+                .any(|(n, _)| *name == n),
+            UiTarget::Tool(name) => model::find_by_name(world, name)
+                .is_some_and(|e| model::is_tool(world, &e)),
+            UiTarget::Operation(name) => model::find_by_name(world, name)
+                .is_some_and(|e| model::is_operation(world, &e)),
+        }
+    }
 }
 
 impl State {
@@ -449,8 +492,7 @@ impl State {
             ui_synced_doc: 0,
             op_synced: (String::new(), 0),
             tool_synced: (String::new(), 0),
-            show_properties: true,
-            show_tools: true,
+            ui_target: UiTarget::None,
             feedback: None,
         }
     }
@@ -550,35 +592,51 @@ impl State {
         }
     }
 
+    /// What the context panes actually edit this frame: the explicit
+    /// target while it resolves, else the world selection, else nothing
+    /// (the creation forms). Panes and drafts route through this instead
+    /// of reading the raw target - a vanished one never leaves them
+    /// pointing at a ghost.
+    #[must_use]
+    pub fn pane_target(&self) -> UiTarget {
+        if self.ui_target.resolves_in(&self.world) {
+            return self.ui_target.clone();
+        }
+        match self.selected_operation() {
+            Some(name) => UiTarget::Operation(name),
+            None => UiTarget::None,
+        }
+    }
+
     /// Refetch the Properties pane's draft after any document or selection
-    /// change. While a real operation is selected its draft always mirrors
-    /// the world; the "new operation" form survives document bumps, since
-    /// there is no reality to refetch until it is added.
+    /// change. While a real operation is targeted (or falls out of the
+    /// selection) its draft always mirrors the world; the "new operation"
+    /// form survives document bumps, since there is no reality to refetch
+    /// until it is added.
     pub fn sync_ops_ui(&mut self) {
-        let sel = self.selected_operation();
-        let ident = sel.clone().unwrap_or_default();
+        let ident = match self.pane_target() {
+            UiTarget::Operation(name) => name,
+            _ => String::new(),
+        };
         if self.op_synced == (ident.clone(), self.doc_version) {
             return;
         }
         let identity_changed = self.op_synced.0 != ident;
         self.op_synced = (ident, self.doc_version);
-        match sel {
-            Some(name) => {
-                if let Some(entity) = model::find_by_name(&self.world, &name)
-                    && let Some(op) = model::operation_of(&self.world, &entity)
-                {
-                    self.op_ui = OpUi::from_op(&name, &op);
-                }
+        if !self.op_synced.0.is_empty() {
+            let name = self.op_synced.0.clone();
+            if let Some(entity) = model::find_by_name(&self.world, &name)
+                && let Some(op) = model::operation_of(&self.world, &entity)
+            {
+                self.op_ui = OpUi::from_op(&name, &op);
             }
-            None if identity_changed => {
-                let n = self.operation_count() + 1;
-                self.op_ui = OpUi {
-                    name: format!("Operation{n}"),
-                    tool: self.tool_names().pop().unwrap_or_default(),
-                    ..OpUi::default()
-                };
-            }
-            None => {}
+        } else if identity_changed {
+            let n = self.operation_count() + 1;
+            self.op_ui = OpUi {
+                name: format!("Operation{n}"),
+                tool: self.tool_names().pop().unwrap_or_default(),
+                ..OpUi::default()
+            };
         }
     }
 

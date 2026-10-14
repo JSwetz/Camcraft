@@ -15,17 +15,14 @@ use crate::state::{CommandKind, ErrorScope, State, ToolUi};
 const TOOL_KINDS: [&str; 3] = ["End mill", "Ball nose", "Bull nose"];
 
 pub fn tools_panel(ui: &Ui, state: &mut State) {
-    if !state.show_tools {
-        return;
-    }
     let Ok(key) = WindowKey::new("tools", "Tool Library") else {
         return;
     };
-    let mut open = state.show_tools;
-    ui.window(key.label("Tool Library")).opened(&mut open).build(|| {
+    // Persistent docked pane, like the Operations one: always in the
+    // layout, page selection lives in `state.tool_ui`, not in a flag.
+    ui.window(key.label("Tool Library")).build(|| {
         contents(ui, state);
     });
-    state.show_tools = open;
 }
 
 fn contents(ui: &Ui, state: &mut State) {

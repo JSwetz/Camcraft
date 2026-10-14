@@ -9,9 +9,10 @@ use dear_imgui_rs::{
     WindowFlags, WindowKey,
 };
 
+use crate::actions;
 use crate::properties;
 use crate::setup;
-use crate::state::{CommandKind, State};
+use crate::state::{CommandKind, State, UiTarget};
 use crate::tool_library;
 use crate::tree;
 
@@ -99,68 +100,68 @@ fn status_bar(ui: &Ui, state: &State) {
         });
 }
 
+/// Menu wiring: every item calls an `actions` entry point - the same ones
+/// the ribbon will call - and nothing here pushes a `CommandKind` itself.
 fn menu_bar(ui: &Ui, state: &mut State) {
     let _bar = ui.begin_main_menu_bar();
     if let Some(file) = ui.begin_menu("File") {
         if ui.menu_item_with_shortcut("Open Model...", "Ctrl+O") {
-            state.pending.push_back(CommandKind::OpenModelDialog);
+            actions::open_model_dialog(state);
         }
         if ui.menu_item_with_shortcut("New", "Ctrl+N") {
-            state.pending.push_back(CommandKind::NewDocument);
+            actions::new_document(state);
         }
         ui.separator();
         if ui.menu_item_with_shortcut("Open Project...", "Ctrl+Shift+O") {
-            state.pending.push_back(CommandKind::OpenProjectDialog);
+            actions::open_project(state);
         }
         if ui.menu_item_with_shortcut("Save Project...", "Ctrl+S") {
-            state.pending.push_back(CommandKind::SaveProjectDialog);
+            actions::save_project(state);
         }
         ui.separator();
         if ui.menu_item("Exit") {
-            state.pending.push_back(CommandKind::Quit);
+            actions::quit(state);
         }
         drop(file);
     }
     if let Some(edit) = ui.begin_menu("Edit") {
         if ui.menu_item_enabled_selected_with_shortcut("Undo", "Ctrl+Z", false, state.history.can_undo()) {
-            state.pending.push_back(CommandKind::Undo);
+            actions::undo(state);
         }
         if ui.menu_item_enabled_selected_with_shortcut("Redo", "Ctrl+Y", false, state.history.can_redo()) {
-            state.pending.push_back(CommandKind::Redo);
+            actions::redo(state);
         }
         ui.separator();
         let has_sel = state.has_selection();
         if ui.menu_item_enabled_selected_with_shortcut("Delete Selected", "Del", false, has_sel) {
-            state.pending.push_back(CommandKind::DeleteSelected);
+            actions::delete_selected(state);
         }
         drop(edit);
     }
     if let Some(view) = ui.begin_menu("View") {
         if ui.menu_item_with_shortcut("Frame All", "F") {
-            state.pending.push_back(CommandKind::FrameAll);
+            actions::frame_all(state);
         }
         drop(view);
     }
     if let Some(cam) = ui.begin_menu("CAM") {
-        // Pane openers: closed dock tabs are re-shown by setting the flag
-        // the panel consumes through its `opened` writeback.
+        // The panes are persistent dock tabs now, so these route rather
+        // than open: New Operation aims the Operations pane at the
+        // creation form (and clears the selection it would fall back to),
+        // Tool Library points at the tool page.
         if ui.menu_item("New Operation") {
-            state.show_properties = true;
+            actions::new_operation(state);
         }
         if ui.menu_item("Tool Library...") {
-            state.show_tools = true;
+            actions::target(state, UiTarget::Tool(String::new()));
         }
         ui.separator();
         let sel = state.selected_operation();
-        if ui.menu_item_enabled_selected("Generate##cam", None::<&str>, false, sel.is_some())
-            && let Some(name) = sel.clone()
-        {
-            state.pending.push_back(CommandKind::GenerateOperation(name));
+        if ui.menu_item_enabled_selected("Generate##cam", None::<&str>, false, sel.is_some()) {
+            actions::generate_selected(state);
         }
-        if ui.menu_item_enabled_selected("Delete Operation", None::<&str>, false, sel.is_some())
-            && let Some(name) = sel
-        {
-            state.pending.push_back(CommandKind::DeleteOperation(name));
+        if ui.menu_item_enabled_selected("Delete Operation", None::<&str>, false, sel.is_some()) {
+            actions::delete_operation(state);
         }
         drop(cam);
     }

@@ -3,6 +3,7 @@
 //! Layering (AGENTS.md): ui -> app -> flecs. This crate renders and routes
 //! input; every persistent world change goes through `hsmworks_app::commands`.
 
+pub mod actions;
 pub mod app;
 pub mod headless;
 pub mod properties;

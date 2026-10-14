@@ -28,19 +28,15 @@ const LEADS: [&str; 3] = ["None", "Linear", "Arc"];
 const STRATEGIES: [&str; 2] = ["Zigzag", "Waterline"];
 
 pub fn properties_panel(ui: &Ui, state: &mut State) {
-    if !state.show_properties {
-        return;
-    }
     let Ok(key) = WindowKey::new("operations", "Operations") else {
         return;
     };
-    // The `opened` flag flips false when the user closes the dock tab; the
-    // CAM menu reopens the pane by setting `show_properties` again.
-    let mut open = state.show_properties;
-    ui.window(key.label("Operations")).opened(&mut open).build(|| {
+    // Persistent docked pane: it is always part of the layout (the ini is
+    // not saved, so the layout is rebuilt from code every launch anyway);
+    // what changes is its subject, via `State::pane_target`.
+    ui.window(key.label("Operations")).build(|| {
         contents(ui, state);
     });
-    state.show_properties = open;
 }
 
 fn contents(ui: &Ui, state: &mut State) {

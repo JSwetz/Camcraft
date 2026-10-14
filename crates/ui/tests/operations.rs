@@ -9,7 +9,7 @@ use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::STOCK_NAME;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
-use hsmworks_ui::state::{CommandKind, ErrorScope, State, ToolUi};
+use hsmworks_ui::state::{CommandKind, ErrorScope, State, ToolUi, UiTarget};
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -368,6 +368,66 @@ fn refusals_are_tagged_to_their_pane_and_cleared_by_the_next_command() {
     assert!(state.status.starts_with("operation not created"), "{:?}", state.status);
     assert!(state.error_for(ErrorScope::Operation).is_some());
     assert_eq!(state.error_for(ErrorScope::Tool), None);
+}
+
+#[test]
+fn pane_target_routes_then_falls_back_to_selection() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+
+    // Selection alone routes the pane (the fallback).
+    state.pending.push_back(CommandKind::Select(Some("Face1".into())));
+    state.drain_actions();
+    assert_eq!(state.pane_target(), UiTarget::Operation("Face1".into()));
+
+    // An explicit target wins over the selection...
+    state.ui_target = UiTarget::Tool("EM-0400-2FL".into());
+    assert_eq!(state.pane_target(), UiTarget::Tool("EM-0400-2FL".into()));
+
+    // ...and a target whose entity disappears stops holding the pane by
+    // itself: the fallback (the selected operation) takes over.
+    state.pending.push_back(CommandKind::DeleteTool("EM-0400-2FL".into()));
+    state.drain_actions();
+    assert_eq!(state.pane_target(), UiTarget::Operation("Face1".into()));
+
+    // The stock page is a target even with no stock yet: creating it is
+    // what that page is for.
+    state.pending.push_back(CommandKind::DeleteByName(STOCK_NAME.into()));
+    state.drain_actions();
+    state.ui_target = UiTarget::Stock;
+    assert_eq!(state.pane_target(), UiTarget::Stock);
+}
+
+#[test]
+fn targeting_an_operation_mirrors_the_draft_without_selection() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    state.ui_target = UiTarget::Operation("Face1".into());
+    state.sync_ops_ui();
+    assert_eq!(state.op_ui.name, "Face1");
+    assert_eq!(state.op_ui.tool, "EM-0400-2FL");
+    assert_eq!(state.op_ui.params, face_params());
+}
+
+#[test]
+fn new_operation_falls_from_target_and_selection_to_the_form() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    state.pending.push_back(CommandKind::Select(Some("Face1".into())));
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(state.op_ui.name, "Face1");
+    // The menu action: blank the target and clear the selection (that is
+    // the command part), and the pane re-prices the creation form.
+    state.ui_target = UiTarget::None;
+    state.pending.push_back(CommandKind::Select(None));
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(state.pane_target(), UiTarget::None);
+    assert_eq!(state.op_ui.name, "Operation2");
 }
 
 #[test]
