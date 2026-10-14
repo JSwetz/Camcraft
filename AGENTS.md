@@ -134,6 +134,35 @@ committed under `tests/golden/`), stock simulation, and post processing; fuzz
 tests for the geometry importers and the toolpath generators (degenerate input
 must error, never crash or hang).
 
+## Knowledge Graph
+
+`graphify-out/` holds a graphify knowledge graph of this repo: code extracted
+structurally (AST), docs and images semantically. Generated output - never
+hand-edit it, never commit it.
+
+Query it before falling back to grep for structural questions:
+
+- `graphify query "<question>"` - how does X work, what calls Y, trace a flow
+- `graphify path "A" "B"` - shortest connection between two concepts
+- `graphify explain "X"` - plain-language summary of a node and its neighbors
+- `graphify affected "X" --relation calls` - who breaks when X changes
+  (the graph is strongest here: it knows the test-to-command wiring)
+
+Keep it current as we work:
+
+- Code-only changes → `graphify update` (re-extracts changed files via AST,
+  free and no LLM; run it as part of wrapping up a task)
+- ROADMAP.md / AGENTS.md / icon changes → `/graphify . --update` instead, so
+  the semantic side is re-extracted too
+- After renames or refactors that move many files → full `/graphify .` rebuild;
+  the shrink guard refuses a smaller graph unless `--force` is passed
+- Expected warning: `tests/golden/*.cl` read as Common Lisp and contribute
+  nothing to the graph (our CLFile dumps, not source) - ignore it
+
+Trust calibration: every edge carries EXTRACTED (1.0, read from source),
+INFERRED (0.55-0.95, model-reasoned), or AMBIGUOUS (0.1-0.3) - verify an
+INFERRED edge against the code before acting on it, never act on AMBIGUOUS.
+
 ## Commits and Releases
 
 [Reference](https://github.com/qoomon/conventional-commits)

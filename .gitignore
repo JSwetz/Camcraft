@@ -1,2 +1,6 @@
 /target
+/graphify-out
+*.exe
+*.dll
+*.cps
 *.hsmproj
