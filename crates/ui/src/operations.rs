@@ -665,6 +665,13 @@ fn retype(cur: &OpParams, kind: usize, top: f64) -> OpParams {
     }
 }
 
+/// Parameter set a ribbon quick-add starts an operation of `kind` with:
+/// the draft defaults, retyped onto the stock top - the same numbers the
+/// creation form would have prefilled.
+pub(crate) fn quick_params(world: &flecs_ecs::prelude::World, kind: usize) -> OpParams {
+    retype(&crate::state::OpUi::default().params, kind, stock_top(world))
+}
+
 fn feed_of(p: &OpParams) -> f64 {
     match p {
         OpParams::Face { feed, .. }

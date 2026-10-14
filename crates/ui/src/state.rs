@@ -350,6 +350,13 @@ pub struct State {
     pub viewport_rect: ([f32; 2], [f32; 2]),
     /// Live viewport drag (orbit/pan), driven by app.rs from winit events.
     pub drag: Option<DragMode>,
+    /// True when the Viewport window was the topmost hovered window last
+    /// frame (the shell writes it, app.rs gates raw pointer drags on it -
+    /// a click on a menu or popup over the image must never orbit).
+    pub viewport_hot: bool,
+    /// Loaded UI glyph textures; `None` headless and pre-GPU, so every
+    /// consumer falls back to text (see [`crate::icons`]).
+    pub icons: Option<crate::icons::Icons>,
     pub cam: Camera,
     /// Show the dimmed world origin axes in the viewport. View state like
     /// the camera - not undoable, not saved - toggled from the Models panel;
@@ -472,6 +479,8 @@ impl State {
             viewport_size: [960.0, 540.0],
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
             drag: None,
+            viewport_hot: false,
+            icons: None,
             cam: Camera::default(),
             show_world_axes: true,
             show_all_paths: false,
@@ -691,7 +700,7 @@ impl State {
     }
 
     #[must_use]
-    fn operation_count(&self) -> usize {
+    pub(crate) fn operation_count(&self) -> usize {
         model::named_entities(&self.world)
             .into_iter()
             .filter(|(_, e)| model::is_operation(&self.world, e))

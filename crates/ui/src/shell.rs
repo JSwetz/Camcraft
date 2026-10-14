@@ -12,6 +12,7 @@ use dear_imgui_rs::{
 use crate::actions;
 use crate::browser;
 use crate::operations;
+use crate::ribbon;
 use crate::state::{CommandKind, State, UiTarget};
 
 /// Stable identity for the 3D panel; shared by the layout and the window.
@@ -60,7 +61,10 @@ pub fn build(ui: &Ui, state: &mut State) {
     // The main menu bar must be issued outside any window.
     menu_bar(ui, state);
 
-    dock_area(ui, state);
+    let ribbon_y = ui.frame_height();
+    dock_area(ui, state, ribbon_y);
+    // Submitted last so it always overlays docked panels dragged up.
+    ribbon::bar(ui, state, ribbon_y);
 
     status_bar(ui, state);
 }
@@ -70,13 +74,13 @@ pub fn build(ui: &Ui, state: &mut State) {
 /// panels can never slide under the menu (the bug a hand-rolled full-screen
 /// host had). The dockspace must be submitted before the windows it hosts,
 /// hence `panels` runs after, not inside, the host window.
-fn dock_area(ui: &Ui, state: &mut State) {
+fn dock_area(ui: &Ui, state: &mut State, ribbon_y: f32) {
     let display = ui.io().display_size();
     let line = ui.text_line_height();
-    let menu_h = ui.frame_height(); // font + 2*FramePadding.y: the menu strip
+    let top = ribbon_y + ribbon::height(ui); // menu strip + ribbon
     let status_h = line + 8.0;
     // `current_window` demands a positive finite size; clamp for tiny windows.
-    let host_h = (display[1] - menu_h - status_h).max(16.0);
+    let host_h = (display[1] - top - status_h).max(16.0);
     let layout = dock_layout();
     let mut dock_err: Option<String> = None;
     ui.window("##dockhost")
@@ -92,7 +96,7 @@ fn dock_area(ui: &Ui, state: &mut State) {
                 | WindowFlags::NO_SCROLL_WITH_MOUSE
                 | WindowFlags::NO_NAV_INPUTS,
         )
-        .position([0.0, menu_h], Condition::Always)
+        .position([0.0, top], Condition::Always)
         .size([display[0], host_h], Condition::Always)
         .build(|| {
             let _pad = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
@@ -264,6 +268,10 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
             }
         }
         let hovered = ui.is_window_hovered();
+        // Raw pointer events (app.rs) may only start viewport drags while
+        // the viewport is the topmost hovered window - menus and popups
+        // over the image otherwise orbit the camera behind the user's click.
+        state.viewport_hot = hovered;
         let wheel = ui.io().mouse_wheel();
         if wheel != 0.0 && hovered {
             // Cursor-centered zoom: map the pointer into the image rect's

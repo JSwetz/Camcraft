@@ -256,6 +256,10 @@ impl App {
             }
         };
         self.state.viewport_tex = Some(external.texture_id());
+        // Ribbon glyphs ride the same external-texture path as the
+        // viewport image; a decode failure is one grey-free text cell,
+        // never a lost frame (icons.rs logs per glyph).
+        self.state.icons = Some(crate::icons::Icons::new(&device, &queue, &mut renderer));
 
         self.ctx = Some(ctx);
         self.platform = Some(platform);
@@ -296,7 +300,10 @@ impl App {
     }
 
     fn on_press(&mut self, button: &MouseButton) {
-        if !self.inside_viewport(self.cursor_pos) {
+        // Bypass ImGui hover bookkeeping entirely except for this one flag:
+        // presses that belong to a menu, popup or the ribbon (any window
+        // on top of the image) must never start an orbit or a pick.
+        if !self.state.viewport_hot || !self.inside_viewport(self.cursor_pos) {
             return;
         }
         match button {

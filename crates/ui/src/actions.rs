@@ -7,6 +7,9 @@
 //! these. Enabling/disabling stays with the surface (it knows what the
 //! user can act on), but the effect lives here exactly once.
 
+use hsmworks_app::operation::SrcRef;
+
+use crate::operations::quick_params;
 use crate::state::{CommandKind, State, UiTarget};
 
 /// File menu: ask for a mesh to import (the dialog itself runs in
@@ -64,6 +67,36 @@ pub(crate) fn target(state: &mut State, t: UiTarget) {
 pub(crate) fn new_operation(state: &mut State) {
     state.ui_target = UiTarget::None;
     state.pending.push_back(CommandKind::Select(None));
+}
+
+/// Quick-add an operation of `kind` (index into the `OpType` order the
+/// Create group buttons follow): name it past the existing ones, give it
+/// the newest tool, cut the stock with retyped default params, then make
+/// it both selected and targeted so the Operations pane lands on it.
+/// Without a tool the refusal is loud on the status line - the ribbon
+/// disables the button too, but every surface shares this one effect.
+pub(crate) fn add_operation(state: &mut State, kind: usize) {
+    let Some(tool) = state.tool_names().pop() else {
+        state.status = String::from("cannot add an operation: no tool in the document");
+        return;
+    };
+    let mut n = state.operation_count() + 1;
+    let name = loop {
+        let candidate = format!("Operation{n}");
+        if hsmworks_app::model::find_by_name(&state.world, &candidate).is_none() {
+            break candidate;
+        }
+        n += 1;
+    };
+    let params = quick_params(&state.world, kind);
+    state.pending.push_back(CommandKind::CreateOperation {
+        name: name.clone(),
+        tool,
+        src: SrcRef::Stock,
+        params,
+    });
+    state.pending.push_back(CommandKind::Select(Some(name.clone())));
+    state.ui_target = UiTarget::Operation(name);
 }
 
 /// Generate the selected operation, if any - surfaces gate the menu item

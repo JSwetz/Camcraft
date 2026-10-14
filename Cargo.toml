@@ -28,6 +28,9 @@ dear-imgui-wgpu = "0.19"
 winit = "0.30"
 rfd = "0.15"
 pollster = "0.4"
+# PNG decode for the UI icon set (assets/ui/*.png -> crates/ui/src/icons.rs).
+# Png only: everything else (formats, headers of other codecs) stays off.
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # STEP reading - truck geometry stack (ricosjp), pure Rust, Apache-2.0. The
 # Sept-2024 mutual version set; hard-pinned because the crates are alpha.
