@@ -400,6 +400,26 @@ fn pane_target_routes_then_falls_back_to_selection() {
 }
 
 #[test]
+fn the_empty_tool_target_is_a_destination_not_a_ghost() {
+    // CAM > Tool Library (and the Tools group) point at the tool page
+    // without naming a tool - like Stock, the page doubles as the catalog
+    // / new-draft form, so an empty name must resolve. A *named* tool that
+    // no longer exists must not: the pane falls back instead of editing a
+    // ghost.
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    state.pending.push_back(CommandKind::Select(Some("Face1".into())));
+    state.drain_actions();
+
+    state.ui_target = UiTarget::Tool(String::new());
+    assert_eq!(state.pane_target(), UiTarget::Tool(String::new()));
+
+    state.ui_target = UiTarget::Tool("ghost".into());
+    assert_eq!(state.pane_target(), UiTarget::Operation("Face1".into()));
+}
+
+#[test]
 fn targeting_an_operation_mirrors_the_draft_without_selection() {
     let mut state = State::new();
     stock_and_tool(&mut state);

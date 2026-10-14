@@ -400,20 +400,23 @@ pub struct State {
     pub feedback: Option<(ErrorScope, String)>,
 }
 
-/// Which pane a refused command's message belongs to.
+/// Which page of the Operations pane a refused command's message belongs
+/// to (so a refusal lands where the user is looking, not only in the
+/// status strip).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ErrorScope {
-    /// The Tool Library page (add/update/delete a tool).
+    /// The Tool page (add/update/delete a tool).
     Tool,
-    /// The Properties page (create/edit/generate/delete an operation).
+    /// The Operation page (create/edit/generate/delete an operation).
     Operation,
-    /// The Setup pane (stock and work offsets).
+    /// The Stock and WCS pages.
     Setup,
 }
 
-/// What the docked context panes should edit. Set by tree/ribbon clicks and
-/// the menu through [`crate::actions::target`]; view state, never a command
-/// (the `Select` a click mirrors into the world is the command).
+/// What the docked context panes should edit. Set by browser-tree and
+/// ribbon clicks and the menu through [`crate::actions::target`]; view
+/// state, never a command (the `Select` a click mirrors into the world is
+/// the command).
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiTarget {
     /// Nothing targeted: panes fall back to the world selection.
@@ -422,8 +425,12 @@ pub enum UiTarget {
     Stock,
     /// One of [`hsmworks_app::schema::WCS_SLOTS`], by index.
     WcsSlot(usize),
+    /// A model entity: the info page.
     Model(String),
+    /// A tool entity, or the empty name for the tool page as destination
+    /// (the catalog / new-draft form, e.g. CAM > Tool Library).
     Tool(String),
+    /// An operation entity: its properties.
     Operation(String),
 }
 
@@ -431,8 +438,8 @@ impl UiTarget {
     /// Whether this target still has something to show: named entities
     /// must exist with the component they were targeted for (an undone
     /// operation stops holding the pane), slot indexes must be real, and
-    /// the stock page survives having no stock yet - creating it is what
-    /// that form is for.
+    /// the pages that double as creation forms - Stock, and the tool page
+    /// with an empty name - survive having no entity yet.
     #[must_use]
     pub fn resolves_in(&self, world: &World) -> bool {
         match self {
@@ -442,8 +449,10 @@ impl UiTarget {
             UiTarget::Model(name) => model::model_entities(world)
                 .into_iter()
                 .any(|(n, _)| *name == n),
-            UiTarget::Tool(name) => model::find_by_name(world, name)
-                .is_some_and(|e| model::is_tool(world, &e)),
+            UiTarget::Tool(name) => {
+                name.is_empty()
+                    || model::find_by_name(world, name).is_some_and(|e| model::is_tool(world, &e))
+            }
             UiTarget::Operation(name) => model::find_by_name(world, name)
                 .is_some_and(|e| model::is_operation(world, &e)),
         }

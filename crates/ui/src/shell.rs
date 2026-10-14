@@ -5,37 +5,51 @@
 //! never open in the middle of an ImGui frame.
 
 use dear_imgui_rs::{
-    Condition, DockLayout, DockLayoutApply, DockNodeFlags, DockSplit, Key, StyleVar, Ui,
+    Condition, DockLayout, DockLayoutApply, DockNodeFlags, DockSplit, Id, Key, StyleVar, Ui,
     WindowFlags, WindowKey,
 };
 
 use crate::actions;
-use crate::properties;
-use crate::setup;
+use crate::browser;
+use crate::operations;
 use crate::state::{CommandKind, State, UiTarget};
-use crate::tool_library;
-use crate::tree;
 
 /// Stable identity for the 3D panel; shared by the layout and the window.
 pub(crate) fn viewport_key() -> Option<WindowKey> {
     WindowKey::new("viewport", "Viewport").ok()
 }
 
-/// Declarative startup layout: tree + setup as left tabs, 3D filling the
-/// rest. Applied only when the dock tree is missing (first run or lost
-/// layout); the layout is rebuilt every launch because the ini file is not
-/// persisted, so panels can be added without migration.
+/// Stable identity for the dock tree: FNV-1a over a constant label, so the
+/// root id depends on nothing but this string (a nonzero id is required
+/// when the dockspace is hosted in a window rather than the main viewport).
+fn dock_root_id() -> Id {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in b"hsmworks-dock-v1" {
+        h ^= u32::from(*b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    Id::from(h.max(1))
+}
+
+/// Declarative startup layout: the browser tree on the left, the viewport
+/// filling the middle, the contextual Operations pane on the right. Applied
+/// only when the dock tree is missing (first run or lost layout); the layout
+/// is rebuilt every launch because the ini file is not persisted, so panels
+/// can be moved without migration.
 fn dock_layout() -> Option<DockLayout> {
-    let tree = WindowKey::new("models", "Models").ok()?;
-    let setup_key = WindowKey::new("setup", "Setup").ok()?;
-    let props = WindowKey::new("operations", "Operations").ok()?;
-    let tools = WindowKey::new("tools", "Tool Library").ok()?;
+    let browser = WindowKey::new("browser", "Browser").ok()?;
     let view = viewport_key()?;
+    let ops = WindowKey::new("operations", "Operations").ok()?;
     Some(DockLayout::split(
         DockSplit::Left,
-        0.24,
-        DockLayout::tabs([tree, setup_key, props, tools]),
-        DockLayout::tabs([view]),
+        0.22,
+        DockLayout::tabs([browser]),
+        DockLayout::split(
+            DockSplit::Right,
+            0.28,
+            DockLayout::tabs([view]),
+            DockLayout::tabs([ops]),
+        ),
     ))
 }
 
@@ -46,34 +60,74 @@ pub fn build(ui: &Ui, state: &mut State) {
     // The main menu bar must be issued outside any window.
     menu_bar(ui, state);
 
-    // Dockspace over the main viewport. ImGui derives its host window and
-    // reserves the menu-bar strip automatically, so panels can never sit
-    // under the menu (a hand-rolled full-screen host window did).
-    let layout = dock_layout();
-    let mut space = ui.dockspace().flags(DockNodeFlags::AUTO_HIDE_TAB_BAR);
-    if let Some(layout) = layout.as_ref() {
-        space = space.layout(layout, DockLayoutApply::IfMissing);
-    }
-    match space.build() {
-        Ok(_) => panels(ui, state),
-        Err(err) => {
-            // Show chrome rather than a blank frame if docking fails.
-            let display = ui.io().display_size();
-            let line_h = ui.text_line_height();
-            ui.window("##dockerror")
-                .flags(WindowFlags::NO_TITLE_BAR | WindowFlags::NO_MOVE)
-                .position([8.0, line_h * 2.0], Condition::Always)
-                .size([display[0] - 16.0, line_h * 4.0], Condition::Always)
-                .build(|| {
-                    ui.text_wrapped(format!(
-                        "dockspace unavailable: {err}\nThe panels are floating instead."
-                    ));
-                });
-            panels(ui, state);
-        }
-    }
+    dock_area(ui, state);
 
     status_bar(ui, state);
+}
+
+/// The dock tree, hosted in a fixed invisible window between the menu bar
+/// and the status strip - geometry computed from font metrics, so the
+/// panels can never slide under the menu (the bug a hand-rolled full-screen
+/// host had). The dockspace must be submitted before the windows it hosts,
+/// hence `panels` runs after, not inside, the host window.
+fn dock_area(ui: &Ui, state: &mut State) {
+    let display = ui.io().display_size();
+    let line = ui.text_line_height();
+    let menu_h = ui.frame_height(); // font + 2*FramePadding.y: the menu strip
+    let status_h = line + 8.0;
+    // `current_window` demands a positive finite size; clamp for tiny windows.
+    let host_h = (display[1] - menu_h - status_h).max(16.0);
+    let layout = dock_layout();
+    let mut dock_err: Option<String> = None;
+    ui.window("##dockhost")
+        .flags(
+            WindowFlags::NO_TITLE_BAR
+                | WindowFlags::NO_COLLAPSE
+                | WindowFlags::NO_MOVE
+                | WindowFlags::NO_RESIZE
+                | WindowFlags::NO_BACKGROUND
+                | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS
+                | WindowFlags::NO_DOCKING
+                | WindowFlags::NO_SCROLLBAR
+                | WindowFlags::NO_SCROLL_WITH_MOUSE
+                | WindowFlags::NO_NAV_INPUTS,
+        )
+        .position([0.0, menu_h], Condition::Always)
+        .size([display[0], host_h], Condition::Always)
+        .build(|| {
+            let _pad = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
+            let size = ui.content_region_avail();
+            let mut space = ui
+                .dockspace()
+                .root_id(dock_root_id())
+                .current_window(size)
+                .flags(DockNodeFlags::AUTO_HIDE_TAB_BAR);
+            if let Some(layout) = layout.as_ref() {
+                space = space.layout(layout, DockLayoutApply::IfMissing);
+            }
+            if let Err(err) = space.build() {
+                dock_err = Some(err.to_string());
+            }
+        });
+    if let Some(err) = dock_err {
+        // Show chrome rather than a blank frame if docking fails; the
+        // panels still build, as floating windows.
+        ui.window("##dockerror")
+            .flags(
+                WindowFlags::NO_TITLE_BAR
+                    | WindowFlags::NO_MOVE
+                    | WindowFlags::NO_DOCKING
+                    | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS,
+            )
+            .position([8.0, line * 2.0], Condition::Always)
+            .size([display[0] - 16.0, line * 4.0], Condition::Always)
+            .build(|| {
+                ui.text_wrapped(format!(
+                    "dockspace unavailable: {err}\nThe panels are floating instead."
+                ));
+            });
+    }
+    panels(ui, state);
 }
 
 /// Bottom status strip. Padding and height are computed from the font so
@@ -145,10 +199,10 @@ fn menu_bar(ui: &Ui, state: &mut State) {
         drop(view);
     }
     if let Some(cam) = ui.begin_menu("CAM") {
-        // The panes are persistent dock tabs now, so these route rather
-        // than open: New Operation aims the Operations pane at the
-        // creation form (and clears the selection it would fall back to),
-        // Tool Library points at the tool page.
+        // The Operations pane is a persistent dock tab whose page follows
+        // the pane target, so these route rather than open: New Operation
+        // aims it at the creation form (and clears the selection it would
+        // fall back to), Tool Library points it at the tool page.
         if ui.menu_item("New Operation") {
             actions::new_operation(state);
         }
@@ -168,11 +222,9 @@ fn menu_bar(ui: &Ui, state: &mut State) {
 }
 
 fn panels(ui: &Ui, state: &mut State) {
-    tree::models_panel(ui, state);
-    setup::setup_panel(ui, state);
-    properties::properties_panel(ui, state);
-    tool_library::tools_panel(ui, state);
+    browser::browser_panel(ui, state);
     viewport_panel(ui, state);
+    operations::operations_panel(ui, state);
 }
 
 fn viewport_panel(ui: &Ui, state: &mut State) {

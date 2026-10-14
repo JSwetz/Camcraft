@@ -1,4 +1,5 @@
-//! Setup pane: stock solid and work-coordinate editing.
+//! Setup pages: stock solid and work-coordinate editing, rendered inside
+//! the Operations pane when the browser points at Stock or a G5x slot.
 //!
 //! Provenance: our own pane, specced from public CAM setup conventions;
 //! the G54..G59 offset codes are the published RS-274 / ISO 6983 ones.
@@ -9,7 +10,7 @@
 
 use std::borrow::Cow;
 
-use dear_imgui_rs::{Ui, WindowKey};
+use dear_imgui_rs::Ui;
 use hsmworks_app::model;
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::StockShape;
@@ -28,21 +29,8 @@ const QUARTER_TURNS: [(&str, usize, f64); 6] = [
     ("Z-", 2, -1.0),
 ];
 
-pub fn setup_panel(ui: &Ui, state: &mut State) {
-    let Ok(key) = WindowKey::new("setup", "Setup") else {
-        return;
-    };
-    ui.window(key.label("Setup")).build(|| {
-        state.sync_setup_ui();
-        ui.text("Stock");
-        stock_group(ui, state);
-        ui.separator();
-        ui.text("Work Coordinate System");
-        wcs_group(ui, state);
-    });
-}
-
-fn stock_group(ui: &Ui, state: &mut State) {
+/// The Stock page (Operations pane, `UiTarget::Stock`).
+pub(crate) fn stock_page(ui: &Ui, state: &mut State) {
     ui.radio_button_int("Box", &mut state.stock_ui.shape, 0);
     ui.same_line();
     ui.radio_button_int("Cylinder", &mut state.stock_ui.shape, 1);
@@ -130,40 +118,12 @@ fn stock_group(ui: &Ui, state: &mut State) {
     }
 }
 
-fn wcs_group(ui: &Ui, state: &mut State) {
-    if ui.combo(
-        "Offset##wcs_slot",
-        &mut state.wcs_ui.slot,
-        WCS_SLOTS.as_slice(),
-        |s| Cow::Borrowed(*s),
-    ) && let Some(slot) = WCS_SLOTS.get(state.wcs_ui.slot)
-    {
-        // Switching slots must show that slot's real numbers now, not the
-        // previous slot's draft - a stale readout invites an accidental move.
-        let loaded = model::find_by_name(&state.world, slot)
-            .and_then(|entity| model::transform_of(&state.world, &entity));
-        match loaded {
-            Some(loc) => {
-                state.wcs_ui.x = loc.pos.x;
-                state.wcs_ui.y = loc.pos.y;
-                state.wcs_ui.z = loc.pos.z;
-                let (r, p, y) = quat_to_euler(loc.rot);
-                state.wcs_ui.roll_deg = r.to_degrees();
-                state.wcs_ui.pitch_deg = p.to_degrees();
-                state.wcs_ui.yaw_deg = y.to_degrees();
-                state.wcs_ui.placed = true;
-            }
-            None => {
-                // Never-placed slot: machine zero is the honest default.
-                state.wcs_ui.x = 0.0;
-                state.wcs_ui.y = 0.0;
-                state.wcs_ui.z = 0.0;
-                state.wcs_ui.roll_deg = 0.0;
-                state.wcs_ui.pitch_deg = 0.0;
-                state.wcs_ui.yaw_deg = 0.0;
-                state.wcs_ui.placed = false;
-            }
-        }
+/// A WCS page (Operations pane, `UiTarget::WcsSlot(slot)`): the slot is
+/// chosen in the browser tree, not by a combo here, so the draft is
+/// reloaded whenever the page disagrees with it.
+pub(crate) fn wcs_page(ui: &Ui, state: &mut State, slot: usize) {
+    if state.wcs_ui.slot != slot {
+        load_wcs_slot(state, slot);
     }
     ui.input_double("X origin##wcs_x", &mut state.wcs_ui.x);
     ui.input_double("Y origin##wcs_y", &mut state.wcs_ui.y);
@@ -283,6 +243,40 @@ fn wcs_group(ui: &Ui, state: &mut State) {
             }
         }
         table.end();
+    }
+}
+
+/// Point the WCS draft at `slot` and show that slot's real numbers now,
+/// not the previous slot's draft - a stale readout invites an accidental
+/// move. A never-placed slot reads machine zero, which is the honest
+/// default and what `Set Origin` will record first.
+fn load_wcs_slot(state: &mut State, slot: usize) {
+    let slot = slot.min(WCS_SLOTS.len() - 1);
+    state.wcs_ui.slot = slot;
+    let loaded = WCS_SLOTS
+        .get(slot)
+        .and_then(|name| model::find_by_name(&state.world, name))
+        .and_then(|entity| model::transform_of(&state.world, &entity));
+    match loaded {
+        Some(loc) => {
+            state.wcs_ui.x = loc.pos.x;
+            state.wcs_ui.y = loc.pos.y;
+            state.wcs_ui.z = loc.pos.z;
+            let (r, p, y) = quat_to_euler(loc.rot);
+            state.wcs_ui.roll_deg = r.to_degrees();
+            state.wcs_ui.pitch_deg = p.to_degrees();
+            state.wcs_ui.yaw_deg = y.to_degrees();
+            state.wcs_ui.placed = true;
+        }
+        None => {
+            state.wcs_ui.x = 0.0;
+            state.wcs_ui.y = 0.0;
+            state.wcs_ui.z = 0.0;
+            state.wcs_ui.roll_deg = 0.0;
+            state.wcs_ui.pitch_deg = 0.0;
+            state.wcs_ui.yaw_deg = 0.0;
+            state.wcs_ui.placed = false;
+        }
     }
 }
 

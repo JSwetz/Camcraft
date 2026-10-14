@@ -5,13 +5,12 @@
 
 pub mod actions;
 pub mod app;
+pub mod browser;
 pub mod headless;
-pub mod properties;
+pub mod operations;
 pub mod setup;
 pub mod shell;
 pub mod state;
-pub mod tool_library;
-pub mod tree;
 pub mod viewport;
 
 /// Entry point used by `main.rs`; returns the process exit code.

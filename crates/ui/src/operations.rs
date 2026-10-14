@@ -1,14 +1,17 @@
-//! Properties pane: the parameter page of an operation, and the form that
-//! creates one.
+//! The Operations pane: one docked context pane showing the page of
+//! whatever the browser (or menu, or viewport pick) pointed at - the
+//! operation's parameters, a tool, the stock, a work offset, or a model.
 //!
-//! Provenance: our own pane, specced from public CAM property-manager
+//! Provenance: our own pane, specced from public CAM context-property
 //! pages; parameter names follow the published machining vocabulary
 //! (stepover, stock to leave, climb/conventional, lead in/out, tabs).
 //!
-//! Like every panel this one never touches the world: it edits
-//! `State::op_ui` and queues `CommandKind`s. The world's `Operation`
-//! component is the truth, refetched into the draft by `sync_ops_ui`;
-//! status (never/ok/STALE) and warnings are computed on read, so the page
+//! Like every panel this one never touches the world: it edits the
+//! `State` drafts and queues `CommandKind`s. The world's components are
+//! the truth, refetched into the drafts by the `sync_*_ui` methods, and
+//! routing goes through `State::pane_target` - a target whose entity
+//! vanished (undo, delete) retargets the pane on its own, so it can never
+//! edit a ghost. Status and warnings are computed on read, so a page
 //! cannot display a stale claim about a stale path.
 
 use std::borrow::Cow;
@@ -18,41 +21,82 @@ use hsmworks_app::geo2d::Point2;
 use hsmworks_app::machining2d::{Lead, PocketStrategy};
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
+use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
+use hsmworks_app::stock::StockShape;
+use hsmworks_app::tools::catalog;
 
-use crate::state::{CommandKind, ErrorScope, State};
+use crate::browser::kind_name;
+use crate::setup;
+use crate::state::{CommandKind, ErrorScope, State, UiTarget};
 
 /// Radio/combo order = `OpType` discriminants (Face, Contour, Pocket, Slot,
 /// Trace); `kind_index` and `retype` must agree with this list.
 const TYPES: [&str; 5] = ["Face", "2D Contour", "2D Pocket", "Slot", "Trace"];
 const LEADS: [&str; 3] = ["None", "Linear", "Arc"];
 const STRATEGIES: [&str; 2] = ["Zigzag", "Waterline"];
+const TOOL_KINDS: [&str; 3] = ["End mill", "Ball nose", "Bull nose"];
 
-pub fn properties_panel(ui: &Ui, state: &mut State) {
+pub fn operations_panel(ui: &Ui, state: &mut State) {
     let Ok(key) = WindowKey::new("operations", "Operations") else {
         return;
     };
     // Persistent docked pane: it is always part of the layout (the ini is
     // not saved, so the layout is rebuilt from code every launch anyway);
-    // what changes is its subject, via `State::pane_target`.
+    // what changes is its page, via `State::pane_target`.
     ui.window(key.label("Operations")).build(|| {
         contents(ui, state);
     });
 }
 
 fn contents(ui: &Ui, state: &mut State) {
+    let target = state.pane_target();
+    match target {
+        UiTarget::None => operation_page(ui, state, None),
+        UiTarget::Operation(name) => operation_page(ui, state, Some(name.as_str())),
+        UiTarget::Tool(name) => tool_page(ui, state, &name),
+        UiTarget::Stock => {
+            state.sync_setup_ui();
+            ui.text("Stock");
+            setup::stock_page(ui, state);
+            setup_error(ui, state);
+        }
+        UiTarget::WcsSlot(i) => {
+            state.sync_setup_ui();
+            ui.text(format!(
+                "Work offset {}",
+                WCS_SLOTS.get(i).copied().unwrap_or("?")
+            ));
+            setup::wcs_page(ui, state, i);
+            setup_error(ui, state);
+        }
+        UiTarget::Model(name) => model_page(ui, state, &name),
+    }
+}
+
+/// A refusal from the stock/offset commands belongs to whoever is looking
+/// at a setup page; elsewhere it rides the status strip.
+fn setup_error(ui: &Ui, state: &State) {
+    if let Some(msg) = state.error_for(ErrorScope::Setup) {
+        ui.text_colored([1.0, 0.35, 0.35, 1.0], msg);
+    }
+}
+
+/// The operation page: live operation when `editing` names one, else the
+/// creation form (typed name, `Add` pre-validated at the click site).
+fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
     state.sync_ops_ui();
+    match editing {
+        Some(name) => ui.text(format!("Operation: {name}")),
+        None => {
+            // Typing the name is not an event; it rides the next Add command.
+            let _ = ui.input_text("Name##op_name", &mut state.op_ui.name);
+        }
+    }
     let target = state.op_ui.name.clone();
     let live = model::find_by_name(&state.world, &target)
         .filter(|e| model::is_operation(&state.world, e))
         .and_then(|e| model::operation_of(&state.world, &e));
     let exists = live.is_some();
-
-    if exists {
-        ui.text(format!("Operation: {target}"));
-    } else {
-        // Typing the name is not an event; it rides the next Add command.
-        let _ = ui.input_text("Name##op_name", &mut state.op_ui.name);
-    }
 
     // Type: swapping the draft's variant, carrying over the shared numbers.
     let mut kind_idx = kind_index(state.op_ui.params.kind());
@@ -97,7 +141,7 @@ fn contents(ui: &Ui, state: &mut State) {
         }
     }
     if tools.is_empty() {
-        ui.text_wrapped("No tools in the document - add one in the Tool Library.");
+        ui.text_wrapped("No tools in the document - the Tools page has a catalog.");
     }
 
     // Source: Stock solid or a model entity (discrete, as above).
@@ -199,7 +243,7 @@ fn contents(ui: &Ui, state: &mut State) {
             || !model::find_by_name(&state.world, &tool)
                 .is_some_and(|e| model::is_tool(&state.world, &e))
         {
-            Some("No tool to cut with yet - add one in the Tool Library.")
+            Some("No tool to cut with yet - add one from the Tools page.")
         } else {
             None
         };
@@ -223,6 +267,153 @@ fn contents(ui: &Ui, state: &mut State) {
     if let Some(msg) = state.error_for(ErrorScope::Operation) {
         ui.text_colored([1.0, 0.35, 0.35, 1.0], msg);
     }
+}
+
+/// The tool page: the document tools list moved to the browser; this page
+/// edits the targeted tool, or (with an empty name target - "Tool
+/// Library...", the Tools group header) shows a new draft plus the
+/// starter catalog to add from.
+fn tool_page(ui: &Ui, state: &mut State, name: &str) {
+    // Bridge the target into the draft before syncing: the identity rule
+    // in `sync_tool_ui` is keyed by the draft's name, so a node click
+    // arriving as a new target has to land in the draft first.
+    if !name.is_empty() && state.tool_ui.name != name {
+        state.tool_ui.name = name.to_string();
+    }
+    state.sync_tool_ui();
+
+    if state.tool_ui.exists {
+        ui.text(format!("Tool: {}", state.tool_ui.name));
+    } else {
+        // Typing the name is not an event; it rides the next Add command.
+        let _ = ui.input_text("Name##tool_name", &mut state.tool_ui.name);
+    }
+    let mut k = state.tool_ui.kind.min(2);
+    if ui.combo("Type##tool_kind", &mut k, TOOL_KINDS.as_slice(), |t| {
+        Cow::Borrowed(*t)
+    }) {
+        state.tool_ui.kind = k;
+    }
+    ui.input_double("Diameter##t_d", &mut state.tool_ui.diameter);
+    ui.input_double("Corner radius##t_cr", &mut state.tool_ui.corner_r);
+    ui.input_double("Flute length##t_fl", &mut state.tool_ui.flute_len);
+    ui.input_double("Shank diameter##t_sd", &mut state.tool_ui.shank_d);
+    ui.input_double("Shank length##t_sl", &mut state.tool_ui.shank_len);
+    ui.input_double("Holder diameter##t_hd", &mut state.tool_ui.holder_d);
+    ui.input_double("Holder length##t_hl", &mut state.tool_ui.holder_len);
+    let _ = ui.input_text("Material group##t_mat", &mut state.tool_ui.material_group);
+    ui.input_double("Spindle rpm##t_rpm", &mut state.tool_ui.rpm);
+    ui.input_double("Feed (mm/min)##t_feed", &mut state.tool_ui.feed);
+
+    ui.spacing();
+    if state.tool_ui.exists {
+        if ui.button("Apply##tool") {
+            let name = state.tool_ui.name.clone();
+            let tool = state.tool_ui.to_tool();
+            state.pending.push_back(CommandKind::ChangeTool { name, tool });
+        }
+        ui.same_line();
+        if ui.button("Delete##tool") {
+            let name = state.tool_ui.name.clone();
+            state.pending.push_back(CommandKind::DeleteTool(name));
+        }
+    } else {
+        // Pre-validate at the click site (the command still validates, as
+        // defense in depth): an empty or taken name used to be refused
+        // silently, which read as a dead Add button. A name typed this
+        // frame has not synced yet, so check the world directly.
+        let name = state.tool_ui.name.clone();
+        let block = if name.trim().is_empty() {
+            Some("Name the tool first.")
+        } else if model::find_by_name(&state.world, &name).is_some() {
+            Some("That name is already in the document.")
+        } else {
+            None
+        };
+        let dis = ui.begin_disabled_with_cond(block.is_some());
+        if ui.button("Add##tool") {
+            let tool = state.tool_ui.to_tool();
+            state.pending.push_back(CommandKind::AddTool { name, tool });
+        }
+        dis.end();
+        if let Some(why) = block {
+            ui.same_line();
+            ui.text_wrapped(why);
+        }
+    }
+    ui.same_line();
+    if ui.button("New##tool") {
+        // A new draft must also release the named-tool target, or next
+        // frame's bridge would reload the old tool over it.
+        state.ui_target = UiTarget::Tool(String::new());
+        state.tool_ui = state.new_tool_draft();
+    }
+    if let Some(msg) = state.error_for(ErrorScope::Tool) {
+        ui.text_colored([1.0, 0.35, 0.35, 1.0], msg);
+    }
+
+    ui.separator();
+    ui.text("Catalog");
+    for (name, tool) in catalog() {
+        ui.text(format!("{}  Ø{} {}", name, tool.diameter, kind_name(tool.kind)));
+        ui.same_line();
+        let taken = model::find_by_name(&state.world, name).is_some();
+        let dis = ui.begin_disabled_with_cond(taken);
+        if ui.button(format!("Add##cat_{name}")) {
+            state.pending.push_back(CommandKind::AddTool {
+                name: name.to_string(),
+                tool: tool.clone(),
+            });
+        }
+        dis.end();
+        if taken {
+            ui.same_line();
+            ui.text("(in document)");
+        }
+    }
+}
+
+/// Read-only model info. The node click already made it the selection, so
+/// Del is live; this page explains what the model is used for.
+fn model_page(ui: &Ui, state: &State, name: &str) {
+    ui.text(format!("Model: {name}"));
+    let Some(entity) = model::find_by_name(&state.world, name) else {
+        ui.text_wrapped("It is gone from the document.");
+        return;
+    };
+    let tris = model::facets_of(&state.world, &entity).map_or(0, |t| t.len());
+    ui.text(format!("{tris} triangle(s)"));
+    if let Some(b) = model::entity_world_aabb(&state.world, &entity) {
+        ui.text(format!(
+            "{:.1} x {:.1} x {:.1} mm",
+            b.max.x - b.min.x,
+            b.max.y - b.min.y,
+            b.max.z - b.min.z
+        ));
+    }
+    let users: Vec<String> = model::named_entities(&state.world)
+        .into_iter()
+        .filter(|(_, e)| model::is_operation(&state.world, e))
+        .filter_map(|(op_name, e)| {
+            let op = model::operation_of(&state.world, &e)?;
+            match &op.src {
+                SrcRef::Entity(n) if n == name => Some(op_name),
+                _ => None,
+            }
+        })
+        .collect();
+    if users.is_empty() {
+        ui.text_wrapped("No operation uses it as a source.");
+    } else {
+        ui.text_wrapped(format!("Source for: {}", users.join(", ")));
+    }
+    if let Some(stock) = model::find_by_name(&state.world, STOCK_NAME)
+        && let Some(StockShape::FromModel { source }) = model::stock_def_of(&state.world, &stock)
+        && source == name
+    {
+        ui.text("It is also the stock solid (Setup > Stock).");
+    }
+    ui.text_wrapped("Selected now: Del removes it (undo restores).");
 }
 
 /// The parameter fields of the draft's current variant. Edits go to the
