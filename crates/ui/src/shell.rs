@@ -34,10 +34,16 @@ fn dock_root_id() -> Id {
 
 /// Declarative startup layout: the browser tree on the left, the viewport
 /// DOMINANT in the middle (~two-thirds of the width - it is the thing you
-/// look at, hand-test feedback), the contextual Operations pane on the
-/// right. Applied only when the dock tree is missing (first run or lost
-/// layout); the layout is rebuilt every launch because the ini file is not
-/// persisted, so panels can be moved without migration.
+/// look at), the contextual Operations pane on the right. Applied only
+/// when the dock tree is missing (first run or lost layout); the layout is
+/// rebuilt every launch because the ini file is not persisted, so panels
+/// can be moved without migration.
+///
+/// `DockLayout::split` puts the FIRST child in the strip at `direction`
+/// sized `ratio`, and the second in the remainder (the `DockSplit` doc).
+/// Getting that backwards is what crammed the viewport against the right
+/// edge (hand-test twice over): the split named `Right` must list the
+/// Operations pane first, so the viewport keeps the middle remainder.
 fn dock_layout() -> Option<DockLayout> {
     let browser = WindowKey::new("browser", "Browser").ok()?;
     let view = viewport_key()?;
@@ -49,8 +55,8 @@ fn dock_layout() -> Option<DockLayout> {
         DockLayout::split(
             DockSplit::Right,
             0.22,
-            DockLayout::tabs([view]),
             DockLayout::tabs([ops]),
+            DockLayout::tabs([view]),
         ),
     ))
 }
