@@ -331,6 +331,16 @@ pub enum DragMode {
     Pan,
 }
 
+/// The facet under the cursor, from the viewport hover raycast: the named
+/// entity and the facet index the pick resolved (into `model::facets_of`'s
+/// order for that entity). Ephemeral view state, not a command (AGENTS.md)
+/// - it only drives the screen-space edge highlight, never selection.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoverHit {
+    pub entity: String,
+    pub facet: usize,
+}
+
 pub struct State {
     pub world: World,
     pub history: History,
@@ -350,6 +360,11 @@ pub struct State {
     pub viewport_rect: ([f32; 2], [f32; 2]),
     /// Live viewport drag (orbit/pan), driven by app.rs from winit events.
     pub drag: Option<DragMode>,
+    /// Facet currently under the cursor (app.rs refreshes it from raw
+    /// `CursorMoved` events with a filtered raycast; it clears when the
+    /// pointer leaves the viewport). View state like the camera and the
+    /// drag - not undoable, not saved.
+    pub hover: Option<HoverHit>,
     /// True when the Viewport window was the topmost hovered window last
     /// frame (the shell writes it, app.rs gates raw pointer drags on it -
     /// a click on a menu or popup over the image must never orbit).
@@ -489,6 +504,7 @@ impl State {
             viewport_size: [960.0, 540.0],
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
             drag: None,
+            hover: None,
             viewport_hot: false,
             icons: None,
             hidden_models: Vec::new(),

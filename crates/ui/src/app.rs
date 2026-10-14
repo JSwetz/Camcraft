@@ -13,7 +13,7 @@ use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use hsmworks_app::cl::MoveKind;
 use hsmworks_app::geometry::{Aabb, Point3, transform_point};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
-use hsmworks_app::{model, pick};
+use hsmworks_app::{model, operation, pick};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -21,7 +21,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::shell;
-use crate::state::{CommandKind, DragMode, State};
+use crate::state::{CommandKind, DragMode, HoverHit, State};
 use crate::viewport::{GpuPart, View3D};
 
 #[must_use]
@@ -341,11 +341,6 @@ impl App {
     /// Raycast at a logical-px point inside the viewport; queues Select
     /// (None on a miss, which clears selection - standard CAM behavior).
     fn pick_at(&mut self, p: [f32; 2]) {
-        let ([x0, y0], [x1, y1]) = self.state.viewport_rect;
-        let (w, h) = (x1 - x0, y1 - y0);
-        if w <= 1.0 || h <= 1.0 {
-            return;
-        }
         // Anchor picking wins over entity picking: in pick mode a click ON a
         // marker places the origin there (same command the pane grid
         // queues); a click beside one still picks normally, so the viewport
@@ -366,32 +361,68 @@ impl App {
             });
             return;
         }
-        let ndc = [
-            (p[0] - x0) / w * 2.0 - 1.0,
-            1.0 - (p[1] - y0) / h * 2.0,
-        ];
-        let Some((origin, dir)) = self.state.cam.ray_through(ndc, f64::from(w / h)) else {
+        let Some((origin, dir)) = self.ray_at(p) else {
             return;
         };
-        let hit = pick::first_hit(&self.state.world, origin, dir);
-        // A hidden model is display-off, not gone: it still feeds stock
-        // and paths. Clicking what the user chose not to show is an honest
-        // miss that says why; picking *through* hidden geometry needs a
-        // filtered ray (step 5's `first_hit_f`), not a silent lie here.
-        let blocked = hit
+        // A browser-eye hidden model is display-off, not gone: it still
+        // feeds stock and paths, but it is transparent to the ray here -
+        // a click selects what the user can SEE, and geometry behind a
+        // hidden model is honestly pickable (filtered `first_hit_f`).
+        let hit = pick::first_hit_f(&self.state.world, origin, dir, |name| {
+            self.state.hidden_models.iter().any(|h| h == name)
+        });
+        // The click also tells us the exact facet under the pointer;
+        // keeping it alive so the highlight matches the selection.
+        self.state.hover = hit
             .as_ref()
-            .is_some_and(|name| self.state.hidden_models.iter().any(|h| h == name));
-        let hit = if blocked { None } else { hit };
+            .map(|(name, facet, _)| HoverHit { entity: name.clone(), facet: *facet });
+        let hit = hit.map(|(name, _, _)| name);
         // Status is the feedback channel: "nothing happened" should be
         // impossible to believe when a pick always says what it did.
         self.state.status = match &hit {
             Some(name) => format!("selected {name}"),
-            None if blocked => {
-                String::from("a hidden model is under the cursor - show it in the browser to pick it")
-            }
             None => String::from("no model under the cursor"),
         };
         self.state.pending.push_back(CommandKind::Select(hit));
+    }
+
+    /// Camera ray through a logical-px viewport point; None outside a
+    /// laid-out image or behind the camera. Shared by picking and hover.
+    fn ray_at(&self, p: [f32; 2]) -> Option<([f64; 3], [f64; 3])> {
+        let ([x0, y0], [x1, y1]) = self.state.viewport_rect;
+        let (w, h) = (x1 - x0, y1 - y0);
+        if w <= 1.0 || h <= 1.0 {
+            return None;
+        }
+        let ndc = [
+            (p[0] - x0) / w * 2.0 - 1.0,
+            1.0 - (p[1] - y0) / h * 2.0,
+        ];
+        self.state.cam.ray_through(ndc, f64::from(w / h))
+    }
+
+    /// Refresh the hover highlight from the cursor: a filtered raycast,
+    /// only while the pointer is over the live viewport image with no
+    /// button held and no menu or popup on top of it. Anywhere else the
+    /// highlight clears - it must never linger where the cursor isn't.
+    /// Ephemeral view state; never a command (AGENTS.md).
+    fn update_hover(&mut self) {
+        let idle_over_viewport = self.state.drag.is_none()
+            && self.left_press.is_none()
+            && self.state.viewport_hot
+            && self.inside_viewport(self.cursor_pos);
+        if !idle_over_viewport {
+            self.state.hover = None;
+            return;
+        }
+        let Some((origin, dir)) = self.ray_at(self.cursor_pos) else {
+            self.state.hover = None;
+            return;
+        };
+        self.state.hover = pick::first_hit_f(&self.state.world, origin, dir, |name| {
+            self.state.hidden_models.iter().any(|h| h == name)
+        })
+        .map(|(entity, facet, _)| HoverHit { entity, facet });
     }
 
     fn draw(&mut self, el: &ActiveEventLoop) {
@@ -682,7 +713,79 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
         }
     }
     out.extend(toolpath_lines(state));
+    out.extend(region_lines(state));
     capped(out)
+}
+
+/// The selected operation's cutting region, in warning orange (our own
+/// display choice): "what gets cut", outlined even before the operation
+/// has ever been generated. The loops come straight from
+/// [`operation::region_of`] - the generators' own region construction -
+/// so the outline cannot disagree with the path, and an operation whose
+/// source vanished shows nothing rather than a stale outline.
+pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
+    const REGION_RGB: [f32; 3] = [0.95, 0.58, 0.15];
+    let mut out = Vec::new();
+    for (_, entity) in model::named_entities(&state.world) {
+        if !model::is_operation(&state.world, &entity)
+            || !model::is_selected(&state.world, &entity)
+        {
+            continue;
+        }
+        let Some(op) = model::operation_of(&state.world, &entity) else {
+            continue;
+        };
+        let Some(region) = operation::region_of(&state.world, &op) else {
+            continue;
+        };
+        let z = op.params.region_z();
+        for l in region.loops() {
+            let pts = l.points();
+            if pts.len() < 3 {
+                continue; // a closed ring needs three corners; never mod 0
+            }
+            for i in 0..pts.len() {
+                let a = Point3::new(pts[i].x, pts[i].y, z);
+                let q = pts[(i + 1) % pts.len()];
+                push_line(&mut out, a, Point3::new(q.x, q.y, z), REGION_RGB);
+            }
+        }
+    }
+    out
+}
+
+/// Screen-space edges of the triangle under the cursor, as viewport-uv
+/// segment pairs (0..1 within the image, like `overlay_labels` - the
+/// shell maps them through the image rect and draws with the window
+/// draw list). A draw-list producer on purpose: hovering must never
+/// rebuild the 3D overlay buffer, and the projection tracks camera
+/// moves without a new raycast. Gone with the facet: a stale index or
+/// a deleted/hidden entity draws nothing.
+pub(crate) fn hover_edges(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 2])> {
+    let Some(hit) = &state.hover else {
+        return Vec::new();
+    };
+    if state.hidden_models.iter().any(|m| m == &hit.entity) {
+        return Vec::new();
+    }
+    let Some(entity) = model::find_by_name(&state.world, &hit.entity) else {
+        return Vec::new();
+    };
+    let Some(facets) = model::world_facets(&state.world, &entity) else {
+        return Vec::new();
+    };
+    let Some(tri) = facets.get(hit.facet) else {
+        return Vec::new();
+    };
+    let mvp = state.cam.mvp(aspect);
+    let (Some(a), Some(b), Some(c)) = (
+        project_uv(&mvp, [tri.a.x, tri.a.y, tri.a.z]),
+        project_uv(&mvp, [tri.b.x, tri.b.y, tri.b.z]),
+        project_uv(&mvp, [tri.c.x, tri.c.y, tri.c.z]),
+    ) else {
+        return Vec::new(); // an edge on a behind-the-camera triangle reads as a stray spike
+    };
+    vec![(a, b), (b, c), (c, a)]
 }
 
 /// Overlay palette for cached paths: feed green, rapid blue, plunge red.
@@ -1048,6 +1151,11 @@ impl ApplicationHandler for App {
                                 self.state.drag = Some(DragMode::Orbit);
                                 self.state.cam.orbit(delta[0], delta[1]);
                             }
+                        } else {
+                            // Free pointer motion: refresh the hover facet
+                            // (the screen-space edge highlight; the 3D
+                            // overlay deliberately does not rebuild here).
+                            self.update_hover();
                         }
                     }
                 }
@@ -1411,7 +1519,10 @@ mod path_tests {
         select(&mut state, Some("Face1"));
         let all = collect_overlay(&state);
         let paths = toolpath_lines(&state);
-        assert_eq!(all.len(), 6 + paths.len(), "world axes first, then the path");
+        // Step 5's region preview joins the tail; the invariant (furniture,
+        // then path) is asserted positionally, not by totals.
+        assert_eq!(all.len(), 6 + paths.len() + region_lines(&state).len());
+        assert_eq!(&all[6..6 + paths.len()], &paths[..], "axes first, then the path");
     }
 
     #[test]
@@ -1476,5 +1587,137 @@ mod path_tests {
         assert_ne!(fold_names(&l(&["a"])), fold_names(&l(&["a", ""])));
         assert_ne!(fold_names(&l(&["a", "b"])), fold_names(&l(&["ab"])));
         assert_ne!(fold_names(&l(&["a", "b"])), fold_names(&l(&["b", "a"])));
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    //! Step 5's "what gets cut": the selected operation's region loops in
+    //! the 3D overlay, and the hovered facet's edges as screen-space
+    //! segments. Both are pure world reads; pinned down headless.
+
+    use super::*;
+    use hsmworks_app::commands::ImportModel;
+    use hsmworks_app::geometry::cube;
+    use hsmworks_app::operation::{OpParams, SrcRef};
+    use hsmworks_app::stock::StockShape;
+    use hsmworks_app::tools::catalog;
+
+    fn face_state() -> State {
+        let mut state = State::new();
+        let em = catalog()
+            .into_iter()
+            .find(|(n, _)| *n == "EM-0400-2FL")
+            .map(|(_, t)| t)
+            .expect("catalog entry");
+        state.pending.extend([
+            CommandKind::SetStock {
+                shape: StockShape::Box {
+                    dx: 60.0,
+                    dy: 60.0,
+                    dz: 20.0,
+                },
+                pos: [0.0, 0.0, 0.0],
+                yaw_deg: 0.0,
+            },
+            CommandKind::AddTool {
+                name: "EM-0400-2FL".into(),
+                tool: em,
+            },
+            CommandKind::CreateOperation {
+                name: "Face1".into(),
+                tool: "EM-0400-2FL".into(),
+                src: SrcRef::Stock,
+                params: OpParams::Face {
+                    stepover: 3.0,
+                    clearance_z: 25.0,
+                    cut_z: 19.5,
+                    feed: 1200.0,
+                    plunge_feed: 300.0,
+                    climb: true,
+                },
+            },
+        ]);
+        state.drain_actions();
+        state
+    }
+
+    #[test]
+    fn selecting_an_operation_outlines_its_cut_region() {
+        let mut state = face_state();
+        // Created but never generated: the preview answers "what WOULD get
+        // cut", which is the whole point of showing it before Generate.
+        assert!(region_lines(&state).is_empty(), "nothing selected: nothing previewed");
+        state.pending.push_back(CommandKind::Select(Some("Face1".into())));
+        state.drain_actions();
+        let lines = region_lines(&state);
+        assert!(!lines.is_empty(), "the footprint of the 60 mm box shows");
+        assert_eq!(lines.len() % 2, 0, "whole line segments only");
+        for v in &lines {
+            assert!(
+                (v[2] - ftoz(19.5)).abs() <= f32::EPSILON,
+                "a face region sits at cut_z, got {v:?}"
+            );
+            assert!(v[3] > 0.8 && v[4] > 0.4 && v[4] < 0.8 && v[5] < 0.3, "warning orange");
+        }
+        // A parameter edit moves the outline at once: it is a live world
+        // read, never a leftover from the last generation.
+        state.pending.push_back(CommandKind::EditOperationParams {
+            name: "Face1".into(),
+            params: OpParams::Face {
+                stepover: 3.0,
+                clearance_z: 25.0,
+                cut_z: 10.0,
+                feed: 1200.0,
+                plunge_feed: 300.0,
+                climb: true,
+            },
+        });
+        state.drain_actions();
+        assert!(region_lines(&state).iter().all(|v| (v[2] - 10.0).abs() < 1e-4));
+    }
+
+    #[test]
+    fn hover_edges_track_the_facet_under_the_cursor() {
+        let mut state = State::new();
+        state.history.execute(
+            &state.world,
+            ImportModel::from_mesh("c", cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0))),
+        );
+        assert!(hover_edges(&state, 4.0 / 3.0).is_empty(), "no hover: no edges");
+        state.hover = Some(HoverHit {
+            entity: "c".into(),
+            facet: 0,
+        });
+        let edges = hover_edges(&state, 4.0 / 3.0);
+        assert_eq!(edges.len(), 3, "the triangle's three edges");
+        for (a, b) in &edges {
+            for uv in [a, b] {
+                assert!(
+                    uv.iter().all(|v| (0.0..=1.0).contains(v)),
+                    "uv lands inside the image: {uv:?}"
+                );
+            }
+        }
+        // Gone or stale: never light up a stranger's triangle.
+        state.hover = Some(HoverHit {
+            entity: "c".into(),
+            facet: 999,
+        });
+        assert!(hover_edges(&state, 4.0 / 3.0).is_empty());
+        state.hover = Some(HoverHit {
+            entity: "nope".into(),
+            facet: 2,
+        });
+        assert!(hover_edges(&state, 4.0 / 3.0).is_empty());
+        state.hover = Some(HoverHit {
+            entity: "c".into(),
+            facet: 2,
+        });
+        state.hidden_models.push("c".into());
+        assert!(
+            hover_edges(&state, 4.0 / 3.0).is_empty(),
+            "a hidden model's facet draws nothing - it is display-off"
+        );
     }
 }

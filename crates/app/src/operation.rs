@@ -170,6 +170,20 @@ impl OpParams {
         }
     }
 
+    /// The Z level the cutting region lives at: the section/stadium plane
+    /// for the depth-bounded kinds, the skimming plane for Face. The
+    /// viewport's "what gets cut" preview draws the region loops here.
+    #[must_use]
+    pub fn region_z(&self) -> f64 {
+        match self {
+            OpParams::Face { cut_z, .. } => *cut_z,
+            OpParams::Contour { top_z, .. }
+            | OpParams::Pocket { top_z, .. }
+            | OpParams::Slot { top_z, .. }
+            | OpParams::Trace { top_z, .. } => *top_z,
+        }
+    }
+
     /// Shallow sanity for command construction: finite numbers, positive
     /// increments, a downward depth range. The generators own the deep
     /// rules (stepover vs diameter, lead sizes); those still fire at
@@ -643,6 +657,32 @@ fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> {
     Ok(Region::new(vec![loop_])?)
 }
 
+/// The cutting region of an operation as the world stands now - the same
+/// construction `generate` runs, without the path (and without the tool,
+/// which the region never consults). This is the viewport's "what gets
+/// cut" outline. None when there is nothing honest to draw: a vanished
+/// source or an unsliceable level shows nothing, never a stale loop
+/// (Prime Directive: a wrong preview is as bad as a wrong toolpath).
+#[must_use]
+pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
+    let material = material_of(world, &op.src).ok()?;
+    region_for(&material, &op.params).ok()
+}
+
+/// The per-kind region build, shared by `generate` and `region_of` so the
+/// preview outline cannot disagree with what the generators cut.
+fn region_for(material: &Material, params: &OpParams) -> Result<Region, GenError> {
+    match params {
+        OpParams::Face { .. } => {
+            slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
+        }
+        OpParams::Contour { top_z, .. }
+        | OpParams::Pocket { top_z, .. }
+        | OpParams::Trace { top_z, .. } => section(&material.facets, *top_z),
+        OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
+    }
+}
+
 /// Generate the path for an operation as the world stands now, and verify
 /// it. Reads only; the caller stores whatever comes back. The error class
 /// is `GenError` for both setup problems (missing tool/stock, unusable
@@ -687,8 +727,7 @@ pub fn generate(
     // Region + path per kind.
     let (region, path) = match &op.params {
         OpParams::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb } => {
-            let region = slice::project(&material.facets, FOOTPRINT_SAMPLES)
-                .map_err(from_slice)?;
+            let region = region_for(&material, &op.params)?;
             let path = machining2d::face(
                 &region,
                 &FaceParams {
@@ -719,7 +758,7 @@ pub fn generate(
             tab_width,
             tab_height,
         } => {
-            let region = section(&material.facets, *top_z)?;
+            let region = region_for(&material, &op.params)?;
             let path = machining2d::contour(
                 &region,
                 &ContourParams {
@@ -754,7 +793,7 @@ pub fn generate(
             climb,
             strategy,
         } => {
-            let region = section(&material.facets, *top_z)?;
+            let region = region_for(&material, &op.params)?;
             let path = machining2d::pocket(
                 &region,
                 &PocketParams {
@@ -804,7 +843,7 @@ pub fn generate(
                     climb: *climb,
                 },
             )?;
-            let region = stadium(*a, *b, width * 0.5)?;
+            let region = region_for(&material, &op.params)?;
             (region, path)
         }
         OpParams::Trace {
@@ -816,7 +855,7 @@ pub fn generate(
             plunge_feed,
             climb,
         } => {
-            let region = section(&material.facets, *top_z)?;
+            let region = region_for(&material, &op.params)?;
             let path = machining2d::trace(
                 &region,
                 &TraceParams {

@@ -7,11 +7,24 @@
 use flecs_ecs::prelude::World;
 
 use crate::geometry::{
-    Point3, Triangle, quat_conjugate, quat_rotate_point, transform_inverse_point,
+    Point3, Triangle, quat_conjugate, quat_rotate_point, transform_inverse_point, transform_point,
 };
 use crate::model;
 
 /// Nearest named solid whose facet sits along `origin + t*dir`, `t > 0`.
+/// Wrapper over [`first_hit_f`] that keeps only the entity name.
+#[must_use]
+pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<String> {
+    first_hit_f(world, origin, dir, |_| false).map(|(name, _, _)| name)
+}
+
+/// The full pick: nearest entity NAME, the index of the facet it hit (into
+/// `model::facets_of` for that entity - the same order `world_facets`
+/// transforms, so a viewer can light up exactly the triangle the ray hit),
+/// and the world-space hit point. `skip` names entities the ray passes
+/// through as if they weren't there - browser-eye-hidden models are
+/// display-off, so picking what sits behind them is what the user sees.
+///
 /// Double-sided; degenerate or non-finite geometry is skipped, never fatal
 /// (Prime Directive). Entities' rigid placements are honored by transforming
 /// the ray into each entity's local frame.
@@ -22,15 +35,23 @@ use crate::model;
 /// where nothing is behind it). WCS entities never carry facets, so the
 /// facet test already excludes them from picking.
 #[must_use]
-pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<String> {
+pub fn first_hit_f(
+    world: &World,
+    origin: [f64; 3],
+    dir: [f64; 3],
+    skip: impl Fn(&str) -> bool,
+) -> Option<(String, usize, [f64; 3])> {
     if !origin.iter().all(|v| v.is_finite()) || !dir.iter().all(|v| v.is_finite()) {
         return None;
     }
     let o = Point3::new(origin[0], origin[1], origin[2]);
     let d = Point3::new(dir[0], dir[1], dir[2]);
-    let mut best_model: Option<(f64, String)> = None;
-    let mut best_stock: Option<(f64, String)> = None;
+    let mut best_model: Option<(f64, String, usize, [f64; 3])> = None;
+    let mut best_stock: Option<(f64, String, usize, [f64; 3])> = None;
     for (name, entity) in model::named_entities(world) {
+        if skip(&name) {
+            continue;
+        }
         let Some(tris) = model::facets_of(world, &entity) else {
             continue;
         };
@@ -48,16 +69,26 @@ pub fn first_hit(world: &World, origin: [f64; 3], dir: [f64; 3]) -> Option<Strin
         } else {
             &mut best_model
         };
-        for t in tris {
+        for (idx, t) in tris.into_iter().enumerate() {
             let Some(hit_t) = ray_triangle(t, o_local, d_local) else {
                 continue;
             };
-            if bucket.as_ref().is_none_or(|(b, _)| hit_t < *b) {
-                *bucket = Some((hit_t, name.clone()));
+            if bucket.as_ref().is_none_or(|(b, _, _, _)| hit_t < *b) {
+                // Local hit point, pushed back through the entity's rigid
+                // placement into the frame the viewer draws in.
+                let hit_local = Point3::new(
+                    o_local.x + d_local.x * hit_t,
+                    o_local.y + d_local.y * hit_t,
+                    o_local.z + d_local.z * hit_t,
+                );
+                let p = transform_point(hit_local, loc.pos, loc.rot);
+                *bucket = Some((hit_t, name.clone(), idx, [p.x, p.y, p.z]));
             }
         }
     }
-    best_model.or(best_stock).map(|(_, name)| name)
+    best_model
+        .or(best_stock)
+        .map(|(_, name, facet, xyz)| (name, facet, xyz))
 }
 
 /// Ray/triangle crossing in the entity's local frame; the ray direction need

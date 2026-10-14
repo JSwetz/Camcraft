@@ -14,7 +14,7 @@ use hsmworks_app::geometry::{cube, IDENTITY_Q, Point3};
 use hsmworks_app::machining2d::Lead;
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
-use hsmworks_app::schema::{Location, Toolpath, STOCK_NAME};
+use hsmworks_app::schema::{Location, Operation, Toolpath, STOCK_NAME};
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{catalog, Tool};
 use hsmworks_app::world::new_world;
@@ -443,4 +443,70 @@ fn contour_on_a_model_box_generates() {
     let e = model::find_by_name(&world, "part").expect("part");
     model::set_transform(&world, &e, at(3.0, 0.0, 0.0));
     assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
+}
+
+#[test]
+fn region_of_is_the_preview_of_what_generate_would_cut() {
+    // The viewport's region outline: the generators' own region
+    // construction, minus tool and path - so it answers "what gets cut"
+    // for operations that have never been generated.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+
+    let trace = Operation {
+        tool: String::new(),
+        src: SrcRef::Stock,
+        params: OpParams::Trace {
+            clearance_z: 25.0,
+            top_z: 10.0,
+            bottom_z: 5.0,
+            stepdown: 5.0,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        },
+        stamp: None,
+    };
+    assert_eq!(trace.params.region_z(), 10.0);
+    let region = operation::region_of(&world, &trace).expect("a box sections cleanly at 10 mm");
+    assert_eq!(region.loops().len(), 1);
+    // The section keeps the mesh's per-face triangle splits, so the ring
+    // is 8 collinear points tracing the same 60x60 rectangle.
+    let pts = region.loops()[0].points();
+    assert!(pts.len() >= 4);
+    let extent = |get: fn(&hsmworks_app::geo2d::Point2) -> f64| -> f64 {
+        let lo = pts.iter().map(get).fold(f64::MAX, f64::min);
+        let hi = pts.iter().map(get).fold(f64::MIN, f64::max);
+        hi - lo
+    };
+    assert!((extent(|p| p.x) - 60.0).abs() < 1e-9, "60 mm across X");
+    assert!((extent(|p| p.y) - 60.0).abs() < 1e-9, "60 mm across Y");
+    assert!(pts.iter().all(|p| p.x.abs() <= 30.0 + 1e-9 && p.y.abs() <= 30.0 + 1e-9));
+
+    // Face: the silhouette footprint of the same box (no tool consulted).
+    let face = Operation {
+        tool: String::new(),
+        src: SrcRef::Stock,
+        params: OpParams::Face {
+            stepover: 3.0,
+            clearance_z: 25.0,
+            cut_z: 19.5,
+            feed: 1200.0,
+            plunge_feed: 300.0,
+            climb: true,
+        },
+        stamp: None,
+    };
+    assert_eq!(face.params.region_z(), 19.5);
+    assert!(!operation::region_of(&world, &face).expect("footprint").is_empty());
+
+    // A vanished source previews NOTHING, not a stale outline.
+    let ghost = Operation {
+        tool: String::new(),
+        src: SrcRef::Entity("gone".into()),
+        params: trace.params.clone(),
+        stamp: None,
+    };
+    assert_eq!(operation::region_of(&world, &ghost), None);
 }

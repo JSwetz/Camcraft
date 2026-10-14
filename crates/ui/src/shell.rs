@@ -266,11 +266,22 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
         let (rw, rh) = (rx1 - rx0, ry1 - ry0);
         if rw > 1.0 && rh > 1.0 {
             let labels = crate::app::overlay_labels(state, (rw / rh) as f64);
-            if !labels.is_empty() {
+            let edges = crate::app::hover_edges(state, (rw / rh) as f64);
+            if !labels.is_empty() || !edges.is_empty() {
                 let dl = ui.get_window_draw_list();
                 for (uv, rgb, text) in labels {
                     let pos = [rx0 + uv[0] * rw, ry0 + uv[1] * rh];
                     dl.add_text(pos, [rgb[0], rgb[1], rgb[2], 1.0], text);
+                }
+                // The facet under the cursor, outlined in screen space -
+                // the hover channel that never touches the 3D overlay.
+                for (a, b) in edges {
+                    dl.add_line(
+                        [rx0 + a[0] * rw, ry0 + a[1] * rh],
+                        [rx0 + b[0] * rw, ry0 + b[1] * rh],
+                        [1.0, 0.85, 0.40, 1.0],
+                    )
+                    .build();
                 }
             }
         }
