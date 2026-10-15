@@ -849,9 +849,11 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
 /// The selected operation's cutting region, in warning orange (our own
 /// display choice): "what gets cut", outlined even before the operation
 /// has ever been generated. The loops come straight from
-/// [`operation::region_of`] - the generators' own region construction -
-/// so the outline cannot disagree with the path, and an operation whose
-/// source vanished shows nothing rather than a stale outline.
+/// [`operation::region_of`] and the open runs a Contour pick list adds
+/// from [`operation::chains_of`] - both the generators' own construction,
+/// one source each - so the outline cannot disagree with the path, and an
+/// operation whose source vanished shows nothing rather than a stale
+/// outline.
 pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
     const REGION_RGB: [f32; 3] = [0.95, 0.58, 0.15];
     let mut out = Vec::new();
@@ -864,19 +866,27 @@ pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
         let Some(op) = model::operation_of(&state.world, &entity) else {
             continue;
         };
-        let Some(region) = operation::region_of(&state.world, &op) else {
-            continue;
-        };
         let z = op.params.region_z();
-        for l in region.loops() {
-            let pts = l.points();
-            if pts.len() < 3 {
-                continue; // a closed ring needs three corners; never mod 0
+        if let Some(region) = operation::region_of(&state.world, &op) {
+            for l in region.loops() {
+                let pts = l.points();
+                if pts.len() < 3 {
+                    continue; // a closed ring needs three corners; never mod 0
+                }
+                for i in 0..pts.len() {
+                    let a = Point3::new(pts[i].x, pts[i].y, z);
+                    let q = pts[(i + 1) % pts.len()];
+                    push_line(&mut out, a, Point3::new(q.x, q.y, z), REGION_RGB);
+                }
             }
-            for i in 0..pts.len() {
-                let a = Point3::new(pts[i].x, pts[i].y, z);
-                let q = pts[(i + 1) % pts.len()];
-                push_line(&mut out, a, Point3::new(q.x, q.y, z), REGION_RGB);
+        }
+        // Centerline runs: open polylines, no closing chord - the run's
+        // ends are where the path stops, and the outline says so.
+        for run in operation::chains_of(&state.world, &op) {
+            for w in run.windows(2) {
+                let a = Point3::new(w[0].x, w[0].y, z);
+                let b = Point3::new(w[1].x, w[1].y, z);
+                push_line(&mut out, a, b, REGION_RGB);
             }
         }
     }

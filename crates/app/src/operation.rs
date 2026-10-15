@@ -35,8 +35,9 @@
 //! instead: faces contribute their boundary loops projected to XY, closed
 //! edge chains their ring projected to XY, coincident rims dedupe. Face
 //! ops demand a near-horizontal face, Pocket demands a closed boundary,
-//! and open runs preview nothing until the centerline-capable generators
-//! arrive (M1.5 step 8) - the same refusal `generate` raises.
+//! and an open run belongs to Contour, which adds a centerline pass along
+//! its points (M1.5 step 8) - preview and generation read the same chain,
+//! so the two cannot disagree about where that pass runs.
 
 use std::hash::Hasher;
 
@@ -790,6 +791,23 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
     region_for(&material, &op.params).ok()
 }
 
+/// The centerline runs `generate` would add to `region_of`'s outline for
+/// this operation as the world stands now - the open chains of a Contour
+/// selection, in the order they were picked. Drawn and generated through
+/// this one call, so the viewport can never show a run the path does not
+/// cut (or hide one it does). Unresolvable selections yield nothing, like
+/// a vanished source in `region_of`.
+#[must_use]
+pub fn chains_of(world: &World, op: &Operation) -> Vec<Vec<Point2>> {
+    let SrcRef::Selection(items) = &op.src else {
+        return Vec::new();
+    };
+    match selection_geometry(world, items, &op.params) {
+        Ok((_, chains)) => chains,
+        Err(_) => Vec::new(),
+    }
+}
+
 /// The source dispatch shared by `generate` and `region_of`: a selection
 /// resolves its picked features, anything else slices its material, and
 /// Slot keeps its closed-form stadium regardless of source (its boundary
@@ -831,20 +849,24 @@ const FACE_TILT_MAX_DEG: f64 = 60.0;
 /// above an actual face.
 const DEGENERATE_AREA: f64 = 1e-9;
 
-/// The cutting region of a feature selection: each picked face gives its
-/// closed boundary loops, each closed chain its ring, projected to XY,
-/// coincident rims counted once; `Region::new` then settles holes by
-/// nesting parity. Refusals are the Prime Directive's kind - a tilted
-/// face for a facing pass, an open chain for a Pocket, an open sheet,
-/// each named in the message, each with the fix stated.
-fn selection_region(
+/// The region loops and centerline runs a feature selection resolves to,
+/// as the world stands now: each picked face gives its closed boundary
+/// loops, each closed chain its ring, projected to XY, coincident rims
+/// counted once; an open chain is no boundary at all, so it comes back in
+/// the second half - and only for a Contour, the one kind that machines a
+/// run. Refusals are the Prime Directive's kind - a tilted face for a
+/// facing pass, an open chain for a Pocket, an open sheet, each named in
+/// the message, each with the fix stated.
+fn selection_geometry(
     world: &World,
     items: &[GeoSel],
     params: &OpParams,
-) -> Result<Region, GenError> {
+) -> Result<(Vec<Loop>, Vec<Vec<Point2>>), GenError> {
     let facing = matches!(params, OpParams::Face { .. });
     let pocket = matches!(params, OpParams::Pocket { .. });
+    let contour = matches!(params, OpParams::Contour { .. });
     let mut loops: Vec<Loop> = Vec::new();
+    let mut chains: Vec<Vec<Point2>> = Vec::new();
     let mut rims: Vec<Vec<(i64, i64)>> = Vec::new();
     for g in items {
         let Some(entity) = model::find_by_name(world, &g.entity) else {
@@ -913,8 +935,25 @@ fn selection_region(
                             "{label} is an open run - a 2D Pocket cannot end mid-edge; select a closed chain"
                         )));
                     }
-                    // Contour/Trace/Face: an open run bounds no area; the
-                    // centerline passes of step 8 are its consumers.
+                    if contour {
+                        // The run's consumer: a centerline pass along
+                        // these exact points, XY like everything else
+                        // here - the Z ladder is the operation's.
+                        chains.push(
+                            feature::chain_points(&features, c)
+                                .iter()
+                                .map(|p| {
+                                    let w = transform_point(
+                                        Point3::new(p[0], p[1], p[2]),
+                                        loc.pos,
+                                        loc.rot,
+                                    );
+                                    Point2::new(w.x, w.y)
+                                })
+                                .collect(),
+                        );
+                    }
+                    // Trace/Face: an open run bounds no area for them.
                     continue;
                 }
                 let pts: Vec<Point2> = feature::chain_points(&features, c)
@@ -928,6 +967,19 @@ fn selection_region(
             }
         }
     }
+    Ok((loops, chains))
+}
+
+/// The region half of `selection_geometry` in the shape `region_of` and
+/// every non-contour generator wants: bounds, or a named refusal - never
+/// a silently empty area. A Contour of pure open runs is the case that
+/// skips this and reads `selection_geometry` directly.
+fn selection_region(
+    world: &World,
+    items: &[GeoSel],
+    params: &OpParams,
+) -> Result<Region, GenError> {
+    let (loops, _) = selection_geometry(world, items, params)?;
     if loops.is_empty() {
         return Err(GenError::Empty(
             "nothing in the selection bounds an area".into(),
@@ -1002,6 +1054,18 @@ fn canon_ring(ring: &[(i64, i64)]) -> Vec<(i64, i64)> {
         }
     }
     best.unwrap_or_default()
+}
+
+/// Run one generated path after another. Both start and end on the
+/// clearance plane, so the joint is a clearance rapid: append and re-anchor
+/// the added path's opening `from` to the previous move's `to` - a stale
+/// `(0, 0)` there would read as a teleport to the origin.
+fn stitch(mut a: Toolpath, mut b: Toolpath) -> Toolpath {
+    if let (Some(to), Some(first)) = (a.moves.last().map(|m| m.to), b.moves.first_mut()) {
+        first.from = to;
+    }
+    a.moves.append(&mut b.moves);
+    a
 }
 
 /// Generate the path for an operation as the world stands now, and verify
@@ -1079,27 +1143,56 @@ pub fn generate(
             tab_width,
             tab_height,
         } => {
-            let region = region_for_src(world, &op.src, &op.params, &material)?;
-            let path = machining2d::contour(
-                &region,
-                &ContourParams {
-                    tool_diameter: d,
-                    stock_to_leave: *stock_to_leave,
-                    clearance_z: *clearance_z,
-                    retract_z: *retract_z,
-                    top_z: *top_z,
-                    bottom_z: *bottom_z,
-                    stepdown: *stepdown,
-                    feed: *feed,
-                    plunge_feed: *plunge_feed,
-                    climb: *climb,
-                    lead: *lead,
-                    tolerance: *tolerance,
-                    tab_count: *tab_count,
-                    tab_width: *tab_width,
-                    tab_height: *tab_height,
-                },
-            )?;
+            let cp = ContourParams {
+                tool_diameter: d,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: *clearance_z,
+                retract_z: *retract_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                lead: *lead,
+                tolerance: *tolerance,
+                tab_count: *tab_count,
+                tab_width: *tab_width,
+                tab_height: *tab_height,
+            };
+            let (region, path) = match &op.src {
+                SrcRef::Selection(items) => {
+                    // The boundary path cuts the loops the picks bound;
+                    // each open run in the picks adds a centerline pass
+                    // along its own points. Either half alone is enough;
+                    // together they machine the whole pick list.
+                    let (loops, runs) = selection_geometry(world, items, &op.params)?;
+                    if loops.is_empty() && runs.is_empty() {
+                        return Err(GenError::Empty(
+                            "nothing in the selection bounds an area or a run".into(),
+                        ));
+                    }
+                    let region = if loops.is_empty() {
+                        Region::empty()
+                    } else {
+                        Region::new(loops)?
+                    };
+                    let mut path = if region.is_empty() {
+                        Toolpath::new(Vec::new())
+                    } else {
+                        machining2d::contour(&region, &cp)?
+                    };
+                    for run in &runs {
+                        path = stitch(path, machining2d::contour_along_chain(run, &cp)?);
+                    }
+                    (region, path)
+                }
+                _ => {
+                    let region = region_for_src(world, &op.src, &op.params, &material)?;
+                    let path = machining2d::contour(&region, &cp)?;
+                    (region, path)
+                }
+            };
             (region, path)
         }
         OpParams::Pocket {

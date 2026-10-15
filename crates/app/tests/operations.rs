@@ -519,13 +519,16 @@ use hsmworks_app::geometry::feature::{self, FaceKind};
 use hsmworks_app::geometry::Triangle;
 use hsmworks_app::operation::{FeatureSel, GeoSel};
 
-/// Planar face id of the box part's top (world normal +z, identity pose).
+/// Planar face whose plane sits highest along +z - the box's top. Face
+/// normals are sign-canonical, so both horizontal faces report (0,0,1)
+/// and only the signed offset tells top from bottom.
 fn top_face_of(world: &World, name: &str) -> u64 {
     let e = model::find_by_name(world, name).expect("part exists");
     let f = model::features_of(world, &e).expect("features");
     f.faces
         .iter()
-        .find(|fa| matches!(fa.kind, FaceKind::Planar) && fa.normal[2] > 0.9)
+        .filter(|fa| matches!(fa.kind, FaceKind::Planar) && fa.normal[2].abs() > 0.9)
+        .max_by(|a, b| a.offset.total_cmp(&b.offset))
         .map(|fa| fa.id)
         .expect("a planar top face")
 }
@@ -835,4 +838,270 @@ fn selection_commands_validate_at_construction() {
     // generation - it is a geometry hash, not a pointer).
     let top = FeatureSel::Face(top_face_of(&world, "part"));
     assert!(CreateOperation::new(&world, "OK", "EM-0400-2FL", sel("part", top), face_params()).is_ok());
+}
+
+// ============== M1.5 step 8: selection-aware generation ==============
+
+use hsmworks_app::cl::MoveKind;
+use hsmworks_app::verify::Warning;
+
+/// An open chain whose two ends sit at distinct XY points - a horizontal
+/// rim edge, the one kind of box run a centerline pass is about.
+fn open_run_of(world: &World, name: &str) -> u64 {
+    let e = model::find_by_name(world, name).expect("part exists");
+    let f = model::features_of(world, &e).expect("features");
+    feature::chains(&f)
+        .into_iter()
+        .find(|c| {
+            !c.closed
+                && {
+                    let p = feature::chain_points(&f, c);
+                    p.len() >= 2 && (p[0][0] != p[1][0] || p[0][1] != p[1][1])
+                }
+        })
+        .map(|c| c.id)
+        .expect("a box has horizontal rim edges")
+}
+
+#[test]
+fn an_open_run_contours_on_its_centerline() {
+    let (world, mut history) = box_part_world();
+    let run = open_run_of(&world, "part");
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Edge1",
+            "EM-0600-4FL",
+            sel("part", FeatureSel::Chain(run)),
+            contour_params(),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Edge1").expect("generate"));
+
+    // Preview: the run bounds no area, so no region outline - the
+    // centerline stands in for it, and it is exactly what the path rides.
+    let op = model::operation_of(&world, &model::find_by_name(&world, "Edge1").expect("op"))
+        .expect("op");
+    assert!(operation::region_of(&world, &op).is_none(), "a run bounds no area");
+    assert_eq!(operation::chains_of(&world, &op).len(), 1, "one run to draw");
+
+    let path = cache(&world, "Edge1").expect("cache").path;
+    assert!(path.is_chained(), "one continuous path");
+    assert!(path.all_finite());
+    let e = model::find_by_name(&world, "part").expect("part");
+    let f = model::features_of(&world, &e).expect("features");
+    let c = feature::chains(&f)
+        .into_iter()
+        .find(|c| c.id == run)
+        .expect("chain");
+    let pts = feature::chain_points(&f, &c);
+    // contour_params: 5.0 -> 0.0 at 2.5 - three levels, one plunge each,
+    // Lead::None so the plunge lands exactly on the stored start vertex.
+    let levels = [5.0, 2.5, 0.0];
+    let plunges: Vec<_> = path
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .collect();
+    assert_eq!(plunges.len(), levels.len());
+    for (lvl, m) in plunges.iter().enumerate() {
+        assert_eq!(
+            (m.to.x, m.to.y),
+            (pts[0][0], pts[0][1]),
+            "plunge {lvl} enters at the run start, not short of it"
+        );
+        assert_eq!(m.to.z, levels[lvl]);
+    }
+    for (lvl, &z) in levels.iter().enumerate() {
+        let feeds: Vec<_> = path
+            .moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Feed && m.to.z == z)
+            .collect();
+        assert_eq!(feeds.len(), pts.len() - 1, "one feed per segment, level {lvl}");
+        let last = feeds.last().expect("a level feeds somewhere");
+        assert_eq!(
+            (last.to.x, last.to.y),
+            (pts[pts.len() - 1][0], pts[pts.len() - 1][1]),
+            "the run stops at its end, never beyond"
+        );
+    }
+}
+
+#[test]
+fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("disc", disc_mesh(12.0)));
+    // The disc is one planar face inside a rim that chains closed - step 4
+    // proved the two picks dedupe to a single identical loop, so the two
+    // operations below must cut byte-comparable paths, and neither may
+    // ride the rim itself: a closed chain bounds, it does not run.
+    let e = model::find_by_name(&world, "disc").expect("disc");
+    let f = model::features_of(&world, &e).expect("features");
+    let face = FeatureSel::Face(
+        f.faces
+            .iter()
+            .find(|fa| matches!(fa.kind, FaceKind::Planar))
+            .map(|fa| fa.id)
+            .expect("the disc is one planar face"),
+    );
+    let rim_id = rim_chain_of(&world, "disc");
+    let params = OpParams::Contour {
+        stock_to_leave: 0.0,
+        clearance_z: 10.0,
+        retract_z: 8.0,
+        top_z: 0.0,
+        bottom_z: -2.0,
+        stepdown: 2.0,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        lead: Lead::None,
+        tolerance: 0.01,
+        tab_count: 0,
+        tab_width: 0.0,
+        tab_height: 0.0,
+    };
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "R-face",
+            "EM-0600-4FL",
+            sel("disc", face),
+            params.clone(),
+        )
+        .expect("create face pick"),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "R-rim",
+            "EM-0600-4FL",
+            sel("disc", FeatureSel::Chain(rim_id)),
+            params.clone(),
+        )
+        .expect("create rim pick"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "R-face").expect("generate face"));
+    history.execute(&world, GenerateOperation::new(&world, "R-rim").expect("generate rim"));
+    assert_eq!(status(&world, "R-rim"), OpStatus::Ok, "a tangential boundary cut");
+
+    let pf = cache(&world, "R-face").expect("cache").path;
+    let pr = cache(&world, "R-rim").expect("cache").path;
+    // Structural: same budget, same kinds, same feed footprint. The seam
+    // (which vertex a loop starts at) is an input-order artifact, so the
+    // positions compare as sets, not as sequences.
+    assert_eq!(pf.moves.len(), pr.moves.len(), "equal move budget");
+    let xy = |p: &hsmworks_app::cl::Toolpath| -> Vec<[f64; 2]> {
+        let mut v: Vec<[f64; 2]> = p
+            .moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Feed)
+            .map(|m| [m.to.x, m.to.y])
+            .collect();
+        v.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+        v
+    };
+    let (fe, fs) = (xy(&pf), xy(&pr));
+    assert_eq!(fe.len(), fs.len(), "equal feed counts");
+    for (a, b) in fe.iter().zip(&fs) {
+        assert!(
+            (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9,
+            "footprint point {a:?} vs {b:?}"
+        );
+    }
+
+    // And it is a boundary path, not a centerline: with a 6 mm cutter at
+    // zero leave the tool center stands ~3 mm off the rim vertices, never
+    // on them.
+    let c = feature::chains(&f)
+        .into_iter()
+        .find(|c| c.id == rim_id)
+        .expect("rim chain");
+    let ring = feature::chain_points(&f, &c);
+    let on_rim = pr
+        .moves
+        .iter()
+        .filter(|m| m.kind != MoveKind::Rapid)
+        .any(|m| {
+            ring.iter()
+                .any(|q| (m.to.x - q[0]).abs() < 1e-6 && (m.to.y - q[1]).abs() < 1e-6)
+        });
+    assert!(!on_rim, "a closed chain bounds - the tool never rides its vertices");
+    let min_standoff = pr
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .map(|m| {
+            ring.iter()
+                .map(|q| ((m.to.x - q[0]).powi(2) + (m.to.y - q[1]).powi(2)).sqrt())
+                .fold(f64::INFINITY, f64::min)
+        })
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        (min_standoff - 3.0).abs() < 0.25,
+        "plunges stand a cutter radius off the rim, got {min_standoff}"
+    );
+}
+
+#[test]
+fn a_mixed_pick_list_cuts_boundary_then_run_and_says_what_overlap_means() {
+    let (world, mut history) = box_part_world();
+    let top = FeatureSel::Face(top_face_of(&world, "part"));
+    let run = FeatureSel::Chain(open_run_of(&world, "part"));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Mix1",
+            "EM-0600-4FL",
+            SrcRef::Selection(vec![
+                GeoSel {
+                    entity: "part".into(),
+                    feature: top,
+                },
+                GeoSel {
+                    entity: "part".into(),
+                    feature: run,
+                },
+            ]),
+            contour_params(),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Mix1").expect("generate"));
+    let op = model::operation_of(&world, &model::find_by_name(&world, "Mix1").expect("op"))
+        .expect("op");
+    assert!(operation::region_of(&world, &op).is_some(), "the face still bounds");
+    assert_eq!(operation::chains_of(&world, &op).len(), 1, "the run still runs");
+
+    let out = cache(&world, "Mix1").expect("cache");
+    assert!(out.path.is_chained(), "stitched seams stay continuous");
+    assert_eq!(
+        out.path
+            .moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Plunge)
+            .count(),
+        6,
+        "three levels of boundary, three of run"
+    );
+    // The run's edge lies on the face's own wall, so a full-width cutter
+    // centered there half-cuts air and half-cuts the finished boundary -
+    // the verifier sees exactly that and says so, instead of pretending
+    // the pick list was coherent. (Pick the run WITHOUT the face, or use
+    // a chamfer tool, for a clean edge-of-part pass.)
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| matches!(w, Warning::Gouge { .. })),
+        "a centerline inside a picked wall is flagged, never silent: {:?}",
+        out.warnings
+    );
 }

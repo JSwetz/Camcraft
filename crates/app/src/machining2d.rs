@@ -409,6 +409,66 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     Ok(path)
 }
 
+/// Contour along an open chain: a run whose ends stop mid-edge instead of
+/// a loop around material. The cutter center rides the chain's own
+/// points: plunge at one end, feed through every vertex at each level,
+/// retract at the other. Climb travels the chain in stored order,
+/// conventional reversed, and the same air-side rule sends the lead-in
+/// and lead-out off the ends - an open run has no material to its side to
+/// keep off, so the ends themselves are where the lead lives. The tab
+/// fields do not apply (there is nothing left held between passes), and
+/// the level ladder, clearance plane and lead geometry are `contour`'s
+/// reused.
+///
+/// Half the tool overhangs the run on either side; a verifier told about
+/// a surrounding region reads that as the wall it is, and says so.
+pub fn contour_along_chain(
+    pts: &[Point2],
+    p: &ContourParams,
+) -> Result<Toolpath, GenError> {
+    p.validate()?;
+    if pts.len() < 2 {
+        return Err(GenError::Empty(
+            "a centerline run needs at least two points".into(),
+        ));
+    }
+    let poly: Vec<Point2> = if p.climb {
+        pts.to_vec()
+    } else {
+        let mut v = pts.to_vec();
+        v.reverse();
+        v
+    };
+    let zs = p.levels();
+    let t0 = unit(poly[1].x - poly[0].x, poly[1].y - poly[0].y);
+    let (entry, lead_in) = lead_in(poly[0], t0, air_side(t0, p.climb), p);
+    let n = poly.len();
+    let t1 = unit(poly[n - 1].x - poly[n - 2].x, poly[n - 1].y - poly[n - 2].y);
+    let lead_out_pts = lead_out(poly[n - 1], t1, air_side(t1, p.climb), p);
+
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    for (k, &z) in zs.iter().enumerate() {
+        if k > 0 {
+            let cur = b.at();
+            b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+        }
+        let cur = b.at();
+        b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
+        b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(p.plunge_feed));
+        for q in lead_in.iter().chain(poly[1..].iter()).chain(&lead_out_pts) {
+            b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(p.feed));
+        }
+    }
+    let cur = b.at();
+    b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+
+    let path = b.finish();
+    if !path.all_finite() {
+        return Err(GenError::Invalid("path left the finite horizon".into()));
+    }
+    Ok(path)
+}
+
 /// Which side of travel is air: canonical (climb) travel keeps material on
 /// the left, so air is right; reversed travel flips both.
 fn air_side(t: Point2, climb: bool) -> Point2 {
