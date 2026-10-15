@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> _Last updated: 2026-10-14_
+> _Last updated: 2026-10-15_
 
 ## North Star
 
@@ -114,7 +114,8 @@ selection, drilling and the first post.
       that draws the nine points of the current level as clickable markers -
       buttons and markers share one anchor helper, so what you click, what
       highlights and what places cannot drift apart. True face/vertex
-      snapping on model faces is deferred to M1.5 (Feature Selection).
+      snapping waits on M1.5's vertex pick mode (see its ⏸ bullet);
+      box-point placement is the shipped mechanism.
       Offset codes are the published RS-274 / ISO 6983 ones
 - ✅ **Toolpath display**: generated paths render in the viewport - green
       feed, blue rapid, red plunge, with directional chevrons along the feed
@@ -205,25 +206,40 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
 
 ### M1.5 - Feature Selection
 **Goal: pick a face or an edge chain and machine that - not just whole
-models.** — 📋
+models.** — ⚠️ partial
 
-The first customer of M1.4's `first_hit_f` facet indices. Planar-face
-clustering runs off the feature-edge weld already proven in the viewport
-overlay (mesh-based - no geometry-kernel commitment; that stays the M1.3
-⏸ open question).
+The first customer of M1.4's `first_hit_f` facet indices shipped:
+planar-face clustering and tangent-continuous edge chains run off the
+feature-edge weld, lifted into `app::geometry` (mesh-based - no
+geometry-kernel commitment; that stays the M1.3 ⏸ open question), with
+ids stable per model revision and enforced by the generation stamp.
+Picks are commands (undoable, validated at construction), show as chips
+in the Geometry section and as 3D overlay lines that hold their place
+under orbiting, and persist in `.hsmproj` v4. Contour machines both
+halves of a selection: the picked loops as boundary passes, the picked
+open runs as a centerline pass - preview and generation read one chain
+construction, so they cannot disagree.
 
-- 📋 **Facet → feature**: weld mesh facets into planar faces and edge
+- ✅ **Facet → feature**: weld mesh facets into planar faces and edge
       chains, exposed as stable ids per model revision (`app::geometry`,
       lifted out of `viewport.rs`)
-- 📋 **Pick modes**: viewport selection modes - whole model (today's
-      behavior), face, edge, vertex
-- 📋 **Boundary-driven operations**: contour a selected face/edge chain
-      instead of a stock section (`SrcRef::Faces`), islands from the
-      selection
-- 📋 **WCS face/vertex snap**: the true snapping deferred from M1.2's
-      box-point placement
-- 📋 **View cube + navigation bar**: the viewport affordances deferred
-      from M1.4
+- ⚠️ **Pick modes**: whole model, face (raycast through the facet map)
+      and edge (nearest feature-edge search; Ctrl/Shift multi-add) -
+      **vertex picking deferred**: nothing machines a bare vertex today;
+      it lands with the features that ask for it (hole centers, M1.6;
+      WCS snap, below)
+- ✅ **Boundary-driven operations**: contour a selected face or edge
+      chain instead of a stock section (`SrcRef::Selection` - the
+      shipped name for `SrcRef::Faces` above); islands come from the
+      picked loops, picked open runs get the centerline pass, and Face/
+      Trace skip runs they cannot use rather than refusing the list
+- ⏸ **WCS face/vertex snap**: deferred again, honestly - it needs the
+      vertex pick above; M1.2's box-point placement stands
+- ⏸ **View cube + navigation bar**: still the viewport affordances
+      deferred from M1.4; orthogonal to selection
+- ⏸ **Labeled height-plane loops** (reference 03): draw the
+      clearance/retract/top/bottom planes as labeled outlines in the
+      viewport - display polish, not a selection feature
 
 ### M1.6 - Drilling
 **Goal: a complete hole list is machined correctly.**
@@ -362,7 +378,7 @@ programming department.
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5 | ⚠️ |
-| **M1.5** | Pick a face, not just a model | Face/edge clustering, pick modes, boundary-driven ops, WCS snapping | 📋 |
+| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge pick modes, selection-driven contour incl. open-chain passes, v4 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |

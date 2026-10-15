@@ -843,6 +843,7 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
     }
     out.extend(toolpath_lines(state));
     out.extend(region_lines(state));
+    out.extend(selection_feature_lines(state));
     capped(out)
 }
 
@@ -887,6 +888,84 @@ pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
                 let a = Point3::new(w[0].x, w[0].y, z);
                 let b = Point3::new(w[1].x, w[1].y, z);
                 push_line(&mut out, a, b, REGION_RGB);
+            }
+        }
+    }
+    out
+}
+
+/// The open operation's resolved pick list in 3D: each picked face's
+/// boundary loops and each picked chain's polyline, drawn where the
+/// feature actually is - violet, deliberately not region orange. Orange
+/// answers "what the path cuts, at the cut plane" (see `region_lines`);
+/// violet answers "what you picked, where it is" - the two disagree
+/// honestly (a face picked low on a wall cuts at its own height, a chain
+/// runs in the solid's skin, not at some level's offset). The hover
+/// highlight is screen-space and evaporates under camera moves; this is
+/// overlay-buffer geometry, rebuilt under the same document and
+/// selection gates as the rest of `collect_overlay`, so picks hold their
+/// place while orbiting. A vanished pick - hidden model, deleted entity,
+/// stale id - draws nothing rather than a ghost, the hover rule again.
+pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
+    const PICK_RGB: [f32; 3] = [0.72, 0.44, 0.86];
+    if state.op_ui.name.is_empty() {
+        return Vec::new(); // nothing open: nothing picked to pin down
+    }
+    let Some(op) = model::find_by_name(&state.world, &state.op_ui.name)
+        .and_then(|e| model::operation_of(&state.world, &e))
+    else {
+        return Vec::new();
+    };
+    let operation::SrcRef::Selection(items) = &op.src else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in items {
+        if state.hidden_models.iter().any(|m| m == &item.entity) {
+            continue; // display-off models are transparent to picking and drawing
+        }
+        let Some(entity) = model::find_by_name(&state.world, &item.entity) else {
+            continue;
+        };
+        let Some(features) = model::features_of(&state.world, &entity) else {
+            continue;
+        };
+        let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
+        let draw = |out: &mut Vec<[f32; 6]>, pts: &[[f64; 3]], closed: bool| {
+            let n = pts.len();
+            if n < 2 || (closed && n < 3) {
+                return; // never mod 0; a ring needs three corners
+            }
+            let last = if closed { n } else { n - 1 };
+            for i in 0..last {
+                let a = transform_point(Point3::new(pts[i][0], pts[i][1], pts[i][2]), loc.pos, loc.rot);
+                let q = &pts[(i + 1) % n];
+                let b = transform_point(Point3::new(q[0], q[1], q[2]), loc.pos, loc.rot);
+                push_line(out, a, b, PICK_RGB);
+            }
+        };
+        match item.feature {
+            FeatureSel::Face(fid) => {
+                let Some(face) = features.faces.iter().find(|f| f.id == fid) else {
+                    continue; // stale id: the model re-meshed since the pick
+                };
+                for l in &face.loops {
+                    let pts: Vec<[f64; 3]> = l
+                        .verts
+                        .iter()
+                        .filter_map(|&vi| features.verts.get(vi as usize).copied())
+                        .collect();
+                    draw(&mut out, &pts, !matches!(l.kind, feature::LoopKind::Open));
+                }
+            }
+            FeatureSel::Chain(cid) => {
+                let Some(chain) =
+                    feature::chains(&features).into_iter().find(|c| c.id == cid)
+                else {
+                    continue;
+                };
+                let pts = feature::chain_points(&features, &chain);
+                draw(&mut out, &pts, chain.closed);
             }
         }
     }
@@ -1116,7 +1195,8 @@ fn push_line(out: &mut Vec<[f32; 6]>, a: Point3, b: Point3, c: [f32; 3]) {
 /// operation always draws bright; other operations show dimmed only under
 /// "Show all toolpaths", and never at all when hidden by its browser eye.
 /// Staleness is not a display state here - what is drawn is the cache
-/// itself, and the tree is where a stale path is called out (step 10).
+/// itself, and the tree's STALE badge is where a stale path is called
+/// out.
 pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
     let mut out = Vec::new();
     let arm = chevron_arm(state);
@@ -1703,8 +1783,8 @@ mod path_tests {
     //! The display half of M1.3: a generated path shows as colored lines
     //! with direction chevrons, and the toggle says how much of that is on
     //! screen. The tool/operation commands run straight off the history -
-    //! the buttons that queue them are step 10; the producer feeding the
-    //! overlay buffer is what these pin down.
+    //! their ribbon buttons (M1.4) are elsewhere; the producer feeding
+    //! the overlay buffer is what these pin down.
 
     use super::*;
     use hsmworks_app::commands::{AddTool, CreateOperation, GenerateOperation, ImportModel};
@@ -1980,6 +2060,102 @@ mod preview_tests {
         });
         state.drain_actions();
         assert!(region_lines(&state).iter().all(|v| (v[2] - 10.0).abs() < 1e-4));
+    }
+
+    #[test]
+    fn picks_are_pinned_in_the_world_not_the_window() {
+        // The overlay twin of hover: the open operation's resolved pick
+        // list draws where the features ARE, in violet, so the picks
+        // hold their place under orbiting (the screen-space highlight
+        // cannot). Orange `region_lines` is the complement - "what the
+        // path cuts, at the cut plane" - and the two coexist on purpose.
+        let mut state = face_state();
+        state.history.execute(
+            &state.world,
+            ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+        );
+        state.op_ui.name = "Face1".into();
+        assert!(
+            selection_feature_lines(&state).is_empty(),
+            "the source is still Stock: no picks, nothing pinned"
+        );
+        let (top, rim) = {
+            let e = model::find_by_name(&state.world, "part").expect("entity");
+            let f = model::features_of(&state.world, &e).expect("features");
+            let face = f
+                .faces
+                .iter()
+                .filter(|fa| {
+                    matches!(fa.kind, feature::FaceKind::Planar) && fa.normal[2].abs() > 0.9
+                })
+                .max_by(|a, b| a.offset.total_cmp(&b.offset))
+                .map(|fa| fa.id)
+                .expect("the box top");
+            let chain = feature::chains(&f)
+                .into_iter()
+                .find(|c| {
+                    c.edges.len() == 1
+                        && feature::chain_points(&f, c).iter().all(|p| (p[2] - 5.0).abs() < 1e-9)
+                })
+                .expect("one top-rim edge")
+                .id;
+            (FeatureSel::Face(face), FeatureSel::Chain(chain))
+        };
+        state.pending.push_back(CommandKind::SetOperationGeometry {
+            name: "Face1".into(),
+            items: vec![
+                GeoSel { entity: "part".into(), feature: top },
+                GeoSel { entity: "part".into(), feature: rim },
+            ],
+        });
+        state.drain_actions();
+        let lines = selection_feature_lines(&state);
+        assert_eq!(lines.len(), 10, "four-sided top ring plus one rim edge");
+        for v in &lines {
+            assert!(
+                (v[3] - 0.72).abs() < 0.01
+                    && (v[4] - 0.44).abs() < 0.01
+                    && (v[5] - 0.86).abs() < 0.01,
+                "violet, never region orange: {v:?}"
+            );
+            assert!(
+                (v[2] - ftoz(5.0)).abs() <= f32::EPSILON,
+                "the picks draw at their own z, not the op's cut plane: {v:?}"
+            );
+        }
+        assert!(
+            collect_overlay(&state).iter().any(|v| (v[5] - 0.86).abs() < 0.01),
+            "the picks reach the real overlay buffer, not just the helper"
+        );
+
+        state.hidden_models.push("part".into());
+        assert!(
+            selection_feature_lines(&state).is_empty(),
+            "a hidden model's picks draw nothing - the hover rule"
+        );
+        state.hidden_models.clear();
+
+        let name = state.op_ui.name.clone();
+        state.op_ui.name.clear();
+        assert!(
+            selection_feature_lines(&state).is_empty(),
+            "no operation open: the pick list shown is no one's"
+        );
+        state.op_ui.name = name;
+
+        // Stale ids: only a file can queue them (the command validates),
+        // so swap the mesh through the app's write chokepoint - the top
+        // face moves to z 8 and every picked id goes stale.
+        let part = model::find_by_name(&state.world, "part").expect("part");
+        model::set_facets(
+            &state.world,
+            &part,
+            cube(Point3::ZERO, Point3::new(10.0, 10.0, 8.0)).facets,
+        );
+        assert!(
+            selection_feature_lines(&state).is_empty(),
+            "a pick that outlived its geometry leaves no ghost on screen"
+        );
     }
 
     #[test]
