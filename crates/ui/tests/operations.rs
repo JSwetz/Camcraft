@@ -547,7 +547,11 @@ fn chips_round_trip_clear_restores_stock_and_undo_is_exact() {
     let chips = state.geo_chips();
     assert_eq!(chips.len(), 2);
     assert!(chips[1].label.starts_with("Chain part · "), "{}", chips[1].label);
-    assert!(chips[1].label.ends_with(" · open"), "a box edge is an open run: {}", chips[1].label);
+    assert!(
+        chips[1].label.contains(" · open · ") && chips[1].label.ends_with(" · 1 of 1"),
+        "a lone box edge is one open run, length and count spelled out: {}",
+        chips[1].label
+    );
 
     // The chip's x queues the reduced list, in the world's order.
     let mut rest = state.op_ui.geo.clone();
@@ -672,4 +676,48 @@ fn a_missing_model_turns_the_chip_amber_and_undo_restores_it() {
     let chips = state.geo_chips();
     assert!(!chips[0].missing, "the id resolves again: {}", chips[0].label);
     assert_eq!(chips[0].label, was, "the very same chip, not a new one");
+}
+
+// ---------------------------------------------------------------------------
+// M1.5.1 step 2: rows read as humans talk about the model - where a face
+// sits and how big it is, how long a run is and which piece of the loop it
+// is - and a pick whose geometry is gone says so instead of a bare digest.
+
+#[test]
+fn selection_rows_read_as_human_descriptors() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    part_and_target(&mut state);
+
+    // Face: axis locator and area. The 10 x 10 top of the box sits at z 5.
+    let top = face_pick(&state, "part", true);
+    queue_feature_pick(&mut state, top, false);
+    state.drain_actions();
+    state.sync_ops_ui();
+    let chips = state.geo_chips();
+    assert!(!chips[0].missing);
+    assert!(chips[0].label.starts_with("Face part · z=5.00"), "{}", chips[0].label);
+    assert!(chips[0].label.contains("100.0 mm"), "area spelled out: {}", chips[0].label);
+
+    // Chain: open or closed, length, and its number among the runs picked
+    // on that entity. A lone box edge is one open run of one.
+    let chain = chain_pick(&state, "part");
+    queue_feature_pick(&mut state, chain, true);
+    state.drain_actions();
+    state.sync_ops_ui();
+    let chips = state.geo_chips();
+    assert!(chips[1].label.starts_with("Chain part · open · "), "{}", chips[1].label);
+    assert!(chips[1].label.contains(" mm · 1 of 1"), "{}", chips[1].label);
+
+    // Gone model: the digest resurfaces and the row admits it cannot read
+    // the geometry - never a blank, never a crash, never an edited id.
+    state.pending.push_back(CommandKind::DeleteByName("part".into()));
+    state.drain_actions();
+    state.sync_ops_ui();
+    let chips = state.geo_chips();
+    assert_eq!(chips.len(), 2, "both picks survive their model, visibly broken");
+    assert!(chips.iter().all(|c| c.missing));
+    assert!(chips[0].label.ends_with(" · missing"), "{}", chips[0].label);
+    assert!(chips[1].label.ends_with(" · missing"), "{}", chips[1].label);
 }

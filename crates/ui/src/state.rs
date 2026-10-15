@@ -9,7 +9,7 @@
 //! STEP never freezes the window; the resulting `ImportModel` command is
 //! executed on this thread, so the history stays the single source of truth.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
@@ -254,9 +254,10 @@ impl OpUi {
     }
 }
 
-/// One Geometry-section chip: the pane-facing view of a pick-list entry.
-/// `label` is the whole display text (kind, entity, short id, state);
-/// `missing` is the amber flag - the id no longer resolves in the model.
+/// One Geometry-section row: the pane-facing view of a pick-list entry.
+/// `label` is the whole display text - a readable descriptor of the
+/// geometry the pick names, falling back to entity and short id when the
+/// id no longer resolves; `missing` is the amber flag for exactly that.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeoChip {
     pub sel: GeoSel,
@@ -467,6 +468,12 @@ pub struct State {
     /// chains. Ephemeral view state like the drafts above - the mode is
     /// set from the Operations page radio row, never saved or undone.
     pub geo_pick: GeoPick,
+    /// The Geometry list row under the pointer this frame, if any: the
+    /// pane answers "which one is that?" by lighting the feature in the
+    /// viewport, like pointer hover does. Ephemeral view state (the
+    /// hover itself is the precedent) - refreshed every frame, never a
+    /// command, never an overlay rebuild.
+    pub geo_hover: Option<GeoSel>,
     pub tool_ui: ToolUi,
     /// `doc_version` the setup drafts were last refetched at.
     ui_synced_doc: u64,
@@ -564,6 +571,7 @@ impl State {
             hover: None,
             viewport_hot: false,
             geo_pick: GeoPick::Model,
+            geo_hover: None,
             icons: None,
             hidden_models: Vec::new(),
             hidden_paths: Vec::new(),
@@ -765,45 +773,117 @@ impl State {
         }
     }
 
-    /// The Geometry section's chips: one per pick-list entry, in order,
-    /// resolved against the model as it stands now. A chip whose id no
-    /// longer resolves (the model was deleted, or re-imported with new
-    /// geometry) reads amber and says so - removing it is always safe,
-    /// because the reduced list only gets shorter.
+    /// The Geometry section's list: one row per pick-list entry, in order,
+    /// resolved against the model as it stands now. Each row *describes*
+    /// its pick in machining terms - a face says where it is and how big
+    /// ("Face part · z=5.00 · 100.0 mm²"), a chain says whether it closes
+    /// and how long ("Chain part · open · 10.0 mm · 2 of 3") - so the
+    /// list answers "what did I select?" without a hash decoder. A row
+    /// whose id no longer resolves (the model was deleted, or re-imported
+    /// with new geometry) reads amber and falls back to its short id with
+    /// "missing" - removing it is always safe, because the reduced list
+    /// only gets shorter.
     #[must_use]
     pub fn geo_chips(&self) -> Vec<GeoChip> {
+        // Open runs are pieces of one loop the user watches get
+        // completed: the "2 of 3" in a run's label counts chain picks
+        // of the same entity, in pick order.
+        let mut run_totals: HashMap<String, usize> = HashMap::new();
+        for g in &self.op_ui.geo {
+            if matches!(g.feature, FeatureSel::Chain(_)) {
+                *run_totals.entry(g.entity.clone()).or_default() += 1;
+            }
+        }
+        let mut run_seq: HashMap<String, usize> = HashMap::new();
         self.op_ui
             .geo
             .iter()
             .map(|g| {
                 let (label, missing) = match g.feature {
                     FeatureSel::Face(id) => {
-                        let found = model::find_by_name(&self.world, &g.entity)
+                        let face = model::find_by_name(&self.world, &g.entity)
                             .and_then(|e| model::features_of(&self.world, &e))
-                            .is_some_and(|f| f.faces.iter().any(|fa| fa.id == id));
-                        let mut label = format!("Face {} · {}", g.entity, short_id(id));
-                        if !found {
-                            label.push_str(" · missing");
+                            .and_then(|f| f.faces.iter().find(|fa| fa.id == id).cloned());
+                        match face {
+                            Some(f) => {
+                                // Which axis the face sits at, on the
+                                // sign-canonical normal's own axis: the
+                                // offset is signed, so top and bottom
+                                // both read as plain z.
+                                let (axis, v) = if f.normal[2].abs()
+                                    >= f.normal[0].abs().max(f.normal[1].abs())
+                                {
+                                    ('z', f.offset)
+                                } else if f.normal[0].abs() >= f.normal[1].abs() {
+                                    ('x', f.offset)
+                                } else {
+                                    ('y', f.offset)
+                                };
+                                let mut label =
+                                    format!("Face {} · {axis}={:.2} · {:.1} mm²", g.entity, v, f.area);
+                                if f.loops.len() > 1 {
+                                    label.push_str(&format!(" · {} loops", f.loops.len()));
+                                }
+                                (label, false)
+                            }
+                            None => (format!("Face {} · {} · missing", g.entity, short_id(id)), true),
                         }
-                        (label, !found)
                     }
                     FeatureSel::Chain(id) => {
-                        let chain = model::find_by_name(&self.world, &g.entity)
+                        let found = model::find_by_name(&self.world, &g.entity)
                             .and_then(|e| model::features_of(&self.world, &e))
-                            .and_then(|f| {
-                                feature::chains(&f).into_iter().find(|c| c.id == id)
-                            });
-                        match chain {
-                            Some(c) => (
-                                format!(
-                                    "Chain {} · {} · {}",
-                                    g.entity,
-                                    short_id(id),
-                                    if c.closed { "closed" } else { "open" }
-                                ),
-                                false,
-                            ),
-                            None => (format!("Chain {} · {} · missing", g.entity, short_id(id)), true),
+                            .map(|f| {
+                                let c = feature::chains(&f).into_iter().find(|c| c.id == id)?;
+                                let pts = feature::chain_points(&f, &c);
+                                Some((c, pts))
+                            })
+                            .unwrap_or(None);
+                        match found {
+                            Some((c, pts)) => {
+                                // Length along the polyline; a closed
+                                // chain's points do not repeat the start
+                                // vertex, so the ring closure counts too.
+                                let mut len = 0.0;
+                                for w in pts.windows(2) {
+                                    let (dx, dy, dz) =
+                                        (w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]);
+                                    len += (dx * dx + dy * dy + dz * dz).sqrt();
+                                }
+                                if c.closed && pts.len() > 1 {
+                                    let (a, b) = (&pts[0], &pts[pts.len() - 1]);
+                                    let (dx, dy, dz) = (b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+                                    len += (dx * dx + dy * dy + dz * dz).sqrt();
+                                }
+                                let label = if c.closed {
+                                    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+                                    for p in &pts {
+                                        for k in 0..2 {
+                                            lo[k] = lo[k].min(p[k]);
+                                            hi[k] = hi[k].max(p[k]);
+                                        }
+                                    }
+                                    format!(
+                                        "Chain {} · closed · {:.1} mm · {:.1} × {:.1}",
+                                        g.entity, len, hi[0] - lo[0], hi[1] - lo[1]
+                                    )
+                                } else {
+                                    let i = run_seq.entry(g.entity.clone()).or_default();
+                                    *i += 1;
+                                    format!(
+                                        "Chain {} · open · {:.1} mm · {} of {}",
+                                        g.entity,
+                                        len,
+                                        i,
+                                        run_totals.get(&g.entity).copied().unwrap_or(1)
+                                    )
+                                };
+                                (label, false)
+                            }
+                            None => {
+                                let label =
+                                    format!("Chain {} · {} · missing", g.entity, short_id(id));
+                                (label, true)
+                            }
                         }
                     }
                 };

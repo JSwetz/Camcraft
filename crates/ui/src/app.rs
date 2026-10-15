@@ -559,6 +559,11 @@ impl App {
         if self.state.request_quit || self.ctx.is_none() {
             return;
         }
+        // Per-frame clear of the Geometry-list row hover: the pane sets it
+        // again below when the pointer is over a row, and anywhere else -
+        // another page, pointer elsewhere - the highlight must not
+        // linger. Same lifetime rule as `hover` in `update_hover`.
+        self.state.geo_hover = None;
 
         // Split disjoint borrows once; bail quietly if any piece is missing.
         let Self {
@@ -972,7 +977,8 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     out
 }
 
-/// Screen-space segments of the FEATURE under the cursor, as viewport-uv
+/// Screen-space segments of the FEATURE under the cursor - in the viewport,
+/// or on a Geometry-list row (`state.geo_hover`) - as viewport-uv
 /// pairs (0..1 within the image, like `overlay_labels` - the shell maps
 /// them through the image rect and draws with the window draw list). A
 /// draw-list producer on purpose: hovering must never rebuild the 3D
@@ -983,28 +989,49 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
 /// Gone entities, hidden models, deleted features and stale ids draw
 /// nothing - a highlight must never promise a pick the click cannot make.
 pub(crate) fn hover_features(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 2])> {
-    let Some(hit) = &state.hover else {
-        return Vec::new();
-    };
-    let Some(sel) = hit.feature else {
-        return Vec::new(); // Model mode: no feature, no feature highlight
-    };
-    if state.hidden_models.iter().any(|m| m == &hit.entity) {
-        return Vec::new();
-    }
-    let Some(entity) = model::find_by_name(&state.world, &hit.entity) else {
-        return Vec::new();
-    };
-    let Some(features) = model::features_of(&state.world, &entity) else {
-        return Vec::new();
-    };
-    let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
-    let mvp = state.cam.mvp(aspect);
     let mut out = Vec::new();
+    let mut viewport: Option<(String, FeatureSel)> = None;
+    if let Some(hit) = &state.hover
+        && let Some(sel) = hit.feature
+    {
+        feature_segments(state, &hit.entity, sel, aspect, &mut out);
+        viewport = Some((hit.entity.clone(), sel));
+    }
+    // The Geometry list's row hover lights the same feature the same way:
+    // the list answering "which one is that?" without a click. Viewport
+    // hover keeps precedence, and one feature never draws twice.
+    if let Some(g) = &state.geo_hover
+        && !viewport.as_ref().is_some_and(|(e, f)| *e == g.entity && *f == g.feature)
+    {
+        feature_segments(state, &g.entity, g.feature, aspect, &mut out);
+    }
+    out
+}
+
+/// One (entity, feature) resolved to viewport-uv segments: gone entities,
+/// hidden models, deleted features and stale ids draw nothing.
+fn feature_segments(
+    state: &State,
+    entity: &str,
+    sel: FeatureSel,
+    aspect: f64,
+    out: &mut Vec<([f32; 2], [f32; 2])>,
+) {
+    if state.hidden_models.iter().any(|m| m == entity) {
+        return;
+    }
+    let Some(found) = model::find_by_name(&state.world, entity) else {
+        return;
+    };
+    let Some(features) = model::features_of(&state.world, &found) else {
+        return;
+    };
+    let loc = model::transform_of(&state.world, &found).unwrap_or_default();
+    let mvp = state.cam.mvp(aspect);
     match sel {
         FeatureSel::Face(fid) => {
             let Some(face) = features.faces.iter().find(|f| f.id == fid) else {
-                return Vec::new(); // stale id: the model re-meshed under the hover
+                return; // stale id: the model re-meshed under the hover
             };
             for l in &face.loops {
                 let pts: Vec<[f64; 3]> = l
@@ -1012,18 +1039,17 @@ pub(crate) fn hover_features(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                     .iter()
                     .filter_map(|&vi| features.verts.get(vi as usize).copied())
                     .collect();
-                push_poly(&mvp, &loc, &pts, !matches!(l.kind, feature::LoopKind::Open), &mut out);
+                push_poly(&mvp, &loc, &pts, !matches!(l.kind, feature::LoopKind::Open), out);
             }
         }
         FeatureSel::Chain(cid) => {
             let Some(chain) = feature::chains(&features).into_iter().find(|c| c.id == cid) else {
-                return Vec::new();
+                return;
             };
             let pts = feature::chain_points(&features, &chain);
-            push_poly(&mvp, &loc, &pts, chain.closed, &mut out);
+            push_poly(&mvp, &loc, &pts, chain.closed, out);
         }
     }
-    out
 }
 
 /// Project a local-space polyline (feature vertices, entity transform
@@ -2228,6 +2254,64 @@ mod preview_tests {
             hover_features(&state, 4.0 / 3.0).is_empty(),
             "a hidden model's feature draws nothing - it is display-off"
         );
+    }
+
+    #[test]
+    fn row_hover_highlights_in_viewport() {
+        // The Geometry list's row hover rides the same amber channel as
+        // viewport hover: same segments, same nothing-for-stale rules, and
+        // one feature pointed at twice draws once.
+        let mut state = State::new();
+        state.history.execute(
+            &state.world,
+            ImportModel::from_mesh("c", cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0))),
+        );
+        let (top, chain) = {
+            let e = model::find_by_name(&state.world, "c").expect("entity");
+            let f = model::features_of(&state.world, &e).expect("features");
+            let top = f
+                .faces
+                .iter()
+                .find(|fa| matches!(fa.kind, feature::FaceKind::Planar) && fa.normal[2] > 0.9)
+                .map(|fa| fa.id)
+                .expect("a planar top face");
+            let chain = feature::chains(&f).into_iter().next().expect("a box edge").id;
+            (top, chain)
+        };
+        let face = GeoSel { entity: "c".into(), feature: FeatureSel::Face(top) };
+        let run = GeoSel { entity: "c".into(), feature: FeatureSel::Chain(chain) };
+
+        state.geo_hover = Some(face.clone());
+        let segs = hover_features(&state, 4.0 / 3.0);
+        assert_eq!(segs.len(), 4, "the row's face lights its four sides");
+        for (a, b) in &segs {
+            for uv in [a, b] {
+                assert!(
+                    uv.iter().all(|v| (0.0..=1.0).contains(v)),
+                    "uv lands inside the image: {uv:?}"
+                );
+            }
+        }
+
+        // Both pointers on the same feature: once, not twice.
+        state.hover =
+            Some(HoverHit { entity: "c".into(), facet: 0, feature: Some(face.feature) });
+        assert_eq!(hover_features(&state, 4.0 / 3.0).len(), 4, "no double-draw");
+
+        // Two different features: the viewport keeps its, the row adds its.
+        state.hover = Some(HoverHit { entity: "c".into(), facet: 0, feature: Some(run.feature) });
+        assert_eq!(hover_features(&state, 4.0 / 3.0).len(), 5, "one edge plus the square");
+
+        // Stale ids and hidden models draw nothing through the row either -
+        // the highlight never promises a pick the click cannot make.
+        state.hover = None;
+        state.geo_hover = Some(GeoSel { entity: "c".into(), feature: FeatureSel::Face(7) });
+        assert!(hover_features(&state, 4.0 / 3.0).is_empty(), "a stale face id draws no ghost");
+        state.geo_hover = Some(GeoSel { entity: "nope".into(), feature: face.feature });
+        assert!(hover_features(&state, 4.0 / 3.0).is_empty(), "a gone entity draws nothing");
+        state.geo_hover = Some(face);
+        state.hidden_models.push("c".into());
+        assert!(hover_features(&state, 4.0 / 3.0).is_empty(), "display-off stays off");
     }
 }
 

@@ -224,27 +224,26 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         _ => GeoPick::Model,
     };
     ui.text_wrapped("Click in the viewport - Ctrl adds; Alt in Edge mode takes one edge.");
+    // geo_hover is cleared once per frame by App::draw; this pane's rows
+    // set it below, and only the row under the pointer this frame does.
     if state.op_ui.src_kind == 2 {
-        // One chip per pick, in list order; each row ends in the x that
-        // takes it out. Removal queues the reduced list (the world's
-        // order, mirrored - never a re-sort), and the last chip leaving
-        // reverts the source to Stock: an empty selection is not a
-        // thing SrcRef can hold, and never was.
+        // One row per pick, in list order - a readable descriptor of the
+        // geometry, ending in the × that takes it out. Hovering a row
+        // lights that feature in the viewport (screen-space amber, never
+        // an overlay rebuild): the list answers "which one is that?".
+        // Removal queues the reduced list (the world's order, mirrored -
+        // never a re-sort), and the last row leaving reverts the source
+        // to Stock: an empty selection is not a thing SrcRef can hold,
+        // and never was.
         let chips = state.geo_chips();
         for (i, chip) in chips.iter().enumerate() {
-            if i > 0 {
-                let avail = ui.content_region_avail()[0];
-                let need = ui.calc_text_size(chip.label.as_str())[0] + 26.0;
-                if avail < need {
-                    ui.new_line();
-                } else {
-                    ui.same_line();
-                }
-            }
             if chip.missing {
                 ui.text_colored([1.0, 0.72, 0.20, 1.0], &chip.label);
             } else {
                 ui.text(&chip.label);
+            }
+            if ui.is_item_hovered() {
+                state.geo_hover = Some(chip.sel.clone());
             }
             ui.same_line();
             let del = format!("×##geo_del_{i}");
@@ -261,8 +260,10 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
                     CommandKind::SetOperationGeometry { name: target.clone(), items: rest }
                 });
             }
+            if i + 1 < chips.len() {
+                ui.new_line();
+            }
         }
-        ui.same_line();
         if ui.button("Clear##geo") {
             state.pending.push_back(CommandKind::EditOperationLinks {
                 name: target.clone(),
