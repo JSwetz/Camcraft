@@ -599,6 +599,50 @@ fn a_duplicate_pick_queues_nothing() {
     assert_eq!(state.geo_chips().len(), 1, "and the chip row never doubled");
 }
 
+// ---------------------------------------------------------------------------
+// M1.5.1 step 1: the Apply click always answers. A changed draft queues the
+// undoable edit; an unchanged draft is a true no-op for the history - and
+// says so through the status strip instead of meeting the click with
+// silence.
+
+#[test]
+fn apply_with_no_changes_reports_nothing_changed() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    part_and_target(&mut state);
+    // The draft mirrors the operation exactly, so this Apply is the no-op.
+    state.apply_operation_params("Face1");
+    assert_eq!(state.status, "parameters already applied - nothing changed");
+    assert!(state.pending.is_empty(), "a no-op queues no command: {:?}", state.pending);
+}
+
+#[test]
+fn apply_reports_queued_then_updated_on_drain() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    part_and_target(&mut state);
+    // Spinbox typing is what this mirrors: the draft differs from live.
+    state.op_ui.params = OpParams::Face {
+        stepover: 3.0,
+        clearance_z: 25.0,
+        cut_z: 18.0,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    };
+    state.apply_operation_params("Face1");
+    assert_eq!(state.pending.len(), 1, "the changed draft queued the edit");
+    state.drain_actions();
+    assert_eq!(state.status, "parameters updated for Face1");
+    assert!(
+        matches!(stored_params(&state, "Face1"),
+            OpParams::Face { cut_z, .. } if (cut_z - 18.0).abs() < 1e-12),
+        "the operation carries the draft's cut height"
+    );
+}
+
 #[test]
 fn a_missing_model_turns_the_chip_amber_and_undo_restores_it() {
     let mut state = State::new();

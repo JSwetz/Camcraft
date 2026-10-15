@@ -744,6 +744,27 @@ impl State {
         }
     }
 
+    /// Arm the Operations page's Apply click: a draft that differs from
+    /// the operation queues the edit for the next drain (validated,
+    /// undoable, as always); a draft that does not differ changes nothing,
+    /// so nothing goes into the history - but the click still answers
+    /// through the status strip. Silence on a click reads as a dead
+    /// button; this is the same ephemeral-ack pattern the feature picks
+    /// use, not a command.
+    pub fn apply_operation_params(&mut self, name: &str) {
+        let unchanged = model::find_by_name(&self.world, name)
+            .and_then(|e| model::operation_of(&self.world, &e))
+            .is_some_and(|op| op.params == self.op_ui.params);
+        if unchanged {
+            self.status = String::from("parameters already applied - nothing changed");
+        } else {
+            self.pending.push_back(CommandKind::EditOperationParams {
+                name: name.to_string(),
+                params: self.op_ui.params.clone(),
+            });
+        }
+    }
+
     /// The Geometry section's chips: one per pick-list entry, in order,
     /// resolved against the model as it stands now. A chip whose id no
     /// longer resolves (the model was deleted, or re-imported with new

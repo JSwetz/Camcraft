@@ -302,11 +302,11 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
 
     if exists {
         let unchanged = live.as_ref().is_some_and(|op| op.params == state.op_ui.params);
-        if ui.button("Apply Parameters") && !unchanged {
-            state.pending.push_back(CommandKind::EditOperationParams {
-                name: target.clone(),
-                params: state.op_ui.params.clone(),
-            });
+        if ui.button("Apply Parameters") {
+            // The arms live on State (`apply_operation_params`) so the
+            // queue and the no-op acknowledgment are testable without a
+            // frame; the click always answers, changed or not.
+            state.apply_operation_params(&target);
         }
         ui.same_line();
         if ui.button("Generate") {
