@@ -28,7 +28,7 @@ use hsmworks_app::tools::catalog;
 use crate::browser::kind_name;
 use crate::form;
 use crate::setup;
-use crate::state::{CommandKind, ErrorScope, State, UiTarget};
+use crate::state::{CommandKind, ErrorScope, GeoPick, State, UiTarget};
 
 /// Radio/combo order = `OpType` discriminants (Face, Contour, Pocket, Slot,
 /// Trace); `kind_index` and `retype` must agree with this list.
@@ -191,6 +191,29 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
             });
         }
     }
+
+    // Viewport pick mode: what a click in the 3D view selects. Transient
+    // view state like the drafts this page edits - the mode itself is not
+    // undoable; what a Face/Edge click changes is (it queues a geometry
+    // pick for this operation, Ctrl adds to the list, Alt in Edge mode
+    // narrows a chain to the one segment under the cursor).
+    ui.text("Click selects:");
+    ui.same_line();
+    let mut pick_mode = match state.geo_pick {
+        GeoPick::Model => 0,
+        GeoPick::Face => 1,
+        GeoPick::Edge => 2,
+    };
+    ui.radio_button_int("Models", &mut pick_mode, 0);
+    ui.same_line();
+    ui.radio_button_int("Faces", &mut pick_mode, 1);
+    ui.same_line();
+    ui.radio_button_int("Edges", &mut pick_mode, 2);
+    state.geo_pick = match pick_mode {
+        1 => GeoPick::Face,
+        2 => GeoPick::Edge,
+        _ => GeoPick::Model,
+    };
 
     // Status, cached-path summary and verification warnings.
     if exists

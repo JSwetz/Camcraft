@@ -11,17 +11,20 @@ use dear_imgui_rs::{ConfigFlags, Context};
 use dear_imgui_wgpu::{wgpu, ExternalTextureId, FramebufferExtent, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use hsmworks_app::cl::MoveKind;
+use hsmworks_app::geometry::feature;
 use hsmworks_app::geometry::{Aabb, Point3, transform_point};
+use hsmworks_app::operation::{FeatureSel, GeoSel};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::{model, operation, pick};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::keyboard::ModifiersState;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::shell;
-use crate::state::{CommandKind, DragMode, HoverHit, State};
+use crate::state::{CommandKind, DragMode, GeoPick, HoverHit, State};
 use crate::viewport::{GpuPart, View3D};
 
 #[must_use]
@@ -75,6 +78,10 @@ struct App {
     cursor_pos: [f32; 2],
     /// Left-press origin, so release can tell a click (pick) from a drag.
     left_press: Option<[f32; 2]>,
+    /// Live keyboard modifiers, fed by `WindowEvent::ModifiersChanged`
+    /// (winit 0.30's MouseInput carries none). A feature pick reads Ctrl
+    /// (multi-add) and Alt (single edge segment) from here.
+    mods: ModifiersState,
     exit_code: i32,
 }
 
@@ -98,6 +105,7 @@ impl App {
             draft_synced: [0; 8],
             cursor_pos: [0.0, 0.0],
             left_press: None,
+            mods: ModifiersState::default(),
             exit_code: 0,
         }
     }
@@ -338,8 +346,8 @@ impl App {
         }
     }
 
-    /// Raycast at a logical-px point inside the viewport; queues Select
-    /// (None on a miss, which clears selection - standard CAM behavior).
+    /// A click inside the viewport, routed by the pick mode: models,
+    /// feature faces, or edge chains.
     fn pick_at(&mut self, p: [f32; 2]) {
         // Anchor picking wins over entity picking: in pick mode a click ON a
         // marker places the origin there (same command the pane grid
@@ -361,6 +369,16 @@ impl App {
             });
             return;
         }
+        match self.state.geo_pick {
+            GeoPick::Model => self.pick_model(p),
+            GeoPick::Face => self.pick_face(p),
+            GeoPick::Edge => self.pick_edge(p),
+        }
+    }
+
+    /// Raycast at a logical-px point inside the viewport; queues Select
+    /// (None on a miss, which clears selection - standard CAM behavior).
+    fn pick_model(&mut self, p: [f32; 2]) {
         let Some((origin, dir)) = self.ray_at(p) else {
             return;
         };
@@ -375,7 +393,11 @@ impl App {
         // keeping it alive so the highlight matches the selection.
         self.state.hover = hit
             .as_ref()
-            .map(|(name, facet, _)| HoverHit { entity: name.clone(), facet: *facet });
+            .map(|(name, facet, _)| HoverHit {
+                entity: name.clone(),
+                facet: *facet,
+                feature: None,
+            });
         let hit = hit.map(|(name, _, _)| name);
         // Status is the feedback channel: "nothing happened" should be
         // impossible to believe when a pick always says what it did.
@@ -384,6 +406,82 @@ impl App {
             None => String::from("no model under the cursor"),
         };
         self.state.pending.push_back(CommandKind::Select(hit));
+    }
+
+    /// Face pick: the raycast facet's feature face becomes a geometry pick
+    /// for the open operation. Queues ONLY SetOperationGeometry - a feature
+    /// click never touches entity selection, so Ctrl+Z walks the pick list,
+    /// not the tree highlight. A miss is a status line, nothing else.
+    fn pick_face(&mut self, p: [f32; 2]) {
+        let Some((entity, sel)) = self.hover_feature_at(p) else {
+            self.state.status = String::from("no face under the cursor");
+            return;
+        };
+        let append = self.mods.control_key() || self.mods.shift_key();
+        queue_feature_pick(&mut self.state, GeoSel { entity, feature: sel }, append);
+    }
+
+    /// Edge pick: the nearest visible feature edge in screen space names a
+    /// chain (its tangent run), or just that segment under Alt. With no
+    /// edge near the cursor the click falls through to the face rule -
+    /// faces own the pixels between edges.
+    fn pick_edge(&mut self, p: [f32; 2]) {
+        let Some((entity, edge)) = edge_nearest(&self.state, p, PICK_EDGE_PX) else {
+            self.pick_face(p);
+            return;
+        };
+        let Some(found) = model::find_by_name(&self.state.world, &entity) else {
+            return;
+        };
+        let Some(features) = model::features_of(&self.state.world, &found) else {
+            return;
+        };
+        let sel = if self.mods.alt_key() {
+            feature::singleton_chain_id(&features, edge).map(FeatureSel::Chain)
+        } else {
+            feature::chains(&features)
+                .iter()
+                .find(|c| c.edges.contains(&edge))
+                .map(|c| FeatureSel::Chain(c.id))
+        };
+        let Some(sel) = sel else {
+            self.pick_face(p);
+            return;
+        };
+        // Mirror the pick in the hover so highlight and click agree even
+        // when the cursor sits on the silhouette, where the ray misses.
+        let facet = self
+            .ray_at(p)
+            .and_then(|(origin, dir)| {
+                pick::first_hit_f(&self.state.world, origin, dir, |name| {
+                    self.state.hidden_models.iter().any(|h| h == name)
+                })
+            })
+            .map_or(usize::MAX, |(_, facet, _)| facet);
+        self.state.hover = Some(HoverHit {
+            entity: entity.clone(),
+            facet,
+            feature: Some(sel),
+        });
+        let append = self.mods.control_key() || self.mods.shift_key();
+        queue_feature_pick(&mut self.state, GeoSel { entity, feature: sel }, append);
+    }
+
+    /// Shared hover/raycast for the Face pick: sets state.hover with the
+    /// face feature resolved and returns (entity, feature). None (with the
+    /// hover reflecting the raw hit) on a miss or a facetless mesh.
+    fn hover_feature_at(&mut self, p: [f32; 2]) -> Option<(String, FeatureSel)> {
+        let (origin, dir) = self.ray_at(p)?;
+        let (entity, facet, _) = pick::first_hit_f(&self.state.world, origin, dir, |name| {
+            self.state.hidden_models.iter().any(|h| h == name)
+        })?;
+        let sel = feature_of_facet(&self.state, &entity, facet);
+        self.state.hover = Some(HoverHit {
+            entity: entity.clone(),
+            facet,
+            feature: sel,
+        });
+        Some((entity, sel?))
     }
 
     /// Camera ray through a logical-px viewport point; None outside a
@@ -401,11 +499,15 @@ impl App {
         self.state.cam.ray_through(ndc, f64::from(w / h))
     }
 
-    /// Refresh the hover highlight from the cursor: a filtered raycast,
-    /// only while the pointer is over the live viewport image with no
-    /// button held and no menu or popup on top of it. Anywhere else the
-    /// highlight clears - it must never linger where the cursor isn't.
-    /// Ephemeral view state; never a command (AGENTS.md).
+    /// Refresh the hover highlight from the cursor: a filtered raycast (plus
+    /// the screen-space edge pass in Edge mode), only while the pointer is
+    /// over the live viewport image with no button held and no menu or popup
+    /// on top of it. Anywhere else the highlight clears - it must never
+    /// linger where the cursor isn't. In Face/Edge mode the hover carries
+    /// the feature it resolves to, so the highlight draws the same loops or
+    /// chain the click would pick; the rule and the projection are shared,
+    /// so they cannot disagree. Ephemeral view state; never a command
+    /// (AGENTS.md).
     fn update_hover(&mut self) {
         let idle_over_viewport = self.state.drag.is_none()
             && self.left_press.is_none()
@@ -415,14 +517,41 @@ impl App {
             self.state.hover = None;
             return;
         }
+        // Edge mode leads with the screen-space pass: the silhouette of a
+        // chain is exactly where a ray misses but an edge pick belongs.
+        if self.state.geo_pick == GeoPick::Edge
+            && let Some((entity, edge)) = edge_nearest(&self.state, self.cursor_pos, PICK_EDGE_PX)
+            && let Some(found) = model::find_by_name(&self.state.world, &entity)
+            && let Some(features) = model::features_of(&self.state.world, &found)
+            && let Some(c) = feature::chains(&features)
+                .into_iter()
+                .find(|c| c.edges.contains(&edge))
+        {
+            self.state.hover = Some(HoverHit {
+                entity,
+                facet: usize::MAX, // no facet drives this highlight
+                feature: Some(FeatureSel::Chain(c.id)),
+            });
+            return;
+        }
         let Some((origin, dir)) = self.ray_at(self.cursor_pos) else {
             self.state.hover = None;
             return;
         };
-        self.state.hover = pick::first_hit_f(&self.state.world, origin, dir, |name| {
+        let hit = pick::first_hit_f(&self.state.world, origin, dir, |name| {
             self.state.hidden_models.iter().any(|h| h == name)
-        })
-        .map(|(entity, facet, _)| HoverHit { entity, facet });
+        });
+        self.state.hover = hit.map(|(entity, facet, _)| {
+            let feature = match self.state.geo_pick {
+                // The triangle highlight is exactly what the feature modes
+                // replace - Model mode keeps hover free of features. In
+                // Edge mode a facet's face is the fallback, matching the
+                // click rule (faces own the pixels between edges).
+                GeoPick::Model => None,
+                GeoPick::Face | GeoPick::Edge => feature_of_facet(&self.state, &entity, facet),
+            };
+            HoverHit { entity, facet, feature }
+        });
     }
 
     fn draw(&mut self, el: &ActiveEventLoop) {
@@ -754,16 +883,22 @@ pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
     out
 }
 
-/// Screen-space edges of the triangle under the cursor, as viewport-uv
-/// segment pairs (0..1 within the image, like `overlay_labels` - the
-/// shell maps them through the image rect and draws with the window
-/// draw list). A draw-list producer on purpose: hovering must never
-/// rebuild the 3D overlay buffer, and the projection tracks camera
-/// moves without a new raycast. Gone with the facet: a stale index or
-/// a deleted/hidden entity draws nothing.
-pub(crate) fn hover_edges(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 2])> {
+/// Screen-space segments of the FEATURE under the cursor, as viewport-uv
+/// pairs (0..1 within the image, like `overlay_labels` - the shell maps
+/// them through the image rect and draws with the window draw list). A
+/// draw-list producer on purpose: hovering must never rebuild the 3D
+/// overlay buffer, and the projection tracks camera moves without a new
+/// raycast. A face lights its boundary loops, a chain its polyline; the
+/// per-segment projection drops any part behind the camera rather than
+/// the whole feature, so a ring half off-screen still draws honestly.
+/// Gone entities, hidden models, deleted features and stale ids draw
+/// nothing - a highlight must never promise a pick the click cannot make.
+pub(crate) fn hover_features(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 2])> {
     let Some(hit) = &state.hover else {
         return Vec::new();
+    };
+    let Some(sel) = hit.feature else {
+        return Vec::new(); // Model mode: no feature, no feature highlight
     };
     if state.hidden_models.iter().any(|m| m == &hit.entity) {
         return Vec::new();
@@ -771,21 +906,175 @@ pub(crate) fn hover_edges(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 2]
     let Some(entity) = model::find_by_name(&state.world, &hit.entity) else {
         return Vec::new();
     };
-    let Some(facets) = model::world_facets(&state.world, &entity) else {
+    let Some(features) = model::features_of(&state.world, &entity) else {
         return Vec::new();
     };
-    let Some(tri) = facets.get(hit.facet) else {
-        return Vec::new();
-    };
+    let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
     let mvp = state.cam.mvp(aspect);
-    let (Some(a), Some(b), Some(c)) = (
-        project_uv(&mvp, [tri.a.x, tri.a.y, tri.a.z]),
-        project_uv(&mvp, [tri.b.x, tri.b.y, tri.b.z]),
-        project_uv(&mvp, [tri.c.x, tri.c.y, tri.c.z]),
-    ) else {
-        return Vec::new(); // an edge on a behind-the-camera triangle reads as a stray spike
+    let mut out = Vec::new();
+    match sel {
+        FeatureSel::Face(fid) => {
+            let Some(face) = features.faces.iter().find(|f| f.id == fid) else {
+                return Vec::new(); // stale id: the model re-meshed under the hover
+            };
+            for l in &face.loops {
+                let pts: Vec<[f64; 3]> = l
+                    .verts
+                    .iter()
+                    .filter_map(|&vi| features.verts.get(vi as usize).copied())
+                    .collect();
+                push_poly(&mvp, &loc, &pts, !matches!(l.kind, feature::LoopKind::Open), &mut out);
+            }
+        }
+        FeatureSel::Chain(cid) => {
+            let Some(chain) = feature::chains(&features).into_iter().find(|c| c.id == cid) else {
+                return Vec::new();
+            };
+            let pts = feature::chain_points(&features, &chain);
+            push_poly(&mvp, &loc, &pts, chain.closed, &mut out);
+        }
+    }
+    out
+}
+
+/// Project a local-space polyline (feature vertices, entity transform
+/// applied) to viewport-uv segments, closing the ring when it is a loop.
+/// A vertex behind the camera drops only the segments that touch it.
+fn push_poly(
+    mvp: &[[f32; 4]; 4],
+    loc: &hsmworks_app::schema::Location,
+    pts: &[[f64; 3]],
+    closed: bool,
+    out: &mut Vec<([f32; 2], [f32; 2])>,
+) {
+    let uv = |p: &[f64; 3]| {
+        let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
+        project_uv(mvp, [w.x, w.y, w.z])
     };
-    vec![(a, b), (b, c), (c, a)]
+    let n = pts.len();
+    if n < 2 {
+        return;
+    }
+    let last = if closed { n } else { n - 1 };
+    for i in 0..last {
+        let (a, b) = match (uv(&pts[i]), uv(&pts[(i + 1) % n])) {
+            (Some(a), Some(b)) => (a, b),
+            _ => continue,
+        };
+        if a != b {
+            out.push((a, b));
+        }
+    }
+}
+
+/// The face feature a raycast facet belongs to, through the model's
+/// facet-to-face map. None when the entity or its features are gone.
+fn feature_of_facet(state: &State, entity: &str, facet: usize) -> Option<FeatureSel> {
+    let found = model::find_by_name(&state.world, entity)?;
+    let features = model::features_of(&state.world, &found)?;
+    let fi = *features.facet_face.get(facet)?;
+    features.faces.get(fi as usize).map(|f| FeatureSel::Face(f.id))
+}
+
+/// Fold one feature pick into the open operation's geometry list and
+/// queue it: plain click replaces, Ctrl/Shift adds, a repeat of what is
+/// already selected is refused as a no-op (the command would dedupe it
+/// anyway - saying so is the honest feedback). The entity name rides along
+/// in the pick, so selecting the stock's top face needs no tree selection.
+/// A pure State write: it queues, the command validates, undo is the
+/// history's job.
+fn queue_feature_pick(state: &mut State, pick: GeoSel, append: bool) {
+    let name = state.op_ui.name.clone();
+    if name.is_empty() {
+        state.status = String::from("open an operation first - geometry picks fill the open one");
+        return;
+    }
+    let base: Vec<GeoSel> = if append {
+        model::find_by_name(&state.world, &name)
+            .and_then(|e| model::operation_of(&state.world, &e))
+            .map_or(Vec::new(), |op| match op.src {
+                operation::SrcRef::Selection(items) => items,
+                _ => Vec::new(),
+            })
+    } else {
+        Vec::new()
+    };
+    if base.iter().any(|g| g.entity == pick.entity && g.feature == pick.feature) {
+        state.status = format!("{} of '{}' is already selected", pick.feature, pick.entity);
+        return;
+    }
+    let mut items = base;
+    items.push(pick.clone());
+    state.status = format!("{} of '{}' added to {name}", pick.feature, pick.entity);
+    state.pending.push_back(CommandKind::SetOperationGeometry { name, items });
+}
+
+/// How close a feature edge must draw to the cursor to be pickable, in
+/// logical px - the same tolerance the anchor markers use.
+const PICK_EDGE_PX: f32 = 12.0;
+
+/// The feature edge nearest a logical-px point, within `radius` px:
+/// (entity, edge index). Screen-space by design - the raycast Face pick
+/// cannot see the silhouette, the edge the user actually aims at. Every
+/// visible model's feature edges are projected through the camera and
+/// measured against the point; hidden models drop out, stock is included
+/// (its top edges are pickable geometry like any model's). Iteration runs
+/// in name order (`model_entities` sorts), so the nearest wins
+/// deterministically and a tie goes to the earlier name.
+pub(crate) fn edge_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<(String, u32)> {
+    let ([x0, y0], [x1, y1]) = state.viewport_rect;
+    let (w, h) = (x1 - x0, y1 - y0);
+    if w <= 1.0 || h <= 1.0 {
+        return None; // no laid-out image: nothing to project into
+    }
+    let mvp = state.cam.mvp(f64::from(w / h));
+    let mut entities: Vec<(String, flecs_ecs::prelude::Entity)> = model::model_entities(&state.world)
+        .into_iter()
+        .filter(|(name, _)| !state.hidden_models.iter().any(|hid| hid == name))
+        .collect();
+    if let Some(stock) = model::find_by_name(&state.world, STOCK_NAME) {
+        entities.push((STOCK_NAME.to_string(), stock));
+    }
+    let to_px = |uv: [f32; 2]| [x0 + uv[0] * w, y0 + uv[1] * h];
+    let mut best: Option<(f32, String, u32)> = None;
+    for (name, entity) in entities {
+        let Some(features) = model::features_of(&state.world, &entity) else {
+            continue;
+        };
+        let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
+        for (i, e) in features.edges.iter().enumerate() {
+            let (Some(a), Some(b)) = (features.verts.get(e.a as usize), features.verts.get(e.b as usize)) else {
+                continue;
+            };
+            let proj = |v: &[f64; 3]| {
+                let w = transform_point(Point3::new(v[0], v[1], v[2]), loc.pos, loc.rot);
+                project_uv(&mvp, [w.x, w.y, w.z]).map(to_px)
+            };
+            let (Some(a), Some(b)) = (proj(a), proj(b)) else {
+                continue; // behind the camera: not what is on screen
+            };
+            let d = point_seg_dist_px(p, a, b);
+            if d <= radius && best.as_ref().is_none_or(|&(bd, _, _)| d < bd) {
+                best = Some((d, name.clone(), i as u32));
+            }
+        }
+    }
+    best.map(|(_, name, edge)| (name, edge))
+}
+
+/// Distance from a point to a segment, px. Clamped-parameter form: no
+/// division, no NaN through a zero-length segment (a weld-degenerate edge
+/// then reads as the distance to its one endpoint).
+fn point_seg_dist_px(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let (abx, aby) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = abx * abx + aby * aby;
+    let t = if len2 > 0.0 {
+        ((( p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let (qx, qy) = (a[0] + t * abx - p[0], a[1] + t * aby - p[1]);
+    (qx * qx + qy * qy).sqrt()
 }
 
 /// Overlay palette for cached paths: feed green, rapid blue, plunge red.
@@ -1170,6 +1459,10 @@ impl ApplicationHandler for App {
                 button,
                 ..
             } => self.on_release(button),
+            // winit 0.30 delivers modifier state as its own events (the
+            // MouseInput variant carries none), so this is the single feed
+            // for Ctrl/Alt at pick time.
+            WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             _ => {}
         }
     }
@@ -1678,20 +1971,37 @@ mod preview_tests {
     }
 
     #[test]
-    fn hover_edges_track_the_facet_under_the_cursor() {
+    fn hover_features_lights_the_face_boundary() {
         let mut state = State::new();
         state.history.execute(
             &state.world,
             ImportModel::from_mesh("c", cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0))),
         );
-        assert!(hover_edges(&state, 4.0 / 3.0).is_empty(), "no hover: no edges");
-        state.hover = Some(HoverHit {
-            entity: "c".into(),
-            facet: 0,
-        });
-        let edges = hover_edges(&state, 4.0 / 3.0);
-        assert_eq!(edges.len(), 3, "the triangle's three edges");
-        for (a, b) in &edges {
+        // The triangle outline is gone with the feature modes: only a
+        // resolved feature highlights anything.
+        assert!(hover_features(&state, 4.0 / 3.0).is_empty(), "no hover: nothing draws");
+        state.hover = Some(HoverHit { entity: "c".into(), facet: 0, feature: None });
+        assert!(
+            hover_features(&state, 4.0 / 3.0).is_empty(),
+            "a bare facet hover (Model mode) draws no feature outline"
+        );
+
+        // Face hover: the planar face's boundary loop - the square its
+        // corner edges weld into, not the two triangles that tessellate it.
+        let top = {
+            let e = model::find_by_name(&state.world, "c").expect("entity");
+            let f = model::features_of(&state.world, &e).expect("features");
+            f.faces
+                .iter()
+                .find(|fa| matches!(fa.kind, feature::FaceKind::Planar) && fa.normal[2] > 0.9)
+                .map(|fa| fa.id)
+                .expect("a planar top face")
+        };
+        state.hover =
+            Some(HoverHit { entity: "c".into(), facet: 0, feature: Some(FeatureSel::Face(top)) });
+        let segs = hover_features(&state, 4.0 / 3.0);
+        assert_eq!(segs.len(), 4, "the square's four sides");
+        for (a, b) in &segs {
             for uv in [a, b] {
                 assert!(
                     uv.iter().all(|v| (0.0..=1.0).contains(v)),
@@ -1699,25 +2009,254 @@ mod preview_tests {
                 );
             }
         }
-        // Gone or stale: never light up a stranger's triangle.
+
+        // Chain hover: a box edge is its own open run - one segment.
+        let chain = {
+            let e = model::find_by_name(&state.world, "c").expect("entity");
+            let f = model::features_of(&state.world, &e).expect("features");
+            feature::chains(&f).into_iter().next().expect("a box edge")
+        };
         state.hover = Some(HoverHit {
             entity: "c".into(),
-            facet: 999,
+            facet: usize::MAX,
+            feature: Some(FeatureSel::Chain(chain.id)),
         });
-        assert!(hover_edges(&state, 4.0 / 3.0).is_empty());
-        state.hover = Some(HoverHit {
-            entity: "nope".into(),
-            facet: 2,
-        });
-        assert!(hover_edges(&state, 4.0 / 3.0).is_empty());
-        state.hover = Some(HoverHit {
-            entity: "c".into(),
-            facet: 2,
-        });
+        assert_eq!(hover_features(&state, 4.0 / 3.0).len(), 1, "one edge, one segment");
+
+        // Gone or stale: never light up a stranger's feature.
+        state.hover =
+            Some(HoverHit { entity: "c".into(), facet: 0, feature: Some(FeatureSel::Face(7)) });
+        assert!(
+            hover_features(&state, 4.0 / 3.0).is_empty(),
+            "a face id the re-mesh dropped draws nothing"
+        );
+        state.hover =
+            Some(HoverHit { entity: "nope".into(), facet: 2, feature: Some(FeatureSel::Face(top)) });
+        assert!(hover_features(&state, 4.0 / 3.0).is_empty());
+        state.hover =
+            Some(HoverHit { entity: "c".into(), facet: 2, feature: Some(FeatureSel::Face(top)) });
         state.hidden_models.push("c".into());
         assert!(
-            hover_edges(&state, 4.0 / 3.0).is_empty(),
-            "a hidden model's facet draws nothing - it is display-off"
+            hover_features(&state, 4.0 / 3.0).is_empty(),
+            "a hidden model's feature draws nothing - it is display-off"
         );
+    }
+}
+
+#[cfg(test)]
+mod feature_pick_tests {
+    //! The Face/Edge click path as it lands on State: a plain click
+    //! replaces the open operation's geometry list, Ctrl/Shift adds to it,
+    //! a repeat is refused as a no-op, and with no operation open nothing
+    //! queues. The screen-space edge search - the half `pick_edge` reads
+    //! but headless tests cannot drive through a window - is pinned here
+    //! too, at the same projection the gizmo and anchor tests use.
+
+    use super::*;
+    use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
+    use hsmworks_app::geometry::cube;
+    use hsmworks_app::operation::{GeoSel, OpParams, SrcRef};
+    use hsmworks_app::stock::StockShape;
+    use hsmworks_app::tools::catalog;
+
+    fn state_with_op() -> State {
+        let mut state = State::new();
+        state.pending.push_back(CommandKind::SetStock {
+            shape: StockShape::Box { dx: 40.0, dy: 40.0, dz: 20.0 },
+            pos: [0.0, 0.0, 0.0],
+            yaw_deg: 0.0,
+        });
+        state.drain_actions();
+        let em = catalog()
+            .into_iter()
+            .find(|(n, _)| *n == "EM-0400-2FL")
+            .map(|(_, t)| t)
+            .expect("catalog entry");
+        state
+            .history
+            .execute(&state.world, AddTool::new(&state.world, "EM-0400-2FL", em).expect("tool"));
+        state.history.execute(
+            &state.world,
+            ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+        );
+        state.history.execute(
+            &state.world,
+            CreateOperation::new(
+                &state.world,
+                "G1",
+                "EM-0400-2FL",
+                SrcRef::Stock,
+                OpParams::Face {
+                    stepover: 3.0,
+                    clearance_z: 25.0,
+                    cut_z: 4.5,
+                    feed: 1200.0,
+                    plunge_feed: 300.0,
+                    climb: true,
+                },
+            )
+            .expect("operation"),
+        );
+        state.op_ui.name = "G1".into();
+        state
+    }
+
+    fn src(state: &State) -> SrcRef {
+        let e = model::find_by_name(&state.world, "G1").expect("op");
+        model::operation_of(&state.world, &e).expect("operation").src
+    }
+
+    /// A horizontal planar face of the named entity, the higher or lower
+    /// one. Face normals are sign-canonical (winding-independent), so the
+    /// two horizontal faces of a box share a normal and are told apart by
+    /// plane offset - exactly what the generation-side tilt test does.
+    fn face_sel(state: &State, name: &str, top: bool) -> FeatureSel {
+        let e = model::find_by_name(&state.world, name).expect("entity");
+        let f = model::features_of(&state.world, &e).expect("features");
+        let mut hs: Vec<&_> = f
+            .faces
+            .iter()
+            .filter(|fa| matches!(fa.kind, feature::FaceKind::Planar) && fa.normal[2].abs() > 0.9)
+            .collect();
+        hs.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+        let fa = if top { hs.last() } else { hs.first() }.expect("a horizontal planar face");
+        FeatureSel::Face(fa.id)
+    }
+
+    /// The screen midpoint of the first edge of `name` whose ends both sit
+    /// above `zmin` in local space - where a rim edge actually draws.
+    fn rim_mid_px(
+        state: &State,
+        mvp: &[[f32; 4]; 4],
+        name: &str,
+        zmin: f64,
+        w: f32,
+        h: f32,
+    ) -> Option<(u32, [f32; 2])> {
+        let e = model::find_by_name(&state.world, name)?;
+        let f = model::features_of(&state.world, &e)?;
+        let loc = model::transform_of(&state.world, &e).unwrap_or_default();
+        let at = |vi: u32| {
+            let v = *f.verts.get(vi as usize)?;
+            let x = transform_point(Point3::new(v[0], v[1], v[2]), loc.pos, loc.rot);
+            project_uv(mvp, [x.x, x.y, x.z]).map(|uv| [uv[0] * w, uv[1] * h])
+        };
+        f.edges.iter().enumerate().find_map(|(i, ed)| {
+            let va = *f.verts.get(ed.a as usize)?;
+            let vb = *f.verts.get(ed.b as usize)?;
+            if va[2] < zmin || vb[2] < zmin {
+                return None;
+            }
+            let (a, b) = (at(ed.a)?, at(ed.b)?);
+            Some((i as u32, [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5]))
+        })
+    }
+
+    #[test]
+    fn a_plain_click_replaces_and_ctrl_adds() {
+        let mut state = state_with_op();
+        assert_eq!(src(&state), SrcRef::Stock);
+        let top = face_sel(&state, "part", true);
+        let bottom = face_sel(&state, "part", false);
+        let part = |feature| GeoSel { entity: "part".into(), feature };
+
+        queue_feature_pick(&mut state, part(top), false);
+        assert!(state.status.contains("added to G1"), "the click says what it did: {}", state.status);
+        state.drain_actions();
+        assert_eq!(src(&state), SrcRef::Selection(vec![part(top)]));
+        assert!(
+            state.status.contains("updated for G1"),
+            "and the executed command says so too: {}",
+            state.status
+        );
+
+        // Ctrl adds: the base is the applied list, so order is stable.
+        queue_feature_pick(&mut state, part(bottom), true);
+        state.drain_actions();
+        assert_eq!(src(&state), SrcRef::Selection(vec![part(top), part(bottom)]));
+
+        // A repeat is refused where it stands: no command, no history entry.
+        let before = state.pending.len();
+        queue_feature_pick(&mut state, part(top), true);
+        assert_eq!(state.pending.len(), before, "the duplicate queues nothing");
+        assert!(state.status.contains("already selected"), "{}", state.status);
+
+        // A plain click replaces: the list is exactly what was clicked.
+        queue_feature_pick(&mut state, part(bottom), false);
+        state.drain_actions();
+        assert_eq!(src(&state), SrcRef::Selection(vec![part(bottom)]));
+    }
+
+    #[test]
+    fn a_chain_pick_rides_the_same_list() {
+        // Edge mode folds a Chain id into exactly the same queue: the
+        // geometry list is kind-blind and order-keeping.
+        let mut state = state_with_op();
+        let chain = {
+            let e = model::find_by_name(&state.world, "part").expect("entity");
+            let f = model::features_of(&state.world, &e).expect("features");
+            feature::chains(&f).into_iter().next().expect("a box edge").id
+        };
+        let top = face_sel(&state, "part", true);
+        let (face_pick, chain_pick) = (
+            GeoSel { entity: "part".into(), feature: top },
+            GeoSel { entity: "part".into(), feature: FeatureSel::Chain(chain) },
+        );
+        queue_feature_pick(&mut state, face_pick.clone(), false);
+        state.drain_actions();
+        queue_feature_pick(&mut state, chain_pick.clone(), true);
+        state.drain_actions();
+        assert_eq!(src(&state), SrcRef::Selection(vec![face_pick, chain_pick]));
+    }
+
+    #[test]
+    fn no_open_operation_queues_nothing() {
+        let mut state = state_with_op();
+        state.op_ui.name.clear();
+        let top = face_sel(&state, "part", true);
+        queue_feature_pick(&mut state, GeoSel { entity: "part".into(), feature: top }, false);
+        assert!(state.pending.is_empty(), "a click with nothing open queues nothing");
+        assert!(state.status.contains("open an operation"), "{}", state.status);
+    }
+
+    #[test]
+    fn edge_picking_finds_the_drawn_edge_and_respects_the_eye() {
+        let mut state = state_with_op();
+        state.viewport_rect = ([0.0, 0.0], [800.0, 600.0]);
+        let mvp = state.cam.mvp(800.0 / 600.0);
+        let (edge, mid) = rim_mid_px(&state, &mvp, "part", 4.9, 800.0, 600.0)
+            .expect("a part rim edge visible from the default camera");
+        let (name, hit) =
+            edge_nearest(&state, mid, PICK_EDGE_PX).expect("an edge under its own midpoint");
+        assert_eq!(name, "part", "the part draws over the stock here");
+        assert_eq!(hit, edge, "and it is the edge that drew there");
+
+        // The browser eye closes the geometry off the screen too.
+        state.hidden_models.push("part".into());
+        assert!(
+            edge_nearest(&state, mid, 4.0 * PICK_EDGE_PX).is_none_or(|(n, _)| n != "part"),
+            "a hidden model's edges are not on screen, even nearby"
+        );
+    }
+
+    #[test]
+    fn stock_edges_are_pickable_and_an_unlaid_rect_finds_nothing() {
+        let mut state = State::new();
+        state.pending.push_back(CommandKind::SetStock {
+            shape: StockShape::Box { dx: 40.0, dy: 40.0, dz: 20.0 },
+            pos: [0.0, 0.0, 0.0],
+            yaw_deg: 0.0,
+        });
+        state.drain_actions();
+        assert!(
+            edge_nearest(&state, [10.0, 10.0], 50.0).is_none(),
+            "pre-layout there is no image to project into - no phantom picks"
+        );
+        state.viewport_rect = ([0.0, 0.0], [800.0, 600.0]);
+        let mvp = state.cam.mvp(800.0 / 600.0);
+        let (_, mid) = rim_mid_px(&state, &mvp, STOCK_NAME, 19.9, 800.0, 600.0)
+            .expect("a stock rim edge visible from the default camera");
+        let (name, _) = edge_nearest(&state, mid, PICK_EDGE_PX).expect("the stock's own edge");
+        assert_eq!(name, STOCK_NAME, "the stock's top is pickable geometry, no tree needed");
     }
 }

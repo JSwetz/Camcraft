@@ -1139,6 +1139,23 @@ pub fn chains(features: &Features) -> Vec<Chain> {
     out
 }
 
+/// The identity of one feature edge taken as its own chain - what
+/// Alt-pick selects: exactly that segment, even when its tangent run is
+/// longer. Agrees with [`chains`] whenever a chain is a lone edge.
+#[must_use]
+pub fn singleton_chain_id(features: &Features, edge: u32) -> Option<ChainId> {
+    let e = *features.edges.get(edge as usize)?;
+    let sentinel = (i64::MIN, i64::MIN, i64::MIN);
+    let lattice: Vec<Pos> =
+        features.verts.iter().map(|p| weld_pos(p).unwrap_or(sentinel)).collect();
+    // Same Euler start a one-edge component gets in `chains`: the odd
+    // degree at `b` sends the walk from there.
+    let vs = trail_verts(&features.edges, &[edge], e.b);
+    let mut segs = Vec::new();
+    ring_segments(&vs, &lattice, false, &mut segs);
+    Some(chain_id(segs, false))
+}
+
 /// The chain's vertex positions in walk order, closing vertex dropped for
 /// closed chains - a ring [`chains`] can be consumed from: projected to
 /// XY it is a machining boundary, walked in Z it is a centerline pass.

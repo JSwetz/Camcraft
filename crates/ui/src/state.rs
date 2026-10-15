@@ -22,7 +22,7 @@ use hsmworks_app::commands::{
     SetOperationGeometry, SetStock, SetWcsOrigin,
 };
 use hsmworks_app::geometry::{quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
-use hsmworks_app::operation::{GeoSel, OpParams, SrcRef};
+use hsmworks_app::operation::{FeatureSel, GeoSel, OpParams, SrcRef};
 use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
@@ -339,14 +339,34 @@ pub enum DragMode {
     Pan,
 }
 
-/// The facet under the cursor, from the viewport hover raycast: the named
-/// entity and the facet index the pick resolved (into `model::facets_of`'s
-/// order for that entity). Ephemeral view state, not a command (AGENTS.md)
-/// - it only drives the screen-space edge highlight, never selection.
+/// What a viewport click selects. Transient view state - the mode
+/// itself is not undoable; what the click does with it is (a pick in
+/// Face/Edge mode queues `CommandKind::SetOperationGeometry`). The
+/// same rule `wcs_ui.pick_anchor` follows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GeoPick {
+    /// Whole entities: click raycasts to a facet and selects the model.
+    Model,
+    /// One planar face of a feature: click raycasts, then maps the facet
+    /// to its feature face id.
+    Face,
+    /// One tangent-continuous edge chain: click finds the nearest visible
+    /// feature edge in screen space (Alt narrows it to that single
+    /// segment). Falls back to Face behavior when nothing is close.
+    Edge,
+}
+
+/// The thing under the cursor, from the viewport hover pass: the named
+/// entity, the facet index the raycast resolved (into `model::facets_of`'s
+/// order for that entity), and - in Face/Edge pick mode - the feature the
+/// hover resolves to, so the highlight draws the face boundary loops or the
+/// chain instead of one triangle. Ephemeral view state, not a command
+/// (AGENTS.md) - it only drives the screen-space highlight, never selection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HoverHit {
     pub entity: String,
     pub facet: usize,
+    pub feature: Option<FeatureSel>,
 }
 
 pub struct State {
@@ -418,6 +438,10 @@ pub struct State {
     pub wcs_ui: WcsUi,
     /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
     pub op_ui: OpUi,
+    /// Viewport click routing: whole models vs feature faces vs edge
+    /// chains. Ephemeral view state like the drafts above - the mode is
+    /// set from the Operations page radio row, never saved or undone.
+    pub geo_pick: GeoPick,
     pub tool_ui: ToolUi,
     /// `doc_version` the setup drafts were last refetched at.
     ui_synced_doc: u64,
@@ -514,6 +538,7 @@ impl State {
             drag: None,
             hover: None,
             viewport_hot: false,
+            geo_pick: GeoPick::Model,
             icons: None,
             hidden_models: Vec::new(),
             hidden_paths: Vec::new(),
