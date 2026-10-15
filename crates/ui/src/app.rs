@@ -73,7 +73,7 @@ struct App {
     /// pane widgets that don't bump `doc_version`, so it gates a rebuild of
     /// its own (pick-mode markers would otherwise lag a click by a
     /// document edit).
-    draft_synced: [u64; 8],
+    draft_synced: [u64; 10],
     /// Last cursor position in logical px; delta base for viewport drags.
     cursor_pos: [f32; 2],
     /// Left-press origin, so release can tell a click (pick) from a drag.
@@ -102,7 +102,7 @@ impl App {
             config: None,
             doc_synced: u64::MAX,
             sel_synced: u64::MAX,
-            draft_synced: [0; 8],
+            draft_synced: [0; 10],
             cursor_pos: [0.0, 0.0],
             left_press: None,
             mods: ModifiersState::default(),
@@ -637,16 +637,7 @@ impl App {
             eprintln!("external texture update: {err}");
         }
 
-        let draft_key = [
-            u64::from(state.wcs_ui.pick_anchor),
-            state.wcs_ui.anchor_source as u64,
-            state.wcs_ui.anchor_z as u64,
-            state.wcs_ui.anchor_xy as u64,
-            u64::from(state.show_world_axes),
-            u64::from(state.show_all_paths),
-            fold_names(&state.hidden_models),
-            fold_names(&state.hidden_paths),
-        ];
+        let draft_key = draft_key(state);
         if state.doc_version != *doc_synced || sel_dirty || draft_key != *draft_synced {
             let parts = collect_parts(state);
             view.set_document(device, queue, &parts);
@@ -806,6 +797,57 @@ const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
 /// Reference-geometry overlay: world origin axes (dimmed) plus one colored
 /// triad per defined work offset. Length scales with the model extent, with
 /// a floor so an empty or tiny document still shows orientation.
+/// Fold of every height a draft parameter stores, kind included (switching
+/// kinds at coincident numbers still moves the key). FNV-style mix, our
+/// own one-liner; the values are not hashed for equality, only churned.
+fn fold_heights(params: &operation::OpParams) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    let mut eat = |v: f64| {
+        h ^= v.to_bits();
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    eat(match params {
+        operation::OpParams::Face { .. } => 0,
+        operation::OpParams::Contour { .. } => 1,
+        operation::OpParams::Pocket { .. } => 2,
+        operation::OpParams::Slot { .. } => 3,
+        operation::OpParams::Trace { .. } => 4,
+    } as f64);
+    eat(params.clearance_z());
+    eat(params.region_z());
+    match params {
+        operation::OpParams::Face { .. } => {}
+        operation::OpParams::Contour { retract_z, bottom_z, .. } => {
+            eat(*retract_z);
+            eat(*bottom_z);
+        }
+        operation::OpParams::Pocket { bottom_z, .. }
+        | operation::OpParams::Slot { bottom_z, .. }
+        | operation::OpParams::Trace { bottom_z, .. } => eat(*bottom_z),
+    }
+    h
+}
+
+/// The draft-state half of the overlay rebuild gate: everything
+/// `collect_overlay` reads that no document version covers. The height
+/// planes and their labels read the open operation's draft heights and
+/// tool, so those join the key - a spinbox edit walks its plane live,
+/// without touching the document.
+fn draft_key(state: &State) -> [u64; 10] {
+    [
+        u64::from(state.wcs_ui.pick_anchor),
+        state.wcs_ui.anchor_source as u64,
+        state.wcs_ui.anchor_z as u64,
+        state.wcs_ui.anchor_xy as u64,
+        u64::from(state.show_world_axes),
+        u64::from(state.show_all_paths),
+        fold_names(&state.hidden_models),
+        fold_names(&state.hidden_paths),
+        fold_heights(&state.op_ui.params),
+        fold_names(&[state.op_ui.name.clone(), state.op_ui.tool.clone()]),
+    ]
+}
+
 fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
     let len = gizmo_len(state);
     let mut out: Vec<[f32; 6]> = Vec::new();
@@ -848,6 +890,7 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
     }
     out.extend(toolpath_lines(state));
     out.extend(region_lines(state));
+    out.extend(height_plane_lines(state));
     out.extend(selection_feature_lines(state));
     capped(out)
 }
@@ -861,7 +904,6 @@ fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
 /// operation whose source vanished shows nothing rather than a stale
 /// outline.
 pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
-    const REGION_RGB: [f32; 3] = [0.95, 0.58, 0.15];
     let mut out = Vec::new();
     for (_, entity) in model::named_entities(&state.world) {
         if !model::is_operation(&state.world, &entity)
@@ -894,6 +936,160 @@ pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
                 let b = Point3::new(w[1].x, w[1].y, z);
                 push_line(&mut out, a, b, REGION_RGB);
             }
+        }
+    }
+    out
+}
+
+/// The region outline's orange, shared by `region_lines` and the height
+/// planes so the "what gets cut" level reads as one thing.
+const REGION_RGB: [f32; 3] = [0.95, 0.58, 0.15];
+/// Safety level (our own palette): the clearance plane everything starts
+/// above, and - Contour only - the shorter retract between passes.
+const CLEARANCE_RGB: [f32; 3] = [0.55, 0.60, 0.68];
+const RETRACT_RGB: [f32; 3] = [0.40, 0.70, 0.95];
+/// The depth the stock is cut to: red, unmistakably the low water mark.
+const CUT_RGB: [f32; 3] = [0.90, 0.35, 0.30];
+
+/// One horizontal level of the open operation's DRAFT parameters: a plane
+/// to mark in the viewport, with the corner label it carries.
+pub(crate) struct HeightPlane {
+    pub z: f64,
+    pub rgb: [f32; 3],
+    pub name: &'static str,
+    /// Which rectangle corner carries the label - 0 NE, 1 NW, 2 SE, 3 SW,
+    /// distinct per kind so simultaneous labels never stack.
+    pub corner: usize,
+    /// The region plane's rectangle is dropped where `region_lines`
+    /// already outlines the region at the same level: the outline IS the
+    /// plane, and a coincident double would only thicken one line.
+    pub skip_rect: bool,
+}
+
+/// The open operation's height planes, read from the draft parameters -
+/// what the spinboxes point at right now, not what was last applied, so
+/// spinning Clearance visibly walks the plane before Apply commits it.
+/// No operation open (empty or unresolved name): no planes, ever.
+pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
+    if state.op_ui.name.is_empty() {
+        return Vec::new();
+    }
+    let Some(entity) = model::find_by_name(&state.world, &state.op_ui.name) else {
+        return Vec::new();
+    };
+    let Some(op) = model::operation_of(&state.world, &entity) else {
+        return Vec::new();
+    };
+    let draft = &state.op_ui.params;
+    // Where the orange outline actually stands: the persisted level, and
+    // only if the operation's source yields region geometry there.
+    let region_shown = op.params.region_z() == draft.region_z()
+        && (operation::region_of(&state.world, &op).is_some()
+            || !operation::chains_of(&state.world, &op).is_empty());
+    let mut out = vec![HeightPlane {
+        z: draft.clearance_z(),
+        rgb: CLEARANCE_RGB,
+        name: "Clearance",
+        corner: 0,
+        skip_rect: false,
+    }];
+    // Retract is a Contour idea of a level: the other kinds do not store
+    // one, so there is nothing honest to draw.
+    if let operation::OpParams::Contour { retract_z, .. } = draft {
+        out.push(HeightPlane {
+            z: *retract_z,
+            rgb: RETRACT_RGB,
+            name: "Retract",
+            corner: 1,
+            skip_rect: false,
+        });
+    }
+    match draft {
+        // Face skims one plane; for the depth kinds, Top is the section
+        // the paths run in and Bottom the last step down.
+        operation::OpParams::Face { cut_z, .. } => out.push(HeightPlane {
+            z: *cut_z,
+            rgb: CUT_RGB,
+            name: "Cut",
+            corner: 2,
+            skip_rect: region_shown,
+        }),
+        operation::OpParams::Contour { top_z, bottom_z, .. }
+        | operation::OpParams::Pocket { top_z, bottom_z, .. }
+        | operation::OpParams::Slot { top_z, bottom_z, .. }
+        | operation::OpParams::Trace { top_z, bottom_z, .. } => {
+            out.push(HeightPlane {
+                z: *top_z,
+                rgb: REGION_RGB,
+                name: "Top",
+                corner: 2,
+                skip_rect: region_shown,
+            });
+            out.push(HeightPlane {
+                z: *bottom_z,
+                rgb: CUT_RGB,
+                name: "Bottom",
+                corner: 3,
+                skip_rect: false,
+            });
+        }
+    }
+    out.retain(|p| p.z.is_finite());
+    out
+}
+
+/// The planes' XY reach: the stock box (the model bounds when there is no
+/// stock), padded outward past the tool so a rectangle always sits clear
+/// of the material. Nothing resolvable, or a non-finite pad, leaves the
+/// planes unplaced - never a rectangle of nonsense extent.
+fn plane_rect(state: &State) -> Option<[f64; 4]> {
+    let b = model::stock_world_aabb(&state.world).or_else(|| model::solid_world_aabb(&state.world))?;
+    let pad = model::find_by_name(&state.world, &state.op_ui.tool)
+        .and_then(|e| model::tool_of(&state.world, &e))
+        .map(|t| t.diameter)
+        .filter(|d| d.is_finite() && *d > 0.0)
+        .map_or(0.0, |d| d * 0.5 + 2.0);
+    let rect = [b.min.x - pad, b.min.y - pad, b.max.x + pad, b.max.y + pad];
+    rect.iter()
+        .all(|v| v.is_finite())
+        .then_some(rect)
+}
+
+fn plane_corner(rect: [f64; 4], corner: usize) -> (f64, f64) {
+    let [x0, y0, x1, y1] = rect;
+    match corner {
+        0 => (x1, y1),
+        1 => (x0, y1),
+        2 => (x1, y0),
+        _ => (x0, y0),
+    }
+}
+
+/// The height planes as overlay geometry: one rectangle each, at the
+/// plane's level. Under the same document/draft gates as the rest of
+/// `collect_overlay` - `draft_key` folds the draft heights, so a spinbox
+/// edit walks its plane without touching the document.
+pub(crate) fn height_plane_lines(state: &State) -> Vec<[f32; 6]> {
+    let planes = height_planes(state);
+    if planes.iter().all(|p| p.skip_rect) {
+        return Vec::new();
+    }
+    let Some(rect) = plane_rect(state) else {
+        return Vec::new();
+    };
+    let [x0, y0, x1, y1] = rect;
+    let ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    let mut out = Vec::new();
+    for p in planes.iter().filter(|p| !p.skip_rect) {
+        for i in 0..4 {
+            let a = ring[i];
+            let b = ring[(i + 1) % 4];
+            push_line(
+                &mut out,
+                Point3::new(a[0], a[1], p.z),
+                Point3::new(b[0], b[1], p.z),
+                p.rgb,
+            );
         }
     }
     out
@@ -1478,10 +1674,25 @@ pub(crate) fn project_uv(mvp: &[[f32; 4]; 4], p: [f64; 3]) -> Option<[f32; 2]> {
 /// tip gets its letter, projected through the same camera math. Entries are
 /// (uv within the viewport image, linear rgb, text); tips behind the camera
 /// or at degenerate `w` are skipped.
-pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 3], &'static str)> {
+pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32; 3], String)> {
     let len = gizmo_len(state);
     let mvp = state.cam.mvp(aspect);
     let mut out = Vec::new();
+    // Corner tags for the height planes - "Clearance 25.00" - one per
+    // plane, including the region plane when the orange outline carries
+    // it. Screen-space like the axis letters, so they track the camera
+    // for free and never rebuild the 3D buffer.
+    let planes = height_planes(state);
+    if !planes.is_empty()
+        && let Some(rect) = plane_rect(state)
+    {
+        for p in &planes {
+            let (cx, cy) = plane_corner(rect, p.corner);
+            if let Some(uv) = project_uv(&mvp, [cx, cy, p.z]) {
+                out.push((uv, p.rgb, format!("{} {:.2}", p.name, p.z)));
+            }
+        }
+    }
     for gizmo in gizmos(state) {
         let base = Point3::new(gizmo.pos[0], gizmo.pos[1], gizmo.pos[2]);
         for (axis, (rgb, dir)) in AXES.iter().enumerate() {
@@ -1502,7 +1713,7 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
             } else {
                 *rgb
             };
-            out.push((uv, c, AXIS_NAMES[axis]));
+            out.push((uv, c, AXIS_NAMES[axis].to_string()));
         }
     }
     out
@@ -2530,5 +2741,175 @@ mod feature_pick_tests {
             .expect("a stock rim edge visible from the default camera");
         let (name, _) = edge_nearest(&state, mid, PICK_EDGE_PX).expect("the stock's own edge");
         assert_eq!(name, STOCK_NAME, "the stock's top is pickable geometry, no tree needed");
+    }
+}
+
+#[cfg(test)]
+mod height_plane_tests {
+    //! M1.5.1 step 3: the viewport answers "where are the heights". The
+    //! planes read the OPEN operation's DRAFT levels - the spinbox value,
+    //! not the applied one - and the region plane defers to `region_lines`
+    //! wherever the orange outline already stands at the same level, so a
+    //! plane never draws twice and never silently vanishes. No op open, no
+    //! planes; a source that bounds nothing still gets its levels marked.
+
+    use super::*;
+    use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
+    use hsmworks_app::geometry::cube;
+    use hsmworks_app::machining2d::{Lead, PocketStrategy};
+    use hsmworks_app::operation::{OpParams, SrcRef};
+    use hsmworks_app::stock::StockShape;
+    use hsmworks_app::tools::catalog;
+
+    fn contour(clearance_z: f64) -> OpParams {
+        OpParams::Contour {
+            stock_to_leave: 0.0,
+            clearance_z,
+            retract_z: 15.0,
+            top_z: 10.0,
+            bottom_z: 2.0,
+            stepdown: 2.0,
+            feed: 800.0,
+            plunge_feed: 200.0,
+            climb: true,
+            lead: Lead::None,
+            tolerance: 0.01,
+            tab_count: 0,
+            tab_width: 0.0,
+            tab_height: 0.0,
+        }
+    }
+
+    fn pocket() -> OpParams {
+        OpParams::Pocket {
+            stepover: 3.0,
+            stock_to_leave: 0.0,
+            clearance_z: 25.0,
+            top_z: 10.0,
+            bottom_z: 2.0,
+            stepdown: 2.0,
+            feed: 800.0,
+            plunge_feed: 200.0,
+            climb: true,
+            strategy: PocketStrategy::Zigzag,
+        }
+    }
+
+    /// Stock, a tool, a part (so a fallback extent exists even stockless)
+    /// and one operation - with the pane draft mirroring it exactly, the
+    /// way sync_ops_ui leaves it when the op is opened.
+    fn state_with(name: &str, params: OpParams) -> State {
+        let mut state = State::new();
+        state.pending.push_back(CommandKind::SetStock {
+            shape: StockShape::Box { dx: 40.0, dy: 40.0, dz: 20.0 },
+            pos: [0.0, 0.0, 0.0],
+            yaw_deg: 0.0,
+        });
+        state.drain_actions();
+        let em = catalog()
+            .into_iter()
+            .find(|(n, _)| *n == "EM-0400-2FL")
+            .map(|(_, t)| t)
+            .expect("catalog entry");
+        state
+            .history
+            .execute(&state.world, AddTool::new(&state.world, "EM-0400-2FL", em).expect("tool"));
+        state.history.execute(
+            &state.world,
+            ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+        );
+        state.history.execute(
+            &state.world,
+            CreateOperation::new(&state.world, name, "EM-0400-2FL", SrcRef::Stock, params.clone())
+                .expect("operation"),
+        );
+        state.op_ui.name = name.into();
+        state.op_ui.tool = "EM-0400-2FL".into();
+        state.op_ui.params = params;
+        state
+    }
+
+    /// Vertices at world height `z` painted exactly `rgb` - rectangle
+    /// corners are the only geometry that carries plane colors.
+    fn count_at(lines: &[[f32; 6]], z: f64, rgb: [f32; 3]) -> usize {
+        lines
+            .iter()
+            .filter(|v| {
+                (f64::from(v[2]) - z).abs() < 1e-3
+                    && (0..3).all(|k| (v[3 + k] - rgb[k]).abs() < 1e-3)
+            })
+            .count()
+    }
+
+    #[test]
+    fn height_planes_draw_for_open_contour_only_where_defined() {
+        let state = state_with("C1", contour(25.0));
+        let lines = height_plane_lines(&state);
+        assert_eq!(count_at(&lines, 25.0, CLEARANCE_RGB), 8, "clearance rectangle");
+        assert_eq!(count_at(&lines, 15.0, RETRACT_RGB), 8, "retract is a Contour level");
+        assert_eq!(count_at(&lines, 2.0, CUT_RGB), 8, "bottom depth");
+        assert_eq!(
+            count_at(&lines, 10.0, REGION_RGB),
+            0,
+            "the region outline already stands at top_z - never a coincident double"
+        );
+
+        // Pocket stores no retract: nothing honest to draw at 15.
+        let pocket = state_with("P1", pocket());
+        let plines = height_plane_lines(&pocket);
+        assert_eq!(count_at(&plines, 25.0, CLEARANCE_RGB), 8);
+        assert_eq!(count_at(&plines, 15.0, RETRACT_RGB), 0, "no retract level exists");
+        assert_eq!(count_at(&plines, 2.0, CUT_RGB), 8);
+
+        // Every drawn plane carries its corner label - the outline-borne
+        // Top included, which is exactly the one with no rectangle.
+        let texts: Vec<String> =
+            overlay_labels(&state, 800.0 / 600.0).into_iter().map(|(_, _, t)| t).collect();
+        for want in ["Clearance 25.00", "Retract 15.00", "Top 10.00", "Bottom 2.00"] {
+            assert!(texts.iter().any(|t| t == want), "{want} among {texts:?}");
+        }
+    }
+
+    #[test]
+    fn height_planes_stand_in_when_the_source_bounds_nothing() {
+        let mut state = state_with("C1", contour(25.0));
+        // The hand-test C shape from the other side: an operation whose
+        // source vanished shows no region outline, so the Top rectangle
+        // appears in its orange to mark the level all the same.
+        state.pending.push_back(CommandKind::DeleteByName(STOCK_NAME.into()));
+        state.drain_actions();
+        let lines = height_plane_lines(&state);
+        assert_eq!(count_at(&lines, 10.0, REGION_RGB), 8, "the standing-in rectangle");
+        assert_eq!(count_at(&lines, 25.0, CLEARANCE_RGB), 8, "the rest is unchanged");
+    }
+
+    #[test]
+    fn height_planes_track_draft_edits() {
+        let mut state = state_with("C1", contour(25.0));
+        let before = draft_key(&state);
+        if let OpParams::Contour { clearance_z, .. } = &mut state.op_ui.params {
+            *clearance_z = 30.0;
+        }
+        assert_ne!(draft_key(&state), before, "a spin edit must re-gate the overlay rebuild");
+        let lines = height_plane_lines(&state);
+        assert_eq!(count_at(&lines, 30.0, CLEARANCE_RGB), 8, "the plane moved with the draft");
+        assert_eq!(count_at(&lines, 25.0, CLEARANCE_RGB), 0, "and not half-old");
+    }
+
+    #[test]
+    fn height_planes_gone_when_no_op_open() {
+        let state = State::new();
+        assert!(height_planes(&state).is_empty() && height_plane_lines(&state).is_empty());
+        // A name typed but not an operation: no planes, no phantom labels.
+        let mut typed = state_with("C1", contour(25.0));
+        typed.op_ui.name = "Ghost".into();
+        assert!(height_planes(&typed).is_empty());
+        assert!(height_plane_lines(&typed).is_empty());
+        let texts: Vec<String> =
+            overlay_labels(&typed, 800.0 / 600.0).into_iter().map(|(_, _, t)| t).collect();
+        assert!(
+            !texts.iter().any(|t| t.contains("Clearance")),
+            "nothing open labels nothing: {texts:?}"
+        );
     }
 }

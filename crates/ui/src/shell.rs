@@ -271,7 +271,7 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
                 let dl = ui.get_window_draw_list();
                 for (uv, rgb, text) in labels {
                     let pos = [rx0 + uv[0] * rw, ry0 + uv[1] * rh];
-                    dl.add_text(pos, [rgb[0], rgb[1], rgb[2], 1.0], text);
+                    dl.add_text(pos, [rgb[0], rgb[1], rgb[2], 1.0], &text);
                 }
                 // The feature under the cursor - face boundary loops or an
                 // edge chain - outlined in screen space: the hover channel
