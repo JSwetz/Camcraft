@@ -154,6 +154,17 @@ impl EditOperationParams {
         };
         let prev = model::operation_of(world, &entity)
             .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))?;
+        // The `OpParams` variant IS the operation's kind, so an edit that
+        // carries a different variant would retype the operation in place -
+        // replacing one kind's work with another's and reading as the op
+        // vanishing from the list. The pane locks its Type control to the
+        // creation form; this is the defense-in-depth refusal behind it.
+        if params.kind() != prev.params.kind() {
+            return Err(CommandError::Invalid(format!(
+                "'{name}' is a {} operation; change its kind by adding a new operation",
+                prev.params.kind()
+            )));
+        }
         if !params.is_sane() {
             return Err(CommandError::Invalid(format!(
                 "operation parameters are not usable for a {} operation",

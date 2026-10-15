@@ -100,15 +100,24 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         .and_then(|e| model::operation_of(&state.world, &e));
     let exists = live.is_some();
 
-    // Type: swapping the draft's variant, carrying over the shared numbers.
-    let mut kind_idx = kind_index(state.op_ui.params.kind());
+    // Type: an operation's kind is fixed at creation. A live operation
+    // shows its kind as a label - swapping the variant in place replaced
+    // one kind's work with another's and read as the op vanishing from
+    // the list (hand-test report). Changing kinds means adding a new
+    // operation. The combo survives on the creation form, where it swaps
+    // the draft's variant and carries over the shared numbers.
     form::field(ui, "Type");
-    if ui.combo("##op_kind", &mut kind_idx, TYPES.as_slice(), |t| {
-        Cow::Borrowed(*t)
-    }) {
-        let top = stock_top(&state.world);
-        let cur = state.op_ui.params.clone();
-        state.op_ui.params = retype(&cur, kind_idx.min(4), top);
+    if exists {
+        ui.text(TYPES[kind_index(state.op_ui.params.kind())]);
+    } else {
+        let mut kind_idx = kind_index(state.op_ui.params.kind());
+        if ui.combo("##op_kind", &mut kind_idx, TYPES.as_slice(), |t| {
+            Cow::Borrowed(*t)
+        }) {
+            let top = stock_top(&state.world);
+            let cur = state.op_ui.params.clone();
+            state.op_ui.params = retype(&cur, kind_idx.min(4), top);
+        }
     }
 
     // Tool: an existing operation retargets immediately (a discrete event,
@@ -320,7 +329,11 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         }
         ui.same_line();
         if ui.button("Generate") {
-            state.pending.push_back(CommandKind::GenerateOperation(target.clone()));
+            // One click, two honest commands: an unsaved draft is applied
+            // first, so the path always comes from what the panel shows -
+            // generating committed parameters under a visibly edited form
+            // was the silent-wrong-answer bug. Arm on State, like Apply.
+            state.generate_operation(&target);
         }
         ui.same_line();
         if ui.button("Delete##op") {

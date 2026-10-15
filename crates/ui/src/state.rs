@@ -743,9 +743,21 @@ impl State {
                 self.op_ui = OpUi::from_op(&name, &op);
             }
         } else if identity_changed {
-            let n = self.operation_count() + 1;
+            // Number the prefilled name past the *taken* names, not just
+            // past the count - a document with holes in its numbering (a
+            // deleted middle op) would otherwise prefill one that is in
+            // use and make Add look dead. Same loop the ribbon quick-add
+            // walks (`actions::add_operation`).
+            let mut n = self.operation_count() + 1;
+            let name = loop {
+                let candidate = format!("Operation{n}");
+                if model::find_by_name(&self.world, &candidate).is_none() {
+                    break candidate;
+                }
+                n += 1;
+            };
             self.op_ui = OpUi {
-                name: format!("Operation{n}"),
+                name,
                 tool: self.tool_names().pop().unwrap_or_default(),
                 ..OpUi::default()
             };
@@ -771,6 +783,27 @@ impl State {
                 params: self.op_ui.params.clone(),
             });
         }
+    }
+
+    /// Arm the Generate click (the pane's button and the menu's item for
+    /// the selected operation both route here): a draft that differs from
+    /// the operation's committed parameters is applied first - one click,
+    /// two honest commands - so the path is never generated from stale
+    /// numbers while the panel shows edited ones. A draft that mirrors a
+    /// different page (another op's mirror, the new-op form) never flushes
+    /// into this operation; it generates the committed parameters alone.
+    pub fn generate_operation(&mut self, name: &str) {
+        let dirty = name == self.op_ui.name
+            && model::find_by_name(&self.world, name)
+                .and_then(|e| model::operation_of(&self.world, &e))
+                .is_some_and(|op| op.params != self.op_ui.params);
+        if dirty {
+            self.pending.push_back(CommandKind::EditOperationParams {
+                name: name.to_string(),
+                params: self.op_ui.params.clone(),
+            });
+        }
+        self.pending.push_back(CommandKind::GenerateOperation(name.to_string()));
     }
 
     /// The Geometry section's list: one row per pick-list entry, in order,

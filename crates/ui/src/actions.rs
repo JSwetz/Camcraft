@@ -100,10 +100,11 @@ pub(crate) fn add_operation(state: &mut State, kind: usize) {
 }
 
 /// Generate the selected operation, if any - surfaces gate the menu item
-/// on the same question.
+/// on the same question. Routes through the same arm as the pane button,
+/// so a visible dirty draft is applied before generating from here too.
 pub(crate) fn generate_selected(state: &mut State) {
     if let Some(name) = state.selected_operation() {
-        state.pending.push_back(CommandKind::GenerateOperation(name));
+        state.generate_operation(&name);
     }
 }
 

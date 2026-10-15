@@ -99,6 +99,26 @@ fn cache(world: &World, name: &str) -> Option<Toolpath> {
 }
 
 #[test]
+fn edit_operation_params_refuses_a_type_change() {
+    let (world, _history) = face_world();
+    // The `OpParams` variant IS the operation's kind: an "edit" carrying a
+    // foreign variant would retype the operation in place - the hand-test
+    // report's "generating this operation replaced the face operation".
+    // The command refuses it by name instead of writing the ghost.
+    let Err(err) = EditOperationParams::new(&world, "Face1", contour_params()) else {
+        panic!("a kind change is not a parameter edit and must be refused");
+    };
+    assert!(matches!(err, CommandError::Invalid(_)), "{err:?}");
+    assert!(err.to_string().contains("new operation"), "{err}");
+    // Nothing was written: the operation keeps its exact params and its
+    // fresh stamp - a refusal that silently half-applied would be worse
+    // than the retype it replaces.
+    assert_eq!(status(&world, "Face1"), OpStatus::Ok);
+    let e = model::find_by_name(&world, "Face1").expect("entity");
+    assert_eq!(model::operation_of(&world, &e).expect("op").params, face_params());
+}
+
+#[test]
 fn tools_are_entities_and_undoable() {
     let world = new_world();
     let mut history = History::default();

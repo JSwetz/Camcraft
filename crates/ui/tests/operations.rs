@@ -9,7 +9,8 @@ use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::STOCK_NAME;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
-use hsmworks_ui::state::{CommandKind, ErrorScope, State, ToolUi, UiTarget};
+use hsmworks_app::machining2d::Lead;
+use hsmworks_ui::state::{CommandKind, ErrorScope, OpUi, State, ToolUi, UiTarget};
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -746,6 +747,142 @@ fn box_run_pick(state: &State, name: &str) -> GeoSel {
         }
     }
     panic!("a box has horizontal edges to pick");
+}
+
+/// A Contour parameter set with a different variant than the face fixture
+/// carries - the draft a retype would have produced (M1.5.2 step 1: the
+/// Type control no longer builds these over a live operation, but the
+/// refusal must stand behind the pane).
+fn contour_draft() -> OpParams {
+    OpParams::Contour {
+        stock_to_leave: 0.0,
+        clearance_z: 25.0,
+        retract_z: 30.0,
+        top_z: 20.0,
+        bottom_z: 15.0,
+        stepdown: 5.0,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+        lead: Lead::Linear { length: 8.0 },
+        tolerance: 0.01,
+        tab_count: 0,
+        tab_width: 5.0,
+        tab_height: 1.0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M1.5.2 step 1: an operation's kind is fixed at creation - the Type combo
+// belongs to the creation form, and anything that still reaches the command
+// with a foreign variant is refused by name; Generate never runs under a
+// dirty draft; and the creation form's prefilled name lands free even when
+// the document's numbering has holes in it.
+
+#[test]
+fn retyping_a_live_operation_is_refused_not_silent() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    // Whatever reached the queue (a stale pane, some future surface), the
+    // command layer refuses: the variant is the kind, kinds do not swap.
+    state.pending.push_back(CommandKind::EditOperationParams {
+        name: "Face1".into(),
+        params: contour_draft(),
+    });
+    state.drain_actions();
+    assert!(state.status.starts_with("parameters not updated"), "{:?}", state.status);
+    assert!(
+        state.error_for(ErrorScope::Operation).is_some_and(|m| m.contains("new operation")),
+        "the refusal names the way to change kind: {:?}",
+        state.error_for(ErrorScope::Operation)
+    );
+    assert_eq!(stored_params(&state, "Face1"), face_params(), "the operation kept its kind");
+}
+
+#[test]
+fn generate_flushes_a_dirty_draft_before_generating() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    part_and_target(&mut state);
+    state.pending.push_back(CommandKind::GenerateOperation("Face1".into()));
+    state.drain_actions();
+    assert_eq!(status(&state, "Face1"), OpStatus::Ok);
+
+    // Spinbox typing the frame has not Applied: the panel shows a new cut
+    // height while the operation still holds the old one. Generating under
+    // that draft used to cut the old numbers silently.
+    state.op_ui.params = OpParams::Face {
+        stepover: 3.0,
+        clearance_z: 25.0,
+        cut_z: 18.0,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    };
+    state.generate_operation("Face1");
+    assert_eq!(state.pending.len(), 2, "the edit rides the click, then the generate");
+    state.drain_actions();
+    assert!(state.status.starts_with("generated Face1:"), "{:?}", state.status);
+    assert!(
+        matches!(stored_params(&state, "Face1"),
+            OpParams::Face { cut_z, .. } if (cut_z - 18.0).abs() < 1e-12),
+        "the path came from what the panel showed"
+    );
+    assert_eq!(status(&state, "Face1"), OpStatus::Ok, "fresh, not stale: it matched the edit");
+
+    // A clean draft flushes nothing - one command, no pointless history.
+    state.generate_operation("Face1");
+    assert_eq!(state.pending.len(), 1, "nothing to apply first");
+    state.drain_actions();
+}
+
+#[test]
+fn generate_never_flushes_a_draft_from_another_page() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    // The new-op form is open (its draft names no live operation): the
+    // menu's Generate on the selected operation must not pour the form's
+    // numbers into it. The draft's name is what decides.
+    state.op_ui = OpUi {
+        name: "Operation9".into(),
+        tool: "EM-0400-2FL".into(),
+        ..OpUi::default()
+    };
+    state.pending.push_back(CommandKind::Select(Some("Face1".into())));
+    state.drain_actions();
+    state.generate_operation("Face1");
+    assert_eq!(state.pending.len(), 1, "only the generation rides the queue");
+    state.drain_actions();
+    assert_eq!(stored_params(&state, "Face1"), face_params(), "the form's draft stayed out of it");
+}
+
+#[test]
+fn new_operation_name_prefill_skips_taken_names() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    // Numbering with a hole that a high name fills: count+1 (2 operations)
+    // would prefill the taken "Operation3" and make Add look dead.
+    for name in ["Operation1", "Operation3"] {
+        state.pending.push_back(CommandKind::CreateOperation {
+            name: name.into(),
+            tool: "EM-0400-2FL".into(),
+            src: SrcRef::Stock,
+            params: face_params(),
+        });
+    }
+    state.drain_actions();
+    // Mirror one op into the draft, then fall back to the creation form:
+    // the prefill arm runs on that identity change.
+    state.ui_target = UiTarget::Operation("Operation1".into());
+    state.sync_ops_ui();
+    assert_eq!(state.op_ui.name, "Operation1");
+    state.ui_target = UiTarget::None;
+    state.sync_ops_ui();
+    assert_eq!(state.op_ui.name, "Operation4", "numbered past the taken names, not the count");
+    assert!(model::find_by_name(&state.world, &state.op_ui.name).is_none());
 }
 
 #[test]
