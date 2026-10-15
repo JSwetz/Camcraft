@@ -982,8 +982,10 @@ fn feature_of_facet(state: &State, entity: &str, facet: usize) -> Option<Feature
 /// anyway - saying so is the honest feedback). The entity name rides along
 /// in the pick, so selecting the stock's top face needs no tree selection.
 /// A pure State write: it queues, the command validates, undo is the
-/// history's job.
-fn queue_feature_pick(state: &mut State, pick: GeoSel, append: bool) {
+/// history's job. The Geometry section's chip buttons queue the same
+/// commands from the other end - viewport and chips are two entrances to
+/// one list, pinned together in `tests/operations.rs`.
+pub fn queue_feature_pick(state: &mut State, pick: GeoSel, append: bool) {
     let name = state.op_ui.name.clone();
     if name.is_empty() {
         state.status = String::from("open an operation first - geometry picks fill the open one");

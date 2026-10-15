@@ -170,7 +170,12 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         _ => 0,
     };
     form::field(ui, "Source");
-    if ui.combo("##op_src", &mut s_idx, src_items.as_slice(), |s| {
+    if state.op_ui.src_kind == 2 {
+        // Feature picks are not a choice this combo could express, and
+        // resting it on "Stock" would lie about the operation. The
+        // Geometry section below owns the source; Clear hands it back.
+        ui.text("Feature picks");
+    } else if ui.combo("##op_src", &mut s_idx, src_items.as_slice(), |s| {
         Cow::Borrowed(s.as_str())
     }) {
         let src = if s_idx == 0 {
@@ -192,11 +197,15 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         }
     }
 
-    // Viewport pick mode: what a click in the 3D view selects. Transient
-    // view state like the drafts this page edits - the mode itself is not
-    // undoable; what a Face/Edge click changes is (it queues a geometry
-    // pick for this operation, Ctrl adds to the list, Alt in Edge mode
-    // narrows a chain to the one segment under the cursor).
+    // Geometry: the boundary this operation machines, and the mode that
+    // fills it. Between Source and Parameters, the shape of reference 04.
+    ui.separator();
+    ui.text("Geometry");
+    // Viewport pick mode - transient view state like the drafts this page
+    // edits: the mode itself is not undoable; what a Face/Edge click
+    // changes is (it queues a geometry pick for this operation, Ctrl adds
+    // to the list, Alt in Edge mode narrows a chain to the one segment
+    // under the cursor).
     ui.text("Click selects:");
     ui.same_line();
     let mut pick_mode = match state.geo_pick {
@@ -214,6 +223,58 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         2 => GeoPick::Edge,
         _ => GeoPick::Model,
     };
+    ui.text_wrapped("Click in the viewport - Ctrl adds; Alt in Edge mode takes one edge.");
+    if state.op_ui.src_kind == 2 {
+        // One chip per pick, in list order; each row ends in the x that
+        // takes it out. Removal queues the reduced list (the world's
+        // order, mirrored - never a re-sort), and the last chip leaving
+        // reverts the source to Stock: an empty selection is not a
+        // thing SrcRef can hold, and never was.
+        let chips = state.geo_chips();
+        for (i, chip) in chips.iter().enumerate() {
+            if i > 0 {
+                let avail = ui.content_region_avail()[0];
+                let need = ui.calc_text_size(chip.label.as_str())[0] + 26.0;
+                if avail < need {
+                    ui.new_line();
+                } else {
+                    ui.same_line();
+                }
+            }
+            if chip.missing {
+                ui.text_colored([1.0, 0.72, 0.20, 1.0], &chip.label);
+            } else {
+                ui.text(&chip.label);
+            }
+            ui.same_line();
+            let del = format!("×##geo_del_{i}");
+            if ui.small_button(&del) {
+                let mut rest = state.op_ui.geo.clone();
+                rest.remove(i);
+                state.pending.push_back(if rest.is_empty() {
+                    CommandKind::EditOperationLinks {
+                        name: target.clone(),
+                        tool: None,
+                        src: Some(SrcRef::Stock),
+                    }
+                } else {
+                    CommandKind::SetOperationGeometry { name: target.clone(), items: rest }
+                });
+            }
+        }
+        ui.same_line();
+        if ui.button("Clear##geo") {
+            state.pending.push_back(CommandKind::EditOperationLinks {
+                name: target.clone(),
+                tool: None,
+                src: Some(SrcRef::Stock),
+            });
+        }
+    } else if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
+        ui.text_wrapped(format!("Whole of '{}' - the first pick replaces this.", state.op_ui.src_name));
+    } else {
+        ui.text_wrapped("Whole stock contour (default) - picks bound the operation.");
+    }
 
     // Status, cached-path summary and verification warnings.
     if exists

@@ -469,3 +469,163 @@ fn delete_operation_round_trips_through_the_queue() {
     assert_eq!(cache(&state, "Face1"), Some(first), "the cached path rides the undo snapshot");
     assert_eq!(status(&state, "Face1"), OpStatus::Ok);
 }
+
+// ---------------------------------------------------------------------------
+// M1.5 step 7: the Geometry section's chip list, driven through the State
+// seams it rides on - queue_feature_pick (the viewport's entrance) and the
+// CommandKinds the chip buttons queue - and mirrored back by sync_ops_ui.
+// The pane's drawing code itself is the same read-only walk of these.
+
+use hsmworks_app::commands::ImportModel;
+use hsmworks_app::geometry::{cube, feature, Point3};
+use hsmworks_app::operation::{FeatureSel, GeoSel};
+use hsmworks_ui::app::queue_feature_pick;
+
+/// A cube part (so faces and chains exist to pick) with Face1 targeted as
+/// the pane's draft, exactly as selecting it in the browser would.
+fn part_and_target(state: &mut State) {
+    state.history.execute(
+        &state.world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    state.ui_target = UiTarget::Operation("Face1".into());
+    state.sync_ops_ui();
+}
+
+/// The top (or bottom) horizontal planar face of `name` as a pick. Face
+/// normals are sign-canonical, so top and bottom share (0,0,1) and only
+/// the signed offset tells them apart.
+fn face_pick(state: &State, name: &str, top: bool) -> GeoSel {
+    let e = model::find_by_name(&state.world, name).expect("entity");
+    let f = model::features_of(&state.world, &e).expect("features");
+    let mut hs: Vec<_> = f
+        .faces
+        .iter()
+        .filter(|fa| matches!(fa.kind, feature::FaceKind::Planar) && fa.normal[2].abs() > 0.9)
+        .collect();
+    hs.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+    let fa = if top { hs.pop() } else { hs.into_iter().next() }.expect("a horizontal face");
+    GeoSel { entity: name.to_string(), feature: FeatureSel::Face(fa.id) }
+}
+
+/// The first chain of `name` - a box gives twelve open single-edge ones.
+fn chain_pick(state: &State, name: &str) -> GeoSel {
+    let e = model::find_by_name(&state.world, name).expect("entity");
+    let f = model::features_of(&state.world, &e).expect("features");
+    let c = feature::chains(&f).into_iter().next().expect("a box edge");
+    GeoSel { entity: name.to_string(), feature: FeatureSel::Chain(c.id) }
+}
+
+fn src_of(state: &State, name: &str) -> SrcRef {
+    let e = model::find_by_name(&state.world, name).expect("operation entity");
+    model::operation_of(&state.world, &e).expect("operation").src
+}
+
+#[test]
+fn chips_round_trip_clear_restores_stock_and_undo_is_exact() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    part_and_target(&mut state);
+
+    // A plain pick replaces the source; one chip, resolved, named right.
+    let top = face_pick(&state, "part", true);
+    queue_feature_pick(&mut state, top.clone(), false);
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(src_of(&state, "Face1"), SrcRef::Selection(vec![top.clone()]));
+    let chips = state.geo_chips();
+    assert_eq!(chips.len(), 1, "one chip per pick");
+    assert!(!chips[0].missing);
+    assert!(chips[0].label.starts_with("Face part · "), "{}", chips[0].label);
+
+    // Ctrl adds a chain: the list is kind-blind and order-keeping.
+    let chain = chain_pick(&state, "part");
+    queue_feature_pick(&mut state, chain.clone(), true);
+    state.drain_actions();
+    state.sync_ops_ui();
+    let chips = state.geo_chips();
+    assert_eq!(chips.len(), 2);
+    assert!(chips[1].label.starts_with("Chain part · "), "{}", chips[1].label);
+    assert!(chips[1].label.ends_with(" · open"), "a box edge is an open run: {}", chips[1].label);
+
+    // The chip's x queues the reduced list, in the world's order.
+    let mut rest = state.op_ui.geo.clone();
+    rest.remove(0);
+    state.pending.push_back(CommandKind::SetOperationGeometry { name: "Face1".into(), items: rest });
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(src_of(&state, "Face1"), SrcRef::Selection(vec![chain.clone()]));
+    assert_eq!(state.geo_chips().len(), 1);
+
+    // Clear reverts the source - an empty selection is not a thing.
+    state.pending.push_back(CommandKind::EditOperationLinks {
+        name: "Face1".into(),
+        tool: None,
+        src: Some(SrcRef::Stock),
+    });
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(src_of(&state, "Face1"), SrcRef::Stock);
+    assert_eq!(state.op_ui.src_kind, 0, "the Source combo reads Stock again");
+    assert!(state.geo_chips().is_empty());
+
+    // Undo lands the exact pre-Clear list back, order and all.
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(src_of(&state, "Face1"), SrcRef::Selection(vec![chain]));
+    assert_eq!(state.op_ui.src_kind, 2, "kind 2 rides the mirror, not a guess");
+}
+
+#[test]
+fn a_duplicate_pick_queues_nothing() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    part_and_target(&mut state);
+    let top = face_pick(&state, "part", true);
+    queue_feature_pick(&mut state, top.clone(), false);
+    state.drain_actions();
+    state.sync_ops_ui();
+
+    let before = state.pending.len();
+    queue_feature_pick(&mut state, top.clone(), true);
+    assert_eq!(state.pending.len(), before, "the repeat adds no command");
+    assert!(state.status.contains("already selected"), "{}", state.status);
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(src_of(&state, "Face1"), SrcRef::Selection(vec![top]));
+    assert_eq!(state.geo_chips().len(), 1, "and the chip row never doubled");
+}
+
+#[test]
+fn a_missing_model_turns_the_chip_amber_and_undo_restores_it() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    part_and_target(&mut state);
+    let top = face_pick(&state, "part", true);
+    queue_feature_pick(&mut state, top.clone(), false);
+    state.drain_actions();
+    state.sync_ops_ui();
+    let was = state.geo_chips()[0].label.clone();
+
+    // The model goes away under the pick list: stale, not silently gone.
+    state.pending.push_back(CommandKind::DeleteByName("part".into()));
+    state.drain_actions();
+    state.sync_ops_ui();
+    let chips = state.geo_chips();
+    assert_eq!(chips.len(), 1, "the pick survives its model, visibly broken");
+    assert!(chips[0].missing, "amber: {}", chips[0].label);
+    assert!(chips[0].label.ends_with(" · missing"), "{}", chips[0].label);
+
+    // Undo is byte-exact: the model, its features, and the id on them.
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(src_of(&state, "Face1"), SrcRef::Selection(vec![top]));
+    let chips = state.geo_chips();
+    assert!(!chips[0].missing, "the id resolves again: {}", chips[0].label);
+    assert_eq!(chips[0].label, was, "the very same chip, not a new one");
+}

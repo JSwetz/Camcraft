@@ -364,16 +364,19 @@ fn face_params() -> OpParams {
     }
 }
 
-/// Planar top face id of a box mesh placed with +z up.
+/// Planar face whose plane sits highest along +z - the box's top. Face
+/// normals are sign-canonical, so both horizontal faces report (0,0,1)
+/// and only the signed offset tells top from bottom.
 fn top_face(world: &flecs_ecs::prelude::World, name: &str) -> FeatureSel {
     let e = model::find_by_name(world, name).expect("entity exists");
     let f = model::features_of(world, &e).expect("features");
     FeatureSel::Face(
         f.faces
             .iter()
-            .find(|fa| matches!(fa.kind, FaceKind::Planar) && fa.normal[2] > 0.9)
+            .filter(|fa| matches!(fa.kind, FaceKind::Planar) && fa.normal[2].abs() > 0.9)
+            .max_by(|a, b| a.offset.total_cmp(&b.offset))
             .map(|fa| fa.id)
-            .expect("a planar top face"),
+            .expect("a horizontal planar face"),
     )
 }
 

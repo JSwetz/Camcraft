@@ -21,7 +21,7 @@ use hsmworks_app::commands::{
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, SelectEntity,
     SetOperationGeometry, SetStock, SetWcsOrigin,
 };
-use hsmworks_app::geometry::{quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
+use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::operation::{FeatureSel, GeoSel, OpParams, SrcRef};
 use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
@@ -185,10 +185,15 @@ pub struct OpUi {
     pub name: String,
     /// Tool entity the operation cuts with.
     pub tool: String,
-    /// 0 = the stock solid, 1 = a named model (`SrcRef`).
+    /// 0 = the stock solid, 1 = a named model, 2 = feature picks (`SrcRef`).
     pub src_kind: usize,
     /// Model name when `src_kind == 1`.
     pub src_name: String,
+    /// The pick list when `src_kind == 2`, mirrored for the Geometry
+    /// section's chips and for `src` below. Never edited through the pane
+    /// fields: viewport picks and chip removal queue commands, and the
+    /// next sync re-mirrors what the world actually holds.
+    pub geo: Vec<GeoSel>,
     /// The parameter set; the kind the fields show is `params.kind()`.
     pub params: OpParams,
 }
@@ -200,6 +205,7 @@ impl Default for OpUi {
             tool: String::new(),
             src_kind: 0,
             src_name: String::new(),
+            geo: Vec::new(),
             // A facing pass over a small billet: sane numbers until edited,
             // zeros would only be refused by the command layer.
             params: OpParams::Face {
@@ -218,20 +224,21 @@ impl OpUi {
     /// Snapshot an operation component into draft form.
     #[must_use]
     pub fn from_op(name: &str, op: &OperationDef) -> Self {
-        let (src_kind, src_name) = match &op.src {
-            SrcRef::Stock => (0, String::new()),
-            SrcRef::Entity(n) => (1, n.clone()),
-            // The combo cannot express a feature pick - the Geometry
-            // section does (M1.5 step 7). Until then a selection mirrors
-            // as kind 2, which `src` below keeps out of the queue: the
-            // pane never rewrites a selection's source by accident.
-            SrcRef::Selection(_) => (2, String::new()),
+        let (src_kind, src_name, geo) = match &op.src {
+            SrcRef::Stock => (0, String::new(), Vec::new()),
+            SrcRef::Entity(n) => (1, n.clone(), Vec::new()),
+            // Feature picks mirror as kind 2 plus the list itself: the
+            // combo cannot express them (the Geometry section draws the
+            // chips from `geo`), but a links edit must never rewrite a
+            // selection's source by accident - `src` below round-trips it.
+            SrcRef::Selection(items) => (2, String::new(), items.clone()),
         };
         OpUi {
             name: name.to_string(),
             tool: op.tool.clone(),
             src_kind,
             src_name,
+            geo,
             params: op.params.clone(),
         }
     }
@@ -239,12 +246,30 @@ impl OpUi {
     /// The source the drafts describe, for the queue.
     #[must_use]
     pub fn src(&self) -> SrcRef {
-        if self.src_kind == 0 {
-            SrcRef::Stock
-        } else {
-            SrcRef::Entity(self.src_name.clone())
+        match self.src_kind {
+            0 => SrcRef::Stock,
+            2 => SrcRef::Selection(self.geo.clone()),
+            _ => SrcRef::Entity(self.src_name.clone()),
         }
     }
+}
+
+/// One Geometry-section chip: the pane-facing view of a pick-list entry.
+/// `label` is the whole display text (kind, entity, short id, state);
+/// `missing` is the amber flag - the id no longer resolves in the model.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeoChip {
+    pub sel: GeoSel,
+    pub label: String,
+    pub missing: bool,
+}
+
+/// A feature id as the chips show it: the 16 hex digits, shortened to
+/// head and tail with an ellipsis. Long enough to tell two picks of one
+/// model apart at a glance, short enough for a chip row to stay one row.
+fn short_id(id: u64) -> String {
+    let h = format!("{id:016x}");
+    format!("{}…{}", &h[..4], &h[14..])
 }
 
 /// Editable fields of the Tool Library pane's tool page; see [`StockUi`]
@@ -717,6 +742,53 @@ impl State {
                 ..OpUi::default()
             };
         }
+    }
+
+    /// The Geometry section's chips: one per pick-list entry, in order,
+    /// resolved against the model as it stands now. A chip whose id no
+    /// longer resolves (the model was deleted, or re-imported with new
+    /// geometry) reads amber and says so - removing it is always safe,
+    /// because the reduced list only gets shorter.
+    #[must_use]
+    pub fn geo_chips(&self) -> Vec<GeoChip> {
+        self.op_ui
+            .geo
+            .iter()
+            .map(|g| {
+                let (label, missing) = match g.feature {
+                    FeatureSel::Face(id) => {
+                        let found = model::find_by_name(&self.world, &g.entity)
+                            .and_then(|e| model::features_of(&self.world, &e))
+                            .is_some_and(|f| f.faces.iter().any(|fa| fa.id == id));
+                        let mut label = format!("Face {} · {}", g.entity, short_id(id));
+                        if !found {
+                            label.push_str(" · missing");
+                        }
+                        (label, !found)
+                    }
+                    FeatureSel::Chain(id) => {
+                        let chain = model::find_by_name(&self.world, &g.entity)
+                            .and_then(|e| model::features_of(&self.world, &e))
+                            .and_then(|f| {
+                                feature::chains(&f).into_iter().find(|c| c.id == id)
+                            });
+                        match chain {
+                            Some(c) => (
+                                format!(
+                                    "Chain {} · {} · {}",
+                                    g.entity,
+                                    short_id(id),
+                                    if c.closed { "closed" } else { "open" }
+                                ),
+                                false,
+                            ),
+                            None => (format!("Chain {} · {} · missing", g.entity, short_id(id)), true),
+                        }
+                    }
+                };
+                GeoChip { sel: g.clone(), label, missing }
+            })
+            .collect()
     }
 
     /// Refetch the Tool Library pane's draft after document changes. The
