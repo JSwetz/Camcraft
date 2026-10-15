@@ -51,8 +51,11 @@ setup, tools, 2D operations, drilling, simulation, and one trustworthy post.
 setup (stock + WCS) and toolpath display, M1.3 2D machining (face, contour,
 pocket, slot, trace over mesh-sliced geometry, with the tool library,
 operation parameters and verification warnings), and the M1.4 ribbon/browser
-UI/UX rework are in; units remain for the early phase, then feature
-selection, drilling and the first post.
+UI/UX rework are in; M1.5 feature selection has shipped its selection
+commands, chips and 3D overlay, and its hand-test rework (M1.5.1: readable
+selection rows, height-plane guides, and selection chains that actually
+close) - the ⏸ items below remain open; then units for the early phase,
+drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -213,12 +216,14 @@ planar-face clustering and tangent-continuous edge chains run off the
 feature-edge weld, lifted into `app::geometry` (mesh-based - no
 geometry-kernel commitment; that stays the M1.3 ⏸ open question), with
 ids stable per model revision and enforced by the generation stamp.
-Picks are commands (undoable, validated at construction), show as chips
-in the Geometry section and as 3D overlay lines that hold their place
-under orbiting, and persist in `.hsmproj` v4. Contour machines both
-halves of a selection: the picked loops as boundary passes, the picked
-open runs as a centerline pass - preview and generation read one chain
-construction, so they cannot disagree.
+Picks are commands (undoable, validated at construction), show as
+readable rows in the Geometry section and as 3D overlay lines that hold
+their place under orbiting, and persist in `.hsmproj` v4. Contour
+machines both halves of a selection: the picked loops as boundary
+passes, the picked open runs as a centerline pass - preview and
+generation read one chain construction, so they cannot disagree. The
+M1.5.1 hand-test rework (off `Milling-test.step`) then made the
+selection itself legible, honest and geometrically complete, below.
 
 - ✅ **Facet → feature**: weld mesh facets into planar faces and edge
       chains, exposed as stable ids per model revision (`app::geometry`,
@@ -231,15 +236,54 @@ construction, so they cannot disagree.
 - ✅ **Boundary-driven operations**: contour a selected face or edge
       chain instead of a stock section (`SrcRef::Selection` - the
       shipped name for `SrcRef::Faces` above); islands come from the
-      picked loops, picked open runs get the centerline pass, and Face/
-      Trace skip runs they cannot use rather than refusing the list
+      picked loops, picked open runs get the centerline pass, and an
+      open run on a Face op extends to the stock boundary and bounds a
+      real region (M1.5.1, below) - nothing is silently dropped
+      anymore; what cannot be used is refused by name
+- ✅ **M1.5.1 hand-test rework** (the four issues from the first
+      feature-selection session, commits `ddb559a` → `a785eca`):
+  - the Geometry section is a readable list - "Top face · z=22.00 ·
+        142.6 mm²", "Closed chain · 199.8 mm · 63.5 × 63.5", "Open run
+        · 122.4 mm · 4 of 6 runs" - and hovering a row highlights that
+        feature in the viewport (amber, immediate-mode);
+  - Apply always reports what it did (status line or queued command);
+  - tessellated rims chain closed (smooth-band merging: shared face +
+        shared crease patch across the step < 40°) and picked open runs
+        stitch into closed rings by quantized endpoints;
+  - the open operation's heights draw as labeled planes in the
+        viewport: Clearance (blue), Retract (sky, Contour only), Cut
+        (red), beside the existing orange Top; planes track draft
+        edits without a document rebuild
 - ⏸ **WCS face/vertex snap**: deferred again, honestly - it needs the
       vertex pick above; M1.2's box-point placement stands
 - ⏸ **View cube + navigation bar**: still the viewport affordances
       deferred from M1.4; orthogonal to selection
-- ⏸ **Labeled height-plane loops** (reference 03): draw the
-      clearance/retract/top/bottom planes as labeled outlines in the
-      viewport - display polish, not a selection feature
+
+Known limits from the M1.5.1 rework - each one refuses by name or
+degrades by rule, none guesses silently:
+
+- the material-side rule: an open run or chain-only ring is scored
+      against the part material silhouette and the side bounding more
+      material is machined, outward-biased by `OUTSIDE_BIAS` (0.5 in
+      `operation.rs`); a convex boss picked by one arc therefore faces
+      the whole boss - by design, the opposite side is "pick the other
+      run"
+- run extensions are chord-lens-probed (no strip may cross the run
+      that bounds it) and a ray that misses, or a self-crossing
+      strip, refuses as ambiguous - "use a closed chain or a Face
+      pick"; straight (unbent) runs have no inside and score both
+      sides, so a straight run with no stock face can face the whole
+      part deterministically
+- Trace refuses open runs by name (close the pick or use Contour);
+      Pocket always refused them, also by name
+- stitching is per-entity - two runs meeting across two model
+      entities do not yet compose into one ring
+- chain and face ids are geometry digests: the smoother chaining rules
+      re-key picks on affected meshes, so old v4 projects show
+      "missing" on a handful of picks and need one re-pick (stale ids
+      refuse safely)
+- facing rows are still the M1.3 bbox serpentine: the region's holes
+      bound contour and pocket passes, not facing rows
 
 ### M1.6 - Drilling
 **Goal: a complete hole list is machined correctly.**
@@ -378,7 +422,7 @@ programming department.
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5 | ⚠️ |
-| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge pick modes, selection-driven contour incl. open-chain passes, v4 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
+| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge pick modes, selection-driven contour and facing (open runs extend to stock), readable selection rows, height-plane guides, v4 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
