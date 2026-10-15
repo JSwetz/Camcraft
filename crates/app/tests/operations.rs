@@ -930,6 +930,174 @@ fn an_open_run_contours_on_its_centerline() {
     }
 }
 
+// ============ M1.5.1 step 4: picked runs stitch into rings ============
+
+/// A flat disc whose rim carries two hard creases - the seam vertices at
+/// 0 and 180 degrees sit 15% proud of the circle, putting a 61-degree
+/// chord turn past the 30-degree merge angle there while every other
+/// turn stays under it. The chain walk cannot close it, so the rim
+/// arrives as exactly two open half-runs whose ends meet end to end:
+/// the split-rim shape the M1.5.1 hand-test hit on the STEP bore.
+fn split_rim_disc(r: f64) -> hsmworks_app::geometry::Mesh {
+    let tau = std::f64::consts::TAU;
+    let p = |i: usize| {
+        let a = tau * i as f64 / 16.0;
+        let rr = if i.is_multiple_of(8) { r * 1.15 } else { r };
+        Point3::new(rr * a.cos(), rr * a.sin(), 0.0)
+    };
+    let facets: Vec<Triangle> = (0..16)
+        .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
+        .collect();
+    hsmworks_app::geometry::Mesh { facets }
+}
+
+/// The open runs an entity's chains carry, in chain order.
+fn open_runs_of(world: &World, name: &str) -> Vec<u64> {
+    let e = model::find_by_name(world, name).expect("part exists");
+    let f = model::features_of(world, &e).expect("features");
+    feature::chains(&f)
+        .into_iter()
+        .filter(|c| !c.closed)
+        .map(|c| c.id)
+        .collect()
+}
+
+#[test]
+fn two_open_runs_stitch_into_one_boundary() {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("disc", split_rim_disc(12.0)));
+    let runs = open_runs_of(&world, "disc");
+    assert_eq!(runs.len(), 2, "the creased rim arrives as two open runs");
+
+    let op = Operation {
+        tool: "EM-0600-4FL".into(),
+        src: SrcRef::Selection(
+            runs.iter()
+                .map(|&id| GeoSel {
+                    entity: "disc".into(),
+                    feature: FeatureSel::Chain(id),
+                })
+                .collect(),
+        ),
+        params: face_sel_params(),
+        stamp: None,
+    };
+    // The hand-test's exact failure ("nothing in the selection bounds an
+    // area") is gone: two picked runs that spell one loop bound one area.
+    let region = operation::region_of(&world, &op).expect("stitched runs bound the disc");
+    assert_eq!(region.loops().len(), 1, "one ring, not a pair of arcs");
+    let ring = &region.loops()[0];
+    assert!(
+        ring.points().len() >= 16,
+        "all 16 rim vertices survive the seam dedupe"
+    );
+    let want = std::f64::consts::PI * 12.0 * 12.0;
+    let got = ring.area().abs();
+    assert!(
+        (got - want).abs() / want < 0.05,
+        "the stitched ring is the disc: {got} vs {want}"
+    );
+}
+
+#[test]
+fn stitching_is_order_independent() {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("disc", split_rim_disc(12.0)));
+    let runs = open_runs_of(&world, "disc");
+    assert_eq!(runs.len(), 2);
+    let pick = |order: [usize; 2]| -> Operation {
+        Operation {
+            tool: "EM-0600-4FL".into(),
+            src: SrcRef::Selection(
+                order
+                    .iter()
+                    .map(|&k| GeoSel {
+                        entity: "disc".into(),
+                        feature: FeatureSel::Chain(runs[k]),
+                    })
+                    .collect(),
+            ),
+            params: face_sel_params(),
+            stamp: None,
+        }
+    };
+    let ab = operation::region_of(&world, &pick([0, 1])).expect("first, then second");
+    let ba = operation::region_of(&world, &pick([1, 0])).expect("second, then first");
+    assert_eq!(ab.loops().len(), 1);
+    assert_eq!(ba.loops().len(), 1);
+    // The same ring, walked from either end: identical area, and a
+    // pick-order shuffle must never produce two loops or zero.
+    assert!(
+        (ab.loops()[0].area() - ba.loops()[0].area()).abs() < 1e-9,
+        "the ring is the ring whatever the pick order"
+    );
+}
+
+#[test]
+fn a_single_arc_stays_open() {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("disc", split_rim_disc(12.0)));
+    let runs = open_runs_of(&world, "disc");
+    assert_eq!(runs.len(), 2);
+    // One half-rim alone has nothing to close against - it remains the
+    // open run it always was: no boundary, and a Contour still
+    // centerlines it end to end.
+    let op = Operation {
+        tool: "EM-0600-4FL".into(),
+        src: sel("disc", FeatureSel::Chain(runs[0])),
+        params: contour_params(),
+        stamp: None,
+    };
+    assert!(
+        operation::region_of(&world, &op).is_none(),
+        "an unpaired run bounds nothing"
+    );
+    let cs = operation::chains_of(&world, &op);
+    assert_eq!(cs.len(), 1, "one run to draw");
+    assert_eq!(cs[0].len(), 9, "the half-rim centerline, seam to seam");
+}
+
+#[test]
+fn duplicate_seam_points_do_not_break_push_loop() {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("disc", split_rim_disc(12.0)));
+    let runs = open_runs_of(&world, "disc");
+    assert_eq!(runs.len(), 2);
+    // The stitched ring concatenates runs that share their seam vertex,
+    // so repeats ride in at every seam. Picking one run twice adds a
+    // repeat the stitcher must ignore and the routing must dedupe:
+    // still exactly one boundary, never a sliver or a second pass.
+    let op = Operation {
+        tool: "EM-0600-4FL".into(),
+        src: SrcRef::Selection(vec![
+            GeoSel {
+                entity: "disc".into(),
+                feature: FeatureSel::Chain(runs[0]),
+            },
+            GeoSel {
+                entity: "disc".into(),
+                feature: FeatureSel::Chain(runs[0]),
+            },
+            GeoSel {
+                entity: "disc".into(),
+                feature: FeatureSel::Chain(runs[1]),
+            },
+        ]),
+        params: face_sel_params(),
+        stamp: None,
+    };
+    let region = operation::region_of(&world, &op).expect("the ring survives the doubled seam");
+    assert_eq!(region.loops().len(), 1, "one ring, whatever the pick repeats");
+}
+
 #[test]
 fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
     let world = new_world();

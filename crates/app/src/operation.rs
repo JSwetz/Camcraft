@@ -39,6 +39,7 @@
 //! its points (M1.5 step 8) - preview and generation read the same chain,
 //! so the two cannot disagree about where that pass runs.
 
+use std::collections::HashSet;
 use std::hash::Hasher;
 
 use flecs_ecs::prelude::World;
@@ -857,6 +858,10 @@ const DEGENERATE_AREA: f64 = 1e-9;
 /// run. Refusals are the Prime Directive's kind - a tilted face for a
 /// facing pass, an open chain for a Pocket, an open sheet, each named in
 /// the message, each with the fix stated.
+///
+/// Picked open runs are stitched before this routing (M1.5.1 issue C):
+/// several runs that meet end to end spell one ring, and a ring is a
+/// ring however it is spelled - see `stitch_open_runs`.
 fn selection_geometry(
     world: &World,
     items: &[GeoSel],
@@ -868,7 +873,11 @@ fn selection_geometry(
     let mut loops: Vec<Loop> = Vec::new();
     let mut chains: Vec<Vec<Point2>> = Vec::new();
     let mut rims: Vec<Vec<(i64, i64)>> = Vec::new();
-    for g in items {
+    let (rings, stitched) = stitch_open_runs(world, items);
+    for (label, pts) in rings {
+        push_loop(&label, pts, &mut loops, &mut rims)?;
+    }
+    for (gi, g) in items.iter().enumerate() {
         let Some(entity) = model::find_by_name(world, &g.entity) else {
             return Err(GenError::Invalid(format!(
                 "the selection names '{}', which is gone",
@@ -930,6 +939,12 @@ fn selection_geometry(
                     )));
                 };
                 if !c.closed {
+                    if stitched.contains(&gi) {
+                        // The stitch pass closed this run's ends into a
+                        // ring with its siblings; the ring is already
+                        // in `loops`, routed like any closed chain.
+                        continue;
+                    }
                     if pocket {
                         return Err(GenError::Invalid(format!(
                             "{label} is an open run - a 2D Pocket cannot end mid-edge; select a closed chain"
@@ -988,6 +1003,168 @@ fn selection_region(
     Region::new(loops).map_err(Into::into)
 }
 
+/// The 1e6 lattice `push_loop` keys rims on, in one place so the
+/// stitcher's endpoint matches and the dedupe agree to the nanometre.
+fn qkey(p: &Point2) -> (i64, i64) {
+    (
+        (p.x * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64,
+        (p.y * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64,
+    )
+}
+
+/// One distinct picked open run in the shape the stitcher works in:
+/// world XY points with the entity's transform applied (where
+/// `push_loop` expects every boundary to live), its quantized endpoints,
+/// and every item index that picked it - the same chain twice is one
+/// run picked twice.
+struct Run {
+    items: Vec<usize>,
+    entity: String,
+    cid: u64,
+    pts: Vec<Point2>,
+    start: (i64, i64),
+    end: (i64, i64),
+}
+
+/// M1.5.1 issue C: tessellation - STEP adaptive chords especially - can
+/// break a geometrically closed rim into several chains, each stopping
+/// where a chord's turn exceeds the merge angle. The user picks them
+/// all, and to them it is obviously one loop. So before routing, stitch
+/// the picked open runs of each entity end to end and return every walk
+/// that closes back onto its start as one ring, with its contributing
+/// picks marked consumed so routing treats them as the closed chain
+/// they describe.
+///
+/// Junctions match either endpoint of a candidate because a loop's runs
+/// are stored with whatever direction their edge orientations allow -
+/// across the rim of a split circle the two halves meet end-to-end on
+/// one side and start-to-start on the other, so a flipped continuation
+/// IS the ring, not a corruption of it. Committed rings are shoelace-
+/// canonicalized to CCW so pick order can never flip the winding. A
+/// doubled pick is deduped by chain id - the same segments twice close
+/// no ring, they close a zero-area spike.
+///
+/// Deliberately conservative: only picked runs take part (nothing
+/// unpicked is pulled in), cross-entity rings are not attempted (a
+/// recorded limit), a greedy fork that dead-ends commits nothing, and
+/// runs that do not close route exactly as they always did. Failed
+/// lookups are not errors here; the routing loop owns those refusals
+/// and will name them.
+fn stitch_open_runs(
+    world: &World,
+    items: &[GeoSel],
+) -> (Vec<(String, Vec<Point2>)>, HashSet<usize>) {
+    let mut runs: Vec<Run> = Vec::new();
+    for (i, g) in items.iter().enumerate() {
+        let FeatureSel::Chain(cid) = g.feature else {
+            continue;
+        };
+        if let Some(r) = runs.iter_mut().find(|r| r.entity == g.entity && r.cid == cid) {
+            r.items.push(i);
+            continue;
+        }
+        let Some(entity) = model::find_by_name(world, &g.entity) else {
+            continue;
+        };
+        let Some(features) = model::features_of(world, &entity) else {
+            continue;
+        };
+        let Some(c) = feature::chains(&features).into_iter().find(|c| c.id == cid) else {
+            continue;
+        };
+        if c.closed {
+            continue;
+        }
+        let loc = model::transform_of(world, &entity).unwrap_or_default();
+        let pts: Vec<Point2> = feature::chain_points(&features, &c)
+            .iter()
+            .map(|p| {
+                let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
+                Point2::new(w.x, w.y)
+            })
+            .collect();
+        let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied()) else {
+            continue;
+        };
+        runs.push(Run {
+            items: vec![i],
+            entity: g.entity.clone(),
+            cid,
+            pts,
+            start: qkey(&first),
+            end: qkey(&last),
+        });
+    }
+    let used = |r: &Run, consumed: &HashSet<usize>| r.items.iter().any(|it| consumed.contains(it));
+    let mut rings: Vec<(String, Vec<Point2>)> = Vec::new();
+    let mut consumed: HashSet<usize> = HashSet::new();
+    for s in 0..runs.len() {
+        if used(&runs[s], &consumed) {
+            continue;
+        }
+        // Walk the cycle through run `s` forward: `anchor` is where we
+        // started, `far` the junction to extend from. `in_seq` is why a
+        // walk can never loop.
+        let anchor = runs[s].start;
+        let mut far = runs[s].end;
+        let mut seq: Vec<(usize, bool)> = vec![(s, false)];
+        let mut in_seq = vec![false; runs.len()];
+        in_seq[s] = true;
+        let closed = loop {
+            if far == anchor {
+                break true;
+            }
+            let mut next: Option<(usize, bool)> = None;
+            for (j, r) in runs.iter().enumerate() {
+                if in_seq[j] || used(r, &consumed) || r.entity != runs[s].entity {
+                    continue;
+                }
+                if r.start == far {
+                    next = Some((j, false));
+                    break;
+                }
+                if r.end == far {
+                    next = Some((j, true));
+                    break;
+                }
+            }
+            let Some((j, rev)) = next else { break false };
+            in_seq[j] = true;
+            seq.push((j, rev));
+            far = if rev { runs[j].start } else { runs[j].end };
+        };
+        if !closed {
+            continue;
+        }
+        // Concatenate the walk, flipping what the junctions asked for.
+        // Shared seam vertices arrive as consecutive repeats and
+        // closing wraps - `push_loop` and `Loop::new` drop exactly
+        // those, so the ring needs no special handling here.
+        let mut pts: Vec<Point2> = Vec::new();
+        for (j, rev) in &seq {
+            for &it in &runs[*j].items {
+                consumed.insert(it);
+            }
+            if *rev {
+                pts.extend(runs[*j].pts.iter().rev().copied());
+            } else {
+                pts.extend(runs[*j].pts.iter().copied());
+            }
+        }
+        let mut twice = 0.0;
+        let n = pts.len();
+        for i in 0..n.saturating_sub(1) {
+            let (a, b) = (pts[i], pts[i + 1]);
+            twice += a.x * b.y - a.y * b.x;
+        }
+        if twice < 0.0 {
+            pts.reverse();
+        }
+        rings.push((format!("the stitched rim of '{}'", runs[s].entity), pts));
+    }
+    (rings, consumed)
+}
+
 /// Accept one selected boundary: refuse what collapses to a line seen
 /// from above, and count a rim already in the region once - two faces
 /// meeting at an edge share it, and a coincident double loop would be a
@@ -998,15 +1175,7 @@ fn push_loop(
     loops: &mut Vec<Loop>,
     rims: &mut Vec<Vec<(i64, i64)>>,
 ) -> Result<(), GenError> {
-    let mut key: Vec<(i64, i64)> = pts
-        .iter()
-        .map(|p| {
-            (
-                (p.x * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64,
-                (p.y * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64,
-            )
-        })
-        .collect();
+    let mut key: Vec<(i64, i64)> = pts.iter().map(qkey).collect();
     // Same drop Loop::new does - consecutive repeats and the closing
     // wrap - so the collapse check below sees the ring the loop would
     // actually be.
