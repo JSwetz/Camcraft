@@ -1,4 +1,4 @@
-//! Project save/load: `.hsmproj`, JSON, version 3.
+//! Project save/load: `.hsmproj`, JSON, version 4.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -12,7 +12,11 @@
 //! facets in any build (see `stock.rs`), keeping files small and round-trips
 //! exact. v3 adds `kind` values `tool`/`operation` with a `tool`/`operation`
 //! payload; CAM data is persisted as definition plus the cached path (paths
-//! are expensive to recompute, and staleness recomputes anyway). v1/v2
+//! are expensive to recompute, and staleness recomputes anyway). v4 makes
+//! feature picks a contractual source: the `selection` variant of `src`
+//! already existed in v3 files (it arrived with the domain type), so every
+//! v3 file reads unchanged - the bump records that picks are now covered
+//! by the save/load contract rather than an experiment in transit. v1/v2/v3
 //! files migrate on load, one version step at a time.
 
 use std::path::Path;
@@ -33,7 +37,7 @@ use crate::stock::{self, StockShape};
 use crate::tools::{Tool, ToolKind};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 3;
+pub const PROJECT_VERSION: u32 = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -767,6 +771,13 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // appeared; every existing entity keeps its fields and defaults
         // the new ones (absent), which is exactly what a v2 file meant.
         file.version = 3;
+    }
+    if file.version == 3 {
+        // v3 -> v4: feature picks graduate from "the src enum can carry
+        // them" to "they persist". The shape is already right - a v3 file
+        // with a selection reads verbatim, one without gains nothing -
+        // so the step-up is the stamp itself.
+        file.version = 4;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

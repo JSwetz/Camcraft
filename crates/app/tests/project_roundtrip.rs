@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use hsmworks_app::commands::{
     AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, SetWcsOrigin,
 };
-use hsmworks_app::operation::{OpParams, SrcRef};
+use hsmworks_app::geometry::feature;
+use hsmworks_app::machining2d::Lead;
+use hsmworks_app::operation::{self, FeatureSel, GeoSel, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::Location;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
@@ -76,12 +78,13 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1/v2 migrate
-    // (see v1_file_migrates / v2_file_migrates_to_v3).
-    let text = r#"{"version": 4, "entities": []}"#;
+    // Anything newer than this build's format stays refused; v1/v2/v3
+    // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
+    // v3_file_migrates_to_v4).
+    let text = r#"{"version": 5, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(4)) => {}
+        Err(ProjectError::UnsupportedVersion(5)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -424,8 +427,8 @@ fn v2_file_migrates_to_v3() {
     let saved = std::fs::read_to_string(&path).expect("read");
     let _ = std::fs::remove_file(&path);
     assert!(
-        saved.contains("\"version\": 3"),
-        "migrated file must be v3: {saved}"
+        saved.contains("\"version\": 4"),
+        "migrated file must carry the current stamp: {saved}"
     );
 }
 
@@ -486,4 +489,155 @@ fn corrupt_tool_and_operation_fields_are_refused() {
             "refused file must leave the world untouched"
         );
     }
+}
+
+#[test]
+fn v3_file_migrates_to_v4() {
+    // A literal v3 file that already carries a feature pick: v3's src enum
+    // could hold one, and v4 reads it verbatim - the migration step is the
+    // stamp, not a reshape. The id 42 is unresolvable on purpose: a
+    // tampered or stale pick is a generation error, never a load error.
+    let text = r#"{
+        "version": 3,
+        "entities": [
+            {"name": "part", "translation": [0.0, 0.0, 0.0],
+             "facets": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]]},
+            {"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": {"selection": {"items": [
+                 {"entity": "part", "feature": {"face": {"id": 42}}}
+            ]}}, "params": {"face": {"stepover": 3.0, "clearance_z": 25.0,
+                 "cut_z": 0.5, "feed": 1200.0, "plunge_feed": 300.0,
+                 "climb": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v3 must migrate");
+    let op = model::find_by_name(&world, "Op1").expect("op");
+    let o = model::operation_of(&world, &op).expect("operation component");
+    assert_eq!(
+        o.src,
+        SrcRef::Selection(vec![GeoSel {
+            entity: "part".into(),
+            feature: FeatureSel::Face(42),
+        }]),
+        "the pick survives the step-up intact"
+    );
+    // Unresolvable id and no cache in the file: shape-legal, so it loads -
+    // and reads Never (nothing was ever generated in this world), never a
+    // load-time refusal, with nothing to preview.
+    assert_eq!(operation::status_of(&world, &op), OpStatus::Never);
+    assert!(operation::region_of(&world, &o).is_none());
+
+    let path = tmp_path("mig4");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains("\"version\": 4"),
+        "resaved file must be v4: {saved}"
+    );
+}
+
+#[test]
+fn a_selection_round_trips_and_stays_ok() {
+    let path = tmp_path("pick");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        AddTool::new(&world, "EM-0400-2FL", catalog_tool("EM-0400-2FL")).expect("add tool"),
+    );
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    // Top face plus one rim edge: the boundary loop and a centerline run
+    // in one pick list (M1.5 step 8's mixed shape), contour parameters.
+    let e = model::find_by_name(&world, "part").expect("part");
+    let f = model::features_of(&world, &e).expect("features");
+    let top = f
+        .faces
+        .iter()
+        .filter(|fa| matches!(fa.kind, feature::FaceKind::Planar) && fa.normal[2].abs() > 0.9)
+        .max_by(|a, b| a.offset.total_cmp(&b.offset))
+        .map(|fa| fa.id)
+        .expect("box top");
+    let run = feature::chains(&f)
+        .into_iter()
+        .find(|c| {
+            !c.closed
+                && {
+                    let p = feature::chain_points(&f, c);
+                    p.len() >= 2 && (p[0][0] != p[1][0] || p[0][1] != p[1][1])
+                }
+        })
+        .map(|c| c.id)
+        .expect("a horizontal rim edge");
+    let params = OpParams::Contour {
+        stock_to_leave: 0.0,
+        clearance_z: 10.0,
+        retract_z: 8.0,
+        top_z: 4.5,
+        bottom_z: 0.0,
+        stepdown: 2.5,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        lead: Lead::None,
+        tolerance: 0.01,
+        tab_count: 0,
+        tab_width: 0.0,
+        tab_height: 0.0,
+    };
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Pick1",
+            "EM-0400-2FL",
+            SrcRef::Selection(vec![
+                GeoSel {
+                    entity: "part".into(),
+                    feature: FeatureSel::Face(top),
+                },
+                GeoSel {
+                    entity: "part".into(),
+                    feature: FeatureSel::Chain(run),
+                },
+            ]),
+            params,
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Pick1").expect("generate"));
+    let src_op = model::find_by_name(&world, "Pick1").expect("op");
+    let o = model::operation_of(&world, &src_op).expect("operation");
+    assert_eq!(operation::status_of(&world, &src_op), OpStatus::Ok, "generated first");
+
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(
+        first.contains("\"selection\"") && first.contains("\"face\"") && first.contains("\"chain\""),
+        "the pick list is in the file verbatim: {first}"
+    );
+
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "a picked project round-trips byte-identically");
+
+    let dst_op = model::find_by_name(&world2, "Pick1").expect("op loaded");
+    let p = model::operation_of(&world2, &dst_op).expect("operation");
+    assert_eq!(p.src, o.src, "the pick list is the same list");
+    // The cache replays against features recomputed from the same facets -
+    // stable ids earn their name here: Ok, not Stale.
+    assert_eq!(p.stamp, o.stamp);
+    assert_eq!(operation::status_of(&world2, &dst_op), OpStatus::Ok, "a loaded pick is still honest");
+    assert_eq!(
+        operation::chains_of(&world2, &p).len(),
+        operation::chains_of(&world, &o).len(),
+        "preview sees the same runs before and after the file"
+    );
 }
