@@ -25,9 +25,13 @@
 //! entity's local frame).
 //!
 //! Edge chains (M1.5 step 3) stitch those feature edges into the runs a
-//! user picks with one click: tangent-continuous paths of edges that are
-//! collinear to within [`CHAIN_TANGENT_DEG`] and bound a face in common,
-//! so a box corner splits but a milled rim loops closed.
+//! user picks with one click: paths of edges that bound a face in common
+//! and are either collinear to within [`CHAIN_TANGENT_DEG`] or lie on one
+//! smooth band - a closed ring of that face whose flanking facets are one
+//! pre-split patch - to within [`CHAIN_BAND_TANGENT_DEG`], so a box corner
+//! splits, a finely tessellated bore rim loops closed even where STEP's
+//! chord turns beat the plain tangent rule, and sheet rims (nothing
+//! flanking them) stay at the documented coarse-mesh limit.
 //!
 //! Robustness bar (AGENTS.md Prime Directive): vertices that refuse to
 //! weld (non-finite) never alias real lattice points; their edges are
@@ -287,6 +291,11 @@ pub struct Features {
     pub faces: Vec<Face>,
     /// facet index -> face index, covering every input facet.
     pub facet_face: Vec<u32>,
+    /// facet index -> root facet of its smooth patch BEFORE the exact-plane
+    /// split: a faceted cylinder wall is one patch spread over several
+    /// planar strips, box walls 90° apart are separate patches. Invalid
+    /// facets are their own patch. Feeds the band rule in [`chains`].
+    pub facet_patch: Vec<u32>,
     /// Feature edges only (no interior seams), ordered by (a, b).
     pub edges: Vec<TopEdge>,
 }
@@ -403,9 +412,17 @@ pub fn features_of_facets(facets: &[Triangle]) -> Features {
     // planar top stays ONE face; a faceted dome yields one strip per
     // segment (documented coarse-mesh limit). Invalid facets stand alone.
     let mut groups: HashMap<(u32, Option<Plane>), Vec<u32>> = HashMap::new();
+    let mut facet_patch = vec![0u32; facets.len()];
     for t in 0..facets.len() as u32 {
+        // The pre-split patch root: recorded so chains() can recognise a
+        // smooth band - one patch spread over several planes.
+        let root = match fv[t as usize] {
+            Some(_) => find(&mut parent, t),
+            None => t,
+        };
+        facet_patch[t as usize] = root;
         let cell = match fv[t as usize] {
-            Some(_) => (find(&mut parent, t), geoms[t as usize].plane),
+            Some(_) => (root, geoms[t as usize].plane),
             None => (t, None),
         };
         groups.entry(cell).or_default().push(t);
@@ -514,6 +531,7 @@ pub fn features_of_facets(facets: &[Triangle]) -> Features {
         verts,
         faces,
         facet_face,
+        facet_patch,
         edges,
     }
 }
@@ -956,6 +974,12 @@ fn turn_nonzero(p: Pos, q: Pos, r: Pos) -> bool {
 /// for chain sensitivity.
 pub const CHAIN_TANGENT_DEG: f64 = 30.0;
 
+/// Turn ceiling for the smooth-band merge (see [`chains`]): 150° is
+/// deliberately loose - the band's real gate is the shared closed loop
+/// plus one flanking patch, and the limit only stops reversals that fold
+/// back on the ring itself.
+pub const CHAIN_BAND_TANGENT_DEG: f64 = 150.0;
+
 /// Stable chain identity: hash of the chain's maximal straight-run corner
 /// keys (collinear rim subdivision cannot move them, same trick as
 /// [`face_id`]) plus the closed flag. Curved loops key on their chords -
@@ -977,8 +1001,14 @@ pub struct Chain {
 /// Group feature edges into tangent-continuous chains. Two edges join at
 /// a shared welded vertex iff they bound at least one face in common (so
 /// the two edges of two unrelated solids touching at a vertex never
-/// merge) and the directed turn between them is at most
-/// [`CHAIN_TANGENT_DEG`]. Total on any input, like [`features_of_facets`].
+/// merge) and either the directed turn between them is at most
+/// [`CHAIN_TANGENT_DEG`], or the [`smooth_band`] rule holds: both edges
+/// lie on one closed boundary ring of that shared face and every facet
+/// flanking either edge outside it belongs to one pre-split smooth patch
+/// ([`Features::facet_patch`]). The band rule is what chains a STEP
+/// bore rim closed - the wall is one patch, but the adaptive chords
+/// turn harder than 30° at the seam. Total on any input, like
+/// [`features_of_facets`].
 #[must_use]
 pub fn chains(features: &Features) -> Vec<Chain> {
     let n = features.edges.len();
@@ -1008,6 +1038,26 @@ pub fn chains(features: &Features) -> Vec<Chain> {
         })
         .collect();
 
+    // Closed boundary rings by edge, for the band rule: an edge maps to
+    // the (face, loop) rings it bounds. An Open (failed-walk) ring never
+    // counts - the band only fires where the face's own angle-free loop
+    // walk already saw the ring close.
+    let mut eloops: HashMap<(u32, u32), Vec<(u32, u32)>> = HashMap::new();
+    for (fi, f) in features.faces.iter().enumerate() {
+        for (li, l) in f.loops.iter().enumerate() {
+            if l.kind == LoopKind::Open || l.verts.len() < 3 {
+                continue;
+            }
+            for k in 0..l.verts.len() {
+                let (x, y) = (l.verts[k], l.verts[(k + 1) % l.verts.len()]);
+                eloops
+                    .entry(if x <= y { (x, y) } else { (y, x) })
+                    .or_default()
+                    .push((fi as u32, li as u32));
+            }
+        }
+    }
+
     // Join pairs per shared vertex.
     let mut incident: HashMap<u32, Vec<u32>> = HashMap::new();
     for (i, e) in features.edges.iter().enumerate() {
@@ -1017,6 +1067,7 @@ pub fn chains(features: &Features) -> Vec<Chain> {
         }
     }
     let cos_max = CHAIN_TANGENT_DEG.to_radians().cos();
+    let cos_band = CHAIN_BAND_TANGENT_DEG.to_radians().cos();
     let mut parent: Vec<u32> = (0..n as u32).collect();
     for (v, list) in &incident {
         let Some(q) = lattice.get(*v as usize).copied() else {
@@ -1034,7 +1085,9 @@ pub fn chains(features: &Features) -> Vec<Chain> {
                     lattice.get(other_end(eb, *v) as usize).copied(),
                 );
                 if let (Some(pa), Some(pb)) = (pa, pb)
-                    && tangent_at(q, pa, pb, cos_max)
+                    && (tangent_at(q, pa, pb, cos_max)
+                        || (tangent_at(q, pa, pb, cos_band)
+                            && smooth_band(features, &eloops, ea, eb)))
                 {
                     union(&mut parent, list[x], list[y]);
                 }
@@ -1223,6 +1276,57 @@ fn other_end(e: &TopEdge, v: u32) -> u32 {
 
 fn shares_face(a: &[u32], b: &[u32]) -> bool {
     a.iter().any(|x| b.contains(x))
+}
+
+/// The smooth-band rule (see [`chains`]): two edges chain when they both
+/// bound one CLOSED ring of a shared face and every facet flanking either
+/// edge outside that face sits in one pre-split smooth patch. A rim edge
+/// with nothing flanking it is a sheet boundary - no band, no merge; that
+/// is the documented coarse-sheet limit, unchanged. Box walls flank in
+/// different patches (90° apart beats [`CREASE_DEG`]), so corners stay
+/// split. All lookups go through the `facet_*` tables by index - stale or
+/// truncated features can only refuse the rule, never misjoin.
+fn smooth_band(
+    features: &Features,
+    eloops: &HashMap<(u32, u32), Vec<(u32, u32)>>,
+    ea: &TopEdge,
+    eb: &TopEdge,
+) -> bool {
+    let rings = |e: &TopEdge| {
+        let key = if e.a <= e.b { (e.a, e.b) } else { (e.b, e.a) };
+        eloops.get(&key)
+    };
+    let (Some(ra), Some(rb)) = (rings(ea), rings(eb)) else {
+        return false;
+    };
+    // Try every shared ring: an edge pair may bound rings of several
+    // faces (a prism rim edge sits in both the top ring and its wall
+    // strip's), and whichever one carries the band decides.
+    for &(fi, _) in ra.iter().filter(|x| rb.contains(x)) {
+        let flank_patch = |e: &TopEdge| -> Option<u32> {
+            let mut root: Option<u32> = None;
+            for slot in 0..(e.n_facets as usize).min(3) {
+                let t = e.facets[slot] as usize;
+                if features.facet_face.get(t).copied() == Some(fi) {
+                    continue; // the shared face's own facet is not a flank
+                }
+                let r = features.facet_patch.get(t).copied()?;
+                if let Some(x) = root
+                    && x != r
+                {
+                    return None; // flanks split into separate patches
+                }
+                root = Some(r);
+            }
+            root
+        };
+        if let (Some(pa), Some(pb)) = (flank_patch(ea), flank_patch(eb))
+            && pa == pb
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Directed turn test at `q`: incoming `pa -> q`, outgoing `q -> pb`.

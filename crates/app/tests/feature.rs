@@ -370,6 +370,53 @@ fn ngon_rows(n: usize, r: f64) -> Vec<[f64; 3]> {
     rows
 }
 
+/// A SOLID n-gon prism: radius r, height h, outward winding. Unlike
+/// `ngon_rows` it has wall facets, and walls are what flank a rim - the
+/// evidence the smooth-band rule reads.
+fn prism_rows(n: usize, r: f64, h: f64) -> Vec<[f64; 3]> {
+    let tau = std::f64::consts::TAU;
+    let p = |i: usize, z: f64| {
+        let a = tau * i as f64 / n as f64;
+        [r * a.cos(), r * a.sin(), z]
+    };
+    let mut rows = Vec::new();
+    for i in 0..n {
+        // Caps as fans, wound so the normal points out of the solid.
+        rows.push([0.0, 0.0, h]);
+        rows.push(p(i, h));
+        rows.push(p(i + 1, h));
+        rows.push([0.0, 0.0, 0.0]);
+        rows.push(p(i + 1, 0.0));
+        rows.push(p(i, 0.0));
+        rows.extend(quad(p(i, 0.0), p(i + 1, 0.0), p(i + 1, h), p(i, h)));
+    }
+    rows
+}
+
+#[test]
+fn ten_gon_rim_chains_closed_by_smooth_band() {
+    // A solid 10-gon prism: 36-degree chord turns beat the plain 30
+    // -degree tangent rule - a coarse STEP bore rim, where adaptive
+    // tessellation puts a hard turn at the seam. But the wall strips
+    // sit 36 degrees apart, inside one smooth patch, so the band rule
+    // closes both rims into single pickable loops.
+    let f = features_of_facets(&tris(&prism_rows(10, 12.0, 5.0)));
+    let cs = chains(&f);
+    let closed: Vec<&Chain> = cs.iter().filter(|c| c.closed).collect();
+    assert_eq!(closed.len(), 2, "top and bottom rim each loop closed");
+    for c in &closed {
+        assert_eq!(c.edges.len(), 10);
+    }
+    assert_eq!(cs.len(), 12, "two rings plus ten singleton verticals");
+    assert!(
+        cs.iter()
+            .filter(|c| !c.closed)
+            .all(|c| c.edges.len() == 1 && !c.closed),
+        "verticals never chain: the rim flanks in the cap's patch, the \
+         vertical in the walls' - different patches, no band"
+    );
+}
+
 #[test]
 fn box_edges_never_chain() {
     let f = features_of_facets(&tris(&box_rows(0.0, 0.0, 0.0, 2.0, 3.0, 1.0)));
@@ -432,7 +479,11 @@ fn coarse_nine_gon_fragments_the_documented_limit() {
     assert_eq!(
         cs.len(),
         9,
-        "40-degree turns beat the 30-degree rule - revisit when STEP arcs land"
+        "40-degree turns beat the 30-degree tangent rule, and a sheet \
+         rim has no flanking facets to carry a smooth band: the \
+         documented coarse-sheet limit stands. Tessellated SOLID rims \
+         (the STEP bore case) do chain closed - see \
+         ten_gon_rim_chains_closed_by_smooth_band."
     );
     assert!(cs.iter().all(|c| c.edges.len() == 1 && !c.closed));
 }
