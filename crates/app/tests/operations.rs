@@ -1273,3 +1273,429 @@ fn a_mixed_pick_list_cuts_boundary_then_run_and_says_what_overlap_means() {
         out.warnings
     );
 }
+
+// ====== M1.5.1 step 6: open runs bind face regions, out to stock ======
+
+use hsmworks_app::geo2d::Point2;
+
+/// A flat 16-chord disc whose rim carries a hard crease every `every`
+/// vertices - the seam bulge puts the chord turn past the 30-degree
+/// merge angle there, so the rim walks as `16 / every` open runs: four
+/// quarter rims at `every = 4`, two half rims at `every = 8` (the
+/// `split_rim_disc` shape the step-4 tests stitch closed.
+fn seamed_sheet(r: f64, every: usize) -> hsmworks_app::geometry::Mesh {
+    let tau = std::f64::consts::TAU;
+    let p = |i: usize| {
+        let a = tau * i as f64 / 16.0;
+        let rr = if i.is_multiple_of(every) { r * 1.15 } else { r };
+        Point3::new(rr * a.cos(), rr * a.sin(), 0.0)
+    };
+    let facets: Vec<Triangle> = (0..16)
+        .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
+        .collect();
+    hsmworks_app::geometry::Mesh { facets }
+}
+
+/// The hand-test's model in flat form: a 40x40 plate with a bore whose
+/// rim carries the same 8-apart seams as `seamed_sheet` - STEP-adaptive
+/// tessellation of a cylindrical wall in a face, reduced to the shape
+/// the region logic must answer. The bore walks as exactly two open
+/// half-runs; the square outer rim as four short ones.
+fn bored_plate() -> hsmworks_app::geometry::Mesh {
+    let tau = std::f64::consts::TAU;
+    let bore = |i: usize| {
+        let a = tau * (i % 16) as f64 / 16.0;
+        let r = if (i % 16).is_multiple_of(8) { 12.0 * 1.15 } else { 12.0 };
+        (r * a.cos(), r * a.sin())
+    };
+    // The bore vertices pushed radially onto the plate's square edge;
+    // the diagonal ones land exactly on the corners, so the outer ring
+    // is the 40x40 square with collinear splits.
+    let outer = |i: usize| {
+        let (x, y) = bore(i);
+        let s = x.abs().max(y.abs());
+        (x * 20.0 / s, y * 20.0 / s)
+    };
+    let bp = |i: usize| {
+        let (x, y) = bore(i);
+        Point3::new(x, y, 0.0)
+    };
+    let op = |i: usize| {
+        let (x, y) = outer(i);
+        Point3::new(x, y, 0.0)
+    };
+    let mut facets = Vec::new();
+    for i in 0..16 {
+        facets.push(Triangle::new(op(i), op(i + 1), bp(i + 1)));
+        facets.push(Triangle::new(op(i), bp(i + 1), bp(i)));
+    }
+    hsmworks_app::geometry::Mesh { facets }
+}
+
+/// A 60x20 sheet scribbled once down its middle: two planar faces, and
+/// the long straight top and bottom runs a face op must resolve to a
+/// side by the material score, not by a coin flip.
+fn scribed_sheet() -> hsmworks_app::geometry::Mesh {
+    let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    hsmworks_app::geometry::Mesh {
+        facets: vec![
+            Triangle::new(p(-30.0, -10.0), p(0.0, -10.0), p(0.0, 10.0)),
+            Triangle::new(p(-30.0, -10.0), p(0.0, 10.0), p(-30.0, 10.0)),
+            Triangle::new(p(0.0, -10.0), p(30.0, -10.0), p(30.0, 10.0)),
+            Triangle::new(p(0.0, -10.0), p(30.0, 10.0), p(0.0, 10.0)),
+        ],
+    }
+}
+
+/// The open half-runs of a `bored_plate` bore rim: long runs that hug
+/// the origin, unlike the square rim's short, far ones.
+fn bore_runs_of(world: &World, name: &str) -> Vec<u64> {
+    let e = model::find_by_name(world, name).expect("part exists");
+    let f = model::features_of(world, &e).expect("features");
+    feature::chains(&f)
+        .into_iter()
+        .filter(|c| {
+            !c.closed && {
+                let p = feature::chain_points(&f, c);
+                p.len() >= 5 && p.iter().all(|q| (q[0] * q[0] + q[1] * q[1]).sqrt() < 15.0)
+            }
+        })
+        .map(|c| c.id)
+        .collect()
+}
+
+/// Picks for a list of chain ids on one entity, in the given order.
+fn chain_picks(entity: &str, ids: &[u64]) -> Vec<GeoSel> {
+    ids.iter()
+        .map(|&id| GeoSel {
+            entity: entity.to_string(),
+            feature: FeatureSel::Chain(id),
+        })
+        .collect()
+}
+
+fn sel_op(world: &World, items: Vec<GeoSel>, params: OpParams) -> Operation {
+    let _ = world;
+    Operation {
+        tool: "EM-0600-4FL".into(),
+        src: SrcRef::Selection(items),
+        params,
+        stamp: None,
+    }
+}
+
+/// Shoelace area of `seamed_sheet`'s 16 rim vertices - the disc's own
+/// polygon, computed without going through any code under test.
+fn seamed_area(r: f64, every: usize) -> f64 {
+    let tau = std::f64::consts::TAU;
+    let v = |i: usize| {
+        let a = tau * (i % 16) as f64 / 16.0;
+        let rr = if (i % 16).is_multiple_of(every) { r * 1.15 } else { r };
+        (rr * a.cos(), rr * a.sin())
+    };
+    (0..16)
+        .map(|i| {
+            let (ax, ay) = v(i);
+            let (bx, by) = v(i + 1);
+            (ax * by - bx * ay).abs() * 0.5
+        })
+        .sum()
+}
+
+#[test]
+fn face_on_split_bore_rim_machines_annulus() {
+    // The hand-test's exact scenario (issue C): a Face op over the two
+    // open rim runs of a bore. Step 4 proved they spell one closed
+    // ring; the ring's interior is air, so the material-side rule takes
+    // its complement - the annulus, what facing the rim actually means.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("plate", bored_plate()));
+    let runs = bore_runs_of(&world, "plate");
+    assert_eq!(runs.len(), 2, "the seamed bore rim walks as two runs");
+
+    let items = chain_picks("plate", &runs);
+    let op = sel_op(&world, items.clone(), face_sel_params());
+    let region = operation::region_of(&world, &op).expect("the rim's complement in the plate");
+    assert_eq!(
+        region.loops().len(), 2,
+        "plate boundary and bore, not a half-open rim"
+    );
+    let want = 1600.0 - seamed_area(12.0, 8);
+    let got = region.area().abs();
+    assert!(
+        (got - want).abs() / want < 0.01,
+        "the annulus, to the polygon's own area: {got} vs {want}"
+    );
+    assert!(!region.contains(Point2::new(0.0, 0.0)), "the bore is left standing");
+    assert!(region.contains(Point2::new(15.0, 0.0)), "material by the rim is taken");
+    assert!(region.contains(Point2::new(0.0, -16.0)), "and across it");
+
+    // And it generates: the same walk the preview read, start to finish.
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "Bore1", "EM-0600-4FL", SrcRef::Selection(items), face_sel_params())
+            .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Bore1").expect("generate"));
+    let path = cache(&world, "Bore1").expect("cache").path;
+    assert!(!path.moves.is_empty(), "facing rows across the annulus bounds");
+    assert!(path.all_finite());
+}
+
+#[test]
+fn face_on_one_bore_run_machines_outside_to_stock() {
+    // One half of the rim, unpaired: the run acts as the limit, and the
+    // stock beyond it is the far edge. Material between run and stock
+    // machines; material on the run's other side stays standing - the
+    // user's "generate to the outside of the stock box, the open loop
+    // selected acts as a limit", at unit scale.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    history.execute(&world, ImportModel::from_mesh("plate", bored_plate()));
+    let runs = bore_runs_of(&world, "plate");
+    assert_eq!(runs.len(), 2);
+    // Take the upper half-rim so the sides of the assertions are fixed.
+    let e = model::find_by_name(&world, "plate").expect("plate");
+    let f = model::features_of(&world, &e).expect("features");
+    let upper = runs
+        .iter()
+        .copied()
+        .find(|&id| {
+            let c = feature::chains(&f).into_iter().find(|x| x.id == id).expect("chain");
+            let p = feature::chain_points(&f, &c);
+            p.iter().map(|q| q[1]).sum::<f64>() > 0.0
+        })
+        .expect("one half-rim lies above the axis");
+
+    let items = chain_picks("plate", &[upper]);
+    let op = sel_op(&world, items.clone(), face_sel_params());
+    let region = operation::region_of(&world, &op).expect("the run-out to the stock");
+    assert!(region.contains(Point2::new(0.0, 16.0)), "material beyond the rim, up to stock");
+    assert!(region.contains(Point2::new(18.0, 6.0)), "and by the extension, still past the rim");
+    assert!(!region.contains(Point2::new(0.0, -16.0)), "the run limits: below it nothing moves");
+    assert!(!region.contains(Point2::new(0.0, 6.0)), "and the bore air is never in the region");
+    let got = region.area().abs();
+    assert!(got > 400.0 && got < 1600.0, "a band of the plate, not all of it: {got}");
+
+    let notes = operation::selection_notes(&world, &items, &face_sel_params());
+    assert!(
+        notes.iter().any(|s| s.contains("1 open run extended to the stock boundary")),
+        "the list says what the run-out did: {notes:?}"
+    );
+    assert!(
+        !notes.iter().any(|s| s.contains("outside")),
+        "nothing flipped - the strip already faced metal: {notes:?}"
+    );
+}
+
+#[test]
+fn one_open_run_on_a_boss_faces_the_whole_boss() {
+    // A convex rim rings all air on its OUTSIDE: a quarter run extended
+    // to stock bounds only air, so the material-side rule takes the
+    // complement inside the material - the whole boss. Facing an arc
+    // that runs past nothing metal is facing the part, never nothing.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    history.execute(&world, ImportModel::from_mesh("disc", seamed_sheet(12.0, 4)));
+    let runs = open_runs_of(&world, "disc");
+    assert_eq!(runs.len(), 4, "the quarter-seamed rim walks as four runs");
+
+    let items = chain_picks("disc", &[runs[0]]);
+    let op = sel_op(&world, items.clone(), face_sel_params());
+    let region = operation::region_of(&world, &op).expect("the boss complement");
+    let want = seamed_area(12.0, 4);
+    let got = region.area().abs();
+    assert!(
+        (got - want).abs() / want < 0.01,
+        "the whole boss, to its own polygon: {got} vs {want}"
+    );
+    assert!(region.contains(Point2::new(0.0, 0.0)));
+    assert!(region.contains(Point2::new(2.0, 2.0)), "the interior is the answer");
+
+    let notes = operation::selection_notes(&world, &items, &face_sel_params());
+    assert!(
+        notes.iter().any(|s| s.contains("1 open run extended to the stock boundary")),
+        "{notes:?}"
+    );
+    assert!(
+        notes.iter().any(|s| s.contains("machining outside the run")),
+        "air on the far side is said, not swallowed: {notes:?}"
+    );
+}
+
+#[test]
+fn straight_run_machines_the_material_side() {
+    // A scribble line laces to nothing, so no side is "outward" - both
+    // normals are tried and the one that meets metal wins. The sheet's
+    // top run therefore faces the sheet below it, and nothing above.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    history.execute(&world, ImportModel::from_mesh("sheet", scribed_sheet()));
+    let e = model::find_by_name(&world, "sheet").expect("sheet");
+    let f = model::features_of(&world, &e).expect("features");
+    let top = feature::chains(&f)
+        .into_iter()
+        .find(|c| {
+            !c.closed && {
+                let p = feature::chain_points(&f, c);
+                p.len() >= 3 && p.iter().all(|q| (q[1] - 10.0).abs() < 1e-9)
+            }
+        })
+        .map(|c| c.id)
+        .expect("the sheet's top run");
+
+    let op = sel_op(&world, chain_picks("sheet", &[top]), face_sel_params());
+    let region = operation::region_of(&world, &op).expect("the run's material side");
+    let want = 1200.0;
+    let got = region.area().abs();
+    assert!(
+        (got - want).abs() / want < 0.01,
+        "the whole sheet under the run: {got} vs {want}"
+    );
+    assert!(region.contains(Point2::new(0.0, -9.0)), "metal below the scribble is in");
+    assert!(region.contains(Point2::new(0.0, 9.0)), "metal above it is in - the run is a limit, not a side");
+    assert!(!region.contains(Point2::new(0.0, 15.0)), "air up to the stock stays air");
+}
+
+#[test]
+fn ambiguous_extension_refuses_by_name() {
+    // Same split rim at r = 30 in 60 mm stock: the seam vertices at
+    // +/-34.5 stand OUTSIDE the stock, and the run's single honest
+    // outward ray hits nothing. That is genuinely undecidable - so the
+    // refusal names it, and nothing is cut in silence.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    history.execute(&world, ImportModel::from_mesh("disc", seamed_sheet(30.0, 8)));
+    let runs = open_runs_of(&world, "disc");
+    assert_eq!(runs.len(), 2);
+
+    let op = sel_op(&world, chain_picks("disc", &[runs[0]]), face_sel_params());
+    assert!(operation::region_of(&world, &op).is_none(), "no preview from undecidable geometry");
+    let items = chain_picks("disc", &[runs[0]]);
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "Bad1", "EM-0600-4FL", SrcRef::Selection(items), face_sel_params())
+            .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "Bad1")
+        .err()
+        .expect("generate must fail, not decide by coin")
+    else {
+        panic!("expected a machining refusal, got something else");
+    };
+    assert!(msg.contains("ambiguous") && msg.contains("closed chain"), "{msg}");
+}
+
+#[test]
+fn straight_runs_face_their_material_and_trace_refuses_by_name() {
+    // Every open run on a facing op now answers something. A box edge
+    // is straight - it closes no lens, so the material score decides,
+    // and the only side that meets metal meets ALL of it: the whole
+    // top face, the scribble rule at box scale, never the silent drop
+    // the old routing committed. (Pocket refusal and contour centerline
+    // keep their step-3/4 tests.)
+    let (world, mut history) = box_part_world();
+    let run = open_run_of(&world, "part");
+    let items = chain_picks("part", &[run]);
+    let op = sel_op(&world, items.clone(), face_sel_params());
+    let region = operation::region_of(&world, &op).expect("the run's material side");
+    let got = region.area().abs();
+    assert!(
+        (got - 100.0).abs() / 100.0 < 0.02,
+        "a straight edge run faces the whole 10x10 top: {got}"
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "Face9", "EM-0600-4FL", SrcRef::Selection(items.clone()), face_sel_params())
+            .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Face9").expect("generate the whole face"));
+    assert!(
+        !cache(&world, "Face9").expect("cache").path.moves.is_empty(),
+        "rows across the top face"
+    );
+
+    // Trace machines a closed boundary; a run inside it is a named
+    // error, never the silent drop the old routing committed.
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Tr9",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            OpParams::Trace {
+                clearance_z: 25.0,
+                top_z: 5.0,
+                bottom_z: 2.5,
+                stepdown: 2.5,
+                feed: 500.0,
+                plunge_feed: 100.0,
+                climb: true,
+            },
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "Tr9")
+        .err()
+        .expect("trace must refuse a run")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("Trace machines a closed boundary"), "{msg}");
+}
+
+#[test]
+fn selection_notes_report_stitching_and_extension() {
+    // The Geometry section's small grey rows, end to end: what the
+    // stitcher and the run-out decided, computed on read so a stale
+    // project can never lie about a pick list it no longer holds.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("plate", bored_plate()));
+    let runs = bore_runs_of(&world, "plate");
+    let items = chain_picks("plate", &runs);
+    let notes = operation::selection_notes(&world, &items, &face_sel_params());
+    assert!(
+        notes.iter().any(|s| s.contains("2 open runs stitched into 1 ring")),
+        "{notes:?}"
+    );
+    assert!(notes.iter().any(|s| s.contains("machining outside the run")), "{notes:?}");
+
+    // A Contour over the same picks stitches into one boundary pass, so
+    // the stitch is reported; nothing was extended, so that stays unsaid.
+    let contour = OpParams::Contour {
+        stock_to_leave: 0.0,
+        clearance_z: 25.0,
+        retract_z: 12.0,
+        top_z: 1.0,
+        bottom_z: -1.0,
+        stepdown: 1.0,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        lead: Lead::None,
+        tolerance: 0.01,
+        tab_count: 0,
+        tab_width: 0.0,
+        tab_height: 0.0,
+    };
+    let notes = operation::selection_notes(&world, &items, &contour);
+    assert!(
+        notes.iter().any(|s| s.contains("2 open runs stitched into 1 ring")),
+        "{notes:?}"
+    );
+    assert!(!notes.iter().any(|s| s.contains("extended")), "{notes:?}");
+    assert!(!notes.iter().any(|s| s.contains("outside")), "{notes:?}");
+}

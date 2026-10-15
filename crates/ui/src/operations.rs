@@ -271,6 +271,15 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
                 src: Some(SrcRef::Stock),
             });
         }
+        // What the picks resolve to beyond the raw list - runs stitched
+        // into rings, lone runs reaching out to the stock boundary, a
+        // region taken on the far side because the rings bound air.
+        // Computed on read through the very walk the region takes, so a
+        // note can never contradict the preview it describes.
+        for note in operation::selection_notes(&state.world, &state.op_ui.geo, &state.op_ui.params)
+        {
+            ui.text_colored([0.62, 0.66, 0.72, 1.0], &note);
+        }
     } else if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
         ui.text_wrapped(format!("Whole of '{}' - the first pick replaces this.", state.op_ui.src_name));
     } else {

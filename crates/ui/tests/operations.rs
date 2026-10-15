@@ -721,3 +721,60 @@ fn selection_rows_read_as_human_descriptors() {
     assert!(chips[0].label.ends_with(" · missing"), "{}", chips[0].label);
     assert!(chips[1].label.ends_with(" · missing"), "{}", chips[1].label);
 }
+
+// ---------------------------------------------------------------------------
+// M1.5.1 step 6: the Geometry section's note lines ride the same
+// `selection_notes` walk the preview takes - through the state seam the
+// pane draws from, an open run on a facing operation must say out loud
+// that it runs out to the stock, and a pick whose geometry is gone must
+// fall to silence that generation then owns with its refusal.
+
+/// First box edge whose XY projection is a real segment - a vertical
+/// edge projects to a point, which is not the extension the note is
+/// about. Any horizontal edge behaves alike: the material-side rule
+/// takes the strip inward, over the whole 10 x 10 top.
+fn box_run_pick(state: &State, name: &str) -> GeoSel {
+    let e = model::find_by_name(&state.world, name).expect("entity");
+    let f = model::features_of(&state.world, &e).expect("features");
+    for c in feature::chains(&f) {
+        if c.closed {
+            continue;
+        }
+        let p = feature::chain_points(&f, &c);
+        if p.len() >= 2 && (p[0][0] != p[1][0] || p[0][1] != p[1][1]) {
+            return GeoSel { entity: name.to_string(), feature: FeatureSel::Chain(c.id) };
+        }
+    }
+    panic!("a box has horizontal edges to pick");
+}
+
+#[test]
+fn geometry_notes_report_through_the_panel_seam() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    part_and_target(&mut state);
+
+    let run = box_run_pick(&state, "part");
+    queue_feature_pick(&mut state, run, false);
+    state.drain_actions();
+    state.sync_ops_ui();
+    assert_eq!(state.op_ui.src_kind, 2, "the pick reached the draft");
+    let notes = operation::selection_notes(&state.world, &state.op_ui.geo, &state.op_ui.params);
+    assert!(
+        notes.iter().any(|n| n.contains("extended to the stock boundary")),
+        "the pane would draw: {notes:?}"
+    );
+    assert!(
+        !notes.iter().any(|n| n.contains("outside")),
+        "the material side won outright, nothing to flip: {notes:?}"
+    );
+
+    // Gone model: the note walk falls to empty rather than contradicting
+    // the refusal generation will make.
+    state.pending.push_back(CommandKind::DeleteByName("part".into()));
+    state.drain_actions();
+    state.sync_ops_ui();
+    let notes = operation::selection_notes(&state.world, &state.op_ui.geo, &state.op_ui.params);
+    assert!(notes.is_empty(), "stale picks say nothing: {notes:?}");
+}

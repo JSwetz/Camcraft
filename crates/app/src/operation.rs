@@ -35,9 +35,10 @@
 //! instead: faces contribute their boundary loops projected to XY, closed
 //! edge chains their ring projected to XY, coincident rims dedupe. Face
 //! ops demand a near-horizontal face, Pocket demands a closed boundary,
-//! and an open run belongs to Contour, which adds a centerline pass along
-//! its points (M1.5 step 8) - preview and generation read the same chain,
-//! so the two cannot disagree about where that pass runs.
+//! and an open run is either a Contour centerline pass along its points
+//! or, for a facing op, a limit extended out to the stock (M1.5.1) -
+//! never a silent drop. Preview and generation read the same walk, so
+//! the two cannot disagree about where that pass or that boundary runs.
 
 use std::collections::HashSet;
 use std::hash::Hasher;
@@ -849,33 +850,94 @@ const FACE_TILT_MAX_DEG: f64 = 60.0;
 /// than a boundary. 1e-9 mm² is far under weld-lattice noise and far
 /// above an actual face.
 const DEGENERATE_AREA: f64 = 1e-9;
+/// The material-side rule's threshold (M1.5.1 issue C): when the area
+/// inside a chain-only Face region holds less than this fraction of the
+/// material the region disagrees with - inside vs outside - the outside
+/// is taken instead. 0.5 means "strictly less material inside than
+/// outside": a bore rim rings air (inside ≈ 0) and machines the annulus;
+/// a box-top ring holds all its material inside (ratio ≈ 1) and stays.
+const OUTSIDE_BIAS: f64 = 0.5;
 
 /// The region loops and centerline runs a feature selection resolves to,
 /// as the world stands now: each picked face gives its closed boundary
 /// loops, each closed chain its ring, projected to XY, coincident rims
-/// counted once; an open chain is no boundary at all, so it comes back in
-/// the second half - and only for a Contour, the one kind that machines a
-/// run. Refusals are the Prime Directive's kind - a tilted face for a
-/// facing pass, an open chain for a Pocket, an open sheet, each named in
-/// the message, each with the fix stated.
+/// counted once. An open chain is no boundary at all: for a Contour it
+/// comes back in the second half - the one kind that machines a run -
+/// and for a Face it runs out to the stock edge, the run acting as the
+/// limit (M1.5.1 issue C). Refusals are the Prime Directive's kind - a
+/// tilted face for a facing pass, an open chain for a Pocket or a Trace,
+/// an open sheet, a run-out whose side cannot be told, each named in the
+/// message, each with the fix stated. Never a silent drop: an unconsumed
+/// run either bounds something or the message says why it cannot.
 ///
 /// Picked open runs are stitched before this routing (M1.5.1 issue C):
 /// several runs that meet end to end spell one ring, and a ring is a
-/// ring however it is spelled - see `stitch_open_runs`.
+/// ring however it is spelled - see `stitch_open_runs`. A facing region
+/// spelled only by chains is then clipped to the material that actually
+/// stands there - and taken on the far side when the picked rings bound
+/// air, which is what "machine out to the stock, the run is the limit"
+/// means on a bore rim (the material-side rule, [`OUTSIDE_BIAS`]).
 fn selection_geometry(
     world: &World,
     items: &[GeoSel],
     params: &OpParams,
 ) -> Result<(Vec<Loop>, Vec<Vec<Point2>>), GenError> {
+    selection_geometry_impl(world, items, params, None)
+}
+
+/// [`selection_geometry`] with a human-readable account of what the
+/// selection resolved to (`notes`) accumulated on the side, so the
+/// account can never disagree with the geometry - they are one walk.
+fn selection_geometry_impl(
+    world: &World,
+    items: &[GeoSel],
+    params: &OpParams,
+    mut notes: Option<&mut Vec<String>>,
+) -> Result<(Vec<Loop>, Vec<Vec<Point2>>), GenError> {
     let facing = matches!(params, OpParams::Face { .. });
     let pocket = matches!(params, OpParams::Pocket { .. });
     let contour = matches!(params, OpParams::Contour { .. });
+    // The two silhouettes a run-out consults, computed once and shared
+    // with the assembly below: the source's own footprint (the Face arm
+    // of `region_for` and the verification project, so preview and path
+    // agree) and the stock around it (what a run runs out to, where
+    // stock exists).
+    let mut material_sil = None;
+    let mut envelope = None;
+    let mut chain_only = false;
+    if facing {
+        let material = material_of(world, &SrcRef::Selection(items.to_vec()))?;
+        chain_only = items.iter().all(|g| !matches!(g.feature, FeatureSel::Face(_)));
+        let sil = silhouette(&material.facets);
+        envelope = model::find_by_name(world, crate::schema::STOCK_NAME)
+            .and_then(|e| model::world_facets(world, &e))
+            .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
+            .filter(|r| !r.is_empty())
+            .or_else(|| sil.clone());
+        material_sil = sil;
+    }
     let mut loops: Vec<Loop> = Vec::new();
     let mut chains: Vec<Vec<Point2>> = Vec::new();
+    let mut strips: Vec<Loop> = Vec::new();
     let mut rims: Vec<Vec<(i64, i64)>> = Vec::new();
     let (rings, stitched) = stitch_open_runs(world, items);
-    for (label, pts) in rings {
+    let mut stitched_runs = 0usize;
+    let mut stitched_rings = 0usize;
+    for (label, pts, runs) in rings {
+        if runs > 1 {
+            stitched_runs += runs;
+            stitched_rings += 1;
+        }
         push_loop(&label, pts, &mut loops, &mut rims)?;
+    }
+    if let Some(n) = &mut notes
+        && stitched_runs > 0
+    {
+        n.push(format!(
+            "{stitched_runs} open run{} stitched into {stitched_rings} ring{}",
+            if stitched_runs == 1 { "" } else { "s" },
+            if stitched_rings == 1 { "" } else { "s" },
+        ));
     }
     for (gi, g) in items.iter().enumerate() {
         let Some(entity) = model::find_by_name(world, &g.entity) else {
@@ -938,6 +1000,13 @@ fn selection_geometry(
                         "{label} is no longer in the model: re-pick it"
                     )));
                 };
+                let xy: Vec<Point2> = feature::chain_points(&features, c)
+                    .iter()
+                    .map(|p| {
+                        let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
+                        Point2::new(w.x, w.y)
+                    })
+                    .collect();
                 if !c.closed {
                     if stitched.contains(&gi) {
                         // The stitch pass closed this run's ends into a
@@ -954,33 +1023,78 @@ fn selection_geometry(
                         // The run's consumer: a centerline pass along
                         // these exact points, XY like everything else
                         // here - the Z ladder is the operation's.
-                        chains.push(
-                            feature::chain_points(&features, c)
-                                .iter()
-                                .map(|p| {
-                                    let w = transform_point(
-                                        Point3::new(p[0], p[1], p[2]),
-                                        loc.pos,
-                                        loc.rot,
-                                    );
-                                    Point2::new(w.x, w.y)
-                                })
-                                .collect(),
-                        );
+                        chains.push(xy);
+                    } else if facing {
+                        // M1.5.1 issue C: the run is the limit - face
+                        // from it out to the stock edge. No stock and
+                        // no source footprint means nowhere to run to,
+                        // said by name rather than dropped.
+                        let Some(env) = &envelope else {
+                            return Err(GenError::Invalid(format!(
+                                "{label} is an open run and nothing bounds the plane around it - set up stock or close the pick into a chain"
+                            )));
+                        };
+                        strips.push(extend_run_to_footprint(
+                            &label,
+                            &xy,
+                            env,
+                            material_sil.as_ref(),
+                        )?);
+                    } else {
+                        // Trace used to drop the run in silence; the
+                        // Prime Directive's answer is a named refusal.
+                        return Err(GenError::Invalid(format!(
+                            "{label} is an open run - Trace machines a closed boundary; use a 2D Contour or close the pick into a chain"
+                        )));
                     }
-                    // Trace/Face: an open run bounds no area for them.
                     continue;
                 }
-                let pts: Vec<Point2> = feature::chain_points(&features, c)
-                    .iter()
-                    .map(|p| {
-                        let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
-                        Point2::new(w.x, w.y)
-                    })
-                    .collect();
-                push_loop(&label, pts, &mut loops, &mut rims)?;
+                push_loop(&label, xy, &mut loops, &mut rims)?;
             }
         }
+    }
+    if facing && (chain_only || !strips.is_empty()) {
+        // The material-side rule, assembled once at the end so the
+        // stitching, the run-outs and the clip all report through the
+        // same walk: rings (or nothing), then the run-out strips, then
+        // one test against the metal - if what the selection bounds
+        // holds less material than what it does not, the answer is the
+        // complement inside the material. A bore rim rings air, and a
+        // convex rim's outward side is all air; a Face region that
+        // named the void as its own answer would machine nothing,
+        // which is gouging by another route.
+        let mut region = if loops.is_empty() {
+            Region::empty()
+        } else {
+            Region::new(loops.clone())?
+        };
+        let extended = strips.len();
+        for s in strips {
+            region = region.union(&Region::new(vec![s])?)?;
+        }
+        let mut flipped = false;
+        if chain_only && let Some(mat) = &material_sil {
+            let keep = region.intersect(mat)?.area().abs();
+            let whole = mat.area().abs();
+            if keep < OUTSIDE_BIAS * (whole - keep) {
+                region = mat.difference(&region)?;
+                flipped = true;
+            } else {
+                region = region.intersect(mat)?;
+            }
+        }
+        if let Some(n) = &mut notes {
+            if extended > 0 {
+                n.push(format!(
+                    "{extended} open run{} extended to the stock boundary",
+                    if extended == 1 { "" } else { "s" },
+                ));
+            }
+            if flipped {
+                n.push("machining outside the run - the selection bounds air".into());
+            }
+        }
+        loops = region.loops().to_vec();
     }
     Ok((loops, chains))
 }
@@ -1001,6 +1115,301 @@ fn selection_region(
         ));
     }
     Region::new(loops).map_err(Into::into)
+}
+
+/// A human-readable account of what a feature selection machines beyond
+/// the bare pick list: runs stitched into rings, runs extended out to
+/// the stock boundary, and a region taken on the far side of its rings
+/// because the rings bound air. Computed on read from the very walk the
+/// region takes - the account cannot disagree with the geometry, and a
+/// selection that refuses says so by owning nothing.
+///
+/// Deliberately *not* a persisted `verify::Warning` variant: those names
+/// are the v4 project-file contract, and this is derived state, not a
+/// verification finding.
+#[must_use]
+pub fn selection_notes(world: &World, items: &[GeoSel], params: &OpParams) -> Vec<String> {
+    let mut notes = Vec::new();
+    match selection_geometry_impl(world, items, params, Some(&mut notes)) {
+        Ok(_) => notes,
+        // The refusal itself is `region_of`'s and generation's to make,
+        // with detail; notes stay empty rather than contradict it.
+        Err(_) => notes,
+    }
+}
+
+/// The footprint a piece of material projects to, XY: the same
+/// `slice::project` the Face arm of `region_for` and the generation
+/// verifier run, so a preview that consults it and the path it previews
+/// agree by construction (M1.5.1: a run-out strip is clipped to this).
+/// A model with height sweeps to a silhouette with its through-holes
+/// intact; a zero-thickness sheet has no Z span to section, so its
+/// facets' planar union is its footprint instead.
+fn silhouette(facets: &[Triangle]) -> Option<Region> {
+    if let Ok(r) = slice::project(facets, FOOTPRINT_SAMPLES)
+        && !r.is_empty()
+    {
+        return Some(r);
+    }
+    let loops: Vec<Loop> = facets
+        .iter()
+        .filter_map(|t| {
+            Loop::new(vec![
+                Point2::new(t.a.x, t.a.y),
+                Point2::new(t.b.x, t.b.y),
+                Point2::new(t.c.x, t.c.y),
+            ])
+            .ok()
+            .filter(|l| l.area().abs() > DEGENERATE_AREA)
+        })
+        .collect();
+    if loops.is_empty() {
+        return None;
+    }
+    Region::new(loops)
+        .ok()
+        .filter(|r| !r.is_empty())
+}
+
+/// The first point and edge index where ray `o + t·d` (t > 0) hits a
+/// polygon ring; `None` when it misses (or runs along the ring without
+/// reaching it). The run-out's geometric question, verbatim.
+fn ray_hit(ring: &[Point2], o: Point2, d: Point2) -> Option<(Point2, usize)> {
+    let mut best: Option<(f64, usize)> = None;
+    let n = ring.len();
+    for i in 0..n {
+        let a = ring[i];
+        let b = ring[(i + 1) % n];
+        let e = Point2::new(b.x - a.x, b.y - a.y);
+        let den = d.x * e.y - d.y * e.x;
+        if den.abs() < 1e-12 {
+            continue; // parallel; an overlapping collinear hit is the ambiguity's own job to name
+        }
+        let oa = Point2::new(a.x - o.x, a.y - o.y);
+        let t = (oa.x * e.y - oa.y * e.x) / den;
+        let s = (oa.x * d.y - oa.y * d.x) / den;
+        if t > 1e-9 && (0.0..=1.0).contains(&s) && best.is_none_or(|(bt, _)| t < bt) {
+            best = Some((t, i));
+        }
+    }
+    let (t, i) = best?;
+    Some((Point2::new(o.x + t * d.x, o.y + t * d.y), i))
+}
+
+/// Walk `ring` from the edge index+hit of one point to that of another,
+/// forward along the ring's own order or back against it. Returns the
+/// strict interior vertices, then the destination point - what a
+/// closure needs between the two ray hits. `None` on a degenerate ring.
+fn boundary_path(
+    ring: &[Point2],
+    from: (usize, Point2),
+    to: (usize, Point2),
+    forward: bool,
+) -> Option<Vec<Point2>> {
+    let n = ring.len();
+    if n < 3 {
+        return None;
+    }
+    let mut out = Vec::new();
+    if from.0 == to.0 {
+        // Same edge: forward = the whole ring from here and back to the
+        // destination; reverse = nothing between (the direct hop).
+        if forward {
+            for k in 1..=n {
+                out.push(ring[(from.0 + k) % n]);
+            }
+        }
+        out.push(to.1);
+        return Some(out);
+    }
+    if forward {
+        let mut i = (from.0 + 1) % n;
+        loop {
+            out.push(ring[i]);
+            if i == to.0 {
+                break;
+            }
+            i = (i + 1) % n;
+        }
+    } else {
+        // Backward: the destination sits mid-edge, entered against the
+        // ring's order from that edge's END vertex - walking to the one
+        // before it would step past the hit and force the closing edge
+        // to jump back over the interior.
+        let mut i = from.0;
+        loop {
+            out.push(ring[i]);
+            if i == (to.0 + 1) % n {
+                break;
+            }
+            i = (i + n - 1) % n;
+        }
+    }
+    out.push(to.1);
+    Some(out)
+}
+
+/// Close one open run into a boundary by casting each free end straight
+/// out to the envelope's outer ring and walking that ring between the
+/// hits (M1.5.1 issue C: "an open loop should just let us generate to
+/// the outside of the stock box - the open loop selected should act as
+/// a limit"). The run is first oriented so the chord-closing shoelace is
+/// positive, which pins the outward normal (a 90° clockwise turn of the
+/// travel direction) to the material-free side at each end; the walk
+/// direction that keeps the strip on that side is chosen by material
+/// overlap when a footprint is known, shortest boundary otherwise, with
+/// the forward walk winning ties - and candidates that cross into the
+/// run's own chord lens are out of the race, because the run is a limit.
+/// Every failure mode - no stock ahead of an end, a self-crossing strip,
+/// a zero-area strip - is the named ambiguity, never a silent skip.
+fn extend_run_to_footprint(
+    label: &str,
+    run: &[Point2],
+    envelope: &Region,
+    material: Option<&Region>,
+) -> Result<Loop, GenError> {
+    let ambiguous = || {
+        GenError::Invalid(format!(
+            "{label} and the selection geometry is ambiguous; use a closed chain or a Face pick"
+        ))
+    };
+    let Some(outer) = envelope
+        .loops()
+        .iter()
+        .max_by(|a, b| total_cmp_signed(a.area(), b.area()))
+    else {
+        return Err(ambiguous());
+    };
+    let ring = outer.points();
+    if ring.len() < 3 || run.len() < 2 {
+        return Err(ambiguous());
+    }
+    // Orient: shoelace over run + chord. A straight run shoelaces to ~0
+    // and keeps its order; the normal choice is still deterministic.
+    let mut twice = 0.0f64;
+    let m = run.len();
+    for i in 0..m {
+        let a = run[i];
+        let b = run[(i + 1) % m];
+        twice += a.x * b.y - b.x * a.y;
+    }
+    let pts: Vec<Point2> = if twice < 0.0 {
+        run.iter().rev().copied().collect()
+    } else {
+        run.to_vec()
+    };
+    // Outward = clockwise turn of travel at each free end: (d.y, -d.x).
+    let d0 = Point2::new(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+    let d1 = Point2::new(pts[m - 1].x - pts[m - 2].x, pts[m - 1].y - pts[m - 2].y);
+    let n0 = Point2::new(d0.y, -d0.x);
+    let n1 = Point2::new(d1.y, -d1.x);
+    // A straight run laces to nothing, so "away from the bulge" names
+    // no side - both normals are tried and the overlap score picks the
+    // material side. A curved run's chord-CCW orientation already fixed
+    // one honest outward direction; trying the other would let a run
+    // that rings material (a bore rim) claim the far half of itself.
+    let straight = twice.abs() < DEGENERATE_AREA;
+    // The lens the run closes against its own chord: material or air on
+    // the run's concave side. A strip that reaches into it crosses the
+    // run - and "the open loop acts as a limit" forbids crossing. One
+    // probe per segment, a hair left of travel (the chord-CCW
+    // orientation above puts lens interior on the left); any candidate
+    // containing one is out of the race, so overlap can no longer be
+    // gamed by wrapping the whole envelope behind the run's back. A
+    // straight run closes no lens: pure overlap decides, as scribbled.
+    let mut probes: Vec<Point2> = Vec::new();
+    if !straight {
+        for i in 0..m - 1 {
+            let (a, b) = (pts[i], pts[i + 1]);
+            let (dx, dy) = (b.x - a.x, b.y - a.y);
+            let len = (dx * dx + dy * dy).sqrt();
+            if len <= f64::EPSILON {
+                continue;
+            }
+            let eps = len * 1e-3;
+            probes.push(Point2::new(
+                (a.x + b.x) * 0.5 - dy / len * eps,
+                (a.y + b.y) * 0.5 + dx / len * eps,
+            ));
+        }
+    }
+    let mut candidates: Vec<(f64, f64, usize, Loop)> = Vec::new();
+    let sides: &[f64] = if straight { &[1.0, -1.0] } else { &[1.0] };
+    for (si, &sgn) in sides.iter().enumerate() {
+        let Some(hit_start) = ray_hit(ring, pts[0], Point2::new(n0.x * sgn, n0.y * sgn)) else {
+            continue;
+        };
+        let Some(hit_end) = ray_hit(ring, pts[m - 1], Point2::new(n1.x * sgn, n1.y * sgn)) else {
+            continue;
+        };
+        for &forward in [true, false].iter() {
+            let Some(between) = boundary_path(
+                ring,
+                (hit_end.1, hit_end.0),
+                (hit_start.1, hit_start.0),
+                forward,
+            ) else {
+                continue;
+            };
+            let mut closed = pts.clone();
+            closed.push(hit_end.0);
+            closed.extend(between.iter().copied());
+            let Ok(loop_) = Loop::new(closed) else {
+                continue;
+            };
+            if loop_.area().abs() < DEGENERATE_AREA {
+                continue;
+            }
+            // Self-crossing is the ambiguity guard: a crossing loop is
+            // no boundary, and `Region::new` is the one that says so.
+            let Ok(region) = Region::new(vec![loop_.clone()]) else {
+                continue;
+            };
+            if probes.iter().any(|p| region.contains(*p)) {
+                continue;
+            }
+            // More material inside the strip than less - the side that
+            // machines metal, not air.
+            let overlap = match material {
+                Some(mat) => match region.intersect(mat) {
+                    Ok(r) => r.area().abs(),
+                    Err(_) => continue,
+                },
+                None => 0.0,
+            };
+            // Then the shorter boundary walk: the corridor hugging the
+            // run's normal side beats the candidate that wraps the
+            // whole envelope, and with no footprint to consult this is
+            // the whole decision.
+            let mut walk = 0.0;
+            let mut prev = hit_end.0;
+            for &p in &between {
+                walk += ((p.x - prev.x).powi(2) + (p.y - prev.y).powi(2)).sqrt();
+                prev = p;
+            }
+            candidates.push((overlap, -walk, si, loop_));
+        }
+    }
+    // Highest score wins; ties break to the shorter walk, then to the
+    // first side tried, so the answer is a pure function of the pick.
+    match candidates
+        .into_iter()
+        .max_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then(a.1.total_cmp(&b.1))
+                .then(a.2.cmp(&b.2))
+        })
+    {
+        Some((_, _, _, loop_)) => Ok(loop_),
+        None => Err(ambiguous()),
+    }
+}
+
+/// Order two signed areas by magnitude - the outer loops of a region
+/// are the big positive ones; a stray negative inside an `outer` pick
+/// should never win.
+fn total_cmp_signed(a: f64, b: f64) -> std::cmp::Ordering {
+    a.abs().total_cmp(&b.abs())
 }
 
 /// The 1e6 lattice `push_loop` keys rims on, in one place so the
@@ -1026,6 +1435,10 @@ struct Run {
     end: (i64, i64),
 }
 
+/// What the stitcher hands back: rings composed from picked runs (label,
+/// points, run count) and the item indices those rings consumed.
+type Stitched = (Vec<(String, Vec<Point2>, usize)>, HashSet<usize>);
+
 /// M1.5.1 issue C: tessellation - STEP adaptive chords especially - can
 /// break a geometrically closed rim into several chains, each stopping
 /// where a chord's turn exceeds the merge angle. The user picks them
@@ -1050,10 +1463,7 @@ struct Run {
 /// runs that do not close route exactly as they always did. Failed
 /// lookups are not errors here; the routing loop owns those refusals
 /// and will name them.
-fn stitch_open_runs(
-    world: &World,
-    items: &[GeoSel],
-) -> (Vec<(String, Vec<Point2>)>, HashSet<usize>) {
+fn stitch_open_runs(world: &World, items: &[GeoSel]) -> Stitched {
     let mut runs: Vec<Run> = Vec::new();
     for (i, g) in items.iter().enumerate() {
         let FeatureSel::Chain(cid) = g.feature else {
@@ -1096,7 +1506,9 @@ fn stitch_open_runs(
         });
     }
     let used = |r: &Run, consumed: &HashSet<usize>| r.items.iter().any(|it| consumed.contains(it));
-    let mut rings: Vec<(String, Vec<Point2>)> = Vec::new();
+    // Each committed ring carries the count of runs that spelled it, so
+    // `selection_notes` can say what the stitching did.
+    let mut rings: Vec<(String, Vec<Point2>, usize)> = Vec::new();
     let mut consumed: HashSet<usize> = HashSet::new();
     for s in 0..runs.len() {
         if used(&runs[s], &consumed) {
@@ -1160,7 +1572,11 @@ fn stitch_open_runs(
         if twice < 0.0 {
             pts.reverse();
         }
-        rings.push((format!("the stitched rim of '{}'", runs[s].entity), pts));
+        rings.push((
+            format!("the stitched rim of '{}'", runs[s].entity),
+            pts,
+            seq.len(),
+        ));
     }
     (rings, consumed)
 }
