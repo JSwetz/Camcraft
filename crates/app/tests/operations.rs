@@ -1384,6 +1384,42 @@ fn bore_runs_of(world: &World, name: &str) -> Vec<u64> {
         .collect()
 }
 
+/// The bore test in solid form: a 40x40x8 block drilled through by a
+/// sixteen-facet bore (22.5-degree turns - inside the crease bound, so
+/// the wall tessellates into strips that weld, exactly what STEP hands
+/// back for a cylindrical face). Unlike `bored_plate` this has metal to
+/// section: the silhouette keeps the bore as a through-hole.
+fn bored_block() -> hsmworks_app::geometry::Mesh {
+    let tau = std::f64::consts::TAU;
+    let bp = |i: usize, z: f64| {
+        let a = tau * (i % 16) as f64 / 16.0;
+        Point3::new(12.0 * a.cos(), 12.0 * a.sin(), z)
+    };
+    // Bore vertices pushed radially onto the 40x40 square: the diagonal
+    // ones carry a corner, so each side's wall quads share its plane.
+    let op = |i: usize, z: f64| {
+        let a = tau * (i % 16) as f64 / 16.0;
+        let (x, y) = (a.cos(), a.sin());
+        let s = x.abs().max(y.abs());
+        Point3::new(x * 20.0 / s, y * 20.0 / s, z)
+    };
+    let quad = |a: Point3, b: Point3, c: Point3, d: Point3, facets: &mut Vec<Triangle>| {
+        facets.push(Triangle::new(a, b, c));
+        facets.push(Triangle::new(a, c, d));
+    };
+    let mut facets = Vec::new();
+    for i in 0..16 {
+        let j = i + 1;
+        // Caps: annuli wound outward (+z top, -z bottom).
+        quad(bp(j, 8.0), bp(i, 8.0), op(i, 8.0), op(j, 8.0), &mut facets);
+        quad(bp(i, 0.0), bp(j, 0.0), op(j, 0.0), op(i, 0.0), &mut facets);
+        // Bore wall faces the axis; the block wall faces away.
+        quad(bp(i, 8.0), bp(j, 8.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
+        quad(op(j, 8.0), op(i, 8.0), op(i, 0.0), op(j, 0.0), &mut facets);
+    }
+    hsmworks_app::geometry::Mesh { facets }
+}
+
 /// Picks for a list of chain ids on one entity, in the given order.
 fn chain_picks(entity: &str, ids: &[u64]) -> Vec<GeoSel> {
     ids.iter()
@@ -1460,6 +1496,76 @@ fn face_on_split_bore_rim_machines_annulus() {
     );
     history.execute(&world, GenerateOperation::new(&world, "Bore1").expect("generate"));
     let path = cache(&world, "Bore1").expect("cache").path;
+    assert!(!path.moves.is_empty(), "facing rows across the annulus bounds");
+    assert!(path.all_finite());
+}
+
+#[test]
+fn a_patch_pick_bounds_the_same_annulus_as_its_strips() {
+    // The welded-face answer to the same bore problem the rim-chain
+    // route solved: pick the wall, not a strip under the cursor. The
+    // wall's rims are one ring (the twin drops at `push_loop`), the ring
+    // circles air, so the material-side rule complements it - and the
+    // annulus must be the one the passing chain pick already produces,
+    // to the last bit the walk can agree on.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("plate", bored_block()));
+    let e = model::find_by_name(&world, "plate").expect("plate");
+    let f = model::features_of(&world, &e).expect("features");
+    let ps = feature::patches(&f);
+    assert_eq!(ps.len(), 1, "only the bore wall welds: 22.5-degree strips");
+    assert_eq!(ps[0].faces.len(), 16);
+
+    let items = vec![GeoSel {
+        entity: "plate".into(),
+        feature: FeatureSel::Patch(ps[0].id),
+    }];
+    let op = sel_op(&world, items.clone(), face_sel_params());
+    let region = operation::region_of(&world, &op).expect("bore wall bounds a region");
+    assert_eq!(
+        region.loops().len(), 2,
+        "block outline and bore, not the wall's two rims doubled"
+    );
+    let tau = std::f64::consts::TAU;
+    let want = 1600.0 - 8.0 * 12.0f64.powi(2) * (tau / 16.0).sin();
+    let got = region.area().abs();
+    assert!(
+        (got - want).abs() / want < 0.01,
+        "the annulus, to the polygon's own area: {got} vs {want}"
+    );
+    assert!(!region.contains(Point2::new(0.0, 0.0)), "the bore stays standing");
+    assert!(region.contains(Point2::new(15.0, 0.0)), "material by the wall is taken");
+
+    // Equivalence oracle: the closed rim chains answer the same cut.
+    let rims: Vec<u64> = feature::chains(&f)
+        .into_iter()
+        .filter(|c| {
+            c.closed && {
+                let p = feature::chain_points(&f, c);
+                p.iter().all(|q| (q[0] * q[0] + q[1] * q[1]).sqrt() < 15.0)
+            }
+        })
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(rims.len(), 2, "both bore rims loop closed");
+    let strip_op = sel_op(&world, chain_picks("plate", &rims), face_sel_params());
+    let strip_region = operation::region_of(&world, &strip_op).expect("rims bound the same");
+    let (a, b) = (region.area().abs(), strip_region.area().abs());
+    assert!(
+        (a - b).abs() / a.max(f64::EPSILON) < 1e-6,
+        "wall pick and rim picks are the same annulus: {a} vs {b}"
+    );
+
+    // And it generates.
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "Wall1", "EM-0600-4FL", SrcRef::Selection(items), face_sel_params())
+            .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Wall1").expect("generate"));
+    let path = cache(&world, "Wall1").expect("cache").path;
     assert!(!path.moves.is_empty(), "facing rows across the annulus bounds");
     assert!(path.all_finite());
 }

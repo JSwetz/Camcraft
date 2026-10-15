@@ -93,6 +93,13 @@ pub struct GeoSel {
 pub enum FeatureSel {
     Face(crate::geometry::feature::FaceId),
     Chain(crate::geometry::feature::ChainId),
+    /// One logical face of a smooth wall: every planar strip the wall was
+    /// tessellated into, welded by their shared `facet_patch` root (see
+    /// [`patch_rings`]). Only exists where that weld has more than one
+    /// strip - a flat face is already whole, and stays a `Face`.
+    ///
+    /// [`patch_rings`]: crate::geometry::feature::patch_rings
+    Patch(crate::geometry::feature::PatchId),
 }
 
 impl core::fmt::Display for FeatureSel {
@@ -100,6 +107,7 @@ impl core::fmt::Display for FeatureSel {
         match self {
             FeatureSel::Face(id) => write!(f, "face {id:#x}"),
             FeatureSel::Chain(id) => write!(f, "edge chain {id:#x}"),
+            FeatureSel::Patch(id) => write!(f, "welded face {id:#x}"),
         }
     }
 }
@@ -601,11 +609,12 @@ pub fn current_stamp(
                 h.write_u8(match g.feature {
                     FeatureSel::Face(_) => 0,
                     FeatureSel::Chain(_) => 1,
+                    FeatureSel::Patch(_) => 2,
                 });
                 h.write_usize(g.entity.len());
                 h.write(g.entity.as_bytes());
                 let id = match g.feature {
-                    FeatureSel::Face(id) | FeatureSel::Chain(id) => id,
+                    FeatureSel::Face(id) | FeatureSel::Chain(id) | FeatureSel::Patch(id) => id,
                 };
                 h.write_u64(id);
                 // The pick resolves against this entity's LOCAL features
@@ -1050,6 +1059,42 @@ fn selection_geometry_impl(
                     continue;
                 }
                 push_loop(&label, xy, &mut loops, &mut rims)?;
+            }
+            FeatureSel::Patch(pid) => {
+                let Some(rings) = feature::patch_rings(&features, pid) else {
+                    return Err(GenError::Invalid(format!(
+                        "{label} is no longer in the model: re-pick it"
+                    )));
+                };
+                // The Face arm's horizontal-tilt rule deliberately does not
+                // apply: a patch is exactly how one asks for a wall. The
+                // wall's rims go through the same seams as any closed
+                // boundary - `push_loop`'s canonical-rim dedupe drops the
+                // bottom rim of a vertical wall as the XY twin of the top,
+                // so the region is the footprint the weld encloses, never
+                // an even-odd sliver of its own skin - and the facing
+                // material-side rule below turns a bore wall's rim around
+                // the air it rings into the annulus the cut needs.
+                let mut drew = false;
+                for r in rings.iter().filter(|r| r.closed) {
+                    let pts: Vec<Point2> = r
+                        .verts
+                        .iter()
+                        .filter_map(|&vi| features.verts.get(vi as usize))
+                        .map(|p| {
+                            let w =
+                                transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
+                            Point2::new(w.x, w.y)
+                        })
+                        .collect();
+                    push_loop(&label, pts, &mut loops, &mut rims)?;
+                    drew = true;
+                }
+                if !drew {
+                    return Err(GenError::Invalid(format!(
+                        "{label} bounds no closed ring - re-pick it"
+                    )));
+                }
             }
         }
     }

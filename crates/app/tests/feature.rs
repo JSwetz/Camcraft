@@ -7,8 +7,8 @@
 
 use hsmworks_app::geometry::cube;
 use hsmworks_app::geometry::feature::{
-    chains, digest_of, feature_edges, features_of_facets, Chain, EdgeKind, FaceKind, Features,
-    LoopKind,
+    chains, digest_of, feature_edges, features_of_facets, patch_rings, patches, Chain, EdgeKind,
+    FaceKind, Features, LoopKind,
 };
 use hsmworks_app::geometry::{Mesh, Point3, Triangle};
 use hsmworks_app::model;
@@ -486,4 +486,61 @@ fn coarse_nine_gon_fragments_the_documented_limit() {
          ten_gon_rim_chains_closed_by_smooth_band."
     );
     assert!(cs.iter().all(|c| c.edges.len() == 1 && !c.closed));
+}
+
+// ===================== welded patches (M1.5.2 step 2) =====================
+
+#[test]
+fn welded_cylinder_walls_report_one_patch() {
+    // The hand-test complaint: a raycast onto a faceted bore answers
+    // with the strip under the cursor, not the wall. The weld is the
+    // patch: faces sharing one `facet_patch` root, more than one of
+    // them. The decagon's wall strips sit 36 degrees apart, inside one
+    // smooth patch; the caps are single planar strips and stay plain
+    // faces - nothing flat is re-keyed.
+    let f = features_of_facets(&tris(&prism_rows(10, 12.0, 5.0)));
+    let ps = patches(&f);
+    assert_eq!(ps.len(), 1, "one weld: the wall, not the caps");
+    let wall: Vec<u64> = f
+        .faces
+        .iter()
+        .filter(|fa| fa.normal[2].abs() < 0.5)
+        .map(|fa| fa.id)
+        .collect();
+    assert_eq!(wall.len(), 10, "ten vertical strips");
+    assert_eq!(ps[0].faces.len(), 10);
+    assert!(
+        ps[0].faces.iter().all(|id| wall.contains(id)),
+        "the patch is exactly the wall faces"
+    );
+    // The boundary: seams weld away, rims stay - two closed decagons.
+    let rings = patch_rings(&f, ps[0].id).expect("resolvable by id");
+    assert_eq!(rings.len(), 2, "top and bottom rim");
+    assert!(
+        rings.iter().all(|r| r.closed && r.verts.len() == 10),
+        "each ring walks the ten rim vertices, closed"
+    );
+    // An ordinary box has no weld: every face is one planar strip.
+    let b = features_of_facets(&tris(&box_rows(0.0, 0.0, 0.0, 2.0, 3.0, 1.0)));
+    assert!(patches(&b).is_empty(), "a box re-keys nothing");
+    assert!(patch_rings(&b, 0xdead_beef).is_none(), "no such weld");
+}
+
+#[test]
+fn patch_ids_survive_a_reimport() {
+    // The id is boundary segments and strip planes at lattice positions,
+    // never face or facet indices - STEP may hand the shape table back in
+    // any order and the weld keeps its name (the pick contract).
+    let rows = prism_rows(10, 12.0, 5.0);
+    let mut back = rows.clone();
+    back.reverse();
+    let a = patches(&features_of_facets(&tris(&rows)));
+    let b = patches(&features_of_facets(&tris(&back)));
+    assert_eq!(a.len(), 1);
+    assert_eq!(b.len(), 1);
+    assert_eq!(a[0].id, b[0].id, "reordered facets, same patch id");
+    // A different weld on the same part is a different id.
+    let t = patches(&features_of_facets(&tris(&prism_rows(10, 12.0, 6.0))));
+    assert_eq!(t.len(), 1);
+    assert_ne!(t[0].id, a[0].id, "the wall grew a millimeter: new geometry, new id");
 }

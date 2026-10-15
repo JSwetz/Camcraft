@@ -1168,6 +1168,22 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
                 let pts = feature::chain_points(&features, &chain);
                 draw(&mut out, &pts, chain.closed);
             }
+            FeatureSel::Patch(pid) => {
+                // The weld's outline, not the seams inside it: the seam
+                // edges are exactly what the patch dissolved, and
+                // drawing them would advertise strips the pick is not.
+                let Some(rings) = feature::patch_rings(&features, pid) else {
+                    continue; // stale id: the model re-meshed since the pick
+                };
+                for r in &rings {
+                    let pts: Vec<[f64; 3]> = r
+                        .verts
+                        .iter()
+                        .filter_map(|&vi| features.verts.get(vi as usize).copied())
+                        .collect();
+                    draw(&mut out, &pts, r.closed);
+                }
+            }
         }
     }
     out
@@ -1245,6 +1261,19 @@ fn feature_segments(
             let pts = feature::chain_points(&features, &chain);
             push_poly(&mvp, &loc, &pts, chain.closed, out);
         }
+        FeatureSel::Patch(pid) => {
+            let Some(rings) = feature::patch_rings(&features, pid) else {
+                return; // stale id: the model re-meshed under the hover
+            };
+            for r in &rings {
+                let pts: Vec<[f64; 3]> = r
+                    .verts
+                    .iter()
+                    .filter_map(|&vi| features.verts.get(vi as usize).copied())
+                    .collect();
+                push_poly(&mvp, &loc, &pts, r.closed, out);
+            }
+        }
     }
 }
 
@@ -1279,12 +1308,24 @@ fn push_poly(
 }
 
 /// The face feature a raycast facet belongs to, through the model's
-/// facet-to-face map. None when the entity or its features are gone.
+/// facet-to-face map. A strip of a welded wall promotes to its patch:
+/// the wall tessellates into strips only because it curves, and the
+/// user who picks "the wall" must get the wall, not the one strip under
+/// the cursor (M1.5.2 issue: "selects a facet - we need welded faces").
+/// Flat faces are their own logical unit and stay a plain Face - the
+/// promotion cannot re-key what was never split. None when the entity
+/// or its features are gone.
 fn feature_of_facet(state: &State, entity: &str, facet: usize) -> Option<FeatureSel> {
     let found = model::find_by_name(&state.world, entity)?;
     let features = model::features_of(&state.world, &found)?;
     let fi = *features.facet_face.get(facet)?;
-    features.faces.get(fi as usize).map(|f| FeatureSel::Face(f.id))
+    let fid = features.faces.get(fi as usize)?.id;
+    Some(
+        feature::patches(&features)
+            .into_iter()
+            .find(|p| p.faces.contains(&fid))
+            .map_or(FeatureSel::Face(fid), |p| FeatureSel::Patch(p.id)),
+    )
 }
 
 /// Fold one feature pick into the open operation's geometry list and
@@ -2537,7 +2578,7 @@ mod feature_pick_tests {
 
     use super::*;
     use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
-    use hsmworks_app::geometry::cube;
+    use hsmworks_app::geometry::{cube, cylinder};
     use hsmworks_app::operation::{GeoSel, OpParams, SrcRef};
     use hsmworks_app::stock::StockShape;
     use hsmworks_app::tools::catalog;
@@ -2690,6 +2731,43 @@ mod feature_pick_tests {
         queue_feature_pick(&mut state, chain_pick.clone(), true);
         state.drain_actions();
         assert_eq!(src(&state), SrcRef::Selection(vec![face_pick, chain_pick]));
+    }
+
+    #[test]
+    fn a_wall_face_pick_lands_on_the_patch() {
+        // The hand-test complaint on the pick side: clicking a faceted
+        // bore answered with the one tessellation strip under the
+        // cursor. A strip of a welded wall now resolves to the whole
+        // weld; flat faces answer with themselves, so an ordinary box
+        // re-keys nothing.
+        let mut state = state_with_op();
+        state.history.execute(
+            &state.world,
+            ImportModel::from_mesh("boss", cylinder(20.0, 8.0, 16)),
+        );
+        // `cylinder`'s facet layout: per segment, two wall triangles,
+        // then the top and bottom cap fans.
+        let wall = feature_of_facet(&state, "boss", 0).expect("wall facet classified");
+        let cap = feature_of_facet(&state, "boss", 2).expect("cap facet classified");
+        assert!(
+            matches!(wall, FeatureSel::Patch(_)),
+            "a welded strip picks as the wall, not a strip: {wall}"
+        );
+        assert!(matches!(cap, FeatureSel::Face(_)), "a planar cap stays a face: {cap}");
+        let pid = match wall {
+            FeatureSel::Patch(id) => id,
+            _ => panic!("wall pick is a patch"),
+        };
+        let e = model::find_by_name(&state.world, "boss").expect("entity");
+        let f = model::features_of(&state.world, &e).expect("features");
+        let p = feature::patches(&f)
+            .into_iter()
+            .find(|x| x.id == pid)
+            .expect("the weld the pick named");
+        assert_eq!(p.faces.len(), 16, "all sixteen wall strips, no cap");
+        // Same facet slot on the box: a single flat strip, no weld.
+        let boxy = feature_of_facet(&state, "part", 4).expect("box facet classified");
+        assert!(matches!(boxy, FeatureSel::Face(_)), "a flat wall picks as itself: {boxy}");
     }
 
     #[test]

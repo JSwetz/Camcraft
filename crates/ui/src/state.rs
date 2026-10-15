@@ -273,6 +273,86 @@ fn short_id(id: u64) -> String {
     format!("{}…{}", &h[..4], &h[14..])
 }
 
+/// XY vertex set of a ring, quantized and sorted: the identity a patch
+/// chip dedupes coincident rims by (top and bottom rims of a vertical
+/// wall share it; a cone's differ, as they must). Display-only helper -
+/// the generator's dedupe is exact and lives in `operation::push_loop`.
+fn xy_set_key(pts: &[[f64; 3]]) -> Vec<(i64, i64)> {
+    let mut k: Vec<(i64, i64)> = pts
+        .iter()
+        .map(|p| {
+            (
+                (p[0] * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64,
+                (p[1] * 1e6).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64,
+            )
+        })
+        .collect();
+    k.sort_unstable();
+    k.dedup();
+    k
+}
+
+/// XY footprint span (w × h) of a point run; 0.0 if it has no extent.
+fn span(pts: &[[f64; 3]]) -> f64 {
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    for p in pts {
+        for k in 0..2 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    (hi[0] - lo[0]).max(0.0) * (hi[1] - lo[1]).max(0.0)
+}
+
+/// |Area| of a closed XY ring by the shoelace sum.
+fn shoelace(pts: &[[f64; 3]]) -> f64 {
+    if pts.len() < 3 {
+        return 0.0;
+    }
+    let mut a = 0.0;
+    for i in 0..pts.len() {
+        let (p, q) = (&pts[i], &pts[(i + 1) % pts.len()]);
+        a += p[0] * q[1] - q[0] * p[1];
+    }
+    (a * 0.5).abs()
+}
+
+/// Kåsa circle fit (mean-radius refinement): Some((center, r)) when the
+/// points are too many and too non-collinear to leave the fit undefined.
+/// Display only, for the chip's "bore Ø" descriptor.
+fn fit_circle(pts: &[[f64; 3]]) -> Option<([f64; 2], f64)> {
+    let n = pts.len();
+    if n < 3 {
+        return None;
+    }
+    let (mut sx, mut sy) = (0.0, 0.0);
+    for p in pts {
+        sx += p[0];
+        sy += p[1];
+    }
+    let (mx, my) = (sx / n as f64, sy / n as f64);
+    let (mut sxx, mut sxy, mut syy, mut bxx, mut byy) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for p in pts {
+        let (x, y) = (p[0] - mx, p[1] - my);
+        let z = x * x + y * y;
+        sxx += x * x;
+        sxy += x * y;
+        syy += y * y;
+        bxx += x * z;
+        byy += y * z;
+    }
+    let det = sxx * syy - sxy * sxy;
+    if !det.is_finite() || det.abs() <= f64::EPSILON {
+        return None;
+    }
+    let u = (0.5 * bxx * syy - 0.5 * sxy * byy) / det;
+    let v = (0.5 * byy * sxx - 0.5 * sxy * bxx) / det;
+    let c = [mx + u, my + v];
+    let r = pts.iter().map(|p| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt()).sum::<f64>()
+        / n as f64;
+    (r.is_finite() && r > 0.0).then_some((c, r))
+}
+
 /// Editable fields of the Tool Library pane's tool page; see [`StockUi`]
 /// for the transient-ness rule. `exists` records whether `name` resolved
 /// to a tool entity when the draft was fetched: Apply edits, Add creates.
@@ -915,6 +995,90 @@ impl State {
                             None => {
                                 let label =
                                     format!("Chain {} · {} · missing", g.entity, short_id(id));
+                                (label, true)
+                            }
+                        }
+                    }
+                    FeatureSel::Patch(id) => {
+                        // Resolve everything while the features live:
+                        // the rings come back as plain point runs,
+                        // XY-deduped by vertex set so a closed wall's
+                        // coincident rims read as the one outline they
+                        // are. Display only - the generator applies the
+                        // same dedupe exactly, through `push_loop`.
+                        let found = model::find_by_name(&self.world, &g.entity)
+                            .and_then(|e| model::features_of(&self.world, &e))
+                            .and_then(|f| {
+                                let strips = feature::patches(&f)
+                                    .into_iter()
+                                    .find(|p| p.id == id)?
+                                    .faces
+                                    .len();
+                                let mut seen: Vec<Vec<(i64, i64)>> = Vec::new();
+                                let mut closed: Vec<Vec<[f64; 3]>> = Vec::new();
+                                let mut open = false;
+                                for r in feature::patch_rings(&f, id)? {
+                                    let pts: Vec<[f64; 3]> = r
+                                        .verts
+                                        .iter()
+                                        .filter_map(|&v| f.verts.get(v as usize).copied())
+                                        .collect();
+                                    open |= !r.closed;
+                                    if !r.closed || pts.len() < 3 {
+                                        continue;
+                                    }
+                                    let key = xy_set_key(&pts);
+                                    if seen.contains(&key) {
+                                        continue;
+                                    }
+                                    seen.push(key);
+                                    closed.push(pts);
+                                }
+                                Some((strips, closed, open))
+                            });
+                        match found {
+                            Some((strips, closed, _open)) => {
+                                let label = match closed
+                                    .iter()
+                                    .max_by(|a, b| span(a).total_cmp(&span(b)))
+                                {
+                                    Some(rim) => {
+                                        let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+                                        for p in rim {
+                                            for k in 0..2 {
+                                                lo[k] = lo[k].min(p[k]);
+                                                hi[k] = hi[k].max(p[k]);
+                                            }
+                                        }
+                                        let shape = match fit_circle(rim) {
+                                            Some((c, r))
+                                                if rim.iter().all(|p| {
+                                                    let d = ((p[0] - c[0]).powi(2)
+                                                        + (p[1] - c[1]).powi(2))
+                                                    .sqrt();
+                                                    (d - r).abs() <= r.max(1e-3) * 0.02
+                                                }) =>
+                                            {
+                                                format!("bore Ø{:.1}", 2.0 * r)
+                                            }
+                                            _ => format!("{:.1} × {:.1}", hi[0] - lo[0], hi[1] - lo[1]),
+                                        };
+                                        format!(
+                                            "Welded face {} · {shape} · {:.1} mm² · {strips} strips",
+                                            g.entity,
+                                            shoelace(rim)
+                                        )
+                                    }
+                                    None => format!("Welded face {} · open band", g.entity),
+                                };
+                                (label, false)
+                            }
+                            None => {
+                                let label = format!(
+                                    "Welded face {} · {} · missing",
+                                    g.entity,
+                                    short_id(id)
+                                );
                                 (label, true)
                             }
                         }

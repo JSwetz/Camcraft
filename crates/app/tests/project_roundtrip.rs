@@ -7,12 +7,12 @@ use hsmworks_app::commands::{
     AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, SetWcsOrigin,
 };
 use hsmworks_app::geometry::feature;
-use hsmworks_app::machining2d::Lead;
+use hsmworks_app::machining2d::{Lead, PocketStrategy};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::Location;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
-use hsmworks_app::geometry::{IDENTITY_Q, cube, Point3};
+use hsmworks_app::geometry::{IDENTITY_Q, cube, cylinder, Point3};
 use hsmworks_app::model;
 use hsmworks_app::project::{self, ProjectError};
 use hsmworks_app::world::new_world;
@@ -78,13 +78,13 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1/v2/v3
+    // Anything newer than this build's format stays refused; v1/v2/v3/v4
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
-    // v3_file_migrates_to_v4).
-    let text = r#"{"version": 5, "entities": []}"#;
+    // v3_file_migrates_to_v4 / v4_file_migrates_to_v5).
+    let text = r#"{"version": 6, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(5)) => {}
+        Err(ProjectError::UnsupportedVersion(6)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -427,7 +427,7 @@ fn v2_file_migrates_to_v3() {
     let saved = std::fs::read_to_string(&path).expect("read");
     let _ = std::fs::remove_file(&path);
     assert!(
-        saved.contains("\"version\": 4"),
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
         "migrated file must carry the current stamp: {saved}"
     );
 }
@@ -533,8 +533,140 @@ fn v3_file_migrates_to_v4() {
     let saved = std::fs::read_to_string(&path).expect("read");
     let _ = std::fs::remove_file(&path);
     assert!(
-        saved.contains("\"version\": 4"),
-        "resaved file must be v4: {saved}"
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "resaved file must be stamped current: {saved}"
+    );
+}
+
+#[test]
+fn v4_file_migrates_to_v5() {
+    // A literal v4 file: the v5 additions (patch picks, arc moves, face
+    // staging, pocket hops) all default to "absent", so a v4 file carries
+    // none of them and v5 reads it verbatim - the step-up is the stamp,
+    // exactly as v3 -> v4 was. Both params kinds are here because the face
+    // arm grew top_z/stepdown and the pocket arm grew retract_z.
+    let text = r#"{
+        "version": 4,
+        "entities": [
+            {"name": "part", "translation": [0.0, 0.0, 0.0],
+             "facets": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]]},
+            {"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": {"selection": {"items": [
+                 {"entity": "part", "feature": {"face": {"id": 42}}}
+            ]}}, "params": {"face": {"stepover": 3.0, "clearance_z": 25.0,
+                 "cut_z": 0.5, "feed": 1200.0, "plunge_feed": 300.0,
+                 "climb": true}}}},
+            {"name": "Op2", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"pocket": {
+                 "stepover": 3.0, "stock_to_leave": 0.0, "clearance_z": 20.0,
+                 "top_z": 8.0, "bottom_z": 2.0, "stepdown": 2.0,
+                 "feed": 900.0, "plunge_feed": 250.0, "climb": true,
+                 "strategy": "zigzag"}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v4 must migrate");
+    let op = model::find_by_name(&world, "Op1").expect("op1");
+    let o = model::operation_of(&world, &op).expect("operation component");
+    assert_eq!(
+        o.src,
+        SrcRef::Selection(vec![GeoSel {
+            entity: "part".into(),
+            feature: FeatureSel::Face(42),
+        }]),
+        "the pick survives the step-up intact"
+    );
+    let op2 = model::find_by_name(&world, "Op2").expect("op2");
+    let p = match model::operation_of(&world, &op2).expect("op2 params").params {
+        OpParams::Pocket { strategy, .. } => strategy,
+        ref other => panic!("pocket params expected, got {other:?}"),
+    };
+    assert_eq!(p, PocketStrategy::Zigzag, "a v4 pocket means zigzag");
+
+    let path = tmp_path("mig5");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "resaved file must be stamped current: {saved}"
+    );
+    // The declared shapes stay unwritten while unused: a migrated file
+    // must not grow keys a v4 build could not read past the version.
+    for absent in ["\"retract_z\"", "\"patch\"", "\"arc\""] {
+        assert!(!saved.contains(absent), "v5 default must not be serialized: {absent}");
+    }
+}
+
+#[test]
+fn patch_selection_round_trips() {
+    // The welded wall of a faceted boss, picked once and saved by its
+    // geometry hash: the file speaks `patch`, and a second world
+    // recomputing features from the same facets resolves the same weld,
+    // so the loaded op stays Ok rather than Stale.
+    let path = tmp_path("patch");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        AddTool::new(&world, "EM-0400-2FL", catalog_tool("EM-0400-2FL")).expect("add tool"),
+    );
+    history.execute(
+        &world,
+        ImportModel::from_mesh("boss", cylinder(20.0, 8.0, 16)),
+    );
+    let e = model::find_by_name(&world, "boss").expect("boss");
+    let f = model::features_of(&world, &e).expect("features");
+    let pid = feature::patches(&f)
+        .into_iter()
+        .find(|p| p.faces.len() >= 8)
+        .map(|p| p.id)
+        .expect("the sixteen wall strips weld into one patch");
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Boss1",
+            "EM-0400-2FL",
+            SrcRef::Selection(vec![GeoSel {
+                entity: "boss".into(),
+                feature: FeatureSel::Patch(pid),
+            }]),
+            OpParams::Face {
+                stepover: 3.0,
+                clearance_z: 25.0,
+                cut_z: 4.5,
+                feed: 1200.0,
+                plunge_feed: 300.0,
+                climb: true,
+            },
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Boss1").expect("generate"));
+    let src_op = model::find_by_name(&world, "Boss1").expect("op");
+    let o = model::operation_of(&world, &src_op).expect("operation");
+    assert_eq!(operation::status_of(&world, &src_op), OpStatus::Ok, "generated first");
+
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(first.contains("\"patch\""), "the wall pick is in the file: {first}");
+
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "a welded pick round-trips byte-identically");
+
+    let dst_op = model::find_by_name(&world2, "Boss1").expect("op loaded");
+    let p = model::operation_of(&world2, &dst_op).expect("operation");
+    assert_eq!(p.src, o.src, "the same weld, named by the same id");
+    assert_eq!(p.stamp, o.stamp);
+    assert_eq!(
+        operation::status_of(&world2, &dst_op),
+        OpStatus::Ok,
+        "patch ids are content hashes, not file positions"
     );
 }
 

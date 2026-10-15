@@ -316,6 +316,7 @@ fn valid_pick(world: &World, g: &GeoSel) -> Result<(), CommandError> {
     let found = match g.feature {
         FeatureSel::Face(id) => features.faces.iter().any(|f| f.id == id),
         FeatureSel::Chain(id) => feature::chains(&features).iter().any(|c| c.id == id),
+        FeatureSel::Patch(id) => feature::patches(&features).iter().any(|p| p.id == id),
     };
     if !found {
         return Err(CommandError::Invalid(format!(

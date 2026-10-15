@@ -1,4 +1,4 @@
-//! Project save/load: `.hsmproj`, JSON, version 4.
+//! Project save/load: `.hsmproj`, JSON, version 5.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -16,8 +16,16 @@
 //! feature picks a contractual source: the `selection` variant of `src`
 //! already existed in v3 files (it arrived with the domain type), so every
 //! v3 file reads unchanged - the bump records that picks are now covered
-//! by the save/load contract rather than an experiment in transit. v1/v2/v3
-//! files migrate on load, one version step at a time.
+//! by the save/load contract rather than an experiment in transit. v5 is
+//! the M1.5.2 landing shape: welded-face picks (`patch`), arc moves
+//! (`arc`), facing stepdowns (`top_z`/`stepdown` on face) and pocket
+//! retract hops (`retract_z` on pocket) all appear in the file grammar at
+//! once, each with a serde default that reads as exact legacy behavior -
+//! a v4 file changes nothing in meaning, and a v5 build that has not
+//! wired one of these yet round-trips files that carry it without
+//! breaking it. Later steps wire the fields to the generators; the
+//! format does not move again. v1/v2/v3/v4 files migrate on load, one
+//! version step at a time.
 
 use std::path::Path;
 
@@ -37,7 +45,7 @@ use crate::stock::{self, StockShape};
 use crate::tools::{Tool, ToolKind};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 4;
+pub const PROJECT_VERSION: u32 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -203,6 +211,7 @@ pub struct GeoSelDto {
 pub enum FeatureSelDto {
     Face { id: u64 },
     Chain { id: u64 },
+    Patch { id: u64 },
 }
 
 /// The file mirror of `operation::OpParams`, tool-free by the same rule as
@@ -217,6 +226,12 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// Declared at v5, wired in step 4: absent (or the defaults) is
+        /// exactly the legacy single-level face.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        top_z: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stepdown: Option<f64>,
     },
     Contour {
         stock_to_leave: f64,
@@ -245,6 +260,10 @@ pub enum ParamsDto {
         plunge_feed: f64,
         climb: bool,
         strategy: StrategyDto,
+        /// Declared at v5, wired in step 5: absent is exactly "hop to
+        /// clearance", the behavior every pre-v5 pocket had.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<f64>,
     },
     Slot {
         a: [f64; 2],
@@ -297,6 +316,11 @@ impl ParamsDto {
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     climb: *climb,
+                    // Inert until step 4 puts the fields on the domain
+                    // type: the domain cannot hold them yet, so a save
+                    // always writes the legacy shape.
+                    top_z: None,
+                    stepdown: None,
                 }
             }
             OpParams::Contour {
@@ -359,6 +383,9 @@ impl ParamsDto {
                     PocketStrategy::Zigzag => StrategyDto::Zigzag,
                     PocketStrategy::Waterline => StrategyDto::Waterline,
                 },
+                // Inert until step 5 wires the hop: absent means the
+                // hop-to-clearance this build always performs.
+                retract_z: None,
             },
             OpParams::Slot {
                 a,
@@ -403,7 +430,10 @@ impl ParamsDto {
 
     fn to_params(&self) -> OpParams {
         match self {
-            ParamsDto::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb } => {
+            // The v5 face fields stay unread until step 4 gives the
+            // domain a place for them; a file carrying them decodes to
+            // the legacy single-level face, byte-exact.
+            ParamsDto::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb, .. } => {
                 OpParams::Face {
                     stepover: *stepover,
                     clearance_z: *clearance_z,
@@ -459,6 +489,8 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 strategy,
+                // Inert until step 5 (see the face note above).
+                ..
             } => OpParams::Pocket {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -524,6 +556,19 @@ pub struct MoveDto {
     pub to: [f64; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feed: Option<f64>,
+    /// Declared at v5, wired in step 3: the circular segment this move
+    /// traverses, absent for the straight-line moves every pre-v5 path
+    /// held.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc: Option<ArcDto>,
+}
+
+/// An arc move's center, in the XY plane, with direction. `kind` stays
+/// the motion class (rapid/feed/plunge); the arc is geometry.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct ArcDto {
+    pub center: [f64; 2],
+    pub ccw: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -568,6 +613,8 @@ impl MoveDto {
             from: [m.from.x, m.from.y, m.from.z],
             to: [m.to.x, m.to.y, m.to.z],
             feed: m.feed,
+            // Inert until step 3 puts arcs on the domain Move.
+            arc: None,
         }
     }
 
@@ -691,6 +738,7 @@ pub fn collect(world: &World) -> ProjectFile {
                                 feature: match g.feature {
                                     FeatureSel::Face(id) => FeatureSelDto::Face { id },
                                     FeatureSel::Chain(id) => FeatureSelDto::Chain { id },
+                                    FeatureSel::Patch(id) => FeatureSelDto::Patch { id },
                                 },
                             })
                             .collect(),
@@ -779,6 +827,14 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // so the step-up is the stamp itself.
         file.version = 4;
     }
+    if file.version == 4 {
+        // v4 -> v5: the M1.5.2 landing shape (patch picks, arc moves,
+        // face stepdowns, pocket retract) is declared in the DTOs with
+        // serde defaults that mean exactly the v4 behavior, so a v4
+        // file needs no content change to live in v5 - the step-up is
+        // the stamp itself, like v3 -> v4.
+        file.version = 5;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -851,6 +907,7 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
                                 feature: match g.feature {
                                     FeatureSelDto::Face { id } => FeatureSel::Face(id),
                                     FeatureSelDto::Chain { id } => FeatureSel::Chain(id),
+                                    FeatureSelDto::Patch { id } => FeatureSel::Patch(id),
                                 },
                             })
                             .collect(),

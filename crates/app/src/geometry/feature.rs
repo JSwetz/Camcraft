@@ -687,11 +687,13 @@ fn union(parent: &mut [u32], a: u32, b: u32) {
     }
 }
 
-/// Walk boundary edges into rings. Degrees are computed on the face's own
-/// boundary set; a closed ring that passes through a vertex of degree != 2
-/// (rings touching, a figure-eight) is reported [`LoopKind::Open`], never
-/// silently split wrong.
-fn build_loops(bis: &[(u32, u32)], lattice: &[Pos], plane: Option<Plane>) -> Vec<Loop> {
+/// Walk an edge set into vertex trails, consuming each edge exactly once.
+/// Trails start at an odd vertex (degree != 2) when one exists, so a path
+/// is a real path; a cycle that passes through a shared knot vertex is
+/// reported open rather than guessed into a split. Shared by face rings
+/// ([`build_loops`]) and patch boundaries ([`patches`]) so both ring walks
+/// obey the same honesty rule.
+fn walk_trails(bis: &[(u32, u32)]) -> Vec<(Vec<u32>, bool)> {
     if bis.is_empty() {
         return Vec::new();
     }
@@ -731,6 +733,18 @@ fn build_loops(bis: &[(u32, u32)], lattice: &[Pos], plane: Option<Plane>) -> Vec
         }
         trails.push((path, closed));
     }
+    trails
+}
+
+/// Walk boundary edges into rings. Degrees are computed on the face's own
+/// boundary set; a closed ring that passes through a vertex of degree != 2
+/// (rings touching, a figure-eight) is reported [`LoopKind::Open`], never
+/// silently split wrong.
+fn build_loops(bis: &[(u32, u32)], lattice: &[Pos], plane: Option<Plane>) -> Vec<Loop> {
+    if bis.is_empty() {
+        return Vec::new();
+    }
+    let trails = walk_trails(bis);
 
     let Some(Plane(n, _)) = plane else {
         // No trusted plane: every ring stays Open - the honest floor.
@@ -964,6 +978,165 @@ fn turn_nonzero(p: Pos, q: Pos, r: Pos) -> bool {
     [term(1, 2), term(2, 0), term(0, 1)]
         .into_iter()
         .any(|x| !matches!(x, Some(false)))
+}
+
+// ===================== welded patches (M1.5.2 step 2) =====================
+
+/// Identity of a *logical face*: the whole smooth band a curved wall is
+/// tessellated into - every planar strip of one pre-split patch - rather
+/// than only the strip a ray happened to hit. Single-strip regions
+/// deliberately have no `PatchId`: the plain [`Face`] already is the
+/// right logical face there, so no existing pick re-keys. Like [`face_id`]
+/// the number is a hash of the boundary's maximal straight segments and
+/// the member strips' sorted plane signatures - never indices - so a
+/// re-import that keeps the geometry keeps the patch.
+pub type PatchId = u64;
+
+/// One logical face: a multi-strip smooth region, named by weld rather
+/// than by any one of its strips.
+#[derive(Clone, Debug)]
+pub struct Patch {
+    pub id: PatchId,
+    /// The [`FaceId`]s of the strips the patch welds, sorted.
+    pub faces: Vec<FaceId>,
+}
+
+/// One boundary ring of a patch, as ids into [`Features::verts`].
+/// `closed` carries [`walk_trails`]' honesty: a walk that cannot confirm
+/// its cycle comes back open, never split wrong.
+#[derive(Clone, Debug)]
+pub struct PatchRing {
+    pub verts: Vec<u32>,
+    pub closed: bool,
+}
+
+/// The multi-strip smooth regions of a mesh: every `facet_patch` root
+/// shared by more than one planar face welds into a patch. Sorted by id,
+/// so facet and group order cannot move anything.
+#[must_use]
+pub fn patches(features: &Features) -> Vec<Patch> {
+    let mut out: Vec<Patch> = Vec::new();
+    for g in patch_groups(features) {
+        let (id, _) = patch_identity(features, &g);
+        let mut faces: Vec<FaceId> = g.iter().map(|f| f.id).collect();
+        faces.sort_unstable();
+        out.push(Patch { id, faces });
+    }
+    out.sort_unstable_by_key(|p| p.id);
+    out
+}
+
+/// The boundary rings of the patch named `id`, or `None` when no smooth
+/// region in this mesh carries that identity (the model re-meshed since
+/// the pick - the caller says "re-pick", it never guesses a successor).
+#[must_use]
+pub fn patch_rings(features: &Features, id: PatchId) -> Option<Vec<PatchRing>> {
+    for g in patch_groups(features) {
+        let (pid, rings) = patch_identity(features, &g);
+        if pid == id {
+            return Some(rings);
+        }
+    }
+    None
+}
+
+/// Faces grouped by their shared pre-split patch root, keeping only the
+/// groups big enough to be a weld. Every facet of a face carries the same
+/// root (clustering's `(root, plane)` grouping ensures it), and invalid
+/// facets are their own root - so those groups are singletons and never
+/// reach the `len > 1` filter.
+fn patch_groups(features: &Features) -> Vec<Vec<&Face>> {
+    let mut groups: HashMap<u32, Vec<&Face>> = HashMap::new();
+    for f in &features.faces {
+        let Some(&t) = f.facets.first() else {
+            continue;
+        };
+        let Some(&root) = features.facet_patch.get(t as usize) else {
+            continue;
+        };
+        groups.entry(root).or_default().push(f);
+    }
+    groups.into_values().filter(|g| g.len() > 1).collect()
+}
+
+/// The seam-stripped boundary of one group, and the id that names it:
+/// maximal segments of the boundary rings plus the sorted strip-plane
+/// signatures. Total on any input: a vertex too extreme to return to the
+/// lattice skips the segment fold and contributes raw bits instead -
+/// still deterministic, never a panic.
+fn patch_identity(features: &Features, g: &[&Face]) -> (PatchId, Vec<PatchRing>) {
+    let rings = patch_boundary(g);
+    let mut h = DefaultHasher::new();
+    h.write_u8(b'P');
+    let lattice: Vec<Option<Pos>> = features.verts.iter().map(weld_pos).collect();
+    let mut segs: Vec<(Pos, Pos)> = Vec::new();
+    let mut flags: Vec<u8> = Vec::new();
+    for r in &rings {
+        flags.push(u8::from(r.closed));
+        if r.verts.len() >= 2
+            && r.verts
+                .iter()
+                .all(|&v| lattice.get(v as usize).is_some_and(|p| p.is_some()))
+        {
+            let flat: Vec<Pos> = lattice.iter().filter_map(|p| *p).collect();
+            ring_segments(&r.verts, &flat, r.closed, &mut segs);
+        } else {
+            for &v in &r.verts {
+                if let Some(p) = features.verts.get(v as usize) {
+                    for c in p {
+                        c.to_bits().hash(&mut h);
+                    }
+                }
+            }
+        }
+    }
+    segs.sort_unstable();
+    segs.dedup();
+    segs.hash(&mut h);
+    flags.sort_unstable();
+    flags.hash(&mut h);
+    let mut sigs: Vec<(i128, i128, i128, i128)> = g
+        .iter()
+        .map(|f| match f.plane {
+            Some(Plane(n, d)) => (n[0], n[1], n[2], d),
+            None => (0, 0, 0, 0),
+        })
+        .collect();
+    sigs.sort_unstable();
+    sigs.hash(&mut h);
+    (h.finish(), rings)
+}
+
+/// Boundary edges of a group of strips: an edge two strips share is the
+/// seam between them and welds away; what appears exactly once bounds
+/// the region. The walk is [`walk_trails`], the same one face rings use.
+fn patch_boundary(g: &[&Face]) -> Vec<PatchRing> {
+    let mut count: HashMap<(u32, u32), u32> = HashMap::new();
+    for f in g {
+        for l in &f.loops {
+            let closed = !matches!(l.kind, LoopKind::Open);
+            let n = l.verts.len();
+            if n < 2 {
+                continue;
+            }
+            let last = if closed { n } else { n - 1 };
+            for i in 0..last {
+                let (a, b) = (l.verts[i], l.verts[(i + 1) % n]);
+                let key = if a <= b { (a, b) } else { (b, a) };
+                *count.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut bis: Vec<(u32, u32)> = count
+        .into_iter()
+        .filter(|(_, c)| *c == 1)
+        .map(|(k, _)| k)
+        .collect();
+    bis.sort_unstable();
+    walk_trails(&bis)
+        .into_iter()
+        .map(|(verts, closed)| PatchRing { verts, closed })
+        .collect()
 }
 
 // ===================== edge chains (step 3) =====================
