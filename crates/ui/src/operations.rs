@@ -562,9 +562,21 @@ fn model_page(ui: &Ui, state: &State, name: &str) {
 /// says what is missing instead of showing a stale z; the viewport drops
 /// that plane and generate refuses by name.
 fn height_editor(ui: &Ui, id: &str, world: &World, h: &mut Height) {
+    // Two stacked rows, never a same_line chain: the docked pane is ~18%
+    // of the screen, and one row of full-width combo + input + echo put
+    // everything past the combo outside the clip rect - the reference was
+    // settable while its offset (the 25 in "stock top +25") and the echo
+    // were invisible (M1.5.4 hand-test). Row 1 is the From picker, row 2
+    // the number with the resolved plane beside it.
     // Sibling ids carry distinct `###`-free suffixes: the combo's source
     // string must never equal the input's (one action, one widget id -
     // the browser-row lesson of `7e95c31` applies inside a row too).
+    let avail = ui.content_region_avail()[0].max(40.0);
+    if matches!(h.reference, HeightReference::WorkOffset(_)) {
+        // Slot picker shares row 1: override form::field's full width so
+        // the combo leaves it room (SetNextItemWidth wins for one item).
+        ui.set_next_item_width(avail * 0.6);
+    }
     let mut kind = h.reference.kind_index().min(5);
     if ui.combo(
         format!("From{id}kind"),
@@ -583,6 +595,7 @@ fn height_editor(ui: &Ui, id: &str, world: &World, h: &mut Height) {
     }
     if let HeightReference::WorkOffset(slot_idx) = h.reference {
         ui.same_line();
+        ui.set_next_item_width(avail * 0.35);
         let mut slot = slot_idx.min(WCS_SLOTS.len() - 1);
         if ui.combo(
             format!("{id}slot"),
@@ -593,10 +606,24 @@ fn height_editor(ui: &Ui, id: &str, world: &World, h: &mut Height) {
             h.reference = HeightReference::WorkOffset(slot);
         }
     }
+    ui.text(offset_label(h.reference));
     ui.same_line();
+    ui.set_next_item_width(avail * 0.45);
     ui.input_double(id, &mut h.offset);
     ui.same_line();
     ui.text_disabled(height_echo(world, h));
+}
+
+/// The row-2 caption: under `Fixed` the number *is* the world z, so do
+/// not call it an offset from something (and under the other references
+/// never pretend the box holds an absolute plane). Pure so a test can pin
+/// which reference reads as which caption.
+fn offset_label(reference: HeightReference) -> &'static str {
+    if matches!(reference, HeightReference::Fixed) {
+        "Value"
+    } else {
+        "Offset"
+    }
 }
 
 /// What a height row echoes after its offset box: the plane it resolves
@@ -1218,6 +1245,22 @@ mod height_row_tests {
         let world = new_world();
         assert_eq!(height_echo(&world, &Height::fixed(-7.0)), "(= Z -7.000)");
         assert_eq!(height_echo(&world, &Height::fixed(25.0)), "(= Z 25.000)");
+    }
+
+    #[test]
+    fn only_the_fixed_reference_calls_its_number_a_value() {
+        // M1.5.4 row 2: every other reference is From + Offset; Fixed
+        // holds the world z itself and must not be captioned "Offset".
+        assert_eq!(offset_label(HeightReference::Fixed), "Value");
+        for r in [
+            HeightReference::TopOfStock,
+            HeightReference::BottomOfStock,
+            HeightReference::TopOfModel,
+            HeightReference::BottomOfModel,
+            HeightReference::WorkOffset(0),
+        ] {
+            assert_eq!(offset_label(r), "Offset", "{r:?} is a source");
+        }
     }
 
     #[test]
