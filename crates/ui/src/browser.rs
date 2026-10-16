@@ -108,6 +108,16 @@ impl<'a> Row<'a> {
     }
 }
 
+/// The row's two ImGui ID strings: the eye's invisible button and the
+/// full-width Selectable. They must NOT resolve to the same ID - whatever
+/// follows the `###` is what ImGui hashes, so `eye###bX` and `###bX` would
+/// be two items with one ID, and the shared `active_id` routing breaks the
+/// row click (it lands on the invisible eye). The eye keeps winning its own
+/// pixels by being submitted first, not by an ID collision.
+fn row_ids(spec_id: &str) -> (String, String) {
+    (format!("eye###eb{spec_id}"), format!("###b{spec_id}"))
+}
+
 /// Draw one row; returns (row clicked, eye clicked). The eye's invisible
 /// button is submitted BEFORE the full-width Selectable so it wins the
 /// hover-id, and the Selectable's `ItemHoverable` then refuses clicks
@@ -121,17 +131,17 @@ fn row(ui: &Ui, state: &State, spec: &Row) -> (bool, bool) {
     let mut eye_hot = false;
     let eye_x = x + avail - INK - 6.0;
     let text_y = y + (row_h - line) * 0.5;
+    let (eye_id, row_id) = row_ids(spec.id);
     if spec.eye {
         ui.set_cursor_screen_pos([eye_x, y + (row_h - INK) * 0.5]);
-        eye_hit = ui.invisible_button(format!("eye###b{}", spec.id), [INK, INK]);
+        eye_hit = ui.invisible_button(eye_id.as_str(), [INK, INK]);
         // The eye's own hover, sampled now: after the Selectable the "last
         // item" is the row, not the button.
         eye_hot = ui.is_item_hovered();
         ui.set_cursor_screen_pos([x, y]);
     }
-    let id = format!("###b{}", spec.id);
     let clicked = ui
-        .selectable_config(id.as_str())
+        .selectable_config(row_id.as_str())
         .selected(spec.active)
         .size([0.0, row_h])
         .build();
@@ -359,6 +369,36 @@ fn operations_group(ui: &Ui, state: &mut State, target: &UiTarget) {
         if hit {
             actions::target(state, UiTarget::Operation(name.clone()));
             state.pending.push_back(CommandKind::Select(Some(name)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::row_ids;
+
+    /// The eye button and the row Selectable must never hash to the same
+    /// ImGui ID: a shared ID routes row clicks to the invisible eye ("2
+    /// visible items with conflicting ID", operations stop selecting).
+    #[test]
+    fn row_and_eye_never_share_an_imgui_id() {
+        // The id-text after `###` is what ImGui actually hashes.
+        fn id_part(s: &str) -> &str {
+            match s.rsplit_once("###") {
+                Some((_, t)) => t,
+                None => s,
+            }
+        }
+        for id in [
+            "opOperation1",
+            "opOperation2",
+            "modelMilling-test",
+            "toolEM-0800-4FL",
+            "wcs0",
+            "wcs5",
+        ] {
+            let (eye, row) = row_ids(id);
+            assert_ne!(id_part(&eye), id_part(&row), "id collision for {id}");
         }
     }
 }
