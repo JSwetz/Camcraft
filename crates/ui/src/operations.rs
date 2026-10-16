@@ -19,7 +19,7 @@ use std::borrow::Cow;
 use dear_imgui_rs::{Ui, WindowKey};
 use flecs_ecs::prelude::World;
 use hsmworks_app::geo2d::Point2;
-use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy};
+use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
@@ -43,6 +43,14 @@ const LEADS: [&str; 3] = ["None", "Linear", "Arc"];
 /// path it cuts at generate.
 pub fn strategy_names() -> &'static [&'static str] {
     &["Zigzag", "Waterline", "Auto"]
+}
+/// The Side combo's labels, in index order (M1.5.4 issue 2). Auto sits
+/// beside the explicit choices like the pocket's Strategy: picking it
+/// stores the choice, and [`hsmworks_app::operation::contour_auto_side`]
+/// (the very walk generation runs) answers which side a contour takes
+/// at generate.
+pub fn side_names() -> &'static [&'static str] {
+    &["Auto", "Inside", "Outside"]
 }
 const TOOL_KINDS: [&str; 3] = ["End mill", "Ball nose", "Bull nose"];
 
@@ -654,8 +662,9 @@ pub(crate) fn unresolved_note(world: &World, params: &OpParams) -> Option<String
 /// draft; the world sees them only through `EditOperationParams`.
 fn params_fields(ui: &Ui, state: &mut State) {
     // Computed up front: the match below keeps a mutable borrow of the
-    // draft alive, and the Auto note reads the world, not the draft.
+    // draft alive, and the Auto notes read the world, not the draft.
     let auto_note = auto_note(state);
+    let side_note = side_note(state);
     match &mut state.op_ui.params {
         OpParams::Face {
             stepover,
@@ -716,6 +725,7 @@ fn params_fields(ui: &Ui, state: &mut State) {
             tab_count,
             tab_width,
             tab_height,
+            side,
         } => {
             form::field(ui, "Stock to leave");
             ui.input_double("##c_stl", stock_to_leave);
@@ -741,6 +751,24 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Plunge feed (mm/min)");
             ui.input_double("##c_pl", plunge_feed);
             ui.checkbox("Climb milling", climb);
+            let mut side_idx = match side {
+                Side::Auto => 0,
+                Side::Inside => 1,
+                Side::Outside => 2,
+            };
+            form::field(ui, "Side");
+            if ui.combo("##c_side", &mut side_idx, side_names(), |t| {
+                Cow::Borrowed(*t)
+            }) {
+                *side = match side_idx {
+                    1 => Side::Inside,
+                    2 => Side::Outside,
+                    _ => Side::Auto,
+                };
+            }
+            if let Some(note) = &side_note {
+                ui.text_wrapped(note.as_str());
+            }
             let mut lead_idx = match lead {
                 Lead::None => 0,
                 Lead::Linear { .. } => 1,
@@ -997,6 +1025,32 @@ fn auto_note(state: &State) -> Option<String> {
     )
 }
 
+/// The live decision behind an `Auto` contour side, quoting
+/// [`operation::contour_auto_side`] - the very walk generation runs - so
+/// a contour never hides which wall the cutter will ride. `None` unless
+/// the draft is a contour set to Auto; a brand-new op, or a pick that
+/// resolves to open runs only, has no verdict to quote yet and gets the
+/// plain sentence instead.
+fn side_note(state: &State) -> Option<String> {
+    let OpParams::Contour { side, .. } = &state.op_ui.params else {
+        return None;
+    };
+    if *side != Side::Auto {
+        return None;
+    }
+    let entity = model::find_by_name(&state.world, &state.op_ui.name)?;
+    let op = model::operation_of(&state.world, &entity)?;
+    match operation::contour_auto_side(&state.world, &op.src, &state.op_ui.params) {
+        Some(true) => Some(
+            "Auto -> Inside: the picked rings bound air, so the metal is outside them.".to_string(),
+        ),
+        Some(false) => Some(
+            "Auto -> Outside: the picked rings bound material.".to_string(),
+        ),
+        None => Some("Auto picks the side from the selection at generate.".to_string()),
+    }
+}
+
 /// Swap the draft's parameter variant, carrying over every shared number
 /// so re-typing an operation does not throw away feeds and heights.
 ///
@@ -1020,6 +1074,7 @@ fn retype(cur: &OpParams, kind: usize) -> OpParams {
     let retract = retract_of(cur).unwrap_or_else(|| Height::of(HeightReference::TopOfStock, 10.0));
     match kind {
         1 => OpParams::Contour {
+            side: Side::Auto,
             stock_to_leave: 0.0,
             clearance_z: clearance,
             retract_z: retract,

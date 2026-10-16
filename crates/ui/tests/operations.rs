@@ -9,7 +9,7 @@ use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus,
 use hsmworks_app::schema::STOCK_NAME;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
-use hsmworks_app::machining2d::Lead;
+use hsmworks_app::machining2d::{Lead, Side};
 use hsmworks_ui::state::{CommandKind, ErrorScope, OpUi, State, ToolUi, UiTarget};
 
 fn catalog_tool(name: &str) -> Tool {
@@ -901,6 +901,7 @@ fn contour_draft() -> OpParams {
         feed: 1200.0,
         plunge_feed: 300.0,
         climb: true,
+        side: Side::Auto,
         lead: Lead::Linear { length: 8.0 },
         tolerance: 0.01,
         tab_count: 0,

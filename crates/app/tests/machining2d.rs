@@ -10,7 +10,7 @@ use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::machining2d::{
     ARC_FIT_TOL, chord_clears, contour, face, on_boundary, pocket, ring_is_circular, slot, trace,
-    ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, SlotParams,
+    ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, Side, SlotParams,
     TraceParams,
 };
 
@@ -315,6 +315,7 @@ fn cp() -> ContourParams {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        side: Side::Auto,
         lead: Lead::None,
         tolerance: 0.01,
         tab_count: 0,

@@ -6,7 +6,7 @@
 use hsmworks_app::cl::{Move, MoveKind};
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::geometry::Point3;
-use hsmworks_app::machining2d::{ContourParams, Lead, Seg, contour, fit_arcs};
+use hsmworks_app::machining2d::{ContourParams, Lead, Seg, Side, contour, fit_arcs};
 
 fn p2(x: f64, y: f64) -> Point2 {
     Point2::new(x, y)
@@ -46,6 +46,7 @@ fn contour_params(lead: Lead) -> ContourParams {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        side: Side::Auto,
         lead,
         tolerance: 0.01,
         tab_count: 0,

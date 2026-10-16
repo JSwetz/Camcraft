@@ -2419,6 +2419,7 @@ mod path_tests {
                     feed: 800.0,
                     plunge_feed: 200.0,
                     climb: true,
+                    side: hsmworks_app::machining2d::Side::Auto,
                     lead: hsmworks_app::machining2d::Lead::None,
                     tolerance: 0.1,
                     tab_count: 0,
@@ -3103,7 +3104,7 @@ mod height_plane_tests {
     use super::*;
     use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
     use hsmworks_app::geometry::cube;
-    use hsmworks_app::machining2d::{Lead, PocketStrategy};
+    use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
     use hsmworks_app::operation::{Height, HeightReference, OpParams, SrcRef};
     use hsmworks_app::stock::StockShape;
     use hsmworks_app::tools::catalog;
@@ -3119,6 +3120,7 @@ mod height_plane_tests {
             feed: 800.0,
             plunge_feed: 200.0,
             climb: true,
+            side: Side::Auto,
             lead: Lead::None,
             tolerance: 0.01,
             tab_count: 0,
@@ -3431,6 +3433,7 @@ mod height_plane_tests {
             feed: 800.0,
             plunge_feed: 200.0,
             climb: true,
+            side: Side::Auto,
             lead: Lead::None,
             tolerance: 0.01,
             tab_count: 0,
@@ -3493,6 +3496,7 @@ mod height_plane_tests {
             feed: 800.0,
             plunge_feed: 200.0,
             climb: true,
+            side: Side::Auto,
             lead: Lead::None,
             tolerance: 0.01,
             tab_count: 0,

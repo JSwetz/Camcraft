@@ -32,8 +32,12 @@
 //! `{"reference": "fixed", "offset": n}` with the saved z preserved to
 //! the bit. Work-offset references name a `G54..G59` slot; the slots'
 //! placements were already persisted in every entity's
-//! `translation`/`rotation`, so nothing else about the file moved.
-//! v1/v2/v3/v4/v5 files migrate on load, one version step at a time.
+//! `translation`/`rotation`, so nothing else about the file moved. v7
+//! adds the contour side choice (`side` on contour params, see
+//! `SideDto`): an absent key reads as `auto` - today's Outside law until
+//! the selection walk resolves it - so a v6 file changes nothing in
+//! meaning. v1/v2/v3/v4/v5/v6 files migrate on load, one version step at
+//! a time.
 
 use std::path::Path;
 
@@ -43,7 +47,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::cl::{Move, MoveKind, Toolpath, lattice};
 use crate::geo2d::Point2;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::machining2d::{Lead, PocketStrategy};
+use crate::machining2d::{Lead, PocketStrategy, Side};
 use crate::model;
 use crate::operation::{FeatureSel, GenStamp, GeoSel, OpParams, SrcRef};
 use crate::schema::{
@@ -53,7 +57,7 @@ use crate::stock::{self, StockShape};
 use crate::tools::{Tool, ToolKind};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 6;
+pub const PROJECT_VERSION: u32 = 7;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -256,6 +260,11 @@ pub enum ParamsDto {
         tab_count: u32,
         tab_width: f64,
         tab_height: f64,
+        /// Declared at v7, wired with the side feature: absent is exactly
+        /// `auto`, the choice every pre-v7 contour file silently had -
+        /// Auto resolves at generate, so the stored path never changes.
+        #[serde(default)]
+        side: SideDto,
     },
     Pocket {
         stepover: f64,
@@ -415,6 +424,21 @@ pub enum StrategyDto {
     Auto,
 }
 
+/// Which side of its geometry a contour runs, on the wire. Added at v7
+/// with the contour side choice; like `StrategyDto::Auto` the stored
+/// value is the user's ask, not the resolution - an absent key reads as
+/// `auto` and the selection layer decides at generate time.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SideDto {
+    /// Resolved by the selection layer: a lone ring bounding air
+    /// machines inside, everything else outside.
+    #[default]
+    Auto,
+    Inside,
+    Outside,
+}
+
 impl ParamsDto {
     fn from_params(p: &OpParams) -> Self {
         match p {
@@ -454,6 +478,7 @@ impl ParamsDto {
                 tab_count,
                 tab_width,
                 tab_height,
+                side,
             } => ParamsDto::Contour {
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -473,6 +498,11 @@ impl ParamsDto {
                 tab_count: *tab_count,
                 tab_width: *tab_width,
                 tab_height: *tab_height,
+                side: match side {
+                    Side::Auto => SideDto::Auto,
+                    Side::Inside => SideDto::Inside,
+                    Side::Outside => SideDto::Outside,
+                },
             },
             OpParams::Pocket {
                 stepover,
@@ -588,6 +618,7 @@ impl ParamsDto {
                 tab_count,
                 tab_width,
                 tab_height,
+                side,
             } => OpParams::Contour {
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -607,6 +638,11 @@ impl ParamsDto {
                 tab_count: *tab_count,
                 tab_width: *tab_width,
                 tab_height: *tab_height,
+                side: match side {
+                    SideDto::Auto => Side::Auto,
+                    SideDto::Inside => Side::Inside,
+                    SideDto::Outside => Side::Outside,
+                },
             },
             ParamsDto::Pocket {
                 stepover,
@@ -998,6 +1034,13 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // `Fixed` expression - every v5 height keeps its z to the bit.
         // Like v4 -> v5, the step-up is the stamp itself.
         file.version = 6;
+    }
+    if file.version == 6 {
+        // v6 -> v7: contour gained the side choice, and the wire already
+        // reads an absent `side` as `auto` - which is exactly what a v6
+        // contour meant, since Auto resolves at generate time and the
+        // stored path is unchanged. Step-up is the stamp itself.
+        file.version = 7;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

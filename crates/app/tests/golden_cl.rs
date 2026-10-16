@@ -10,7 +10,7 @@ use hsmworks_app::cl::MoveKind;
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::machining2d::{
     contour, face, pocket, slot, trace, ContourParams, FaceParams, Lead, PocketParams,
-    PocketStrategy, SlotParams, TraceParams,
+    PocketStrategy, Side, SlotParams, TraceParams,
 };
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
@@ -96,6 +96,7 @@ fn contour_disc_hole_matches_golden() {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        side: Side::Auto,
         lead: Lead::Arc { radius: 3.0 },
         tolerance: 0.01,
         tab_count: 0,
@@ -167,6 +168,7 @@ fn contour_plate_with_hole_matches_golden() {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        side: Side::Auto,
         lead: Lead::Arc { radius: 3.0 },
         tolerance: 0.01,
         tab_count: 0,

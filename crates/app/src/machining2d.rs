@@ -207,6 +207,27 @@ pub enum Lead {
     Arc { radius: f64 },
 }
 
+/// Which side of a contour boundary the cutter runs on - a sign law on
+/// the offset and one traversal flip, nothing else. Auto is resolved by
+/// the selection layer (only there does anything know what a picked ring
+/// bounds); inside the generator Auto means Outside, so every
+/// explicit-region caller - goldens, direct tests - keeps cutting today's
+/// law byte-for-byte.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Side {
+    /// Generator: the Outside law. The app's fill-ratio check on picked
+    /// rings may resolve Auto to Inside, and says so in a note.
+    #[default]
+    Auto,
+    /// Cutter inside the boundary: the region erodes by `r + leave` and
+    /// each loop's traversal reverses, so material stays on the left and
+    /// leads bulge into the bounded air - the wall of a bore.
+    Inside,
+    /// Today's law: the region grows by `r + leave`, the tool grazes the
+    /// boundary from the material side - a boss or an outside wall.
+    Outside,
+}
+
 /// 2D contouring: trim a material region's boundary at successive depths.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ContourParams {
@@ -225,7 +246,14 @@ pub struct ContourParams {
     pub plunge_feed: f64,
     /// Climb travels each offset loop with the region's canonical
     /// orientation (material on the left); conventional reverses it.
+    /// Under [`Side::Inside`] the canonical orientation is the loop's
+    /// reverse, which the generator XORs in - this field still means the
+    /// process, not a winding.
     pub climb: bool,
+    /// Which side of the boundary to cut; see [`Side`]. Only the offset
+    /// sign and the traversal follow from it - hops, leads and tabs are
+    /// side-agnostic.
+    pub side: Side,
     pub lead: Lead,
     /// Chord tolerance for arcs: bounds how far a fitted arc may sit
     /// from the tessellation it replaces (both directions), and is the
@@ -415,9 +443,12 @@ fn run_levels(
 /// allowance short of it otherwise. The plan phrases this as
 /// `- (r - leave)`; that is the same curve written from the void side -
 /// here the region is material, so both outer walls and island/hole
-/// walls come out of one positive offset. Loop order is deterministic
-/// (largest absolute area first, canonically oriented, and traversed
-/// forward for climb, reversed for conventional).
+/// walls come out of one positive offset. [`Side::Inside`] negates that
+/// one term - the region erodes and each loop traverses reversed, so the
+/// cutter rides the boundary from the void side with material still on
+/// the left (Auto is this Outside law inside the generator). Loop order
+/// is deterministic (largest absolute area first, canonically oriented,
+/// and traversed per the climb/side XOR).
 ///
 /// Between subpaths (tab hops) and between loops of one level the tool
 /// retracts to the hop plane - `retract_z`, clamped to `clearance_z` so
@@ -434,9 +465,16 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
         return Err(GenError::Empty("empty footprint".into()));
     }
     let r = p.tool_diameter * 0.5;
-    let center = region.offset(r + p.stock_to_leave)?;
+    let inside = p.side == Side::Inside;
+    let d = r + p.stock_to_leave;
+    let center = region.offset(if inside { -d } else { d })?;
     if center.is_empty() {
-        return Err(GenError::Empty("offset boundary collapsed".into()));
+        return Err(GenError::Empty(if inside {
+            "the bore is narrower than the tool - switch Side to Outside or pick a smaller tool"
+                .into()
+        } else {
+            "offset boundary collapsed".into()
+        }));
     }
     let zs = p.levels();
     let mut loops: Vec<&Loop> = center.loops().iter().collect();
@@ -450,7 +488,11 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
         for (li, l) in loops.iter().enumerate() {
             // Canonical orientation is material-on-the-left travel;
             // conventional climbing reverses it. Air is the other side.
-            let pts: Vec<Point2> = if p.climb {
+            // An Inside region was eroded, not grown, so its stored
+            // winding puts the (outside) material on the right - flip
+            // with the sign and the rule, and every air_side-derived
+            // lead, holds again.
+            let pts: Vec<Point2> = if p.climb != inside {
                 l.points().to_vec()
             } else {
                 l.points().iter().rev().copied().collect()
@@ -1929,5 +1971,111 @@ mod tests {
         assert!(!chord_clears(&region, p(-1.0, 5.0), p(35.0, 20.0)));
         // Boundary corners read as closed-inside.
         assert!(chord_clears(&region, p(40.0, 40.0), p(40.0, 30.0)));
+    }
+
+    fn contour_side(side: Side) -> ContourParams {
+        ContourParams {
+            tool_diameter: 6.0,
+            stock_to_leave: 0.0,
+            clearance_z: 10.0,
+            retract_z: 5.0,
+            top_z: 1.0,
+            bottom_z: 1.0,
+            stepdown: 2.0,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+            side,
+            lead: Lead::None,
+            tolerance: 0.01,
+            tab_count: 0,
+            tab_width: 0.0,
+            tab_height: 0.0,
+        }
+    }
+
+    /// XY of every point the tool CUTS at (plunges and feeds, no rapids).
+    fn cut_xy(path: &Toolpath) -> Vec<Point2> {
+        path.moves
+            .iter()
+            .filter(|m| m.kind != MoveKind::Rapid)
+            .map(|m| Point2::new(m.to.x, m.to.y))
+            .collect()
+    }
+
+    /// Twice the signed area of the point sequence walked in order:
+    /// negative means clockwise (CCW is positive).
+    fn signed_walk(pts: &[Point2]) -> f64 {
+        let mut s = 0.0;
+        for i in 0..pts.len() {
+            let a = pts[i];
+            let b = pts[(i + 1) % pts.len()];
+            s += a.x * b.y - b.x * a.y;
+        }
+        s
+    }
+
+    #[test]
+    fn contour_inside_shrinks_and_flips_travel() {
+        // A 20x20 square region eroded by r = 3 gives the sharp inset
+        // [23,37]^2 (negative round offset keeps convex corners sharp);
+        // climb under Inside travels the loop reversed, so material stays
+        // on the left of a CCW-normalized ring - the walk is clockwise.
+        let region = Region::new(vec![sq(20.0, 20.0, 40.0, 40.0)]).expect("test square");
+        let path = contour(&region, &contour_side(Side::Inside)).expect("inside contour");
+        let pts = cut_xy(&path);
+        let edge = |v: f64| (v - 23.0).abs() < 1e-6 || (v - 37.0).abs() < 1e-6;
+        assert!(
+            pts.iter().all(|p| edge(p.x) && edge(p.y)),
+            "cut points off the inset square: {pts:?}"
+        );
+        let corner = |cx: f64, cy: f64| {
+            pts.iter()
+                .any(|p| (p.x - cx).abs() < 1e-6 && (p.y - cy).abs() < 1e-6)
+        };
+        assert!(
+            corner(23.0, 23.0)
+                && corner(37.0, 23.0)
+                && corner(37.0, 37.0)
+                && corner(23.0, 37.0),
+            "inset ring corners missing: {pts:?}"
+        );
+        assert!(signed_walk(&pts) < 0.0, "expected clockwise travel");
+    }
+
+    #[test]
+    fn conventional_inside_travels_forward() {
+        // Climb is the process, not a winding: conventional Inside walks
+        // the stored (CCW) ring and keeps material on the left that way.
+        let region = Region::new(vec![sq(20.0, 20.0, 40.0, 40.0)]).expect("test square");
+        let mut p = contour_side(Side::Inside);
+        p.climb = false;
+        let path = contour(&region, &p).expect("inside contour");
+        let pts = cut_xy(&path);
+        assert!(pts.iter().all(|q| (q.x - 23.0).abs() < 1e-6 || (q.x - 37.0).abs() < 1e-6));
+        assert!(signed_walk(&pts) > 0.0, "expected counterclockwise travel");
+    }
+
+    #[test]
+    fn contour_auto_matches_outside() {
+        // Auto is the Outside law inside the generator: explicit-region
+        // callers (goldens, direct tests) stay byte-for-byte today's path.
+        let region = Region::new(vec![sq(20.0, 20.0, 40.0, 40.0)]).expect("test square");
+        let a = contour(&region, &contour_side(Side::Auto)).expect("auto contour");
+        let o = contour(&region, &contour_side(Side::Outside)).expect("outside contour");
+        assert_eq!(a, o, "Auto must resolve to Outside here");
+    }
+
+    #[test]
+    fn inside_on_small_bore_refuses() {
+        // A 4x4 ring eroded by r = 3 collapses: named refusal, never a
+        // clamped path (Prime Directive).
+        let region = Region::new(vec![sq(18.0, 18.0, 22.0, 22.0)]).expect("test square");
+        match contour(&region, &contour_side(Side::Inside)) {
+            Err(GenError::Empty(msg)) => {
+                assert!(msg.contains("narrower than the tool"), "{msg}")
+            }
+            other => panic!("expected a named Empty refusal, got {other:?}"),
+        }
     }
 }

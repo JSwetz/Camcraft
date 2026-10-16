@@ -4,7 +4,9 @@
 use hsmworks_app::cl::{Move, MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::geometry::Point3;
-use hsmworks_app::machining2d::{contour, pocket, trace, ContourParams, PocketParams, PocketStrategy, TraceParams};
+use hsmworks_app::machining2d::{
+    contour, pocket, trace, ContourParams, PocketParams, PocketStrategy, Side, TraceParams,
+};
 use hsmworks_app::verify::{Mode, ToolGeom, VerifyContext, Warning, verify};
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
@@ -116,6 +118,7 @@ fn clean_contour_verifies_silent() {
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
+            side: Side::Auto,
             lead: hsmworks_app::machining2d::Lead::None,
             tolerance: 0.01,
             tab_count: 0,

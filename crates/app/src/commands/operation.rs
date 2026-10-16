@@ -119,6 +119,9 @@ impl CreateOperation {
                 params.kind()
             )));
         }
+        if let Some(msg) = crate::operation::side_sane(&params, &src) {
+            return Err(CommandError::Invalid(msg));
+        }
         Ok(CreateOperation {
             name: name.to_string(),
             operation: Operation {
@@ -186,6 +189,9 @@ impl EditOperationParams {
                 params.kind()
             )));
         }
+        if let Some(msg) = crate::operation::side_sane(&params, &prev.src) {
+            return Err(CommandError::Invalid(msg));
+        }
         let next = Operation {
             params,
             stamp: None,
@@ -239,6 +245,12 @@ impl EditOperationLinks {
         }
         if let Some(src) = src {
             valid_src(world, &src)?;
+            // Retargeting onto a whole-model source under Inside would
+            // arm the mirror law; refused here, and backstopped at
+            // generate for commands that arrive via file load.
+            if let Some(msg) = crate::operation::side_sane(&next.params, &src) {
+                return Err(CommandError::Invalid(msg));
+            }
             next.src = src;
         }
         Ok(EditOperationLinks { name: name.to_string(), prev, next })

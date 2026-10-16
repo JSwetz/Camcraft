@@ -11,7 +11,7 @@ use hsmworks_app::commands::{
     SetWcsOrigin,
 };
 use hsmworks_app::geometry::{cube, IDENTITY_Q, Point3};
-use hsmworks_app::machining2d::Lead;
+use hsmworks_app::machining2d::{Lead, Side};
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::{Location, Operation, Toolpath, STOCK_NAME};
@@ -59,6 +59,7 @@ fn contour_params() -> OpParams {
         feed: 800.0,
         plunge_feed: 200.0,
         climb: true,
+        side: Side::Auto,
         lead: Lead::None,
         tolerance: 0.01,
         tab_count: 0,
@@ -1160,6 +1161,7 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
         feed: 800.0,
         plunge_feed: 200.0,
         climb: true,
+        side: Side::Auto,
         lead: Lead::None,
         tolerance: 0.01,
         tab_count: 0,
@@ -1824,6 +1826,7 @@ fn selection_notes_report_stitching_and_extension() {
         feed: 800.0,
         plunge_feed: 200.0,
         climb: true,
+        side: Side::Auto,
         lead: Lead::None,
         tolerance: 0.01,
         tab_count: 0,
@@ -1836,5 +1839,329 @@ fn selection_notes_report_stitching_and_extension() {
         "{notes:?}"
     );
     assert!(!notes.iter().any(|s| s.contains("extended")), "{notes:?}");
-    assert!(!notes.iter().any(|s| s.contains("outside")), "{notes:?}");
+    // The stitched ring circles the bore's air, so Auto answers Inside
+    // (M1.5.4) - what used to be a silent outside cut is now said.
+    assert!(
+        notes.iter().any(|s| s.contains("machining inside the ring")),
+        "{notes:?}"
+    );
+}
+
+// ---------------------------------------------------------------- M1.5.4 B:
+// contour Side. Auto answers the fill-ratio question on picked rings;
+// Inside/Outside are the user's ask, honored verbatim; whole-section
+// sources refuse Inside by name at every command door.
+
+/// Contour at the band z±1, one level pair deep enough for the fixtures.
+fn contour_at(side: Side, z: f64) -> OpParams {
+    OpParams::Contour {
+        stock_to_leave: 0.0,
+        clearance_z: Height::fixed(10.0),
+        retract_z: Height::fixed(8.0),
+        top_z: Height::fixed(z + 1.0),
+        bottom_z: Height::fixed(z - 1.0),
+        stepdown: 8.0,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        side,
+        lead: Lead::None,
+        tolerance: 0.01,
+        tab_count: 0,
+        tab_width: 0.0,
+        tab_height: 0.0,
+    }
+}
+
+/// The welded bore-wall patch of a `bored_block`, as a pick list.
+fn bore_patch_pick(world: &World, name: &str) -> Vec<GeoSel> {
+    let e = model::find_by_name(world, name).expect("part exists");
+    let f = model::features_of(world, &e).expect("features");
+    let ps = feature::patches(&f);
+    assert_eq!(ps.len(), 1, "only the bore wall welds: 22.5-degree strips");
+    vec![GeoSel {
+        entity: name.to_string(),
+        feature: FeatureSel::Patch(ps[0].id),
+    }]
+}
+
+/// Distance of every cut point (plunges and feeds) from the XY origin.
+fn feed_radii(world: &World, name: &str) -> Vec<f64> {
+    cache(world, name)
+        .expect("cache")
+        .path
+        .moves
+        .iter()
+        .filter(|m| m.kind != MoveKind::Rapid)
+        .map(|m| (m.to.x * m.to.x + m.to.y * m.to.y).sqrt())
+        .collect()
+}
+
+fn world_with_bore() -> (World, History) {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("plate", bored_block()));
+    (world, history)
+}
+
+#[test]
+fn contour_bore_wall_pick_defaults_inside() {
+    // The hand-test's defect 2, fixed: contouring a bore's wall from the
+    // material side cuts OUTSIDE the wall. The picked ring bounds air, so
+    // Auto machines inside it, says so, and the path rides the eroded
+    // ring - a Ø6 cutter around an Ø24 bore stands ~3 mm off the wall,
+    // on the axis side.
+    let (world, mut history) = world_with_bore();
+    let items = bore_patch_pick(&world, "plate");
+    let op = sel_op(&world, items.clone(), contour_at(Side::Auto, 4.0));
+    let region = operation::region_of(&world, &op).expect("the picked wall rings");
+    assert_eq!(region.loops().len(), 1, "contour machines the ring, not the annulus");
+    // 1e-5: Region::new round-trips the vertices through clipper's int
+    // grid; the law under test is that nothing was COMPLEMENTED, not the
+    // last bit of the coordinate.
+    assert!(
+        region.loops()[0].points().iter().all(|p| (p.x.hypot(p.y) - 12.0).abs() < 1e-5),
+        "the picked ring is untouched: contour never rewrites loops; got {:?}",
+        region.loops()[0].points(),
+    );
+
+    let notes = operation::selection_notes(&world, &items, &contour_at(Side::Auto, 4.0));
+    assert!(
+        notes.iter().any(|s| s.contains("machining inside the ring")),
+        "{notes:?}"
+    );
+
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "BoreC",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            contour_at(Side::Auto, 4.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "BoreC").expect("generate"));
+    assert_eq!(status(&world, "BoreC"), OpStatus::Ok);
+    let radii = feed_radii(&world, "BoreC");
+    assert!(
+        radii.iter().all(|d| (8.0..=10.0).contains(d)),
+        "inside the bore, on the eroded ring: {radii:?}"
+    );
+}
+
+#[test]
+fn contour_boss_pick_defaults_outside() {
+    // The other half of the law: a ring that bounds the material itself
+    // (a boss's OD) keeps today's outside walk and earns no flip note.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("disc", disc_mesh(12.0)));
+    let items = chain_picks("disc", &[rim_chain_of(&world, "disc")]);
+    let notes = operation::selection_notes(&world, &items, &contour_at(Side::Auto, 0.0));
+    assert!(
+        !notes.iter().any(|s| s.contains("machining inside the ring")),
+        "a boss's ring bounds material: {notes:?}"
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "BossC",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            contour_at(Side::Auto, 0.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "BossC").expect("generate"));
+    assert_eq!(status(&world, "BossC"), OpStatus::Ok);
+    let radii = feed_radii(&world, "BossC");
+    assert!(
+        radii.iter().all(|d| (14.0..=16.0).contains(d)),
+        "outside the boss, on the grown ring: {radii:?}"
+    );
+}
+
+#[test]
+fn contour_outside_forces_outside_on_bore() {
+    // The escape hatch: an explicit Outside on a bore reproduces the old
+    // path and stays silent (the note belongs to Auto's verdict).
+    let (world, mut history) = world_with_bore();
+    let items = bore_patch_pick(&world, "plate");
+    let notes = operation::selection_notes(&world, &items, &contour_at(Side::Outside, 4.0));
+    assert!(
+        !notes.iter().any(|s| s.contains("inside the ring")),
+        "{notes:?}"
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "BoreO",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            contour_at(Side::Outside, 4.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "BoreO").expect("generate"));
+    let radii = feed_radii(&world, "BoreO");
+    assert!(
+        radii.iter().all(|d| (14.0..=16.0).contains(d)),
+        "explicit Outside must stand, bore or no bore: {radii:?}"
+    );
+}
+
+#[test]
+fn contour_inside_forces_inside_on_boss() {
+    // And Inside on a boss is honored without a note: the user asked, the
+    // generator obeys, only Auto explains itself.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("disc", disc_mesh(12.0)));
+    let items = chain_picks("disc", &[rim_chain_of(&world, "disc")]);
+    let notes = operation::selection_notes(&world, &items, &contour_at(Side::Inside, 0.0));
+    assert!(!notes.iter().any(|s| s.contains("inside the ring")), "{notes:?}");
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "BossI",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            contour_at(Side::Inside, 0.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "BossI").expect("generate"));
+    let radii = feed_radii(&world, "BossI");
+    assert!(
+        radii.iter().all(|d| (8.0..=10.0).contains(d)),
+        "explicit Inside must stand on the boss too: {radii:?}"
+    );
+}
+
+#[test]
+fn inside_on_entity_source_is_refused() {
+    // Whole-section sources run the parity law, which already cuts hole
+    // walls from inside; negating it would erode outer walls and grow
+    // hole loops through them - the mirror gouge. Refused by name at
+    // every command door.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh(
+            "part",
+            cube(Point3::new(-20.0, -20.0, 0.0), Point3::new(20.0, 20.0, 8.0)),
+        ),
+    );
+    history.execute(&world, ImportModel::from_mesh("bore", bored_block()));
+
+    // Door 1: create.
+    let CommandError::Invalid(msg) = CreateOperation::new(
+        &world,
+        "Bad1",
+        "EM-0600-4FL",
+        SrcRef::Entity("part".into()),
+        contour_at(Side::Inside, 4.0),
+    )
+    .err()
+    .expect("create must refuse") else {
+        panic!("expected an Invalid refusal");
+    };
+    assert!(msg.contains("needs picked rings"), "{msg}");
+
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "E1",
+            "EM-0600-4FL",
+            SrcRef::Entity("part".into()),
+            contour_at(Side::Auto, 4.0),
+        )
+        .expect("Auto on an entity is allowed"),
+    );
+
+    // Door 2: the params edit.
+    let CommandError::Invalid(msg) =
+        EditOperationParams::new(&world, "E1", contour_at(Side::Inside, 4.0))
+            .err()
+            .expect("params edit must refuse")
+    else {
+        panic!("expected an Invalid refusal");
+    };
+    assert!(msg.contains("needs picked rings"), "{msg}");
+
+    // Door 3: a links edit retargeting a Selection+Inside op onto the
+    // model arms the same law from the other side.
+    let items = bore_patch_pick(&world, "bore");
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "S1",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            contour_at(Side::Inside, 4.0),
+        )
+        .expect("selection + inside is the honest combo"),
+    );
+    let CommandError::Invalid(msg) =
+        EditOperationLinks::new(&world, "S1", None, Some(SrcRef::Entity("part".into())))
+            .err()
+            .expect("links edit must refuse")
+    else {
+        panic!("expected an Invalid refusal");
+    };
+    assert!(msg.contains("needs picked rings"), "{msg}");
+    // The refusal wrote nothing: S1 still machines its picked ring.
+    let op = model::operation_of(&world, &model::find_by_name(&world, "S1").expect("op")).expect("op");
+    assert!(matches!(op.src, SrcRef::Selection(_)), "the refused retarget stands off");
+}
+
+#[test]
+fn side_change_goes_stale_once_and_generate_clears_it() {
+    // The digest carries Side (v7): Auto and Inside on the same selection
+    // are different asks - the second generates the same path, but the
+    // op says Stale until it is applied, exactly once.
+    let (world, mut history) = world_with_bore();
+    let items = bore_patch_pick(&world, "plate");
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Stale1",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            contour_at(Side::Auto, 4.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Stale1").expect("generate"));
+    assert_eq!(status(&world, "Stale1"), OpStatus::Ok);
+
+    history.execute(
+        &world,
+        EditOperationParams::new(&world, "Stale1", contour_at(Side::Inside, 4.0)).expect("edit"),
+    );
+    assert_eq!(status(&world, "Stale1"), OpStatus::Stale, "the ask changed, the path did not");
+
+    history.execute(&world, GenerateOperation::new(&world, "Stale1").expect("regen"));
+    assert_eq!(status(&world, "Stale1"), OpStatus::Ok, "apply clears the flag");
+
+    // Back through the regenerate, then through the edit: the params and
+    // their digest travel together, so two steps down lands on the old
+    // consistent pair.
+    history.undo(&world);
+    assert_eq!(status(&world, "Stale1"), OpStatus::Stale, "the regen's stamp is undone");
+    history.undo(&world);
+    assert_eq!(status(&world, "Stale1"), OpStatus::Ok, "undo restores ask and digest together");
 }

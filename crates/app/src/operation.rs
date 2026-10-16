@@ -52,8 +52,8 @@ use crate::geometry::feature::{self, LoopKind};
 use crate::geometry::slice::{self, SliceError};
 use crate::geometry::{Point3, transform_point};
 use crate::machining2d::{
-    self, ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, SlotParams,
-    TraceParams,
+    self, ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, Side,
+    SlotParams, TraceParams,
 };
 use crate::model;
 use crate::schema::Operation;
@@ -472,6 +472,10 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// Which side of the boundary the cutter rides; see
+        /// [`machining2d::Side`]. Auto is answered by the material-fill
+        /// check in the selection walk, never stored as a verdict.
+        side: Side,
         lead: Lead,
         tolerance: f64,
         tab_count: u32,
@@ -773,6 +777,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 lead,
+                side,
                 tolerance,
                 tab_count,
                 tab_width,
@@ -801,6 +806,15 @@ impl OpParams {
                         w(h, *radius);
                     }
                 }
+                // Appended at the v7-era side field: even a pre-Side
+                // contour op digests differently - the mechanism saying
+                // so, so nothing quietly reinterprets a committed path
+                // under the new Auto law.
+                h.write_u8(match side {
+                    Side::Auto => 0,
+                    Side::Inside => 1,
+                    Side::Outside => 2,
+                });
             }
             OpParams::Pocket {
                 stepover,
@@ -1295,6 +1309,11 @@ const DEGENERATE_AREA: f64 = 1e-9;
 /// a box-top ring holds all its material inside (ratio ≈ 1) and stays.
 const OUTSIDE_BIAS: f64 = 0.5;
 
+/// What a selection resolves to: the boundary loops and centerline runs
+/// it spells, plus Auto's inside verdict for a Contour (the fill law;
+/// `false` for every other kind and for a side the user named).
+type SelectionGeometry = (Vec<Loop>, Vec<Vec<Point2>>, bool);
+
 /// The region loops and centerline runs a feature selection resolves to,
 /// as the world stands now: each picked face gives its closed boundary
 /// loops, each closed chain its ring, projected to XY, coincident rims
@@ -1313,27 +1332,73 @@ const OUTSIDE_BIAS: f64 = 0.5;
 /// spelled only by chains is then clipped to the material that actually
 /// stands there - and taken on the far side when the picked rings bound
 /// air, which is what "machine out to the stock, the run is the limit"
-/// means on a bore rim (the material-side rule, [`OUTSIDE_BIAS`]).
+/// means on a bore rim (the material-side rule, [`OUTSIDE_BIAS`]). A
+/// contour with `Side::Auto` asks the same rings a narrower question -
+/// what fraction of the area THEY bound is material - and answers it in
+/// the third slot of [`selection_geometry_impl`]'s tuple; this wrapper
+/// hands out only the halves the region-shaped kinds want.
 fn selection_geometry(
     world: &World,
     items: &[GeoSel],
     params: &OpParams,
 ) -> Result<(Vec<Loop>, Vec<Vec<Point2>>), GenError> {
-    selection_geometry_impl(world, items, params, None)
+    let (loops, chains, _) = selection_geometry_impl(world, items, params, None)?;
+    Ok((loops, chains))
+}
+
+/// [`side_sane`]'s question, answered for one concrete source.
+pub(crate) fn side_sane(params: &OpParams, src: &SrcRef) -> Option<String> {
+    let OpParams::Contour { side, .. } = params else {
+        return None;
+    };
+    if *side != Side::Inside || matches!(src, SrcRef::Selection(_)) {
+        return None;
+    }
+    Some(
+        "Side 'Inside' needs picked rings: this source machines the whole model section, whose \
+         hole walls are already cut from inside - switch Side to Auto, or pick the wall's edges"
+            .into(),
+    )
+}
+
+/// The side [`Side::Auto`] resolves to for this operation's contour,
+/// asked of the very walk generation runs ([`selection_geometry_impl`]) -
+/// the same law [`machining2d::PocketStrategy::resolve`] is for the
+/// pocket's Auto, so a panel note and a generated path can never
+/// disagree. `None` when there is no verdict to quote yet: picks that
+/// resolve to open runs only (the side is inert there), or geometry that
+/// refuses. A whole-section source always answers Outside - its `+` law
+/// is already parity-correct over holes, and Inside there is a named
+/// refusal, never an Auto verdict.
+pub fn contour_auto_side(world: &World, src: &SrcRef, params: &OpParams) -> Option<bool> {
+    match src {
+        SrcRef::Stock | SrcRef::Entity(_) => Some(false),
+        SrcRef::Selection(items) => {
+            let (loops, _runs, inside) = selection_geometry_impl(world, items, params, None).ok()?;
+            (!loops.is_empty()).then_some(inside)
+        }
+    }
 }
 
 /// [`selection_geometry`] with a human-readable account of what the
 /// selection resolved to (`notes`) accumulated on the side, so the
 /// account can never disagree with the geometry - they are one walk.
+/// The third return value is Auto's verdict for a Contour (material-fill
+/// on the picked rings); it is `false` for every other kind and for a
+/// contour whose side the user already named.
 fn selection_geometry_impl(
     world: &World,
     items: &[GeoSel],
     params: &OpParams,
     mut notes: Option<&mut Vec<String>>,
-) -> Result<(Vec<Loop>, Vec<Vec<Point2>>), GenError> {
+) -> Result<SelectionGeometry, GenError> {
     let facing = matches!(params, OpParams::Face { .. });
     let pocket = matches!(params, OpParams::Pocket { .. });
     let contour = matches!(params, OpParams::Contour { .. });
+    let contour_side = match params {
+        OpParams::Contour { side, .. } => *side,
+        _ => Side::Auto,
+    };
     // The two silhouettes a run-out consults, computed once and shared
     // with the assembly below: the source's own footprint (the Face arm
     // of `region_for` and the verification project, so preview and path
@@ -1569,7 +1634,48 @@ fn selection_geometry_impl(
         }
         loops = region.loops().to_vec();
     }
-    Ok((loops, chains))
+    let mut contour_inside = false;
+    if contour && contour_side == Side::Auto && !loops.is_empty() {
+        // Auto asks the rings themselves what they bound: how much of the
+        // area they enclose is actually material. A boss or OD ring sits
+        // in its own metal (fill ≈ 1) - Outside, today's law. A bore rim
+        // rings air (fill ≈ 0) - the wall's metal is OUTSIDE the ring,
+        // and the Inside law is the one that grazes it. This is NOT the
+        // Face complement rule (that one compares the region to the rest
+        // of the part and would flip a small boss ring inside one
+        // entity's footprint); the loop count and winding are untouched
+        // either way, so the preview of a picked bore wall stays the wall
+        // the picks spelled - one walk, sign and traversal carrying the
+        // side (M1.5.4 issue 2).
+        let region = Region::new(loops.clone())?;
+        let whole = region.area().abs();
+        if whole > 0.0 {
+            let sil = match &material_sil {
+                Some(s) => Some(s.clone()),
+                None => material_of(world, &SrcRef::Selection(items.to_vec()))
+                    .ok()
+                    .and_then(|m| silhouette(&m.facets)),
+            };
+            if let Some(mat) = sil {
+                let fill = region.intersect(&mat)?.area().abs() / whole;
+                if fill < OUTSIDE_BIAS {
+                    contour_inside = true;
+                    if let Some(n) = &mut notes {
+                        n.push("machining inside the ring - the selection bounds air".into());
+                    }
+                }
+            }
+        }
+    }
+    if contour && contour_side != Side::Auto && loops.is_empty() && !chains.is_empty() {
+        // An explicit Side on a pure open-run selection changes nothing -
+        // the cutter rides the run's own points - so say that plainly
+        // instead of letting the combo imply an effect.
+        if let Some(n) = &mut notes {
+            n.push("Side does not apply to open runs - the cutter rides the run's line".into());
+        }
+    }
+    Ok((loops, chains, contour_inside))
 }
 
 /// The region half of `selection_geometry` in the shape `region_of` and
@@ -2222,6 +2328,7 @@ pub fn generate(
             feed,
             plunge_feed,
             climb,
+            side,
             lead,
             tolerance,
             tab_count,
@@ -2229,6 +2336,12 @@ pub fn generate(
             tab_height,
             ..
         } => {
+            // Backstop for a committed file that carries Inside on a
+            // whole-model source (commands refuse it at creation): the
+            // mirror-gouge law must never reach a path.
+            if let Some(msg) = side_sane(&op.params, &op.src) {
+                return Err(GenError::Invalid(msg));
+            }
             let cp = ContourParams {
                 tool_diameter: d,
                 stock_to_leave: *stock_to_leave,
@@ -2240,6 +2353,7 @@ pub fn generate(
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                side: *side,
                 lead: *lead,
                 tolerance: *tolerance,
                 tab_count: *tab_count,
@@ -2252,12 +2366,19 @@ pub fn generate(
                     // each open run in the picks adds a centerline pass
                     // along its own points. Either half alone is enough;
                     // together they machine the whole pick list.
-                    let (loops, runs) = selection_geometry(world, items, &op.params)?;
+                    let (loops, runs, auto_inside) =
+                        selection_geometry_impl(world, items, &op.params, None)?;
                     if loops.is_empty() && runs.is_empty() {
                         return Err(GenError::Empty(
                             "nothing in the selection bounds an area or a run".into(),
                         ));
                     }
+                    let mut cp = cp;
+                    cp.side = match side {
+                        Side::Auto if auto_inside => Side::Inside,
+                        Side::Auto => Side::Outside,
+                        s => *s,
+                    };
                     let region = if loops.is_empty() {
                         Region::empty()
                     } else {

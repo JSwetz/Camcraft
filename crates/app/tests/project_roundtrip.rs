@@ -7,7 +7,7 @@ use hsmworks_app::commands::{
     AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, SetWcsOrigin,
 };
 use hsmworks_app::geometry::feature;
-use hsmworks_app::machining2d::{Lead, PocketStrategy};
+use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::Location;
 use hsmworks_app::stock::StockShape;
@@ -81,11 +81,12 @@ fn wrong_version_is_refused() {
     // Anything newer than this build's format stays refused; v1/v2/v3/v4/v5
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
-    // the v5 numeric heights -> v6 Fixed migration).
-    let text = r#"{"version": 7, "entities": []}"#;
+    // the v5 numeric heights -> v6 Fixed migration, and
+    // side_roundtrip_v6_defaults_to_auto the v6 contour -> v7 side step).
+    let text = r#"{"version": 8, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(7)) => {}
+        Err(ProjectError::UnsupportedVersion(8)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -438,6 +439,7 @@ fn arc_move_round_trips() {
                 feed: 800.0,
                 plunge_feed: 200.0,
                 climb: true,
+                side: Side::Auto,
                 lead: Lead::None,
                 tolerance: 0.1,
                 tab_count: 0,
@@ -891,6 +893,7 @@ fn a_selection_round_trips_and_stays_ok() {
         feed: 800.0,
         plunge_feed: 200.0,
         climb: true,
+        side: Side::Auto,
         lead: Lead::None,
         tolerance: 0.01,
         tab_count: 0,
@@ -948,4 +951,197 @@ fn a_selection_round_trips_and_stays_ok() {
         operation::chains_of(&world, &o).len(),
         "preview sees the same runs before and after the file"
     );
+}
+
+#[test]
+fn side_roundtrip_v6_defaults_to_auto() {
+    // A literal v6 project: contour params predate the side key. The
+    // serde default IS the migration - absent reads as `auto`, the ask
+    // every pre-v7 file silently had - and saving stamps the v7 shape.
+    let text = r#"{
+        "version": 6,
+        "entities": [
+            {"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock",
+             "stock": {"box": {"dx": 40.0, "dy": 40.0, "dz": 10.0}}},
+            {"name": "T", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "end_mill", "diameter": 6.0, "corner_r": 0.0,
+                      "flute_len": 20.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 10000.0, "feed": 800.0}},
+            {"name": "C1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T", "src": "stock", "params": {"contour": {
+                 "stock_to_leave": 0.0, "clearance_z": 10.0, "retract_z": 8.0,
+                 "top_z": 5.0, "bottom_z": 3.0, "stepdown": 8.0,
+                 "feed": 800.0, "plunge_feed": 200.0, "climb": true,
+                 "lead": "none", "tolerance": 0.01,
+                 "tab_count": 0, "tab_width": 0.0, "tab_height": 0.0}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v6 contour must migrate");
+    let e = model::find_by_name(&world, "C1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Contour { side, .. } = &o.params else {
+        panic!("contour params expected, got {:?}", o.params);
+    };
+    assert_eq!(*side, Side::Auto, "an absent side is Auto");
+
+    let path = tmp_path("v7");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains("\"side\": \"auto\"")
+            && saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v7 shape: {saved}"
+    );
+}
+
+#[test]
+fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
+    // The stored value is the user's ask, never a resolution: Inside
+    // survives save/load byte-for-byte...
+    let path = tmp_path("side");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        SetStock::new(
+            &world,
+            StockShape::Box {
+                dx: 40.0,
+                dy: 40.0,
+                dz: 10.0,
+            },
+            Location::default(),
+        )
+        .expect("stock"),
+    );
+    history.execute(
+        &world,
+        AddTool::new(&world, "EM-0600-4FL", catalog_tool("EM-0600-4FL")).expect("tool"),
+    );
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "C1",
+            "EM-0600-4FL",
+            SrcRef::Entity("part".into()),
+            OpParams::Contour {
+                stock_to_leave: 0.0,
+                clearance_z: Height::fixed(10.0),
+                retract_z: Height::fixed(8.0),
+                top_z: Height::fixed(4.0),
+                bottom_z: Height::fixed(2.0),
+                stepdown: 8.0,
+                feed: 800.0,
+                plunge_feed: 200.0,
+                climb: true,
+                side: Side::Auto,
+                lead: Lead::None,
+                tolerance: 0.01,
+                tab_count: 0,
+                tab_width: 0.0,
+                tab_height: 0.0,
+            },
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "C1").expect("generate"));
+    project::save(&world, &path).expect("save");
+    let text = std::fs::read_to_string(&path).expect("read");
+
+    // ...which a hand-edited file proves is loadable verbatim: commands
+    // refuse Inside on a whole-section source (operations.rs's
+    // `inside_on_entity_source_is_refused`), so the only way an Inside
+    // + Entity op reaches a world is by editing the JSON. The load
+    // accepts it; generate refuses it by name - the backstop.
+    let edited = text.replace("\"side\": \"auto\"", "\"side\": \"inside\"");
+    assert_ne!(edited, text, "the saved file carries the side key once");
+    let world2 = new_world();
+    project::open(&world2, &edited).expect("a hand-edited file loads as any other");
+    let e = model::find_by_name(&world2, "C1").expect("op");
+    let o = model::operation_of(&world2, &e).expect("operation");
+    let OpParams::Contour { side, .. } = &o.params else {
+        panic!("contour params expected, got {:?}", o.params);
+    };
+    assert_eq!(*side, Side::Inside, "the ask survives the file");
+    let err = GenerateOperation::new(&world2, "C1")
+        .err()
+        .expect("generate must backstop the hand-edited Inside");
+    assert!(err.to_string().contains("needs picked rings"), "{err}");
+
+    // And the honest path: an Inside on a Selection source round-trips
+    // the choice and generates. The pick list is built against the
+    // loaded world (feature ids are per-world), on the same path the
+    // hand-edit took - minus the edit.
+    let items = {
+        let e = model::find_by_name(&world2, "part").expect("part");
+        let f = model::features_of(&world2, &e).expect("features");
+        let top = f
+            .faces
+            .iter()
+            .filter(|fa| matches!(fa.kind, feature::FaceKind::Planar) && fa.normal[2].abs() > 0.9)
+            .max_by(|a, b| a.offset.total_cmp(&b.offset))
+            .map(|fa| fa.id)
+            .expect("box top");
+        vec![GeoSel {
+            entity: "part".into(),
+            feature: FeatureSel::Face(top),
+        }]
+    };
+    history.execute(
+        &world2,
+        CreateOperation::new(
+            &world2,
+            "C2",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            OpParams::Contour {
+                stock_to_leave: 0.0,
+                clearance_z: Height::fixed(10.0),
+                retract_z: Height::fixed(8.0),
+                top_z: Height::fixed(4.0),
+                bottom_z: Height::fixed(2.0),
+                stepdown: 8.0,
+                feed: 800.0,
+                plunge_feed: 200.0,
+                climb: true,
+                side: Side::Inside,
+                lead: Lead::None,
+                tolerance: 0.01,
+                tab_count: 0,
+                tab_width: 0.0,
+                tab_height: 0.0,
+            },
+        )
+        .expect("create C2"),
+    );
+    history.execute(
+        &world2,
+        GenerateOperation::new(&world2, "C2").expect("generate C2"),
+    );
+    project::save(&world2, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(
+        first.contains("\"side\": \"inside\""),
+        "the choice is in the file"
+    );
+    let world3 = new_world();
+    project::load(&world3, &path).expect("load");
+    project::save(&world3, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the side choice round-trips byte-identically");
+    let e = model::find_by_name(&world3, "C2").expect("op loaded");
+    let o = model::operation_of(&world3, &e).expect("operation");
+    let OpParams::Contour { side, .. } = &o.params else {
+        panic!("contour params expected, got {:?}", o.params);
+    };
+    assert_eq!(*side, Side::Inside, "Inside survives the file unchanged");
 }
