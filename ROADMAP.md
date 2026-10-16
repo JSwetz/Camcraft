@@ -52,12 +52,14 @@ setup (stock + WCS) and toolpath display, M1.3 2D machining (face, contour,
 pocket, slot, trace over mesh-sliced geometry, with the tool library,
 operation parameters and verification warnings), and the M1.4 ribbon/browser
 UI/UX rework are in; M1.5 feature selection has shipped its selection
-commands, chips and 3D overlay, and its three hand-test reworks (M1.5.1:
+commands, chips and 3D overlay, and its four hand-test reworks (M1.5.1:
 readable selection rows, height-plane guides, and selection chains that
 actually close; M1.5.2: welded-wall picks, arc moves, staged facing, retract
 hops, per-level planes and translucent cut-region fills; M1.5.3: browser-row
 ids that stop stealing clicks, and From/Offset height references riding
-stock, model and work-offset sources) - the ⏸ items below
+stock, model and work-offset sources; M1.5.4: a bore's wall contoured from
+inside by default (Side), collision warnings folded to one line per kind,
+height offsets back in view in docked panes) - the ⏸ items below
 remain open; then units for the early phase, drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
@@ -68,9 +70,10 @@ remain open; then units for the early phase, drilling and the first post.
 - ✅ **Robustness**: degenerate and corrupt models produce clean errors, never
       crashes (Prime Directive) - corrupt-input corpus tests enforce this
 - ✅ **Project save/load**: versioned single-file project (`.hsmproj` JSON, at
-      v6: tools, operations with height references, their cached, verified
-      toolpaths (including arc moves) and work-offset placements; older files
-      migrate on load through chained steps, v1→2→3→4→5→6, never skipping one)
+      v7: tools, operations with height references and contour side, their
+      cached, verified toolpaths (including arc moves) and work-offset
+      placements; older files migrate on load through chained steps,
+      v1→2→3→4→5→6→7, never skipping one)
 - ✅ **Command foundation**: command pattern with undo/redo driving all
       UI-visible state changes from day one
 - 📋 **Units**: millimeters and inches, correct everywhere including posts
@@ -233,17 +236,20 @@ ids stable per model revision and enforced by the generation stamp.
 Picks are commands (undoable, validated at construction), show as
 readable rows in the Geometry section and as 3D overlay lines that hold
 their place under orbiting, and persist in the project file
-(`.hsmproj` v4 then; v5 since the M1.5.2 rework, v6 since the M1.5.3
-one below). Contour machines both halves of a selection: the picked
+(`.hsmproj` v4 then; v5 since the M1.5.2 rework, v6 since the M1.5.3 one
+and v7 since the M1.5.4 one below). Contour machines both halves of a
+selection: the picked
 loops as boundary passes, the picked open runs as a centerline pass -
 preview and generation read one chain construction, so they cannot
 disagree. The
 M1.5.1 hand-test rework (off `Milling-test.step`) made the
 selection itself legible, honest and geometrically complete; the
 M1.5.2 rework closed the seven issues the second session on the same
-model brought back, and the M1.5.3 rework closed the third session's
-three - heights now say where they come from and ride it; all 2D, per
-the standing rule to finish the 2D story before the 2.5D/3D ones.
+model brought back, the M1.5.3 rework closed the third session's three,
+and the M1.5.4 rework the fourth's - heights now say where they come
+from and ride it, and a bore's wall is contoured from the inside by
+default; all 2D, per the standing rule to finish the 2D story before
+the 2.5D/3D ones.
 
 - ✅ **Facet → feature**: weld mesh facets into planar faces and edge
       chains, exposed as stable ids per model revision (`app::geometry`,
@@ -366,12 +372,44 @@ the standing rule to finish the 2D story before the 2.5D/3D ones.
   Deferred by decision: rotations never tilt a height reference - a WCS
   slot contributes its origin's world Z (frame transforms are the
   2.5D/3D milestones' territory), and stepdown/feeds stay plain deltas.
+- ✅ **M1.5.4 hand-test rework** (the three issues from the fourth
+      hand-test session, commits `871418e` → `047e327`):
+  - the warning flood folds: a shank/holder check that collides on
+        sixteen moves printed sixteen pane lines; the display groups by
+        kind (and by part for a shank hit) now - one line, its first
+        offender named, "repeated on N more moves (to X)" appended -
+        while the persisted `Vec<Warning>` stays move-by-move, exactly
+        what the file format promises;
+  - contour learned which side to cut: a picked ring whose bounded area
+        is mostly air is a bore, and Auto machines inside it - the fill
+        law asked of the very walk generation runs, with a note saying
+        "machining inside the ring" - so the wall is contoured from the
+        axis side instead of around the outside, the hand-test's
+        mis-cut. Explicit Inside/Outside always override the verdict;
+        Inside on a whole-section source is refused by name (its `+`
+        law already cuts hole walls from inside by parity); a climb cut
+        on the inside reverses its travel to keep the material on the
+        tool's left, and the leads bulge into the bore's air;
+  - `.hsmproj` v7 stores the side as the user's ask (absent key = Auto,
+        the serde default is the migration); the generation stamp folds
+        it, so existing contour ops surface Stale once after the update
+        and Apply clears them;
+  - the height rows came back into view: From and Offset stack in two
+        rows instead of one clipped `same_line` chain, so the offset box
+        and the `(= Z …)` echo survive the narrow docked pane, and
+        "Fixed value" labels its box "Value" - the z itself, no hidden
+        `+ 0`.
+  Deferred by decision: Auto's verdict never rewrites the picked loops
+  (preview stays consistent by construction) and stays inert, with a
+  note, for selections that resolve to open runs only; the fill law
+  scores a lone ring against the selection silhouette and never reuses
+  Face's complement comparison, which misfires on a small boss.
 - ⏸ **WCS face/vertex snap**: deferred again, honestly - it needs the
       vertex pick above; M1.2's box-point placement stands
 - ⏸ **View cube + navigation bar**: still the viewport affordances
       deferred from M1.4; orthogonal to selection
 
-Known limits from the M1.5.1-M1.5.3 reworks - each one refuses by name or
+Known limits from the M1.5.1-M1.5.4 reworks - each one refuses by name or
 degrades by rule, none guesses silently:
 
 - the material-side rule: an open run or chain-only ring is scored
@@ -537,7 +575,7 @@ programming department.
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5 | ⚠️ |
-| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, translucent cut-region fills, v5→v6 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
+| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
