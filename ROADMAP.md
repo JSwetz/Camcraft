@@ -52,10 +52,12 @@ setup (stock + WCS) and toolpath display, M1.3 2D machining (face, contour,
 pocket, slot, trace over mesh-sliced geometry, with the tool library,
 operation parameters and verification warnings), and the M1.4 ribbon/browser
 UI/UX rework are in; M1.5 feature selection has shipped its selection
-commands, chips and 3D overlay, and its two hand-test reworks (M1.5.1:
+commands, chips and 3D overlay, and its three hand-test reworks (M1.5.1:
 readable selection rows, height-plane guides, and selection chains that
 actually close; M1.5.2: welded-wall picks, arc moves, staged facing, retract
-hops, per-level planes and translucent cut-region fills) - the ⏸ items below
+hops, per-level planes and translucent cut-region fills; M1.5.3: browser-row
+ids that stop stealing clicks, and From/Offset height references riding
+stock, model and work-offset sources) - the ⏸ items below
 remain open; then units for the early phase, drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
@@ -66,9 +68,9 @@ remain open; then units for the early phase, drilling and the first post.
 - ✅ **Robustness**: degenerate and corrupt models produce clean errors, never
       crashes (Prime Directive) - corrupt-input corpus tests enforce this
 - ✅ **Project save/load**: versioned single-file project (`.hsmproj` JSON, at
-      v5: tools, operations and their cached, verified toolpaths (including arc
-      moves); older files migrate on load through chained steps,
-      v1→2→3→4→5, never skipping one)
+      v6: tools, operations with height references, their cached, verified
+      toolpaths (including arc moves) and work-offset placements; older files
+      migrate on load through chained steps, v1→2→3→4→5→6, never skipping one)
 - ✅ **Command foundation**: command pattern with undo/redo driving all
       UI-visible state changes from day one
 - 📋 **Units**: millimeters and inches, correct everywhere including posts
@@ -175,7 +177,8 @@ undoes and redoes exactly, replaying byte-identical paths.
       speeds-and-feeds numbers by material group (never a copy of the
       Machining Data Handbook); referenced operations read STALE after an
       edit - no silent cascade
-- ✅ **Operation parameters**: heights (clearance/retract/feed/top/bottom),
+- ✅ **Operation parameters**: heights (clearance/retract/feed/top/bottom -
+      the depth ones From-reference + Offset pairs since M1.5.3),
       stepdowns and stepover, tolerance, climb vs conventional, feeds and
       plunge feeds - full property page; parameter edits ride the history
       like everything else
@@ -230,15 +233,17 @@ ids stable per model revision and enforced by the generation stamp.
 Picks are commands (undoable, validated at construction), show as
 readable rows in the Geometry section and as 3D overlay lines that hold
 their place under orbiting, and persist in the project file
-(`.hsmproj` v4 then; v5 since the M1.5.2 rework below). Contour
-machines both halves of a selection: the picked loops as boundary
-passes, the picked open runs as a centerline pass - preview and
-generation read one chain construction, so they cannot disagree. The
+(`.hsmproj` v4 then; v5 since the M1.5.2 rework, v6 since the M1.5.3
+one below). Contour machines both halves of a selection: the picked
+loops as boundary passes, the picked open runs as a centerline pass -
+preview and generation read one chain construction, so they cannot
+disagree. The
 M1.5.1 hand-test rework (off `Milling-test.step`) made the
 selection itself legible, honest and geometrically complete; the
 M1.5.2 rework closed the seven issues the second session on the same
-model brought back - all 2D, per the standing rule to finish the 2D
-story before the 2.5D/3D ones.
+model brought back, and the M1.5.3 rework closed the third session's
+three - heights now say where they come from and ride it; all 2D, per
+the standing rule to finish the 2D story before the 2.5D/3D ones.
 
 - ✅ **Facet → feature**: weld mesh facets into planar faces and edge
       chains, exposed as stable ids per model revision (`app::geometry`,
@@ -329,12 +334,44 @@ story before the 2.5D/3D ones.
   Deferred by decision: G2/G3 text emission rides the post (M2.3),
   helical/ramp entries stay M2.1's family, rest-material stock shading is
   simulation work (M2.3/M4).
+- ✅ **M1.5.3 height references** (the three issues from the third
+      hand-test session, commits `7e95c31` → `ea2628b`):
+  - the browser row stops stealing its own clicks: row and eye carry
+        distinct ImGui ids, so the "2 visible items with conflicting ID"
+        warning is gone and clicking between operations switches the
+        property pane again;
+  - every height is From + Offset: `operation::Height` pairs a
+        `HeightReference` (Fixed value, Top/Bottom of stock, Top/Bottom of
+        model, Work offset G54..G59) with an offset in mm, resolved against
+        the live world wherever a z is needed - the pane's combo and slot
+        picker with a `(= Z …)` echo, the viewport chips that name their
+        source ("Operation1 · Bottom 2.00 (G54 -1.00)" - Fixed heights
+        stay bare labels), verify and generation through `resolve_params`,
+        which refuses by field and by reason. Move a G54 anchor and every
+        plane, echo and stamp that rides it moves with it;
+  - new operations default part-aware - Top of model + 0, Bottom G54 + 0,
+        rapids 25 above the stock top - so the bottom height is the
+        selected work offset, never an arbitrary five under the stock top;
+        a fresh Face skims the stock top, because a Bottom default would
+        cut through the whole block;
+  - `.hsmproj` v6: saved numeric heights migrate to `Fixed` bit-for-bit
+        (goldens unchanged), work-offset placements finally persist with
+        their anchor, and the generation stamp folds each height's
+        reference (salt v2) - committed operations read Stale once after
+        the update and Apply clears it;
+  - the honesty invariant extends: an unresolved reference draws no
+        plane and no number, echoes what is missing and where to fix it,
+        and blocks generation by name - a guessed z never reaches the
+        viewport or the post.
+  Deferred by decision: rotations never tilt a height reference - a WCS
+  slot contributes its origin's world Z (frame transforms are the
+  2.5D/3D milestones' territory), and stepdown/feeds stay plain deltas.
 - ⏸ **WCS face/vertex snap**: deferred again, honestly - it needs the
       vertex pick above; M1.2's box-point placement stands
 - ⏸ **View cube + navigation bar**: still the viewport affordances
       deferred from M1.4; orthogonal to selection
 
-Known limits from the M1.5.1/M1.5.2 reworks - each one refuses by name or
+Known limits from the M1.5.1-M1.5.3 reworks - each one refuses by name or
 degrades by rule, none guesses silently:
 
 - the material-side rule: an open run or chain-only ring is scored
@@ -500,7 +537,7 @@ programming department.
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5 | ⚠️ |
-| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, translucent cut-region fills, v5 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
+| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, translucent cut-region fills, v5→v6 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
