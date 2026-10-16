@@ -80,6 +80,15 @@ fn fs_stock(in: VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(mix(base, hot, in.sel), mix(0.30, 0.55, in.sel));
 }
 
+// Cut-region fill: the selected operation's material area painted, not just
+// outlined. A constant translucent warning orange (REGION_RGB in the app
+// layer, alpha 0.22 - our own display choice) with no lighting: the fill
+// marks a level, it is not a surface.
+@fragment
+fn fs_region(in: VSOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(0.95, 0.58, 0.15, 0.22);
+}
+
 // Overlay lines (WCS triads, world axes): position + explicit color, no
 // lighting - reference geometry must stay legible at any zoom.
 struct LineOut {
@@ -105,27 +114,33 @@ fn fs_line(in: LineOut) -> @location(0) vec4<f32> {
 const OVERLAY_STRIDE: u64 = 24;
 
 /// One triangle-soup part for the GPU: world-space vertices (transform
-/// applied by the caller), plus selection and stock-kind flags. Stock parts
-/// are drawn last, blended, by a separate pipeline.
+/// applied by the caller), plus selection and kind flags. Stock parts are
+/// drawn blended after the models; region-fill parts after those (see
+/// `set_document`'s models → stock → fill partition). A fill part is pure
+/// translucent overlay: it never contributes welded wire.
 pub struct GpuPart {
     pub verts: Vec<[f32; 3]>,
     pub selected: bool,
     pub stock: bool,
+    pub fill: bool,
 }
 
 pub struct View3D {
     pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
     stock_pipeline: wgpu::RenderPipeline,
+    region_pipeline: wgpu::RenderPipeline,
     overlay_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
-    /// Total indices; `[0, model_index_count)` are models, the rest stock
-    /// (set_document partitions parts models-first).
+    /// Total indices; `[0, model_index_count)` are models,
+    /// `[model_index_count, stock_index_end)` stock and the rest region
+    /// fills (set_document partitions parts models-first).
     index_count: u32,
     model_index_count: u32,
+    stock_index_end: u32,
     edge_buf: wgpu::Buffer,
     /// Pairs of u32 line indices; `[0, model_edge_count)` are model edges,
     /// the rest stock edges. Edges are per-part, so a stock face coplanar
@@ -363,6 +378,72 @@ impl View3D {
             cache: None,
         });
 
+        // Cut-region fill: the stock blend's shape (last, translucent, no
+        // depth write) with a constant color - cloned, not shared, so a
+        // future stock-material change cannot silently retint the fill.
+        let region_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport3d-region"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_region"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::Zero,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
         // Non-indexed lines for the WCS triads and world axes: their own
         // vertex layout (pos + rgb), no lighting, depth-tested but never
         // occluded-by-write.
@@ -436,6 +517,7 @@ impl View3D {
             pipeline,
             line_pipeline,
             stock_pipeline,
+            region_pipeline,
             overlay_pipeline,
             bind_group,
             uniform,
@@ -443,6 +525,7 @@ impl View3D {
             index_buf,
             index_count: 0,
             model_index_count: 0,
+            stock_index_end: 0,
             edge_buf,
             edge_count: 0,
             model_edge_count: 0,
@@ -487,14 +570,16 @@ impl View3D {
     /// kind; partitioning for the draw order happens here, not in the
     /// caller, so a sloppy caller still gets models-first, stock-last.
     pub fn set_document(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, parts: &[GpuPart]) {
-        let mut order: Vec<&GpuPart> = parts.iter().filter(|p| !p.stock).collect();
-        order.extend(parts.iter().filter(|p| p.stock));
+        let mut order: Vec<&GpuPart> = parts.iter().filter(|p| !p.stock && !p.fill).collect();
+        order.extend(parts.iter().filter(|p| p.stock && !p.fill));
+        order.extend(parts.iter().filter(|p| p.fill));
 
         let mut verts: Vec<u8> = Vec::new();
         let mut idx: Vec<u32> = Vec::new();
         let mut edges: Vec<u32> = Vec::new();
         let mut vertex_count = 0u32;
         let mut model_indices = 0u32;
+        let mut stock_end = 0u32;
         let mut model_edges = 0u32;
         for part in &order {
             let sel: f32 = if part.selected { 1.0 } else { 0.0 };
@@ -508,17 +593,23 @@ impl View3D {
             idx.extend(vertex_count..vertex_count + n);
             // CAD-style wire per part: crease and boundary edges only, and
             // never welded across parts - a stock face coplanar with a
-            // model face must not erase either solid's outline.
-            edges.extend(feature_edges(&part.verts).into_iter().map(|i| i + vertex_count));
-            vertex_count += n;
-            if !part.stock {
-                model_indices = idx.len() as u32;
-                model_edges = edges.len() as u32;
+            // model face must not erase either solid's outline. Region
+            // fills are a pure translucent overlay; their outline already
+            // rides the overlay lines, so they add no wire.
+            if !part.fill {
+                edges.extend(feature_edges(&part.verts).into_iter().map(|i| i + vertex_count));
+                stock_end = idx.len() as u32;
+                if !part.stock {
+                    model_indices = idx.len() as u32;
+                    model_edges = edges.len() as u32;
+                }
             }
+            vertex_count += n;
         }
         if verts.is_empty() {
             self.index_count = 0; // render() then draws nothing, just clears
             self.model_index_count = 0;
+            self.stock_index_end = 0;
             self.edge_count = 0;
             self.model_edge_count = 0;
             return;
@@ -550,6 +641,7 @@ impl View3D {
         self.index_buf = index_buf;
         self.index_count = idx.len() as u32;
         self.model_index_count = model_indices;
+        self.stock_index_end = stock_end;
         self.edge_buf = edge_buf;
         self.edge_count = edges.len() as u32;
         self.model_edge_count = model_edges;
@@ -634,7 +726,9 @@ impl View3D {
         // One bind group for the frame: every pipeline shares the layout,
         // so switching pipelines mid-pass needs no resource rebinds. Draw
         // order is opaque models, their wire, then translucent stock with
-        // its wire on top, then the reference-geometry overlay last.
+        // its wire on top, then the cut-region fills last among triangles -
+        // a light film over everything it overlaps - then the reference-
+        // geometry overlay lines on top of all of it.
         pass.set_bind_group(0, &self.bind_group, &[]);
         if self.index_count > 0 {
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
@@ -646,15 +740,20 @@ impl View3D {
                 pass.set_pipeline(&self.line_pipeline);
                 pass.draw_indexed(0..self.model_edge_count, 0, 0..1);
             }
-            if self.model_index_count < self.index_count {
+            if self.model_index_count < self.stock_index_end {
                 pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_pipeline(&self.stock_pipeline);
-                pass.draw_indexed(self.model_index_count..self.index_count, 0, 0..1);
+                pass.draw_indexed(self.model_index_count..self.stock_index_end, 0, 0..1);
                 pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
                 if self.model_edge_count < self.edge_count {
                     pass.set_pipeline(&self.line_pipeline);
                     pass.draw_indexed(self.model_edge_count..self.edge_count, 0, 0..1);
                 }
+            }
+            if self.stock_index_end < self.index_count {
+                pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_pipeline(&self.region_pipeline);
+                pass.draw_indexed(self.stock_index_end..self.index_count, 0, 0..1);
             }
         }
         if self.overlay_count > 0 {

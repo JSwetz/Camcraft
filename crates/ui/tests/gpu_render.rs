@@ -46,6 +46,7 @@ fn stock_part(shape: &StockShape) -> GpuPart {
         verts: soup_of(shape),
         selected: false,
         stock: true,
+        fill: false,
     }
 }
 
@@ -58,6 +59,25 @@ fn model_part(shape_d: f64) -> GpuPart {
         }),
         selected: false,
         stock: false,
+        fill: false,
+    }
+}
+
+/// A flat CCW square sheet at height `z`, half-width `h`: the shape a
+/// region fill part carries (a triangle list, no lighting, no wire).
+fn fill_square(h: f32, z: f32) -> GpuPart {
+    GpuPart {
+        verts: vec![
+            [-h, -h, z],
+            [h, -h, z],
+            [h, h, z],
+            [-h, -h, z],
+            [h, h, z],
+            [-h, h, z],
+        ],
+        selected: false,
+        stock: false,
+        fill: true,
     }
 }
 
@@ -178,4 +198,44 @@ fn empty_document_clears_to_background_only() {
     };
     let changed = changed_pixels(&img);
     assert_eq!(changed, 0, "empty document on {w}x{h} should be uniform");
+}
+
+#[test]
+fn cut_region_fill_is_translucent() {
+    // The same model twice, once with a fill sheet riding just above its
+    // top face: the sheet must change pixels (it paints) and every pixel
+    // it paints must keep most of what was under it (it blends, never
+    // replaces) - the plan's "translucent, not a paint-over".
+    let Some((a_img, _, _)) = render(&[model_part(40.0)], &test_cam()) else {
+        eprintln!("gpu test skipped: no usable adapter");
+        return;
+    };
+    let Some((b_img, _, _)) = render(&[model_part(40.0), fill_square(12.0, 41.0)], &test_cam())
+    else {
+        return; // first render found an adapter, this one cannot fail differently
+    };
+    let mut moved = 0usize;
+    let mut see_through = 0usize;
+    for (pa, pb) in a_img.chunks(4).zip(b_img.chunks(4)) {
+        let d = (pb[0] as i32 - pa[0] as i32).abs()
+            + (pb[1] as i32 - pa[1] as i32).abs()
+            + (pb[2] as i32 - pa[2] as i32).abs();
+        if d > 12 {
+            moved += 1;
+            // alpha 0.22: a channel can shift at most ~0.22*255 across a
+            // full-range boundary, and 40 keeps the test honest against
+            // an opaque plate, which would repaint channels far harder.
+            if (pb[0] as i32 - pa[0] as i32).abs() < 40
+                && (pb[1] as i32 - pa[1] as i32).abs() < 40
+                && (pb[2] as i32 - pa[2] as i32).abs() < 40
+            {
+                see_through += 1;
+            }
+        }
+    }
+    assert!(moved > 200, "the fill sheet painted {moved} pixels; want a visible footprint");
+    assert!(
+        see_through * 2 > moved,
+        "fill must blend over what it covers, not replace it: {see_through}/{moved} gentle"
+    );
 }

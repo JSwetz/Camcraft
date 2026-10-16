@@ -22,7 +22,7 @@ use hsmworks_app::commands::{
     SetOperationGeometry, SetStock, SetWcsOrigin,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
-use hsmworks_app::operation::{FeatureSel, GeoSel, OpParams, SrcRef};
+use hsmworks_app::operation::{self, FeatureSel, GeoSel, OpParams, SrcRef};
 use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
@@ -910,11 +910,16 @@ impl State {
             }
         }
         let mut run_seq: HashMap<String, usize> = HashMap::new();
+        // Which stitched ring each pick took part in, from the stitcher's
+        // own walk - the same one the region geometry is built through,
+        // so a row's `· → ring k` cannot disagree with the preview.
+        let stitched = operation::stitched_rings(&self.world, &self.op_ui.geo);
         self.op_ui
             .geo
             .iter()
-            .map(|g| {
-                let (label, missing) = match g.feature {
+            .enumerate()
+            .map(|(gi, g)| {
+                let (mut label, missing) = match g.feature {
                     FeatureSel::Face(id) => {
                         let face = model::find_by_name(&self.world, &g.entity)
                             .and_then(|e| model::features_of(&self.world, &e))
@@ -1086,6 +1091,11 @@ impl State {
                         }
                     }
                 };
+                if !missing
+                    && let Some(k) = stitched.get(gi).copied().flatten()
+                {
+                    label.push_str(&format!(" · → ring {}", k + 1));
+                }
                 GeoChip { sel: g.clone(), label, missing }
             })
             .collect()
@@ -1483,11 +1493,7 @@ impl State {
                         let cache = model::find_by_name(&self.world, &name)
                             .and_then(|e| model::toolpath_of(&self.world, &e));
                         self.status = match cache {
-                            Some(tp) => format!(
-                                "generated {name}: {} move(s), {} warning(s)",
-                                tp.path.len(),
-                                tp.warnings.len()
-                            ),
+                            Some(tp) => tp.path.status_summary(&name, tp.warnings.len()),
                             None => format!("generated {name}"),
                         };
                     }

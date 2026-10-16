@@ -13,6 +13,7 @@ use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use hsmworks_app::cl::MoveKind;
 use hsmworks_app::geometry::feature;
 use hsmworks_app::geometry::{Aabb, Point3, transform_point};
+use hsmworks_app::geo2d::Region;
 use hsmworks_app::operation::{FeatureSel, GeoSel};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::{model, operation, pick};
@@ -747,6 +748,7 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             verts: world_verts(state, &entity),
             selected: model::is_selected(&state.world, &entity),
             stock: false,
+            fill: false,
         })
         .collect();
     if let Some(entity) = model::find_by_name(&state.world, STOCK_NAME)
@@ -756,6 +758,31 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             verts: world_verts(state, &entity),
             selected: model::is_selected(&state.world, &entity),
             stock: true,
+            fill: false,
+        });
+    }
+    // Cut-region fills: a translucent film over the material each shown
+    // region covers, at the same level `region_lines` outlines it - the
+    // same gate, so a fill never floats where no outline stands. A region
+    // `triangles()` refuses (degenerate, too dense) stays wireframe-only:
+    // never a partial or wrong sheet.
+    for (z, region) in shown_regions(state) {
+        let Some(region) = region else { continue };
+        let Ok(tris) = region.triangles() else { continue };
+        if tris.is_empty() {
+            continue;
+        }
+        let mut verts = Vec::with_capacity(tris.len() * 3);
+        for t in &tris {
+            for p in t {
+                verts.push([ftoz(p.x), ftoz(p.y), ftoz(z)]);
+            }
+        }
+        parts.push(GpuPart {
+            verts,
+            selected: false,
+            stock: false,
+            fill: true,
         });
     }
     parts
@@ -944,6 +971,40 @@ pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
 /// The region outline's orange, shared by `region_lines` and the height
 /// planes so the "what gets cut" level reads as one thing.
 const REGION_RGB: [f32; 3] = [0.95, 0.58, 0.15];
+
+/// What `region_lines` actually paints, per SELECTED operation whose
+/// source resolves geometry: the operation's committed `region_z` and its
+/// region - `None` for an open-runs-only pick (a Contour chain has outline
+/// but no area to fill). `height_planes` defers a region rectangle to
+/// these levels and `collect_parts` fills these areas: the same gate the
+/// outline runs under, no parallel truth, so a rectangle neither doubles a
+/// standing outline nor vanishes because the panel disagrees with the
+/// selection about who is shown - and a translucent fill never covers
+/// where no outline stands.
+pub(crate) fn shown_regions(state: &State) -> Vec<(f64, Option<Region>)> {
+    let mut out = Vec::new();
+    for (_, entity) in model::named_entities(&state.world) {
+        if !model::is_operation(&state.world, &entity)
+            || !model::is_selected(&state.world, &entity)
+        {
+            continue;
+        }
+        let Some(op) = model::operation_of(&state.world, &entity) else {
+            continue;
+        };
+        let region = operation::region_of(&state.world, &op);
+        if region.is_some() || !operation::chains_of(&state.world, &op).is_empty() {
+            out.push((op.params.region_z(), region));
+        }
+    }
+    out
+}
+
+/// The levels of [`shown_regions`] - one truth, read at the height-plane
+/// gate.
+pub(crate) fn shown_region_levels(state: &State) -> Vec<f64> {
+    shown_regions(state).into_iter().map(|(z, _)| z).collect()
+}
 /// Safety level (our own palette): the clearance plane everything starts
 /// above, and - Contour only - the shorter retract between passes.
 const CLEARANCE_RGB: [f32; 3] = [0.55, 0.60, 0.68];
@@ -977,15 +1038,15 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
     let Some(entity) = model::find_by_name(&state.world, &state.op_ui.name) else {
         return Vec::new();
     };
-    let Some(op) = model::operation_of(&state.world, &entity) else {
-        return Vec::new();
-    };
+    if model::operation_of(&state.world, &entity).is_none() {
+        return Vec::new(); // a typed name is not an operation
+    }
     let draft = &state.op_ui.params;
-    // Where the orange outline actually stands: the persisted level, and
-    // only if the operation's source yields region geometry there.
-    let region_shown = op.params.region_z() == draft.region_z()
-        && (operation::region_of(&state.world, &op).is_some()
-            || !operation::chains_of(&state.world, &op).is_empty());
+    // Where the orange outline actually stands, level by level: the
+    // shared `shown_region_levels` gate, so `region_lines` and the
+    // plane rectangles answer to one predicate, never two.
+    let levels = shown_region_levels(state);
+    let stands = |z: f64| levels.contains(&z);
     let mut out = vec![HeightPlane {
         z: draft.clearance_z(),
         rgb: CLEARANCE_RGB,
@@ -1043,7 +1104,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                     rgb: REGION_RGB,
                     name: "Top",
                     corner: 1,
-                    skip_rect: region_shown,
+                    skip_rect: stands(t),
                 });
             }
             out.push(HeightPlane {
@@ -1051,7 +1112,11 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                 rgb: CUT_RGB,
                 name: "Cut",
                 corner: 2,
-                skip_rect: region_shown,
+                // Stands only where no outline is painted AT the cut
+                // level: a staged Face's outline sits up at its Top, so
+                // the finished Cut keeps its own rectangle - the old
+                // blanket flag used to erase it.
+                skip_rect: stands(*cut_z),
             });
         }
         operation::OpParams::Contour { top_z, bottom_z, .. }
@@ -1063,7 +1128,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                 rgb: REGION_RGB,
                 name: "Top",
                 corner: 2,
-                skip_rect: region_shown,
+                skip_rect: stands(*top_z),
             });
             out.push(HeightPlane {
                 z: *bottom_z,
@@ -1787,10 +1852,16 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
     let len = gizmo_len(state);
     let mvp = state.cam.mvp(aspect);
     let mut out = Vec::new();
-    // Corner tags for the height planes - "Clearance 25.00" - one per
-    // plane, including the region plane when the orange outline carries
-    // it. Screen-space like the axis letters, so they track the camera
-    // for free and never rebuild the 3D buffer.
+    // Corner tags for the height planes - "Operation1 · Clearance 25.00"
+    // - one per plane, including the region plane when the orange outline
+    // carries it. The operation's name rides along: with two ops open in
+    // one session the plane set must say whose heights these are. Screen
+    // space like the axis letters, so they track the camera for free and
+    // never rebuild the 3D buffer. A corner that projects outside the
+    // frame (a tight zoom leaves the padded rectangle's far corners)
+    // clamps to a margin instead of dragging its label off-screen: the
+    // plane's level and value stay readable, and `project_uv` itself is
+    // untouched - picking shares it and must keep true positions.
     let planes = height_planes(state);
     if !planes.is_empty()
         && let Some(rect) = plane_rect(state)
@@ -1798,7 +1869,13 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
         for p in &planes {
             let (cx, cy) = plane_corner(rect, p.corner);
             if let Some(uv) = project_uv(&mvp, [cx, cy, p.z]) {
-                out.push((uv, p.rgb, format!("{} {:.2}", p.name, p.z)));
+                const M: f32 = 0.02; // uv margin: pixels, whichever way the viewport measures
+                let uv = [uv[0].clamp(M, 1.0 - M), uv[1].clamp(M, 1.0 - M)];
+                out.push((
+                    uv,
+                    p.rgb,
+                    format!("{} · {} {:.2}", state.op_ui.name, p.name, p.z),
+                ));
             }
         }
     }
@@ -3053,6 +3130,10 @@ mod height_plane_tests {
         state.op_ui.name = name.into();
         state.op_ui.tool = "EM-0400-2FL".into();
         state.op_ui.params = params;
+        // Open means selected in the pane, and the plane gates read the
+        // selection, not the pane: mirror what a click on the tree does.
+        state.pending.push_back(CommandKind::Select(Some(name.into())));
+        state.drain_actions();
         state
     }
 
@@ -3092,9 +3173,62 @@ mod height_plane_tests {
         // Top included, which is exactly the one with no rectangle.
         let texts: Vec<String> =
             overlay_labels(&state, 800.0 / 600.0).into_iter().map(|(_, _, t)| t).collect();
-        for want in ["Clearance 25.00", "Retract 15.00", "Top 10.00", "Bottom 2.00"] {
+        for want in ["C1 · Clearance 25.00", "C1 · Retract 15.00", "C1 · Top 10.00", "C1 · Bottom 2.00"] {
             assert!(texts.iter().any(|t| t == want), "{want} among {texts:?}");
         }
+    }
+
+    /// The Face that stages: outline at its Top, the finished Cut below.
+    /// The old blanket gate skipped the Cut rectangle off a single
+    /// "region shown" bool - invisible level, no outline standing for it.
+    /// The level-by-level gate leaves the Cut rectangle exactly when no
+    /// outline paints its level, and drops it exactly when one does.
+    #[test]
+    fn height_planes_stand_in_only_when_the_level_is_undrawn() {
+        let staged = state_with(
+            "F1",
+            OpParams::Face {
+                stepover: 3.0,
+                clearance_z: 25.0,
+                cut_z: 18.0,
+                top_z: Some(20.0),
+                stepdown: Some(1.0),
+                feed: 1200.0,
+                plunge_feed: 400.0,
+                climb: false,
+            },
+        );
+        let lines = height_plane_lines(&staged);
+        assert_eq!(
+            count_at(&lines, 20.0, REGION_RGB),
+            0,
+            "the outline already stands at the staged Top"
+        );
+        assert_eq!(
+            count_at(&lines, 18.0, CUT_RGB),
+            8,
+            "the finished Cut level carries no outline - the rectangle marks it"
+        );
+        // Unstaged: region_z IS the cut, one outline at one level.
+        let flat = state_with(
+            "F2",
+            OpParams::Face {
+                stepover: 3.0,
+                clearance_z: 25.0,
+                cut_z: 18.0,
+                top_z: None,
+                stepdown: None,
+                feed: 1200.0,
+                plunge_feed: 400.0,
+                climb: false,
+            },
+        );
+        let lines = height_plane_lines(&flat);
+        assert_eq!(
+            count_at(&lines, 18.0, CUT_RGB),
+            0,
+            "the outline stands at the cut - no coincident double"
+        );
     }
 
     #[test]
@@ -3121,6 +3255,54 @@ mod height_plane_tests {
         let lines = height_plane_lines(&state);
         assert_eq!(count_at(&lines, 30.0, CLEARANCE_RGB), 8, "the plane moved with the draft");
         assert_eq!(count_at(&lines, 25.0, CLEARANCE_RGB), 0, "and not half-old");
+    }
+
+    #[test]
+    fn plane_labels_stay_inside_the_viewport() {
+        let mut state = state_with("C1", contour(25.0));
+        // Zoom so tight the padded rectangle's corners project far off
+        // frame: their labels must ride the margin, not vanish with the
+        // corner. (project_uv itself is untouched - picking needs true
+        // positions; only the label placement clamps.)
+        state.cam.dist = 6.0;
+        let labels = overlay_labels(&state, 800.0 / 600.0);
+        let planes: Vec<&([f32; 2], [f32; 3], String)> =
+            labels.iter().filter(|(_, _, t)| t.contains(" · ")).collect();
+        assert!(!planes.is_empty(), "the open operation's planes still label");
+        for (uv, _, t) in &planes {
+            assert!(
+                (0.0..=1.0).contains(&uv[0]) && (0.0..=1.0).contains(&uv[1]),
+                "label {t} at {uv:?} left the viewport"
+            );
+        }
+        // And the clamp earned its keep: raw, some corner did project out.
+        let rect = plane_rect(&state).expect("stock gives an extent");
+        let mvp = state.cam.mvp(800.0 / 600.0);
+        let pushed_out = height_planes(&state).iter().any(|p| {
+            let (cx, cy) = plane_corner(rect, p.corner);
+            project_uv(&mvp, [cx, cy, p.z])
+                .is_some_and(|uv| !(0.0..=1.0).contains(&uv[0]) || !(0.0..=1.0).contains(&uv[1]))
+        });
+        assert!(pushed_out, "a camera that fits everything proves nothing");
+    }
+
+    #[test]
+    fn plane_labels_name_their_operation() {
+        let state = state_with("Operation1", contour(25.0));
+        let texts: Vec<String> = overlay_labels(&state, 800.0 / 600.0)
+            .into_iter()
+            .map(|(_, _, t)| t)
+            .collect();
+        assert!(
+            texts.iter().any(|t| t.starts_with("Operation1 · Clearance")),
+            "the label says whose plane it is: {texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .all(|t| !t.contains(" · ") || t.starts_with("Operation1 ·")),
+            "no plane labels anonymously: {texts:?}"
+        );
     }
 
     #[test]

@@ -40,7 +40,7 @@
 //! never a silent drop. Preview and generation read the same walk, so
 //! the two cannot disagree about where that pass or that boundary runs.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::hash::Hasher;
 
 use flecs_ecs::prelude::World;
@@ -1097,7 +1097,7 @@ fn selection_geometry_impl(
                     })
                     .collect();
                 if !c.closed {
-                    if stitched.contains(&gi) {
+                    if stitched.contains_key(&gi) {
                         // The stitch pass closed this run's ends into a
                         // ring with its siblings; the ring is already
                         // in `loops`, routed like any closed chain.
@@ -1240,6 +1240,23 @@ fn selection_region(
         ));
     }
     Region::new(loops).map_err(Into::into)
+}
+
+/// Which stitched ring (0-based, the stitcher's own order) each pick took
+/// part in: one entry per item, `None` for picks that closed nothing or
+/// were themselves closed chains. The chips' `· → ring k` note reads
+/// through the very stitch walk the region takes, so a row can never say
+/// it joins a ring the preview does not build.
+#[must_use]
+pub fn stitched_rings(world: &World, items: &[GeoSel]) -> Vec<Option<usize>> {
+    let (_, consumed) = stitch_open_runs(world, items);
+    let mut out: Vec<Option<usize>> = vec![None; items.len()];
+    for (it, k) in consumed {
+        if let Some(slot) = out.get_mut(it) {
+            *slot = Some(k);
+        }
+    }
+    out
 }
 
 /// A human-readable account of what a feature selection machines beyond
@@ -1561,8 +1578,11 @@ struct Run {
 }
 
 /// What the stitcher hands back: rings composed from picked runs (label,
-/// points, run count) and the item indices those rings consumed.
-type Stitched = (Vec<(String, Vec<Point2>, usize)>, HashSet<usize>);
+/// points, run count), and for every item the rings consumed, which ring
+/// (index into that vec) consumed it - the set form answers "was this
+/// stitched?", the map form lets the UI's chips say "→ ring k" from the
+/// very walk the region takes.
+type Stitched = (Vec<(String, Vec<Point2>, usize)>, HashMap<usize, usize>);
 
 /// M1.5.1 issue C: tessellation - STEP adaptive chords especially - can
 /// break a geometrically closed rim into several chains, each stopping
@@ -1630,11 +1650,13 @@ fn stitch_open_runs(world: &World, items: &[GeoSel]) -> Stitched {
             end: qkey(&last),
         });
     }
-    let used = |r: &Run, consumed: &HashSet<usize>| r.items.iter().any(|it| consumed.contains(it));
+    let used = |r: &Run, consumed: &HashMap<usize, usize>| {
+        r.items.iter().any(|it| consumed.contains_key(it))
+    };
     // Each committed ring carries the count of runs that spelled it, so
     // `selection_notes` can say what the stitching did.
     let mut rings: Vec<(String, Vec<Point2>, usize)> = Vec::new();
-    let mut consumed: HashSet<usize> = HashSet::new();
+    let mut consumed: HashMap<usize, usize> = HashMap::new();
     for s in 0..runs.len() {
         if used(&runs[s], &consumed) {
             continue;
@@ -1680,7 +1702,7 @@ fn stitch_open_runs(world: &World, items: &[GeoSel]) -> Stitched {
         let mut pts: Vec<Point2> = Vec::new();
         for (j, rev) in &seq {
             for &it in &runs[*j].items {
-                consumed.insert(it);
+                consumed.insert(it, rings.len());
             }
             if *rev {
                 pts.extend(runs[*j].pts.iter().rev().copied());

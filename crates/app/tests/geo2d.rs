@@ -221,3 +221,90 @@ fn pseudo_random_degenerate_loops_never_panic() {
         }
     }
 }
+
+// --- display triangulation (Region::triangles) ---
+
+/// The test sampler's golden-ratio stride: two grid coords hitting the
+/// same line are (phi multiples) effectively impossible, so membership is
+/// decided strictly inside/outside everywhere - a half-integer grid would
+/// let exact on-boundary samples disagree with the half-open parity rule.
+fn sample_points(w: f64, n: usize) -> Vec<Point2> {
+    (0..n)
+        .map(|i| {
+            let a = (i as f64 + 1.0) * 0.6180_3398_8749;
+            let b = (i as f64 + 1.0) * 0.7548_7766_6214;
+            Point2::new((a * 37.0).rem_euclid(w), (b * 53.0).rem_euclid(w))
+        })
+        .collect()
+}
+
+fn tri_has(t: &[Point2; 3], p: Point2) -> bool {
+    let side = |a: Point2, b: Point2| (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    let (s1, s2, s3) = (side(t[0], t[1]), side(t[1], t[2]), side(t[2], t[0]));
+    (s1 > 0.0 && s2 > 0.0 && s3 > 0.0) || (s1 < 0.0 && s2 < 0.0 && s3 < 0.0)
+}
+
+fn tri_area(t: &[Point2; 3]) -> f64 {
+    0.5 * ((t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[1].y - t[0].y) * (t[2].x - t[0].x))
+}
+
+fn check_triangles(r: &Region, tag: &str) {
+    let tris = r.triangles().expect(tag);
+    let sum: f64 = tris.iter().map(tri_area).sum();
+    assert!(
+        close(sum, r.area()),
+        "{tag}: triangle signed-area sum {sum} vs region area {}",
+        r.area()
+    );
+    for p in sample_points(60.0, 4000) {
+        let inside = r.contains(p);
+        let covered = tris.iter().any(|t| tri_has(t, p));
+        assert_eq!(covered, inside, "{tag}: sample {p:?} disagrees with contains");
+    }
+}
+
+#[test]
+fn region_triangles_cover_a_holed_square() {
+    // The bridge-and-clip law: material area exactly, hole stays void.
+    let r = Region::new(vec![
+        rect(0.0, 0.0, 40.0, 40.0),
+        rect(15.0, 15.0, 25.0, 25.0),
+    ])
+    .expect("holed square");
+    check_triangles(&r, "holed square");
+}
+
+#[test]
+fn region_triangles_cover_nested_islands() {
+    // A hole inside material, an island inside the hole: the island is
+    // material again - its own piece, its own triangles.
+    let r = Region::new(vec![
+        rect(0.0, 0.0, 60.0, 60.0),
+        rect(20.0, 20.0, 40.0, 40.0),
+        rect(28.0, 28.0, 34.0, 32.0),
+    ])
+    .expect("island in hole");
+    check_triangles(&r, "nested island");
+}
+
+#[test]
+fn region_triangles_refuse_self_crossing() {
+    // A sketch bowtie never reaches a triangulation: Region::new refuses it
+    // at construction (the same gate `self_crossing_loops_are_refused`
+    // pins). Slicer output through from_slices decomposes into two lobes
+    // touching at one point - those DO triangulate, and the union still
+    // agrees with contains.
+    let bowtie = Loop::new(vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(20.0, 20.0),
+        Point2::new(20.0, 0.0),
+        Point2::new(0.0, 20.0),
+    ])
+    .expect("bowtie");
+    assert!(matches!(
+        Region::new(vec![bowtie.clone()]),
+        Err(GeoError::Invalid(_))
+    ));
+    let r = Region::from_slices(vec![bowtie]).expect("lobes");
+    check_triangles(&r, "bowtie lobes");
+}

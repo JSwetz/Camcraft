@@ -359,6 +359,93 @@ impl Region {
         )))
     }
 
+    /// Triangulate the region's material for display: the returned
+    /// triangles' union is exactly what [`contains`](Self::contains) says -
+    /// holes stay void, islands nested inside holes come back filled.
+    ///
+    /// Provenance: our own, from the published textbook construction
+    /// (merge each hole into its container along a horizontal ray from the
+    /// hole's rightmost vertex, then ear-clip the merged walk - standard
+    /// computational-geometry literature). clipper2-rust does booleans and
+    /// offsets, not triangulation, so this is not a bridge around a
+    /// dependency.
+    ///
+    /// Contract: nothing here may guess. Each piece is clipped with a
+    /// bounded candidate budget, bridges are verified not to cross the
+    /// boundary they span, and any degeneracy - a hole without a
+    /// container, a bridge with no valid endpoint, an ear-clipping stuck on
+    /// self-touching input - returns `Err`, never a partial or wrong fill.
+    /// The UI's translucent cut-region fill is the only consumer; on `Err`
+    /// it draws the wireframe outline and nothing else. Never hangs: every
+    /// loop makes progress or refuses.
+    pub fn triangles(&self) -> Result<Vec<[Point2; 3]>, GeoError> {
+        let n = self.loops.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+        let total: usize = self.loops.iter().map(|l| l.pts.len()).sum();
+        if total > TRI_MAX_VERTS {
+            return Err(GeoError::Invalid(format!(
+                "region too dense to triangulate ({total} vertices)"
+            )));
+        }
+        let area: Vec<f64> = self.loops.iter().map(|l| l.area()).collect();
+
+        // Containment forest: each loop's parent is the smallest-|area|
+        // loop enclosing it. Loops touching only at boundary points still
+        // read as parent/child (the on-loop clause); two coincident
+        // duplicates have equal area and no honest reading, so they refuse.
+        let mut parent: Vec<Option<usize>> = Vec::with_capacity(n);
+        for i in 0..n {
+            let mut best: Option<usize> = None;
+            for j in 0..n {
+                if i == j || !encloses(&self.loops[j], &self.loops[i].pts) {
+                    continue;
+                }
+                match best {
+                    None => best = Some(j),
+                    Some(b) if area[j].abs() == area[b].abs() => {
+                        return Err(GeoError::Invalid("coincident duplicate loop".into()));
+                    }
+                    Some(b) if area[j].abs() < area[b].abs() => best = Some(j),
+                    Some(_) => {}
+                }
+            }
+            parent.push(best);
+        }
+
+        let mut tris: Vec<[Point2; 3]> = Vec::new();
+        // Worklist of piece roots (even depth: outer boundaries and islands
+        // inside holes). Odd-depth loops merge into their parent's walk;
+        // their CCW children are the next pieces.
+        let mut stack: Vec<usize> = (0..n).filter(|i| parent[*i].is_none()).collect();
+        while let Some(root) = stack.pop() {
+            if area[root] < 0.0 {
+                return Err(GeoError::Invalid("hole outside any boundary".into()));
+            }
+            let mut walk = self.loops[root].pts.clone();
+            for h in 0..n {
+                if parent[h] != Some(root) {
+                    continue;
+                }
+                if area[h] >= 0.0 {
+                    return Err(GeoError::Invalid("boundary inside boundary".into()));
+                }
+                merge_hole(&mut walk, &self.loops[h].pts)?;
+                for g in 0..n {
+                    if parent[g] == Some(h) {
+                        if area[g] <= 0.0 {
+                            return Err(GeoError::Invalid("hole inside hole".into()));
+                        }
+                        stack.push(g);
+                    }
+                }
+            }
+            clip_walk(&walk, &mut tris)?;
+        }
+        Ok(tris)
+    }
+
     pub fn square(side: f64) -> Result<Region, GeoError> {
         Region::new(vec![Loop::new(vec![
             Point2::new(0.0, 0.0),
@@ -367,6 +454,243 @@ impl Region {
             Point2::new(0.0, side),
         ])?])
     }
+}
+
+// --- triangulation helpers (see `Region::triangles` for provenance) ---
+
+/// Refuse rather than risk the frame: the ear budget is quadratic in this,
+/// and no display fill is worth an unbounded rebuild.
+const TRI_MAX_VERTS: usize = 20_000;
+
+/// Strictly positive cross product of (b - a) x (c - b): a left turn.
+fn is_left(a: Point2, b: Point2, c: Point2) -> bool {
+    (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x) > 0.0
+}
+
+fn is_right(a: Point2, b: Point2, c: Point2) -> bool {
+    (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x) < 0.0
+}
+
+/// `p` lies exactly on the closed segment `a`-`b`.
+fn on_segment(a: Point2, b: Point2, p: Point2) -> bool {
+    let cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    cross == 0.0
+        && p.x >= a.x.min(b.x)
+        && p.x <= a.x.max(b.x)
+        && p.y >= a.y.min(b.y)
+        && p.y <= a.y.max(b.y)
+}
+
+fn on_loop(l: &Loop, p: Point2) -> bool {
+    let n = l.pts.len();
+    (0..n).any(|i| on_segment(l.pts[i], l.pts[(i + 1) % n], p))
+}
+
+/// Loop `parent` encloses the point set `child`: every point inside or
+/// exactly on its boundary, and at least one strictly inside (otherwise two
+/// merely touching or coincident loops would "enclose" each other).
+fn encloses(parent: &Loop, child: &[Point2]) -> bool {
+    let mut strict = false;
+    for p in child {
+        if parent.contains_xy(*p) {
+            strict = true;
+        } else if !on_loop(parent, *p) {
+            return false;
+        }
+    }
+    strict
+}
+
+/// The open segments `a1`-`a2` and `b1`-`b2` cross at an interior point of
+/// both - the test that keeps a bridge chord from cutting through boundary.
+fn proper_cross(a1: Point2, a2: Point2, b1: Point2, b2: Point2) -> bool {
+    let side = |p: Point2, q1: Point2, q2: Point2| -> f64 {
+        (q2.x - q1.x) * (p.y - q1.y) - (q2.y - q1.y) * (p.x - q1.x)
+    };
+    let s1 = side(a1, b1, b2);
+    let s2 = side(a2, b1, b2);
+    let s3 = side(b1, a1, a2);
+    let s4 = side(b2, a1, a2);
+    s1 * s2 < 0.0 && s3 * s4 < 0.0
+}
+
+/// Parity of ray crossings to +x over a (possibly self-touching) closed
+/// walk: doubled bridge chords contribute twice and cancel, so the answer
+/// is this piece's material - the same law `Loop::contains_xy` runs, on a
+/// ring with repeated vertices instead of a simple loop.
+fn walk_contains(ring: &[Point2], p: Point2) -> bool {
+    let mut inside = false;
+    let n = ring.len();
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[(i + 1) % n]);
+        let (ylo, yhi) = if a.y <= b.y { (a.y, b.y) } else { (b.y, a.y) };
+        if p.y >= ylo && p.y < yhi {
+            let x_at = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
+            if p.x < x_at {
+                inside = !inside;
+            }
+        }
+    }
+    inside
+}
+
+/// Is `p` strictly inside triangle `t`? (Boundary belongs to whichever
+/// triangle claims it, and the ear tests read the same way.)
+fn tri_contains(t: [Point2; 3], p: Point2) -> bool {
+    let side = |a: Point2, b: Point2| -> f64 {
+        (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+    };
+    let (a, b, c) = (t[0], t[1], t[2]);
+    let (s1, s2, s3) = (side(a, b), side(b, c), side(c, a));
+    (s1 > 0.0 && s2 > 0.0 && s3 > 0.0) || (s1 < 0.0 && s2 < 0.0 && s3 < 0.0)
+}
+
+/// Splice `hole`'s boundary into `walk` with a verified bridge chord,
+/// turning two rings into one weakly-simple walk whose winding still equals
+/// the region's material (the bridge is traversed both ways and cancels).
+/// The textbook ray candidate comes first; a walk vertex is the fallback
+/// for the collinear-ray degeneracies the ray cannot express. A candidate
+/// is accepted only if the open bridge segment crosses no boundary edge and
+/// stays on material along its length - never a guess (Prime Directive).
+fn merge_hole(walk: &mut Vec<Point2>, hole: &[Point2]) -> Result<(), GeoError> {
+    let mut r = hole[0];
+    for p in hole {
+        if p.x > r.x || (p.x == r.x && p.y > r.y) {
+            r = *p;
+        }
+    }
+    let nl = hole.len();
+    let ri = hole
+        .iter()
+        .position(|p| *p == r)
+        .ok_or_else(|| GeoError::Invalid("empty hole loop".into()))?;
+    // The hole cycle leaves r for its successor and closes back on r;
+    // spliced between the two bridge traversals below.
+    let cycle: Vec<Point2> = (1..=nl).map(|k| hole[(ri + k) % nl]).collect();
+    let hole_loop = Loop {
+        pts: hole.to_vec(),
+    };
+
+    let mut cands: Vec<Point2> = Vec::new();
+    let nw = walk.len();
+    for j in 0..nw {
+        let (a, b) = (walk[j], walk[(j + 1) % nw]);
+        if a.y == b.y {
+            continue; // collinear with the ray or missing it: the vertex pass covers these
+        }
+        let (ylo, yhi) = if a.y <= b.y { (a.y, b.y) } else { (b.y, a.y) };
+        if r.y >= ylo && r.y < yhi {
+            let x = a.x + (r.y - a.y) * (b.x - a.x) / (b.y - a.y);
+            if x > r.x {
+                cands.push(Point2::new(x, r.y));
+            }
+        }
+    }
+    for p in walk.iter() {
+        if *p != r && p.x >= r.x {
+            cands.push(*p);
+        }
+    }
+    cands.sort_by(|p, q| {
+        ((p.x - r.x) * (p.x - r.x) + (p.y - r.y) * (p.y - r.y))
+            .partial_cmp(&((q.x - r.x) * (q.x - r.x) + (q.y - r.y) * (q.y - r.y)))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    for q in cands {
+        let clear = (0..nw).all(|j| !proper_cross(r, q, walk[j], walk[(j + 1) % nw]));
+        // The bridge must ride this piece's material: inside the walk's
+        // winding (which already excludes any hole merged before this one)
+        // and out of this hole - a sample inside an island nested in the
+        // hole belongs to a different piece.
+        let on_material = [1.0 / 3.0, 0.5, 2.0 / 3.0].iter().all(|t| {
+            let m = Point2::new(r.x + (q.x - r.x) * t, r.y + (q.y - r.y) * t);
+            walk_contains(walk, m) && !hole_loop.contains_xy(m)
+        });
+        if !clear || !on_material {
+            continue;
+        }
+        // Splice after the edge containing q (a vertex hit is the endpoint case).
+        let mut splice = nw; // append at the end
+        for j in 0..nw {
+            if on_segment(walk[j], walk[(j + 1) % nw], q) {
+                splice = j + 1;
+                break;
+            }
+        }
+        let mut merged = walk[..splice].to_vec();
+        merged.push(q);
+        merged.push(r);
+        merged.extend_from_slice(&cycle);
+        merged.push(q);
+        merged.extend_from_slice(&walk[splice..]);
+        *walk = merged;
+        return Ok(());
+    }
+    Err(GeoError::Invalid("no bridge reaches the hole".into()))
+}
+
+/// Ear-clip one weakly-simple walk (CCW boundary, holes spliced in through
+/// doubled bridge chords). An ear is cut only when its tip is a left turn,
+/// its centroid is material, and no reflex vertex lies inside it - on a
+/// merged walk every hole vertex reads reflex, so no ear ever buries a
+/// hole. Bounded by a quadratic candidate budget: stuck is refused, never
+/// retried forever.
+fn clip_walk(walk: &[Point2], tris: &mut Vec<[Point2; 3]>) -> Result<(), GeoError> {
+    let mut ring = Loop::dedup(walk.to_vec());
+    if ring.len() < 3 {
+        return Ok(()); // no area to fill
+    }
+    let budget = ring.len().saturating_mul(ring.len()).saturating_add(1024);
+    let mut churn = 0usize;
+    while ring.len() > 3 {
+        let n = ring.len();
+        let mut found: Option<usize> = None;
+        for i in 0..n {
+            churn += 1;
+            if churn > budget {
+                return Err(GeoError::Invalid("triangulation budget exhausted".into()));
+            }
+            let (a, b, c) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
+            if !is_left(a, b, c) {
+                continue;
+            }
+            let cen = Point2::new((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0);
+            if !walk_contains(&ring, cen) {
+                continue;
+            }
+            let blocked = (0..n).any(|j| {
+                if j == (i + n - 1) % n || j == i || j == (i + 1) % n {
+                    return false;
+                }
+                let (p, q, t) = (ring[(j + n - 1) % n], ring[j], ring[(j + 1) % n]);
+                is_right(p, q, t) && tri_contains([a, b, c], q)
+            });
+            if blocked {
+                continue;
+            }
+            found = Some(i);
+            break;
+        }
+        let Some(i) = found else {
+            return Err(GeoError::Invalid("no ear in a non-triangle walk".into()));
+        };
+        let n = ring.len();
+        let t = [ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]];
+        ring.remove(i);
+        let cross = (t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[1].y - t[0].y) * (t[2].x - t[0].x);
+        if cross != 0.0 {
+            tris.push(t);
+        }
+    }
+    if ring.len() == 3 {
+        let t = [ring[0], ring[1], ring[2]];
+        let cross = (t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[1].y - t[0].y) * (t[2].x - t[0].x);
+        if cross != 0.0 {
+            tris.push(t);
+        }
+    }
+    Ok(())
 }
 
 fn to_paths(loops: &[Loop]) -> Result<Paths64, GeoError> {

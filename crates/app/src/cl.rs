@@ -223,6 +223,35 @@ impl Toolpath {
     pub fn arc_count(&self) -> usize {
         self.moves.iter().filter(|m| m.arc.is_some()).count()
     }
+
+    /// The status line after a successful generate, counted from the
+    /// moves themselves: plunge count with the plunge feed the path
+    /// actually carries, the number of distinct cut levels (feeds at
+    /// that height, whatever lifted the tool there), arc moves, and the
+    /// verify warnings. Nothing a generator merely intended - only what
+    /// the path shows.
+    #[must_use]
+    pub fn status_summary(&self, name: &str, warnings: usize) -> String {
+        let n = self.moves.len();
+        let p = self.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count();
+        let a = self.arc_count();
+        let mut levels: Vec<f64> = Vec::new();
+        for m in &self.moves {
+            if m.kind == MoveKind::Feed && !levels.contains(&m.to.z) {
+                levels.push(m.to.z);
+            }
+        }
+        let feed = self
+            .moves
+            .iter()
+            .find(|m| m.kind == MoveKind::Plunge)
+            .and_then(|m| m.feed)
+            .map_or(String::new(), |f| format!(" @ {f}"));
+        format!(
+            "generated {name}: {n} moves ({p} plunge(s){feed}, {} level(s), {a} arc(s)), {warnings} warning(s)",
+            levels.len()
+        )
+    }
 }
 
 /// Chains moves onto a Toolpath, maintaining the link invariant by
@@ -331,6 +360,28 @@ mod tests {
         assert_eq!(t.moves[0].kind, MoveKind::Plunge);
         assert!(t.moves[0].arc.is_none());
         assert!(t.is_chained());
+    }
+
+    #[test]
+    fn status_summary_counts_levels_and_arcs() {
+        // Two cut levels, a lead-in arc on the first, two warnings: the
+        // line reports exactly what the path shows.
+        let mut b = PathBuilder::new(p(0.0, 0.0, 5.0));
+        b.push(MoveKind::Rapid, p(10.0, 0.0, 5.0), None);
+        b.push(MoveKind::Plunge, p(10.0, 0.0, 0.0), Some(100.0));
+        b.push_arc(MoveKind::Feed, p(0.0, 10.0, 0.0), Some(500.0), pt(0.0, 0.0), true);
+        b.push(MoveKind::Feed, p(-10.0, 0.0, 0.0), Some(500.0));
+        b.push(MoveKind::Rapid, p(-10.0, 0.0, 3.0), None);
+        b.push(MoveKind::Rapid, p(-10.0, 0.0, 5.0), None);
+        b.push(MoveKind::Rapid, p(10.0, 0.0, 5.0), None);
+        b.push(MoveKind::Plunge, p(10.0, 0.0, -2.0), Some(100.0));
+        b.push(MoveKind::Feed, p(0.0, 0.0, -2.0), Some(500.0));
+        let t = b.finish();
+        assert_eq!(t.len(), 9, "every move above is real motion");
+        assert_eq!(
+            t.status_summary("P1", 2),
+            "generated P1: 9 moves (2 plunge(s) @ 100, 2 level(s), 1 arc(s)), 2 warning(s)"
+        );
     }
 
     #[test]

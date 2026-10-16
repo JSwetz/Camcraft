@@ -731,6 +731,76 @@ fn selection_rows_read_as_human_descriptors() {
     assert!(chips[1].label.ends_with(" · missing"), "{}", chips[1].label);
 }
 
+/// A disc whose rim carries two hard creases: the chain walk splits it
+/// into exactly two open runs (the fixture from
+/// `crates/app/tests/operations.rs`, same law, copied for the ui seam).
+fn split_rim_disc(r: f64) -> hsmworks_app::geometry::Mesh {
+    use hsmworks_app::geometry::Triangle;
+    let tau = std::f64::consts::TAU;
+    let pt = |i: usize| {
+        let a = tau * i as f64 / 16.0;
+        let rr = if i.is_multiple_of(8) { r * 1.15 } else { r };
+        Point3::new(rr * a.cos(), rr * a.sin(), 0.0)
+    };
+    let facets: Vec<Triangle> = (0..16)
+        .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), pt(i), pt(i + 1)))
+        .collect();
+    hsmworks_app::geometry::Mesh { facets }
+}
+
+#[test]
+fn stitched_rows_say_which_ring() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    state.history.execute(&state.world, ImportModel::from_mesh("disc", split_rim_disc(12.0)));
+    let e = model::find_by_name(&state.world, "disc").expect("entity");
+    let f = model::features_of(&state.world, &e).expect("features");
+    let runs: Vec<u64> =
+        feature::chains(&f).into_iter().filter(|c| !c.closed).map(|c| c.id).collect();
+    assert_eq!(runs.len(), 2, "the creased rim arrives as two open runs");
+    state.ui_target = UiTarget::Operation("Face1".into());
+    state.sync_ops_ui();
+
+    for (i, id) in runs.iter().enumerate() {
+        let pick =
+            GeoSel { entity: "disc".into(), feature: FeatureSel::Chain(*id) };
+        queue_feature_pick(&mut state, pick, i > 0);
+        // Drain between picks: the append arm reads the committed list,
+        // which is how the viewport's Ctrl-click sees the world too.
+        state.drain_actions();
+    }
+    state.sync_ops_ui();
+
+    // Both rows say the same thing: they spell ring 1. One row per pick
+    // still - the note annotates the label, it never merges or reorders
+    // rows, so the × on each still deletes exactly its own pick.
+    let chips = state.geo_chips();
+    assert_eq!(chips.len(), 2, "one row per pick, annotated or not");
+    for c in &chips {
+        assert!(c.label.ends_with(" · → ring 1"), "stitched row: {}", c.label);
+    }
+
+    // Take one away and the note follows the truth: alone, the run
+    // stitches nothing, so it no longer claims a ring.
+    let mut rest = state.op_ui.geo.clone();
+    rest.remove(0);
+    state.pending.push_back(CommandKind::SetOperationGeometry {
+        name: "Face1".into(),
+        items: rest,
+    });
+    state.drain_actions();
+    state.sync_ops_ui();
+    let chips = state.geo_chips();
+    assert_eq!(chips.len(), 1);
+    assert!(chips[0].label.contains(" · open · "), "{}", chips[0].label);
+    assert!(
+        !chips[0].label.contains("ring"),
+        "unjoined, the row must not claim a ring: {}",
+        chips[0].label
+    );
+}
+
 // ---------------------------------------------------------------------------
 // M1.5.1 step 6: the Geometry section's note lines ride the same
 // `selection_notes` walk the preview takes - through the state seam the
