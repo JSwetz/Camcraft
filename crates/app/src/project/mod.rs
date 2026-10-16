@@ -32,7 +32,7 @@ use std::path::Path;
 use flecs_ecs::prelude::World;
 use serde::{Deserialize, Serialize};
 
-use crate::cl::{Move, MoveKind, Toolpath};
+use crate::cl::{Move, MoveKind, Toolpath, lattice};
 use crate::geo2d::Point2;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
 use crate::machining2d::{Lead, PocketStrategy};
@@ -556,9 +556,9 @@ pub struct MoveDto {
     pub to: [f64; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feed: Option<f64>,
-    /// Declared at v5, wired in step 3: the circular segment this move
-    /// traverses, absent for the straight-line moves every pre-v5 path
-    /// held.
+    /// Added at v5: the circular segment this move traverses, absent for
+    /// the straight-line moves every pre-v5 path held (and every path
+    /// with no arcs still writes - the field skips serialization).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<ArcDto>,
 }
@@ -603,23 +603,35 @@ pub struct OperationDto {
 }
 
 impl MoveDto {
+    /// Coordinates stand on the 1 um lattice ([`crate::cl::lattice`]):
+    /// every float a file carries is then a fixed point of write-parse,
+    /// so save-load-save is byte-identical - an off-lattice double's
+    /// shortest decimal can parse back one ulp over from what was
+    /// written, and a cache that drifts a ulp per reopen is a file
+    /// that never repeats itself. Generated coordinates are already
+    /// lattice values (clipper's grid, user-typed feeds); the snap
+    /// only ever moves anything computed - a lead tangent point - and
+    /// does so by at most half a micron.
     fn from_move(m: &Move) -> Self {
+        let lat = |p: Point3| [lattice(p.x), lattice(p.y), lattice(p.z)];
         MoveDto {
             kind: match m.kind {
                 MoveKind::Rapid => MoveKindDto::Rapid,
                 MoveKind::Feed => MoveKindDto::Feed,
                 MoveKind::Plunge => MoveKindDto::Plunge,
             },
-            from: [m.from.x, m.from.y, m.from.z],
-            to: [m.to.x, m.to.y, m.to.z],
-            feed: m.feed,
-            // Inert until step 3 puts arcs on the domain Move.
-            arc: None,
+            from: lat(m.from),
+            to: lat(m.to),
+            feed: m.feed.map(lattice),
+            arc: m.arc.map(|a| ArcDto {
+                center: [lattice(a.center.x), lattice(a.center.y)],
+                ccw: a.ccw,
+            }),
         }
     }
 
     fn to_move(self) -> Move {
-        Move::new(
+        let m = Move::new(
             match self.kind {
                 MoveKindDto::Rapid => MoveKind::Rapid,
                 MoveKindDto::Feed => MoveKind::Feed,
@@ -628,7 +640,11 @@ impl MoveDto {
             Point3::new(self.from[0], self.from[1], self.from[2]),
             Point3::new(self.to[0], self.to[1], self.to[2]),
             self.feed,
-        )
+        );
+        match self.arc {
+            Some(a) => m.with_arc(Point2::new(a.center[0], a.center[1]), a.ccw),
+            None => m,
+        }
     }
 }
 

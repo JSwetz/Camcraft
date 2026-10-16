@@ -3,8 +3,10 @@
 //! Provenance: serpentine facing, offset contouring, zigzag and waterline
 //! pocketing, stadium slotting rows and engraved trace paths are textbook
 //! CAM strategies as described in machine-tool handbooks and published CAM
-//! literature; every number (parameter model, entry/exit overruns, snap
-//! rules) is ours. Pure module: no flecs, no
+//! literature; the arc fitter is the classic three-point circle with a
+//! two-sided sagitta bound (geometry handbooks, e.g. Farin's curves and
+//! surfaces primer). Every number (parameter model, entry/exit overruns,
+//! snap rules) is ours. Pure module: no flecs, no
 //! world access - the command layer resolves geometry into regions, this
 //! module only cuts them.
 //!
@@ -167,7 +169,9 @@ pub enum Lead {
     /// overrun the same way on exit.
     Linear { length: f64 },
     /// Quarter arc of `radius`, tangent to the path at entry and exit,
-    /// bulging to the air side. Tessellated to `tolerance` chord error.
+    /// bulging to the air side. Posted as one arc move; chord error at
+    /// `tolerance` only appears where a path gets flattened downstream
+    /// (verification, display, the golden dump).
     Arc { radius: f64 },
 }
 
@@ -191,7 +195,9 @@ pub struct ContourParams {
     /// orientation (material on the left); conventional reverses it.
     pub climb: bool,
     pub lead: Lead,
-    /// Chord tolerance for lead-arc tessellation.
+    /// Chord tolerance for arcs: bounds how far a fitted arc may sit
+    /// from the tessellation it replaces (both directions), and is the
+    /// chord error arcs flatten to wherever a law needs segments.
     pub tolerance: f64,
     /// Tabs: `tab_count` bridges of `tab_width`, holding the part until
     /// the cut drops below `bottom_z + tab_height`.
@@ -283,6 +289,10 @@ fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
 /// path already starts at clearance above the entry point. Rapids
 /// therefore always run at `clearance_z`, never inside the cut. Shared by
 /// the depth-stepping area operations (pocket, slot, trace).
+/// `fit = Some(tol)` runs each pass through [`fit_arcs`] once (the walk
+/// shape is level-independent): waterline rings of a fine tessellation
+/// travel as arcs. `None` keeps the per-point feed walk every straight
+/// generator has always had.
 fn run_levels(
     b: &mut PathBuilder,
     passes: &[Vec<Point2>],
@@ -290,10 +300,15 @@ fn run_levels(
     clearance_z: f64,
     feed: f64,
     plunge_feed: f64,
+    fit: Option<f64>,
 ) {
+    let runs: Vec<Vec<Seg>> = match fit {
+        Some(tol) => passes.iter().map(|p| fit_arcs(p, tol)).collect(),
+        None => Vec::new(),
+    };
     let mut first = true;
     for &z in zs {
-        for pass in passes {
+        for (pi, pass) in passes.iter().enumerate() {
             let Some((entry, rest)) = pass.split_first() else {
                 continue;
             };
@@ -311,8 +326,13 @@ fn run_levels(
             );
             b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(plunge_feed));
             first = false;
-            for q in rest {
-                b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
+            match fit {
+                Some(_) => push_segs(b, &runs[pi], z, feed),
+                None => {
+                    for q in rest {
+                        b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
+                    }
+                }
             }
         }
     }
@@ -369,8 +389,13 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 if poly.len() < 2 {
                     continue;
                 }
-                let t0 = unit(poly[1].x - poly[0].x, poly[1].y - poly[0].y);
-                let (entry, lead_in) = lead_in(poly[0], t0, air_side(t0, p.climb), p);
+                let walk = fit_arcs(&poly, p.tolerance);
+                // The lead meets the wall on the wall's own tangent at
+                // the joint - the fitted walk's true circle tangent, not
+                // a chord across it, or the join kinks at the very seam
+                // the fitter just smoothed.
+                let t0 = walk_tangent(&walk, &poly, true);
+                let (entry, lead) = lead_in(poly[0], t0, air_side(t0, p.climb), p);
                 if k == 0 {
                     if !first_entry {
                         let cur = b.at();
@@ -385,17 +410,16 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 }
                 b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(p.plunge_feed));
                 first_entry = false;
-                for q in lead_in {
-                    b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(p.feed));
-                }
-                for q in &poly[1..] {
-                    b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(p.feed));
-                }
+                push_segs(&mut b, &lead, z, p.feed);
+                push_segs(&mut b, &walk, z, p.feed);
                 let n = poly.len();
-                let t1 = unit(poly[n - 1].x - poly[n - 2].x, poly[n - 1].y - poly[n - 2].y);
-                for q in lead_out(poly[n - 1], t1, air_side(t1, p.climb), p) {
-                    b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(p.feed));
-                }
+                let t1 = walk_tangent(&walk, &poly, false);
+                push_segs(
+                    &mut b,
+                    &lead_out(poly[n - 1], t1, air_side(t1, p.climb), p),
+                    z,
+                    p.feed,
+                );
             }
         }
     }
@@ -440,11 +464,12 @@ pub fn contour_along_chain(
         v
     };
     let zs = p.levels();
-    let t0 = unit(poly[1].x - poly[0].x, poly[1].y - poly[0].y);
-    let (entry, lead_in) = lead_in(poly[0], t0, air_side(t0, p.climb), p);
+    let walk = fit_arcs(&poly, p.tolerance);
+    let t0 = walk_tangent(&walk, &poly, true);
+    let (entry, lead) = lead_in(poly[0], t0, air_side(t0, p.climb), p);
     let n = poly.len();
-    let t1 = unit(poly[n - 1].x - poly[n - 2].x, poly[n - 1].y - poly[n - 2].y);
-    let lead_out_pts = lead_out(poly[n - 1], t1, air_side(t1, p.climb), p);
+    let t1 = walk_tangent(&walk, &poly, false);
+    let out = lead_out(poly[n - 1], t1, air_side(t1, p.climb), p);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     for (k, &z) in zs.iter().enumerate() {
@@ -455,9 +480,9 @@ pub fn contour_along_chain(
         let cur = b.at();
         b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
         b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(p.plunge_feed));
-        for q in lead_in.iter().chain(poly[1..].iter()).chain(&lead_out_pts) {
-            b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(p.feed));
-        }
+        push_segs(&mut b, &lead, z, p.feed);
+        push_segs(&mut b, &walk, z, p.feed);
+        push_segs(&mut b, &out, z, p.feed);
     }
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
@@ -488,14 +513,321 @@ fn unit(dx: f64, dy: f64) -> Point2 {
     }
 }
 
-/// (plunge point, feed points from it onto the path, ending exactly at
+/// One piece of tool motion: a straight feed walk through the listed
+/// points (exactly how generators have always walked polylines), or one
+/// arc move ending at `to` about `center`. A [`Seg`] list describes a
+/// walk starting where the builder's cursor already is, so endpoints
+/// chain exactly.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Seg {
+    Line(Vec<Point2>),
+    Arc { center: Point2, ccw: bool, to: Point2 },
+}
+
+/// Chord tolerance for arc fitting where no parameter carries one
+/// (waterline rings, and the depth kinds without a `tolerance` field).
+/// An arc may only replace a polyline if both sit within this of each
+/// other - the same budget a chord's gouge allowance already spends.
+pub const ARC_FIT_TOL: f64 = 0.01;
+
+/// Longest vertex run a single candidate arc may span: bounds the
+/// greedy walk on pathological input (no honest tessellation needs it).
+const ARC_FIT_MAX_RUN: usize = 4096;
+
+/// How many still-too-straight windows a run may look ahead for its
+/// first claim of curvature. A finely tessellated circle only proves
+/// "this is a curve" once the window spans enough of it - two vertices
+/// into a 1000-gon look flat - and a greedy that gave up at the first
+/// flat window would never fit such a rim at all. Straight runs pay
+/// this cost once per start vertex and then walk on as lines; no
+/// honest tessellation that a `tol`-budgeted arc could replace needs
+/// more than a handful of these (sagitta grows quadratically in the
+/// window), so the cap only ever bounds pathological flat input.
+const ARC_FIT_STRAIGHT_LOOKAHEAD: usize = 64;
+
+/// Walk a polyline's pieces: lines feed through their points, arcs get
+/// one [`PathBuilder::push_arc`] each. At cut level `z` with `feed`.
+fn push_segs(b: &mut PathBuilder, segs: &[Seg], z: f64, feed: f64) {
+    for seg in segs {
+        match seg {
+            Seg::Line(qs) => {
+                for q in qs {
+                    b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
+                }
+            }
+            Seg::Arc { center, ccw, to } => {
+                b.push_arc(MoveKind::Feed, Point3::new(to.x, to.y, z), Some(feed), *center, *ccw);
+            }
+        }
+    }
+}
+
+/// Travel direction of a fitted walk at its front vertex (`front`) or
+/// its last one: the true circle tangent where that end rides an arc,
+/// the adjacent-vertex chord otherwise (a straight's chord IS its
+/// tangent, and the polyline fallback covers degenerate walks). A lead
+/// must leave or join the wall on this vector for the join to be smooth.
+fn walk_tangent(segs: &[Seg], poly: &[Point2], front: bool) -> Point2 {
+    let n = poly.len();
+    if n < 2 {
+        return Point2::new(1.0, 0.0);
+    }
+    let chord = if front {
+        unit(poly[1].x - poly[0].x, poly[1].y - poly[0].y)
+    } else {
+        unit(poly[n - 1].x - poly[n - 2].x, poly[n - 1].y - poly[n - 2].y)
+    };
+    let arc = match (front, segs.first(), segs.last()) {
+        (true, Some(Seg::Arc { center, ccw, .. }), _) => Some((*center, *ccw, poly[0])),
+        (false, _, Some(Seg::Arc { center, ccw, to })) => Some((*center, *ccw, *to)),
+        _ => None,
+    };
+    match arc {
+        Some((c, ccw, p)) => {
+            let (dx, dy) = (p.x - c.x, p.y - c.y);
+            let m = (dx * dx + dy * dy).sqrt();
+            if m == 0.0 || !m.is_finite() {
+                chord
+            } else if ccw {
+                Point2::new(-dy / m, dx / m)
+            } else {
+                Point2::new(dy / m, -dx / m)
+            }
+        }
+        None => chord,
+    }
+}
+
+/// Replace maximal arc-fittable runs of a polyline with arc moves,
+/// keeping everything else point-for-point.
+///
+/// A run earns arcs only if both directions agree within `tol`: every
+/// vertex lies within `tol` of one circle (the arc is no lie about the
+/// tessellation), and every chord lies within `tol` of that circle's
+/// arc (the arc is no surprise against the verified polygon) - so
+/// trading chords for the arc moves the tool nowhere the plan didn't
+/// already tolerate. Near-straight runs (all deviations within `tol` of
+/// the end chord) stay lines on principle: a huge-radius "arc" along a
+/// straight would re-describe motion the golden already spells point by
+/// point - but a window that is merely too short to have proven its
+/// curvature yet extends the run instead of ending it (bounded by
+/// [`ARC_FIT_STRAIGHT_LOOKAHEAD`]), because a fine tessellation of a
+/// real circle looks flat until the chord spans enough of it. Runs that
+/// genuinely fail - corners, coarse tessellations, backtracks - end the
+/// run, and a run that claimed nothing advances one vertex at a time,
+/// which is exactly the old walk, so polygonal paths are byte-identical
+/// through this function.
+///
+/// Sweeps over half a turn split at a vertex into <= pi pieces (the
+/// builder refuses zero-sweep arcs, so an unsplit full circle would
+/// erase its ring here); endpoints are always polyline points, so
+/// chaining is exact by construction. Consumers fit at use; nothing
+/// about a [`crate::geometry::Features`] digest ever depends on this.
+pub fn fit_arcs(pts: &[Point2], tol: f64) -> Vec<Seg> {
+    let tol = if tol.is_finite() && tol > 0.0 { tol } else { ARC_FIT_TOL };
+    let n = pts.len();
+    let mut segs = Vec::new();
+    let mut s = 0usize;
+    while s + 1 < n {
+        let cap = (s + ARC_FIT_MAX_RUN).min(n - 1);
+        let mut best: Option<(usize, Point2, bool, f64)> = None;
+        let mut e = s + 2;
+        let mut flat = 0;
+        while e <= cap {
+            match arc_over(&pts[s..=e], tol) {
+                Over::Fit(center, ccw, total) => {
+                    best = Some((e, center, ccw, total));
+                    e += 1;
+                }
+                // Too straight to have said anything yet: extend, up
+                // to the lookahead's word.
+                Over::Straight if flat < ARC_FIT_STRAIGHT_LOOKAHEAD => {
+                    flat += 1;
+                    e += 1;
+                }
+                Over::Straight | Over::Fail => break,
+            }
+        }
+        match best {
+            Some((e, center, ccw, total)) => {
+                // Split at vertices into sub-sweeps of at most half a
+                // turn; a closing full circle becomes two arcs meeting at
+                // the far vertex, so the builder never sees the
+                // zero-sweep single arc that would erase the ring.
+                let k = (total / PI).ceil().max(1.0) as usize;
+                for m in 1..=k {
+                    let idx = if m == k { e } else { s + (e - s) * m / k };
+                    segs.push(Seg::Arc {
+                        center,
+                        ccw,
+                        to: pts[idx],
+                    });
+                }
+                s = e;
+            }
+            None => {
+                segs.push(Seg::Line(vec![pts[s + 1]]));
+                s += 1;
+            }
+        }
+    }
+    segs
+}
+
+/// What a window of at least 3 points says about sitting on one circle
+/// (see [`fit_arcs`]).
+enum Over {
+    /// A circle within `tol`, both directions: (center, ccw, total
+    /// sweep).
+    Fit(Point2, bool, f64),
+    /// Flatter than `tol` end to end - the window cannot tell arc from
+    /// line yet, and the run's next, longer window might.
+    Straight,
+    /// Not one circle within `tol`.
+    Fail,
+}
+
+/// The verdict on whether a run of >= 3 points sits on one circle
+/// within `tol` in both directions, and if so which circle (see
+/// [`fit_arcs`]). `Straight` is the honest answer when no vertex leaves
+/// the end chord by more than `tol`: there is nothing there an arc
+/// could describe better than the chords already do.
+fn arc_over(run: &[Point2], tol: f64) -> Over {
+    let (a, b) = (run[0], run[run.len() - 1]);
+    let dev = |p: Point2| chord_dev(p, a, b);
+    // Farthest interior vertex from the end chord anchors the circle.
+    let mut pivot = None;
+    let mut pd = 0.0;
+    for p in &run[1..run.len() - 1] {
+        let d = dev(*p);
+        if !d.is_finite() {
+            return Over::Fail;
+        }
+        if d > pd {
+            pd = d;
+            pivot = Some(*p);
+        }
+    }
+    // Curvature must exceed the tolerance to justify an arc at all -
+    // but a short window on a finely tessellated curve is no refusal,
+    // just not yet evidence.
+    let Some(pivot) = pivot.filter(|_| pd > tol) else {
+        return Over::Straight;
+    };
+    // A run closing a full circle has an end chord of zero length - no
+    // usable anchor at `b`. Second anchor: the vertex farthest from the
+    // a-pivot line, which for an honest tessellation is a quarter turn
+    // out. Either anchor pair defines the circle - and the turning
+    // direction, from the same triple it was fitted on; the validation
+    // loops are the actual judges.
+    let (c, r, ccw) = match circle3(a, pivot, b) {
+        Some((c, r)) => (
+            c,
+            r,
+            ((pivot.x - a.x) * (b.y - pivot.y) - (pivot.y - a.y) * (b.x - pivot.x)) > 0.0,
+        ),
+        None if dist(a, b) <= tol => {
+            let mut second = None;
+            let mut sd = 0.0;
+            for p in &run[1..] {
+                let d = chord_dev(*p, a, pivot);
+                if d > sd && d.is_finite() {
+                    sd = d;
+                    second = Some(*p);
+                }
+            }
+            let Some(anchor) = second.filter(|_| sd > tol) else {
+                return Over::Straight;
+            };
+            let Some((c, r)) = circle3(a, pivot, anchor) else {
+                return Over::Fail;
+            };
+            (
+                c,
+                r,
+                ((pivot.x - a.x) * (anchor.y - pivot.y) - (pivot.y - a.y) * (anchor.x - pivot.x))
+                    > 0.0,
+            )
+        }
+        None => return Over::Fail,
+    };
+    if !r.is_finite() || r <= tol {
+        return Over::Fail;
+    }
+    // Direction one: vertices on the circle.
+    for p in run {
+        let d = (((p.x - c.x).powi(2) + (p.y - c.y).powi(2)).sqrt() - r).abs();
+        if d > tol {
+            return Over::Fail;
+        }
+    }
+    // Direction two: chords hug the arc; a step against the claimed
+    // direction lands near a full turn here and fails the same test.
+    let sag_bound = 1.0 - tol / r;
+    let mut total = 0.0;
+    for w in run.windows(2) {
+        let t0 = (w[0].y - c.y).atan2(w[0].x - c.x);
+        let t1 = (w[1].y - c.y).atan2(w[1].x - c.x);
+        let step = if ccw { t1 - t0 } else { t0 - t1 };
+        if !step.is_finite() {
+            return Over::Fail;
+        }
+        let step = step.rem_euclid(2.0 * PI);
+        if (step * 0.5).cos() < sag_bound {
+            return Over::Fail;
+        }
+        total += step;
+    }
+    if total <= 0.0 || total > 2.0 * PI + tol / r {
+        return Over::Fail;
+    }
+    Over::Fit(c, ccw, total)
+}
+
+/// Distance from `p` to segment `a`-`b`.
+fn chord_dev(p: Point2, a: Point2, b: Point2) -> f64 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let dd = dx * dx + dy * dy;
+    if dd <= f64::EPSILON {
+        return ((p.x - a.x).powi(2) + (p.y - a.y).powi(2)).sqrt();
+    }
+    let t = (((p.x - a.x) * dx + (p.y - a.y) * dy) / dd).clamp(0.0, 1.0);
+    ((p.x - (a.x + t * dx)).powi(2) + (p.y - (a.y + t * dy)).powi(2)).sqrt()
+}
+
+/// Circle through three points: center and radius, or None when they
+/// are (near-)collinear or land outside the finite horizon.
+fn circle3(a: Point2, b: Point2, c: Point2) -> Option<(Point2, f64)> {
+    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    if !d.is_finite() || d.abs() <= f64::EPSILON {
+        return None;
+    }
+    let (a2, b2, c2) = (
+        a.x * a.x + a.y * a.y,
+        b.x * b.x + b.y * b.y,
+        c.x * c.x + c.y * c.y,
+    );
+    let ux = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d;
+    let uy = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d;
+    if !ux.is_finite() || !uy.is_finite() {
+        return None;
+    }
+    let o = Point2::new(ux, uy);
+    let r = dist(a, o);
+    if !r.is_finite() {
+        return None;
+    }
+    Some((o, r))
+}
+
+/// (plunge point, segments from it onto the path, ending exactly at
 /// `s`).
-fn lead_in(s: Point2, t: Point2, air: Point2, p: &ContourParams) -> (Point2, Vec<Point2>) {
+fn lead_in(s: Point2, t: Point2, air: Point2, p: &ContourParams) -> (Point2, Vec<Seg>) {
     match p.lead {
         Lead::None => (s, Vec::new()),
         Lead::Linear { length } => (
             Point2::new(s.x - t.x * length, s.y - t.y * length),
-            vec![s],
+            vec![Seg::Line(vec![s])],
         ),
         Lead::Arc { radius } => {
             let o = Point2::new(s.x + air.x * radius, s.y + air.y * radius);
@@ -503,58 +835,33 @@ fn lead_in(s: Point2, t: Point2, air: Point2, p: &ContourParams) -> (Point2, Vec
                 s.x + (air.x - t.x) * radius,
                 s.y + (air.y - t.y) * radius,
             );
-            let v = arc_tess(o, radius, e, s, p.tolerance);
-            (e, v)
+            // Quarter arc e -> s about o: ccw iff s bears left of the
+            // start radius. The chord error at p.tolerance only appears
+            // when something downstream flattens the move.
+            let ccw = ((e.x - o.x) * (s.y - o.y) - (e.y - o.y) * (s.x - o.x)) > 0.0;
+            (e, vec![Seg::Arc { center: o, ccw, to: s }])
         }
     }
 }
 
-/// Feed points carrying the tool off the path end (not including it).
-fn lead_out(e: Point2, t: Point2, air: Point2, p: &ContourParams) -> Vec<Point2> {
+/// Segments carrying the tool off the path end (not including it).
+fn lead_out(e: Point2, t: Point2, air: Point2, p: &ContourParams) -> Vec<Seg> {
     match p.lead {
         Lead::None => Vec::new(),
-        Lead::Linear { length } => vec![Point2::new(e.x + t.x * length, e.y + t.y * length)],
+        Lead::Linear { length } => vec![Seg::Line(vec![Point2::new(
+            e.x + t.x * length,
+            e.y + t.y * length,
+        )])],
         Lead::Arc { radius } => {
             let o = Point2::new(e.x + air.x * radius, e.y + air.y * radius);
             let q = Point2::new(
                 e.x + (air.x + t.x) * radius,
                 e.y + (air.y + t.y) * radius,
             );
-            arc_tess(o, radius, e, q, p.tolerance)
+            let ccw = ((e.x - o.x) * (q.y - o.y) - (e.y - o.y) * (q.x - o.x)) > 0.0;
+            vec![Seg::Arc { center: o, ccw, to: q }]
         }
     }
-}
-
-/// Arc from `a` to `b` on the circle centered at `o`, the short way, with
-/// chord error under `tol`; the final point is `b` exactly. Empty for a
-/// zero sweep (tessellating from a0==a1 would emit a bogus move).
-fn arc_tess(o: Point2, r: f64, a: Point2, b: Point2, tol: f64) -> Vec<Point2> {
-    let a0 = (a.y - o.y).atan2(a.x - o.x);
-    let a1 = (b.y - o.y).atan2(b.x - o.x);
-    let mut d = a1 - a0;
-    while d <= -PI {
-        d += 2.0 * PI;
-    }
-    while d > PI {
-        d -= 2.0 * PI;
-    }
-    if d == 0.0 {
-        return Vec::new();
-    }
-    // Sagitta r(1 - cos(step/2)) <= tol bounds the sweep per segment.
-    let max_step = 2.0 * (1.0 - (tol / r).clamp(-1.0, 1.0)).clamp(-1.0, 1.0).acos();
-    let n = if max_step > 0.0 {
-        (d.abs() / max_step).ceil().max(1.0) as usize
-    } else {
-        1
-    };
-    let mut v = Vec::with_capacity(n);
-    for j in 1..n {
-        let t = a0 + d * (j as f64 / n as f64);
-        v.push(Point2::new(o.x + r * t.cos(), o.y + r * t.sin()));
-    }
-    v.push(b);
-    v
 }
 
 /// A closed polyline parametrized by arc length, for tab windows.
@@ -859,7 +1166,14 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    run_levels(&mut b, &passes, &zs, p.clearance_z, p.feed, p.plunge_feed);
+    // Waterline rings circle around material, so they get the arc fitter
+    // (rings straight enough to be lines stay exactly that); zigzag rows
+    // are straight by construction and keep the plain walk.
+    let fit = match p.strategy {
+        PocketStrategy::Zigzag => None,
+        PocketStrategy::Waterline => Some(ARC_FIT_TOL),
+    };
+    run_levels(&mut b, &passes, &zs, p.clearance_z, p.feed, p.plunge_feed, fit);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
@@ -1128,7 +1442,7 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
 
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     let mut bld = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    run_levels(&mut bld, &[pass], &zs, p.clearance_z, p.feed, p.plunge_feed);
+    run_levels(&mut bld, &[pass], &zs, p.clearance_z, p.feed, p.plunge_feed, None);
     let cur = bld.at();
     bld.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
@@ -1214,7 +1528,9 @@ pub fn trace(region: &Region, p: &TraceParams) -> Result<Toolpath, GenError> {
 
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    run_levels(&mut b, &passes, &zs, p.clearance_z, p.feed, p.plunge_feed);
+    // Trace engraves the region's own vertices - the point is to ride
+    // the boundary as picked, so no arc fitter runs here.
+    run_levels(&mut b, &passes, &zs, p.clearance_z, p.feed, p.plunge_feed, None);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 

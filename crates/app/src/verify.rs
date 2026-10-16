@@ -37,8 +37,15 @@
 //! stay silent about the four classes above. The hard post-gate that
 //! blocks on these lands with the post processor (M2.3); until then the
 //! operation layer attaches them to the operation for display.
+//!
+//! Arc moves are flattened to chords before the laws run
+//! ([`Move::chords`]) at `gouge_tol`: a chord sits within that
+//! tolerance of the arc it samples, which is exactly the slack the
+//! radial laws already grant - so no violation beyond tolerance hides
+//! in an arc. Warnings keep indexing *moves*; an arc is one move, so
+//! swapping chords for arcs never shifts an index.
 
-use crate::cl::{MoveKind, Toolpath};
+use crate::cl::{Move, MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
@@ -200,6 +207,27 @@ fn boundary_samples(region: &Region) -> Vec<Point2> {
     out
 }
 
+/// XY points a radial law must hold at for one move: exactly the move's
+/// `to` for a straight one - byte-for-byte the behavior every straight
+/// path always had - and the arc with its chord joints for an arc, which
+/// bound it within `chord_tol`: the laws' own radial tolerance is what
+/// absorbs that sampling error, so a violation past tolerance is never
+/// missed.
+fn law_points(m: &Move, chord_tol: f64) -> Vec<Point2> {
+    match m.arc {
+        None => vec![Point2::new(m.to.x, m.to.y)],
+        Some(_) => {
+            let cs = m.chords(chord_tol);
+            let mut v = Vec::with_capacity(cs.len() + 1);
+            if let Some(&(a, _)) = cs.first() {
+                v.push(a);
+            }
+            v.extend(cs.into_iter().map(|(_, b)| b));
+            v
+        }
+    }
+}
+
 /// Verify a generated path. Quadratic in feed count (crossings), linear
 /// per sample for the rest; called by the operation layer after
 /// generation, never on a systems hot path.
@@ -214,37 +242,58 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     }
 
     // (a) Crossing: Feed-Feed pairs, proper XY crossings at shared depth.
-    let feeds: Vec<(usize, Point2, Point2, f64, f64)> = path
-        .moves
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| m.kind == MoveKind::Feed)
-        .map(|(i, m)| (i, xy(&m.from), xy(&m.to), m.from.z, m.to.z))
-        .collect();
+    // Each feed contributes its chords (one for a straight move, so a
+    // straight path walks exactly the pair set it always did); reports
+    // are per move pair, ascending and deduped - indices hold stable
+    // whatever the chord count.
+    let chord_tol = cx.gouge_tol;
+    let mut feeds: Vec<(usize, Point2, Point2, f64, f64)> = Vec::new();
+    for (i, m) in path.moves.iter().enumerate() {
+        if m.kind != MoveKind::Feed {
+            continue;
+        }
+        for (a, b) in m.chords(chord_tol) {
+            feeds.push((i, a, b, m.from.z, m.to.z));
+        }
+    }
+    let mut crossed: Vec<[usize; 2]> = Vec::new();
     for (ai, &(ia, a0, a1, za0, za1)) in feeds.iter().enumerate() {
         for &(ib, b0, b1, zb0, zb1) in feeds.iter().skip(ai + 1) {
+            if ia == ib {
+                continue; // chords of one move share their joints
+            }
             let z_hit = zb0.max(zb1).min(za0.max(za1)) >= zb0.min(zb1).max(za0.min(za1));
             if z_hit && proper_cross(a0, a1, b0, b1) {
-                warns.push(Warning::Crossing { moves: [ia, ib] });
+                crossed.push([ia.min(ib), ia.max(ib)]);
             }
         }
     }
+    crossed.sort_unstable();
+    crossed.dedup();
+    warns.extend(crossed.into_iter().map(|moves| Warning::Crossing { moves }));
 
-    // (b) Gouge: tangency law d(center, boundary) >= r - leave - tol.
+    // (b) Gouge: tangency law d(center, boundary) >= r - leave - tol,
+    // held at every law point of the move (see law_points).
     if cx.mode != Mode::Engrave {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;
             }
-            let p = xy(&m.to);
-            let mut d2 = f64::INFINITY;
-            for l in cx.region.loops() {
-                let pts = l.points();
-                for k in 0..pts.len() {
-                    d2 = d2.min(dist2_seg(p, pts[k], pts[(k + 1) % pts.len()]));
+            let mut gouged = false;
+            for p in law_points(m, chord_tol) {
+                let mut d2 = f64::INFINITY;
+                for l in cx.region.loops() {
+                    let pts = l.points();
+                    for k in 0..pts.len() {
+                        d2 = d2.min(dist2_seg(p, pts[k], pts[(k + 1) % pts.len()]));
+                    }
+                }
+                if d2.sqrt() < r - cx.stock_to_leave - cx.gouge_tol {
+                    gouged = true;
+                    break;
                 }
             }
-            if d2.sqrt() < r - cx.stock_to_leave - cx.gouge_tol {
+            if gouged {
                 warns.push(Warning::Gouge { at: i });
             }
         }
@@ -252,12 +301,17 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
 
     // Cutting (non-rapid) XY segments with the level they cut at: a
     // segment's whole disc sweep clears its column down to `to.z`
-    // (plunges are degenerate segments at their XY).
+    // (plunges are degenerate segments at their XY, arcs contribute
+    // their chords - all within chord_tol of the true arc).
     let cut: Vec<(Point2, Point2, f64)> = path
         .moves
         .iter()
         .filter(|m| m.kind != MoveKind::Rapid)
-        .map(|m| (xy(&m.from), xy(&m.to), m.to.z))
+        .flat_map(|m| {
+            m.chords(chord_tol)
+                .into_iter()
+                .map(move |(a, b)| (a, b, m.to.z))
+        })
         .collect();
     // Material footprint for the reach laws: the stock prism when given,
     // the region standing in for it otherwise.
@@ -295,7 +349,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
             if m.kind == MoveKind::Rapid {
                 continue;
             }
-            let p = xy(&m.to);
+            let pts = law_points(m, chord_tol);
             for &(above, band_r, band_len) in &bands {
                 if band_r <= r || band_len <= 0.0 {
                     continue;
@@ -303,18 +357,22 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                 let h0 = m.to.z + above;
                 let r2 = (band_r + 1e-9) * (band_r + 1e-9);
                 let mut hit = None;
-                for q in &samples {
-                    let dd = dist2_seg(*q, p, p);
-                    if dd > r2 || dd <= (r + cx.gouge_tol) * (r + cx.gouge_tol) {
-                        continue; // outside this band's annulus
-                    }
-                    if !in_stock(*q) {
-                        continue;
-                    }
-                    if h0 < surface(*q) {
-                        hit = Some(!cx.region.contains(*q));
-                        if hit == Some(true) {
-                            break; // report the worst offender
+                'worst: {
+                    for p in &pts {
+                        for q in &samples {
+                            let dd = dist2_seg(*q, *p, *p);
+                            if dd > r2 || dd <= (r + cx.gouge_tol) * (r + cx.gouge_tol) {
+                                continue; // outside this band's annulus
+                            }
+                            if !in_stock(*q) {
+                                continue;
+                            }
+                            if h0 < surface(*q) {
+                                hit = Some(!cx.region.contains(*q));
+                                if hit == Some(true) {
+                                    break 'worst; // report the worst offender
+                                }
+                            }
                         }
                     }
                 }

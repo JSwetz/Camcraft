@@ -59,6 +59,53 @@ fn square_with_center(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
     .unwrap()
 }
 
+/// A closed ccw circle about `c`, tessellated into `n` segments - fine
+/// enough that the arc fitter sees the circle in it (sagitta
+/// `r(1 - cos(pi/n))` well under any sane tolerance), which is exactly
+/// what STEP tessellation hands us for a bore.
+fn circle(c: Point2, r: f64, n: usize) -> Loop {
+    Loop::new(
+        (0..n)
+            .map(|k| {
+                let t = std::f64::consts::TAU * k as f64 / n as f64;
+                Point2::new(c.x + r * t.cos(), c.y + r * t.sin())
+            })
+            .collect(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn contour_disc_hole_matches_golden() {
+    // A plate with a 128-gon approximation of a round bore: the rim is
+    // polygonal only because import tessellates it, so the fitter must
+    // replace the chord runs with arc moves - this golden is the v2
+    // format's committed witness.
+    let mut loops = rect(0.0, 0.0, 40.0, 20.0).loops().to_vec();
+    loops.push(circle(Point2::new(20.0, 10.0), 6.0, 128));
+    let region = Region::new(loops).unwrap();
+    let p = ContourParams {
+        tool_diameter: 6.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        retract_z: 2.0,
+        top_z: 0.0,
+        bottom_z: -4.0,
+        stepdown: 2.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead: Lead::Arc { radius: 3.0 },
+        tolerance: 0.01,
+        tab_count: 0,
+        tab_width: 0.0,
+        tab_height: 0.0,
+    };
+    let t = contour(&region, &p).unwrap();
+    assert!(t.has_arcs(), "a fine polygon bore rim must fit to arcs");
+    write_golden("contour_disc_hole.cl", &gen_to_cltext(&t));
+}
+
 #[test]
 fn face_square_40x40_matches_golden() {
     // The same plain 40x40 square the row-count tests use, at the

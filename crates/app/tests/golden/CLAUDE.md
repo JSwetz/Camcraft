@@ -28,6 +28,19 @@ has one. The dump carries no timestamps and no iteration-order-sensitive
 data, so it is byte-stable across machines and runs - generator code is
 pure and ordered by construction.
 
+Paths that carry arc moves dump as **v2**: the header says `v2`, and an
+arc line replaces the kind token with `Arc` and gains the center and
+sense after the feed:
+
+```
+Arc 24000 10000 -2000 F500000 I20000 J10000 S1
+```
+
+An arc is always a planar feed move (`PathBuilder::push_arc` refuses
+anything else), so the token loses nothing but the redundancy; `S` is
+`+1` ccw, `-1` cw. A straight-line path dumps identically in either
+version - the header only changes when `Toolpath::has_arcs()`.
+
 ## Naming
 
 By operation and shape: `face_<shape>.cl`, `contour_<shape>.cl`,

@@ -1446,6 +1446,10 @@ const CHEVRON_SPACING: f64 = 10.0;
 /// the line list is truncated with a logged diagnostic - never silently,
 /// and never by refusing to draw at all.
 const MAX_OVERLAY_VERTICES: usize = 1 << 20;
+/// Sagitta bound for drawing arc moves: arcs flatten through the same
+/// law the verifier and the golden dump use, at a display tolerance
+/// fine enough that zoomed-in curvature still reads as a curve.
+const DISPLAY_CHORD_TOL: f64 = 0.02;
 
 /// One overlay line: two `[x, y, z, r, g, b]` vertices.
 fn push_line(out: &mut Vec<[f32; 6]>, a: Point3, b: Point3, c: [f32; 3]) {
@@ -1453,8 +1457,9 @@ fn push_line(out: &mut Vec<[f32; 6]>, a: Point3, b: Point3, c: [f32; 3]) {
     out.push([ftoz(b.x), ftoz(b.y), ftoz(b.z), c[0], c[1], c[2]]);
 }
 
-/// The cached CL paths as overlay segments: one line per move in its kind
-/// color, with direction chevrons along feed travel. The selected
+/// The cached CL paths as overlay segments: straight moves as one line in
+/// their kind color with direction chevrons along feed travel, arc moves
+/// as their chord runs. The selected
 /// operation always draws bright; other operations show dimmed only under
 /// "Show all toolpaths", and never at all when hidden by its browser eye.
 /// Staleness is not a display state here - what is drawn is the cache
@@ -1478,6 +1483,35 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
         }
         let dim = if selected { 1.0 } else { OTHERS_DIM };
         for m in &cache.path.moves {
+            let base = match m.kind {
+                MoveKind::Rapid => RAPID_RGB,
+                MoveKind::Feed => FEED_RGB,
+                MoveKind::Plunge => PLUNGE_RGB,
+            };
+            let c = [base[0] * dim, base[1] * dim, base[2] * dim];
+            if m.arc.is_some() {
+                // Arcs draw as chords (one law, one tolerance story) and
+                // take no chevrons: the curve itself reads as direction.
+                let cs = m.chords(DISPLAY_CHORD_TOL);
+                if out.len() + 2 * cs.len() + 2 > MAX_OVERLAY_VERTICES {
+                    eprintln!(
+                        "overlay: the cached paths outgrew the {MAX_OVERLAY_VERTICES}-vertex \
+                         display budget; the rest is truncated (the full path still posts)"
+                    );
+                    out.truncate(out.len() & !1);
+                    return out;
+                }
+                for (a, b) in cs {
+                    let za = m.from.z;
+                    push_line(
+                        &mut out,
+                        Point3::new(a.x, a.y, za),
+                        Point3::new(b.x, b.y, za),
+                        c,
+                    );
+                }
+                continue;
+            }
             if out.len() + 10 > MAX_OVERLAY_VERTICES {
                 // A pathological cache (millions of file-loaded moves)
                 // must not allocate millions of segments either.
@@ -1488,12 +1522,6 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
                 out.truncate(out.len() & !1);
                 return out;
             }
-            let base = match m.kind {
-                MoveKind::Rapid => RAPID_RGB,
-                MoveKind::Feed => FEED_RGB,
-                MoveKind::Plunge => PLUNGE_RGB,
-            };
-            let c = [base[0] * dim, base[1] * dim, base[2] * dim];
             push_line(&mut out, m.from, m.to, c);
             if m.kind == MoveKind::Feed {
                 chevrons(&mut out, m.from, m.to, c, arm);
@@ -2186,6 +2214,78 @@ mod path_tests {
         // then path) is asserted positionally, not by totals.
         assert_eq!(all.len(), 6 + paths.len() + region_lines(&state).len());
         assert_eq!(&all[6..6 + paths.len()], &paths[..], "axes first, then the path");
+    }
+
+    #[test]
+    fn arc_moves_draw_curved() {
+        // Cylinder stock, contour at a tolerance the tessellated wall
+        // satisfies: the cache holds arc moves, and the overlay must
+        // draw each as a run of chords, not one straight chord.
+        let mut state = State::new();
+        state.pending.push_back(CommandKind::SetStock {
+            shape: StockShape::Cylinder {
+                diameter: 30.0,
+                height: 10.0,
+            },
+            pos: [0.0, 0.0, 0.0],
+            yaw_deg: 0.0,
+        });
+        state.drain_actions();
+        let em = catalog()
+            .into_iter()
+            .find(|(n, _)| *n == "EM-0400-2FL")
+            .map(|(_, t)| t)
+            .expect("catalog entry");
+        state
+            .history
+            .execute(&state.world, AddTool::new(&state.world, "EM-0400-2FL", em).expect("tool"));
+        state.history.execute(
+            &state.world,
+            CreateOperation::new(
+                &state.world,
+                "Skin1",
+                "EM-0400-2FL",
+                SrcRef::Stock,
+                OpParams::Contour {
+                    stock_to_leave: 0.0,
+                    clearance_z: 20.0,
+                    retract_z: 15.0,
+                    top_z: 10.0,
+                    bottom_z: 8.0,
+                    stepdown: 2.0,
+                    feed: 800.0,
+                    plunge_feed: 200.0,
+                    climb: true,
+                    lead: hsmworks_app::machining2d::Lead::None,
+                    tolerance: 0.1,
+                    tab_count: 0,
+                    tab_width: 0.0,
+                    tab_height: 0.0,
+                },
+            )
+            .expect("operation"),
+        );
+        state.history.execute(
+            &state.world,
+            GenerateOperation::new(&state.world, "Skin1").expect("generate"),
+        );
+        select(&mut state, Some("Skin1"));
+        let cache = model::find_by_name(&state.world, "Skin1")
+            .and_then(|e| model::toolpath_of(&state.world, &e))
+            .expect("cache");
+        assert!(cache.path.has_arcs(), "the tessellated wall fits to arcs at tol 0.1");
+
+        let lines = toolpath_lines(&state);
+        // At the display chord tolerance a half-circle arc fans into a
+        // couple dozen chords; a straight-chord draw would emit exactly
+        // one line (two vertices) per arc move, and arcs carry no
+        // chevrons to pad the count with.
+        let arcs = cache.path.arc_count().max(1);
+        let feed = lines.iter().filter(|v| v[3..6] == FEED_RGB).count();
+        assert!(
+            feed > 8 * 2 * arcs,
+            "{feed} feed vertices for {arcs} arc moves: arcs must draw as chord runs"
+        );
     }
 
     #[test]

@@ -395,6 +395,78 @@ fn tools_and_generated_operations_round_trip() {
 }
 
 #[test]
+fn arc_move_round_trips() {
+    // Cylinder stock, contour at a fitter-friendly tolerance: the wall
+    // rim is tessellation, the fitter says circle, and the cache must
+    // persist arc moves - not silently fall back to chords on reload.
+    let path = tmp_path("arcs");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        SetStock::new(
+            &world,
+            StockShape::Cylinder {
+                diameter: 30.0,
+                height: 10.0,
+            },
+            Location::default(),
+        )
+        .expect("cylinder stock"),
+    );
+    history.execute(
+        &world,
+        AddTool::new(&world, "EM-0400-2FL", catalog_tool("EM-0400-2FL")).expect("add tool"),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Skin1",
+            "EM-0400-2FL",
+            SrcRef::Stock,
+            OpParams::Contour {
+                stock_to_leave: 0.0,
+                clearance_z: 20.0,
+                retract_z: 15.0,
+                top_z: 10.0,
+                bottom_z: 8.0,
+                stepdown: 2.0,
+                feed: 800.0,
+                plunge_feed: 200.0,
+                climb: true,
+                lead: Lead::None,
+                tolerance: 0.1,
+                tab_count: 0,
+                tab_width: 0.0,
+                tab_height: 0.0,
+            },
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Skin1").expect("generate"));
+    let src = model::find_by_name(&world, "Skin1").expect("op");
+    let before = model::toolpath_of(&world, &src).expect("cache").path;
+    assert!(before.has_arcs(), "a 32-gon wall at tol 0.1 contours to arcs");
+
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(first.contains("\"arc\""), "the arc payload is in the file: {first}");
+
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "arc moves round-trip byte-identically");
+
+    let dst = model::find_by_name(&world2, "Skin1").expect("op loaded");
+    let after = model::toolpath_of(&world2, &dst).expect("cache").path;
+    assert_eq!(after, before, "arcs survive exactly - centers, sense, endpoints");
+    assert_eq!(after.arc_count(), before.arc_count());
+}
+
+#[test]
 fn v2_file_migrates_to_v3() {
     // A literal v2 project: no tool or operation fields anywhere. The
     // chained migration only carries the version forward.

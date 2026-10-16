@@ -24,25 +24,44 @@ fn q(mm: f64) -> i64 {
 
 /// Deterministic text form of a toolpath: a header naming the format and
 /// move count, the start point, then one line per move - kind
-/// (Rapid/Feed/Plunge), destination coordinates, feed in mm/min when the
-/// move has one. Nothing in the dump depends on the run: no timestamps,
-/// no hash-map iteration order, full-precision-integer coordinates.
+/// (Rapid/Feed/Plunge, or `Arc` when the move carries a circular
+/// segment), destination coordinates, feed in mm/min when the move has
+/// one, and for an arc the center `I`/`J` plus sense `S` (+1 ccw, -1
+/// cw). v2 (the `Arc` token) appears only when the path carries arcs;
+/// straight paths dump exactly as in v1. Nothing in the dump depends on
+/// the run: no timestamps, no hash-map iteration order,
+/// full-precision-integer coordinates.
 pub fn gen_to_cltext(t: &Toolpath) -> String {
-    let mut s = format!("; HSMW-CL v1 scale={}mm moves={}\n", CL_SCALE, t.len());
+    let version = if t.has_arcs() { 2 } else { 1 };
+    let mut s = format!("; HSMW-CL v{version} scale={CL_SCALE}mm moves={}\n", t.len());
     match t.start() {
         Some(p) => s.push_str(&format!("START {} {} {}\n", q(p.x), q(p.y), q(p.z))),
         None => s.push_str("START\n"),
     }
     for m in &t.moves {
-        let k = match m.kind {
+        let mut k = match m.kind {
             MoveKind::Rapid => "Rapid",
             MoveKind::Feed => "Feed",
             MoveKind::Plunge => "Plunge",
         };
+        let mut arc = String::new();
+        if let Some(a) = m.arc {
+            // An arc is always a planar feed (`push_arc` refuses
+            // anything else), so the token loses nothing but the
+            // redundancy.
+            k = "Arc";
+            arc = format!(
+                " I{} J{} S{}",
+                q(a.center.x),
+                q(a.center.y),
+                if a.ccw { 1 } else { -1 }
+            );
+        }
         s.push_str(&format!("{k} {} {} {}", q(m.to.x), q(m.to.y), q(m.to.z)));
         if let Some(f) = m.feed {
             s.push_str(&format!(" F{}", (f * 1000.0).round() as i64));
         }
+        s.push_str(&arc);
         s.push('\n');
     }
     s

@@ -175,6 +175,37 @@ fn gouge_ring_is_flagged() {
 }
 
 #[test]
+fn arcs_keep_warning_indices() {
+    // A shallow arc from (4,10) to (16,10) whose chords sweep down to 2
+    // mm of the y = 20 wall, while both endpoints sit exactly on the
+    // r = 4 tool's tangency line: the law must sample inside the arc,
+    // yet the warning still speaks a move index - one warning, at the
+    // arc's own slot, whatever its chord count.
+    let arc = Move::new(MoveKind::Feed, p(4.0, 10.0, -1.0), p(16.0, 10.0, -1.0), Some(500.0))
+        .with_arc(p2(10.0, 11.75), false);
+    let r = rect(0.0, 0.0, 20.0, 20.0);
+    let tool = deep_tool();
+    let t = Toolpath { moves: vec![arc] };
+    assert_eq!(verify(&t, &ctx(&r, None, &tool, Mode::Boundary)), vec![Warning::Gouge { at: 0 }]);
+    // The straight chord between the same endpoints never dips: silent.
+    let straight = Toolpath {
+        moves: vec![Move::new(MoveKind::Feed, p(4.0, 10.0, -1.0), p(16.0, 10.0, -1.0), Some(500.0))],
+    };
+    assert_eq!(verify(&straight, &ctx(&r, None, &tool, Mode::Boundary)), Vec::new());
+    // Flattening a path to chords never shifts an index: crossing X,
+    // one arm drawn as a full turn of chords-equivalent arc.
+    let crossed = Toolpath {
+        moves: vec![
+            Move::new(MoveKind::Feed, p(4.0, 4.0, -1.0), p(16.0, 16.0, -1.0), Some(500.0)),
+            Move::new(MoveKind::Feed, p(4.0, 16.0, -1.0), p(16.0, 4.0, -1.0), Some(500.0))
+                .with_arc(p2(10.0, 10.0), true),
+        ],
+    };
+    let warns = verify(&crossed, &ctx(&r, None, &tool, Mode::Area));
+    assert!(warns.contains(&Warning::Crossing { moves: [0, 1] }), "{warns:?}");
+}
+
+#[test]
 fn holder_hits_a_part_island_when_the_flute_is_short() {
     // Same pocket as the clean case with a 2 mm flute: the shank rides
     // below the island top, so the island is struck at the deepest

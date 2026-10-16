@@ -193,8 +193,13 @@ fn cp() -> ContourParams {
     }
 }
 
+/// Chord budget for flattening arc moves into polylines: the same sagitta
+/// allowance the fitter promised, so the sampled polyline never lies more
+/// than tol off the path that will actually be cut.
+const FLATTEN_TOL: f64 = 0.01;
+
 /// XY polyline of the level's in-plane Feed moves (start = first move's
-/// from, then every `to` in order).
+/// from, then every chord end in order; arcs flattened at FLATTEN_TOL).
 fn level_xy(t: &Toolpath, z: f64) -> Vec<(f64, f64)> {
     let mut out = Vec::new();
     for m in &t.moves {
@@ -202,7 +207,9 @@ fn level_xy(t: &Toolpath, z: f64) -> Vec<(f64, f64)> {
             if out.is_empty() {
                 out.push((m.from.x, m.from.y));
             }
-            out.push((m.to.x, m.to.y));
+            for (_, b) in m.chords(FLATTEN_TOL) {
+                out.push((b.x, b.y));
+            }
         }
     }
     out
@@ -210,11 +217,26 @@ fn level_xy(t: &Toolpath, z: f64) -> Vec<(f64, f64)> {
 
 /// Total in-plane feed length at `z`, summed per move so tab-hop
 /// transitions (which leave the plane) can't count as cut distance.
+/// Arc moves carry their true circle length - the metal the rim actually
+/// walks - not the chord across them.
 fn level_len(t: &Toolpath, z: f64) -> f64 {
     t.moves
         .iter()
         .filter(|m| m.kind == MoveKind::Feed && m.from.z == z && m.to.z == z)
-        .map(|m| ((m.to.x - m.from.x).powi(2) + (m.to.y - m.from.y).powi(2)).sqrt())
+        .map(|m| match m.arc {
+            None => ((m.to.x - m.from.x).powi(2) + (m.to.y - m.from.y).powi(2)).sqrt(),
+            Some(a) => {
+                let (rx, ry) = (m.from.x - a.center.x, m.from.y - a.center.y);
+                let (ux, uy) = (m.to.x - a.center.x, m.to.y - a.center.y);
+                let r = (rx * rx + ry * ry).sqrt();
+                let sweep = if a.ccw {
+                    (uy.atan2(ux) - ry.atan2(rx)).rem_euclid(std::f64::consts::TAU)
+                } else {
+                    (ry.atan2(rx) - uy.atan2(ux)).rem_euclid(std::f64::consts::TAU)
+                };
+                r * sweep
+            }
+        })
         .sum()
 }
 
@@ -361,9 +383,22 @@ fn climb_and_conventional_reverse_the_travel() {
     let (a, b) = (level_xy(&up, 0.0), level_xy(&down, 0.0));
     assert!(shoelace(&a) > 0.0, "climb keeps the canonical orientation");
     assert!(shoelace(&b) < 0.0, "conventional reverses it");
-    assert!((shoelace(&a) + shoelace(&b)).abs() < 1e-6);
-    // Same wall, opposite direction: identical perimeter.
-    assert!((level_len(&up, 0.0) - level_len(&down, 0.0)).abs() < 1e-6);
+    // The chorded polygons agree to the flattening's own word: chord
+    // endpoints ride the fitted circle measured from each run's start,
+    // so the mirror images differ by sub-step chords, not by geometry.
+    assert!((shoelace(&a) + shoelace(&b)).abs() < 1e-3);
+    // Same wall, opposite direction: the same perimeter. The fitter
+    // walks each ring from its own end, so the seam corner splits
+    // differently in the two runs - one direction fits it to arcs, the
+    // other leaves a chorded remainder, which measures short by the
+    // sagittas it actually travels. Both are honest descriptions of
+    // the identical rounded square, so the meaningful law is each
+    // path against the wall's true perimeter: straights plus full
+    // quarter circles, r = 5 at each corner.
+    let true_perimeter = 80.0 + std::f64::consts::TAU * 5.0;
+    for l in [level_len(&up, 0.0), level_len(&down, 0.0)] {
+        assert!((l - true_perimeter).abs() < 2e-3, "{l} vs wall {true_perimeter}");
+    }
 }
 
 #[test]
@@ -375,11 +410,18 @@ fn linear_lead_overshoots_the_tangent() {
     let s = plunge_xy(&base)[0];
     let pts = level_xy(&base, 0.0);
     let q = pts[1];
-    let t = ((q.0 - s.0) / ((q.0 - s.0).powi(2) + (q.1 - s.1).powi(2)).sqrt(),
-             (q.1 - s.1) / ((q.0 - s.0).powi(2) + (q.1 - s.1).powi(2)).sqrt());
+    let tl = ((q.0 - s.0) / ((q.0 - s.0).powi(2) + (q.1 - s.1).powi(2)).sqrt(),
+              (q.1 - s.1) / ((q.0 - s.0).powi(2) + (q.1 - s.1).powi(2)).sqrt());
     let e = plunge_xy(&led)[0];
-    assert!((e.0 - (s.0 - 4.0 * t.0)).abs() < 1e-9);
-    assert!((e.1 - (s.1 - 4.0 * t.1)).abs() < 1e-9);
+    let (ex, ey) = (e.0 - s.0, e.1 - s.1);
+    let d = (ex * ex + ey * ey).sqrt();
+    // Overshoot is exactly the lead's length behind the rim start, and
+    // it lies along the wall's own tangent there - measured to the next
+    // sampled wall vertex, so a chord-vs-tangent half-step, not a
+    // right-angle slam into the wall, is all that may show.
+    assert!((d - 4.0).abs() < 1e-9, "overshoot distance {d}");
+    let cos = -(ex * tl.0 + ey * tl.1) / d;
+    assert!(cos > 0.998, "lead leaves the wall at {cos} rad-equivalent");
     // The lead run lands exactly on the base path's entry vertex.
     assert!(level_xy(&led, 0.0).windows(2).any(|w| w[1] == s && w[0] == e));
     assert!(led.is_chained() && led.all_finite());
@@ -395,19 +437,31 @@ fn arc_lead_enters_tangentially_as_a_quarter_arc() {
     // The quarter-arc diagonal: |entry - start| = radius * sqrt(2).
     let d = ((e.0 - s.0).powi(2) + (e.1 - s.1).powi(2)).sqrt();
     assert!((d - 5.0 * 2.0f64.sqrt()).abs() < 1e-9, "entry-to-start {d}");
-    // Tessellated to tolerance: many short feeds cover the 90-degree lead.
-    let n = led
+    // The lead is one arc move landing exactly at the rim's start - not
+    // thirteen chords. Two passes per loop (in and out), and nothing
+    // else about the rim changed: its arcs are the same fitted circles
+    // the Lead::None path carries.
+    let arcs = |t: &Toolpath| t.moves.iter().filter(|m| m.arc.is_some()).count();
+    assert_eq!(arcs(&led), arcs(&base) + 2, "one arc lands, one arc leaves");
+    let land = led
         .moves
         .iter()
-        .filter(|m| m.kind == MoveKind::Feed && m.from.z == 0.0 && m.to.z == 0.0)
-        .count();
-    let n0 = base
-        .moves
-        .iter()
-        .filter(|m| m.kind == MoveKind::Feed && m.from.z == 0.0 && m.to.z == 0.0)
-        .count();
-    assert!(n > n0 + 4, "arc should add ~13 chord feeds, got {n} vs {n0}");
-    // Every arc chord stays within tolerance of radius 5 about its center.
+        .find(|m| m.arc.is_some() && m.to.x == s.0 && m.to.y == s.1)
+        .expect("the landing arc hands off at the rim start, vertex-exact");
+    // Tangent continuity: at the join the lead circle and the wall's
+    // first arc share their tangent line - centers and contact point
+    // collinear, which (radii 5 + 5) means |o - c| = 10. To the
+    // fitter's own word, though: the wall's circle is fitted to the
+    // tessellated rim, so the contact point sits on the rim's vertex,
+    // a residual off the fitted circle - tangency inherits the fit.
+    // When the wall starts on a straight, the join is tangent by
+    // construction and there is no rim center to test.
+    if let Some(wall) = base.moves.iter().find(|m| m.arc.is_some() && m.from.x == s.0 && m.from.y == s.1) {
+        let (oc, wc) = (land.arc.unwrap().center, wall.arc.unwrap().center);
+        let cd = ((oc.x - wc.x).powi(2) + (oc.y - wc.y).powi(2)).sqrt();
+        assert!((cd - 10.0).abs() < 1e-4, "lead and wall circles tangent at s: {cd}");
+    }
+    // Every arc move is a planar feed; chords chain and stay finite.
     assert!(led.is_chained() && led.all_finite());
 }
 
@@ -436,10 +490,14 @@ fn tabs_hold_the_part_until_the_floor() {
         .filter(|m| m.kind == MoveKind::Rapid && m.from.z == 3.0 && m.to.z == 3.0)
         .count();
     assert_eq!(low_rapids, 3);
-    // The tabbed level cuts exactly four tab widths less than a full ring.
+    // The tabbed level cuts four tab widths less than a full ring.
+    // Tab windows are placed along the ring's polyline parameter, so a
+    // window boundary that falls inside a fitted corner arc removes an
+    // arc length off 6.0 by the chord-to-arc drift of one tessellation
+    // step - sub-micron, and the four boundaries share the bias.
     let full = level_len(&t, -3.0);
     let tabbed = level_len(&t, -6.0);
-    assert!((full - tabbed - 24.0).abs() < 1e-6, "{full} - {tabbed}");
+    assert!((full - tabbed - 24.0).abs() < 1e-3, "{full} - {tabbed}");
     assert!(t.is_chained() && t.all_finite());
 }
 
@@ -540,8 +598,12 @@ fn polyline_at(t: &Toolpath, z: f64) -> (Vec<(f64, f64)>, Vec<bool>) {
                     pts.push((m.from.x, m.from.y));
                     lifted.push(true);
                 }
-                pts.push((m.to.x, m.to.y));
-                lifted.push(false);
+                // An arc is walked as the chords the machine can read,
+                // never as the long chord across it.
+                for (_, b) in m.chords(FLATTEN_TOL) {
+                    pts.push((b.x, b.y));
+                    lifted.push(false);
+                }
             }
             MoveKind::Plunge if m.to.z == z => {
                 pts.push((m.to.x, m.to.y));
@@ -700,7 +762,14 @@ fn waterline_stays_clear_of_an_island() {
     let mut p = pp();
     p.strategy = PocketStrategy::Waterline;
     p.stepover = 2.5;
-    let center = region.offset(-5.0).expect("offset");
+    // The test's own chord flattening of a fitted arc cuts a sagitta
+    // INSIDE the arc - the ring's true geometry stays on the exact
+    // center boundary, but its flattened image dips FLATTEN_TOL into
+    // the hole, where the exact polygon would report a gouge. So the
+    // clearance question is measured against the center grown by twice
+    // that sagitta; a real gouge (a ring reaching INTO the island) is
+    // millimeters, and still fails this by a mile.
+    let center = region.offset(-5.0 + 2.0 * FLATTEN_TOL).expect("offset");
     let t = pocket(&region, &p).expect("valid");
     for z in levels_3_zs() {
         let (pts, lifted) = polyline_at(&t, z);
@@ -708,7 +777,7 @@ fn waterline_stays_clear_of_an_island() {
             assert!(in_closed(&center, *q), "ring point {q:?} outside the center area");
             let dx = (15.0 - q.0).max(q.0 - 25.0).max(0.0);
             let dy = (15.0 - q.1).max(q.1 - 25.0).max(0.0);
-            assert!((dx * dx + dy * dy).sqrt() > 5.0 - 1e-3, "point {q:?} in the island");
+            assert!((dx * dx + dy * dy).sqrt() > 5.0 - 2.0 * FLATTEN_TOL, "point {q:?} in the island");
         }
         for i in 1..pts.len() {
             let a = Point2::new(pts[i - 1].0, pts[i - 1].1);
