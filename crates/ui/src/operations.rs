@@ -324,6 +324,13 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
 
     ui.separator();
     params_fields(ui, state);
+    // A height whose reference lost its source already says so on its
+    // own row; this line binds the whole panel to it, because the
+    // viewport has dropped that plane and Generate will refuse by name -
+    // the pane must not read as "just edit the numbers" behind that.
+    if let Some(note) = unresolved_note(&state.world, &state.op_ui.params) {
+        ui.text_wrapped(note);
+    }
     ui.separator();
 
     if exists {
@@ -547,20 +554,72 @@ fn model_page(ui: &Ui, state: &State, name: &str) {
     ui.text_wrapped("Selected now: Del removes it (undo restores).");
 }
 
-/// A height row: the offset input behind the reference the draft carries,
-/// plus the plane it resolves to - the number on screen never lies about
-/// where the tool goes, and an unavailable source says so instead of
-/// showing a stale z. The `From` combo arrives with the reference editor.
-fn height_row(ui: &Ui, id: &str, world: &World, h: &mut Height) {
+/// One height, HSMWorks-style: *From* a reference, plus an *Offset* from
+/// it - and the plane the pair currently resolves to, echoed so the
+/// number on screen can never lie about where the tool goes. `Work
+/// offset` grows a slot combo naming G54..G59. An unavailable source
+/// says what is missing instead of showing a stale z; the viewport drops
+/// that plane and generate refuses by name.
+fn height_editor(ui: &Ui, id: &str, world: &World, h: &mut Height) {
+    // Sibling ids carry distinct `###`-free suffixes: the combo's source
+    // string must never equal the input's (one action, one widget id -
+    // the browser-row lesson of `7e95c31` applies inside a row too).
+    let mut kind = h.reference.kind_index().min(5);
+    if ui.combo(
+        format!("From{id}kind"),
+        &mut kind,
+        HeightReference::KIND_LABELS.as_slice(),
+        |label| Cow::Borrowed(*label),
+    ) {
+        h.reference = match kind {
+            0 => HeightReference::Fixed,
+            1 => HeightReference::TopOfStock,
+            2 => HeightReference::BottomOfStock,
+            3 => HeightReference::TopOfModel,
+            4 => HeightReference::BottomOfModel,
+            _ => HeightReference::WorkOffset(h.reference.wcs_slot().min(WCS_SLOTS.len() - 1)),
+        };
+    }
+    if let HeightReference::WorkOffset(slot_idx) = h.reference {
+        ui.same_line();
+        let mut slot = slot_idx.min(WCS_SLOTS.len() - 1);
+        if ui.combo(
+            format!("{id}slot"),
+            &mut slot,
+            WCS_SLOTS.as_slice(),
+            |name| Cow::Borrowed(*name),
+        ) {
+            h.reference = HeightReference::WorkOffset(slot);
+        }
+    }
+    ui.same_line();
     ui.input_double(id, &mut h.offset);
     ui.same_line();
+    ui.text_disabled(height_echo(world, h));
+}
+
+/// What a height row echoes after its offset box: the plane it resolves
+/// to, or - never a stale or guessed number - what is missing. Pure so
+/// the tests can pin the exact wording; the draw code only labels it.
+pub(crate) fn height_echo(world: &World, h: &Height) -> String {
     match h.z(world) {
-        Some(z) => ui.text_disabled(format!("(= Z {z:.3})")),
-        None => ui.text_disabled(format!(
+        Some(z) => format!("(= Z {z:.3})"),
+        None => format!(
             "(unresolved: {})",
             operation::missing_source(world, h.reference).unwrap_or("source missing")
-        )),
+        ),
     }
+}
+
+/// The pane-wide counterpart of the row echo: while any height fails to
+/// resolve, one line tells the whole panel that the viewport dropped a
+/// plane and Generate will refuse, naming the field and the reason (the
+/// app's `resolve_params` error). `None` when everything resolves, so a
+/// healthy panel shows no alarm.
+pub(crate) fn unresolved_note(world: &World, params: &OpParams) -> Option<String> {
+    operation::resolve_params(world, params)
+        .err()
+        .map(|why| format!("{why}; set the source up or switch the reference"))
 }
 
 /// The parameter fields of the draft's current variant. Edits go to the
@@ -583,9 +642,9 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Stepover (Y spacing)");
             ui.input_double("##f_so", stepover);
             form::field(ui, "Clearance Z");
-            height_row(ui, "##f_clr", &state.world, clearance_z);
+            height_editor(ui, "##f_clr", &state.world, clearance_z);
             form::field(ui, "Cut Z");
-            height_row(ui, "##f_cut", &state.world, cut_z);
+            height_editor(ui, "##f_cut", &state.world, cut_z);
             // Off is the legacy single skim; on stages from Top Z down,
             // prefilled one step above Cut Z in the same reference frame
             // for the user to retune.
@@ -604,7 +663,7 @@ fn params_fields(ui: &Ui, state: &mut State) {
             if staged {
                 form::field(ui, "Top Z (first cut level)");
                 let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
-                height_row(ui, "##f_top", &state.world, top_z.get_or_insert(seed));
+                height_editor(ui, "##f_top", &state.world, top_z.get_or_insert(seed));
                 form::field(ui, "Stepdown");
                 ui.input_double("##f_sd", stepdown.get_or_insert(1.0));
             }
@@ -633,9 +692,9 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Stock to leave");
             ui.input_double("##c_stl", stock_to_leave);
             form::field(ui, "Clearance Z");
-            height_row(ui, "##c_clr", &state.world, clearance_z);
+            height_editor(ui, "##c_clr", &state.world, clearance_z);
             form::field(ui, "Retract Z (between passes)");
-            height_row(ui, "##c_ret", &state.world, retract_z);
+            height_editor(ui, "##c_ret", &state.world, retract_z);
             if let (Some(r), Some(c)) = (retract_z.z(&state.world), clearance_z.z(&state.world))
                 && r > c
             {
@@ -644,9 +703,9 @@ fn params_fields(ui: &Ui, state: &mut State) {
                 ));
             }
             form::field(ui, "Top Z");
-            height_row(ui, "##c_top", &state.world, top_z);
+            height_editor(ui, "##c_top", &state.world, top_z);
             form::field(ui, "Bottom Z");
-            height_row(ui, "##c_bot", &state.world, bottom_z);
+            height_editor(ui, "##c_bot", &state.world, bottom_z);
             form::field(ui, "Stepdown");
             ui.input_double("##c_sd", stepdown);
             form::field(ui, "Feed (mm/min)");
@@ -709,7 +768,7 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Stock to leave");
             ui.input_double("##p_stl", stock_to_leave);
             form::field(ui, "Clearance Z");
-            height_row(ui, "##p_clr", &state.world, clearance_z);
+            height_editor(ui, "##p_clr", &state.world, clearance_z);
             // Off hops to clearance - the legacy shape; on lifts between
             // passes of one level to this plane, clamped at clearance.
             form::field(ui, "Retract plane");
@@ -723,7 +782,7 @@ fn params_fields(ui: &Ui, state: &mut State) {
             }
             if let Some(r) = retract_z {
                 form::field(ui, "Retract Z");
-                height_row(ui, "##p_ret", &state.world, r);
+                height_editor(ui, "##p_ret", &state.world, r);
                 if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                     && rz > cz
                 {
@@ -733,9 +792,9 @@ fn params_fields(ui: &Ui, state: &mut State) {
                 }
             }
             form::field(ui, "Top Z");
-            height_row(ui, "##p_top", &state.world, top_z);
+            height_editor(ui, "##p_top", &state.world, top_z);
             form::field(ui, "Bottom Z");
-            height_row(ui, "##p_bot", &state.world, bottom_z);
+            height_editor(ui, "##p_bot", &state.world, bottom_z);
             form::field(ui, "Stepdown");
             ui.input_double("##p_sd", stepdown);
             form::field(ui, "Feed (mm/min)");
@@ -793,11 +852,11 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Stock to leave");
             ui.input_double("##s_stl", stock_to_leave);
             form::field(ui, "Clearance Z");
-            height_row(ui, "##s_clr", &state.world, clearance_z);
+            height_editor(ui, "##s_clr", &state.world, clearance_z);
             form::field(ui, "Top Z");
-            height_row(ui, "##s_top", &state.world, top_z);
+            height_editor(ui, "##s_top", &state.world, top_z);
             form::field(ui, "Bottom Z");
-            height_row(ui, "##s_bot", &state.world, bottom_z);
+            height_editor(ui, "##s_bot", &state.world, bottom_z);
             form::field(ui, "Stepdown");
             ui.input_double("##s_sd", stepdown);
             form::field(ui, "Stepover");
@@ -819,7 +878,7 @@ fn params_fields(ui: &Ui, state: &mut State) {
             climb,
         } => {
             form::field(ui, "Clearance Z");
-            height_row(ui, "##t_clr", &state.world, clearance_z);
+            height_editor(ui, "##t_clr", &state.world, clearance_z);
             // Engraved lines cut their own groove, so a low hop between
             // loops of one level is safe here; off hops to clearance.
             form::field(ui, "Retract plane");
@@ -833,7 +892,7 @@ fn params_fields(ui: &Ui, state: &mut State) {
             }
             if let Some(r) = retract_z {
                 form::field(ui, "Retract Z");
-                height_row(ui, "##t_ret", &state.world, r);
+                height_editor(ui, "##t_ret", &state.world, r);
                 if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                     && rz > cz
                 {
@@ -843,9 +902,9 @@ fn params_fields(ui: &Ui, state: &mut State) {
                 }
             }
             form::field(ui, "Top Z");
-            height_row(ui, "##t_top", &state.world, top_z);
+            height_editor(ui, "##t_top", &state.world, top_z);
             form::field(ui, "Bottom Z");
-            height_row(ui, "##t_bot", &state.world, bottom_z);
+            height_editor(ui, "##t_bot", &state.world, bottom_z);
             form::field(ui, "Stepdown");
             ui.input_double("##t_sd", stepdown);
             form::field(ui, "Feed (mm/min)");
@@ -1089,5 +1148,104 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::Slot { retract_z, .. }
         | OpParams::Trace { retract_z, .. } => *retract_z,
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod height_row_tests {
+    //! M1.5.3 step 3: the wording of a height row and its pane-wide note.
+    //! An unresolved reference must say which source is missing and where
+    //! to fix it - never show a stale or guessed z.
+
+    use super::*;
+    use hsmworks_app::world::new_world;
+
+    #[test]
+    fn a_resolved_height_echoes_the_plane_it_lands_on() {
+        let world = new_world();
+        assert_eq!(height_echo(&world, &Height::fixed(-7.0)), "(= Z -7.000)");
+        assert_eq!(height_echo(&world, &Height::fixed(25.0)), "(= Z 25.000)");
+    }
+
+    #[test]
+    fn a_missing_source_names_itself_and_where_to_fix_it() {
+        let world = new_world();
+        assert_eq!(
+            height_echo(&world, &Height::of(HeightReference::TopOfStock, 25.0)),
+            "(unresolved: no stock yet - set it up in Setup > Stock)"
+        );
+        assert_eq!(
+            height_echo(&world, &Height::of(HeightReference::BottomOfModel, 0.0)),
+            "(unresolved: no model loaded)"
+        );
+        assert_eq!(
+            height_echo(&world, &Height::of(HeightReference::WorkOffset(0), 0.0)),
+            "(unresolved: that work offset has no origin yet - place it in Setup)"
+        );
+    }
+
+    #[test]
+    fn the_pane_note_appears_only_while_something_is_unresolved() {
+        let world = new_world();
+        let ok = OpParams::Face {
+            stepover: 3.0,
+            clearance_z: Height::fixed(25.0),
+            cut_z: Height::fixed(19.5),
+            top_z: None,
+            stepdown: None,
+            feed: 1200.0,
+            plunge_feed: 300.0,
+            climb: true,
+        };
+        assert_eq!(unresolved_note(&world, &ok), None, "all fixed - no alarm");
+        let broken = OpParams::Face {
+            stepover: 3.0,
+            clearance_z: Height::fixed(25.0),
+            cut_z: Height::of(HeightReference::BottomOfStock, 0.0),
+            top_z: None,
+            stepdown: None,
+            feed: 1200.0,
+            plunge_feed: 300.0,
+            climb: true,
+        };
+        let note = unresolved_note(&world, &broken).expect("the stock is gone");
+        assert!(note.contains("Cut Z"), "{note}");
+        assert!(note.contains("no stock yet"), "{note}");
+        assert!(note.ends_with("switch the reference"), "{note}");
+    }
+
+    #[test]
+    fn fresh_depth_operations_default_to_the_part_and_g54() {
+        // The contract behind issue 2: a new operation's Bottom rides the
+        // selected work offset and its Top is the part itself - the
+        // number the newcomer sees is where the material actually is,
+        // never an arbitrary 5 under the stock top.
+        for kind in [1usize, 2, 3, 4] {
+            let p = quick_params(kind);
+            assert_eq!(
+                top_of(&p).map(|h| h.reference),
+                Some(HeightReference::TopOfModel),
+                "kind {kind} tops out at the model",
+            );
+            assert_eq!(
+                bottom_of(&p).map(|h| (h.reference, h.offset)),
+                Some((HeightReference::WorkOffset(0), 0.0)),
+                "kind {kind} bottoms out at G54",
+            );
+            assert_eq!(
+                p.clearance().reference,
+                HeightReference::TopOfStock,
+                "rapids stage above the stock",
+            );
+        }
+        let OpParams::Face { cut_z, top_z, .. } = quick_params(0) else {
+            panic!("kind 0 is a Face");
+        };
+        assert_eq!(
+            cut_z.reference,
+            HeightReference::TopOfStock,
+            "a fresh face skims the stock top - a Bottom default would cut through everything",
+        );
+        assert!(top_z.is_none(), "staging is opt-in, never a surprise default");
     }
 }

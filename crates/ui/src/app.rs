@@ -14,7 +14,7 @@ use hsmworks_app::cl::MoveKind;
 use hsmworks_app::geometry::feature;
 use hsmworks_app::geometry::{Aabb, Point3, transform_point};
 use hsmworks_app::geo2d::Region;
-use hsmworks_app::operation::{FeatureSel, GeoSel};
+use hsmworks_app::operation::{FeatureSel, GeoSel, Height};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::{model, operation, pick};
 use winit::application::ApplicationHandler;
@@ -1034,6 +1034,10 @@ const CUT_RGB: [f32; 3] = [0.90, 0.35, 0.30];
 /// to mark in the viewport, with the corner label it carries.
 pub(crate) struct HeightPlane {
     pub z: f64,
+    /// The draft height this plane resolved from - the chip suffix names
+    /// its source, but only when it is one (`Fixed` planes are their own
+    /// number and get no parenthetical).
+    pub src: Height,
     pub rgb: [f32; 3],
     pub name: &'static str,
     /// Which rectangle corner carries the label - 0 NE, 1 NW, 2 SE, 3 SW,
@@ -1070,9 +1074,11 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
     // guessed z) - the panel says why, and generation refuses by name.
     let world = &state.world;
     let mut out = Vec::new();
-    if let Some(z) = draft.clearance().z(world) {
+    let clr = draft.clearance();
+    if let Some(z) = clr.z(world) {
         out.push(HeightPlane {
             z,
+            src: clr,
             rgb: CLEARANCE_RGB,
             name: "Clearance",
             corner: 0,
@@ -1097,6 +1103,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
     {
         out.push(HeightPlane {
             z: r.min(c),
+            src: hop,
             rgb: RETRACT_RGB,
             name: "Retract",
             corner: 1,
@@ -1116,6 +1123,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
             {
                 out.push(HeightPlane {
                     z: tz,
+                    src: t,
                     rgb: REGION_RGB,
                     name: "Top",
                     corner: 1,
@@ -1125,6 +1133,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
             if let Some(z) = cut {
                 out.push(HeightPlane {
                     z,
+                    src: *cut_z,
                     rgb: CUT_RGB,
                     name: "Cut",
                     corner: 2,
@@ -1143,6 +1152,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,
+                    src: *top_z,
                     rgb: REGION_RGB,
                     name: "Top",
                     corner: 2,
@@ -1152,6 +1162,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
             if let Some(z) = bottom_z.z(world) {
                 out.push(HeightPlane {
                     z,
+                    src: *bottom_z,
                     rgb: CUT_RGB,
                     name: "Bottom",
                     corner: 3,
@@ -1892,11 +1903,23 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
             if let Some(uv) = project_uv(&mvp, [cx, cy, p.z]) {
                 const M: f32 = 0.02; // uv margin: pixels, whichever way the viewport measures
                 let uv = [uv[0].clamp(M, 1.0 - M), uv[1].clamp(M, 1.0 - M)];
-                out.push((
-                    uv,
-                    p.rgb,
-                    format!("{} · {} {:.2}", state.op_ui.name, p.name, p.z),
-                ));
+                // A reference plane names its source so the number on
+                // screen says what it rides on: "Operation1 · Bottom
+                // 22.00 (G54 +0.00)". Fixed heights are their own
+                // number and carry no parenthetical.
+                let chip = if p.src.is_fixed() {
+                    format!("{} · {} {:.2}", state.op_ui.name, p.name, p.z)
+                } else {
+                    format!(
+                        "{} · {} {:.2} ({} {:+.2})",
+                        state.op_ui.name,
+                        p.name,
+                        p.z,
+                        p.src.reference,
+                        p.src.offset,
+                    )
+                };
+                out.push((uv, p.rgb, chip));
             }
         }
     }
@@ -3081,7 +3104,7 @@ mod height_plane_tests {
     use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
     use hsmworks_app::geometry::cube;
     use hsmworks_app::machining2d::{Lead, PocketStrategy};
-    use hsmworks_app::operation::{Height, OpParams, SrcRef};
+    use hsmworks_app::operation::{Height, HeightReference, OpParams, SrcRef};
     use hsmworks_app::stock::StockShape;
     use hsmworks_app::tools::catalog;
 
@@ -3390,5 +3413,113 @@ mod height_plane_tests {
             Some(6.0),
             "region_z stages with top_z - the draft's 9.0 never reached the document"
         );
+    }
+
+    #[test]
+    fn a_referenced_plane_says_so_in_its_chip() {
+        // The parenthetical is the From + Offset that produced the number:
+        // what the corner label rides on, not an accident of the last
+        // resolve. Fixed planes stay bare - their number is the whole
+        // story - and moving the source walks the chip with it.
+        let params = OpParams::Contour {
+            stock_to_leave: 0.0,
+            clearance_z: Height::of(HeightReference::TopOfStock, 5.0),
+            retract_z: Height::fixed(15.0),
+            top_z: Height::fixed(10.0),
+            bottom_z: Height::of(HeightReference::WorkOffset(0), -1.0),
+            stepdown: 2.0,
+            feed: 800.0,
+            plunge_feed: 200.0,
+            climb: true,
+            lead: Lead::None,
+            tolerance: 0.01,
+            tab_count: 0,
+            tab_width: 0.0,
+            tab_height: 0.0,
+        };
+        let mut state = state_with("C1", params);
+        // G54 at z 3.0: stock top (20) + 5 = 25, G54 - 1 = 2.
+        state.pending.push_back(CommandKind::SetWcs {
+            slot: "G54".into(),
+            pos: [0.0, 0.0, 3.0],
+            roll_deg: 0.0,
+            pitch_deg: 0.0,
+            yaw_deg: 0.0,
+        });
+        state.drain_actions();
+        let texts: Vec<String> = overlay_labels(&state, 800.0 / 600.0)
+            .into_iter()
+            .map(|(_, _, t)| t)
+            .collect();
+        for want in [
+            "C1 · Clearance 25.00 (stock top +5.00)",
+            "C1 · Bottom 2.00 (G54 -1.00)",
+            "C1 · Top 10.00",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want} among {texts:?}");
+        }
+        // Slide G54 up: the plane, and the number on it, track the source
+        // with no edit to the operation.
+        state.pending.push_back(CommandKind::SetWcs {
+            slot: "G54".into(),
+            pos: [0.0, 0.0, 6.0],
+            roll_deg: 0.0,
+            pitch_deg: 0.0,
+            yaw_deg: 0.0,
+        });
+        state.drain_actions();
+        let texts: Vec<String> = overlay_labels(&state, 800.0 / 600.0)
+            .into_iter()
+            .map(|(_, _, t)| t)
+            .collect();
+        assert!(
+            texts.iter().any(|t| t == "C1 · Bottom 5.00 (G54 -1.00)"),
+            "the chip tracks its source: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn an_unresolved_source_draws_no_plane_and_labels_nothing() {
+        // The same reference with G54 never placed: no rectangle at a
+        // guessed z, no chip claiming a number. The planes that DO
+        // resolve keep theirs - an honest mixed state, drawn as one.
+        let params = OpParams::Contour {
+            stock_to_leave: 0.0,
+            clearance_z: Height::fixed(25.0),
+            retract_z: Height::fixed(15.0),
+            top_z: Height::fixed(10.0),
+            bottom_z: Height::of(HeightReference::WorkOffset(0), -1.0),
+            stepdown: 2.0,
+            feed: 800.0,
+            plunge_feed: 200.0,
+            climb: true,
+            lead: Lead::None,
+            tolerance: 0.01,
+            tab_count: 0,
+            tab_width: 0.0,
+            tab_height: 0.0,
+        };
+        let state = state_with("C1", params);
+        assert!(
+            height_planes(&state).iter().all(|p| p.name != "Bottom"),
+            "an unplaced G54 draws no bottom plane",
+        );
+        let texts: Vec<String> = overlay_labels(&state, 800.0 / 600.0)
+            .into_iter()
+            .map(|(_, _, t)| t)
+            .collect();
+        assert!(texts.iter().all(|t| !t.contains(" · Bottom")), "{texts:?}");
+        assert!(
+            texts.iter().any(|t| t.starts_with("C1 · Clearance")),
+            "the resolved planes still label: {texts:?}"
+        );
+        let cut_zs: Vec<f32> = height_plane_lines(&state)
+            .iter()
+            .filter(|l| {
+                (0..3).all(|k| (l[3 + k] - CUT_RGB[k]).abs() < 1e-3)
+            })
+            .map(|l| l[2])
+            .collect();
+        assert!(cut_zs.is_empty(), "no cut geometry without a bottom: {cut_zs:?}");
     }
 }

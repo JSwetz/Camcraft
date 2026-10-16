@@ -5,7 +5,7 @@
 //! Provenance: our own tests, specced from the panes' contract.
 
 use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
+use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::STOCK_NAME;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
@@ -273,6 +273,65 @@ fn selecting_an_operation_mirrors_it_into_the_draft() {
     state.sync_ops_ui();
     assert_eq!(state.op_ui.name, "Operation2");
     assert_eq!(state.op_ui.tool, "EM-0400-2FL", "prefilled with the last tool");
+}
+
+#[test]
+fn a_work_offset_reference_survives_apply_undo_and_the_draft() {
+    // Issue 3's round trip: a height set From G54 must reach the world
+    // as the REFERENCE - not a z frozen at edit time - follow undo and
+    // redo with it, and read back into the property pane unchanged.
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+
+    let referenced = OpParams::Face {
+        stepover: 3.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::of(HeightReference::WorkOffset(0), 0.0),
+        top_z: None,
+        stepdown: None,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    };
+    state.pending.push_back(CommandKind::EditOperationParams {
+        name: "Face1".into(),
+        params: referenced.clone(),
+    });
+    state.drain_actions();
+    assert_eq!(state.status, "parameters updated for Face1");
+    let cut = match stored_params(&state, "Face1") {
+        OpParams::Face { cut_z, .. } => cut_z,
+        _ => panic!("Face1 stays a Face"),
+    };
+    assert_eq!(
+        cut,
+        Height::of(HeightReference::WorkOffset(0), 0.0),
+        "the reference is stored, not a resolved number",
+    );
+
+    // Undo restores the plain value; redo brings the reference back.
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    assert_eq!(stored_params(&state, "Face1"), face_params());
+    state.pending.push_back(CommandKind::Redo);
+    state.drain_actions();
+    assert_eq!(
+        stored_params(&state, "Face1"),
+        referenced,
+        "redo replays the reference too",
+    );
+
+    // Reopening the op mirrors it into the draft: the page shows
+    // From Work offset / G54 / 0.00, not some z resolved on the way in.
+    state.pending.push_back(CommandKind::Select(Some("Face1".into())));
+    state.drain_actions();
+    state.sync_ops_ui();
+    let cut = match &state.op_ui.params {
+        OpParams::Face { cut_z, .. } => *cut_z,
+        _ => panic!("still a Face"),
+    };
+    assert_eq!(cut, Height::of(HeightReference::WorkOffset(0), 0.0), "the draft reads the reference");
 }
 
 #[test]
