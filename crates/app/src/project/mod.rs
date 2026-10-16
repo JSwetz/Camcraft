@@ -308,7 +308,16 @@ pub enum StrategyDto {
 impl ParamsDto {
     fn from_params(p: &OpParams) -> Self {
         match p {
-            OpParams::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb } => {
+            OpParams::Face {
+                stepover,
+                clearance_z,
+                cut_z,
+                top_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+            } => {
                 ParamsDto::Face {
                     stepover: *stepover,
                     clearance_z: *clearance_z,
@@ -316,11 +325,8 @@ impl ParamsDto {
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     climb: *climb,
-                    // Inert until step 4 puts the fields on the domain
-                    // type: the domain cannot hold them yet, so a save
-                    // always writes the legacy shape.
-                    top_z: None,
-                    stepdown: None,
+                    top_z: *top_z,
+                    stepdown: *stepdown,
                 }
             }
             OpParams::Contour {
@@ -430,14 +436,16 @@ impl ParamsDto {
 
     fn to_params(&self) -> OpParams {
         match self {
-            // The v5 face fields stay unread until step 4 gives the
-            // domain a place for them; a file carrying them decodes to
-            // the legacy single-level face, byte-exact.
-            ParamsDto::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb, .. } => {
+            // Absent v5 keys decode (via serde defaults) to the legacy
+            // single-level face, byte-exact; present ones land on the
+            // domain as staged facing.
+            ParamsDto::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb } => {
                 OpParams::Face {
                     stepover: *stepover,
                     clearance_z: *clearance_z,
                     cut_z: *cut_z,
+                    top_z: *top_z,
+                    stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     climb: *climb,

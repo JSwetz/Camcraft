@@ -548,6 +548,8 @@ fn params_fields(ui: &Ui, state: &mut State) {
             stepover,
             clearance_z,
             cut_z,
+            top_z,
+            stepdown,
             feed,
             plunge_feed,
             climb,
@@ -558,6 +560,25 @@ fn params_fields(ui: &Ui, state: &mut State) {
             ui.input_double("##f_clr", clearance_z);
             form::field(ui, "Cut Z");
             ui.input_double("##f_cut", cut_z);
+            // Off is the legacy single skim; on stages from Top Z down,
+            // prefilled one stepdown above Cut Z for the user to retune.
+            form::field(ui, "Depth staging");
+            let mut staged = top_z.is_some();
+            if ui.checkbox("Stage down to Cut Z", &mut staged) {
+                if staged {
+                    *top_z = Some(*cut_z + 1.0);
+                    *stepdown = Some(1.0);
+                } else {
+                    *top_z = None;
+                    *stepdown = None;
+                }
+            }
+            if staged {
+                form::field(ui, "Top Z (first cut level)");
+                ui.input_double("##f_top", top_z.get_or_insert(*cut_z + 1.0));
+                form::field(ui, "Stepdown");
+                ui.input_double("##f_sd", stepdown.get_or_insert(1.0));
+            }
             form::field(ui, "Feed (mm/min)");
             ui.input_double("##f_feed", feed);
             form::field(ui, "Plunge feed (mm/min)");
@@ -830,6 +851,10 @@ fn retype(cur: &OpParams, kind: usize, top: f64) -> OpParams {
             stepover,
             clearance_z: clearance,
             cut_z: top,
+            // A fresh face cuts one level; staging is opt-in in the
+            // panel, never a surprise default.
+            top_z: None,
+            stepdown: None,
             feed,
             plunge_feed: plunge,
             climb,

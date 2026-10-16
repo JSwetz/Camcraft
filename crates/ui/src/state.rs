@@ -212,6 +212,8 @@ impl Default for OpUi {
                 stepover: 3.0,
                 clearance_z: 25.0,
                 cut_z: 0.0,
+                top_z: None,
+                stepdown: None,
                 feed: 1200.0,
                 plunge_feed: 300.0,
                 climb: true,

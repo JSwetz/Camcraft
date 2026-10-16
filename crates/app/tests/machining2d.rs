@@ -28,6 +28,8 @@ fn params() -> FaceParams {
         stepover: 5.0,
         clearance_z: 5.0,
         cut_z: 2.0,
+        top_z: None,
+        stepdown: None,
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
@@ -73,6 +75,105 @@ fn rapids_only_appear_at_the_ends() {
     assert_eq!(last.from.x, last.to.x);
     assert_eq!(last.from.y, last.to.y);
     assert_eq!(last.to.z, 5.0);
+}
+
+#[test]
+fn face_default_stays_single_level() {
+    // The byte-shield of `face_square_40x40.cl`: with no staging the face
+    // cuts exactly one level at `cut_z`. Naming the same height explicitly
+    // (top == cut, one step) must produce the identical path - staging is
+    // opt-in geometry, never a re-phrasing that moves the moves.
+    let r = rect(0.0, 0.0, 20.0, 20.0);
+    let legacy = face(&r, &params()).expect("valid params");
+    let mut p = params();
+    p.top_z = Some(p.cut_z);
+    p.stepdown = Some(1.0);
+    let explicit = face(&r, &p).expect("single-level staging is valid");
+    assert_eq!(legacy, explicit, "top_z == cut_z must not change the path");
+    assert_eq!(
+        explicit.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count(),
+        1
+    );
+}
+
+#[test]
+fn face_steps_down_through_levels() {
+    let r = rect(0.0, 0.0, 20.0, 20.0);
+    let mut p = params(); // cut_z 2.0, clearance 5.0
+    p.top_z = Some(4.0);
+    p.stepdown = Some(1.0);
+    let t = face(&r, &p).expect("valid params");
+    assert!(t.is_chained());
+    assert!(t.all_finite());
+    let zs: Vec<f64> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .map(|m| m.to.z)
+        .collect();
+    assert_eq!(zs, [4.0, 3.0, 2.0], "three staged levels");
+    // Same rows at every level: the band law is computed once and the
+    // single-level sweep count repeats per staged level (3 rows, 20x20).
+    for &z in &zs {
+        let sweeps = t
+            .moves
+            .iter()
+            .filter(|m| {
+                m.kind == MoveKind::Feed
+                    && m.from.z == z
+                    && m.to.z == z
+                    && (m.to.x - m.from.x).abs() > (m.to.y - m.from.y).abs()
+            })
+            .count();
+        assert_eq!(sweeps, 3, "level {z} must repeat every row");
+    }
+    // Between levels the tool lifts to clearance and re-enters from the
+    // same corner it plunges at: exactly two rapids before each extra
+    // level's plunge, and nothing but rapids leave the level plane.
+    let rapids = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Rapid)
+        .count();
+    assert_eq!(rapids, 2 * (zs.len() - 1) + 1, "hop rapids plus the final lift");
+    for (i, m) in t.moves.iter().enumerate() {
+        if m.kind == MoveKind::Plunge && i > 0 {
+            assert_eq!(t.moves[i - 1].kind, MoveKind::Rapid);
+            assert_eq!(m.from.z, 5.0, "plunge must start in air");
+            assert_eq!(m.from.x, t.moves[i - 1].to.x);
+            assert_eq!(m.from.y, t.moves[i - 1].to.y);
+        }
+    }
+}
+
+#[test]
+fn face_levels_snap_to_bottom_exactly() {
+    // A step that would cut below the finished height is replaced by the
+    // finished height itself - never skipped, never overshot.
+    let r = rect(0.0, 0.0, 20.0, 20.0);
+    let mut p = params(); // cut_z 2.0, clearance 5.0
+    p.top_z = Some(4.5);
+    p.stepdown = Some(1.5); // would next cut at 1.5, below the finish
+    let t = face(&r, &p).expect("valid params");
+    let zs: Vec<f64> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .map(|m| m.to.z)
+        .collect();
+    assert_eq!(zs, [4.5, 3.0, 2.0], "last level lands on cut_z, not below");
+
+    let mut p = params();
+    p.top_z = Some(4.5);
+    p.stepdown = Some(2.0);
+    let t = face(&r, &p).expect("valid params");
+    let zs: Vec<f64> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .map(|m| m.to.z)
+        .collect();
+    assert_eq!(zs, [4.5, 2.5, 2.0], "odd arithmetic still snaps exactly");
 }
 
 #[test]
@@ -141,6 +242,32 @@ fn degenerate_parameters_are_refused_before_any_geometry() {
         {
             let mut p = params();
             p.clearance_z = f64::INFINITY;
+            p
+        },
+        {
+            // Staging fields refuse the same way scalars do: a named
+            // error before any geometry runs, never a silent one-level cut.
+            let mut p = params();
+            p.top_z = Some(1.0); // params cut_z is 2.0: top below the finish
+            p.stepdown = Some(1.0);
+            p
+        },
+        {
+            let mut p = params();
+            p.top_z = Some(4.0); // staged descent with no stepdown: the
+            p.stepdown = None; //  while-loop of cut_levels must never spin
+            p
+        },
+        {
+            let mut p = params();
+            p.top_z = Some(4.0);
+            p.stepdown = Some(0.0);
+            p
+        },
+        {
+            let mut p = params();
+            p.top_z = Some(6.0); // first level above the clearance plane
+            p.stepdown = Some(1.0);
             p
         },
     ];

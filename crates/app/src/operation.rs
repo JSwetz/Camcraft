@@ -144,6 +144,13 @@ pub enum OpParams {
         stepover: f64,
         clearance_z: f64,
         cut_z: f64,
+        /// Staged facing: the first cut level. `None` faces in one level
+        /// at `cut_z` - the legacy default every pre-stepdown file
+        /// carries. `Some(t)` descends `t` down to `cut_z` by `stepdown`.
+        top_z: Option<f64>,
+        /// Level spacing; positive when `top_z` is set, ignored when it
+        /// is not.
+        stepdown: Option<f64>,
         feed: f64,
         plunge_feed: f64,
         climb: bool,
@@ -230,7 +237,7 @@ impl OpParams {
     #[must_use]
     pub fn region_z(&self) -> f64 {
         match self {
-            OpParams::Face { cut_z, .. } => *cut_z,
+            OpParams::Face { top_z, cut_z, .. } => top_z.unwrap_or(*cut_z),
             OpParams::Contour { top_z, .. }
             | OpParams::Pocket { top_z, .. }
             | OpParams::Slot { top_z, .. }
@@ -247,9 +254,23 @@ impl OpParams {
         let pos = |v: f64| v.is_finite() && v > 0.0;
         let nneg = |v: f64| v.is_finite() && v >= 0.0;
         match self {
-            OpParams::Face { stepover, clearance_z, cut_z, feed, plunge_feed, .. } => {
-                pos(*stepover) && clearance_z.is_finite() && cut_z.is_finite()
-                    && pos(*feed) && pos(*plunge_feed)
+            OpParams::Face {
+                stepover,
+                clearance_z,
+                cut_z,
+                top_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                ..
+            } => {
+                pos(*stepover)
+                    && clearance_z.is_finite()
+                    && cut_z.is_finite()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && top_z.is_none_or(|t| t.is_finite() && t >= *cut_z)
+                    && stepdown.is_none_or(|s| s.is_finite() && s > 0.0)
             }
             OpParams::Contour {
                 stock_to_leave,
@@ -358,12 +379,33 @@ impl OpParams {
             w(h, p.y);
         };
         match self {
-            OpParams::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb } => {
+            OpParams::Face {
+                stepover,
+                clearance_z,
+                cut_z,
+                top_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+            } => {
                 h.write_u8(0);
                 for v in [*stepover, *clearance_z, *cut_z, *feed, *plunge_feed] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
+                // Appended at v5-era staging: presence first, then the
+                // value. Even a legacy (None, None) face digest differs
+                // from a pre-stamp face op - the mechanism saying so.
+                for o in [*top_z, *stepdown] {
+                    match o {
+                        Some(v) => {
+                            h.write_u8(1);
+                            w(h, v);
+                        }
+                        None => h.write_u8(0),
+                    }
+                }
             }
             OpParams::Contour {
                 stock_to_leave,
@@ -1741,7 +1783,7 @@ pub fn generate(
 
     // Region + path per kind.
     let (region, path) = match &op.params {
-        OpParams::Face { stepover, clearance_z, cut_z, feed, plunge_feed, climb } => {
+        OpParams::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb } => {
             let region = region_for_src(world, &op.src, &op.params, &material)?;
             let path = machining2d::face(
                 &region,
@@ -1750,6 +1792,8 @@ pub fn generate(
                     stepover: *stepover,
                     clearance_z: *clearance_z,
                     cut_z: *cut_z,
+                    top_z: *top_z,
+                    stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     climb: *climb,
@@ -1972,11 +2016,48 @@ mod tests {
             stepover: 8.0,
             clearance_z: 5.0,
             cut_z: -0.5,
+            top_z: None,
+            stepdown: None,
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
         };
         assert!(ok.is_sane());
+        // Staged facing is sane when it descends: a top below the
+        // finished height, or a zero stepdown, is not.
+        let staged = OpParams::Face {
+            stepover: 8.0,
+            clearance_z: 5.0,
+            cut_z: -0.5,
+            top_z: Some(1.0),
+            stepdown: Some(0.5),
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        };
+        assert!(staged.is_sane());
+        let low = OpParams::Face {
+            stepover: 8.0,
+            clearance_z: 5.0,
+            cut_z: -0.5,
+            top_z: Some(-0.6),
+            stepdown: Some(0.5),
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        };
+        assert!(!low.is_sane(), "staged top below the finished height");
+        let no_step = OpParams::Face {
+            stepover: 8.0,
+            clearance_z: 5.0,
+            cut_z: -0.5,
+            top_z: Some(1.0),
+            stepdown: Some(0.0),
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        };
+        assert!(!no_step.is_sane(), "stepdown must be positive when set");
         let bad = OpParams::Pocket {
             stepover: f64::NAN,
             stock_to_leave: 0.0,
@@ -2012,6 +2093,8 @@ mod tests {
             stepover: 8.0,
             clearance_z: 5.0,
             cut_z: -0.5,
+            top_z: None,
+            stepdown: None,
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
@@ -2021,14 +2104,57 @@ mod tests {
             stepover: 8.0,
             clearance_z: 5.0,
             cut_z: -0.6,
+            top_z: None,
+            stepdown: None,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        };
+        let c = OpParams::Face {
+            stepover: 8.0,
+            clearance_z: 5.0,
+            cut_z: -0.5,
+            top_z: Some(1.0),
+            stepdown: Some(0.5),
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
         };
         let mut ha = std::hash::DefaultHasher::new();
         let mut hb = std::hash::DefaultHasher::new();
+        let mut hc = std::hash::DefaultHasher::new();
         a.stamp_with(&mut ha);
         b.stamp_with(&mut hb);
+        c.stamp_with(&mut hc);
         assert_ne!(ha.finish(), hb.finish());
+        assert_ne!(ha.finish(), hc.finish(), "staging moves the stamp");
+    }
+
+    #[test]
+    fn face_stamp_moves_with_stepdown() {
+        // A cached single-level facing must never be replayed as the
+        // answer for a staged one - and two stagings that cut different
+        // stacks must not claim each other's cache either.
+        let face_with = |top_z: Option<f64>, stepdown: Option<f64>| OpParams::Face {
+            stepover: 8.0,
+            clearance_z: 5.0,
+            cut_z: -0.5,
+            top_z,
+            stepdown,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        };
+        let digest = |p: &OpParams| {
+            let mut h = std::hash::DefaultHasher::new();
+            p.stamp_with(&mut h);
+            h.finish()
+        };
+        let legacy = face_with(None, None);
+        let staged = face_with(Some(1.0), Some(0.5));
+        let deeper = face_with(Some(1.0), Some(0.4));
+        assert_ne!(digest(&legacy), digest(&staged), "staging invalidates");
+        assert_ne!(digest(&staged), digest(&deeper), "step size is geometry");
+        assert_eq!(digest(&staged), digest(&face_with(Some(1.0), Some(0.5))));
     }
 }

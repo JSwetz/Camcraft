@@ -358,6 +358,8 @@ fn face_params() -> OpParams {
         stepover: 3.0,
         clearance_z: 25.0,
         cut_z: 4.5,
+        top_z: None,
+        stepdown: None,
         feed: 1200.0,
         plunge_feed: 300.0,
         climb: true,

@@ -1005,15 +1005,28 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         });
     }
     match draft {
-        // Face skims one plane; for the depth kinds, Top is the section
-        // the paths run in and Bottom the last step down.
-        operation::OpParams::Face { cut_z, .. } => out.push(HeightPlane {
-            z: *cut_z,
-            rgb: CUT_RGB,
-            name: "Cut",
-            corner: 2,
-            skip_rect: region_shown,
-        }),
+        // For the depth kinds, Top is the section the paths run in and
+        // Bottom the last step down. Face skims one plane unless it
+        // stages: then its Top is the first level, drawn like the depth
+        // kinds' Top, with the finished Cut below it.
+        operation::OpParams::Face { top_z, cut_z, .. } => {
+            if let Some(t) = top_z.filter(|t| *t != *cut_z) {
+                out.push(HeightPlane {
+                    z: t,
+                    rgb: REGION_RGB,
+                    name: "Top",
+                    corner: 1,
+                    skip_rect: region_shown,
+                });
+            }
+            out.push(HeightPlane {
+                z: *cut_z,
+                rgb: CUT_RGB,
+                name: "Cut",
+                corner: 2,
+                skip_rect: region_shown,
+            });
+        }
         operation::OpParams::Contour { top_z, bottom_z, .. }
         | operation::OpParams::Pocket { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
@@ -2130,6 +2143,8 @@ mod path_tests {
                     stepover: 3.0,
                     clearance_z: 25.0,
                     cut_z: 19.5,
+                    top_z: None,
+                    stepdown: None,
                     feed: 1200.0,
                     plunge_feed: 300.0,
                     climb: true,
@@ -2395,6 +2410,8 @@ mod preview_tests {
                     stepover: 3.0,
                     clearance_z: 25.0,
                     cut_z: 19.5,
+                    top_z: None,
+                    stepdown: None,
                     feed: 1200.0,
                     plunge_feed: 300.0,
                     climb: true,
@@ -2431,6 +2448,8 @@ mod preview_tests {
                 stepover: 3.0,
                 clearance_z: 25.0,
                 cut_z: 10.0,
+                top_z: None,
+                stepdown: None,
                 feed: 1200.0,
                 plunge_feed: 300.0,
                 climb: true,
@@ -2714,6 +2733,8 @@ mod feature_pick_tests {
                     stepover: 3.0,
                     clearance_z: 25.0,
                     cut_z: 4.5,
+                    top_z: None,
+                    stepdown: None,
                     feed: 1200.0,
                     plunge_feed: 300.0,
                     climb: true,
@@ -3088,6 +3109,55 @@ mod height_plane_tests {
         assert!(
             !texts.iter().any(|t| t.contains("Clearance")),
             "nothing open labels nothing: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn face_top_z_walks_its_plane() {
+        // An unstaged face draws only its Cut plane - no phantom Top for a
+        // level it will never cut. Staged, Top appears at the first level,
+        // and editing the draft walks it live, the same honesty rule the
+        // depth kinds follow.
+        let face_at = |top_z: Option<f64>| OpParams::Face {
+            stepover: 8.0,
+            clearance_z: 15.0,
+            cut_z: 2.0,
+            top_z,
+            stepdown: if top_z.is_some() { Some(2.0) } else { None },
+            feed: 800.0,
+            plunge_feed: 200.0,
+            climb: true,
+        };
+        let plain = state_with("F1", face_at(None));
+        let names: Vec<&str> = height_planes(&plain).iter().map(|p| p.name).collect();
+        assert_eq!(names, ["Clearance", "Cut"], "unstaged: no Top plane: {names:?}");
+
+        let mut staged = state_with("F2", face_at(Some(6.0)));
+        let at = |s: &State| -> Vec<(&'static str, f64)> {
+            height_planes(s).iter().map(|p| (p.name, p.z)).collect()
+        };
+        assert_eq!(
+            at(&staged),
+            [("Clearance", 15.0), ("Top", 6.0), ("Cut", 2.0)],
+            "staged facing draws its first level above the finish"
+        );
+        // Walk the draft's Top Z: the plane follows before Apply, the
+        // committed entity does not move at all.
+        if let OpParams::Face { top_z, .. } = &mut staged.op_ui.params {
+            *top_z = Some(9.0);
+        }
+        assert_eq!(
+            at(&staged),
+            [("Clearance", 15.0), ("Top", 9.0), ("Cut", 2.0)],
+            "the draft owns the plane"
+        );
+        let zs: Vec<f32> = height_plane_lines(&staged).iter().map(|l| l[2]).collect();
+        assert!(zs.contains(&9.0), "the ring geometry walks too: {zs:?}");
+        let back = state_with("F2", face_at(Some(6.0)));
+        assert_eq!(
+            back.op_ui.params.region_z(),
+            6.0,
+            "region_z stages with top_z - the draft's 9.0 never reached the document"
         );
     }
 }

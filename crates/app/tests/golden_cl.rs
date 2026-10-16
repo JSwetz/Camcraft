@@ -6,6 +6,7 @@ mod common;
 
 use common::{gen_to_cltext, write_golden};
 
+use hsmworks_app::cl::MoveKind;
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::machining2d::{
     contour, face, pocket, slot, trace, ContourParams, FaceParams, Lead, PocketParams,
@@ -115,12 +116,39 @@ fn face_square_40x40_matches_golden() {
         stepover: 8.0,
         clearance_z: 5.0,
         cut_z: -2.0,
+        top_z: None,
+        stepdown: None,
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
     };
     let t = face(&rect(0.0, 0.0, 40.0, 40.0), &p).unwrap();
     write_golden("face_square_40x40.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn face_square_40x40_stepped_matches_golden() {
+    // The same square staged from 2.0 down to -2.0 in 1.5 steps: the row
+    // band is identical at every level, and each level change lifts to
+    // clearance and re-enters above the first row's start.
+    let p = FaceParams {
+        tool_diameter: 10.0,
+        stepover: 8.0,
+        clearance_z: 5.0,
+        cut_z: -2.0,
+        top_z: Some(2.0),
+        stepdown: Some(1.5),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    let t = face(&rect(0.0, 0.0, 40.0, 40.0), &p).unwrap();
+    assert_eq!(
+        t.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count(),
+        4,
+        "levels 2.0, 0.5, -1.0, -2.0"
+    );
+    write_golden("face_square_40x40_stepped.cl", &gen_to_cltext(&t));
 }
 
 #[test]
