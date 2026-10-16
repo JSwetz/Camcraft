@@ -60,7 +60,9 @@ ids that stop stealing clicks, and From/Offset height references riding
 stock, model and work-offset sources; M1.5.4: a bore's wall contoured from
 inside by default (Side), collision warnings folded to one line per kind,
 height offsets back in view in docked panes) - the ⏸ items below
-remain open; then units for the early phase, drilling and the first post.
+remain open, and the M1.4 look-and-feel verdict has prioritized M1.4.1,
+the Dear ImGui → egui stack rework, ahead of the remaining surface
+polish; then units for the early phase, drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -230,7 +232,7 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
       the preview the parameter page can't give; the window form is a
       considered revisit of this milestone's "standalone tool library
       window is gone" decision (keep the dock for the library, open a
-      window for the editor)
+      window for the editor) - builds on the M1.4.1 stack
 - 📋 **Viewport display modes**: wireframe-only, and shaded-with-edges
       (solid fill plus the feature-edge overlay), switchable per view -
       navigation and selection aids: wireframe to see through stock and
@@ -239,7 +241,81 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
 - 📋 **Panel UX overhaul**: property panels reorganized into tabs and
       named sections (geometry, heights, passes, leads and links,
       feeds) instead of long stacks of dropdowns and inputs, so a
-      parameter reads as part of a page, not another row
+      parameter reads as part of a page, not another row - lands in
+      the M1.4.1 migration, not as an ImGui restyle
+
+### M1.4.1 - UI Framework Rework: Dear ImGui → egui
+**Goal: make the look-and-feel complaint structural instead of another
+restyle - rebuild the shell on a toolkit we fully control, keep every
+behavior the app layer has earned, and ship the Fusion 360-caliber dark
+UI that ImGui styling has not reached.** — 📋 prioritized
+
+Prompted by the M1.4 hand-test verdict: testers' single biggest complaint
+is the Dear ImGui look and feel, and restyling inside ImGui has not closed
+it. The target - general modern dark-CAD conventions, our own strings and
+glyphs (clean-room) - is buildable on egui. Decisions recorded after a
+three-part investigation (UI inventory, egui, clay), October 2026:
+
+- ✅ **Decision - egui replaces Dear ImGui**: the current egui line pins
+      wgpu 30 and winit 0.30 - exactly what this shell already runs, so
+      no forced-upgrade ripple; egui_dock gives the docked pane layout;
+      the viewport composites into a docked panel as a registered
+      texture, the pattern Rerun runs in production; egui_kittest is a
+      stronger headless harness than the current one - only two tests
+      execute an immediate-mode frame today. The dock crate is
+      single-maintainer and trails egui's quarterly releases by a minor
+      (0.21 targets egui 0.36); our layout is built in code and ini
+      persistence is already disabled, so no user layouts exist to port -
+      worst case the small crate gets vendored.
+- ✅ **Decision - clay considered, not now**: a layout engine only - no
+      widgets, no docking, no accessibility; the Rust binding trails the
+      C master and carries an open unresolved use-after-free report,
+      disqualifying against the never-crash directive. A full UI on clay
+      means writing a toolkit from scratch (~50-100k LOC); grafting clay
+      under egui for layout is an anti-pattern with a bad precedent. If
+      finer layout control ever matters, a pure-Rust taffy-class engine
+      (kaolin, cobogo, kui-core) is the FFI-free way there - clay's
+      ideas yes, the dependency no.
+- ✅ **Decision - no dual-stack hybrid**: an imgui/egui bridge means two
+      toolkits fighting over hit-testing and focus in one frame.
+      Migrate per-panel, switch each panel wholly, never split one.
+
+Spike first - a branch, 2-4 weeks, the go/no-go evidence:
+
+- 📋 **Shell**: eframe-less egui-winit + egui-wgpu over the existing
+      winit 0.30 event loop; viewport as a docked egui_dock panel -
+      registered-texture path first, paint-callback fallback; 3D view
+      stays correct across resize and dock drags.
+- 📋 **One real page plus the painted chrome**: the Contour property
+      panel, the ribbon and the browser rows - the two custom draw_list
+      lists have no widget equivalent anywhere and become a Shape/
+      Painter layer; a Fusion-caliber dark palette + typography module
+      judged from screenshots (the open risk: small-text rendering vs
+      DirectWrite - a visual call, not a code review).
+- 📋 **Harness**: ui tests ported to egui_kittest; the golden CLFile/
+      G-code gate untouched throughout.
+
+Migration after go - per-panel commits, 1.5-3 months: ~3.4k LOC and ~350
+imgui-facing call sites, all inside the ui crates; crates/app is 100%
+imgui-free, so the layering (ui → app → flecs), commands, systems,
+persistence and every generator stay untouched.
+
+- 📋 Each panel ships with parity - same features, same command wiring;
+      undo/redo behavior is a test gate, not a hand-test; ImGui exits
+      with the last panel.
+- 📋 The M1.4 carry-overs build directly on the new stack: the
+      graphical tool editor window and the tabbed property panels ride
+      the migration, not ImGui restyle commits; viewport display modes
+      are renderer work, independent of the framework.
+- 📋 Version coupling managed: egui + egui_dock pinned together at
+      spike sign-off; then track egui minors with egui_kittest
+      snapshot diffs as the churn gate, and if the dock lags a release,
+      hold the pin or vendor the patch.
+
+Honest risks: immediate-mode focus/IME edge cases (Latin-first fine -
+revisit before internationalization), no built-in animation easing (add
+it where it earns its keep), breaking churn every egui minor (the cost
+the spike measures - bounded because the surface is 3.4k LOC, not 30k).
 
 ### M1.5 - Feature Selection
 **Goal: pick a face or an edge chain and machine that - not just whole
@@ -604,7 +680,8 @@ programming department.
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
-| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window, wireframe/shaded-with-edges display modes, and tabbed-panels UX overhaul open | ⚠️ |
+| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window, wireframe/shaded-with-edges display modes, and tabbed-panels UX overhaul open - the tool editor and tabbed panels ride the M1.4.1 stack | ⚠️ |
+| **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike (docked viewport, one panel, painted chrome, kittest) then per-panel migration | 📋 |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
