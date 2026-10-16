@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> _Last updated: 2026-10-15_
+> _Last updated: 2026-10-16_
 
 ## North Star
 
@@ -52,10 +52,11 @@ setup (stock + WCS) and toolpath display, M1.3 2D machining (face, contour,
 pocket, slot, trace over mesh-sliced geometry, with the tool library,
 operation parameters and verification warnings), and the M1.4 ribbon/browser
 UI/UX rework are in; M1.5 feature selection has shipped its selection
-commands, chips and 3D overlay, and its hand-test rework (M1.5.1: readable
-selection rows, height-plane guides, and selection chains that actually
-close) - the ⏸ items below remain open; then units for the early phase,
-drilling and the first post.
+commands, chips and 3D overlay, and its two hand-test reworks (M1.5.1:
+readable selection rows, height-plane guides, and selection chains that
+actually close; M1.5.2: welded-wall picks, arc moves, staged facing, retract
+hops, per-level planes and translucent cut-region fills) - the ⏸ items below
+remain open; then units for the early phase, drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -65,8 +66,9 @@ drilling and the first post.
 - ✅ **Robustness**: degenerate and corrupt models produce clean errors, never
       crashes (Prime Directive) - corrupt-input corpus tests enforce this
 - ✅ **Project save/load**: versioned single-file project (`.hsmproj` JSON, at
-      v3: tools, operations and their cached, verified toolpaths; older files
-      migrate on load through chained steps, v1→2→3, never skipping one)
+      v5: tools, operations and their cached, verified toolpaths (including arc
+      moves); older files migrate on load through chained steps,
+      v1→2→3→4→5, never skipping one)
 - ✅ **Command foundation**: command pattern with undo/redo driving all
       UI-visible state changes from day one
 - 📋 **Units**: millimeters and inches, correct everywhere including posts
@@ -144,16 +146,25 @@ undoes and redoes exactly, replaying byte-identical paths.
       decision - truck (already linked for import) vs an OpenCascade binding;
       benchmark truck's booleans before committing. The 2D ops above work
       without it, from meshes
-- ✅ **Face operation**: serpentine rows over the stock or model footprint at
-      the cut Z, with rapids only at the ends
+- ✅ **Face operation**: serpentine rows over the stock or model footprint,
+      staged down from an optional Top Z by a Stepdown through the cut levels
+      (M1.5.2; the default stays the single level of M1.3, so pre-stepdown
+      paths are byte-stable), with rapids only at the ends
 - ⚠️ **2D Contour**: islands (even-odd region sets), climb vs conventional,
       linear and arc lead in/out, tabs as skipped segments, per-level
-      stepdowns, tolerance-driven arc tessellation. Missing: tangential
+      stepdowns with same-level hops to the retract plane between loops
+      (M1.5.2), tolerance-driven arc tessellation - and since M1.5.2 the arc
+      leads and fitted rims travel as single arc moves, not chord fans (G2/G3
+      text emission waits for the post, M2.3). Missing: tangential
       leads, and G41/G42 output - the compensation side is recorded in the
       parameters but the path is cutter-center until the post emits it (M1.7)
 - ⚠️ **2D Pocket**: zigzag (scanline parity walk; islands fall out of the
-      even-odd set) and waterline (inward buffers), stock-to-leave as a
-      region shrink, per-level stepdowns with retract between levels.
+      even-odd set) and waterline (inward buffers), with an Auto choice
+      between them from the region's circularity - decided through `fit_arcs`
+      and reported in the status, never silent (M1.5.2; rectangular fixtures
+      stay zigzag), stock-to-leave as a region shrink, per-level stepdowns,
+      same-level between-ring hops to the retract plane with full clearance
+      only at level changes (M1.5.2).
       Missing: spiral entry and ramp/helical plunges (M2.1 has the entry
       family); plunge entries are vertical today
 - ✅ **Slot and Trace**: slots as stadium regions between two points (corner
@@ -218,12 +229,16 @@ geometry-kernel commitment; that stays the M1.3 ⏸ open question), with
 ids stable per model revision and enforced by the generation stamp.
 Picks are commands (undoable, validated at construction), show as
 readable rows in the Geometry section and as 3D overlay lines that hold
-their place under orbiting, and persist in `.hsmproj` v4. Contour
+their place under orbiting, and persist in the project file
+(`.hsmproj` v4 then; v5 since the M1.5.2 rework below). Contour
 machines both halves of a selection: the picked loops as boundary
 passes, the picked open runs as a centerline pass - preview and
 generation read one chain construction, so they cannot disagree. The
-M1.5.1 hand-test rework (off `Milling-test.step`) then made the
-selection itself legible, honest and geometrically complete, below.
+M1.5.1 hand-test rework (off `Milling-test.step`) made the
+selection itself legible, honest and geometrically complete; the
+M1.5.2 rework closed the seven issues the second session on the same
+model brought back - all 2D, per the standing rule to finish the 2D
+story before the 2.5D/3D ones.
 
 - ✅ **Facet → feature**: weld mesh facets into planar faces and edge
       chains, exposed as stable ids per model revision (`app::geometry`,
@@ -254,12 +269,72 @@ selection itself legible, honest and geometrically complete, below.
         viewport: Clearance (blue), Retract (sky, Contour only), Cut
         (red), beside the existing orange Top; planes track draft
         edits without a document rebuild
+- ✅ **M1.5.2 hand-test rework** (the seven issues from the second
+      feature-selection session, commits `e6b4749` → `e805c64`):
+  - the op list lists: operation Type locks at creation - the combo renders
+        only on the new-op form, committed ops show a static kind label, and
+        `EditOperationParams` refuses a foreign variant at the command layer;
+        Generate flushes a visible dirty draft through the history first (one
+        click, two honest commands), and the `OperationN` prefill skips taken
+        names;
+  - a raycast onto a curved wall answers the weld, not the strip:
+        `feature::patches` groups planar strips sharing a facet-patch root
+        under a `PatchId` (boundary segments on the position lattice plus
+        strip-plane signatures - order- and winding-free, stable across
+        re-imports), and `FeatureSel::Patch` bounds its rims through the same
+        material-side rule, so a bore-wall pick machines the annulus and a
+        boss-wall pick the disk; flat faces keep plain `Face` ids, so no v4
+        pick re-keys;
+  - arcs move: `Move` carries a planar arc (`PathBuilder::push_arc` refuses
+        helicals and zero-sweep), lead-in/out post one arc move, and
+        `fit_arcs` replaces tessellation chords on a tri-state window (fit /
+        not-yet-proven / refuse) - contour_plate_with_hole's golden went
+        330 → 69 moves and the waterline 228 → 51 with non-arc goldens
+        byte-identical; goldens log v2 arc lines, centers stand on the µm
+        lattice, and the verifier flattens through `Move::chords`, the same
+        sagitta law the overlay and dump use, so warning indices stay stable;
+  - facing steps down: Top Z + Stepdown stage the same band law through
+        `cut_levels`, levels snapping to the finish exactly - the unstaged
+        default is the old single level byte-for-byte, and a staged face whose
+        first level would plunge zero depth refuses;
+  - the retract plane earns its keep: same-level lifts between passes travel
+        `min(retract_z, clearance_z)` - contour's loop-to-loop transitions and
+        waterline's island splits hop there, level changes still cross at full
+        clearance, and a retract under top_z is refused by name (a hop plane
+        inside material is a gouge with a plane named after it). Pocket, Slot
+        and Trace carry the plane in data; Slot shows no control for it - one
+        serpentine per level has no same-level lift, and a dead knob is a lie.
+        Waterline rings hop only where an island splits them, so island-free
+        spirals still chain at depth;
+  - height planes are one truth: `shown_regions` gates region outlines, plane
+        stand-ins and fills level by level (a staged Face's Cut rectangle
+        stands exactly where no outline paints its level - the invisible-
+        Face-Cut bug), labels name their operation ("Operation1 · Cut 22.00")
+        and clamp into the viewport; Retract widened from Contour-only to
+        every depth kind;
+  - circularity decides the pocket: `PocketStrategy::Auto` - the new default
+        for new pockets, never retyped over an explicit choice - runs
+        Waterline where `fit_arcs` covers nine tenths of a rim around centers
+        a quarter-stepover apart, Zigzag otherwise, and the panel quotes the
+        generator's own `resolve()`, so the decision reads in the status
+        instead of guessing silently;
+  - cutting is visible: `geo2d::Region::triangles()` (bridge-merge +
+        ear-clip, our construction from textbook literature - clipper2 does
+        not triangulate) lays a translucent film (α 0.22, depth-write off,
+        its own pipeline) over the stock at each shown region's level - holes
+        stay void, nested islands refill, and any degeneracy refuses to
+        wireframe-only, never a partial sheet; the status line counts moves,
+        plunges, levels and arcs from the cached toolpath, and stitch chips
+        annotate `· → ring k` through the stitcher's own map.
+  Deferred by decision: G2/G3 text emission rides the post (M2.3),
+  helical/ramp entries stay M2.1's family, rest-material stock shading is
+  simulation work (M2.3/M4).
 - ⏸ **WCS face/vertex snap**: deferred again, honestly - it needs the
       vertex pick above; M1.2's box-point placement stands
 - ⏸ **View cube + navigation bar**: still the viewport affordances
       deferred from M1.4; orthogonal to selection
 
-Known limits from the M1.5.1 rework - each one refuses by name or
+Known limits from the M1.5.1/M1.5.2 reworks - each one refuses by name or
 degrades by rule, none guesses silently:
 
 - the material-side rule: an open run or chain-only ring is scored
@@ -278,12 +353,15 @@ degrades by rule, none guesses silently:
       Pocket always refused them, also by name
 - stitching is per-entity - two runs meeting across two model
       entities do not yet compose into one ring
-- chain and face ids are geometry digests: the smoother chaining rules
-      re-key picks on affected meshes, so old v4 projects show
+- chain, face and patch ids are geometry digests: the smoother chaining
+      rules re-key picks on affected meshes, so old v4 projects show
       "missing" on a handful of picks and need one re-pick (stale ids
-      refuse safely)
-- facing rows are still the M1.3 bbox serpentine: the region's holes
-      bound contour and pocket passes, not facing rows
+      refuse safely); patch ids live in their own namespace, so a weld
+      never claims a flat face's id, and re-welding a mesh re-keys
+      patches the same way
+- facing rows are still the M1.3 bbox serpentine, staged down since
+      M1.5.2: the region's holes bound contour and pocket passes, not
+      facing rows
 
 ### M1.6 - Drilling
 **Goal: a complete hole list is machined correctly.**
@@ -422,7 +500,7 @@ programming department.
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5 | ⚠️ |
-| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge pick modes, selection-driven contour and facing (open runs extend to stock), readable selection rows, height-plane guides, v4 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
+| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, translucent cut-region fills, v5 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
