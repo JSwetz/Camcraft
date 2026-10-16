@@ -25,6 +25,7 @@ use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus,
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::catalog;
+use hsmworks_app::verify::Warning;
 
 use crate::browser::kind_name;
 use crate::form;
@@ -317,8 +318,8 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
                 format!("Status: STALE - inputs moved since generation ({moves} move(s) cached)")
             }
         });
-        for w in &warnings {
-            ui.text_wrapped(format!("warning: {w}"));
+        for line in fold_warnings(&warnings) {
+            ui.text_wrapped(line);
         }
     }
 
@@ -1151,6 +1152,58 @@ fn retract_of(p: &OpParams) -> Option<Height> {
     }
 }
 
+/// One line per warning kind, not one per colliding move. verify records
+/// a ShankHit for every feed move the holder grazes stock on, so a deep
+/// finishing pass used to flood the pane with a wall of near-identical
+/// lines. The `Vec<Warning>` itself is the persisted cache format
+/// (project `OperationDto.cache`) - the fold lives here, in the display
+/// layer, and the full list still round-trips through the project file.
+/// Groups keep first-appearance order; `ShankHit`'s two flavors (stock
+/// vs part/island) group apart because they read differently and mean
+/// different fixes.
+pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
+    fn key(w: &Warning) -> (u8, bool) {
+        match w {
+            Warning::Crossing { .. } => (0, false),
+            Warning::Gouge { .. } => (1, false),
+            Warning::ShankHit { part, .. } => (2, *part),
+            Warning::RapidInStock { .. } => (3, false),
+            Warning::NonFinite { .. } => (4, false),
+        }
+    }
+    fn last_move(w: &Warning) -> usize {
+        match w {
+            Warning::Crossing { moves } => moves[1],
+            Warning::Gouge { at }
+            | Warning::ShankHit { at, .. }
+            | Warning::RapidInStock { at }
+            | Warning::NonFinite { at } => *at,
+        }
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut groups: Vec<((u8, bool), usize, usize)> = Vec::new();
+    for w in warnings {
+        match groups.iter_mut().find(|g| g.0 == key(w)) {
+            Some(g) => {
+                g.1 += 1;
+                g.2 = last_move(w);
+            }
+            None => {
+                groups.push((key(w), 1, last_move(w)));
+                lines.push(format!("warning: {w}"));
+            }
+        }
+    }
+    for (line, (_, count, last)) in lines.iter_mut().zip(&groups) {
+        let extra = count - 1;
+        if extra > 0 {
+            let noun = if extra == 1 { "move" } else { "moves" };
+            line.push_str(&format!(" - repeated on {extra} more {noun} (to {last})"));
+        }
+    }
+    lines
+}
+
 #[cfg(test)]
 mod height_row_tests {
     //! M1.5.3 step 3: the wording of a height row and its pane-wide note.
@@ -1247,5 +1300,77 @@ mod height_row_tests {
             "a fresh face skims the stock top - a Bottom default would cut through everything",
         );
         assert!(top_z.is_none(), "staging is opt-in, never a surprise default");
+    }
+}
+
+#[cfg(test)]
+mod warning_fold_tests {
+    //! M1.5.4 step 1: the display-side fold. The wall of identical
+    //! "shank/holder at move N" lines was the hand-test complaint; the
+    //! cache still stores every warning (file-format contract), the pane
+    //! must not print every one.
+
+    use super::fold_warnings;
+    use hsmworks_app::verify::Warning;
+
+    fn shank_run(from: usize, to: usize, part: bool) -> Vec<Warning> {
+        (from..=to)
+            .map(|at| Warning::ShankHit { at, part })
+            .collect()
+    }
+
+    #[test]
+    fn empty_and_singles_need_no_count() {
+        assert!(fold_warnings(&[]).is_empty());
+        assert_eq!(
+            fold_warnings(&[Warning::Gouge { at: 7 }]),
+            ["warning: move 7 cuts past the finish surface"]
+        );
+    }
+
+    #[test]
+    fn a_run_folds_to_its_first_line_plus_count() {
+        let folded = fold_warnings(&shank_run(1131, 1146, false));
+        assert_eq!(folded.len(), 1, "sixteen hits read as one line");
+        assert_eq!(
+            folded[0],
+            "warning: shank/holder at move 1131 collides with the uncut stock \
+             - repeated on 15 more moves (to 1146)"
+        );
+    }
+
+    #[test]
+    fn one_extra_repeat_reads_singular() {
+        let folded = fold_warnings(&shank_run(4, 5, false));
+        assert_eq!(
+            folded[0],
+            "warning: shank/holder at move 4 collides with the uncut stock \
+             - repeated on 1 more move (to 5)"
+        );
+    }
+
+    #[test]
+    fn flavors_group_apart_and_order_is_first_appearance() {
+        let mut w = shank_run(10, 12, false);
+        w.push(Warning::ShankHit { at: 500, part: true });
+        w.push(Warning::RapidInStock { at: 3 });
+        w.push(Warning::ShankHit { at: 540, part: true });
+        let folded = fold_warnings(&w);
+        assert_eq!(folded.len(), 3);
+        assert!(
+            folded[0].starts_with("warning: shank/holder at move 10 collides with the uncut stock"),
+            "{folded:?}"
+        );
+        // The island flavor leads with its own first hit, its run's end rides
+        // the suffix, and the interleave does not reorder the kinds.
+        assert_eq!(
+            folded[1],
+            "warning: shank/holder at move 500 collides with the part or an island \
+             - repeated on 1 more move (to 540)"
+        );
+        assert_eq!(
+            folded[2],
+            "warning: rapid move 3 travels below the clearance plane inside stock"
+        );
     }
 }
