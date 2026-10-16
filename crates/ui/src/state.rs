@@ -22,7 +22,7 @@ use hsmworks_app::commands::{
     SetOperationGeometry, SetStock, SetWcsOrigin,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
-use hsmworks_app::operation::{self, FeatureSel, GeoSel, OpParams, SrcRef};
+use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
 use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
@@ -206,12 +206,15 @@ impl Default for OpUi {
             src_kind: 0,
             src_name: String::new(),
             geo: Vec::new(),
-            // A facing pass over a small billet: sane numbers until edited,
-            // zeros would only be refused by the command layer.
+            // A facing pass over a small billet, in references: 25 above
+            // the stock top, skimming the stock top itself. `retype`
+            // carries this clearance into every kind, so the draft
+            // default must already be the seed shape the panes display -
+            // quick-add and the creation form then say the same thing.
             params: OpParams::Face {
                 stepover: 3.0,
-                clearance_z: 25.0,
-                cut_z: 0.0,
+                clearance_z: Height::of(HeightReference::TopOfStock, 25.0),
+                cut_z: Height::of(HeightReference::TopOfStock, 0.0),
                 top_z: None,
                 stepdown: None,
                 feed: 1200.0,

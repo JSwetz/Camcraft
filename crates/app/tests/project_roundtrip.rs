@@ -8,7 +8,7 @@ use hsmworks_app::commands::{
 };
 use hsmworks_app::geometry::feature;
 use hsmworks_app::machining2d::{Lead, PocketStrategy};
-use hsmworks_app::operation::{self, FeatureSel, GeoSel, OpParams, OpStatus, SrcRef};
+use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::Location;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
@@ -78,13 +78,14 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1/v2/v3/v4
+    // Anything newer than this build's format stays refused; v1/v2/v3/v4/v5
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
-    // v3_file_migrates_to_v4 / v4_file_migrates_to_v5).
-    let text = r#"{"version": 6, "entities": []}"#;
+    // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
+    // the v5 numeric heights -> v6 Fixed migration).
+    let text = r#"{"version": 7, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(6)) => {}
+        Err(ProjectError::UnsupportedVersion(7)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -332,8 +333,8 @@ fn tools_and_generated_operations_round_trip() {
             SrcRef::Stock,
             OpParams::Face {
                 stepover: 3.0,
-                clearance_z: 25.0,
-                cut_z: 19.5,
+                clearance_z: Height::fixed(25.0),
+                cut_z: Height::fixed(19.5),
                 top_z: None,
                 stepdown: None,
                 feed: 1200.0,
@@ -429,10 +430,10 @@ fn arc_move_round_trips() {
             SrcRef::Stock,
             OpParams::Contour {
                 stock_to_leave: 0.0,
-                clearance_z: 20.0,
-                retract_z: 15.0,
-                top_z: 10.0,
-                bottom_z: 8.0,
+                clearance_z: Height::fixed(20.0),
+                retract_z: Height::fixed(15.0),
+                top_z: Height::fixed(10.0),
+                bottom_z: Height::fixed(8.0),
                 stepdown: 2.0,
                 feed: 800.0,
                 plunge_feed: 200.0,
@@ -706,10 +707,10 @@ fn v5_roundtrips_retract_and_auto() {
             OpParams::Pocket {
                 stepover: 1.0,
                 stock_to_leave: 0.0,
-                clearance_z: 25.0,
-                retract_z: Some(22.0),
-                top_z: 20.0,
-                bottom_z: 18.0,
+                clearance_z: Height::fixed(25.0),
+                retract_z: Some(Height::fixed(22.0)),
+                top_z: Height::fixed(20.0),
+                bottom_z: Height::fixed(18.0),
                 stepdown: 2.0,
                 feed: 900.0,
                 plunge_feed: 250.0,
@@ -727,10 +728,10 @@ fn v5_roundtrips_retract_and_auto() {
             "EM-0400-2FL",
             SrcRef::Stock,
             OpParams::Trace {
-                clearance_z: 25.0,
-                retract_z: Some(23.0),
-                top_z: 20.0,
-                bottom_z: 18.0,
+                clearance_z: Height::fixed(25.0),
+                retract_z: Some(Height::fixed(23.0)),
+                top_z: Height::fixed(20.0),
+                bottom_z: Height::fixed(18.0),
                 stepdown: 2.0,
                 feed: 1200.0,
                 plunge_feed: 300.0,
@@ -759,14 +760,14 @@ fn v5_roundtrips_retract_and_auto() {
             strategy,
             ..
         } => {
-            assert_eq!(retract_z, Some(22.0), "the hop plane survives exactly");
+            assert_eq!(retract_z, Some(Height::fixed(22.0)), "the hop plane survives exactly");
             assert_eq!(strategy, PocketStrategy::Auto, "the choice survives exactly");
         }
         ref other => panic!("pocket params expected, got {other:?}"),
     }
     let tr = model::find_by_name(&world2, "Trace1").expect("trace loaded");
     match model::operation_of(&world2, &tr).expect("params").params {
-        OpParams::Trace { retract_z, .. } => assert_eq!(retract_z, Some(23.0)),
+        OpParams::Trace { retract_z, .. } => assert_eq!(retract_z, Some(Height::fixed(23.0))),
         ref other => panic!("trace params expected, got {other:?}"),
     }
 }
@@ -807,8 +808,8 @@ fn patch_selection_round_trips() {
             }]),
             OpParams::Face {
                 stepover: 3.0,
-                clearance_z: 25.0,
-                cut_z: 4.5,
+                clearance_z: Height::fixed(25.0),
+                cut_z: Height::fixed(4.5),
                 top_z: None,
                 stepdown: None,
                 feed: 1200.0,
@@ -882,10 +883,10 @@ fn a_selection_round_trips_and_stays_ok() {
         .expect("a horizontal rim edge");
     let params = OpParams::Contour {
         stock_to_leave: 0.0,
-        clearance_z: 10.0,
-        retract_z: 8.0,
-        top_z: 4.5,
-        bottom_z: 0.0,
+        clearance_z: Height::fixed(10.0),
+        retract_z: Height::fixed(8.0),
+        top_z: Height::fixed(4.5),
+        bottom_z: Height::fixed(0.0),
         stepdown: 2.5,
         feed: 800.0,
         plunge_feed: 200.0,

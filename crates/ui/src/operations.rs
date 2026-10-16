@@ -17,10 +17,11 @@
 use std::borrow::Cow;
 
 use dear_imgui_rs::{Ui, WindowKey};
+use flecs_ecs::prelude::World;
 use hsmworks_app::geo2d::Point2;
 use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy};
 use hsmworks_app::model;
-use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
+use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::catalog;
@@ -121,9 +122,8 @@ fn operation_page(ui: &Ui, state: &mut State, editing: Option<&str>) {
         if ui.combo("##op_kind", &mut kind_idx, TYPES.as_slice(), |t| {
             Cow::Borrowed(*t)
         }) {
-            let top = stock_top(&state.world);
             let cur = state.op_ui.params.clone();
-            state.op_ui.params = retype(&cur, kind_idx.min(4), top);
+            state.op_ui.params = retype(&cur, kind_idx.min(4));
         }
     }
 
@@ -547,6 +547,22 @@ fn model_page(ui: &Ui, state: &State, name: &str) {
     ui.text_wrapped("Selected now: Del removes it (undo restores).");
 }
 
+/// A height row: the offset input behind the reference the draft carries,
+/// plus the plane it resolves to - the number on screen never lies about
+/// where the tool goes, and an unavailable source says so instead of
+/// showing a stale z. The `From` combo arrives with the reference editor.
+fn height_row(ui: &Ui, id: &str, world: &World, h: &mut Height) {
+    ui.input_double(id, &mut h.offset);
+    ui.same_line();
+    match h.z(world) {
+        Some(z) => ui.text_disabled(format!("(= Z {z:.3})")),
+        None => ui.text_disabled(format!(
+            "(unresolved: {})",
+            operation::missing_source(world, h.reference).unwrap_or("source missing")
+        )),
+    }
+}
+
 /// The parameter fields of the draft's current variant. Edits go to the
 /// draft; the world sees them only through `EditOperationParams`.
 fn params_fields(ui: &Ui, state: &mut State) {
@@ -567,16 +583,18 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Stepover (Y spacing)");
             ui.input_double("##f_so", stepover);
             form::field(ui, "Clearance Z");
-            ui.input_double("##f_clr", clearance_z);
+            height_row(ui, "##f_clr", &state.world, clearance_z);
             form::field(ui, "Cut Z");
-            ui.input_double("##f_cut", cut_z);
+            height_row(ui, "##f_cut", &state.world, cut_z);
             // Off is the legacy single skim; on stages from Top Z down,
-            // prefilled one stepdown above Cut Z for the user to retune.
+            // prefilled one step above Cut Z in the same reference frame
+            // for the user to retune.
             form::field(ui, "Depth staging");
             let mut staged = top_z.is_some();
             if ui.checkbox("Stage down to Cut Z", &mut staged) {
+                let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
                 if staged {
-                    *top_z = Some(*cut_z + 1.0);
+                    *top_z = Some(seed);
                     *stepdown = Some(1.0);
                 } else {
                     *top_z = None;
@@ -585,7 +603,8 @@ fn params_fields(ui: &Ui, state: &mut State) {
             }
             if staged {
                 form::field(ui, "Top Z (first cut level)");
-                ui.input_double("##f_top", top_z.get_or_insert(*cut_z + 1.0));
+                let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
+                height_row(ui, "##f_top", &state.world, top_z.get_or_insert(seed));
                 form::field(ui, "Stepdown");
                 ui.input_double("##f_sd", stepdown.get_or_insert(1.0));
             }
@@ -614,18 +633,20 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Stock to leave");
             ui.input_double("##c_stl", stock_to_leave);
             form::field(ui, "Clearance Z");
-            ui.input_double("##c_clr", clearance_z);
+            height_row(ui, "##c_clr", &state.world, clearance_z);
             form::field(ui, "Retract Z (between passes)");
-            ui.input_double("##c_ret", retract_z);
-            if *retract_z > *clearance_z {
+            height_row(ui, "##c_ret", &state.world, retract_z);
+            if let (Some(r), Some(c)) = (retract_z.z(&state.world), clearance_z.z(&state.world))
+                && r > c
+            {
                 ui.text_wrapped(format!(
-                    "above clearance - the hop travels at {clearance_z:.3} (min of the two)"
+                    "above clearance - the hop travels at {c:.3} (min of the two)"
                 ));
             }
             form::field(ui, "Top Z");
-            ui.input_double("##c_top", top_z);
+            height_row(ui, "##c_top", &state.world, top_z);
             form::field(ui, "Bottom Z");
-            ui.input_double("##c_bot", bottom_z);
+            height_row(ui, "##c_bot", &state.world, bottom_z);
             form::field(ui, "Stepdown");
             ui.input_double("##c_sd", stepdown);
             form::field(ui, "Feed (mm/min)");
@@ -688,27 +709,33 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Stock to leave");
             ui.input_double("##p_stl", stock_to_leave);
             form::field(ui, "Clearance Z");
-            ui.input_double("##p_clr", clearance_z);
+            height_row(ui, "##p_clr", &state.world, clearance_z);
             // Off hops to clearance - the legacy shape; on lifts between
             // passes of one level to this plane, clamped at clearance.
             form::field(ui, "Retract plane");
             let mut hop = retract_z.is_some();
             if ui.checkbox("Hop below clearance", &mut hop) {
-                *retract_z = if hop { Some(*top_z + 1.0) } else { None };
+                *retract_z = if hop {
+                    Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                } else {
+                    None
+                };
             }
-            if let Some(z) = retract_z {
+            if let Some(r) = retract_z {
                 form::field(ui, "Retract Z");
-                ui.input_double("##p_ret", z);
-                if *z > *clearance_z {
+                height_row(ui, "##p_ret", &state.world, r);
+                if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
+                    && rz > cz
+                {
                     ui.text_wrapped(format!(
-                        "above clearance - the hop travels at {clearance_z:.3} (min of the two)"
+                        "above clearance - the hop travels at {cz:.3} (min of the two)"
                     ));
                 }
             }
             form::field(ui, "Top Z");
-            ui.input_double("##p_top", top_z);
+            height_row(ui, "##p_top", &state.world, top_z);
             form::field(ui, "Bottom Z");
-            ui.input_double("##p_bot", bottom_z);
+            height_row(ui, "##p_bot", &state.world, bottom_z);
             form::field(ui, "Stepdown");
             ui.input_double("##p_sd", stepdown);
             form::field(ui, "Feed (mm/min)");
@@ -766,11 +793,11 @@ fn params_fields(ui: &Ui, state: &mut State) {
             form::field(ui, "Stock to leave");
             ui.input_double("##s_stl", stock_to_leave);
             form::field(ui, "Clearance Z");
-            ui.input_double("##s_clr", clearance_z);
+            height_row(ui, "##s_clr", &state.world, clearance_z);
             form::field(ui, "Top Z");
-            ui.input_double("##s_top", top_z);
+            height_row(ui, "##s_top", &state.world, top_z);
             form::field(ui, "Bottom Z");
-            ui.input_double("##s_bot", bottom_z);
+            height_row(ui, "##s_bot", &state.world, bottom_z);
             form::field(ui, "Stepdown");
             ui.input_double("##s_sd", stepdown);
             form::field(ui, "Stepover");
@@ -792,27 +819,33 @@ fn params_fields(ui: &Ui, state: &mut State) {
             climb,
         } => {
             form::field(ui, "Clearance Z");
-            ui.input_double("##t_clr", clearance_z);
+            height_row(ui, "##t_clr", &state.world, clearance_z);
             // Engraved lines cut their own groove, so a low hop between
             // loops of one level is safe here; off hops to clearance.
             form::field(ui, "Retract plane");
             let mut hop = retract_z.is_some();
             if ui.checkbox("Hop below clearance", &mut hop) {
-                *retract_z = if hop { Some(*top_z + 1.0) } else { None };
+                *retract_z = if hop {
+                    Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                } else {
+                    None
+                };
             }
-            if let Some(z) = retract_z {
+            if let Some(r) = retract_z {
                 form::field(ui, "Retract Z");
-                ui.input_double("##t_ret", z);
-                if *z > *clearance_z {
+                height_row(ui, "##t_ret", &state.world, r);
+                if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
+                    && rz > cz
+                {
                     ui.text_wrapped(format!(
-                        "above clearance - the hop travels at {clearance_z:.3} (min of the two)"
+                        "above clearance - the hop travels at {cz:.3} (min of the two)"
                     ));
                 }
             }
             form::field(ui, "Top Z");
-            ui.input_double("##t_top", top_z);
+            height_row(ui, "##t_top", &state.world, top_z);
             form::field(ui, "Bottom Z");
-            ui.input_double("##t_bot", bottom_z);
+            height_row(ui, "##t_bot", &state.world, bottom_z);
             form::field(ui, "Stepdown");
             ui.input_double("##t_sd", stepdown);
             form::field(ui, "Feed (mm/min)");
@@ -877,29 +910,32 @@ fn auto_note(state: &State) -> Option<String> {
     )
 }
 
-/// Top of the stock solid: the natural default for a `Top Z`.
-fn stock_top(world: &flecs_ecs::prelude::World) -> f64 {
-    model::stock_world_aabb(world).map_or(0.0, |b| b.max.z)
-}
-
 /// Swap the draft's parameter variant, carrying over every shared number
 /// so re-typing an operation does not throw away feeds and heights.
-fn retype(cur: &OpParams, kind: usize, top: f64) -> OpParams {
+///
+/// Heights are references, not baked world numbers: a fresh op's Top is
+/// the part's own top surface and its Bottom the first work offset (G54),
+/// the planes the user actually points at - the complaint this replaces
+/// was an "arbitrary bottom" computed from the stock. Carried-over
+/// heights keep the reference they were saved with. Nothing resolves to
+/// a `top - 5.0` anymore; Face cuts one skim at the stock top (`cut_z`
+/// is a single plane, so a deeper reference would cut through the whole
+/// stock in the default op - the same safe z retype produced before).
+fn retype(cur: &OpParams, kind: usize) -> OpParams {
     let feed = feed_of(cur);
     let plunge = plunge_of(cur);
     let climb = climb_of(cur);
-    let clearance = cur.clearance_z();
+    let clearance = cur.clearance();
     let stepover = stepover_of(cur).unwrap_or(3.0);
     let stepdown = stepdown_of(cur).unwrap_or(5.0);
-    let bottom = match bottom_of(cur) {
-        Some(b) if b < top => b,
-        _ => top - 5.0,
-    };
+    let top = top_of(cur).unwrap_or_else(|| Height::of(HeightReference::TopOfModel, 0.0));
+    let bottom = bottom_of(cur).unwrap_or_else(|| Height::of(HeightReference::WorkOffset(0), 0.0));
+    let retract = retract_of(cur).unwrap_or_else(|| Height::of(HeightReference::TopOfStock, 10.0));
     match kind {
         1 => OpParams::Contour {
             stock_to_leave: 0.0,
             clearance_z: clearance,
-            retract_z: top + 10.0,
+            retract_z: retract,
             top_z: top,
             bottom_z: bottom,
             stepdown,
@@ -955,7 +991,7 @@ fn retype(cur: &OpParams, kind: usize, top: f64) -> OpParams {
         _ => OpParams::Face {
             stepover,
             clearance_z: clearance,
-            cut_z: top,
+            cut_z: Height::of(HeightReference::TopOfStock, 0.0),
             // A fresh face cuts one level; staging is opt-in in the
             // panel, never a surprise default.
             top_z: None,
@@ -968,10 +1004,11 @@ fn retype(cur: &OpParams, kind: usize, top: f64) -> OpParams {
 }
 
 /// Parameter set a ribbon quick-add starts an operation of `kind` with:
-/// the draft defaults, retyped onto the stock top - the same numbers the
-/// creation form would have prefilled.
-pub(crate) fn quick_params(world: &flecs_ecs::prelude::World, kind: usize) -> OpParams {
-    retype(&crate::state::OpUi::default().params, kind, stock_top(world))
+/// the draft defaults, retyped - the same heights the creation form
+/// would have prefilled. No world argument: the seeds are references,
+/// and generation resolves them against whatever the document holds.
+pub(crate) fn quick_params(kind: usize) -> OpParams {
+    retype(&crate::state::OpUi::default().params, kind)
 }
 
 fn feed_of(p: &OpParams) -> f64 {
@@ -1023,12 +1060,34 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
     }
 }
 
-fn bottom_of(p: &OpParams) -> Option<f64> {
+fn bottom_of(p: &OpParams) -> Option<Height> {
     match p {
         OpParams::Contour { bottom_z, .. }
         | OpParams::Pocket { bottom_z, .. }
         | OpParams::Slot { bottom_z, .. }
         | OpParams::Trace { bottom_z, .. } => Some(*bottom_z),
+        _ => None,
+    }
+}
+
+fn top_of(p: &OpParams) -> Option<Height> {
+    match p {
+        OpParams::Contour { top_z, .. }
+        | OpParams::Pocket { top_z, .. }
+        | OpParams::Slot { top_z, .. }
+        | OpParams::Trace { top_z, .. } => Some(*top_z),
+        _ => None,
+    }
+}
+
+/// The between-pass hop plane, present or not: Contour always stores one,
+/// the other hopped kinds keep it in an option (None hops to clearance).
+fn retract_of(p: &OpParams) -> Option<Height> {
+    match p {
+        OpParams::Contour { retract_z, .. } => Some(*retract_z),
+        OpParams::Pocket { retract_z, .. }
+        | OpParams::Slot { retract_z, .. }
+        | OpParams::Trace { retract_z, .. } => *retract_z,
         _ => None,
     }
 }

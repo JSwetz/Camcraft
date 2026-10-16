@@ -1,4 +1,4 @@
-//! Project save/load: `.hsmproj`, JSON, version 5.
+//! Project save/load: `.hsmproj`, JSON, version 6.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -24,13 +24,21 @@
 //! a v4 file changes nothing in meaning, and a v5 build that has not
 //! wired one of these yet round-trips files that carry it without
 //! breaking it. Later steps wire the fields to the generators; the
-//! format does not move again. v1/v2/v3/v4 files migrate on load, one
-//! version step at a time.
+//! format does not move again. v6 is the heights landing shape: every
+//! operation height field (`clearance_z`, `top_z`, `bottom_z`,
+//! `retract_z`, `cut_z`) is now a From+Offset expression
+//! (`{"reference": ..., "offset": ...}`, see `HeightDto`), and a bare
+//! number - the whole v5 grammar for a height - still reads, as
+//! `{"reference": "fixed", "offset": n}` with the saved z preserved to
+//! the bit. Work-offset references name a `G54..G59` slot; the slots'
+//! placements were already persisted in every entity's
+//! `translation`/`rotation`, so nothing else about the file moved.
+//! v1/v2/v3/v4/v5 files migrate on load, one version step at a time.
 
 use std::path::Path;
 
 use flecs_ecs::prelude::World;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::cl::{Move, MoveKind, Toolpath, lattice};
 use crate::geo2d::Point2;
@@ -45,7 +53,7 @@ use crate::stock::{self, StockShape};
 use crate::tools::{Tool, ToolKind};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 5;
+pub const PROJECT_VERSION: u32 = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -221,24 +229,24 @@ pub enum FeatureSelDto {
 pub enum ParamsDto {
     Face {
         stepover: f64,
-        clearance_z: f64,
-        cut_z: f64,
+        clearance_z: HeightDto,
+        cut_z: HeightDto,
         feed: f64,
         plunge_feed: f64,
         climb: bool,
         /// Declared at v5, wired in step 4: absent (or the defaults) is
         /// exactly the legacy single-level face.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        top_z: Option<f64>,
+        top_z: Option<HeightDto>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stepdown: Option<f64>,
     },
     Contour {
         stock_to_leave: f64,
-        clearance_z: f64,
-        retract_z: f64,
-        top_z: f64,
-        bottom_z: f64,
+        clearance_z: HeightDto,
+        retract_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
         stepdown: f64,
         feed: f64,
         plunge_feed: f64,
@@ -252,9 +260,9 @@ pub enum ParamsDto {
     Pocket {
         stepover: f64,
         stock_to_leave: f64,
-        clearance_z: f64,
-        top_z: f64,
-        bottom_z: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
         stepdown: f64,
         feed: f64,
         plunge_feed: f64,
@@ -263,18 +271,18 @@ pub enum ParamsDto {
         /// Declared at v5, wired in step 5: absent is exactly "hop to
         /// clearance", the behavior every pre-v5 pocket had.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        retract_z: Option<f64>,
+        retract_z: Option<HeightDto>,
     },
     Slot {
         a: [f64; 2],
         b: [f64; 2],
         width: f64,
         stock_to_leave: f64,
-        clearance_z: f64,
+        clearance_z: HeightDto,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        retract_z: Option<f64>,
-        top_z: f64,
-        bottom_z: f64,
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
         stepdown: f64,
         stepover: f64,
         feed: f64,
@@ -282,16 +290,110 @@ pub enum ParamsDto {
         climb: bool,
     },
     Trace {
-        clearance_z: f64,
+        clearance_z: HeightDto,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        retract_z: Option<f64>,
-        top_z: f64,
-        bottom_z: f64,
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
         stepdown: f64,
         feed: f64,
         plunge_feed: f64,
         climb: bool,
     },
+}
+
+/// The reference part of a stored height. Serialized as a plain string;
+/// `work_offset` carries its slot number.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HeightRefDto {
+    Fixed,
+    TopOfStock,
+    BottomOfStock,
+    TopOfModel,
+    BottomOfModel,
+    WorkOffset { slot: usize },
+}
+
+/// One stored height: `{"reference": ..., "offset": z}`. A bare number
+/// still deserializes (`HeightWire`) as a `Fixed` expression carrying
+/// exactly that number - the exact v5 value, so every pre-v6 file reads
+/// unchanged with its saved z preserved to the bit. Writing always
+/// produces the expression form.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+pub struct HeightDto {
+    pub reference: HeightRefDto,
+    pub offset: f64,
+}
+
+impl<'de> Deserialize<'de> for HeightDto {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        HeightWire::deserialize(deserializer).map(HeightDto::from)
+    }
+}
+
+/// The two shapes a height takes on the wire. `Expr`'s fields are spelled
+/// inline rather than nesting `HeightDto`, whose own `Deserialize` routes
+/// back through here - the indirection must stay one-way, or parsing an
+/// expression form recurses until the stack is gone.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum HeightWire {
+    Legacy(f64),
+    Expr {
+        reference: HeightRefDto,
+        #[serde(default)]
+        offset: f64,
+    },
+}
+
+impl From<HeightWire> for HeightDto {
+    fn from(v: HeightWire) -> Self {
+        match v {
+            HeightWire::Legacy(z) => HeightDto { reference: HeightRefDto::Fixed, offset: z },
+            HeightWire::Expr { reference, offset } => HeightDto { reference, offset },
+        }
+    }
+}
+
+impl From<crate::operation::Height> for HeightDto {
+    fn from(h: crate::operation::Height) -> Self {
+        HeightDto { reference: h.reference.into(), offset: h.offset }
+    }
+}
+
+impl From<HeightDto> for crate::operation::Height {
+    fn from(d: HeightDto) -> Self {
+        crate::operation::Height { reference: d.reference.into(), offset: d.offset }
+    }
+}
+
+impl From<crate::operation::HeightReference> for HeightRefDto {
+    fn from(r: crate::operation::HeightReference) -> Self {
+        use crate::operation::HeightReference as R;
+        match r {
+            R::Fixed => HeightRefDto::Fixed,
+            R::TopOfStock => HeightRefDto::TopOfStock,
+            R::BottomOfStock => HeightRefDto::BottomOfStock,
+            R::TopOfModel => HeightRefDto::TopOfModel,
+            R::BottomOfModel => HeightRefDto::BottomOfModel,
+            R::WorkOffset(slot) => HeightRefDto::WorkOffset { slot },
+        }
+    }
+}
+
+impl From<HeightRefDto> for crate::operation::HeightReference {
+    fn from(d: HeightRefDto) -> Self {
+        use crate::operation::HeightReference as R;
+        match d {
+            HeightRefDto::Fixed => R::Fixed,
+            HeightRefDto::TopOfStock => R::TopOfStock,
+            HeightRefDto::BottomOfStock => R::BottomOfStock,
+            HeightRefDto::TopOfModel => R::TopOfModel,
+            HeightRefDto::BottomOfModel => R::BottomOfModel,
+            HeightRefDto::WorkOffset { slot } => R::WorkOffset(slot),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -328,12 +430,12 @@ impl ParamsDto {
             } => {
                 ParamsDto::Face {
                     stepover: *stepover,
-                    clearance_z: *clearance_z,
-                    cut_z: *cut_z,
+                    clearance_z: (*clearance_z).into(),
+                    cut_z: (*cut_z).into(),
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     climb: *climb,
-                    top_z: *top_z,
+                    top_z: (*top_z).map(Into::into),
                     stepdown: *stepdown,
                 }
             }
@@ -354,10 +456,10 @@ impl ParamsDto {
                 tab_height,
             } => ParamsDto::Contour {
                 stock_to_leave: *stock_to_leave,
-                clearance_z: *clearance_z,
-                retract_z: *retract_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
@@ -387,9 +489,9 @@ impl ParamsDto {
             } => ParamsDto::Pocket {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
-                clearance_z: *clearance_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
@@ -401,7 +503,7 @@ impl ParamsDto {
                 },
                 // Absent means the hop-to-clearance every pre-step-5
                 // pocket performed; a set plane round-trips exactly.
-                retract_z: *retract_z,
+                retract_z: (*retract_z).map(Into::into),
             },
             OpParams::Slot {
                 a,
@@ -422,10 +524,10 @@ impl ParamsDto {
                 b: [b.x, b.y],
                 width: *width,
                 stock_to_leave: *stock_to_leave,
-                clearance_z: *clearance_z,
-                retract_z: *retract_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
                 stepover: *stepover,
                 feed: *feed,
@@ -442,10 +544,10 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
             } => ParamsDto::Trace {
-                clearance_z: *clearance_z,
-                retract_z: *retract_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
@@ -462,9 +564,9 @@ impl ParamsDto {
             ParamsDto::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb } => {
                 OpParams::Face {
                     stepover: *stepover,
-                    clearance_z: *clearance_z,
-                    cut_z: *cut_z,
-                    top_z: *top_z,
+                    clearance_z: (*clearance_z).into(),
+                    cut_z: (*cut_z).into(),
+                    top_z: (*top_z).map(Into::into),
                     stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
@@ -488,10 +590,10 @@ impl ParamsDto {
                 tab_height,
             } => OpParams::Contour {
                 stock_to_leave: *stock_to_leave,
-                clearance_z: *clearance_z,
-                retract_z: *retract_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
@@ -521,10 +623,10 @@ impl ParamsDto {
             } => OpParams::Pocket {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
-                clearance_z: *clearance_z,
-                retract_z: *retract_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
@@ -554,10 +656,10 @@ impl ParamsDto {
                 b: Point2::new(b[0], b[1]),
                 width: *width,
                 stock_to_leave: *stock_to_leave,
-                clearance_z: *clearance_z,
-                retract_z: *retract_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
                 stepover: *stepover,
                 feed: *feed,
@@ -574,10 +676,10 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
             } => OpParams::Trace {
-                clearance_z: *clearance_z,
-                retract_z: *retract_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
@@ -889,6 +991,13 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // file needs no content change to live in v5 - the step-up is
         // the stamp itself, like v3 -> v4.
         file.version = 5;
+    }
+    if file.version == 5 {
+        // v5 -> v6: heights became From+Offset expressions, and the
+        // wire (`HeightWire`) already read a bare number as the exact
+        // `Fixed` expression - every v5 height keeps its z to the bit.
+        // Like v4 -> v5, the step-up is the stamp itself.
+        file.version = 6;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

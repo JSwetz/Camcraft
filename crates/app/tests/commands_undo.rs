@@ -342,7 +342,7 @@ use hsmworks_app::commands::{
     AddTool, CreateOperation, EditOperationLinks, GenerateOperation, SetOperationGeometry,
 };
 use hsmworks_app::geometry::feature::FaceKind;
-use hsmworks_app::operation::{self, FeatureSel, GeoSel, OpParams, SrcRef};
+use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, SrcRef};
 use hsmworks_app::tools::catalog;
 
 fn cat_tool(name: &str) -> hsmworks_app::tools::Tool {
@@ -356,8 +356,8 @@ fn cat_tool(name: &str) -> hsmworks_app::tools::Tool {
 fn face_params() -> OpParams {
     OpParams::Face {
         stepover: 3.0,
-        clearance_z: 25.0,
-        cut_z: 4.5,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(4.5),
         top_z: None,
         stepdown: None,
         feed: 1200.0,

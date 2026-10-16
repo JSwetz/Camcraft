@@ -88,7 +88,7 @@ pub(crate) fn add_operation(state: &mut State, kind: usize) {
         }
         n += 1;
     };
-    let params = quick_params(&state.world, kind);
+    let params = quick_params(kind);
     state.pending.push_back(CommandKind::CreateOperation {
         name: name.clone(),
         tool,

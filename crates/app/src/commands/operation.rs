@@ -110,6 +110,15 @@ impl CreateOperation {
                 params.kind()
             )));
         }
+        // Ordering needs resolved heights, and the world is in hand right
+        // here: an operation that would cut upward is refused at creation
+        // (AGENTS.md: validate early), not deep in the generator.
+        if !crate::operation::depth_sane(world, &params) {
+            return Err(CommandError::Invalid(format!(
+                "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
+                params.kind()
+            )));
+        }
         Ok(CreateOperation {
             name: name.to_string(),
             operation: Operation {
@@ -168,6 +177,12 @@ impl EditOperationParams {
         if !params.is_sane() {
             return Err(CommandError::Invalid(format!(
                 "operation parameters are not usable for a {} operation",
+                params.kind()
+            )));
+        }
+        if !crate::operation::depth_sane(world, &params) {
+            return Err(CommandError::Invalid(format!(
+                "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
                 params.kind()
             )));
         }

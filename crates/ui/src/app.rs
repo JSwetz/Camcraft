@@ -829,8 +829,8 @@ const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
 /// own one-liner; the values are not hashed for equality, only churned.
 fn fold_heights(params: &operation::OpParams) -> u64 {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
-    let mut eat = |v: f64| {
-        h ^= v.to_bits();
+    let mut eat = |v: u64| {
+        h ^= v;
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     };
     eat(match params {
@@ -839,18 +839,31 @@ fn fold_heights(params: &operation::OpParams) -> u64 {
         operation::OpParams::Pocket { .. } => 2,
         operation::OpParams::Slot { .. } => 3,
         operation::OpParams::Trace { .. } => 4,
-    } as f64);
-    eat(params.clearance_z());
-    eat(params.region_z());
+    });
+    // The reference itself, never the resolved z: a moved source changes
+    // the planes through the document version (the other key half), and
+    // two references that happen to resolve equal must still tell
+    // drafts apart.
+    let mut eat_h = |height: &operation::Height| {
+        eat(height.reference.kind_index() as u64);
+        eat(height.reference.wcs_slot() as u64);
+        eat(height.offset.to_bits());
+    };
+    eat_h(&params.clearance());
+    eat_h(&params.region_height());
     match params {
-        operation::OpParams::Face { .. } => {}
+        operation::OpParams::Face { top_z, .. } => {
+            if let Some(t) = top_z {
+                eat_h(t);
+            }
+        }
         operation::OpParams::Contour { retract_z, bottom_z, .. } => {
-            eat(*retract_z);
-            eat(*bottom_z);
+            eat_h(retract_z);
+            eat_h(bottom_z);
         }
         operation::OpParams::Pocket { bottom_z, .. }
         | operation::OpParams::Slot { bottom_z, .. }
-        | operation::OpParams::Trace { bottom_z, .. } => eat(*bottom_z),
+        | operation::OpParams::Trace { bottom_z, .. } => eat_h(bottom_z),
     }
     h
 }
@@ -941,7 +954,10 @@ pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
         let Some(op) = model::operation_of(&state.world, &entity) else {
             continue;
         };
-        let z = op.params.region_z();
+        let Some(z) = operation::region_z(&state.world, &op.params) else {
+            continue; // the region plane's source is gone - draw nothing
+                      // rather than an outline at a guessed level
+        };
         if let Some(region) = operation::region_of(&state.world, &op) {
             for l in region.loops() {
                 let pts = l.points();
@@ -993,8 +1009,10 @@ pub(crate) fn shown_regions(state: &State) -> Vec<(f64, Option<Region>)> {
             continue;
         };
         let region = operation::region_of(&state.world, &op);
-        if region.is_some() || !operation::chains_of(&state.world, &op).is_empty() {
-            out.push((op.params.region_z(), region));
+        if let Some(z) = operation::region_z(&state.world, &op.params)
+            && (region.is_some() || !operation::chains_of(&state.world, &op).is_empty())
+        {
+            out.push((z, region));
         }
     }
     out
@@ -1047,45 +1065,38 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
     // plane rectangles answer to one predicate, never two.
     let levels = shown_region_levels(state);
     let stands = |z: f64| levels.contains(&z);
-    let mut out = vec![HeightPlane {
-        z: draft.clearance_z(),
-        rgb: CLEARANCE_RGB,
-        name: "Clearance",
-        corner: 0,
-        skip_rect: false,
-    }];
-    // Retract is the between-pass hop plane, every kind that stores one.
-    // It draws at the effective hop - `min(retract, clearance)` - because
-    // that is the Z the rapids actually travel at, even when a legacy
-    // file parked retract above clearance. Kinds whose retract is unset
-    // hop at clearance and get no extra plane: the Clearance plane above
-    // already says where those rapids run.
-    let hop = match draft {
-        operation::OpParams::Contour {
-            retract_z,
-            clearance_z,
-            ..
-        } => Some(retract_z.min(*clearance_z)),
-        operation::OpParams::Pocket {
-            retract_z,
-            clearance_z,
-            ..
-        }
-        | operation::OpParams::Slot {
-            retract_z,
-            clearance_z,
-            ..
-        }
-        | operation::OpParams::Trace {
-            retract_z,
-            clearance_z,
-            ..
-        } => retract_z.map(|r| r.min(*clearance_z)),
-        operation::OpParams::Face { .. } => None,
-    };
-    if let Some(z) = hop {
+    // Heights resolve against the world before they reach the viewport:
+    // an unavailable source drops its plane (never a rectangle at a
+    // guessed z) - the panel says why, and generation refuses by name.
+    let world = &state.world;
+    let mut out = Vec::new();
+    if let Some(z) = draft.clearance().z(world) {
         out.push(HeightPlane {
             z,
+            rgb: CLEARANCE_RGB,
+            name: "Clearance",
+            corner: 0,
+            skip_rect: false,
+        });
+    }
+    // Retract is the between-pass hop plane, every kind that stores one.
+    // It draws at the effective hop - `min(retract, clearance)` of the
+    // RESOLVED planes - because that is the Z the rapids actually travel
+    // at, even when a legacy file parked retract above clearance. Kinds
+    // whose retract is unset hop at clearance and get no extra plane: the
+    // Clearance plane above already says where those rapids run.
+    let hop = match draft {
+        operation::OpParams::Contour { retract_z, .. } => Some(*retract_z),
+        operation::OpParams::Pocket { retract_z, .. }
+        | operation::OpParams::Slot { retract_z, .. }
+        | operation::OpParams::Trace { retract_z, .. } => *retract_z,
+        operation::OpParams::Face { .. } => None,
+    };
+    if let Some(hop) = hop
+        && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
+    {
+        out.push(HeightPlane {
+            z: r.min(c),
             rgb: RETRACT_RGB,
             name: "Retract",
             corner: 1,
@@ -1098,45 +1109,55 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // stages: then its Top is the first level, drawn like the depth
         // kinds' Top, with the finished Cut below it.
         operation::OpParams::Face { top_z, cut_z, .. } => {
-            if let Some(t) = top_z.filter(|t| *t != *cut_z) {
+            let cut = cut_z.z(world);
+            if let (Some(t), Some(c)) = ((*top_z).to_owned(), cut)
+                && let Some(tz) = t.z(world)
+                && tz != c
+            {
                 out.push(HeightPlane {
-                    z: t,
+                    z: tz,
                     rgb: REGION_RGB,
                     name: "Top",
                     corner: 1,
-                    skip_rect: stands(t),
+                    skip_rect: stands(tz),
                 });
             }
-            out.push(HeightPlane {
-                z: *cut_z,
-                rgb: CUT_RGB,
-                name: "Cut",
-                corner: 2,
-                // Stands only where no outline is painted AT the cut
-                // level: a staged Face's outline sits up at its Top, so
-                // the finished Cut keeps its own rectangle - the old
-                // blanket flag used to erase it.
-                skip_rect: stands(*cut_z),
-            });
+            if let Some(z) = cut {
+                out.push(HeightPlane {
+                    z,
+                    rgb: CUT_RGB,
+                    name: "Cut",
+                    corner: 2,
+                    // Stands only where no outline is painted AT the cut
+                    // level: a staged Face's outline sits up at its Top,
+                    // so the finished Cut keeps its own rectangle - the
+                    // old blanket flag used to erase it.
+                    skip_rect: stands(z),
+                });
+            }
         }
         operation::OpParams::Contour { top_z, bottom_z, .. }
         | operation::OpParams::Pocket { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
         | operation::OpParams::Trace { top_z, bottom_z, .. } => {
-            out.push(HeightPlane {
-                z: *top_z,
-                rgb: REGION_RGB,
-                name: "Top",
-                corner: 2,
-                skip_rect: stands(*top_z),
-            });
-            out.push(HeightPlane {
-                z: *bottom_z,
-                rgb: CUT_RGB,
-                name: "Bottom",
-                corner: 3,
-                skip_rect: false,
-            });
+            if let Some(z) = top_z.z(world) {
+                out.push(HeightPlane {
+                    z,
+                    rgb: REGION_RGB,
+                    name: "Top",
+                    corner: 2,
+                    skip_rect: stands(z),
+                });
+            }
+            if let Some(z) = bottom_z.z(world) {
+                out.push(HeightPlane {
+                    z,
+                    rgb: CUT_RGB,
+                    name: "Bottom",
+                    corner: 3,
+                    skip_rect: false,
+                });
+            }
         }
     }
     out.retain(|p| p.z.is_finite());
@@ -2212,7 +2233,7 @@ mod path_tests {
     use super::*;
     use hsmworks_app::commands::{AddTool, CreateOperation, GenerateOperation, ImportModel};
     use hsmworks_app::geometry::cube;
-    use hsmworks_app::operation::{OpParams, SrcRef};
+    use hsmworks_app::operation::{Height, OpParams, SrcRef};
     use hsmworks_app::stock::StockShape;
     use hsmworks_app::tools::catalog;
 
@@ -2245,8 +2266,8 @@ mod path_tests {
                 SrcRef::Stock,
                 OpParams::Face {
                     stepover: 3.0,
-                    clearance_z: 25.0,
-                    cut_z: 19.5,
+                    clearance_z: Height::fixed(25.0),
+                    cut_z: Height::fixed(19.5),
                     top_z: None,
                     stepdown: None,
                     feed: 1200.0,
@@ -2367,10 +2388,10 @@ mod path_tests {
                 SrcRef::Stock,
                 OpParams::Contour {
                     stock_to_leave: 0.0,
-                    clearance_z: 20.0,
-                    retract_z: 15.0,
-                    top_z: 10.0,
-                    bottom_z: 8.0,
+                    clearance_z: Height::fixed(20.0),
+                    retract_z: Height::fixed(15.0),
+                    top_z: Height::fixed(10.0),
+                    bottom_z: Height::fixed(8.0),
                     stepdown: 2.0,
                     feed: 800.0,
                     plunge_feed: 200.0,
@@ -2481,7 +2502,7 @@ mod preview_tests {
     use super::*;
     use hsmworks_app::commands::ImportModel;
     use hsmworks_app::geometry::cube;
-    use hsmworks_app::operation::{OpParams, SrcRef};
+    use hsmworks_app::operation::{Height, OpParams, SrcRef};
     use hsmworks_app::stock::StockShape;
     use hsmworks_app::tools::catalog;
 
@@ -2512,8 +2533,8 @@ mod preview_tests {
                 src: SrcRef::Stock,
                 params: OpParams::Face {
                     stepover: 3.0,
-                    clearance_z: 25.0,
-                    cut_z: 19.5,
+                    clearance_z: Height::fixed(25.0),
+                    cut_z: Height::fixed(19.5),
                     top_z: None,
                     stepdown: None,
                     feed: 1200.0,
@@ -2550,8 +2571,8 @@ mod preview_tests {
             name: "Face1".into(),
             params: OpParams::Face {
                 stepover: 3.0,
-                clearance_z: 25.0,
-                cut_z: 10.0,
+                clearance_z: Height::fixed(25.0),
+                cut_z: Height::fixed(10.0),
                 top_z: None,
                 stepdown: None,
                 feed: 1200.0,
@@ -2802,7 +2823,7 @@ mod feature_pick_tests {
     use super::*;
     use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
     use hsmworks_app::geometry::{cube, cylinder};
-    use hsmworks_app::operation::{GeoSel, OpParams, SrcRef};
+    use hsmworks_app::operation::{GeoSel, Height, OpParams, SrcRef};
     use hsmworks_app::stock::StockShape;
     use hsmworks_app::tools::catalog;
 
@@ -2835,8 +2856,8 @@ mod feature_pick_tests {
                 SrcRef::Stock,
                 OpParams::Face {
                     stepover: 3.0,
-                    clearance_z: 25.0,
-                    cut_z: 4.5,
+                    clearance_z: Height::fixed(25.0),
+                    cut_z: Height::fixed(4.5),
                     top_z: None,
                     stepdown: None,
                     feed: 1200.0,
@@ -3060,17 +3081,17 @@ mod height_plane_tests {
     use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
     use hsmworks_app::geometry::cube;
     use hsmworks_app::machining2d::{Lead, PocketStrategy};
-    use hsmworks_app::operation::{OpParams, SrcRef};
+    use hsmworks_app::operation::{Height, OpParams, SrcRef};
     use hsmworks_app::stock::StockShape;
     use hsmworks_app::tools::catalog;
 
-    fn contour(clearance_z: f64) -> OpParams {
+    fn contour(clearance_z: Height) -> OpParams {
         OpParams::Contour {
             stock_to_leave: 0.0,
             clearance_z,
-            retract_z: 15.0,
-            top_z: 10.0,
-            bottom_z: 2.0,
+            retract_z: Height::fixed(15.0),
+            top_z: Height::fixed(10.0),
+            bottom_z: Height::fixed(2.0),
             stepdown: 2.0,
             feed: 800.0,
             plunge_feed: 200.0,
@@ -3087,10 +3108,10 @@ mod height_plane_tests {
         OpParams::Pocket {
             stepover: 3.0,
             stock_to_leave: 0.0,
-            clearance_z: 25.0,
+            clearance_z: Height::fixed(25.0),
             retract_z: None,
-            top_z: 10.0,
-            bottom_z: 2.0,
+            top_z: Height::fixed(10.0),
+            bottom_z: Height::fixed(2.0),
             stepdown: 2.0,
             feed: 800.0,
             plunge_feed: 200.0,
@@ -3151,7 +3172,7 @@ mod height_plane_tests {
 
     #[test]
     fn height_planes_draw_for_open_contour_only_where_defined() {
-        let state = state_with("C1", contour(25.0));
+        let state = state_with("C1", contour(Height::fixed(25.0)));
         let lines = height_plane_lines(&state);
         assert_eq!(count_at(&lines, 25.0, CLEARANCE_RGB), 8, "clearance rectangle");
         assert_eq!(count_at(&lines, 15.0, RETRACT_RGB), 8, "retract is a Contour level");
@@ -3189,9 +3210,9 @@ mod height_plane_tests {
             "F1",
             OpParams::Face {
                 stepover: 3.0,
-                clearance_z: 25.0,
-                cut_z: 18.0,
-                top_z: Some(20.0),
+                clearance_z: Height::fixed(25.0),
+                cut_z: Height::fixed(18.0),
+                top_z: Some(Height::fixed(20.0)),
                 stepdown: Some(1.0),
                 feed: 1200.0,
                 plunge_feed: 400.0,
@@ -3214,8 +3235,8 @@ mod height_plane_tests {
             "F2",
             OpParams::Face {
                 stepover: 3.0,
-                clearance_z: 25.0,
-                cut_z: 18.0,
+                clearance_z: Height::fixed(25.0),
+                cut_z: Height::fixed(18.0),
                 top_z: None,
                 stepdown: None,
                 feed: 1200.0,
@@ -3233,7 +3254,7 @@ mod height_plane_tests {
 
     #[test]
     fn height_planes_stand_in_when_the_source_bounds_nothing() {
-        let mut state = state_with("C1", contour(25.0));
+        let mut state = state_with("C1", contour(Height::fixed(25.0)));
         // The hand-test C shape from the other side: an operation whose
         // source vanished shows no region outline, so the Top rectangle
         // appears in its orange to mark the level all the same.
@@ -3246,10 +3267,10 @@ mod height_plane_tests {
 
     #[test]
     fn height_planes_track_draft_edits() {
-        let mut state = state_with("C1", contour(25.0));
+        let mut state = state_with("C1", contour(Height::fixed(25.0)));
         let before = draft_key(&state);
         if let OpParams::Contour { clearance_z, .. } = &mut state.op_ui.params {
-            *clearance_z = 30.0;
+            *clearance_z = Height::fixed(30.0);
         }
         assert_ne!(draft_key(&state), before, "a spin edit must re-gate the overlay rebuild");
         let lines = height_plane_lines(&state);
@@ -3259,7 +3280,7 @@ mod height_plane_tests {
 
     #[test]
     fn plane_labels_stay_inside_the_viewport() {
-        let mut state = state_with("C1", contour(25.0));
+        let mut state = state_with("C1", contour(Height::fixed(25.0)));
         // Zoom so tight the padded rectangle's corners project far off
         // frame: their labels must ride the margin, not vanish with the
         // corner. (project_uv itself is untouched - picking needs true
@@ -3288,7 +3309,7 @@ mod height_plane_tests {
 
     #[test]
     fn plane_labels_name_their_operation() {
-        let state = state_with("Operation1", contour(25.0));
+        let state = state_with("Operation1", contour(Height::fixed(25.0)));
         let texts: Vec<String> = overlay_labels(&state, 800.0 / 600.0)
             .into_iter()
             .map(|(_, _, t)| t)
@@ -3310,7 +3331,7 @@ mod height_plane_tests {
         let state = State::new();
         assert!(height_planes(&state).is_empty() && height_plane_lines(&state).is_empty());
         // A name typed but not an operation: no planes, no phantom labels.
-        let mut typed = state_with("C1", contour(25.0));
+        let mut typed = state_with("C1", contour(Height::fixed(25.0)));
         typed.op_ui.name = "Ghost".into();
         assert!(height_planes(&typed).is_empty());
         assert!(height_plane_lines(&typed).is_empty());
@@ -3328,10 +3349,10 @@ mod height_plane_tests {
         // level it will never cut. Staged, Top appears at the first level,
         // and editing the draft walks it live, the same honesty rule the
         // depth kinds follow.
-        let face_at = |top_z: Option<f64>| OpParams::Face {
+        let face_at = |top_z: Option<Height>| OpParams::Face {
             stepover: 8.0,
-            clearance_z: 15.0,
-            cut_z: 2.0,
+            clearance_z: Height::fixed(15.0),
+            cut_z: Height::fixed(2.0),
             top_z,
             stepdown: if top_z.is_some() { Some(2.0) } else { None },
             feed: 800.0,
@@ -3342,7 +3363,7 @@ mod height_plane_tests {
         let names: Vec<&str> = height_planes(&plain).iter().map(|p| p.name).collect();
         assert_eq!(names, ["Clearance", "Cut"], "unstaged: no Top plane: {names:?}");
 
-        let mut staged = state_with("F2", face_at(Some(6.0)));
+        let mut staged = state_with("F2", face_at(Some(Height::fixed(6.0))));
         let at = |s: &State| -> Vec<(&'static str, f64)> {
             height_planes(s).iter().map(|p| (p.name, p.z)).collect()
         };
@@ -3354,7 +3375,7 @@ mod height_plane_tests {
         // Walk the draft's Top Z: the plane follows before Apply, the
         // committed entity does not move at all.
         if let OpParams::Face { top_z, .. } = &mut staged.op_ui.params {
-            *top_z = Some(9.0);
+            *top_z = Some(Height::fixed(9.0));
         }
         assert_eq!(
             at(&staged),
@@ -3363,10 +3384,10 @@ mod height_plane_tests {
         );
         let zs: Vec<f32> = height_plane_lines(&staged).iter().map(|l| l[2]).collect();
         assert!(zs.contains(&9.0), "the ring geometry walks too: {zs:?}");
-        let back = state_with("F2", face_at(Some(6.0)));
+        let back = state_with("F2", face_at(Some(Height::fixed(6.0))));
         assert_eq!(
-            back.op_ui.params.region_z(),
-            6.0,
+            operation::region_z(&back.world, &back.op_ui.params),
+            Some(6.0),
             "region_z stages with top_z - the draft's 9.0 never reached the document"
         );
     }

@@ -13,7 +13,7 @@ use hsmworks_app::commands::{
 use hsmworks_app::geometry::{cube, IDENTITY_Q, Point3};
 use hsmworks_app::machining2d::Lead;
 use hsmworks_app::model;
-use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
+use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::{Location, Operation, Toolpath, STOCK_NAME};
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{catalog, Tool};
@@ -38,8 +38,8 @@ fn at(x: f64, y: f64, z: f64) -> Location {
 fn face_params() -> OpParams {
     OpParams::Face {
         stepover: 3.0,
-        clearance_z: 25.0,
-        cut_z: 19.5,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.5),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -51,10 +51,10 @@ fn face_params() -> OpParams {
 fn contour_params() -> OpParams {
     OpParams::Contour {
         stock_to_leave: 0.0,
-        clearance_z: 10.0,
-        retract_z: 8.0,
-        top_z: 5.0,
-        bottom_z: 0.0,
+        clearance_z: Height::fixed(10.0),
+        retract_z: Height::fixed(8.0),
+        top_z: Height::fixed(5.0),
+        bottom_z: Height::fixed(0.0),
         stepdown: 2.5,
         feed: 800.0,
         plunge_feed: 200.0,
@@ -232,8 +232,8 @@ fn create_operation_validates_every_reference() {
             SrcRef::Stock,
             OpParams::Face {
                 stepover: f64::NAN,
-                clearance_z: 25.0,
-                cut_z: 19.5,
+                clearance_z: Height::fixed(25.0),
+                cut_z: Height::fixed(19.5),
                 top_z: None,
                 stepdown: None,
                 feed: 1200.0,
@@ -289,8 +289,8 @@ fn edit_params_clears_the_stamp_not_the_cache() {
 
     let lower = OpParams::Face {
         stepover: 3.0,
-        clearance_z: 25.0,
-        cut_z: 19.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.0),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -486,10 +486,10 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         tool: String::new(),
         src: SrcRef::Stock,
         params: OpParams::Trace {
-            clearance_z: 25.0,
+            clearance_z: Height::fixed(25.0),
             retract_z: None,
-            top_z: 10.0,
-            bottom_z: 5.0,
+            top_z: Height::fixed(10.0),
+            bottom_z: Height::fixed(5.0),
             stepdown: 5.0,
             feed: 500.0,
             plunge_feed: 100.0,
@@ -497,7 +497,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         },
         stamp: None,
     };
-    assert_eq!(trace.params.region_z(), 10.0);
+    assert_eq!(operation::region_z(&world, &trace.params), Some(10.0));
     let region = operation::region_of(&world, &trace).expect("a box sections cleanly at 10 mm");
     assert_eq!(region.loops().len(), 1);
     // The section keeps the mesh's per-face triangle splits, so the ring
@@ -519,8 +519,8 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         src: SrcRef::Stock,
         params: OpParams::Face {
             stepover: 3.0,
-            clearance_z: 25.0,
-            cut_z: 19.5,
+            clearance_z: Height::fixed(25.0),
+            cut_z: Height::fixed(19.5),
             top_z: None,
             stepdown: None,
             feed: 1200.0,
@@ -529,7 +529,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         },
         stamp: None,
     };
-    assert_eq!(face.params.region_z(), 19.5);
+    assert_eq!(operation::region_z(&world, &face.params), Some(19.5));
     assert!(!operation::region_of(&world, &face).expect("footprint").is_empty());
 
     // A vanished source previews NOTHING, not a stale outline.
@@ -619,8 +619,8 @@ fn sel(entity: &str, feature: FeatureSel) -> SrcRef {
 fn face_sel_params() -> OpParams {
     OpParams::Face {
         stepover: 3.0,
-        clearance_z: 25.0,
-        cut_z: 4.5,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(4.5),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -771,10 +771,10 @@ fn pocket_refuses_an_open_run() {
         params: OpParams::Pocket {
             stepover: 3.0,
             stock_to_leave: 0.0,
-            clearance_z: 10.0,
+            clearance_z: Height::fixed(10.0),
             retract_z: None,
-            top_z: 5.0,
-            bottom_z: 0.0,
+            top_z: Height::fixed(5.0),
+            bottom_z: Height::fixed(0.0),
             stepdown: 2.5,
             feed: 800.0,
             plunge_feed: 200.0,
@@ -1152,10 +1152,10 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
     let rim_id = rim_chain_of(&world, "disc");
     let params = OpParams::Contour {
         stock_to_leave: 0.0,
-        clearance_z: 10.0,
-        retract_z: 8.0,
-        top_z: 0.0,
-        bottom_z: -2.0,
+        clearance_z: Height::fixed(10.0),
+        retract_z: Height::fixed(8.0),
+        top_z: Height::fixed(0.0),
+        bottom_z: Height::fixed(-2.0),
         stepdown: 2.0,
         feed: 800.0,
         plunge_feed: 200.0,
@@ -1773,10 +1773,10 @@ fn straight_runs_face_their_material_and_trace_refuses_by_name() {
             "EM-0600-4FL",
             SrcRef::Selection(items),
             OpParams::Trace {
-                clearance_z: 25.0,
+                clearance_z: Height::fixed(25.0),
                 retract_z: None,
-                top_z: 5.0,
-                bottom_z: 2.5,
+                top_z: Height::fixed(5.0),
+                bottom_z: Height::fixed(2.5),
                 stepdown: 2.5,
                 feed: 500.0,
                 plunge_feed: 100.0,
@@ -1816,10 +1816,10 @@ fn selection_notes_report_stitching_and_extension() {
     // the stitch is reported; nothing was extended, so that stays unsaid.
     let contour = OpParams::Contour {
         stock_to_leave: 0.0,
-        clearance_z: 25.0,
-        retract_z: 12.0,
-        top_z: 1.0,
-        bottom_z: -1.0,
+        clearance_z: Height::fixed(25.0),
+        retract_z: Height::fixed(12.0),
+        top_z: Height::fixed(1.0),
+        bottom_z: Height::fixed(-1.0),
         stepdown: 1.0,
         feed: 800.0,
         plunge_feed: 200.0,

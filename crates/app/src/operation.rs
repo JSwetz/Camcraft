@@ -134,20 +134,327 @@ impl core::fmt::Display for OpType {
     }
 }
 
+/// What a height is measured from. Every source but [`HeightReference::Fixed`]
+/// is a world truth re-read at resolve time - the stock and model bounding
+/// boxes and the work-offset slot placements - so a height that follows the
+/// moved setup is expressed, never stale. Rotations are not part of a Z
+/// reference: only the source's height feeds an offset (a full WCS frame
+/// transform is out of 2D scope, like 3D itself).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HeightReference {
+    /// The offset is the Z itself, in world (model) coordinates. What
+    /// pre-reference files and hand-typed absolute values carry.
+    Fixed,
+    TopOfStock,
+    BottomOfStock,
+    TopOfModel,
+    BottomOfModel,
+    /// The Z=0 plane of a work-offset slot: `WCS_SLOTS[i]`'s origin. An
+    /// existing-but-unplaced slot reads as the world origin, exactly as
+    /// the rest of the world treats an entity nobody has moved.
+    WorkOffset(usize),
+}
+
+impl HeightReference {
+    /// Panel combo entries, in this order; WorkOffset gets its slot name
+    /// appended by the panel.
+    pub const KIND_LABELS: [&'static str; 6] = [
+        "Fixed value",
+        "Top of stock",
+        "Bottom of stock",
+        "Top of model",
+        "Bottom of model",
+        "Work offset",
+    ];
+
+    /// Which entry of [`Self::KIND_LABELS`] this reference's kind is.
+    #[must_use]
+    pub fn kind_index(&self) -> usize {
+        match self {
+            HeightReference::Fixed => 0,
+            HeightReference::TopOfStock => 1,
+            HeightReference::BottomOfStock => 2,
+            HeightReference::TopOfModel => 3,
+            HeightReference::BottomOfModel => 4,
+            HeightReference::WorkOffset(_) => 5,
+        }
+    }
+
+    /// The slot index for WorkOffset references, 0 for everything else.
+    #[must_use]
+    pub fn wcs_slot(&self) -> usize {
+        match self {
+            HeightReference::WorkOffset(i) => *i,
+            _ => 0,
+        }
+    }
+
+    /// Replace the slot part, keeping the kind - only meaningful on a
+    /// WorkOffset reference.
+    #[must_use]
+    pub fn with_wcs_slot(&self, i: usize) -> Self {
+        match self {
+            HeightReference::WorkOffset(_) => HeightReference::WorkOffset(i),
+            other => *other,
+        }
+    }
+}
+
+impl core::fmt::Display for HeightReference {
+    /// Chip text for a plane label: short, and the G-code word for a
+    /// work offset so it names what the user selected in Setup.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            HeightReference::Fixed => f.write_str("fixed"),
+            HeightReference::TopOfStock => f.write_str("stock top"),
+            HeightReference::BottomOfStock => f.write_str("stock bottom"),
+            HeightReference::TopOfModel => f.write_str("model top"),
+            HeightReference::BottomOfModel => f.write_str("model bottom"),
+            HeightReference::WorkOffset(i) => match crate::schema::WCS_SLOTS.get(*i) {
+                Some(name) => f.write_str(name),
+                None => write!(f, "work offset #{i}"),
+            },
+        }
+    }
+}
+
+/// One height: From-reference plus offset in mm (HSMWorks-style "From:
+/// model top, Offset: 0.5"). The stored truth is the expression, never a
+/// resolved Z - so a height cannot disagree with the setup it references.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Height {
+    pub reference: HeightReference,
+    pub offset: f64,
+}
+
+impl Height {
+    /// A height that stands on its own: the value is the world Z.
+    #[must_use]
+    pub fn fixed(z: f64) -> Self {
+        Height { reference: HeightReference::Fixed, offset: z }
+    }
+
+    #[must_use]
+    pub fn of(reference: HeightReference, offset: f64) -> Self {
+        Height { reference, offset }
+    }
+
+    /// Resolve against the current world; None when the source is not
+    /// available (no stock or model yet, no entity in the slot).
+    #[must_use]
+    pub fn z(&self, world: &flecs_ecs::prelude::World) -> Option<f64> {
+        resolve_height(world, *self)
+    }
+
+    /// Structural sanity, no world: a Fixed height must be finite, and
+    /// any offset must be finite. Ordering rules run on resolved values
+    /// ([`depth_sane`]).
+    /// Structural sanity: a finite offset, and a WorkOffset reference
+    /// naming a slot that exists. Ordering lives on resolved values
+    /// ([`depth_sane`]).
+    #[must_use]
+    pub fn is_sane(&self) -> bool {
+        self.offset.is_finite() && self.reference.wcs_slot() < crate::schema::WCS_SLOTS.len()
+    }
+
+    #[must_use]
+    pub fn is_fixed(&self) -> bool {
+        matches!(self.reference, HeightReference::Fixed)
+    }
+}
+
+/// Resolve one height to a world Z. `Fixed` reads through; the other
+/// sources ask the world for the current geometry (model bounds exclude
+/// stock and WCS by `solid_world_aabb`'s rule; a slot entity that exists
+/// but was never moved reads at the origin, matching `transform_of`'s
+/// own default-everything semantics).
+#[must_use]
+pub fn resolve_height(world: &flecs_ecs::prelude::World, h: Height) -> Option<f64> {
+    let base = match h.reference {
+        HeightReference::Fixed => return (h.offset.is_finite()).then_some(h.offset),
+        HeightReference::TopOfStock => model::stock_world_aabb(world)?.max.z,
+        HeightReference::BottomOfStock => model::stock_world_aabb(world)?.min.z,
+        HeightReference::TopOfModel => model::solid_world_aabb(world)?.max.z,
+        HeightReference::BottomOfModel => model::solid_world_aabb(world)?.min.z,
+        HeightReference::WorkOffset(i) => {
+            let slot = *crate::schema::WCS_SLOTS.get(i)?;
+            let entity = model::find_by_name(world, slot)?;
+            model::transform_of(world, &entity).unwrap_or_default().pos.z
+        }
+    };
+    (base + h.offset).is_finite().then_some(base + h.offset)
+}
+
+/// What a reference is missing, phrased for a diagnostic: the user can
+/// act on "no stock yet". None when the source stands.
+#[must_use]
+pub fn missing_source(
+    world: &flecs_ecs::prelude::World,
+    r: HeightReference,
+) -> Option<&'static str> {
+    match r {
+        HeightReference::Fixed => None,
+        HeightReference::TopOfStock | HeightReference::BottomOfStock => model::stock_world_aabb(
+            world,
+        )
+        .is_none()
+        .then_some("no stock yet - set it up in Setup > Stock"),
+        HeightReference::TopOfModel | HeightReference::BottomOfModel => {
+            model::solid_world_aabb(world).is_none().then_some("no model loaded")
+        }
+        HeightReference::WorkOffset(i) => match crate::schema::WCS_SLOTS.get(i) {
+            None => Some("work offset slot out of range (G54..G59)"),
+            Some(name) => model::find_by_name(world, name)
+                .is_none()
+                .then_some("that work offset has no origin yet - place it in Setup"),
+        },
+    }
+}
+
+/// The Z the operation's region lives at, resolved: the section/stadium
+/// plane for the depth kinds, the skim (or first stage) plane for Face.
+/// None when that height's reference has no source.
+#[must_use]
+pub fn region_z(world: &flecs_ecs::prelude::World, params: &OpParams) -> Option<f64> {
+    match params {
+        OpParams::Face { top_z, cut_z, .. } => top_z
+            .map(|t| resolve_height(world, t))
+            .unwrap_or_else(|| resolve_height(world, *cut_z)),
+        OpParams::Contour { top_z, .. }
+        | OpParams::Pocket { top_z, .. }
+        | OpParams::Slot { top_z, .. }
+        | OpParams::Trace { top_z, .. } => resolve_height(world, *top_z),
+    }
+}
+
+/// Every height of one params set, resolved at once for a generation or
+/// a panel pass. Err carries the field name and the source that is
+/// missing, so the refusal is actionable by name - never a guessed z.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedHeights {
+    /// Rapids plane, every kind.
+    pub clearance: f64,
+    /// Depth kinds: section top. Face: None (it has [`Self::face_top`]).
+    pub top: Option<f64>,
+    /// Depth kinds: last level. Face: the finished cut plane.
+    pub bottom: Option<f64>,
+    /// Face: first stage when stepped, None for one-level facing.
+    pub face_top: Option<f64>,
+    /// Contour resolves Some; pocket-family None hops at clearance.
+    pub retract: Option<f64>,
+}
+
+impl ResolvedHeights {
+    /// The height-plane Zs of one kind: (top, bottom/cut) as the panels
+    /// and verify want them, from the resolved bag.
+    #[must_use]
+    pub fn depth(&self) -> (Option<f64>, Option<f64>) {
+        if self.face_top.is_some() || self.top.is_some() {
+            (self.top.or(self.face_top), self.bottom)
+        } else {
+            (self.face_top, self.bottom)
+        }
+    }
+}
+
+/// Resolve every height in `params`; Err is "<field> (From: <ref> <offset>):
+/// <why>" - each refusal names the height and its source.
+pub fn resolve_params(
+    world: &flecs_ecs::prelude::World,
+    params: &OpParams,
+) -> Result<ResolvedHeights, String> {
+    let req = |what: &str, h: Height| -> Result<f64, String> {
+        resolve_height(world, h).ok_or_else(|| unresolved_msg(what, h, world))
+    };
+    let opt = |what: &str, h: Option<Height>| -> Result<Option<f64>, String> {
+        h.map(|v| req(what, v)).transpose()
+    };
+    let (clearance, top, bottom, face_top, retract) = match params {
+        OpParams::Face { clearance_z, cut_z, top_z, .. } => (
+            req("Clearance Z", *clearance_z)?,
+            None,
+            Some(req("Cut Z", *cut_z)?),
+            opt("Top Z", *top_z)?,
+            None,
+        ),
+        OpParams::Contour { clearance_z, retract_z, top_z, bottom_z, .. } => (
+            req("Clearance Z", *clearance_z)?,
+            Some(req("Top of Part Z", *top_z)?),
+            Some(req("Bottom of Part Z", *bottom_z)?),
+            None,
+            Some(req("Retract Z", *retract_z)?),
+        ),
+        OpParams::Pocket { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Slot { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. } => (
+            req("Clearance Z", *clearance_z)?,
+            Some(req("Top of Part Z", *top_z)?),
+            Some(req("Bottom of Part Z", *bottom_z)?),
+            None,
+            opt("Retract Z", *retract_z)?,
+        ),
+    };
+    Ok(ResolvedHeights { clearance, top, bottom, face_top, retract })
+}
+
+/// The resolved depth pair for the verify context and the level list:
+/// (top, bottom), Face folded to (cut, cut-or-top) - None parts stay
+/// None, never guessed.
+#[must_use]
+pub fn resolve_map(
+    world: &flecs_ecs::prelude::World,
+    params: &OpParams,
+) -> (Option<f64>, Option<f64>) {
+    match resolve_params(world, params) {
+        Ok(r) => {
+            if matches!(params, OpParams::Face { .. }) {
+                let cut = r.bottom;
+                (cut, cut)
+            } else {
+                (r.top, r.bottom)
+            }
+        }
+        Err(_) => (None, None),
+    }
+}
+
+/// Ordering sanity on resolved values: an operation whose top is not
+/// above its bottom (or whose finished cut is not below its first stage)
+/// is refused at command creation. A height that cannot resolve is not
+/// here's business: `resolve_params` refuses it at generation, by name.
+#[must_use]
+pub fn depth_sane(world: &flecs_ecs::prelude::World, params: &OpParams) -> bool {
+    let Ok(r) = resolve_params(world, params) else {
+        return true; // unresolved is refused elsewhere, never a false lie here
+    };
+    match params {
+        OpParams::Face { .. } => match (r.face_top, r.bottom) {
+            (Some(t), Some(c)) => t >= c,
+            _ => true,
+        },
+        _ => match (r.top, r.bottom) {
+            (Some(t), Some(b)) => t > b,
+            _ => true,
+        },
+    }
+}
+
 /// Everything an operation needs beyond its tool and source. The tool
 /// diameter is deliberately absent - it lives in the tool definition and
 /// is injected at generation, so a tool edit cannot disagree with a
-/// parameter field.
+/// parameter field. Heights are [`Height`] expressions (From + offset);
+/// a file's pre-reference absolute numbers arrive as `Height::fixed`
+/// through the project migration, so their behavior is unchanged.
 #[derive(Clone, Debug, PartialEq)]
 pub enum OpParams {
     Face {
         stepover: f64,
-        clearance_z: f64,
-        cut_z: f64,
+        clearance_z: Height,
+        cut_z: Height,
         /// Staged facing: the first cut level. `None` faces in one level
         /// at `cut_z` - the legacy default every pre-stepdown file
         /// carries. `Some(t)` descends `t` down to `cut_z` by `stepdown`.
-        top_z: Option<f64>,
+        top_z: Option<Height>,
         /// Level spacing; positive when `top_z` is set, ignored when it
         /// is not.
         stepdown: Option<f64>,
@@ -157,10 +464,10 @@ pub enum OpParams {
     },
     Contour {
         stock_to_leave: f64,
-        clearance_z: f64,
-        retract_z: f64,
-        top_z: f64,
-        bottom_z: f64,
+        clearance_z: Height,
+        retract_z: Height,
+        top_z: Height,
+        bottom_z: Height,
         stepdown: f64,
         feed: f64,
         plunge_feed: f64,
@@ -174,12 +481,12 @@ pub enum OpParams {
     Pocket {
         stepover: f64,
         stock_to_leave: f64,
-        clearance_z: f64,
+        clearance_z: Height,
         /// Hop plane between passes of one level; None hops to
         /// clearance - the legacy shape.
-        retract_z: Option<f64>,
-        top_z: f64,
-        bottom_z: f64,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
         stepdown: f64,
         feed: f64,
         plunge_feed: f64,
@@ -191,10 +498,10 @@ pub enum OpParams {
         b: Point2,
         width: f64,
         stock_to_leave: f64,
-        clearance_z: f64,
-        retract_z: Option<f64>,
-        top_z: f64,
-        bottom_z: f64,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
         stepdown: f64,
         stepover: f64,
         feed: f64,
@@ -202,10 +509,10 @@ pub enum OpParams {
         climb: bool,
     },
     Trace {
-        clearance_z: f64,
-        retract_z: Option<f64>,
-        top_z: f64,
-        bottom_z: f64,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
         stepdown: f64,
         feed: f64,
         plunge_feed: f64,
@@ -225,8 +532,9 @@ impl OpParams {
         }
     }
 
+    /// The rapids plane, as expressed (every kind has one).
     #[must_use]
-    pub fn clearance_z(&self) -> f64 {
+    pub fn clearance(&self) -> Height {
         match self {
             OpParams::Face { clearance_z, .. }
             | OpParams::Contour { clearance_z, .. }
@@ -236,11 +544,12 @@ impl OpParams {
         }
     }
 
-    /// The Z level the cutting region lives at: the section/stadium plane
-    /// for the depth-bounded kinds, the skimming plane for Face. The
-    /// viewport's "what gets cut" preview draws the region loops here.
+    /// The cutting region's height expression: the section/stadium plane
+    /// for the depth-bounded kinds, the skim (or first-stage) plane for
+    /// Face. Resolve it for a Z; the viewport draws the region loops
+    /// there.
     #[must_use]
-    pub fn region_z(&self) -> f64 {
+    pub fn region_height(&self) -> Height {
         match self {
             OpParams::Face { top_z, cut_z, .. } => top_z.unwrap_or(*cut_z),
             OpParams::Contour { top_z, .. }
@@ -250,10 +559,12 @@ impl OpParams {
         }
     }
 
-    /// Shallow sanity for command construction: finite numbers, positive
-    /// increments, a downward depth range. The generators own the deep
-    /// rules (stepover vs diameter, lead sizes); those still fire at
-    /// generation time inside `GenerateOperation`'s constructor.
+    /// Shallow sanity for command construction, no world: finite numbers,
+    /// positive increments, in-range slots. Ordering needs resolved
+    /// heights and runs in [`depth_sane`] wherever a command holds the
+    /// world; the generators own the deep rules (stepover vs diameter,
+    /// lead sizes), which still fire inside `GenerateOperation`'s
+    /// constructor.
     #[must_use]
     pub fn is_sane(&self) -> bool {
         let pos = |v: f64| v.is_finite() && v > 0.0;
@@ -270,11 +581,11 @@ impl OpParams {
                 ..
             } => {
                 pos(*stepover)
-                    && clearance_z.is_finite()
-                    && cut_z.is_finite()
+                    && clearance_z.is_sane()
+                    && cut_z.is_sane()
                     && pos(*feed)
                     && pos(*plunge_feed)
-                    && top_z.is_none_or(|t| t.is_finite() && t >= *cut_z)
+                    && top_z.is_none_or(|t| t.is_sane())
                     && stepdown.is_none_or(|s| s.is_finite() && s > 0.0)
             }
             OpParams::Contour {
@@ -293,11 +604,10 @@ impl OpParams {
                 ..
             } => {
                 nneg(*stock_to_leave)
-                    && clearance_z.is_finite()
-                    && retract_z.is_finite()
-                    && top_z.is_finite()
-                    && bottom_z.is_finite()
-                    && top_z > bottom_z
+                    && clearance_z.is_sane()
+                    && retract_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
                     && pos(*stepdown)
                     && pos(*feed)
                     && pos(*plunge_feed)
@@ -320,11 +630,10 @@ impl OpParams {
             } => {
                 pos(*stepover)
                     && nneg(*stock_to_leave)
-                    && clearance_z.is_finite()
-                    && retract_z.is_none_or(f64::is_finite)
-                    && top_z.is_finite()
-                    && bottom_z.is_finite()
-                    && top_z > bottom_z
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
                     && pos(*stepdown)
                     && pos(*feed)
                     && pos(*plunge_feed)
@@ -350,11 +659,10 @@ impl OpParams {
                     && b.y.is_finite()
                     && pos(*width)
                     && nneg(*stock_to_leave)
-                    && clearance_z.is_finite()
-                    && retract_z.is_none_or(f64::is_finite)
-                    && top_z.is_finite()
-                    && bottom_z.is_finite()
-                    && top_z > bottom_z
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
                     && pos(*stepdown)
                     && pos(*stepover)
                     && pos(*feed)
@@ -370,11 +678,10 @@ impl OpParams {
                 plunge_feed,
                 ..
             } => {
-                clearance_z.is_finite()
-                    && retract_z.is_none_or(f64::is_finite)
-                    && top_z.is_finite()
-                    && bottom_z.is_finite()
-                    && top_z > bottom_z
+                clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
                     && pos(*stepdown)
                     && pos(*feed)
                     && pos(*plunge_feed)
@@ -382,9 +689,46 @@ impl OpParams {
         }
     }
 
-    /// The digest-relevant scalars, written to a hasher in a fixed order.
-    fn stamp_with(&self, h: &mut std::hash::DefaultHasher) {
+    /// The digest-relevant scalars, written to a hasher in a fixed
+    /// order. A height contributes its reference (tag, plus slot for a
+    /// work offset) and its offset bits; a non-Fixed reference ALSO
+    /// contributes its resolved Z (or an unresolved marker). The source
+    /// digests in `current_stamp` only cover the operation's own source
+    /// entity - a stock-sourced Face with a `TopOfModel` cut height must
+    /// go Stale when a model moves, and nothing else feeds that world in.
+    /// Resolved Zs are not double-counted for Fixed heights: their
+    /// offset bits are the whole truth.
+    fn stamp_with(&self, world: &World, h: &mut std::hash::DefaultHasher) {
         let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
+        let wh = |h: &mut std::hash::DefaultHasher, v: Height| {
+            let (tag, slot) = match v.reference {
+                HeightReference::Fixed => (0u8, 0u8),
+                HeightReference::TopOfStock => (1, 0),
+                HeightReference::BottomOfStock => (2, 0),
+                HeightReference::TopOfModel => (3, 0),
+                HeightReference::BottomOfModel => (4, 0),
+                HeightReference::WorkOffset(i) => (5, i.min(255) as u8),
+            };
+            h.write_u8(tag);
+            h.write_u8(slot);
+            w(h, v.offset);
+            if tag != 0 {
+                match resolve_height(world, v) {
+                    Some(z) => {
+                        h.write_u8(1);
+                        w(h, z);
+                    }
+                    None => h.write_u8(0),
+                }
+            }
+        };
+        let wh_opt = |h: &mut std::hash::DefaultHasher, v: Option<Height>| match v {
+            Some(v) => {
+                h.write_u8(1);
+                wh(h, v);
+            }
+            None => h.write_u8(0),
+        };
         let wp2 = |h: &mut std::hash::DefaultHasher, p: Point2| {
             w(h, p.x);
             w(h, p.y);
@@ -401,21 +745,22 @@ impl OpParams {
                 climb,
             } => {
                 h.write_u8(0);
-                for v in [*stepover, *clearance_z, *cut_z, *feed, *plunge_feed] {
-                    w(h, v);
-                }
+                w(h, *stepover);
+                wh(h, *clearance_z);
+                wh(h, *cut_z);
+                w(h, *feed);
+                w(h, *plunge_feed);
                 h.write_u8(u8::from(*climb));
                 // Appended at v5-era staging: presence first, then the
                 // value. Even a legacy (None, None) face digest differs
                 // from a pre-stamp face op - the mechanism saying so.
-                for o in [*top_z, *stepdown] {
-                    match o {
-                        Some(v) => {
-                            h.write_u8(1);
-                            w(h, v);
-                        }
-                        None => h.write_u8(0),
+                wh_opt(h, *top_z);
+                match *stepdown {
+                    Some(v) => {
+                        h.write_u8(1);
+                        w(h, v);
                     }
+                    None => h.write_u8(0),
                 }
             }
             OpParams::Contour {
@@ -435,19 +780,12 @@ impl OpParams {
                 climb,
             } => {
                 h.write_u8(1);
-                for v in [
-                    *stock_to_leave,
-                    *clearance_z,
-                    *retract_z,
-                    *top_z,
-                    *bottom_z,
-                    *stepdown,
-                    *feed,
-                    *plunge_feed,
-                    *tolerance,
-                    *tab_width,
-                    *tab_height,
-                ] {
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *retract_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed, *tolerance, *tab_width, *tab_height] {
                     w(h, v);
                 }
                 h.write_u32(*tab_count);
@@ -478,16 +816,12 @@ impl OpParams {
                 strategy,
             } => {
                 h.write_u8(2);
-                for v in [
-                    *stepover,
-                    *stock_to_leave,
-                    *clearance_z,
-                    *top_z,
-                    *bottom_z,
-                    *stepdown,
-                    *feed,
-                    *plunge_feed,
-                ] {
+                w(h, *stepover);
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
@@ -498,13 +832,7 @@ impl OpParams {
                 });
                 // v5-era hop plane: presence, then the value (same shape
                 // as Face's staging fields appended above).
-                match retract_z {
-                    Some(v) => {
-                        h.write_u8(1);
-                        w(h, *v);
-                    }
-                    None => h.write_u8(0),
-                }
+                wh_opt(h, *retract_z);
             }
             OpParams::Slot {
                 a,
@@ -524,27 +852,16 @@ impl OpParams {
                 h.write_u8(3);
                 wp2(h, *a);
                 wp2(h, *b);
-                for v in [
-                    *width,
-                    *stock_to_leave,
-                    *clearance_z,
-                    *top_z,
-                    *bottom_z,
-                    *stepdown,
-                    *stepover,
-                    *feed,
-                    *plunge_feed,
-                ] {
+                w(h, *width);
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *stepover, *feed, *plunge_feed] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
-                match retract_z {
-                    Some(v) => {
-                        h.write_u8(1);
-                        w(h, *v);
-                    }
-                    None => h.write_u8(0),
-                }
+                wh_opt(h, *retract_z);
             }
             OpParams::Trace {
                 clearance_z,
@@ -557,17 +874,14 @@ impl OpParams {
                 climb,
             } => {
                 h.write_u8(4);
-                for v in [*clearance_z, *top_z, *bottom_z, *stepdown, *feed, *plunge_feed] {
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
-                match retract_z {
-                    Some(v) => {
-                        h.write_u8(1);
-                        w(h, *v);
-                    }
-                    None => h.write_u8(0),
-                }
+                wh_opt(h, *retract_z);
             }
         }
     }
@@ -612,7 +926,11 @@ pub fn current_stamp(
     params: &OpParams,
 ) -> Option<GenStamp> {
     let mut h = std::hash::DefaultHasher::new();
-    h.write(b"hsmw-op-stamp-v1");
+    // v2: heights became From+Offset expressions and their resolved
+    // sources feed the digest - every op cached under v1 reads Stale
+    // once and clears on regenerate (same one-time churn as the
+    // b3eaebc stamp move, the mechanism working, not broken).
+    h.write(b"hsmw-op-stamp-v2");
     let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
     h.write(tool_name.as_bytes());
     h.write_u8(0xff);
@@ -634,7 +952,7 @@ pub fn current_stamp(
     ] {
         w(&mut h, v);
     }
-    params.stamp_with(&mut h);
+    params.stamp_with(world, &mut h);
     match src {
         SrcRef::Stock => {
             h.write_u8(b'S');
@@ -879,7 +1197,7 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
         return selection_region(world, items, &op.params).ok();
     }
     let material = material_of(world, &op.src).ok()?;
-    region_for(&material, &op.params).ok()
+    region_for(world, &material, &op.params).ok()
 }
 
 /// The centerline runs `generate` would add to `region_of`'s outline for
@@ -913,22 +1231,52 @@ fn region_for_src(
         SrcRef::Selection(items) if !matches!(params, OpParams::Slot { .. }) => {
             selection_region(world, items, params)
         }
-        _ => region_for(material, params),
+        _ => region_for(world, material, params),
     }
 }
 
 /// The per-kind region build, shared by `generate` and `region_of` so the
-/// preview outline cannot disagree with what the generators cut.
-fn region_for(material: &Material, params: &OpParams) -> Result<Region, GenError> {
+/// preview outline cannot disagree with what the generators cut. The
+/// section height resolves through the world like every other height in
+/// the params: a preview with an unresolvable `top_z` shows nothing (the
+/// `Err` folds to `None` in `region_of`), and a generation refuses by
+/// name.
+fn region_for(world: &World, material: &Material, params: &OpParams) -> Result<Region, GenError> {
     match params {
         OpParams::Face { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
-        | OpParams::Trace { top_z, .. } => section(&material.facets, *top_z),
+        | OpParams::Trace { top_z, .. } => {
+            let z = resolve_height(world, *top_z).ok_or_else(|| unresolved_err("Top of Part Z", *top_z, world))?;
+            section(&material.facets, z)
+        }
         OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
     }
+}
+
+/// The shared refusal phrasing for an unresolved height, named by field.
+/// One source so `resolve_params`, the region builders and every command
+/// error read identically.
+pub fn unresolved_msg(what: &str, h: Height, world: &World) -> String {
+    format!(
+        "{what} (From: {ref}, offset {off}) is unresolved: {why}",
+        ref = h.reference,
+        off = h.offset,
+        why = missing_source(world, h.reference).unwrap_or("the source has no finite height"),
+    )
+}
+
+fn unresolved_err(what: &str, h: Height, world: &World) -> GenError {
+    GenError::Invalid(unresolved_msg(what, h, world))
+}
+
+/// A required height slot of an already-`Ok` `ResolvedHeights` is `Some`
+/// by that function's contract (per kind); the error arm exists so no
+/// call site needs an unwrap.
+fn req_z(v: Option<f64>, what: &str) -> Result<f64, GenError> {
+    v.ok_or_else(|| GenError::Invalid(format!("{what} is unresolved")))
 }
 
 /// Largest tilt from horizontal, in degrees, a Face operation accepts for
@@ -1841,18 +2189,25 @@ pub fn generate(
         OpType::Trace => Mode::Engrave,
     };
 
+    // The height seam: the params' From+offset expressions become the
+    // generators' plain f64s right here. Every unresolved reference is
+    // refused by name before a single move is computed - never a
+    // guessed z. `machining2d`'s params keep taking resolved values, so
+    // the generators (and the goldens) know nothing of references.
+    let hs = resolve_params(world, &op.params).map_err(GenError::Invalid)?;
+
     // Region + path per kind.
     let (region, path) = match &op.params {
-        OpParams::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb } => {
+        OpParams::Face { stepover, stepdown, feed, plunge_feed, climb, .. } => {
             let region = region_for_src(world, &op.src, &op.params, &material)?;
             let path = machining2d::face(
                 &region,
                 &FaceParams {
                     tool_diameter: d,
                     stepover: *stepover,
-                    clearance_z: *clearance_z,
-                    cut_z: *cut_z,
-                    top_z: *top_z,
+                    clearance_z: hs.clearance,
+                    cut_z: req_z(hs.bottom, "Cut Z")?,
+                    top_z: hs.face_top,
                     stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
@@ -1863,10 +2218,6 @@ pub fn generate(
         }
         OpParams::Contour {
             stock_to_leave,
-            clearance_z,
-            retract_z,
-            top_z,
-            bottom_z,
             stepdown,
             feed,
             plunge_feed,
@@ -1876,14 +2227,15 @@ pub fn generate(
             tab_count,
             tab_width,
             tab_height,
+            ..
         } => {
             let cp = ContourParams {
                 tool_diameter: d,
                 stock_to_leave: *stock_to_leave,
-                clearance_z: *clearance_z,
-                retract_z: *retract_z,
-                top_z: *top_z,
-                bottom_z: *bottom_z,
+                clearance_z: hs.clearance,
+                retract_z: req_z(hs.retract, "Retract Z")?,
+                top_z: req_z(hs.top, "Top of Part Z")?,
+                bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
@@ -1932,15 +2284,12 @@ pub fn generate(
         OpParams::Pocket {
             stepover,
             stock_to_leave,
-            clearance_z,
-            retract_z,
-            top_z,
-            bottom_z,
             stepdown,
             feed,
             plunge_feed,
             climb,
             strategy,
+            ..
         } => {
             let region = region_for_src(world, &op.src, &op.params, &material)?;
             let path = machining2d::pocket(
@@ -1949,10 +2298,10 @@ pub fn generate(
                     tool_diameter: d,
                     stepover: *stepover,
                     stock_to_leave: *stock_to_leave,
-                    clearance_z: *clearance_z,
-                    retract_z: *retract_z,
-                    top_z: *top_z,
-                    bottom_z: *bottom_z,
+                    clearance_z: hs.clearance,
+                    retract_z: hs.retract,
+                    top_z: req_z(hs.top, "Top of Part Z")?,
+                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
                     stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
@@ -1967,15 +2316,12 @@ pub fn generate(
             b,
             width,
             stock_to_leave,
-            clearance_z,
-            retract_z,
-            top_z,
-            bottom_z,
             stepdown,
             stepover,
             feed,
             plunge_feed,
             climb,
+            ..
         } => {
             let path = machining2d::slot(
                 *a,
@@ -1984,10 +2330,10 @@ pub fn generate(
                     tool_diameter: d,
                     width: *width,
                     stock_to_leave: *stock_to_leave,
-                    clearance_z: *clearance_z,
-                    retract_z: *retract_z,
-                    top_z: *top_z,
-                    bottom_z: *bottom_z,
+                    clearance_z: hs.clearance,
+                    retract_z: hs.retract,
+                    top_z: req_z(hs.top, "Top of Part Z")?,
+                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
                     stepdown: *stepdown,
                     stepover: *stepover,
                     feed: *feed,
@@ -1998,24 +2344,15 @@ pub fn generate(
             let region = region_for_src(world, &op.src, &op.params, &material)?;
             (region, path)
         }
-        OpParams::Trace {
-            clearance_z,
-            retract_z,
-            top_z,
-            bottom_z,
-            stepdown,
-            feed,
-            plunge_feed,
-            climb,
-        } => {
+        OpParams::Trace { stepdown, feed, plunge_feed, climb, .. } => {
             let region = region_for_src(world, &op.src, &op.params, &material)?;
             let path = machining2d::trace(
                 &region,
                 &TraceParams {
-                    clearance_z: *clearance_z,
-                    retract_z: *retract_z,
-                    top_z: *top_z,
-                    bottom_z: *bottom_z,
+                    clearance_z: hs.clearance,
+                    retract_z: hs.retract,
+                    top_z: req_z(hs.top, "Top of Part Z")?,
+                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
                     stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
@@ -2035,7 +2372,7 @@ pub fn generate(
             tool: &geom,
             mode,
             stock_top_z,
-            clearance_z: op.params.clearance_z(),
+            clearance_z: hs.clearance,
             stock_to_leave: match &op.params {
                 OpParams::Face { .. } | OpParams::Trace { .. } => 0.0,
                 OpParams::Contour { stock_to_leave, .. }
@@ -2078,46 +2415,53 @@ mod tests {
 
     #[test]
     fn params_sanity_gates() {
+        // `is_sane` is structural - finite numbers, positive increments,
+        // in-range slots; ordering needs resolved heights and lives in
+        // `depth_sane`, which commands run with the world in hand. An
+        // unresolved reference is never a lie there: refusing happens at
+        // generate, by name.
+        let world = crate::world::new_world();
         let ok = OpParams::Face {
             stepover: 8.0,
-            clearance_z: 5.0,
-            cut_z: -0.5,
+            clearance_z: Height::fixed(5.0),
+            cut_z: Height::fixed(-0.5),
             top_z: None,
             stepdown: None,
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
         };
-        assert!(ok.is_sane());
+        assert!(ok.is_sane() && depth_sane(&world, &ok));
         // Staged facing is sane when it descends: a top below the
         // finished height, or a zero stepdown, is not.
         let staged = OpParams::Face {
             stepover: 8.0,
-            clearance_z: 5.0,
-            cut_z: -0.5,
-            top_z: Some(1.0),
+            clearance_z: Height::fixed(5.0),
+            cut_z: Height::fixed(-0.5),
+            top_z: Some(Height::fixed(1.0)),
             stepdown: Some(0.5),
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
         };
-        assert!(staged.is_sane());
+        assert!(staged.is_sane() && depth_sane(&world, &staged));
         let low = OpParams::Face {
             stepover: 8.0,
-            clearance_z: 5.0,
-            cut_z: -0.5,
-            top_z: Some(-0.6),
+            clearance_z: Height::fixed(5.0),
+            cut_z: Height::fixed(-0.5),
+            top_z: Some(Height::fixed(-0.6)),
             stepdown: Some(0.5),
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
         };
-        assert!(!low.is_sane(), "staged top below the finished height");
+        assert!(low.is_sane(), "structurally fine - the order is the flaw");
+        assert!(!depth_sane(&world, &low), "staged top below the finished height");
         let no_step = OpParams::Face {
             stepover: 8.0,
-            clearance_z: 5.0,
-            cut_z: -0.5,
-            top_z: Some(1.0),
+            clearance_z: Height::fixed(5.0),
+            cut_z: Height::fixed(-0.5),
+            top_z: Some(Height::fixed(1.0)),
             stepdown: Some(0.0),
             feed: 500.0,
             plunge_feed: 100.0,
@@ -2127,10 +2471,10 @@ mod tests {
         let bad = OpParams::Pocket {
             stepover: f64::NAN,
             stock_to_leave: 0.0,
-            clearance_z: 5.0,
+            clearance_z: Height::fixed(5.0),
             retract_z: None,
-            top_z: 0.0,
-            bottom_z: -4.0,
+            top_z: Height::fixed(0.0),
+            bottom_z: Height::fixed(-4.0),
             stepdown: 2.0,
             feed: 400.0,
             plunge_feed: 80.0,
@@ -2138,29 +2482,45 @@ mod tests {
             strategy: PocketStrategy::Zigzag,
         };
         assert!(!bad.is_sane());
-        // A depth range that runs upward is nonsense, refuse it early.
+        // A depth range that runs upward is nonsense, refused at command
+        // creation - not by the shape of the numbers but by their z's.
         let up = OpParams::Trace {
-            clearance_z: 5.0,
+            clearance_z: Height::fixed(5.0),
             retract_z: None,
-            top_z: -4.0,
-            bottom_z: 0.0,
+            top_z: Height::fixed(-4.0),
+            bottom_z: Height::fixed(0.0),
             stepdown: 1.0,
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
         };
-        assert!(!up.is_sane());
+        assert!(up.is_sane());
+        assert!(!depth_sane(&world, &up));
+        // An out-of-range slot is structural: there is no seventh offset.
+        let ghost = OpParams::Trace {
+            clearance_z: Height::fixed(5.0),
+            retract_z: None,
+            top_z: Height::fixed(5.0),
+            bottom_z: Height::of(HeightReference::WorkOffset(6), 0.0),
+            stepdown: 1.0,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        };
+        assert!(!ghost.is_sane(), "work-offset references must name a real slot");
     }
 
     #[test]
     fn stamp_follows_every_input() {
         // Tool numerics, params and source must each move the digest; the
         // world pieces are exercised in tests/operations.rs, the pure
-        // param path is deterministic here.
+        // param path is deterministic here (Fixed heights resolve without
+        // touching the world).
+        let world = crate::world::new_world();
         let a = OpParams::Face {
             stepover: 8.0,
-            clearance_z: 5.0,
-            cut_z: -0.5,
+            clearance_z: Height::fixed(5.0),
+            cut_z: Height::fixed(-0.5),
             top_z: None,
             stepdown: None,
             feed: 500.0,
@@ -2170,8 +2530,8 @@ mod tests {
         // (No struct-update syntax on enum variants: write it out.)
         let b = OpParams::Face {
             stepover: 8.0,
-            clearance_z: 5.0,
-            cut_z: -0.6,
+            clearance_z: Height::fixed(5.0),
+            cut_z: Height::fixed(-0.6),
             top_z: None,
             stepdown: None,
             feed: 500.0,
@@ -2180,9 +2540,9 @@ mod tests {
         };
         let c = OpParams::Face {
             stepover: 8.0,
-            clearance_z: 5.0,
-            cut_z: -0.5,
-            top_z: Some(1.0),
+            clearance_z: Height::fixed(5.0),
+            cut_z: Height::fixed(-0.5),
+            top_z: Some(Height::fixed(1.0)),
             stepdown: Some(0.5),
             feed: 500.0,
             plunge_feed: 100.0,
@@ -2191,9 +2551,9 @@ mod tests {
         let mut ha = std::hash::DefaultHasher::new();
         let mut hb = std::hash::DefaultHasher::new();
         let mut hc = std::hash::DefaultHasher::new();
-        a.stamp_with(&mut ha);
-        b.stamp_with(&mut hb);
-        c.stamp_with(&mut hc);
+        a.stamp_with(&world, &mut ha);
+        b.stamp_with(&world, &mut hb);
+        c.stamp_with(&world, &mut hc);
         assert_ne!(ha.finish(), hb.finish());
         assert_ne!(ha.finish(), hc.finish(), "staging moves the stamp");
     }
@@ -2203,10 +2563,11 @@ mod tests {
         // A cached single-level facing must never be replayed as the
         // answer for a staged one - and two stagings that cut different
         // stacks must not claim each other's cache either.
-        let face_with = |top_z: Option<f64>, stepdown: Option<f64>| OpParams::Face {
+        let world = crate::world::new_world();
+        let face_with = |top_z: Option<Height>, stepdown: Option<f64>| OpParams::Face {
             stepover: 8.0,
-            clearance_z: 5.0,
-            cut_z: -0.5,
+            clearance_z: Height::fixed(5.0),
+            cut_z: Height::fixed(-0.5),
             top_z,
             stepdown,
             feed: 500.0,
@@ -2215,14 +2576,17 @@ mod tests {
         };
         let digest = |p: &OpParams| {
             let mut h = std::hash::DefaultHasher::new();
-            p.stamp_with(&mut h);
+            p.stamp_with(&world, &mut h);
             h.finish()
         };
         let legacy = face_with(None, None);
-        let staged = face_with(Some(1.0), Some(0.5));
-        let deeper = face_with(Some(1.0), Some(0.4));
+        let staged = face_with(Some(Height::fixed(1.0)), Some(0.5));
+        let deeper = face_with(Some(Height::fixed(1.0)), Some(0.4));
         assert_ne!(digest(&legacy), digest(&staged), "staging invalidates");
         assert_ne!(digest(&staged), digest(&deeper), "step size is geometry");
-        assert_eq!(digest(&staged), digest(&face_with(Some(1.0), Some(0.5))));
+        assert_eq!(
+            digest(&staged),
+            digest(&face_with(Some(Height::fixed(1.0)), Some(0.5)))
+        );
     }
 }

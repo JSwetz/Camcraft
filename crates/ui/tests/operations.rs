@@ -5,7 +5,7 @@
 //! Provenance: our own tests, specced from the panes' contract.
 
 use hsmworks_app::model;
-use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
+use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::STOCK_NAME;
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools::{Tool, catalog};
@@ -23,8 +23,8 @@ fn catalog_tool(name: &str) -> Tool {
 fn face_params() -> OpParams {
     OpParams::Face {
         stepover: 3.0,
-        clearance_z: 25.0,
-        cut_z: 19.5,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.5),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -181,8 +181,8 @@ fn create_generate_undo_redo_replays_the_same_path() {
     // A parameter edit marks it stale but keeps the old path on screen.
     let moved = OpParams::Face {
         stepover: 4.0,
-        clearance_z: 25.0,
-        cut_z: 19.5,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.5),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -309,8 +309,8 @@ fn retargeting_a_tool_and_bad_params() {
     // and the operation keeps its exact previous values and stamp.
     let junk = OpParams::Face {
         stepover: 0.0,
-        clearance_z: 25.0,
-        cut_z: 19.5,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.5),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -637,8 +637,8 @@ fn apply_reports_queued_then_updated_on_drain() {
     // Spinbox typing is what this mirrors: the draft differs from live.
     state.op_ui.params = OpParams::Face {
         stepover: 3.0,
-        clearance_z: 25.0,
-        cut_z: 18.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(18.0),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -651,7 +651,7 @@ fn apply_reports_queued_then_updated_on_drain() {
     assert_eq!(state.status, "parameters updated for Face1");
     assert!(
         matches!(stored_params(&state, "Face1"),
-            OpParams::Face { cut_z, .. } if (cut_z - 18.0).abs() < 1e-12),
+            OpParams::Face { cut_z, .. } if cut_z == Height::fixed(18.0)),
         "the operation carries the draft's cut height"
     );
 }
@@ -834,10 +834,10 @@ fn box_run_pick(state: &State, name: &str) -> GeoSel {
 fn contour_draft() -> OpParams {
     OpParams::Contour {
         stock_to_leave: 0.0,
-        clearance_z: 25.0,
-        retract_z: 30.0,
-        top_z: 20.0,
-        bottom_z: 15.0,
+        clearance_z: Height::fixed(25.0),
+        retract_z: Height::fixed(30.0),
+        top_z: Height::fixed(20.0),
+        bottom_z: Height::fixed(15.0),
         stepdown: 5.0,
         feed: 1200.0,
         plunge_feed: 300.0,
@@ -893,8 +893,8 @@ fn generate_flushes_a_dirty_draft_before_generating() {
     // that draft used to cut the old numbers silently.
     state.op_ui.params = OpParams::Face {
         stepover: 3.0,
-        clearance_z: 25.0,
-        cut_z: 18.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(18.0),
         top_z: None,
         stepdown: None,
         feed: 1200.0,
@@ -907,7 +907,7 @@ fn generate_flushes_a_dirty_draft_before_generating() {
     assert!(state.status.starts_with("generated Face1:"), "{:?}", state.status);
     assert!(
         matches!(stored_params(&state, "Face1"),
-            OpParams::Face { cut_z, .. } if (cut_z - 18.0).abs() < 1e-12),
+            OpParams::Face { cut_z, .. } if cut_z == Height::fixed(18.0)),
         "the path came from what the panel showed"
     );
     assert_eq!(status(&state, "Face1"), OpStatus::Ok, "fresh, not stale: it matched the edit");
