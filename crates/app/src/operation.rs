@@ -175,6 +175,9 @@ pub enum OpParams {
         stepover: f64,
         stock_to_leave: f64,
         clearance_z: f64,
+        /// Hop plane between passes of one level; None hops to
+        /// clearance - the legacy shape.
+        retract_z: Option<f64>,
         top_z: f64,
         bottom_z: f64,
         stepdown: f64,
@@ -189,6 +192,7 @@ pub enum OpParams {
         width: f64,
         stock_to_leave: f64,
         clearance_z: f64,
+        retract_z: Option<f64>,
         top_z: f64,
         bottom_z: f64,
         stepdown: f64,
@@ -199,6 +203,7 @@ pub enum OpParams {
     },
     Trace {
         clearance_z: f64,
+        retract_z: Option<f64>,
         top_z: f64,
         bottom_z: f64,
         stepdown: f64,
@@ -305,6 +310,7 @@ impl OpParams {
                 stepover,
                 stock_to_leave,
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -315,6 +321,7 @@ impl OpParams {
                 pos(*stepover)
                     && nneg(*stock_to_leave)
                     && clearance_z.is_finite()
+                    && retract_z.is_none_or(f64::is_finite)
                     && top_z.is_finite()
                     && bottom_z.is_finite()
                     && top_z > bottom_z
@@ -328,6 +335,7 @@ impl OpParams {
                 width,
                 stock_to_leave,
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -343,6 +351,7 @@ impl OpParams {
                     && pos(*width)
                     && nneg(*stock_to_leave)
                     && clearance_z.is_finite()
+                    && retract_z.is_none_or(f64::is_finite)
                     && top_z.is_finite()
                     && bottom_z.is_finite()
                     && top_z > bottom_z
@@ -353,6 +362,7 @@ impl OpParams {
             }
             OpParams::Trace {
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -361,6 +371,7 @@ impl OpParams {
                 ..
             } => {
                 clearance_z.is_finite()
+                    && retract_z.is_none_or(f64::is_finite)
                     && top_z.is_finite()
                     && bottom_z.is_finite()
                     && top_z > bottom_z
@@ -457,6 +468,7 @@ impl OpParams {
                 stepover,
                 stock_to_leave,
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -482,7 +494,17 @@ impl OpParams {
                 h.write_u8(match strategy {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
+                    PocketStrategy::Auto => 2,
                 });
+                // v5-era hop plane: presence, then the value (same shape
+                // as Face's staging fields appended above).
+                match retract_z {
+                    Some(v) => {
+                        h.write_u8(1);
+                        w(h, *v);
+                    }
+                    None => h.write_u8(0),
+                }
             }
             OpParams::Slot {
                 a,
@@ -490,6 +512,7 @@ impl OpParams {
                 width,
                 stock_to_leave,
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -515,9 +538,17 @@ impl OpParams {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
+                match retract_z {
+                    Some(v) => {
+                        h.write_u8(1);
+                        w(h, *v);
+                    }
+                    None => h.write_u8(0),
+                }
             }
             OpParams::Trace {
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -530,6 +561,13 @@ impl OpParams {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
+                match retract_z {
+                    Some(v) => {
+                        h.write_u8(1);
+                        w(h, *v);
+                    }
+                    None => h.write_u8(0),
+                }
             }
         }
     }
@@ -1873,6 +1911,7 @@ pub fn generate(
             stepover,
             stock_to_leave,
             clearance_z,
+            retract_z,
             top_z,
             bottom_z,
             stepdown,
@@ -1889,6 +1928,7 @@ pub fn generate(
                     stepover: *stepover,
                     stock_to_leave: *stock_to_leave,
                     clearance_z: *clearance_z,
+                    retract_z: *retract_z,
                     top_z: *top_z,
                     bottom_z: *bottom_z,
                     stepdown: *stepdown,
@@ -1906,6 +1946,7 @@ pub fn generate(
             width,
             stock_to_leave,
             clearance_z,
+            retract_z,
             top_z,
             bottom_z,
             stepdown,
@@ -1922,6 +1963,7 @@ pub fn generate(
                     width: *width,
                     stock_to_leave: *stock_to_leave,
                     clearance_z: *clearance_z,
+                    retract_z: *retract_z,
                     top_z: *top_z,
                     bottom_z: *bottom_z,
                     stepdown: *stepdown,
@@ -1936,6 +1978,7 @@ pub fn generate(
         }
         OpParams::Trace {
             clearance_z,
+            retract_z,
             top_z,
             bottom_z,
             stepdown,
@@ -1948,6 +1991,7 @@ pub fn generate(
                 &region,
                 &TraceParams {
                     clearance_z: *clearance_z,
+                    retract_z: *retract_z,
                     top_z: *top_z,
                     bottom_z: *bottom_z,
                     stepdown: *stepdown,
@@ -2062,6 +2106,7 @@ mod tests {
             stepover: f64::NAN,
             stock_to_leave: 0.0,
             clearance_z: 5.0,
+            retract_z: None,
             top_z: 0.0,
             bottom_z: -4.0,
             stepdown: 2.0,
@@ -2074,6 +2119,7 @@ mod tests {
         // A depth range that runs upward is nonsense, refuse it early.
         let up = OpParams::Trace {
             clearance_z: 5.0,
+            retract_z: None,
             top_z: -4.0,
             bottom_z: 0.0,
             stepdown: 1.0,

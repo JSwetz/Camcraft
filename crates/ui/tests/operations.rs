@@ -925,3 +925,15 @@ fn geometry_notes_report_through_the_panel_seam() {
     let notes = operation::selection_notes(&state.world, &state.op_ui.geo, &state.op_ui.params);
     assert!(notes.is_empty(), "stale picks say nothing: {notes:?}");
 }
+
+// M1.5.2 step 5: Auto joins the pocket's Strategy combo. The label list
+// is the single source the combo renders from, so the pane and the test
+// cannot drift apart.
+#[test]
+fn strategy_combo_offers_auto() {
+    assert_eq!(
+        hsmworks_ui::operations::strategy_names(),
+        &["Zigzag", "Waterline", "Auto"],
+        "the combo offers Auto beside the explicit choices"
+    );
+}

@@ -274,6 +274,13 @@ impl ContourParams {
         if self.clearance_z < self.top_z {
             return Err(GenError::Invalid("clearance plane below the first cut level".into()));
         }
+        if self.retract_z < self.top_z {
+            // Hops travel at the retract plane; one at or below the
+            // material top would drag across solid - a gouge by
+            // definition, refused by name. Above clearance is legal in
+            // old files and gets clamped, not refused (see `contour`).
+            return Err(GenError::Invalid("retract plane sits inside the material".into()));
+        }
         if self.tolerance <= 0.0 {
             return Err(GenError::Invalid("tolerance must be positive".into()));
         }
@@ -315,23 +322,51 @@ fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
 }
 
 /// Run XY passes at each of the cut levels: every pass starts with a lift
-/// (except the very first entry) and a rapid transfer along the clearance
-/// plane, then plunges at the pass start and feeds along it. The builder
-/// drops zero-length moves, so the first entry's lift collapses when the
-/// path already starts at clearance above the entry point. Rapids
-/// therefore always run at `clearance_z`, never inside the cut. Shared by
+/// (except the very first entry) and a rapid transfer, then plunges at
+/// the pass start and feeds along it. The builder drops zero-length
+/// moves, so the first entry's lift collapses when the path already
+/// starts at clearance above the entry point. A level change lifts to
+/// `clearance_z` - the new level engages material the previous one never
+/// touched, and clearance is the honest plane for that. A between-pass
+/// lift *within* a level travels `hop_z`: floor already swept, air over
+/// everything still standing, and a full clearance climb between passes
+/// of one level pays a climb nobody asked for. `hop_z` is validated at
+/// or above `top_z`, so a hop is never a slide through solid. Shared by
 /// the depth-stepping area operations (pocket, slot, trace).
 /// `fit = Some(tol)` runs each pass through [`fit_arcs`] once (the walk
 /// shape is level-independent): waterline rings of a fine tessellation
 /// travel as arcs. `None` keeps the per-point feed walk every straight
 /// generator has always had.
+/// The motion envelope a depth-stepping generator shares with
+/// [`run_levels`]: the two lift planes (clearance for a level change,
+/// hop between passes of one level) and the two feeds.
+struct Motion {
+    clearance_z: f64,
+    hop_z: f64,
+    feed: f64,
+    plunge_feed: f64,
+}
+
+impl Motion {
+    /// `retract_z: None` hops at clearance - the legacy shape, every
+    /// lift a full climb. A set plane is clamped at clearance, so a
+    /// pre-validation file whose retract sits above clearance still
+    /// crosses at the plane the machine already obeyed.
+    fn new(clearance_z: f64, retract_z: Option<f64>, feed: f64, plunge_feed: f64) -> Self {
+        Self {
+            clearance_z,
+            hop_z: retract_z.unwrap_or(clearance_z).min(clearance_z),
+            feed,
+            plunge_feed,
+        }
+    }
+}
+
 fn run_levels(
     b: &mut PathBuilder,
     passes: &[Vec<Point2>],
     zs: &[f64],
-    clearance_z: f64,
-    feed: f64,
-    plunge_feed: f64,
+    m: &Motion,
     fit: Option<f64>,
 ) {
     let runs: Vec<Vec<Seg>> = match fit {
@@ -339,6 +374,12 @@ fn run_levels(
         None => Vec::new(),
     };
     let mut first = true;
+    // The z the tool last ENGAGED (cut at), not the z the loop last
+    // visited: a hop is earned only by having floor already swept at
+    // this very level. A level change - or a first entry, or a level
+    // whose earlier passes came out degenerate - crosses in over new
+    // material and keeps the full clearance climb.
+    let mut last_cut_z: Option<f64> = None;
     for &z in zs {
         for (pi, pass) in passes.iter().enumerate() {
             let Some((entry, rest)) = pass.split_first() else {
@@ -347,25 +388,23 @@ fn run_levels(
             if rest.is_empty() {
                 continue;
             }
+            let lift_z = if last_cut_z == Some(z) { m.hop_z } else { m.clearance_z };
             if !first {
                 let cur = b.at();
-                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, clearance_z), None);
+                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, lift_z), None);
             }
-            b.push(
-                MoveKind::Rapid,
-                Point3::new(entry.x, entry.y, clearance_z),
-                None,
-            );
-            b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(plunge_feed));
+            b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, lift_z), None);
+            b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(m.plunge_feed));
             first = false;
             match fit {
-                Some(_) => push_segs(b, &runs[pi], z, feed),
+                Some(_) => push_segs(b, &runs[pi], z, m.feed),
                 None => {
                     for q in rest {
-                        b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
+                        b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(m.feed));
                     }
                 }
             }
+            last_cut_z = Some(z);
         }
     }
 }
@@ -380,10 +419,15 @@ fn run_levels(
 /// (largest absolute area first, canonically oriented, and traversed
 /// forward for climb, reversed for conventional).
 ///
-/// Between subpaths (tab hops) the tool retracts to `retract_z`, rapids
-/// across the bridge in air, and plunges again; between loops and levels
-/// it lifts to `clearance_z`. Rapids inside the footprint below the safe
-/// plane are the verifier's business (step 7), flagged, never hidden.
+/// Between subpaths (tab hops) and between loops of one level the tool
+/// retracts to the hop plane - `retract_z`, clamped to `clearance_z` so
+/// a legacy retract parked above clearance cannot make the hop climb
+/// higher than the clearance move it replaced, with the clamp echoed in
+/// the panel - rapids across in air, and plunges again. A level change
+/// still lifts to full `clearance_z`: the new level engages material the
+/// previous one never touched. Rapids inside the footprint below the
+/// safe plane are the verifier's business (step 7), flagged, never
+/// hidden.
 pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError> {
     p.validate()?;
     if region.is_empty() {
@@ -399,10 +443,11 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     loops.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let hop = p.retract_z.min(p.clearance_z);
     let mut first_entry = true;
     for &z in &zs {
         let tabbed = p.tab_count > 0 && z < p.bottom_z + p.tab_height;
-        for l in &loops {
+        for (li, l) in loops.iter().enumerate() {
             // Canonical orientation is material-on-the-left travel;
             // conventional climbing reverses it. Air is the other side.
             let pts: Vec<Point2> = if p.climb {
@@ -428,8 +473,16 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 // the fitter just smoothed.
                 let t0 = walk_tangent(&walk, &poly, true);
                 let (entry, lead) = lead_in(poly[0], t0, air_side(t0, p.climb), p);
-                if k == 0 {
+                if k == 0 && li > 0 && !first_entry {
+                    // Loop to loop within one level: the tab-hop
+                    // template - up to the hop plane, across, plunge.
+                    let cur = b.at();
+                    b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
+                    b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, hop), None);
+                } else if k == 0 {
                     if !first_entry {
+                        // Level to level: new material engages from the
+                        // one plane that is safe over all of it.
                         let cur = b.at();
                         b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
                     }
@@ -437,8 +490,8 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                     b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
                 } else {
                     let cur = b.at();
-                    b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, p.retract_z), Some(p.feed));
-                    b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, p.retract_z), None);
+                    b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
+                    b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, hop), None);
                 }
                 b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(p.plunge_feed));
                 first_entry = false;
@@ -1084,6 +1137,89 @@ pub fn on_boundary(region: &Region, p: Point2) -> bool {
 pub enum PocketStrategy {
     Zigzag,
     Waterline,
+    /// Waterline where the pocket's outer boundary is round enough for
+    /// rings to be the honest shape, Zigzag otherwise. The resolution is
+    /// [`PocketStrategy::resolve`] - the panel quotes it verbatim, so an
+    /// Auto pocket never hides which path it is cutting.
+    Auto,
+}
+
+impl PocketStrategy {
+    /// What Auto picks for a cutter-center ring: fitted arcs must carry
+    /// at least 90% of the boundary's length AND agree on a center
+    /// within a quarter stepover - a family of true circles, not corners
+    /// that happen to round - and the stepover must still be inside
+    /// waterline's reach (rings a whole stepover apart leave a band no
+    /// ring's edge reaches when the step exceeds one radius; zigzag
+    /// clears the same floor honestly). Any other strategy answers as
+    /// itself.
+    pub fn resolve(self, outer_ring: &[Point2], stepover: f64, tool_diameter: f64, tol: f64) -> Self {
+        match self {
+            PocketStrategy::Auto
+                if ring_is_circular(outer_ring, tol, stepover)
+                    && stepover <= tool_diameter * 0.5 =>
+            {
+                PocketStrategy::Waterline
+            }
+            PocketStrategy::Auto => PocketStrategy::Zigzag,
+            s => s,
+        }
+    }
+}
+
+/// The circularity law behind [`PocketStrategy::resolve`]: fit the ring
+/// with the arc fitter's own tolerance budget and ask what came back.
+/// Arc length must cover at least 0.9 of the total; fitted centers must
+/// span no more than `stepover / 4` (a concentric circle family agrees
+/// on one center; a rounded rectangle's corner arcs do not).
+pub fn ring_is_circular(poly: &[Point2], tol: f64, stepover: f64) -> bool {
+    if poly.len() < 3 {
+        return false;
+    }
+    // Loop points are vertex lists whose last edge implicitly wraps to the
+    // first; the fitter sees plain sequences, so close the ring explicitly
+    // before asking it what shape the whole circuit is.
+    let mut closed = poly.to_vec();
+    if dist(closed[0], *closed.last().unwrap()) > 0.0 {
+        closed.push(closed[0]);
+    }
+    let segs = fit_arcs(&closed, tol);
+    let mut arc_len = 0.0;
+    let mut line_len = 0.0;
+    let mut centers: Vec<Point2> = Vec::new();
+    let mut prev = closed[0];
+    for seg in &segs {
+        match seg {
+            Seg::Line(pts) => {
+                for q in pts {
+                    line_len += dist(prev, *q);
+                    prev = *q;
+                }
+            }
+            Seg::Arc { center, to, .. } => {
+                // Chord length for the share: an arc is longer than its
+                // chord, but coverage compares like-for-like runs, and
+                // the 0.9 margin absorbs the difference.
+                arc_len += dist(prev, *to);
+                centers.push(*center);
+                prev = *to;
+            }
+        }
+    }
+    let total = arc_len + line_len;
+    if total <= 0.0 || !total.is_finite() {
+        return false;
+    }
+    if arc_len / total < 0.9 {
+        return false;
+    }
+    let mut span = 0.0f64;
+    for (i, a) in centers.iter().enumerate() {
+        for b in centers[i..].iter() {
+            span = span.max(dist(*a, *b));
+        }
+    }
+    span <= stepover * 0.25
 }
 
 /// 2D pocketing: clear every bit of material inside a region down to
@@ -1110,11 +1246,14 @@ pub struct PocketParams {
     /// travelled with material on the left of the cut.
     pub climb: bool,
     pub strategy: PocketStrategy,
+    /// Between-ring hop plane within one level. `None` hops to
+    /// clearance - every pre-M1.5.2 pocket's shape, kept byte-exact.
+    pub retract_z: Option<f64>,
 }
 
 impl PocketParams {
     fn validate(&self) -> Result<(), GenError> {
-        let finite = [
+        let mut finite = [
             self.tool_diameter,
             self.stock_to_leave,
             self.clearance_z,
@@ -1127,6 +1266,7 @@ impl PocketParams {
         ]
         .into_iter()
         .all(f64::is_finite);
+        finite &= self.retract_z.is_none_or(f64::is_finite);
         if !finite {
             return Err(GenError::Invalid("parameters must be finite".into()));
         }
@@ -1141,9 +1281,11 @@ impl PocketParams {
         // and zigzag puts grazing rows on the extreme coverage centers,
         // so stepover <= diameter covers the region. Waterline's innermost
         // ring can stand a whole stepover from the material it collapses
-        // around, so it must stay within one radius.
+        // around, so it must stay within one radius. Auto is bounded by
+        // the looser law: its waterline branch carries the radius bound
+        // inside `resolve`, and anything else runs zigzag.
         let reach = match self.strategy {
-            PocketStrategy::Zigzag => self.tool_diameter,
+            PocketStrategy::Zigzag | PocketStrategy::Auto => self.tool_diameter,
             PocketStrategy::Waterline => self.tool_diameter * 0.5,
         };
         if self.stepover > reach {
@@ -1162,6 +1304,9 @@ impl PocketParams {
         }
         if self.clearance_z < self.top_z {
             return Err(GenError::Invalid("clearance plane below the first cut level".into()));
+        }
+        if self.retract_z.is_some_and(|rz| rz < self.top_z) {
+            return Err(GenError::Invalid("retract plane sits inside the material".into()));
         }
         Ok(())
     }
@@ -1191,8 +1336,24 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         // Material exists that no legal tool position can reach.
         return Err(GenError::Invalid("pocket is narrower than the tool".into()));
     }
-    let passes = match p.strategy {
-        PocketStrategy::Zigzag => zigzag_passes(&center, p)?,
+    // Auto commits to a shape here, from the region's own outline - the
+    // outermost loop (largest area; holes and islands never decide the
+    // pocket's strategy). The panel quotes the same law on the same
+    // points, so what was cut is what was said.
+    let strategy = match p.strategy {
+        PocketStrategy::Auto => {
+            let outer = region
+                .loops()
+                .iter()
+                .max_by(|a, b| a.area().abs().total_cmp(&b.area().abs()))
+                .map(|l| l.points())
+                .unwrap_or(&[]);
+            p.strategy.resolve(outer, p.stepover, p.tool_diameter, ARC_FIT_TOL)
+        }
+        s => s,
+    };
+    let passes = match strategy {
+        PocketStrategy::Zigzag | PocketStrategy::Auto => zigzag_passes(&center, p)?,
         PocketStrategy::Waterline => waterline_passes(&center, p)?,
     };
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
@@ -1201,11 +1362,12 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     // Waterline rings circle around material, so they get the arc fitter
     // (rings straight enough to be lines stay exactly that); zigzag rows
     // are straight by construction and keep the plain walk.
-    let fit = match p.strategy {
-        PocketStrategy::Zigzag => None,
+    let fit = match strategy {
+        PocketStrategy::Zigzag | PocketStrategy::Auto => None,
         PocketStrategy::Waterline => Some(ARC_FIT_TOL),
     };
-    run_levels(&mut b, &passes, &zs, p.clearance_z, p.feed, p.plunge_feed, fit);
+    let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
+    run_levels(&mut b, &passes, &zs, &motion, fit);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
@@ -1381,6 +1543,12 @@ pub struct SlotParams {
     pub width: f64,
     pub stock_to_leave: f64,
     pub clearance_z: f64,
+    /// Hop plane for moves that stay inside already-cut material. None
+    /// hops to `clearance_z` (the legacy shape). A slot is one continuous
+    /// serpentine per level, so the hop never actually engages here; the
+    /// plane is validated like everywhere else so a stale value cannot
+    /// hide inside a file that later gains multi-pass rows.
+    pub retract_z: Option<f64>,
     /// First cut level; material is engaged from here down.
     pub top_z: f64,
     pub bottom_z: f64,
@@ -1394,7 +1562,7 @@ pub struct SlotParams {
 
 impl SlotParams {
     fn validate(&self) -> Result<(), GenError> {
-        let finite = [
+        let mut finite = [
             self.tool_diameter,
             self.width,
             self.stock_to_leave,
@@ -1408,6 +1576,7 @@ impl SlotParams {
         ]
         .into_iter()
         .all(f64::is_finite);
+        finite &= self.retract_z.is_none_or(f64::is_finite);
         if !finite {
             return Err(GenError::Invalid("parameters must be finite".into()));
         }
@@ -1436,6 +1605,9 @@ impl SlotParams {
         }
         if self.clearance_z < self.top_z {
             return Err(GenError::Invalid("clearance plane below the first cut level".into()));
+        }
+        if self.retract_z.is_some_and(|rz| rz < self.top_z) {
+            return Err(GenError::Invalid("retract plane sits inside the material".into()));
         }
         Ok(())
     }
@@ -1474,7 +1646,8 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
 
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     let mut bld = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    run_levels(&mut bld, &[pass], &zs, p.clearance_z, p.feed, p.plunge_feed, None);
+    let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
+    run_levels(&mut bld, &[pass], &zs, &motion, None);
     let cur = bld.at();
     bld.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
@@ -1493,6 +1666,10 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TraceParams {
     pub clearance_z: f64,
+    /// Hop plane between loops of the same level (engraved lines already
+    /// cut their own groove, so a low hop is safe there). None hops to
+    /// `clearance_z` - the legacy shape, byte-stable goldens.
+    pub retract_z: Option<f64>,
     /// First cut level; material is engaged from here down.
     pub top_z: f64,
     pub bottom_z: f64,
@@ -1506,7 +1683,7 @@ pub struct TraceParams {
 
 impl TraceParams {
     fn validate(&self) -> Result<(), GenError> {
-        let finite = [
+        let mut finite = [
             self.clearance_z,
             self.top_z,
             self.bottom_z,
@@ -1516,6 +1693,7 @@ impl TraceParams {
         ]
         .into_iter()
         .all(f64::is_finite);
+        finite &= self.retract_z.is_none_or(f64::is_finite);
         if !finite {
             return Err(GenError::Invalid("parameters must be finite".into()));
         }
@@ -1530,6 +1708,9 @@ impl TraceParams {
         }
         if self.clearance_z < self.top_z {
             return Err(GenError::Invalid("clearance plane below the first cut level".into()));
+        }
+        if self.retract_z.is_some_and(|rz| rz < self.top_z) {
+            return Err(GenError::Invalid("retract plane sits inside the material".into()));
         }
         Ok(())
     }
@@ -1562,7 +1743,8 @@ pub fn trace(region: &Region, p: &TraceParams) -> Result<Toolpath, GenError> {
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     // Trace engraves the region's own vertices - the point is to ride
     // the boundary as picked, so no arc fitter runs here.
-    run_levels(&mut b, &passes, &zs, p.clearance_z, p.feed, p.plunge_feed, None);
+    let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
+    run_levels(&mut b, &passes, &zs, &motion, None);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 

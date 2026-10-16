@@ -1,14 +1,17 @@
 //! Face, contour, pocket, slot and trace generator goldens: row counts,
 //! offsets and spacings are exact hand-computable numbers, and rapids may
 //! only appear where the strategy says (face: at the path ends; contour:
-//! between loops and at the hop planes; pocket/slot/trace: only at the
-//! clearance plane).
+//! between loops and at the hop planes; pocket/slot/trace: at the
+//! clearance plane for level changes, and at the retract hop plane for
+//! lifts between passes of one level - None retract means the hop plane
+//! is the clearance plane, and the rapids are where they always were).
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::machining2d::{
-    chord_clears, contour, face, on_boundary, pocket, slot, trace, ContourParams, FaceParams,
-    GenError, Lead, PocketParams, PocketStrategy, SlotParams, TraceParams,
+    ARC_FIT_TOL, chord_clears, contour, face, on_boundary, pocket, ring_is_circular, slot, trace,
+    ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, SlotParams,
+    TraceParams,
 };
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
@@ -695,6 +698,7 @@ fn pp() -> PocketParams {
         stepover: 5.0,
         stock_to_leave: 0.0,
         clearance_z: 5.0,
+        retract_z: None,
         top_z: 0.0,
         bottom_z: -6.0,
         stepdown: 3.0,
@@ -1019,6 +1023,202 @@ fn pocket_is_deterministic() {
     }
 }
 
+/// A regular n-gon approximating a circle of radius `rad`, CCW, centered
+/// on the origin - the ring Auto must recognize as round.
+fn ring_circle(rad: f64, n: usize) -> Vec<Point2> {
+    (0..n)
+        .map(|i| {
+            let t = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
+            Point2::new(rad * t.cos(), rad * t.sin())
+        })
+        .collect()
+}
+
+/// Waterline rings earn a hop only where the rings cannot join: an
+/// island splits each offset level into loops whose connecting chords
+/// cross the island void, so `chord_clears` refuses them and each loop
+/// starts its own pass. Passes of ONE level then lift only to the
+/// retract plane; the first pass of a level still enters from clearance
+/// (it crosses in over the top of the material), and a level change
+/// always clears the whole stack. Island-free waterline chains its rings
+/// at depth with diagonal stepover feeds - there is nothing to hop, and
+/// `zigzag_and_levels_still_lift_to_clearance` covers the transitions.
+#[test]
+fn waterline_rings_split_by_an_island_hop_below_clearance() {
+    let mut p = pp();
+    p.strategy = PocketStrategy::Waterline;
+    p.tool_diameter = 8.0;
+    p.stepover = 2.0;
+    p.top_z = 0.0;
+    p.bottom_z = -3.0;
+    p.stepdown = 3.0; // two levels: 0 and -3
+    p.clearance_z = 5.0;
+    p.retract_z = Some(2.0); // hop plane, below clearance, above the cut
+    let region = Region::new(vec![
+        Loop::new(vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(40.0, 0.0),
+            Point2::new(40.0, 40.0),
+            Point2::new(0.0, 40.0),
+        ])
+        .unwrap(),
+        Loop::new(vec![
+            Point2::new(15.0, 15.0),
+            Point2::new(25.0, 15.0),
+            Point2::new(25.0, 25.0),
+            Point2::new(15.0, 25.0),
+        ])
+        .unwrap(),
+    ])
+    .unwrap();
+    let t = pocket(&region, &p).expect("valid");
+    assert!(t.is_chained() && t.all_finite());
+    let plunges: Vec<(f64, f64)> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .map(|m| (m.from.z, m.to.z))
+        .collect();
+    assert!(plunges.len() >= 4, "the island must split several passes");
+    assert!(
+        (plunges[0].0 - p.clearance_z).abs() < 1e-9,
+        "the first entry crosses in at clearance"
+    );
+    // The whole law, per consecutive pair: same level -> the hop plane;
+    // new level -> the full clearance climb. Nothing else ever appears.
+    let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
+    for pair in plunges.windows(2) {
+        let same_level = (pair[0].1 - pair[1].1).abs() < 1e-9;
+        let want = if same_level { hop } else { p.clearance_z };
+        assert!(
+            (pair[1].0 - want).abs() < 1e-9,
+            "plunge at z {} lifted from {}, not {}",
+            pair[1].1,
+            pair[1].0,
+            want
+        );
+    }
+    assert!(
+        plunges.iter().any(|p2| (p2.0 - 2.0).abs() < 1e-9),
+        "the hop must actually engage on this shape"
+    );
+}
+
+/// A level change engages material the previous level never touched, so
+/// it must clear the whole stack no matter what retract plane is set.
+/// Zigzag is one serpentine pass per level, so it exercises the level
+/// transitions directly: every plunge comes down from clearance, never
+/// from the lower retract hop.
+#[test]
+fn zigzag_and_levels_still_lift_to_clearance() {
+    let mut p = pp(); // zigzag, top 0, bottom -6, stepdown 3 -> 3 levels
+    p.clearance_z = 5.0;
+    p.retract_z = Some(2.0);
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let t = pocket(&region, &p).expect("valid");
+    for m in &t.moves {
+        if m.kind == MoveKind::Plunge {
+            assert!(
+                (m.from.z - p.clearance_z).abs() < 1e-9,
+                "a zigzag level plunged from {} - level changes go to clearance",
+                m.from.z
+            );
+        }
+    }
+}
+
+/// A retract plane inside the material would make a between-pass hop
+/// slide through solid - a gouge. Refused by name, for every kind that
+/// owns the field.
+#[test]
+fn retract_inside_material_refuses() {
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    {
+        let mut p = pp();
+        p.retract_z = Some(-1.0); // below top_z 0.0
+        assert!(matches!(pocket(&region, &p), Err(GenError::Invalid(r)) if r.contains("retract")));
+    }
+    {
+        let mut c = cp();
+        c.retract_z = -1.0;
+        assert!(matches!(contour(&region, &c), Err(GenError::Invalid(r)) if r.contains("retract")));
+    }
+    {
+        let mut s = sp();
+        s.retract_z = Some(-1.0);
+        assert!(
+            matches!(slot(Point2::new(-10.0, 0.0), Point2::new(10.0, 0.0), &s), Err(GenError::Invalid(r)) if r.contains("retract"))
+        );
+    }
+    {
+        let mut tr = tp();
+        tr.retract_z = Some(-1.0);
+        assert!(matches!(trace(&region, &tr), Err(GenError::Invalid(r)) if r.contains("retract")));
+    }
+}
+
+/// The clamp: a legacy file may park retract above clearance. Refusing
+/// would brick it, so the effective hop is `min(retract, clearance)` -
+/// which makes the path byte-identical to the no-retract (hop-to-
+/// clearance) shape. The panel echo that names the clamp is a UI test.
+#[test]
+fn legacy_retract_above_clearance_clamps_and_says_so() {
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let mut a = pp();
+    a.strategy = PocketStrategy::Waterline;
+    a.tool_diameter = 8.0;
+    a.stepover = 2.0;
+    a.top_z = 0.0;
+    a.bottom_z = 0.0;
+    a.clearance_z = 5.0;
+    a.retract_z = Some(50.0); // absurd: retract far above clearance
+    let mut b = a;
+    b.retract_z = None; // the hop-to-clearance every pre-step-5 file did
+    assert_eq!(
+        pocket(&region, &a).expect("a"),
+        pocket(&region, &b).expect("b"),
+        "retract above clearance clamps to clearance, path unchanged"
+    );
+}
+
+/// Auto reads the pocket's own outline: a round boundary whose fitted
+/// arcs agree on one center and whose stepover stays inside a tool
+/// radius becomes Waterline; a square, whose fitted runs are straight,
+/// stays Zigzag.
+#[test]
+fn auto_picks_waterline_for_a_circular_region() {
+    // 192 segments on a Ø40 rim keep every chord's sagitta inside
+    // ARC_FIT_TOL, so the fitter can honour the circle it is shown. A
+    // coarser tessellation (last assert) is NOT round at that tolerance
+    // - Auto falls back to Zigzag rather than claim rings the chords
+    // would cut outside of.
+    let circle = ring_circle(20.0, 192);
+    assert!(ring_is_circular(&circle, ARC_FIT_TOL, 5.0), "the circle must read as round");
+    let chosen = PocketStrategy::Auto.resolve(&circle, 5.0, 10.0, ARC_FIT_TOL);
+    assert_eq!(chosen, PocketStrategy::Waterline, "round + reachable -> waterline");
+    // An unreachable stepover demotes to zigzag even on a round ring:
+    // rings a whole stepover apart would leave a band no ring edge cuts.
+    let demoted = PocketStrategy::Auto.resolve(&circle, 8.0, 10.0, ARC_FIT_TOL);
+    assert_eq!(demoted, PocketStrategy::Zigzag, "stepover past reach -> zigzag");
+    assert!(
+        !ring_is_circular(&ring_circle(20.0, 48), ARC_FIT_TOL, 5.0),
+        "coarse facets are not a round rim at this tolerance"
+    );
+}
+
+#[test]
+fn rectangular_pocket_stays_zigzag_under_auto() {
+    let square = vec![
+        Point2::new(0.0, 0.0),
+        Point2::new(40.0, 0.0),
+        Point2::new(40.0, 40.0),
+        Point2::new(0.0, 40.0),
+    ];
+    assert!(!ring_is_circular(&square, ARC_FIT_TOL, 5.0), "a square is not round");
+    let chosen = PocketStrategy::Auto.resolve(&square, 5.0, 10.0, ARC_FIT_TOL);
+    assert_eq!(chosen, PocketStrategy::Zigzag);
+}
+
 // ---- slot and trace -----------------------------------------------------
 
 fn sp() -> SlotParams {
@@ -1027,6 +1227,7 @@ fn sp() -> SlotParams {
         width: 10.0,
         stock_to_leave: 0.0,
         clearance_z: 5.0,
+        retract_z: None,
         top_z: 0.0,
         bottom_z: -6.0,
         stepdown: 3.0,
@@ -1040,6 +1241,7 @@ fn sp() -> SlotParams {
 fn tp() -> TraceParams {
     TraceParams {
         clearance_z: 5.0,
+        retract_z: None,
         top_z: 0.0,
         bottom_z: -2.0,
         stepdown: 1.0,
@@ -1183,6 +1385,7 @@ fn slot_refuses_bad_input() {
         ("negative leave", SlotParams { stock_to_leave: -1.0, ..sp() }),
         ("top below bottom", SlotParams { bottom_z: 1.0, ..sp() }),
         ("clearance below the cut", SlotParams { clearance_z: -2.0, ..sp() }),
+        ("retract inside the material", SlotParams { retract_z: Some(-1.0), ..sp() }),
         ("zero feed", SlotParams { feed: 0.0, ..sp() }),
         ("zero stepdown", SlotParams { stepdown: 0.0, ..sp() }),
     ];
@@ -1296,6 +1499,7 @@ fn trace_refuses_bad_input() {
         ("zero stepdown", TraceParams { stepdown: 0.0, ..tp() }),
         ("top below bottom", TraceParams { bottom_z: 1.0, ..tp() }),
         ("clearance below the cut", TraceParams { clearance_z: -3.0, ..tp() }),
+        ("retract inside the material", TraceParams { retract_z: Some(-1.0), ..tp() }),
         ("zero feed", TraceParams { feed: 0.0, ..tp() }),
         ("zero plunge feed", TraceParams { plunge_feed: 0.0, ..tp() }),
     ];

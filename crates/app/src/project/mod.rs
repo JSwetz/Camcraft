@@ -271,6 +271,8 @@ pub enum ParamsDto {
         width: f64,
         stock_to_leave: f64,
         clearance_z: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<f64>,
         top_z: f64,
         bottom_z: f64,
         stepdown: f64,
@@ -281,6 +283,8 @@ pub enum ParamsDto {
     },
     Trace {
         clearance_z: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<f64>,
         top_z: f64,
         bottom_z: f64,
         stepdown: f64,
@@ -303,6 +307,10 @@ pub enum LeadDto {
 pub enum StrategyDto {
     Zigzag,
     Waterline,
+    /// Added at v5 with the auto strategy: the choice itself is not
+    /// stored - resolution runs at generate time - only that the user
+    /// asked for it.
+    Auto,
 }
 
 impl ParamsDto {
@@ -368,6 +376,7 @@ impl ParamsDto {
                 stepover,
                 stock_to_leave,
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -388,10 +397,11 @@ impl ParamsDto {
                 strategy: match strategy {
                     PocketStrategy::Zigzag => StrategyDto::Zigzag,
                     PocketStrategy::Waterline => StrategyDto::Waterline,
+                    PocketStrategy::Auto => StrategyDto::Auto,
                 },
-                // Inert until step 5 wires the hop: absent means the
-                // hop-to-clearance this build always performs.
-                retract_z: None,
+                // Absent means the hop-to-clearance every pre-step-5
+                // pocket performed; a set plane round-trips exactly.
+                retract_z: *retract_z,
             },
             OpParams::Slot {
                 a,
@@ -399,6 +409,7 @@ impl ParamsDto {
                 width,
                 stock_to_leave,
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -412,6 +423,7 @@ impl ParamsDto {
                 width: *width,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: *clearance_z,
+                retract_z: *retract_z,
                 top_z: *top_z,
                 bottom_z: *bottom_z,
                 stepdown: *stepdown,
@@ -420,16 +432,24 @@ impl ParamsDto {
                 plunge_feed: *plunge_feed,
                 climb: *climb,
             },
-            OpParams::Trace { clearance_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb } => {
-                ParamsDto::Trace {
-                    clearance_z: *clearance_z,
-                    top_z: *top_z,
-                    bottom_z: *bottom_z,
-                    stepdown: *stepdown,
-                    feed: *feed,
-                    plunge_feed: *plunge_feed,
-                    climb: *climb,
-                }
+            OpParams::Trace {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+            } => ParamsDto::Trace {
+                clearance_z: *clearance_z,
+                retract_z: *retract_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
             }
         }
     }
@@ -497,12 +517,12 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 strategy,
-                // Inert until step 5 (see the face note above).
-                ..
+                retract_z,
             } => OpParams::Pocket {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: *clearance_z,
+                retract_z: *retract_z,
                 top_z: *top_z,
                 bottom_z: *bottom_z,
                 stepdown: *stepdown,
@@ -512,6 +532,7 @@ impl ParamsDto {
                 strategy: match strategy {
                     StrategyDto::Zigzag => PocketStrategy::Zigzag,
                     StrategyDto::Waterline => PocketStrategy::Waterline,
+                    StrategyDto::Auto => PocketStrategy::Auto,
                 },
             },
             ParamsDto::Slot {
@@ -520,6 +541,7 @@ impl ParamsDto {
                 width,
                 stock_to_leave,
                 clearance_z,
+                retract_z,
                 top_z,
                 bottom_z,
                 stepdown,
@@ -533,6 +555,7 @@ impl ParamsDto {
                 width: *width,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: *clearance_z,
+                retract_z: *retract_z,
                 top_z: *top_z,
                 bottom_z: *bottom_z,
                 stepdown: *stepdown,
@@ -541,16 +564,24 @@ impl ParamsDto {
                 plunge_feed: *plunge_feed,
                 climb: *climb,
             },
-            ParamsDto::Trace { clearance_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb } => {
-                OpParams::Trace {
-                    clearance_z: *clearance_z,
-                    top_z: *top_z,
-                    bottom_z: *bottom_z,
-                    stepdown: *stepdown,
-                    feed: *feed,
-                    plunge_feed: *plunge_feed,
-                    climb: *climb,
-                }
+            ParamsDto::Trace {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+            } => OpParams::Trace {
+                clearance_z: *clearance_z,
+                retract_z: *retract_z,
+                top_z: *top_z,
+                bottom_z: *bottom_z,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
             }
         }
     }

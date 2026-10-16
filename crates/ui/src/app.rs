@@ -993,11 +993,38 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         corner: 0,
         skip_rect: false,
     }];
-    // Retract is a Contour idea of a level: the other kinds do not store
-    // one, so there is nothing honest to draw.
-    if let operation::OpParams::Contour { retract_z, .. } = draft {
+    // Retract is the between-pass hop plane, every kind that stores one.
+    // It draws at the effective hop - `min(retract, clearance)` - because
+    // that is the Z the rapids actually travel at, even when a legacy
+    // file parked retract above clearance. Kinds whose retract is unset
+    // hop at clearance and get no extra plane: the Clearance plane above
+    // already says where those rapids run.
+    let hop = match draft {
+        operation::OpParams::Contour {
+            retract_z,
+            clearance_z,
+            ..
+        } => Some(retract_z.min(*clearance_z)),
+        operation::OpParams::Pocket {
+            retract_z,
+            clearance_z,
+            ..
+        }
+        | operation::OpParams::Slot {
+            retract_z,
+            clearance_z,
+            ..
+        }
+        | operation::OpParams::Trace {
+            retract_z,
+            clearance_z,
+            ..
+        } => retract_z.map(|r| r.min(*clearance_z)),
+        operation::OpParams::Face { .. } => None,
+    };
+    if let Some(z) = hop {
         out.push(HeightPlane {
-            z: *retract_z,
+            z,
             rgb: RETRACT_RGB,
             name: "Retract",
             corner: 1,
@@ -2984,6 +3011,7 @@ mod height_plane_tests {
             stepover: 3.0,
             stock_to_leave: 0.0,
             clearance_z: 25.0,
+            retract_z: None,
             top_z: 10.0,
             bottom_z: 2.0,
             stepdown: 2.0,

@@ -673,6 +673,105 @@ fn v4_file_migrates_to_v5() {
 }
 
 #[test]
+fn v5_roundtrips_retract_and_auto() {
+    // The step-5 fields, once actually set, round-trip exactly: the
+    // pocket's hop plane and Auto choice, and the trace's hop plane.
+    let path = tmp_path("hop5");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        SetStock::new(
+            &world,
+            StockShape::Box {
+                dx: 60.0,
+                dy: 60.0,
+                dz: 20.0,
+            },
+            Location::default(),
+        )
+        .expect("stock"),
+    );
+    history.execute(
+        &world,
+        AddTool::new(&world, "EM-0400-2FL", catalog_tool("EM-0400-2FL")).expect("add tool"),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Pocket1",
+            "EM-0400-2FL",
+            SrcRef::Stock,
+            OpParams::Pocket {
+                stepover: 1.0,
+                stock_to_leave: 0.0,
+                clearance_z: 25.0,
+                retract_z: Some(22.0),
+                top_z: 20.0,
+                bottom_z: 18.0,
+                stepdown: 2.0,
+                feed: 900.0,
+                plunge_feed: 250.0,
+                climb: true,
+                strategy: PocketStrategy::Auto,
+            },
+        )
+        .expect("pocket"),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Trace1",
+            "EM-0400-2FL",
+            SrcRef::Stock,
+            OpParams::Trace {
+                clearance_z: 25.0,
+                retract_z: Some(23.0),
+                top_z: 20.0,
+                bottom_z: 18.0,
+                stepdown: 2.0,
+                feed: 1200.0,
+                plunge_feed: 300.0,
+                climb: true,
+            },
+        )
+        .expect("trace"),
+    );
+
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(first.contains("\"retract_z\""), "the set hop plane is in the file");
+    assert!(first.contains("\"auto\""), "the Auto choice is stored (resolution is not)");
+
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "retract/Auto round-trip byte-identically");
+
+    let op = model::find_by_name(&world2, "Pocket1").expect("pocket loaded");
+    match model::operation_of(&world2, &op).expect("params").params {
+        OpParams::Pocket {
+            retract_z,
+            strategy,
+            ..
+        } => {
+            assert_eq!(retract_z, Some(22.0), "the hop plane survives exactly");
+            assert_eq!(strategy, PocketStrategy::Auto, "the choice survives exactly");
+        }
+        ref other => panic!("pocket params expected, got {other:?}"),
+    }
+    let tr = model::find_by_name(&world2, "Trace1").expect("trace loaded");
+    match model::operation_of(&world2, &tr).expect("params").params {
+        OpParams::Trace { retract_z, .. } => assert_eq!(retract_z, Some(23.0)),
+        ref other => panic!("trace params expected, got {other:?}"),
+    }
+}
+
+#[test]
 fn patch_selection_round_trips() {
     // The welded wall of a faceted boss, picked once and saved by its
     // geometry hash: the file speaks `patch`, and a second world

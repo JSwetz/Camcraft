@@ -18,7 +18,7 @@ use std::borrow::Cow;
 
 use dear_imgui_rs::{Ui, WindowKey};
 use hsmworks_app::geo2d::Point2;
-use hsmworks_app::machining2d::{Lead, PocketStrategy};
+use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy};
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
@@ -34,7 +34,14 @@ use crate::state::{CommandKind, ErrorScope, GeoPick, State, UiTarget};
 /// Trace); `kind_index` and `retype` must agree with this list.
 const TYPES: [&str; 5] = ["Face", "2D Contour", "2D Pocket", "Slot", "Trace"];
 const LEADS: [&str; 3] = ["None", "Linear", "Arc"];
-const STRATEGIES: [&str; 2] = ["Zigzag", "Waterline"];
+/// The Strategy combo's labels, in index order - one source for the
+/// labels, the combo, and any test checking what the pane offers. Auto
+/// sits beside the explicit choices; picking it stores the choice, and
+/// [`hsmworks_app::machining2d::PocketStrategy::resolve`] answers which
+/// path it cuts at generate.
+pub fn strategy_names() -> &'static [&'static str] {
+    &["Zigzag", "Waterline", "Auto"]
+}
 const TOOL_KINDS: [&str; 3] = ["End mill", "Ball nose", "Bull nose"];
 
 pub fn operations_panel(ui: &Ui, state: &mut State) {
@@ -543,6 +550,9 @@ fn model_page(ui: &Ui, state: &State, name: &str) {
 /// The parameter fields of the draft's current variant. Edits go to the
 /// draft; the world sees them only through `EditOperationParams`.
 fn params_fields(ui: &Ui, state: &mut State) {
+    // Computed up front: the match below keeps a mutable borrow of the
+    // draft alive, and the Auto note reads the world, not the draft.
+    let auto_note = auto_note(state);
     match &mut state.op_ui.params {
         OpParams::Face {
             stepover,
@@ -607,6 +617,11 @@ fn params_fields(ui: &Ui, state: &mut State) {
             ui.input_double("##c_clr", clearance_z);
             form::field(ui, "Retract Z (between passes)");
             ui.input_double("##c_ret", retract_z);
+            if *retract_z > *clearance_z {
+                ui.text_wrapped(format!(
+                    "above clearance - the hop travels at {clearance_z:.3} (min of the two)"
+                ));
+            }
             form::field(ui, "Top Z");
             ui.input_double("##c_top", top_z);
             form::field(ui, "Bottom Z");
@@ -659,6 +674,7 @@ fn params_fields(ui: &Ui, state: &mut State) {
             stepover,
             stock_to_leave,
             clearance_z,
+            retract_z,
             top_z,
             bottom_z,
             stepdown,
@@ -673,6 +689,22 @@ fn params_fields(ui: &Ui, state: &mut State) {
             ui.input_double("##p_stl", stock_to_leave);
             form::field(ui, "Clearance Z");
             ui.input_double("##p_clr", clearance_z);
+            // Off hops to clearance - the legacy shape; on lifts between
+            // passes of one level to this plane, clamped at clearance.
+            form::field(ui, "Retract plane");
+            let mut hop = retract_z.is_some();
+            if ui.checkbox("Hop below clearance", &mut hop) {
+                *retract_z = if hop { Some(*top_z + 1.0) } else { None };
+            }
+            if let Some(z) = retract_z {
+                form::field(ui, "Retract Z");
+                ui.input_double("##p_ret", z);
+                if *z > *clearance_z {
+                    ui.text_wrapped(format!(
+                        "above clearance - the hop travels at {clearance_z:.3} (min of the two)"
+                    ));
+                }
+            }
             form::field(ui, "Top Z");
             ui.input_double("##p_top", top_z);
             form::field(ui, "Bottom Z");
@@ -687,16 +719,20 @@ fn params_fields(ui: &Ui, state: &mut State) {
             let mut st_idx = match strategy {
                 PocketStrategy::Zigzag => 0,
                 PocketStrategy::Waterline => 1,
+                PocketStrategy::Auto => 2,
             };
             form::field(ui, "Strategy");
-            if ui.combo("##p_strat", &mut st_idx, STRATEGIES.as_slice(), |t| {
+            if ui.combo("##p_strat", &mut st_idx, strategy_names(), |t| {
                 Cow::Borrowed(*t)
             }) {
-                *strategy = if st_idx == 1 {
-                    PocketStrategy::Waterline
-                } else {
-                    PocketStrategy::Zigzag
+                *strategy = match st_idx {
+                    1 => PocketStrategy::Waterline,
+                    2 => PocketStrategy::Auto,
+                    _ => PocketStrategy::Zigzag,
                 };
+            }
+            if let Some(note) = &auto_note {
+                ui.text_wrapped(note.as_str());
             }
         }
         OpParams::Slot {
@@ -705,6 +741,10 @@ fn params_fields(ui: &Ui, state: &mut State) {
             width,
             stock_to_leave,
             clearance_z,
+            // The slot cuts one continuous serpentine per level, so there
+            // is never a same-level lift to hop - the plane is accepted
+            // and validated, but showing a dead control would be a lie.
+            retract_z: _,
             top_z,
             bottom_z,
             stepdown,
@@ -743,6 +783,7 @@ fn params_fields(ui: &Ui, state: &mut State) {
         }
         OpParams::Trace {
             clearance_z,
+            retract_z,
             top_z,
             bottom_z,
             stepdown,
@@ -752,6 +793,22 @@ fn params_fields(ui: &Ui, state: &mut State) {
         } => {
             form::field(ui, "Clearance Z");
             ui.input_double("##t_clr", clearance_z);
+            // Engraved lines cut their own groove, so a low hop between
+            // loops of one level is safe here; off hops to clearance.
+            form::field(ui, "Retract plane");
+            let mut hop = retract_z.is_some();
+            if ui.checkbox("Hop below clearance", &mut hop) {
+                *retract_z = if hop { Some(*top_z + 1.0) } else { None };
+            }
+            if let Some(z) = retract_z {
+                form::field(ui, "Retract Z");
+                ui.input_double("##t_ret", z);
+                if *z > *clearance_z {
+                    ui.text_wrapped(format!(
+                        "above clearance - the hop travels at {clearance_z:.3} (min of the two)"
+                    ));
+                }
+            }
             form::field(ui, "Top Z");
             ui.input_double("##t_top", top_z);
             form::field(ui, "Bottom Z");
@@ -775,6 +832,49 @@ fn kind_index(kind: operation::OpType) -> usize {
         operation::OpType::Slot => 3,
         operation::OpType::Trace => 4,
     }
+}
+
+/// The live decision behind an `Auto` pocket, quoting
+/// [`PocketStrategy::resolve`] - the very law generation applies - so the
+/// strategy never hides which shape the pocket will cut. `None` unless
+/// the draft is a pocket set to Auto. A brand-new op has no geometry in
+/// the world to ask yet; once its region resolves, the note names the
+/// pick.
+fn auto_note(state: &State) -> Option<String> {
+    let OpParams::Pocket {
+        strategy, stepover, ..
+    } = &state.op_ui.params
+    else {
+        return None;
+    };
+    if *strategy != PocketStrategy::Auto {
+        return None;
+    }
+    let stepover = *stepover;
+    let pick = "Auto picks the shape from the pocket's outline at generate.";
+    let entity = model::find_by_name(&state.world, &state.op_ui.name)?;
+    let op = model::operation_of(&state.world, &entity)?;
+    let region = operation::region_of(&state.world, &op)
+        .unwrap_or_else(hsmworks_app::geo2d::Region::empty);
+    let diameter = model::find_by_name(&state.world, &state.op_ui.tool)
+        .and_then(|t| model::tool_of(&state.world, &t))
+        .map_or(6.0, |tool| tool.diameter);
+    let outer = region
+        .loops()
+        .iter()
+        .max_by(|a, b| a.area().abs().total_cmp(&b.area().abs()))
+        .map_or(&[][..], |l| l.points());
+    if outer.is_empty() {
+        return Some(pick.to_string());
+    }
+    Some(
+        match PocketStrategy::Auto.resolve(outer, stepover, diameter, ARC_FIT_TOL) {
+            PocketStrategy::Waterline => {
+                "Auto -> Waterline: the outline is round and the rings reach every band.".to_string()
+            }
+            _ => "Auto -> Zigzag: rings would not suit this outline.".to_string(),
+        },
+    )
 }
 
 /// Top of the stock solid: the natural default for a `Top Z`.
@@ -816,13 +916,16 @@ fn retype(cur: &OpParams, kind: usize, top: f64) -> OpParams {
             stepover,
             stock_to_leave: 0.0,
             clearance_z: clearance,
+            retract_z: None,
             top_z: top,
             bottom_z: bottom,
             stepdown,
             feed,
             plunge_feed: plunge,
             climb,
-            strategy: PocketStrategy::Zigzag,
+            // New pockets let the shape come from the outline; explicit
+            // choices on live operations are never retyped over.
+            strategy: PocketStrategy::Auto,
         },
         3 => OpParams::Slot {
             a: Point2::new(-20.0, 0.0),
@@ -830,6 +933,7 @@ fn retype(cur: &OpParams, kind: usize, top: f64) -> OpParams {
             width: 4.0,
             stock_to_leave: 0.0,
             clearance_z: clearance,
+            retract_z: None,
             top_z: top,
             bottom_z: bottom,
             stepdown,
@@ -840,6 +944,7 @@ fn retype(cur: &OpParams, kind: usize, top: f64) -> OpParams {
         },
         4 => OpParams::Trace {
             clearance_z: clearance,
+            retract_z: None,
             top_z: top,
             bottom_z: bottom,
             stepdown,

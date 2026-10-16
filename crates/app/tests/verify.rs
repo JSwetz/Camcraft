@@ -83,6 +83,7 @@ fn clean_pocket_verifies_silent() {
             stepover: 3.0,
             stock_to_leave: 0.0,
             clearance_z: 5.0,
+            retract_z: None,
             top_z: 0.0,
             bottom_z: -4.0,
             stepdown: 2.0,
@@ -219,6 +220,7 @@ fn holder_hits_a_part_island_when_the_flute_is_short() {
             stepover: 3.0,
             stock_to_leave: 0.0,
             clearance_z: 5.0,
+            retract_z: None,
             top_z: 0.0,
             bottom_z: -4.0,
             stepdown: 2.0,
@@ -265,6 +267,7 @@ fn engrave_paths_skip_the_gouge_law() {
         &r,
         &TraceParams {
             clearance_z: 5.0,
+            retract_z: None,
             top_z: 0.0,
             bottom_z: -1.0,
             stepdown: 1.0,

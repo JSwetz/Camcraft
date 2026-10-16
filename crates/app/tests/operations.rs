@@ -487,6 +487,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         src: SrcRef::Stock,
         params: OpParams::Trace {
             clearance_z: 25.0,
+            retract_z: None,
             top_z: 10.0,
             bottom_z: 5.0,
             stepdown: 5.0,
@@ -771,6 +772,7 @@ fn pocket_refuses_an_open_run() {
             stepover: 3.0,
             stock_to_leave: 0.0,
             clearance_z: 10.0,
+            retract_z: None,
             top_z: 5.0,
             bottom_z: 0.0,
             stepdown: 2.5,
@@ -1772,6 +1774,7 @@ fn straight_runs_face_their_material_and_trace_refuses_by_name() {
             SrcRef::Selection(items),
             OpParams::Trace {
                 clearance_z: 25.0,
+                retract_z: None,
                 top_z: 5.0,
                 bottom_z: 2.5,
                 stepdown: 2.5,
