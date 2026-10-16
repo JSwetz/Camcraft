@@ -222,7 +222,24 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
       highlights the facet under the cursor (`pick::first_hit_f`) - the
       facet-index hook M1.5 feature picking builds on
 - ⏸ **View cube + viewport navigation bar**: deferred to the M1.5 viewport
-      work; the only open item here
+      work (three open items below it join this milestone's list)
+- 📋 **Graphical tool editor**: tool creation and editing move from the
+      property page's field list to its own window with a live preview -
+      the tool, shank and holder drawn to scale and updating as the
+      numbers change, from the same geometry the viewport shows. Owns
+      the preview the parameter page can't give; the window form is a
+      considered revisit of this milestone's "standalone tool library
+      window is gone" decision (keep the dock for the library, open a
+      window for the editor)
+- 📋 **Viewport display modes**: wireframe-only, and shaded-with-edges
+      (solid fill plus the feature-edge overlay), switchable per view -
+      navigation and selection aids: wireframe to see through stock and
+      toolpaths, edges to know what a click will grab. Generalizes the
+      STEP feature-edge wireframe from M1.2 to every model
+- 📋 **Panel UX overhaul**: property panels reorganized into tabs and
+      named sections (geometry, heights, passes, leads and links,
+      feeds) instead of long stacks of dropdowns and inputs, so a
+      parameter reads as part of a page, not another row
 
 ### M1.5 - Feature Selection
 **Goal: pick a face or an edge chain and machine that - not just whole
@@ -523,11 +540,20 @@ own.
 - **Post template engine**: an embedded scripting runtime so users own their posts (a clean-room design: no adaptation of the original .post JavaScript files)
 - **Built-in posts**: Fanuc, Haas, Siemens 840D, Heidenhain, Mazak - each with conformance tests against a golden G-code suite
 - **Machine definitions**: a machine group in the Setup pane - select or edit a
-      machine, its name shown in the setup, with axis travel, tool changer,
-      spindle and coolant - driving simulation limits and post output. The
-      user-facing workflow (pick a machine, edit it, see it on the setup) is
-      specced from published CAM user documentation only; no vendor strings,
-      templates, or post files are copied or adapted
+      machine, its name shown in the setup, driving simulation limits and post
+      output. A machine declares its kind - mill, lathe, or mill-turn - and
+      the operation families a setup offers follow the kind; today every
+      assumption in the app is a mill. The definition carries the machine's
+      numbers: X/Y/Z travel and rapid rates, spindle speed and power limits
+      (the ceilings the tool library's per-material speeds and feeds are
+      checked against), rotary axes where present
+      (A/B/C travel, rapid speed, positioning resolution), tool changer
+      capacity, and coolant options (none / mist / flood / high-pressure /
+      through-spindle) that reach the post as M-codes (M1.7's Fanuc coolant
+      output reads them from here). The user-facing workflow (pick a machine,
+      edit it, see it on the setup) is specced from published CAM user
+      documentation only; no vendor strings, templates, or post files are
+      copied or adapted
 - **RTCP output**: G43.4 / A-angles correctly emitted for trunnion and tilting-head machines
 - **Post debugging**: block-by-block trace from toolpath to line of G-code
 
@@ -551,6 +577,10 @@ programming department.
 ### M4.2 - Turning & Mill-Turn
 **Goal: lathe parts and C-axis parts from the same system.**
 
+- **Lathe machine model**: the turning side of M3.3's machine kinds - a
+      lathe-kind machine offers turning operations on its own axis model
+      (X/Z, spindle as the cutting axis), so the mill-centric plumbing
+      finally branches; mill-turn machines offer both families
 - **2D turning**: face, OD/ID rough and finish with inserts from the tool library
 - **Grooving, part-off, single-point threading**
 - **Bar feeder patterns**: catch/transfer support for production turning
@@ -574,7 +604,7 @@ programming department.
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
-| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5 | ⚠️ |
+| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window, wireframe/shaded-with-edges display modes, and tabbed-panels UX overhaul open | ⚠️ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
@@ -583,9 +613,9 @@ programming department.
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
 | **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |
-| **M3.3** | Every control covered | Post engine, 5 posts, machines, RTCP, 0.3.0 | 📋 |
+| **M3.3** | Every control covered | Post engine, 5 posts, machine definitions (mill/lathe kinds, axis limits, speeds and feeds, coolant), RTCP, 0.3.0 | 📋 |
 | **M4.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
-| **M4.2** | Lathes too | Turning cycles, bar feeder, mill-turn | 📋 |
+| **M4.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M4.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
 
 ## Open questions & deferred
