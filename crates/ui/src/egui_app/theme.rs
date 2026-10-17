@@ -1,13 +1,17 @@
-//! S2: the dark Visuals the spike claims can reach a Fusion-caliber look.
+//! The dark Visuals, graduated from the M1.4.1 spike (theme.rs, unchanged
+//! law): the numbers are the imgui shell's dark theme (app.rs's style block)
+//! restated as egui tokens.
 //!
 //! Every color is a named token here and nowhere else: the painted ribbon
-//! and browser (painted.rs) read the same struct the egui widgets get via
-//! `Visuals`, so a retheme is one edit and the two render paths (widgets vs
-//! draw-list port) cannot drift. The numbers are the imgui shell's dark
-//! theme (app.rs's style block): the same slate grounds, the same steel-blue
-//! accent, hover/active stepping one notch each, flat 1-px strokes.
-//! Provenance: our own spike module, specced from the imgui theme we already
-//! ship and the egui Visuals docs; no third-party theme copied.
+//! and browser (M-b will graduate painted.rs) read the same struct the egui
+//! widgets get via `Visuals`, so a retheme is one edit and the two render
+//! paths (widgets vs draw-list port) cannot drift. The numbers are the
+//! imgui shell's dark theme (app.rs's style block): the same slate grounds,
+//! the same steel-blue accent, hover/active stepping one notch each, flat
+//! 1-px strokes.
+//! Provenance: our own module (graduated from the spike), specced from the
+//! imgui theme we already ship and the egui Visuals docs; no third-party
+//! theme copied.
 
 use egui::{Color32, Stroke, Visuals};
 
@@ -104,15 +108,15 @@ impl Palette {
         v
     }
 
-    /// The panel ground behind the ribbon/browser strips (painted.rs).
+    /// The panel ground behind the ribbon/browser strips (painted.rs, M-b).
     #[must_use]
     pub fn strip_fill(self) -> Color32 {
         self.ink_alt
     }
 }
 
-/// Install the palette into a context. Called once per Context (windowed)
-/// and once per shot context (shots.rs) - Visuals are per-context.
+/// Install the palette into a context. Called once per Context (windowed).
+/// Visuals are per-context.
 pub fn apply(ctx: &egui::Context) {
     ctx.set_visuals(Palette::DARK.visuals());
 }

@@ -1,19 +1,22 @@
-//! S2: the demo document and the per-frame scene collectors.
+//! The egui shell's demo document and per-frame scene collectors, graduated
+//! from the M1.4.1 spike (world.rs) — the mirror law of app.rs's private
+//! collectors.
 //!
 //! `seed` builds what the panels and viewport show without a file dialog:
 //! a 60x60x30 block, fitted stock, a 6 mm end mill from the catalog, and one
 //! Contour operation picked on the block's top face - the same command walk
 //! `crates/ui/tests/operations.rs` proves, through the same `State` the
 //! imgui app runs. Nothing here pokes world state ad hoc: every change is a
-//! `CommandKind` through `State::drain_actions`, so the spike panels exercise
+//! `CommandKind` through `State::drain_actions`, so the egui shell exercises
 //! the real validation, undo and staleness machinery (AGENTS.md: everything
-//! is a command - the spike must not become an exception).
+//! is a command - the migration must not become an exception). M-d replaces
+//! the startup seed with the real New/Open commands.
 //!
 //! `collect` mirrors app.rs's private collectors (collect_parts, the region
 //! outlines, the draft height planes, committed-pick outlines, cached-path
 //! display) as world-space `View3D` buffers. The mirrors are slim - no hover
 //! highlight, no screen-space bake - but the gates are copied line for line,
-//! so a plane the imgui shell would refuse to draw is a plane the spike
+//! so a plane the imgui shell would refuse to draw is a plane this shell
 //! does not draw either. Provenance: our own code, mirrored from app.rs.
 
 use hsmworks_app::commands::ImportModel;
@@ -23,10 +26,11 @@ use hsmworks_app::model;
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::tools::{Tool, catalog};
-use hsmworks_ui::state::{CommandKind, State, UiTarget};
-use hsmworks_ui::viewport::GpuPart;
 
-/// The spike's whole scene for one frame: what `View3D::set_document` and
+use crate::state::{CommandKind, State, UiTarget};
+use crate::viewport::GpuPart;
+
+/// The shell's whole scene for one frame: what `View3D::set_document` and
 /// `set_overlay` take.
 pub struct Scene {
     pub parts: Vec<GpuPart>,
@@ -409,7 +413,8 @@ fn region_lines(state: &State) -> Vec<[f32; 6]> {
 
 /// The DRAFT parameters' height planes as rectangles around the stock
 /// (`App::height_plane_lines` + `height_planes` + `plane_rect` laws, the
-/// rectangle corners in the same order so a spike eye matches the shell's).
+/// rectangle corners in the same order so an eye match says the two shells
+/// agree).
 fn height_plane_lines(state: &State) -> Vec<[f32; 6]> {
     let Some(rect) = plane_rect(state) else { return Vec::new() };
     let levels: Vec<f64> = shown_regions(state).into_iter().map(|(z, _)| z).collect();
@@ -565,4 +570,3 @@ fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
     }
     out
 }
-

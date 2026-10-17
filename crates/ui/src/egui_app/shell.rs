@@ -1,20 +1,19 @@
-//! M1.4.1 spike binary (branch ui-egui-spike; see ROADMAP.md).
+//! M-a: the graduated egui shell — the loop, GPU init, dock, and the
+//! View3D-texture law, moved from the M1.4.1 spike binary into the lib
+//! (docs/spike-egui-go-no-go.md, migration step M-a). The law is the
+//! spike's, unchanged; what changed is where it lives and that the panes
+//! are stubs that name their migration step.
 //!
-//! S2: the S1 shell wearing the real UI - the demo document is a seeded
-//! `State` (the same one the imgui app runs), the dock holds three leaves
-//! (browser 17% left, properties 22% right, mirroring shell.rs's ratios),
-//! the ribbon and status strips are painted one-panel widgets (panels.rs),
-//! and the property pages bind to the SAME commands as imgui - every edit
-//! queues a `CommandKind` and lands in the undo history.
-//!
-//! The GPU loop is S1's, unchanged: winit 0.30, our own wgpu instance/
-//! surface (mirroring app.rs, no unwrap), egui-wgpu's low-level Renderer,
-//! View3D's offscreen texture registered once as a native egui texture and
-//! rebound on resize. What is new per frame: `drain_actions` first (the
-//! commands the panels queued last frame), then a digest-gated re-upload of
-//! document + overlay - the imgui shell's exact upload law, mirrored.
-//! Provenance: our own spike harness, specced from the egui/egui-wgpu/
-//! egui_dock docs and vendored sources; no HSMWorks material involved.
+//! The GPU loop mirrors app.rs (our own wgpu instance/surface, no unwrap —
+//! every failure is an eprintln plus a nonzero exit), plus egui-wgpu's
+//! low-level Renderer and View3D's offscreen texture registered once as a
+//! native egui texture and rebound on resize. Per frame: `drain_actions`
+//! first (commands the panels queued land before the scene is collected),
+//! then the digest-gated re-upload of document + overlay — the imgui
+//! shell's exact upload law, mirrored.
+//! Provenance: our own code, graduated from our own spike, specced from the
+//! egui/egui-wgpu/egui_dock docs and vendored sources; no HSMWorks material
+//! involved.
 
 use std::sync::Arc;
 
@@ -32,53 +31,23 @@ use winit::window::{Window, WindowId};
 use egui_wgpu::wgpu;
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 
-use hsmworks_ui::state::{CommandKind, State};
-use hsmworks_ui::viewport::{Camera, View3D};
+use crate::state::{CommandKind, State};
+use crate::viewport::View3D;
 
-// The Cargo bin declares an explicit `path` (src/bin/egui_spike.rs), so
-// Rust looks for children in src/bin/ rather than src/bin/egui_spike/ -
-// pin the paths.
-#[path = "egui_spike/painted.rs"]
-mod painted;
-#[path = "egui_spike/panels.rs"]
-mod panels;
-#[path = "egui_spike/shots.rs"]
-mod shots;
-#[path = "egui_spike/theme.rs"]
-mod theme;
-#[path = "egui_spike/world.rs"]
-mod world;
-// M1.4.1 spike S3: the frame tests run THIS bin's shell_layout, so they live
-// here (a bin's modules are invisible to tests/) behind the test cfg.
-#[cfg(test)]
-#[path = "egui_spike/tests.rs"]
-mod tests;
+use super::panes;
+use super::theme;
+use super::world;
 
 const VIEW3D_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// Ribbon strip height (cells at top+3, group captions at top+31 - the
-/// imgui ribbon's geometry, which painted::cell reproduces).
+/// imgui ribbon's geometry, which M-b's painted::cell reproduces).
 const RIBBON_H: f32 = 49.0;
 /// Status strip height (imgui's single-line bottom bar).
 const STATUS_H: f32 = 22.0;
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--headless") {
-        std::process::exit(match headless::run() {
-            Ok(()) => {
-                println!("egui spike S2 headless: seeded document, panels' world, View3D green");
-                0
-            }
-            Err(err) => {
-                eprintln!("egui spike S2 headless FAILED: {err}");
-                1
-            }
-        });
-    }
-    std::process::exit(run_windowed());
-}
-
-fn run_windowed() -> i32 {
+/// The windowed shell (the `--ui egui` entry without `--headless`); returns
+/// the process exit code.
+pub(crate) fn run_windowed() -> i32 {
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(err) => {
@@ -125,13 +94,12 @@ struct Shell {
     scene_digest: u64,
     exit_code: i32,
     failed: bool,
-    shots_done: bool,
     exit_requested: bool,
     state: State,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum Tab {
+pub(crate) enum Tab {
     Viewport,
     Browser,
     Properties,
@@ -147,13 +115,13 @@ impl Tab {
     }
 }
 
-/// The spike's fixed three-pane layout, as egui_dock splits: the browser
+/// The shell's fixed three-pane layout, as egui_dock splits: the browser
 /// takes 17% at the left and the properties pane 22% at the right of what
 /// remains - shell.rs's DockLayout ratios, restated as split fractions.
 /// A fraction governs the TOP/LEFT child (SplitNode docs), and a `Left`
-/// split puts the NEW node left, a `Right` split the OLD one - so the
-/// first fraction is the browser's share, the second the viewport's.
-fn build_dock() -> DockState<Tab> {
+/// split puts the NEW node left, a `Right` split the OLD one - so the first
+/// fraction is the browser's share, the second the viewport's.
+pub(crate) fn build_dock() -> DockState<Tab> {
     let mut dock = DockState::new(vec![Tab::Viewport]);
     let [vp, _browser] =
         dock.split(NodePath::MAIN_ROOT, Split::Left, 0.17, Node::leaf(Tab::Browser));
@@ -169,7 +137,8 @@ fn build_dock() -> DockState<Tab> {
 impl Shell {
     fn new() -> Self {
         // The demo document through the real command machinery (world.rs);
-        // FrameAll rides the same queue a ribbon click would use.
+        // FrameAll rides the same queue a ribbon click would use. M-d
+        // replaces the startup seed with the real New/Open commands.
         let mut state = State::new();
         world::seed(&mut state);
         state.pending.push_back(CommandKind::FrameAll);
@@ -191,14 +160,13 @@ impl Shell {
             scene_digest: 0,
             exit_code: 0,
             failed: false,
-            shots_done: false,
             exit_requested: false,
             state,
         }
     }
 
     fn fail(&mut self, el: &ActiveEventLoop, what: &str, err: impl std::fmt::Display) {
-        eprintln!("egui spike: {what}: {err}");
+        eprintln!("egui shell: {what}: {err}");
         self.failed = true;
         self.exit_code = 1;
         el.exit();
@@ -206,7 +174,7 @@ impl Shell {
 
     fn init_gpu(&mut self, el: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
-            .with_title("HSMWorks (egui spike S2)")
+            .with_title("HSMWorks (egui shell)")
             .with_inner_size(LogicalSize::new(1280.0, 800.0));
         let window = match el.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -288,11 +256,8 @@ impl Shell {
         self.scene_digest = scene.digest();
         view.set_document(&device, &queue, &scene.parts);
         view.set_overlay(&device, &queue, &scene.overlay);
-        let tex = renderer.register_native_texture(
-            &device,
-            view.color_view(),
-            wgpu::FilterMode::Linear,
-        );
+        let tex =
+            renderer.register_native_texture(&device, view.color_view(), wgpu::FilterMode::Linear);
         let winit_state = egui_winit::State::new(
             self.egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -352,7 +317,6 @@ impl Shell {
             view_tex,
             viewport_points,
             scene_digest,
-            shots_done,
             exit_requested,
             state,
             ..
@@ -438,7 +402,7 @@ impl Shell {
         let mvp = state.cam.mvp(f64::from(ew.max(1)) / f64::from(eh.max(1)));
         let eye = state.cam.eye_f32();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("egui-spike-frame"),
+            label: Some("egui-shell-frame"),
         });
         view.render(queue, &mut encoder, &mvp, eye);
 
@@ -448,15 +412,9 @@ impl Shell {
             pixels_per_point: scale as f32,
         };
         let mut buffer_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("egui-spike-buffers"),
+            label: Some("egui-shell-buffers"),
         });
-        let extra = renderer.update_buffers(
-            device,
-            queue,
-            &mut buffer_encoder,
-            &clipped,
-            &sd,
-        );
+        let extra = renderer.update_buffers(device, queue, &mut buffer_encoder, &clipped, &sd);
         // SAFETY of forget_lifetime: everything the pass encodes against
         // (target view, egui textures, buffer binds) outlives this block -
         // the pass is finished when the encoder closes the scope.
@@ -489,47 +447,33 @@ impl Shell {
         if state.request_quit {
             *exit_requested = true;
         }
-        // First frame only: the text-crispness dumps S2 owes the user's
-        // eyes (shots.rs). The viewport image rides on this frame's own
-        // offscreen readback - the dump shows what the shell shows.
-        if !*shots_done {
-            *shots_done = true;
-            match view.snapshot_rgba(device, queue) {
-                Some((rgba, w, h)) => {
-                    if let Err(err) = shots::dump(device, queue, rgba, w, h) {
-                        eprintln!("egui spike: shots: {err}");
-                    }
-                }
-                None => eprintln!("egui spike: shots: no readback path"),
-            }
-        }
     }
 }
 
-/// The whole shell for one egui pass: keyboard shortcuts, the painted
-/// ribbon and status strips, and the three-leaf dock. Shared by the live
-/// frame (draw) and the crispness dumps (shots.rs) so the two can never
-/// disagree about layout; the borrow order is deliberate - each pane
-/// reborrows `state` in sequence, the dock tabs only after the strips end.
-fn shell_layout(
+/// The whole shell for one egui pass: keyboard shortcuts, the ribbon and
+/// status strips, and the three-leaf dock. Shared by the live frame (draw)
+/// and the frame tests (tests.rs) so the two can never disagree about
+/// layout; the borrow order is deliberate - each pane reborrows `state` in
+/// sequence, the dock tabs only after the strips end.
+pub(crate) fn shell_layout(
     ui: &mut egui::Ui,
     state: &mut State,
     dock: &mut DockState<Tab>,
     tex: egui::TextureId,
     viewport_points: &mut [f32; 2],
 ) {
-    panels::shortcuts(ui, state);
+    panes::shortcuts(ui, state);
     egui::Panel::top("ribbon")
         .frame(egui::Frame::NONE)
         .exact_size(RIBBON_H)
         .show(ui, |ui| {
-            panels::ribbon(ui, &mut *state, &theme::Palette::DARK);
+            panes::ribbon(ui);
         });
     egui::Panel::bottom("status")
         .frame(egui::Frame::NONE)
         .exact_size(STATUS_H)
         .show(ui, |ui| {
-            panels::status(ui, &*state, &theme::Palette::DARK);
+            panes::status(ui, &*state);
         });
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
@@ -622,7 +566,7 @@ impl TabViewer for ShellTabs<'_> {
 
     fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
         // Title-derived: stable across frames, collision-free while the
-        // dockspace holds one tab per title (true for the whole spike).
+        // dockspace holds one tab per title (true for the whole migration).
         egui::Id::new(tab.title())
     }
 
@@ -659,30 +603,34 @@ impl TabViewer for ShellTabs<'_> {
                 }
             }
             Tab::Browser => {
-                panels::browser(ui, self.state, &theme::Palette::DARK);
+                panes::browser(ui);
             }
             Tab::Properties => {
-                panels::properties(ui, self.state, &theme::Palette::DARK);
+                panes::properties(ui);
             }
         }
     }
 }
 
-/// Headless proof (the S2 gate): no window, no surface - the fallback
-/// adapter (the same deterministic choice as tests/gpu_render.rs), View3D
-/// on the spike's Rgba8Unorm offscreen format, the SEEDED document rendered
-/// (block + stock + region + cached path through set_overlay), and the
-/// readback showing a solid footprint of changed pixels - the S1 gate, now
-/// driven by the real command machinery instead of a hand-built cube.
-/// The second half of the proof is the world itself: Contour1 carries a
-/// non-empty cached toolpath, i.e. seed -> commands -> generate worked.
-mod headless {
+/// Headless proof (the M-a gate, graduated from the spike's S2 gate): no
+/// window, no surface - the fallback adapter (the same deterministic choice
+/// as tests/gpu_render.rs), View3D on the shell's Rgba8Unorm offscreen
+/// format, the SEEDED document rendered (block + stock + region + cached
+/// path through set_overlay), and the readback showing a solid footprint of
+/// changed pixels. The second half of the proof is the world itself:
+/// Contour1 carries a non-empty cached toolpath, i.e. seed -> commands ->
+/// generate worked.
+pub(crate) mod headless {
     use hsmworks_app::model;
-    use hsmworks_ui::state::{CommandKind, State};
 
-    use crate::{Camera, View3D, wgpu, world};
+    use crate::state::{CommandKind, State};
+    use crate::viewport::{Camera, View3D};
 
-    pub fn run() -> Result<(), String> {
+    use super::VIEW3D_FORMAT;
+    use super::wgpu;
+    use super::world;
+
+    pub(crate) fn run() -> Result<(), String> {
         let mut state = State::new();
         world::seed(&mut state);
         state.pending.push_back(CommandKind::FrameAll);
@@ -710,7 +658,7 @@ mod headless {
         .map_err(|err| format!("device: {err}"))?;
 
         let mut view = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            View3D::new(&device, crate::VIEW3D_FORMAT, 320, 240)
+            View3D::new(&device, VIEW3D_FORMAT, 320, 240)
         }))
         .map_err(|_| "View3D pipeline panicked on validation".to_string())?;
         let scene = world::collect(&state);
@@ -727,7 +675,7 @@ mod headless {
         let (w, h) = view.extent();
         let mvp = cam.mvp(f64::from(w.max(1)) / f64::from(h.max(1)));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("egui-spike-headless"),
+            label: Some("egui-shell-headless"),
         });
         view.render(&queue, &mut encoder, &mvp, cam.eye_f32());
         queue.submit([encoder.finish()]);
@@ -762,23 +710,5 @@ mod headless {
             changed * 100 / total
         );
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod resolution {
-    /// Compile-time proof of the S0 gate, kept through S1: exactly ONE wgpu
-    /// in the tree. If egui-wgpu resolved a different wgpu major than the
-    /// imgui renderer's re-export, the reference below would not typecheck
-    /// and the spike's registered-texture plan would be dead on arrival.
-    #[test]
-    fn wgpu_types_are_unified() {
-        // Elided lifetimes bind output to the single input lifetime, so the
-        // coercion is only accepted when both paths name the SAME type.
-        fn coerce(d: &dear_imgui_wgpu::wgpu::Device) -> &egui_wgpu::wgpu::Device {
-            d
-        }
-        // The coercion itself is the assertion; the pointer bind is the use.
-        let _f: fn(&dear_imgui_wgpu::wgpu::Device) -> &egui_wgpu::wgpu::Device = coerce;
     }
 }

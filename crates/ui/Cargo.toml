@@ -37,4 +37,4 @@ path = "src/main.rs"
 
 [[bin]]
 name = "hsmworks-ui-egui"
-path = "src/bin/egui_spike.rs"
+path = "src/bin/hsmworks_ui_egui.rs"
