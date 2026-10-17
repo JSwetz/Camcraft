@@ -34,6 +34,7 @@ use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 use crate::state::{CommandKind, State};
 use crate::viewport::View3D;
 
+use super::pages;
 use super::panes;
 use super::theme;
 use super::world;
@@ -606,7 +607,7 @@ impl TabViewer for ShellTabs<'_> {
                 panes::browser(ui, self.state, &theme::Palette::DARK);
             }
             Tab::Properties => {
-                panes::properties(ui, self.state, &theme::Palette::DARK);
+                pages::properties(ui, self.state, &theme::Palette::DARK);
             }
         }
     }

@@ -1,9 +1,10 @@
 //! The egui shell's pane layer, graduated from the spike's panels.rs -
 //! every pane a faithful re-implementation of its imgui original
-//! (`crates/ui/src/{ribbon,browser,operations}.rs`): same strings, same
-//! command shapes, same enabled rules. The strips are painted
-//! (super::painted) because that is the law the spike proved; the
-//! property pages are the one pane M-b has not moved (stub says so).
+//! (`crates/ui/src/{ribbon,browser}.rs`): same strings, same command
+//! shapes, same enabled rules. The strips are painted (super::painted)
+//! because that is the law the spike proved; the property pages moved to
+//! `pages` with M-c, leaving this module the keyboard layer and the two
+//! painted panes.
 //!
 //! Layering holds (AGENTS.md): world access is `hsmworks_app`'s public API
 //! only, and every change goes through `state.pending` / the command
@@ -24,7 +25,9 @@ use super::painted;
 use super::theme::Palette;
 
 /// The operation kinds in panel order (mirrors operations.rs's TYPES).
-const TYPES: [&str; 5] = ["Face", "2D Contour", "2D Pocket", "Slot", "Trace"];
+/// Shared with pages.rs: the Type combo there and the ribbon tips here
+/// quote the same table.
+pub(crate) const TYPES: [&str; 5] = ["Face", "2D Contour", "2D Pocket", "Slot", "Trace"];
 
 // ---------------------------------------------------------------- shortcuts
 
@@ -271,7 +274,7 @@ pub fn status(ui: &mut Ui, state: &State, pal: &Palette) {
         ui.add(Label::new(RichText::new(text).weak()).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                RichText::new("egui shell (M-b) - imgui stays default until M-g")
+                RichText::new("egui shell (M-c) - imgui stays default until M-g")
                     .color(pal.text_faint)
                     .small(),
             );
@@ -310,7 +313,7 @@ fn push_row(
     leaves.push(leaf);
 }
 
-fn kind_name(k: ToolKind) -> &'static str {
+pub(crate) fn kind_name(k: ToolKind) -> &'static str {
     match k {
         ToolKind::EndMill => "end mill",
         ToolKind::BallNose => "ball nose",
@@ -639,16 +642,3 @@ fn quick_params(kind: usize) -> OpParams {
     retype(&OpUi::default().params, kind)
 }
 
-// ------------------------------------------------------- properties (stub)
-
-/// Stub: the property pages (all five op types, setup pages) arrive whole
-/// in M-c; the spike proved the Contour page end to end.
-pub fn properties(ui: &mut Ui, _state: &mut State, _pal: &Palette) {
-    ui.centered_and_justified(|ui| {
-        ui.label(
-            RichText::new("property pages - arrive in M-c")
-                .color(Palette::DARK.text_faint)
-                .small(),
-        );
-    });
-}

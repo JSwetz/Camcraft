@@ -4,11 +4,14 @@
 //! shipping code; the spike's bin-local tests retire with the bin.)
 //!
 //! Ported from the spike's tests: `egui_frames_run` (8 frames, seeded
-//! document survives the round trip) and, with M-b's browser pane,
-//! `click_toggles_view_state` (a real pointer event on a real checkbox).
-//! `click_apply_edits_operation_through_commands` still waits for M-c's
-//! Contour page. `history_key_queues_command` proves the keyboard layer.
-//! The snapshot is the churn gate for the per-panel migration steps.
+//! document survives the round trip), with M-b's browser pane,
+//! `click_toggles_view_state` (a real pointer event on a real checkbox),
+//! and - with M-c's property pages - `click_apply_edits_operation_through_
+//! commands` (the draft/Apply law) plus the DragValue parity test: the drag
+//! path and the typed path commit the same staged field the imgui
+//! InputDouble did (divergence D5's proof). `history_key_queues_command`
+//! proves the keyboard layer. The snapshot is the churn gate for the
+//! per-panel migration steps.
 //!
 //! The harness runs the managed-texture path: the viewport leaf shows a flat
 //! placeholder instead of View3D's offscreen render, because the GPU
@@ -26,6 +29,7 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 
 use hsmworks_app::model;
+use hsmworks_app::operation::OpParams;
 
 use crate::state::{CommandKind, State};
 
@@ -163,6 +167,152 @@ fn click_toggles_view_state() {
     harness.get_by_label("Show all toolpaths").click();
     harness.run();
     assert!(harness.state().state.show_all_paths);
+}
+
+/// Port of the spike's `click_apply_edits_operation_through_commands`
+/// (M-c: the properties pane is the real one now). The draft law end to
+/// end: the checkbox edits the staged `op_ui` only, Apply queues
+/// EditOperationParams, and the NEXT drain writes the world - the history
+/// afterwards is the proof, not any intermediate queue state (egui may run
+/// the state closure across several passes per `run`).
+#[test]
+fn click_apply_edits_operation_through_commands() {
+    let mut harness = shell_harness();
+    let staged_climb = |h: &Harness<'static, ShellUi>| match h.state().state.op_ui.params {
+        OpParams::Contour { climb, .. } => climb,
+        _ => false,
+    };
+    assert!(staged_climb(&harness));
+    harness.get_by_label("Climb milling").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Climb milling").click();
+    harness.run();
+    assert!(!staged_climb(&harness), "checkbox did not reach the staged params");
+    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Apply Parameters").click();
+    harness.run();
+    let st = &harness.state().state;
+    let live = model::find_by_name(&st.world, "Contour1")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|op| match op.params {
+            OpParams::Contour { climb, .. } => climb,
+            _ => true,
+        });
+    assert_eq!(live, Some(false), "Apply did not reach the world");
+    assert!(
+        !st.pending
+            .iter()
+            .any(|c| matches!(c, CommandKind::EditOperationParams { .. })),
+        "the queued command outlived the drain - queue and panels disagree"
+    );
+    assert!(
+        !st.history.can_redo() && st.history.can_undo(),
+        "Apply must sit on the undo timeline"
+    );
+}
+
+/// The first SpinButton node's center: the Contour page's "Stock to
+/// leave" DragValue. Tree order is submission order, and the properties
+/// page submits it before any other number in the shell - the only
+/// role-SpinButton nodes anywhere are DragValues (the painted strips
+/// carry no a11y marks), and params_fields puts it first.
+fn stock_to_leave_center(h: &Harness<'static, ShellUi>) -> egui::Pos2 {
+    h.get_all_by_role(egui::accesskit::Role::SpinButton)
+        .next()
+        .expect("the properties pane owns DragValues")
+        .rect()
+        .center()
+}
+
+/// DragValue parity (divergence D5's proof, M-c): the drag path and the
+/// typed path commit the SAME staged field the imgui InputDouble did.
+/// Neither may touch the world by itself - numbers stage into `op_ui`
+/// and ride an EditOperationParams only when Apply is clicked.
+#[test]
+fn drag_and_type_edit_the_same_staged_number() {
+    let mut harness = shell_harness();
+    harness.run();
+    let leave = |h: &Harness<'static, ShellUi>| match h.state().state.op_ui.params {
+        OpParams::Contour {
+            stock_to_leave,
+            climb,
+            ..
+        } => {
+            assert!(climb, "the drag/type paths must not disturb other staged fields");
+            stock_to_leave
+        }
+        _ => panic!("the demo document must stage Contour params"),
+    };
+    let first = leave(&harness);
+    let live0 = model::find_by_name(&harness.state().state.world, "Contour1")
+        .and_then(|e| model::operation_of(&harness.state().state.world, &e))
+        .map(|op| match op.params {
+            OpParams::Contour { stock_to_leave, .. } => stock_to_leave,
+            _ => f64::NAN,
+        })
+        .expect("Contour1 exists with contour params");
+
+    // The drag: press, one moved frame with the button down, release.
+    // A same-frame click+move would become focus instead (clicked()
+    // requests it before the drag branch), so the gesture is spread
+    // across frames - the imgui InputDouble stepped on arrows and
+    // wheel; the DragValue's counterpart is the horizontal drag.
+    let c = stock_to_leave_center(&harness);
+    harness.drag_at(c);
+    harness.run();
+    harness.hover_at(c + Vec2::new(30.0, 0.0));
+    harness.run();
+    harness.drop_at(c + Vec2::new(30.0, 0.0));
+    harness.run();
+    assert!(
+        (leave(&harness) - (first + 3.0)).abs() < 0.05,
+        "drag path: 30 px at speed 0.1 did not step {first} to {} (got {})",
+        first + 3.0,
+        leave(&harness)
+    );
+
+    // The typed entry: click focuses (the DragValue re-renders itself as
+    // a TextEdit with select-all), typing replaces, and
+    // update_while_editing commits the parse live.
+    harness
+        .get_all_by_role(egui::accesskit::Role::SpinButton)
+        .next()
+        .unwrap()
+        .click();
+    harness.run();
+    harness
+        .get_all_by_role(egui::accesskit::Role::SpinButton)
+        .next()
+        .unwrap()
+        .type_text("25");
+    harness.run();
+    assert!(
+        (leave(&harness) - 25.0).abs() < 1e-9,
+        "typed path: 25 did not commit (got {})",
+        leave(&harness)
+    );
+
+    // And the world is untouched until Apply: no command was queued,
+    // the live op still carries the seed value.
+    let st = &harness.state().state;
+    assert!(
+        !st.pending
+            .iter()
+            .any(|c| matches!(c, CommandKind::EditOperationParams { .. })),
+        "a staged number edit must not queue a command by itself"
+    );
+    let live = model::find_by_name(&st.world, "Contour1")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|op| match op.params {
+            OpParams::Contour { stock_to_leave, .. } => stock_to_leave,
+            _ => f64::NAN,
+        })
+        .expect("Contour1 exists with contour params");
+    assert!(
+        live == live0 && live != 25.0,
+        "staged edits leaked into the world: live {live0} became {live}"
+    );
 }
 
 /// The exit contract, lib side (the integration tests/egui_app.rs covers the
