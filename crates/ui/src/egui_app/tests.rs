@@ -320,6 +320,10 @@ fn click_apply_edits_operation_through_commands() {
         _ => false,
     };
     assert!(staged_climb(&harness));
+    // M1.4 sectioning: the checkbox lives on the Feeds tab now, and a tab
+    // cell is the way in - navigation first, then the click law itself.
+    harness.get_by_label("Feeds").click();
+    harness.run();
     harness.get_by_label("Climb milling").scroll_to_me();
     harness.run();
     harness.get_by_label("Climb milling").click();
@@ -350,10 +354,10 @@ fn click_apply_edits_operation_through_commands() {
 }
 
 /// The first SpinButton node's center: the Contour page's "Stock to
-/// leave" DragValue. Tree order is submission order, and the properties
-/// page submits it before any other number in the shell - the only
+/// leave" DragValue. Tree order is submission order; the only
 /// role-SpinButton nodes anywhere are DragValues (the painted strips
-/// carry no a11y marks), and params_fields puts it first.
+/// carry no a11y marks), and with the Passes tab open it is the pane's
+/// only number (M1.4 sectioning) - the caller navigates before asking.
 fn stock_to_leave_center(h: &Harness<'static, ShellUi>) -> egui::Pos2 {
     h.get_all_by_role(egui::accesskit::Role::SpinButton)
         .next()
@@ -369,6 +373,10 @@ fn stock_to_leave_center(h: &Harness<'static, ShellUi>) -> egui::Pos2 {
 #[test]
 fn drag_and_type_edit_the_same_staged_number() {
     let mut harness = shell_harness();
+    // M1.4 sectioning: "Stock to leave" is on the Passes tab - navigate
+    // there, and it becomes the only DragValue the pane renders.
+    harness.get_by_label("Passes").click();
+    harness.run();
     harness.run();
     let leave = |h: &Harness<'static, ShellUi>| match h.state().state.op_ui.params {
         OpParams::Contour {
@@ -450,6 +458,131 @@ fn drag_and_type_edit_the_same_staged_number() {
         live == live0 && live != 25.0,
         "staged edits leaked into the world: live {live0} became {live}"
     );
+}
+
+/// M1.4's sectioning law, as a drift guard in the tips-match style:
+/// every named field of every kind renders on exactly ONE tab (visible
+/// when its tab is open, absent from the tree otherwise), and a kind's
+/// tab bar shows exactly the sections it has fields for - no dead tabs.
+/// If a field moves sections, a label changes, or a guard drops a field,
+/// this fails.
+#[test]
+fn every_field_lives_on_exactly_one_section() {
+    let mut harness = shell_harness();
+    let all = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds"];
+    // Kind order == pages::kind_index == the Type combo's TYPES order;
+    // `retype` is the law the combo itself runs, so the draft takes the
+    // same shape the user would drive it into.
+    let table = [
+        (
+            "Face",
+            vec![
+                ("Geometry", vec!["Click selects:"]),
+                ("Heights", vec!["Clearance Z", "Cut Z", "Depth staging"]),
+                ("Passes", vec!["Stepover (Y spacing)"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
+            "Contour",
+            vec![
+                ("Geometry", vec!["Click selects:", "Side", "Tolerance"]),
+                (
+                    "Heights",
+                    vec![
+                        "Clearance Z",
+                        "Retract Z (between passes)",
+                        "Top Z",
+                        "Bottom Z",
+                        "Stepdown",
+                    ],
+                ),
+                ("Passes", vec!["Stock to leave"]),
+                ("Leads & Links", vec!["Lead in/out", "Tab count", "Tab width", "Tab height"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
+            "Pocket",
+            vec![
+                ("Geometry", vec!["Click selects:"]),
+                ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
+                ("Passes", vec!["Stepover", "Stock to leave", "Strategy"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
+            "Slot",
+            vec![
+                ("Geometry", vec!["Click selects:", "A X", "A Y", "B X", "B Y", "Slot width"]),
+                ("Heights", vec!["Clearance Z", "Top Z", "Bottom Z", "Stepdown"]),
+                ("Passes", vec!["Stock to leave", "Stepover"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
+            "Trace",
+            vec![
+                ("Geometry", vec!["Click selects:"]),
+                ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+    ];
+    for (ki, (kind_name, sections)) in table.iter().enumerate() {
+        let cur = harness.state().state.op_ui.params.clone();
+        let retyped = panes::retype(&cur, ki);
+        harness.state_mut().state.op_ui.params = retyped;
+        let mut placement: Vec<(&str, usize)> = Vec::new();
+        for (sname, labels) in sections {
+            let si = all
+                .iter()
+                .position(|s| s == sname)
+                .expect("the table names the SECTIONS");
+            for l in labels.iter() {
+                placement.push((*l, si));
+            }
+        }
+        for (si, tab_name) in all.iter().enumerate() {
+            harness.state_mut().state.op_tab = si;
+            harness.run();
+            let has_tab = sections.iter().any(|(n, _)| *n == *tab_name);
+            assert_eq!(
+                harness.query_by_label(tab_name).is_some(),
+                has_tab,
+                "{kind_name}: the tab bar must show '{tab_name}' iff the kind has fields for it",
+            );
+            // A kind cannot show a section it has no fields for - an
+            // out-of-set op_tab falls back to Geometry (0), the law the
+            // page's resolution line states.
+            let effective = if has_tab { si } else { 0 };
+            for (label, want) in &placement {
+                assert_eq!(
+                    harness.query_by_label(label).is_some(),
+                    *want == effective,
+                    "{kind_name}: '{label}' visible on tab {si}, it belongs to tab {want} - \
+                     one placement per field, always",
+                );
+            }
+        }
+    }
+}
+
+/// A tab click is navigation, nothing more: the pane's state field moves,
+/// no command is queued, and the section's fields replace the previous
+/// ones (the view-state law from M1.4's toggle decision, same shape).
+#[test]
+fn tab_click_navigates_and_queues_nothing() {
+    let mut harness = shell_harness();
+    harness.run();
+    assert!(harness.query_by_label("Side").is_some(), "Geometry opens by default");
+    harness.get_by_label("Heights").click();
+    harness.run();
+    let st = &harness.state().state;
+    assert_eq!(st.op_tab, 1, "the Heights cell did not open the Heights section");
+    assert!(st.pending.is_empty(), "opening a section must not queue a command");
+    assert!(harness.query_by_label("Clearance Z").is_some());
+    assert!(harness.query_by_label("Side").is_none(), "the closed tab's fields leave the tree");
 }
 
 // ------------------------------------------------------- gesture plumbing

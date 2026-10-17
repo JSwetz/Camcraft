@@ -569,6 +569,12 @@ pub struct State {
     /// hover itself is the precedent) - refreshed every frame, never a
     /// command, never an overlay rebuild.
     pub geo_hover: Option<GeoSel>,
+    /// Which named section of the operation page is showing (the M1.4
+    /// tabbing). Ephemeral pane state like the drafts it reveals - never a
+    /// command, never saved; a kind without the section falls back to
+    /// Geometry. Deliberately NOT inside [`OpUi`]: the drafts rebuild on
+    /// every sync, and a tab reset on Apply would read as a bug.
+    pub op_tab: usize,
     pub tool_ui: ToolUi,
     /// `doc_version` the setup drafts were last refetched at.
     ui_synced_doc: u64,
@@ -665,6 +671,7 @@ impl State {
             viewport_hot: false,
             geo_pick: GeoPick::Model,
             geo_hover: None,
+            op_tab: 0,
             hidden_models: Vec::new(),
             hidden_paths: Vec::new(),
             cam: Camera::default(),

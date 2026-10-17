@@ -6,10 +6,15 @@
 //! mirrored (operations.rs/setup.rs, plus the property-page code in
 //! app.rs) retired at M-g, so the law they shared now lives in
 //! `crate::operations` (height wording, retypes, warning folds - called
-//! through, never restated) and here. Same fields, same order, same notes
-//! and echoes, same command shapes - every change rides `state.pending` /
+//! through, never restated) and here. Same fields, same notes and echoes,
+//! same command shapes - every change rides `state.pending` /
 //! the command methods, never an ad-hoc field poke (AGENTS.md, "Everything
-//! Is a Command"). Two deliberate translations, both from the go/no-go
+//! Is a Command"). The M-c pages arrived as one scroll (parity first); the
+//! named post-M-g carry-over landed here: the operation page is now the
+//! specced named sections (SECTIONS - geometry, heights, passes, leads and
+//! links, feeds) as a tab bar, each field keeping its within-section
+//! order, the open tab transient pane state that queues nothing. Two
+//! deliberate translations, both from the go/no-go
 //! report (S4):
 //!
 //! * `InputDouble` becomes `DragValue` (divergence D5): egui has no
@@ -69,6 +74,31 @@ const AMBER: Color32 = Color32::from_rgb(0xB8, 0xB8, 0xC8);
 const RED: Color32 = Color32::from_rgb(0xFF, 0x59, 0x59);
 /// The note gray imgui's geometry notes use ([0.62,0.66,0.72]).
 const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
+
+/// The specced named sections of the operation page (ROADMAP M1.4: "tabs
+/// and named sections (geometry, heights, passes, leads and links, feeds)
+/// instead of long stacks"), in tab-bar order. The guard indices in
+/// `params_fields` are these same numbers - one placement law, table and
+/// guards read each other.
+const SECTIONS: [&str; 5] = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds"];
+const SEC_GEO: usize = 0;
+const SEC_HEIGHTS: usize = 1;
+const SEC_PASSES: usize = 2;
+const SEC_LEADS: usize = 3;
+const SEC_FEEDS: usize = 4;
+
+/// Which sections an operation kind actually has fields (or the pick law)
+/// for: Geometry/Heights/Feeds always; Passes except Trace (Trace has no
+/// stepover or leave); Leads & Links only Contour - it is the kind with
+/// lead moves and tabs. The tab bar shows exactly this: no dead tabs.
+fn has_section(kind: OpType, s: usize) -> bool {
+    match s {
+        SEC_GEO | SEC_HEIGHTS | SEC_FEEDS => true,
+        SEC_PASSES => !matches!(kind, OpType::Trace),
+        SEC_LEADS => matches!(kind, OpType::Contour),
+        _ => false,
+    }
+}
 
 // --------------------------------------------------------------- properties
 
@@ -218,97 +248,10 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
         }
     }
 
-    // Geometry.
-    ui.separator();
-    ui.heading("Geometry");
-    // Viewport pick mode - transient view state like the drafts this page
-    // edits: the mode itself is not undoable; what a Face/Edge click
-    // changes is (M-e: the imgui radio row, ported, because the egui
-    // viewport now honors geo_pick exactly like the imgui one).
-    ui.horizontal(|ui| {
-        ui.label("Click selects:");
-        let mut pick_mode = match state.geo_pick {
-            GeoPick::Model => 0,
-            GeoPick::Face => 1,
-            GeoPick::Edge => 2,
-        };
-        ui.radio_value(&mut pick_mode, 0, "Models");
-        ui.radio_value(&mut pick_mode, 1, "Faces");
-        ui.radio_value(&mut pick_mode, 2, "Edges");
-        state.geo_pick = match pick_mode {
-            1 => GeoPick::Face,
-            2 => GeoPick::Edge,
-            _ => GeoPick::Model,
-        };
-    });
-    ui.label("Click in the viewport - Ctrl adds; Alt in Edge mode takes one edge.");
-    if state.op_ui.src_kind == 2 {
-        // Hovering a row lights that feature in the viewport (screen-space
-        // amber, the shared interact law) - so the chip carries its GeoSel.
-        let chips: Vec<(String, bool, GeoSel)> = state
-            .geo_chips()
-            .into_iter()
-            .map(|c| (c.label, c.missing, c.sel))
-            .collect();
-        for (i, (label, missing, sel)) in chips.into_iter().enumerate() {
-            let remove = ui
-                .horizontal(|ui| {
-                    let resp = if missing {
-                        ui.colored_label(AMBER, &label)
-                    } else {
-                        ui.label(&label)
-                    };
-                    if resp.hovered() {
-                        state.geo_hover = Some(sel);
-                    }
-                    ui.small_button("×").clicked()
-                })
-                .inner;
-            if remove {
-                let mut rest: Vec<GeoSel> = state.op_ui.geo.clone();
-                if i < rest.len() {
-                    rest.remove(i);
-                    if rest.is_empty() {
-                        state.op_ui.geo.clear();
-                        state.op_ui.src_kind = 0;
-                        state.pending.push_back(CommandKind::EditOperationLinks {
-                            name: target.clone(),
-                            tool: None,
-                            src: Some(SrcRef::Stock),
-                        });
-                    } else {
-                        state.op_ui.geo = rest.clone();
-                        state.pending.push_back(CommandKind::SetOperationGeometry {
-                            name: target.clone(),
-                            items: rest,
-                        });
-                    }
-                }
-            }
-        }
-        if ui.small_button("Clear").clicked() {
-            state.pending.push_back(CommandKind::EditOperationLinks {
-                name: target.clone(),
-                tool: None,
-                src: Some(SrcRef::Stock),
-            });
-        }
-    }
-    let notes: Vec<String> =
-        operation::selection_notes(&state.world, &state.op_ui.geo.clone(), &state.op_ui.params.clone());
-    for note in notes {
-        ui.colored_label(NOTE, note);
-    }
-    if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
-        let n = state.op_ui.src_name.clone();
-        ui.label(format!("Whole of '{n}' - the first pick replaces this."));
-    } else if state.op_ui.src_kind != 2 {
-        ui.label("Whole stock contour (default) - picks bound the operation.");
-    }
-
-    // Status.
+    // Status above the tab bar (it sat below the Geometry block in the
+    // single scroll): a STALE line and the warning fold must stay visible
+    // whichever section is open.
     if exists {
-        ui.separator();
         let ent = model::find_by_name(&state.world, &target);
         let (moves, warnings): (usize, Vec<Warning>) = ent
             .as_ref()
@@ -330,8 +273,124 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     }
     ui.separator();
 
-    // Parameters.
-    params_fields(ui, state);
+    // The named sections (M1.4's tabbing of M-c's single scroll): one tab
+    // per specced group, SECTIONS order; a kind shows only the sections it
+    // has fields for - no dead tabs. The open tab is transient pane state
+    // (`State::op_tab`), never a command, never saved: switching it queues
+    // nothing, and every edit rides its own tab exactly as it did in the
+    // scroll (hidden guards write no params).
+    let kind = state.op_ui.params.kind();
+    let want = state.op_tab.min(SECTIONS.len() - 1);
+    let mut tab = if has_section(kind, want) { want } else { SEC_GEO };
+    ui.horizontal_wrapped(|ui| {
+        for (i, name) in SECTIONS.iter().enumerate() {
+            if !has_section(kind, i) {
+                continue;
+            }
+            // Wrapped, not one row: the properties pane is ~22% wide and
+            // five full names overflow it - an off-pane tab would take
+            // clicks meant for the viewport (M1.4's pane-width law).
+            if ui.selectable_label(tab == i, *name).clicked() {
+                state.op_tab = i;
+                tab = i;
+            }
+        }
+    });
+    ui.separator();
+
+    // The Geometry section's pick block (params' geometry fields follow in
+    // params_fields). Viewport pick mode - transient view state like the
+    // drafts this page edits: the mode itself is not undoable; what a
+    // Face/Edge click changes is (M-e: the radio row, because the egui
+    // viewport honors geo_pick exactly like the imgui one did).
+    if tab == SEC_GEO {
+        ui.horizontal(|ui| {
+            ui.label("Click selects:");
+            let mut pick_mode = match state.geo_pick {
+                GeoPick::Model => 0,
+                GeoPick::Face => 1,
+                GeoPick::Edge => 2,
+            };
+            ui.radio_value(&mut pick_mode, 0, "Models");
+            ui.radio_value(&mut pick_mode, 1, "Faces");
+            ui.radio_value(&mut pick_mode, 2, "Edges");
+            state.geo_pick = match pick_mode {
+                1 => GeoPick::Face,
+                2 => GeoPick::Edge,
+                _ => GeoPick::Model,
+            };
+        });
+        ui.label("Click in the viewport - Ctrl adds; Alt in Edge mode takes one edge.");
+        if state.op_ui.src_kind == 2 {
+            // Hovering a row lights that feature in the viewport (screen-space
+            // amber, the shared interact law) - so the chip carries its GeoSel.
+            let chips: Vec<(String, bool, GeoSel)> = state
+                .geo_chips()
+                .into_iter()
+                .map(|c| (c.label, c.missing, c.sel))
+                .collect();
+            for (i, (label, missing, sel)) in chips.into_iter().enumerate() {
+                let remove = ui
+                    .horizontal(|ui| {
+                        let resp = if missing {
+                            ui.colored_label(AMBER, &label)
+                        } else {
+                            ui.label(&label)
+                        };
+                        if resp.hovered() {
+                            state.geo_hover = Some(sel);
+                        }
+                        ui.small_button("×").clicked()
+                    })
+                    .inner;
+                if remove {
+                    let mut rest: Vec<GeoSel> = state.op_ui.geo.clone();
+                    if i < rest.len() {
+                        rest.remove(i);
+                        if rest.is_empty() {
+                            state.op_ui.geo.clear();
+                            state.op_ui.src_kind = 0;
+                            state.pending.push_back(CommandKind::EditOperationLinks {
+                                name: target.clone(),
+                                tool: None,
+                                src: Some(SrcRef::Stock),
+                            });
+                        } else {
+                            state.op_ui.geo = rest.clone();
+                            state.pending.push_back(CommandKind::SetOperationGeometry {
+                                name: target.clone(),
+                                items: rest,
+                            });
+                        }
+                    }
+                }
+            }
+            if ui.small_button("Clear").clicked() {
+                state.pending.push_back(CommandKind::EditOperationLinks {
+                    name: target.clone(),
+                    tool: None,
+                    src: Some(SrcRef::Stock),
+                });
+            }
+        }
+        let notes: Vec<String> = operation::selection_notes(
+            &state.world,
+            &state.op_ui.geo.clone(),
+            &state.op_ui.params.clone(),
+        );
+        for note in notes {
+            ui.colored_label(NOTE, note);
+        }
+        if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
+            let n = state.op_ui.src_name.clone();
+            ui.label(format!("Whole of '{n}' - the first pick replaces this."));
+        } else if state.op_ui.src_kind != 2 {
+            ui.label("Whole stock contour (default) - picks bound the operation.");
+        }
+    }
+
+    // Parameters, placed on the section tabs.
+    params_fields(ui, state, tab);
     // The whole-panel unresolved line is operations.rs's law, same as the
     // retired imgui page's.
     if let Some(note) = unresolved_note(&state.world, &state.op_ui.params) {
@@ -409,11 +468,14 @@ fn kind_index(kind: OpType) -> usize {
 
 // --------------------------------------------------------------- param rows
 
-/// The params block for all five kinds, mirrored verbatim from
-/// operations.rs's params_fields (same fields, same order, same notes).
-/// Numbers are DragValue instead of InputDouble (divergence D5, S4 report):
-/// egui has no InputDouble; DragValue edits + commits with no custom state.
-fn params_fields(ui: &mut Ui, state: &mut State) {
+/// The params block for all five kinds - operations.rs's fields, notes and
+/// echoes, unchanged in content and in within-section order, now placed on
+/// the section tabs: each field renders when, and only when, its section
+/// is the open tab (SECTIONS/has_section are the placement law; the guards
+/// below read them as indices). Numbers are DragValue instead of
+/// InputDouble (divergence D5, S4 report): egui has no InputDouble;
+/// DragValue edits + commits with no custom state.
+fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let mut side_note: Option<String> = None;
     let mut auto_note: Option<String> = None;
     let nm = state.op_ui.name.clone();
@@ -462,36 +524,42 @@ fn params_fields(ui: &mut Ui, state: &mut State) {
 
     match &mut state.op_ui.params {
         OpParams::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb } => {
-            field(ui, "Stepover (Y spacing)");
-            num(ui, stepover);
-            field(ui, "Clearance Z");
-            height_editor(ui, &state.world, clearance_z, "face.clearance");
-            field(ui, "Cut Z");
-            height_editor(ui, &state.world, cut_z, "face.cut");
-            field(ui, "Depth staging");
-            let mut staged = top_z.is_some();
-            if ui.checkbox(&mut staged, "Stage down to Cut Z").changed() {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, clearance_z, "face.clearance");
+                field(ui, "Cut Z");
+                height_editor(ui, &state.world, cut_z, "face.cut");
+                field(ui, "Depth staging");
+                let mut staged = top_z.is_some();
+                if ui.checkbox(&mut staged, "Stage down to Cut Z").changed() {
+                    if staged {
+                        let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
+                        *top_z = Some(seed);
+                        *stepdown = Some(1.0);
+                    } else {
+                        *top_z = None;
+                        *stepdown = None;
+                    }
+                }
                 if staged {
+                    field(ui, "Top Z (first cut level)");
                     let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
-                    *top_z = Some(seed);
-                    *stepdown = Some(1.0);
-                } else {
-                    *top_z = None;
-                    *stepdown = None;
+                    height_editor(ui, &state.world, top_z.get_or_insert(seed), "face.top");
+                    field(ui, "Stepdown");
+                    num(ui, stepdown.get_or_insert(1.0));
                 }
             }
-            if staged {
-                field(ui, "Top Z (first cut level)");
-                let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
-                height_editor(ui, &state.world, top_z.get_or_insert(seed), "face.top");
-                field(ui, "Stepdown");
-                num(ui, stepdown.get_or_insert(1.0));
+            if tab == SEC_PASSES {
+                field(ui, "Stepover (Y spacing)");
+                num(ui, stepover);
             }
-            field(ui, "Feed (mm/min)");
-            num(ui, feed);
-            field(ui, "Plunge feed (mm/min)");
-            num(ui, plunge_feed);
-            ui.checkbox(climb, "Climb milling");
+            if tab == SEC_FEEDS {
+                field(ui, "Feed (mm/min)");
+                num(ui, feed);
+                field(ui, "Plunge feed (mm/min)");
+                num(ui, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
         }
         OpParams::Contour {
             stock_to_leave,
@@ -510,79 +578,92 @@ fn params_fields(ui: &mut Ui, state: &mut State) {
             tab_width,
             tab_height,
         } => {
-            field(ui, "Stock to leave");
-            num(ui, stock_to_leave);
-            field(ui, "Clearance Z");
-            height_editor(ui, &state.world, clearance_z, "contour.clearance");
-            field(ui, "Retract Z (between passes)");
-            height_editor(ui, &state.world, retract_z, "contour.retract");
-            if let (Some(rz), Some(cz)) = (retract_z.z(&state.world), clearance_z.z(&state.world))
-                && rz > cz
-            {
-                ui.label(format!("above clearance - the hop travels at {cz:.3} (min of the two)"));
-            }
-            field(ui, "Top Z");
-            height_editor(ui, &state.world, top_z, "contour.top");
-            field(ui, "Bottom Z");
-            height_editor(ui, &state.world, bottom_z, "contour.bottom");
-            field(ui, "Stepdown");
-            num(ui, stepdown);
-            field(ui, "Feed (mm/min)");
-            num(ui, feed);
-            field(ui, "Plunge feed (mm/min)");
-            num(ui, plunge_feed);
-            ui.checkbox(climb, "Climb milling");
-            field(ui, "Side");
-            let mut s_idx = match side {
-                Side::Auto => 0,
-                Side::Inside => 1,
-                Side::Outside => 2,
-            };
-            combo(ui, "c_side", &mut s_idx, side_names());
-            *side = match s_idx {
-                1 => Side::Inside,
-                2 => Side::Outside,
-                _ => Side::Auto,
-            };
-            if let Some(note) = &side_note {
-                ui.label(note.clone());
-            }
-            field(ui, "Lead in/out");
-            let mut l_idx = match lead {
-                Lead::None => 0,
-                Lead::Linear { .. } => 1,
-                Lead::Arc { .. } => 2,
-            };
-            let before = l_idx;
-            combo(ui, "c_lead", &mut l_idx, &LEADS);
-            if l_idx != before {
-                *lead = match l_idx {
-                    1 => Lead::Linear { length: 8.0 },
-                    2 => Lead::Arc { radius: 5.0 },
-                    _ => Lead::None,
+            if tab == SEC_GEO {
+                field(ui, "Side");
+                let mut s_idx = match side {
+                    Side::Auto => 0,
+                    Side::Inside => 1,
+                    Side::Outside => 2,
                 };
-            }
-            match lead {
-                Lead::Linear { length } => {
-                    field(ui, "Lead length");
-                    num(ui, length);
+                combo(ui, "c_side", &mut s_idx, side_names());
+                *side = match s_idx {
+                    1 => Side::Inside,
+                    2 => Side::Outside,
+                    _ => Side::Auto,
+                };
+                if let Some(note) = &side_note {
+                    ui.label(note.clone());
                 }
-                Lead::Arc { radius } => {
-                    field(ui, "Lead arc radius");
-                    num(ui, radius);
-                }
-                Lead::None => {}
+                field(ui, "Tolerance");
+                num(ui, tolerance);
             }
-            field(ui, "Tolerance");
-            num(ui, tolerance);
-            field(ui, "Tab count");
-            let mut tabs = f64::from(*tab_count);
-            num(ui, &mut tabs);
-            *tab_count = tabs.clamp(0.0, 99.0).round().max(0.0) as u32;
-            field(ui, "Tab width");
-            num(ui, tab_width);
-            field(ui, "Tab height");
-            num(ui, tab_height);
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, clearance_z, "contour.clearance");
+                field(ui, "Retract Z (between passes)");
+                height_editor(ui, &state.world, retract_z, "contour.retract");
+                if let (Some(rz), Some(cz)) =
+                    (retract_z.z(&state.world), clearance_z.z(&state.world))
+                    && rz > cz
+                {
+                    ui.label(format!(
+                        "above clearance - the hop travels at {cz:.3} (min of the two)"
+                    ));
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, top_z, "contour.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, bottom_z, "contour.bottom");
+                field(ui, "Stepdown");
+                num(ui, stepdown);
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Stock to leave");
+                num(ui, stock_to_leave);
+            }
+            if tab == SEC_LEADS {
+                field(ui, "Lead in/out");
+                let mut l_idx = match lead {
+                    Lead::None => 0,
+                    Lead::Linear { .. } => 1,
+                    Lead::Arc { .. } => 2,
+                };
+                let before = l_idx;
+                combo(ui, "c_lead", &mut l_idx, &LEADS);
+                if l_idx != before {
+                    *lead = match l_idx {
+                        1 => Lead::Linear { length: 8.0 },
+                        2 => Lead::Arc { radius: 5.0 },
+                        _ => Lead::None,
+                    };
+                }
+                match lead {
+                    Lead::Linear { length } => {
+                        field(ui, "Lead length");
+                        num(ui, length);
+                    }
+                    Lead::Arc { radius } => {
+                        field(ui, "Lead arc radius");
+                        num(ui, radius);
+                    }
+                    Lead::None => {}
+                }
+                field(ui, "Tab count");
+                let mut tabs = f64::from(*tab_count);
+                num(ui, &mut tabs);
+                *tab_count = tabs.clamp(0.0, 99.0).round().max(0.0) as u32;
+                field(ui, "Tab width");
+                num(ui, tab_width);
+                field(ui, "Tab height");
+                num(ui, tab_height);
+            }
+            if tab == SEC_FEEDS {
+                field(ui, "Feed (mm/min)");
+                num(ui, feed);
+                field(ui, "Plunge feed (mm/min)");
+                num(ui, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
         }
         OpParams::Pocket {
             stepover,
@@ -597,59 +678,68 @@ fn params_fields(ui: &mut Ui, state: &mut State) {
             climb,
             strategy,
         } => {
-            field(ui, "Stepover");
-            num(ui, stepover);
-            field(ui, "Stock to leave");
-            num(ui, stock_to_leave);
-            field(ui, "Clearance Z");
-            height_editor(ui, &state.world, clearance_z, "pocket.clearance");
-            field(ui, "Retract plane");
-            let mut hop = retract_z.is_some();
-            if ui.checkbox(&mut hop, "Hop below clearance").changed() {
-                *retract_z = if hop {
-                    Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                } else {
-                    None
-                };
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, clearance_z, "pocket.clearance");
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, r, "pocket.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {cz:.3} (min of the two)"
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, top_z, "pocket.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, bottom_z, "pocket.bottom");
+                field(ui, "Stepdown");
+                num(ui, stepdown);
             }
-            if let Some(r) = retract_z {
-                field(ui, "Retract Z");
-                height_editor(ui, &state.world, r, "pocket.retract");
-                if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                    && rz > cz
-                {
-                    ui.label(format!("above clearance - the hop travels at {cz:.3} (min of the two)"));
+            if tab == SEC_PASSES {
+                field(ui, "Stepover");
+                num(ui, stepover);
+                field(ui, "Stock to leave");
+                num(ui, stock_to_leave);
+                field(ui, "Strategy");
+                let mut st_idx = match strategy {
+                    PocketStrategy::Zigzag => 0,
+                    PocketStrategy::Waterline => 1,
+                    PocketStrategy::Auto => 2,
+                };
+                let names = strategy_names();
+                let before = st_idx;
+                combo(ui, "p_strat", &mut st_idx, names);
+                if st_idx != before {
+                    *strategy = match st_idx {
+                        1 => PocketStrategy::Waterline,
+                        2 => PocketStrategy::Auto,
+                        _ => PocketStrategy::Zigzag,
+                    };
+                }
+                if let Some(note) = &auto_note {
+                    ui.label(note.clone());
                 }
             }
-            field(ui, "Top Z");
-            height_editor(ui, &state.world, top_z, "pocket.top");
-            field(ui, "Bottom Z");
-            height_editor(ui, &state.world, bottom_z, "pocket.bottom");
-            field(ui, "Stepdown");
-            num(ui, stepdown);
-            field(ui, "Feed (mm/min)");
-            num(ui, feed);
-            field(ui, "Plunge feed (mm/min)");
-            num(ui, plunge_feed);
-            ui.checkbox(climb, "Climb milling");
-            let mut st_idx = match strategy {
-                PocketStrategy::Zigzag => 0,
-                PocketStrategy::Waterline => 1,
-                PocketStrategy::Auto => 2,
-            };
-            field(ui, "Strategy");
-            let names = strategy_names();
-            let before = st_idx;
-            combo(ui, "p_strat", &mut st_idx, names);
-            if st_idx != before {
-                *strategy = match st_idx {
-                    1 => PocketStrategy::Waterline,
-                    2 => PocketStrategy::Auto,
-                    _ => PocketStrategy::Zigzag,
-                };
-            }
-            if let Some(note) = &auto_note {
-                ui.label(note.clone());
+            if tab == SEC_FEEDS {
+                field(ui, "Feed (mm/min)");
+                num(ui, feed);
+                field(ui, "Plunge feed (mm/min)");
+                num(ui, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
             }
         }
         OpParams::Slot {
@@ -667,66 +757,81 @@ fn params_fields(ui: &mut Ui, state: &mut State) {
             plunge_feed,
             climb,
         } => {
-            field(ui, "A X");
-            num(ui, &mut a.x);
-            field(ui, "A Y");
-            num(ui, &mut a.y);
-            field(ui, "B X");
-            num(ui, &mut b.x);
-            field(ui, "B Y");
-            num(ui, &mut b.y);
-            field(ui, "Slot width");
-            num(ui, width);
-            field(ui, "Stock to leave");
-            num(ui, stock_to_leave);
-            field(ui, "Clearance Z");
-            height_editor(ui, &state.world, clearance_z, "slot.clearance");
-            field(ui, "Top Z");
-            height_editor(ui, &state.world, top_z, "slot.top");
-            field(ui, "Bottom Z");
-            height_editor(ui, &state.world, bottom_z, "slot.bottom");
-            field(ui, "Stepdown");
-            num(ui, stepdown);
-            field(ui, "Stepover");
-            num(ui, stepover);
-            field(ui, "Feed (mm/min)");
-            num(ui, feed);
-            field(ui, "Plunge feed (mm/min)");
-            num(ui, plunge_feed);
-            ui.checkbox(climb, "Climb milling");
+            if tab == SEC_GEO {
+                field(ui, "A X");
+                num(ui, &mut a.x);
+                field(ui, "A Y");
+                num(ui, &mut a.y);
+                field(ui, "B X");
+                num(ui, &mut b.x);
+                field(ui, "B Y");
+                num(ui, &mut b.y);
+                field(ui, "Slot width");
+                num(ui, width);
+            }
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, clearance_z, "slot.clearance");
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, top_z, "slot.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, bottom_z, "slot.bottom");
+                field(ui, "Stepdown");
+                num(ui, stepdown);
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Stock to leave");
+                num(ui, stock_to_leave);
+                field(ui, "Stepover");
+                num(ui, stepover);
+            }
+            if tab == SEC_FEEDS {
+                field(ui, "Feed (mm/min)");
+                num(ui, feed);
+                field(ui, "Plunge feed (mm/min)");
+                num(ui, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
         }
         OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb } => {
-            field(ui, "Clearance Z");
-            height_editor(ui, &state.world, clearance_z, "trace.clearance");
-            field(ui, "Retract plane");
-            let mut hop = retract_z.is_some();
-            if ui.checkbox(&mut hop, "Hop below clearance").changed() {
-                *retract_z = if hop {
-                    Some(Height::of(top_z.reference, top_z.offset + 1.0))
-                } else {
-                    None
-                };
-            }
-            if let Some(r) = retract_z {
-                field(ui, "Retract Z");
-                height_editor(ui, &state.world, r, "trace.retract");
-                if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
-                    && rz > cz
-                {
-                    ui.label(format!("above clearance - the hop travels at {cz:.3} (min of the two)"));
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, clearance_z, "trace.clearance");
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
                 }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, r, "trace.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {cz:.3} (min of the two)"
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, top_z, "trace.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, bottom_z, "trace.bottom");
+                field(ui, "Stepdown");
+                num(ui, stepdown);
             }
-            field(ui, "Top Z");
-            height_editor(ui, &state.world, top_z, "trace.top");
-            field(ui, "Bottom Z");
-            height_editor(ui, &state.world, bottom_z, "trace.bottom");
-            field(ui, "Stepdown");
-            num(ui, stepdown);
-            field(ui, "Feed (mm/min)");
-            num(ui, feed);
-            field(ui, "Plunge feed (mm/min)");
-            num(ui, plunge_feed);
-            ui.checkbox(climb, "Climb milling");
+            if tab == SEC_FEEDS {
+                field(ui, "Feed (mm/min)");
+                num(ui, feed);
+                field(ui, "Plunge feed (mm/min)");
+                num(ui, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
         }
     }
 }

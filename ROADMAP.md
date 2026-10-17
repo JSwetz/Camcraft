@@ -64,9 +64,9 @@ open. The M1.4 look-and-feel verdict prioritized the Dear ImGui → egui
 stack rework, and that rework has now shipped: M1.4.1 (the decision and
 GO spike) and M1.4.2 (the per-panel graduation, imgui retired) are both
 done - egui is the shell. What's left of the early phase is the remaining
-M1.4 surface polish (graphical tool editor, tabbed-panels UX - viewport
-display modes landed right after the graduation), units, drilling and the
-first post.
+M1.4 surface polish (graphical tool editor - viewport display modes and
+the tabbed-panels UX landed right after the graduation), units, drilling
+and the first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -246,11 +246,15 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
       the stock, a volume rather than a surface, keeps its full wire.
       Generalizes the STEP feature-edge wireframe from M1.2 to every
       model - the pixel law is tested in `tests/gpu_render.rs` (this commit)
-- 📋 **Panel UX overhaul**: property panels reorganized into tabs and
-      named sections (geometry, heights, passes, leads and links,
-      feeds) instead of long stacks of dropdowns and inputs, so a
-      parameter reads as part of a page, not another row - lands in
-      the M1.4.1 migration, not as an ImGui restyle
+- ✅ **Panel UX overhaul**: the operation page is five named sections
+      behind a tab bar - Geometry, Heights, Passes, Leads & Links, Feeds -
+      instead of one long stack, so a parameter reads as part of a page,
+      not another row. A kind shows only the sections it has fields for
+      (Trace has no Passes, non-Contour has no Leads), Status lives above
+      the bar so warnings never hide behind a tab, and the open tab is
+      ephemeral view state like the drafts it reveals - never a command,
+      never saved. `every_field_lives_on_exactly_one_section` is the
+      drift guard (this commit; the M1.4.2 migration it rode on is below)
 
 ### M1.4.1 - UI Framework Rework: Dear ImGui → egui
 **Goal: make the look-and-feel complaint structural instead of another
@@ -324,8 +328,9 @@ generator stayed untouched (the golden CLFile/G-code suite never moved).
 - ✅ **M-b** ribbon + browser @ `b687407` - painted strips graduated, tree
       column model per browser.rs (the spike's eye/warn overlap is gone).
 - ✅ **M-c** property pages @ `8e5a988` - the five 2D operation pages +
-      heights + warning fold, then setup pages; pages arrived already
-      tabbed (the panel-UX carry-over rode here).
+      heights + warning fold, then setup pages; pages arrived as one
+      scroll (parity with imgui) - the tabbed redesign was named a
+      post-migration carry-over and landed after M-g, not here.
 - ✅ **M-d** dialogs + file ops @ `44c6e3a` - rfd wiring, new/open/save,
       error surfaces; the window opens on a real empty document, the demo
       seed retired to the harnesses and the headless proof.
@@ -343,9 +348,10 @@ generator stayed untouched (the golden CLFile/G-code suite never moved).
       and the graphify rebuild re-baselined the knowledge graph.
 
 Parity held as promised: same features, same command wiring, undo/redo
-gated by tests, not hand-test. The remaining M1.4 carry-overs (graphical
-tool editor window, viewport display modes) ride the new stack as
-open M1.4 items; tabbed panels landed with M-c. Version coupling came
+gated by tests, not hand-test. The remaining M1.4 carry-over (graphical
+tool editor window) rides the new stack as an open M1.4 item; viewport
+display modes and the tabbed panel-UX redesign landed right after the
+graduation as their own M1.4 items. Version coupling came
 true the cheap way: egui 0.36.2 + egui_dock 0.21.1 held the pin through
 the whole migration, snapshot diffs caught every paint change.
 
@@ -716,7 +722,7 @@ programming department.
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
-| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window and tabbed-panels UX overhaul open (wireframe/shaded-with-edges display modes done) - the tool editor and tabbed panels ride the egui stack | ⚠️ |
+| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window open (wireframe/shaded-with-edges display modes and the tabbed-panels UX overhaul done) - the tool editor rides the egui stack | ⚠️ |
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
