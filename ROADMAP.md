@@ -248,7 +248,8 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
 **Goal: make the look-and-feel complaint structural instead of another
 restyle - rebuild the shell on a toolkit we fully control, keep every
 behavior the app layer has earned, and ship the Fusion 360-caliber dark
-UI that ImGui styling has not reached.** — 📋 prioritized
+UI that ImGui styling has not reached.** — 🔄 spike done (GO), migration
+in progress
 
 Prompted by the M1.4 hand-test verdict: testers' single biggest complaint
 is the Dear ImGui look and feel, and restyling inside ImGui has not closed
@@ -280,25 +281,47 @@ three-part investigation (UI inventory, egui, clay), October 2026:
       toolkits fighting over hit-testing and focus in one frame.
       Migrate per-panel, switch each panel wholly, never split one.
 
-Spike first - a branch, 2-4 weeks, the go/no-go evidence:
+Spike first - a branch, the go/no-go evidence (**done** 2026-10-17,
+verdict **GO** in `docs/spike-egui-go-no-go.md`; `ui-egui-spike`
+`8219f62..644713a`, restore tag `pre-egui-spike`):
 
-- 📋 **Shell**: eframe-less egui-winit + egui-wgpu over the existing
-      winit 0.30 event loop; viewport as a docked egui_dock panel -
-      registered-texture path first, paint-callback fallback; 3D view
-      stays correct across resize and dock drags.
-- 📋 **One real page plus the painted chrome**: the Contour property
-      panel, the ribbon and the browser rows - the two custom draw_list
-      lists have no widget equivalent anywhere and become a Shape/
-      Painter layer; a Fusion-caliber dark palette + typography module
-      judged from screenshots (the open risk: small-text rendering vs
-      DirectWrite - a visual call, not a code review).
-- 📋 **Harness**: ui tests ported to egui_kittest; the golden CLFile/
-      G-code gate untouched throughout.
+- ✅ **Shell** @ `482a54b`: eframe-less egui-winit + egui-wgpu over the
+      existing winit 0.30 event loop; View3D's offscreen texture docked
+      as an egui native texture, rebound on resize; orbit/pan/zoom
+      through egui pointer responses; headless readback proves the 3D
+      view under the new shell (caught the TexturesDelta drain bug).
+- ✅ **One real page plus the painted chrome** @ `1930f76`: the Contour
+      page on the same commands as imgui, painted ribbon/browser/status
+      (the draw_list port), the dark theme module; 100%/150% PNG dumps
+      judged by eye - the small-text risk from the investigation is
+      cleared (egui's CPU atlas rasterizes per pixel ratio).
+- ✅ **Harness** @ `644713a`: egui_kittest frame tests driving the same
+      `shell_layout` the window runs - pointer-event command round trip
+      and a committed snapshot as the migration churn gate; the golden
+      CLFile/G-code gate was untouched throughout.
 
 Migration after go - per-panel commits, 1.5-3 months: ~3.4k LOC and ~350
 imgui-facing call sites, all inside the ui crates; crates/app is 100%
 imgui-free, so the layering (ui → app → flecs), commands, systems,
-persistence and every generator stay untouched.
+persistence and every generator stay untouched. Order (report §
+"Migration order"):
+
+- 📋 **M-a** shell graduation - the egui loop/dock/View3D-texture law
+      moves from the spike bin into the lib as the `--ui egui` entry,
+      stub panes; `test_harness` learns to spawn it.
+- 📋 **M-b** ribbon + browser - painted strips graduate, tree column
+      model per browser.rs (kills the spike's eye/warn overlap).
+- 📋 **M-c** property pages - the five 2D operation pages + heights +
+      warning fold, then setup pages; pages arrive already tabbed (the
+      panel-UX carry-over rides here).
+- 📋 **M-d** dialogs + file ops - rfd wiring, new/open/save, error
+      surfaces.
+- 📋 **M-e** viewport interaction - pick, hover chips, anchor grid,
+      overlay handles through egui pointer events.
+- 📋 **M-f** actions + paths panels - post/report surfaces.
+- 📋 **M-g** retire imgui - drop the three dear-imgui deps, icons fold
+      into egui textures, graphify rebuild; carry-overs (tool editor
+      window) then ride the new stack as M1.4.2+.
 
 - 📋 Each panel ships with parity - same features, same command wiring;
       undo/redo behavior is a test gate, not a hand-test; ImGui exits
@@ -681,7 +704,7 @@ programming department.
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window, wireframe/shaded-with-edges display modes, and tabbed-panels UX overhaul open - the tool editor and tabbed panels ride the M1.4.1 stack | ⚠️ |
-| **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike (docked viewport, one panel, painted chrome, kittest) then per-panel migration | 📋 |
+| **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`); per-panel migration M-a…M-g in progress | 🔄 |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
