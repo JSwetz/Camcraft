@@ -265,8 +265,8 @@ fn viewport_panel(ui: &Ui, state: &mut State) {
         let ([rx0, ry0], [rx1, ry1]) = viewport_rect;
         let (rw, rh) = (rx1 - rx0, ry1 - ry0);
         if rw > 1.0 && rh > 1.0 {
-            let labels = crate::app::overlay_labels(state, (rw / rh) as f64);
-            let edges = crate::app::hover_features(state, (rw / rh) as f64);
+            let labels = crate::interact::overlay_labels(state, (rw / rh) as f64);
+            let edges = crate::interact::hover_features(state, (rw / rh) as f64);
             if !labels.is_empty() || !edges.is_empty() {
                 let dl = ui.get_window_draw_list();
                 for (uv, rgb, text) in labels {

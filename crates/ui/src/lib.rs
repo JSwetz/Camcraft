@@ -9,6 +9,7 @@ pub mod browser;
 pub mod egui_app;
 pub mod form;
 pub mod headless;
+pub mod interact;
 pub mod icons;
 pub mod operations;
 pub mod ribbon;

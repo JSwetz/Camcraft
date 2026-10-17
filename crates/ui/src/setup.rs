@@ -178,7 +178,7 @@ pub(crate) fn wcs_page(ui: &Ui, state: &mut State, slot: usize) {
     // explicit choice - stock or model - and the nine points of the chosen
     // level can be clicked in the viewport as markers instead of hunting
     // through the button grid. The buttons and the markers share
-    // `crate::app::anchor_points`, so what you click, what highlights, and
+    // `crate::interact::anchor_points`, so what you click, what highlights, and
     // what places are the same points by construction. Behavior specced
     // from published CAM setup practice; the grid and its math are ours.
     ui.spacing();
@@ -190,7 +190,7 @@ pub(crate) fn wcs_page(ui: &Ui, state: &mut State, slot: usize) {
         &SOURCES,
         |s| Cow::Borrowed(*s),
     );
-    match crate::app::anchor_reference(state) {
+    match crate::interact::anchor_reference(state) {
         Some((_, what)) => {
             let chosen = *SOURCES
                 .get(state.wcs_ui.anchor_source.min(1))
@@ -212,7 +212,7 @@ pub(crate) fn wcs_page(ui: &Ui, state: &mut State, slot: usize) {
             if state.wcs_ui.pick_anchor {
                 ui.text("Click a yellow marker in the viewport to set the origin.");
             }
-            let pts = crate::app::anchor_points(state);
+            let pts = crate::interact::anchor_points(state);
             for row in 0..3usize {
                 for col in 0..3usize {
                     let k = row * 3 + col;

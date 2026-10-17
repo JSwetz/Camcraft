@@ -31,7 +31,8 @@ use winit::window::{Window, WindowId};
 use egui_wgpu::wgpu;
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 
-use crate::state::State;
+use crate::interact;
+use crate::state::{DragMode, State};
 use crate::viewport::View3D;
 
 use super::pages;
@@ -90,6 +91,10 @@ struct Shell {
     /// Last laid-out viewport size in logical points; drives the View3D
     /// extent for the NEXT frame (imgui's shell uses the same deferral).
     viewport_points: [f32; 2],
+    /// Where the last primary press landed (viewport panel coords), until its
+    /// release decides pick-vs-orbit - the imgui App's `left_press` plumbed
+    /// into the frame builder the same way `viewport_points` is (M-e).
+    left_press: Option<[f32; 2]>,
     /// Content digest of the scene last uploaded to View3D; re-uploads are
     /// gated on it (App::sync_gpu's law, mirrored).
     scene_digest: u64,
@@ -158,6 +163,7 @@ impl Shell {
             view: None,
             view_tex: None,
             viewport_points: [600.0, 400.0],
+            left_press: None,
             scene_digest: 0,
             exit_code: 0,
             failed: false,
@@ -317,6 +323,7 @@ impl Shell {
             view,
             view_tex,
             viewport_points,
+            left_press,
             scene_digest,
             exit_requested,
             state,
@@ -377,7 +384,7 @@ impl Shell {
         // UI logic first: the dock reports the viewport tab's size, the GPU
         // passes follow (same ordering law as app.rs - panels drive extent).
         let mut full_output = egui_ctx.run_ui(raw_input, |ui| {
-            shell_layout(ui, state, dock_state, tex_id, viewport_points);
+            shell_layout(ui, state, dock_state, tex_id, viewport_points, left_press);
         });
         drain_textures(renderer, device, queue, &mut full_output);
         winit_state.handle_platform_output(window, full_output.platform_output);
@@ -462,7 +469,12 @@ pub(crate) fn shell_layout(
     dock: &mut DockState<Tab>,
     tex: egui::TextureId,
     viewport_points: &mut [f32; 2],
+    left_press: &mut Option<[f32; 2]>,
 ) {
+    // Ephemeral hover clears every frame before anything recomputes it (the
+    // App::draw law); the viewport's update_hover and the property-page chip
+    // hovers then own it until the pointer moves on.
+    state.geo_hover = None;
     panes::shortcuts(ui, state);
     egui::Panel::top("ribbon")
         .frame(egui::Frame::NONE)
@@ -483,6 +495,7 @@ pub(crate) fn shell_layout(
                 state: &mut *state,
                 tex,
                 viewport_points,
+                left_press,
             });
     });
 }
@@ -560,6 +573,7 @@ struct ShellTabs<'a> {
     state: &'a mut State,
     tex: egui::TextureId,
     viewport_points: &'a mut [f32; 2],
+    left_press: &'a mut Option<[f32; 2]>,
 }
 
 impl TabViewer for ShellTabs<'_> {
@@ -578,30 +592,13 @@ impl TabViewer for ShellTabs<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         match tab {
             Tab::Viewport => {
-                let avail = ui.available_size();
-                self.viewport_points[0] = avail.x.max(1.0);
-                self.viewport_points[1] = avail.y.max(1.0);
-                let resp = ui.add(
-                    egui::Image::from_texture(egui::load::SizedTexture::new(self.tex, avail))
-                        .max_size(avail)
-                        .sense(egui::Sense::click_and_drag()),
+                viewport_panel(
+                    ui,
+                    self.state,
+                    self.tex,
+                    self.viewport_points,
+                    self.left_press,
                 );
-                // The imgui shell's rule, now expressed in egui's model:
-                // primary drag orbits, middle drag pans, wheel dollies.
-                if resp.dragged_by(egui::PointerButton::Primary) {
-                    let d = resp.drag_delta();
-                    self.state.cam.orbit(d.x, d.y);
-                }
-                if resp.dragged_by(egui::PointerButton::Middle) {
-                    let d = resp.drag_delta();
-                    self.state.cam.pan(d.x, d.y);
-                }
-                if resp.hovered() {
-                    let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-                    if scroll != 0.0 {
-                        self.state.cam.zoom(scroll);
-                    }
-                }
             }
             Tab::Browser => {
                 panes::browser(ui, self.state, &theme::Palette::DARK);
@@ -611,6 +608,194 @@ impl TabViewer for ShellTabs<'_> {
             }
         }
     }
+}
+
+/// The viewport tab: the 3D image, the pointer law, and the screen-space
+/// overlays. M-e moved the law to `crate::interact` so both shells share
+/// one: a short LMB press picks (Ctrl adds, the imgui gesture table), an LMB
+/// drag past the click-travel threshold orbits, MMB orbits, RMB pans, wheel
+/// dollies toward the cursor. egui's press/drag bookkeeping differs from
+/// winit's raw stream, so the gestures are read off `ui.input` directly,
+/// the same CLICK_TRAVEL_PX law applied by hand; the spike's simplified
+/// mapping is retired.
+fn viewport_panel(
+    ui: &mut egui::Ui,
+    state: &mut State,
+    tex: egui::TextureId,
+    viewport_points: &mut [f32; 2],
+    left_press: &mut Option<[f32; 2]>,
+) {
+    let avail = ui.available_size();
+    if avail.x > 1.0 && avail.y > 1.0 {
+        state.viewport_size = [avail.x, avail.y];
+        *viewport_points = [avail.x.max(1.0), avail.y.max(1.0)];
+    }
+    let resp = ui.add(
+        egui::Image::from_texture(egui::load::SizedTexture::new(tex, avail))
+            .max_size(avail)
+            .sense(egui::Sense::click_and_drag()),
+    );
+    // The pane's rect is the projection screen, so hit-tests take the same
+    // global pointer coords imgui's viewport_rect fed the raw-event path.
+    let ([rx0, ry0], [rx1, ry1]) = (parr(resp.rect.min), parr(resp.rect.max));
+    state.viewport_rect = ([rx0, ry0], [rx1, ry1]);
+    let hot = resp.hovered();
+    state.viewport_hot = hot;
+    let (rw, rh) = (rx1 - rx0, ry1 - ry0);
+
+    // One wheel notch must dolly by one line in both shells: egui bakes
+    // `line_scroll_speed` pixels into smooth_scroll_delta, so undo it here
+    // (the imgui shell sees raw mouse_wheel = notches).
+    let line_px = ui.ctx().options(|o| o.input_options.line_scroll_speed).max(1.0);
+    let (pos, mods, mid_press, right_press, left_pressed, left_released, other_released, motion, wheel) =
+        ui.input(|a| {
+            let p = &a.pointer;
+            (
+                p.interact_pos().or_else(|| p.hover_pos()),
+                interact::Mods {
+                    ctrl: a.modifiers.ctrl,
+                    shift: a.modifiers.shift,
+                    alt: a.modifiers.alt,
+                },
+                p.button_pressed(egui::PointerButton::Middle),
+                p.button_pressed(egui::PointerButton::Secondary),
+                p.button_pressed(egui::PointerButton::Primary),
+                p.button_released(egui::PointerButton::Primary),
+                p.button_released(egui::PointerButton::Middle)
+                    || p.button_released(egui::PointerButton::Secondary),
+                // Frame-to-frame pointer delta. egui's `motion()` only
+                // fills from raw OS motion events (never from PointerMoved
+                // in a kittest harness), while `delta()` tracks every
+                // position change in both the window and the harness - the
+                // per-frame motion both shells want.
+                p.delta(),
+                if a.smooth_scroll_delta.y != 0.0 {
+                    Some(a.smooth_scroll_delta.y / line_px)
+                } else {
+                    None
+                },
+            )
+        });
+
+    // Presses - only over the pane, like the imgui hot-window gate. A press
+    // is remembered, not acted on: the release decides pick vs orbit.
+    if hot && let Some(p) = pos {
+        if interact::inside_viewport(state, parr(p)) {
+            if mid_press {
+                state.drag = Some(DragMode::Orbit);
+            }
+            if right_press {
+                state.drag = Some(DragMode::Pan);
+            }
+            if left_pressed {
+                *left_press = Some(parr(p));
+            }
+        }
+        if let (Some(steps), Some(p)) = (wheel, pos)
+            && rw > 1.0
+            && rh > 1.0
+        {
+            let [x, y] = parr(p);
+            let ndc = [(x - rx0) / rw * 2.0 - 1.0, 1.0 - (y - ry0) / rh * 2.0];
+            state.cam.dolly_cursor(ndc, (rw / rh) as f64, steps);
+        }
+    }
+
+    // Releases. A short press released inside the pane is a pick; a same-
+    // frame press+release (fast click) is handled here, not at the press.
+    if left_released {
+        let press = left_press.take();
+        if state.drag == Some(DragMode::Orbit) {
+            state.drag = None;
+        }
+        if let (Some(q), Some(p)) = (press, pos)
+            && (p - egui::pos2(q[0], q[1])).length() <= interact::CLICK_TRAVEL_PX
+            && interact::inside_viewport(state, parr(p))
+        {
+            interact::pick_at(state, parr(p), mods);
+        }
+    }
+    if other_released && state.drag.is_some() {
+        state.drag = None;
+    }
+
+    // Motion: drags move the camera; a held-but-not-yet-dragging left
+    // button promotes to orbit past the travel threshold. Hover recomputes
+    // every frame (imgui checks inside draw, so a parked cursor keeps its
+    // feature outline); interact gates it on drag/hot/inside itself.
+    if motion != egui::Vec2::ZERO {
+        match state.drag {
+            Some(DragMode::Orbit) => state.cam.orbit(motion.x, motion.y),
+            Some(DragMode::Pan) => state.cam.pan(motion.x, motion.y),
+            None => {
+                if let (Some(q), Some(p)) = (*left_press, pos)
+                    && p.distance(egui::pos2(q[0], q[1])) > interact::CLICK_TRAVEL_PX
+                {
+                    state.drag = Some(DragMode::Orbit);
+                    state.cam.orbit(motion.x, motion.y);
+                }
+            }
+        }
+    }
+    if let Some(p) = pos {
+        interact::update_hover(state, parr(p), left_press.is_some());
+    }
+
+    // Screen-space overlays on the image: axis/anchor/gizmo labels and the
+    // hovered feature's outline, projected through the same camera math.
+    if rw > 1.0 && rh > 1.0 {
+        let aspect = (rw / rh) as f64;
+        // 0.36 has no Style::text_style lookup - text_styles is the map.
+        let font = ui
+            .style()
+            .text_styles
+            .get(&egui::TextStyle::Small)
+            .cloned()
+            .unwrap_or_else(|| egui::FontId::proportional(11.0));
+        for (uv, rgb, text) in interact::overlay_labels(state, aspect) {
+            ui.painter().text(
+                egui::pos2(rx0 + uv[0] * rw, ry0 + uv[1] * rh),
+                egui::Align2::LEFT_TOP,
+                text,
+                font.clone(),
+                egui::Color32::from_rgb(
+                    (rgb[0] * 255.0).clamp(0.0, 255.0) as u8,
+                    (rgb[1] * 255.0).clamp(0.0, 255.0) as u8,
+                    (rgb[2] * 255.0).clamp(0.0, 255.0) as u8,
+                ),
+            );
+        }
+        for (a, b) in interact::hover_features(state, aspect) {
+            ui.painter().line_segment(
+                [
+                    egui::pos2(rx0 + a[0] * rw, ry0 + a[1] * rh),
+                    egui::pos2(rx0 + b[0] * rw, ry0 + b[1] * rh),
+                ],
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 217, 102)),
+            );
+        }
+        // Corner hint: the control legend, or the live mode while dragging.
+        let hint = match state.drag {
+            Some(DragMode::Orbit) => "orbit",
+            Some(DragMode::Pan) => "pan",
+            None => "LMB pick / drag-orbit · MMB orbit · RMB pan · wheel · F frame",
+        };
+        if hot || state.drag.is_some() {
+            ui.painter().text(
+                resp.rect.max - egui::vec2(12.0, 12.0),
+                egui::Align2::RIGHT_BOTTOM,
+                hint,
+                font,
+                egui::Color32::from_white_alpha(200),
+            );
+        }
+    }
+}
+
+/// egui Pos2 -> the `[f32; 2]` convention interact.rs speaks (0.36 has no
+/// `to_array` on Pos2).
+fn parr(p: egui::Pos2) -> [f32; 2] {
+    [p.x, p.y]
 }
 
 /// Headless proof (the M-a gate, graduated from the spike's S2 gate): no

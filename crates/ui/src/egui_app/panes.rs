@@ -276,7 +276,7 @@ pub fn status(ui: &mut Ui, state: &State, pal: &Palette) {
         ui.add(Label::new(RichText::new(text).weak()).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                RichText::new("egui shell (M-d) - imgui stays default until M-g")
+                RichText::new("egui shell (M-e) - imgui stays default until M-g")
                     .color(pal.text_faint)
                     .small(),
             );

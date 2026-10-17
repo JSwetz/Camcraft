@@ -15,21 +15,22 @@
 //! the real file ops (rfd dialog, shared command machinery). This seed is
 //! what the frame harnesses and the headless proof call directly.
 //!
-//! `collect` mirrors app.rs's private collectors (collect_parts, the region
-//! outlines, the draft height planes, committed-pick outlines, cached-path
-//! display) as world-space `View3D` buffers. The mirrors are slim - no hover
-//! highlight, no screen-space bake - but the gates are copied line for line,
-//! so a plane the imgui shell would refuse to draw is a plane this shell
-//! does not draw either. Provenance: our own code, mirrored from app.rs.
+//! `collect` builds the world-space `View3D` buffers: parts here (models,
+//! stock, region fills - the same walk app.rs does), overlay by delegation
+//! to `crate::interact` since M-e, the single law both shells draw from.
+//! The gates are copied line for line, so a plane the imgui shell would
+//! refuse to draw is a plane this shell does not draw either.
+//! Provenance: our own code, mirrored from app.rs.
 
 use hsmworks_app::commands::ImportModel;
 use hsmworks_app::geometry::{Point3, cube, feature, transform_point};
 use hsmworks_app::machining2d::{Lead, Side};
 use hsmworks_app::model;
-use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
+use hsmworks_app::operation::{FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::tools::{Tool, catalog};
 
+use crate::interact::ftoz;
 use crate::state::{CommandKind, State, UiTarget};
 use crate::viewport::GpuPart;
 
@@ -172,10 +173,6 @@ pub fn collect(state: &State) -> Scene {
 
 // ---------------------------------------------------------------- parts
 
-fn ftoz(v: f64) -> f32 {
-    if v.is_finite() { v as f32 } else { 0.0 }
-}
-
 fn world_verts(state: &State, entity: &flecs_ecs::prelude::Entity) -> Vec<[f32; 3]> {
     let tris = model::facets_of(&state.world, entity).unwrap_or_default();
     let loc = model::transform_of(&state.world, entity).unwrap_or_default();
@@ -213,7 +210,7 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             fill: false,
         });
     }
-    for (z, region) in shown_regions(state) {
+    for (z, region) in crate::interact::shown_regions(state) {
         let Some(region) = region else { continue };
         let Ok(tris) = region.triangles() else { continue };
         if tris.is_empty() {
@@ -232,344 +229,11 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
 
 // -------------------------------------------------------------- overlay
 
-/// `App::push_line`'s law, verbatim: two `[f32;6]` rows (xyz, rgb).
-fn push_line(out: &mut Vec<[f32; 6]>, a: Point3, b: Point3, c: [f32; 3]) {
-    out.push([ftoz(a.x), ftoz(a.y), ftoz(a.z), c[0], c[1], c[2]]);
-    out.push([ftoz(b.x), ftoz(b.y), ftoz(b.z), c[0], c[1], c[2]]);
-}
-
+/// The overlay is the SHARED law since M-e: `crate::interact::collect_overlay`
+/// — cached paths with chevrons, region outlines, draft height planes,
+/// committed-pick outlines, and the gizmos, built by the same functions the
+/// imgui shell uploads. (The pre-M-e mirror skipped the gizmos and the
+/// `show_all_paths` dimming; this delegation closes both gaps for free.)
 fn collect_overlay(state: &State) -> Vec<[f32; 6]> {
-    let mut out = Vec::new();
-    out.extend(toolpath_lines(state));
-    out.extend(region_lines(state));
-    out.extend(height_plane_lines(state));
-    out.extend(selection_feature_lines(state));
-    out
-}
-
-const FEED_RGB: [f32; 3] = [0.20, 0.85, 0.35];
-const RAPID_RGB: [f32; 3] = [0.30, 0.50, 0.95];
-const PLUNGE_RGB: [f32; 3] = [0.92, 0.30, 0.25];
-const REGION_RGB: [f32; 3] = [0.95, 0.58, 0.15];
-const CLEARANCE_RGB: [f32; 3] = [0.55, 0.60, 0.68];
-const RETRACT_RGB: [f32; 3] = [0.40, 0.70, 0.95];
-const CUT_RGB: [f32; 3] = [0.90, 0.35, 0.30];
-const PICK_RGB: [f32; 3] = [0.72, 0.44, 0.86];
-const DISPLAY_CHORD_TOL: f64 = 0.02;
-
-/// Cached paths of the SELECTED operations, the cache itself drawn (the
-/// imgui law: staleness is the panel's word, the cache is the picture).
-/// Chevrons and the vertex cap are the display honesty parts: a feed line
-/// says which way the tool ran, and a pathological cache truncates loudly.
-fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
-    const MAX_OVERLAY_VERTICES: usize = 1 << 20;
-    const CHEVRON_SPACING: f64 = 10.0;
-    let mut out = Vec::new();
-    let arm = chevron_arm(state);
-    for (name, entity) in model::named_entities(&state.world) {
-        if state.hidden_paths.contains(&name) {
-            continue;
-        }
-        let Some(cache) = model::toolpath_of(&state.world, &entity) else { continue };
-        if !model::is_selected(&state.world, &entity) {
-            continue;
-        }
-        for m in &cache.path.moves {
-            let c = match m.kind {
-                hsmworks_app::cl::MoveKind::Rapid => RAPID_RGB,
-                hsmworks_app::cl::MoveKind::Feed => FEED_RGB,
-                hsmworks_app::cl::MoveKind::Plunge => PLUNGE_RGB,
-            };
-            if m.arc.is_some() {
-                let cs = m.chords(DISPLAY_CHORD_TOL);
-                if out.len() + 2 * cs.len() + 2 > MAX_OVERLAY_VERTICES {
-                    eprintln!("overlay: the cached paths outgrew the display budget; truncated");
-                    out.truncate(out.len() & !1);
-                    return out;
-                }
-                for (a, b) in cs {
-                    let za = m.from.z;
-                    push_line(&mut out, Point3::new(a.x, a.y, za), Point3::new(b.x, b.y, za), c);
-                }
-                continue;
-            }
-            if out.len() + 10 > MAX_OVERLAY_VERTICES {
-                eprintln!("overlay: the cached paths outgrew the display budget; truncated");
-                out.truncate(out.len() & !1);
-                return out;
-            }
-            push_line(&mut out, m.from, m.to, c);
-            if m.kind == hsmworks_app::cl::MoveKind::Feed {
-                chevrons(&mut out, m.from, m.to, c, arm, CHEVRON_SPACING);
-            }
-        }
-    }
-    out
-}
-
-fn chevron_arm(state: &State) -> f64 {
-    let extent = model::solid_world_aabb(&state.world)
-        .map(|b| (b.max.x - b.min.x).max(b.max.y - b.min.y).max(b.max.z - b.min.z))
-        .unwrap_or(0.0);
-    (extent * 0.01).max(0.6)
-}
-
-fn chevrons(
-    out: &mut Vec<[f32; 6]>,
-    from: Point3,
-    to: Point3,
-    c: [f32; 3],
-    arm: f64,
-    spacing: f64,
-) {
-    let d = to - from;
-    let len2 = d.dot(d);
-    let min2 = (2.0 * arm) * (2.0 * arm);
-    if !len2.is_finite() || len2 <= min2 {
-        return;
-    }
-    let len = len2.sqrt();
-    let dir = Point3::new(d.x / len, d.y / len, d.z / len);
-    let refv =
-        if dir.z.abs() > 0.99 { Point3::new(1.0, 0.0, 0.0) } else { Point3::new(0.0, 0.0, 1.0) };
-    let n0 = refv.cross(dir);
-    let n2 = n0.dot(n0);
-    if !n2.is_finite() || n2 <= f64::EPSILON {
-        return;
-    }
-    let nl = n2.sqrt();
-    let n = Point3::new(n0.x / nl, n0.y / nl, n0.z / nl);
-    let count = ((len / spacing).floor().max(1.0) as usize).min(10_000);
-    let (back, spread) = (arm * 0.8, arm * 0.45);
-    for i in 0..count {
-        let t = len * (f64::from(i as u32) + 0.5) / count as f64;
-        let q = Point3::new(from.x + dir.x * t, from.y + dir.y * t, from.z + dir.z * t);
-        for s in [-1.0, 1.0] {
-            let tip = Point3::new(
-                q.x - dir.x * back + n.x * spread * s,
-                q.y - dir.y * back + n.y * spread * s,
-                q.z - dir.z * back + n.z * spread * s,
-            );
-            push_line(out, q, tip, c);
-        }
-    }
-}
-
-/// The cut regions of the selected operations (outline source and the fill
-/// gate share this walk - `App::shown_regions` verbatim).
-fn shown_regions(state: &State) -> Vec<(f64, Option<hsmworks_app::geo2d::Region>)> {
-    let mut out = Vec::new();
-    for (_, entity) in model::named_entities(&state.world) {
-        if !model::is_operation(&state.world, &entity)
-            || !model::is_selected(&state.world, &entity)
-        {
-            continue;
-        }
-        let Some(op) = model::operation_of(&state.world, &entity) else { continue };
-        let region = operation::region_of(&state.world, &op);
-        if let Some(z) = operation::region_z(&state.world, &op.params)
-            && (region.is_some() || !operation::chains_of(&state.world, &op).is_empty())
-        {
-            out.push((z, region));
-        }
-    }
-    out
-}
-
-/// Region outlines + open centerline runs, orange, at the region level
-/// (`App::region_lines` verbatim).
-fn region_lines(state: &State) -> Vec<[f32; 6]> {
-    let mut out = Vec::new();
-    for (_, entity) in model::named_entities(&state.world) {
-        if !model::is_operation(&state.world, &entity)
-            || !model::is_selected(&state.world, &entity)
-        {
-            continue;
-        }
-        let Some(op) = model::operation_of(&state.world, &entity) else { continue };
-        let Some(z) = operation::region_z(&state.world, &op.params) else {
-            continue; // source gone - never an outline at a guessed level
-        };
-        if let Some(region) = operation::region_of(&state.world, &op) {
-            for l in region.loops() {
-                let pts = l.points();
-                if pts.len() < 3 {
-                    continue;
-                }
-                for i in 0..pts.len() {
-                    let a = Point3::new(pts[i].x, pts[i].y, z);
-                    let q = pts[(i + 1) % pts.len()];
-                    push_line(&mut out, a, Point3::new(q.x, q.y, z), REGION_RGB);
-                }
-            }
-        }
-        for run in operation::chains_of(&state.world, &op) {
-            for w in run.windows(2) {
-                let a = Point3::new(w[0].x, w[0].y, z);
-                let b = Point3::new(w[1].x, w[1].y, z);
-                push_line(&mut out, a, b, REGION_RGB);
-            }
-        }
-    }
-    out
-}
-
-/// The DRAFT parameters' height planes as rectangles around the stock
-/// (`App::height_plane_lines` + `height_planes` + `plane_rect` laws, the
-/// rectangle corners in the same order so an eye match says the two shells
-/// agree).
-fn height_plane_lines(state: &State) -> Vec<[f32; 6]> {
-    let Some(rect) = plane_rect(state) else { return Vec::new() };
-    let levels: Vec<f64> = shown_regions(state).into_iter().map(|(z, _)| z).collect();
-    let stands = |z: f64| levels.contains(&z);
-    let mut planes: Vec<(f64, [f32; 3], bool)> = Vec::new();
-    if !state.op_ui.name.is_empty()
-        && model::find_by_name(&state.world, &state.op_ui.name)
-            .and_then(|e| model::operation_of(&state.world, &e))
-            .is_some()
-    {
-        let world = &state.world;
-        let draft = &state.op_ui.params;
-        let clr = draft.clearance();
-        if let Some(z) = clr.z(world) {
-            planes.push((z, CLEARANCE_RGB, false));
-        }
-        let hop = match draft {
-            OpParams::Contour { retract_z, .. } => Some(*retract_z),
-            OpParams::Pocket { retract_z, .. }
-            | OpParams::Slot { retract_z, .. }
-            | OpParams::Trace { retract_z, .. } => *retract_z,
-            OpParams::Face { .. } => None,
-        };
-        if let Some(hop) = hop
-            && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
-        {
-            planes.push((r.min(c), RETRACT_RGB, false));
-        }
-        match draft {
-            OpParams::Face { top_z, cut_z, .. } => {
-                let cut = cut_z.z(world);
-                if let (Some(t), Some(c)) = ((*top_z).to_owned(), cut)
-                    && let Some(tz) = t.z(world)
-                    && tz != c
-                {
-                    planes.push((tz, REGION_RGB, stands(tz)));
-                }
-                if let Some(z) = cut {
-                    planes.push((z, CUT_RGB, stands(z)));
-                }
-            }
-            OpParams::Contour { top_z, bottom_z, .. }
-            | OpParams::Pocket { top_z, bottom_z, .. }
-            | OpParams::Slot { top_z, bottom_z, .. }
-            | OpParams::Trace { top_z, bottom_z, .. } => {
-                if let Some(z) = top_z.z(world) {
-                    planes.push((z, REGION_RGB, stands(z)));
-                }
-                if let Some(z) = bottom_z.z(world) {
-                    planes.push((z, CUT_RGB, false));
-                }
-            }
-        }
-    }
-    planes.retain(|(z, _, _)| z.is_finite());
-    let [x0, y0, x1, y1] = rect;
-    let ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
-    let mut out = Vec::new();
-    for (z, rgb, _skip) in planes.iter().filter(|(_, _, skip)| !skip) {
-        for i in 0..4 {
-            let a = ring[i];
-            let b = ring[(i + 1) % 4];
-            push_line(
-                &mut out,
-                Point3::new(a[0], a[1], *z),
-                Point3::new(b[0], b[1], *z),
-                *rgb,
-            );
-        }
-    }
-    out
-}
-
-fn plane_rect(state: &State) -> Option<[f64; 4]> {
-    let b = model::stock_world_aabb(&state.world).or_else(|| model::solid_world_aabb(&state.world))?;
-    let pad = model::find_by_name(&state.world, &state.op_ui.tool)
-        .and_then(|e| model::tool_of(&state.world, &e))
-        .map(|t| t.diameter)
-        .filter(|d| d.is_finite() && *d > 0.0)
-        .map_or(0.0, |d| d * 0.5 + 2.0);
-    let rect = [b.min.x - pad, b.min.y - pad, b.max.x + pad, b.max.y + pad];
-    rect.iter().all(|v| v.is_finite()).then_some(rect)
-}
-
-/// The open operation's committed picks in 3D, violet (`App`'s law, with
-/// the `Loop.verts` id resolution the hover path also uses).
-fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
-    if state.op_ui.name.is_empty() {
-        return Vec::new();
-    }
-    let Some(op) = model::find_by_name(&state.world, &state.op_ui.name)
-        .and_then(|e| model::operation_of(&state.world, &e))
-    else {
-        return Vec::new();
-    };
-    let operation::SrcRef::Selection(items) = &op.src else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for item in items {
-        if state.hidden_models.iter().any(|m| m == &item.entity) {
-            continue;
-        }
-        let Some(entity) = model::find_by_name(&state.world, &item.entity) else { continue };
-        let Some(features) = model::features_of(&state.world, &entity) else { continue };
-        let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
-        let draw = |out: &mut Vec<[f32; 6]>, pts: &[[f64; 3]], closed: bool| {
-            let n = pts.len();
-            if n < 2 || (closed && n < 3) {
-                return;
-            }
-            let last = if closed { n } else { n - 1 };
-            for i in 0..last {
-                let a =
-                    transform_point(Point3::new(pts[i][0], pts[i][1], pts[i][2]), loc.pos, loc.rot);
-                let q = &pts[(i + 1) % n];
-                let b = transform_point(Point3::new(q[0], q[1], q[2]), loc.pos, loc.rot);
-                push_line(out, a, b, PICK_RGB);
-            }
-        };
-        match item.feature {
-            FeatureSel::Face(fid) => {
-                let Some(face) = features.faces.iter().find(|f| f.id == fid) else { continue };
-                for l in &face.loops {
-                    let pts: Vec<[f64; 3]> = l
-                        .verts
-                        .iter()
-                        .filter_map(|&vi| features.verts.get(vi as usize).copied())
-                        .collect();
-                    draw(&mut out, &pts, !matches!(l.kind, feature::LoopKind::Open));
-                }
-            }
-            FeatureSel::Chain(cid) => {
-                let Some(chain) = feature::chains(&features).into_iter().find(|c| c.id == cid)
-                else {
-                    continue;
-                };
-                let pts = feature::chain_points(&features, &chain);
-                draw(&mut out, &pts, chain.closed);
-            }
-            FeatureSel::Patch(pid) => {
-                let Some(rings) = feature::patch_rings(&features, pid) else { continue };
-                for r in &rings {
-                    let pts: Vec<[f64; 3]> = r
-                        .verts
-                        .iter()
-                        .filter_map(|&vi| features.verts.get(vi as usize).copied())
-                        .collect();
-                    draw(&mut out, &pts, r.closed);
-                }
-            }
-        }
-    }
-    out
+    crate::interact::collect_overlay(state)
 }

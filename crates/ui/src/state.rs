@@ -162,7 +162,7 @@ pub struct WcsUi {
     pub anchor_z: usize,
     /// Which box the anchor points live on: 0 = stock box, 1 = model bounds.
     /// The pane states it explicitly; a chosen source that doesn't exist
-    /// falls back to the other, with a note (app::anchor_reference).
+    /// falls back to the other, with a note (interact::anchor_reference).
     pub anchor_source: usize,
     /// Viewport picking mode: the anchor points of the current level show as
     /// clickable markers in the viewport. Transient UI mode, not undoable

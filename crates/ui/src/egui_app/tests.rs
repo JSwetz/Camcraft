@@ -14,8 +14,11 @@
 //! `blank_startup_renders_and_frames_honestly` (the window opens empty -
 //! the seed is gone from `Shell::new`) and `file_ops_round_trip_through_
 //! commands` (Save/New/Open through the queue; the rfd modals are
-//! hand-test-only). The snapshot is the churn gate for the per-panel
-//! migration steps.
+//! hand-test-only). Since M-e the viewport itself is interactive: the
+//! gesture tests drive `crate::interact::pick_at` and the camera arms
+//! through egui's own pointer events - click-and-pick, the travel
+//! threshold, MMB/RMB, wheel, the Face radio and anchor picking. The
+//! snapshot is the churn gate for the per-panel migration steps.
 //!
 //! The harness runs the managed-texture path: the viewport leaf shows a flat
 //! placeholder instead of View3D's offscreen render, because the GPU
@@ -33,9 +36,11 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 
 use hsmworks_app::model;
-use hsmworks_app::operation::OpParams;
+use hsmworks_app::operation::{FeatureSel, OpParams, SrcRef};
+use hsmworks_app::schema::WCS_SLOTS;
 
-use crate::state::{CommandKind, State};
+use crate::interact;
+use crate::state::{CommandKind, DragMode, GeoPick, State};
 
 use super::shell::{Tab, build_dock, headless, shell_layout};
 use super::{theme, world};
@@ -46,6 +51,7 @@ struct ShellUi {
     state: State,
     dock: DockState<Tab>,
     viewport_points: [f32; 2],
+    left_press: Option<[f32; 2]>,
     viewport_tex: Option<egui::TextureHandle>,
     themed: bool,
 }
@@ -58,6 +64,7 @@ impl ShellUi {
             state: State::new(),
             dock: build_dock(),
             viewport_points: [1280.0, 649.0],
+            left_press: None,
             viewport_tex: None,
             themed: false,
         }
@@ -91,7 +98,14 @@ fn frame(ui: &mut egui::Ui, sh: &mut ShellUi) {
         .viewport_tex
         .get_or_insert_with(|| ctx.load_texture("egui-viewport", img, TextureOptions::NEAREST))
         .id();
-    shell_layout(ui, &mut sh.state, &mut sh.dock, tex, &mut sh.viewport_points);
+    shell_layout(
+        ui,
+        &mut sh.state,
+        &mut sh.dock,
+        tex,
+        &mut sh.viewport_points,
+        &mut sh.left_press,
+    );
 }
 
 /// The window at hand-test size, first frame settled (the builder's own
@@ -401,6 +415,313 @@ fn drag_and_type_edit_the_same_staged_number() {
     assert!(
         live == live0 && live != 25.0,
         "staged edits leaked into the world: live {live0} became {live}"
+    );
+}
+
+// ------------------------------------------------------- gesture plumbing
+//
+// The harness has no mouse loop, so pointer gestures are built from egui's
+// own event types - the same RawInput stream the winit backend feeds the
+// live window. One event per frame: press and release are separate frames,
+// exactly like a human click, and `run_steps(2)` afterwards lets the shell's
+// queue law execute what the gesture staged.
+
+fn set_pos(h: &mut Harness<'static, ShellUi>, p: egui::Pos2) {
+    h.input_mut().events.push(Event::PointerMoved(p));
+    h.run();
+}
+
+fn button_at(h: &mut Harness<'static, ShellUi>, b: egui::PointerButton, p: egui::Pos2, pressed: bool) {
+    h.input_mut().events.push(Event::PointerButton {
+        pos: p,
+        button: b,
+        pressed,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+}
+
+/// A plain (button-1) click at `p`, then the frames that drain its command.
+fn click_viewport(h: &mut Harness<'static, ShellUi>, p: egui::Pos2) {
+    set_pos(h, p);
+    button_at(h, egui::PointerButton::Primary, p, true);
+    button_at(h, egui::PointerButton::Primary, p, false);
+    h.run_steps(2);
+}
+
+/// The pane's screen center, once a frame has laid it out.
+fn vp_center(sh: &ShellUi) -> egui::Pos2 {
+    let ([x0, y0], [x1, y1]) = sh.state.viewport_rect;
+    egui::pos2((x0 + x1) * 0.5, (y0 + y1) * 0.5)
+}
+
+/// M-e's core claim in the egui shell: a click inside the pane runs the
+/// SHARED `interact::pick_at` law - status, hover, and a Select command
+/// that moves the tree highlight off the operation the seed had selected.
+#[test]
+fn click_in_viewport_selects_model() {
+    let mut harness = shell_harness();
+    let c = vp_center(harness.state());
+    click_viewport(&mut harness, c);
+    let st = &harness.state().state;
+    assert_eq!(st.status, "selected Block", "the center ray must hit the block");
+    assert!(
+        !st.pending
+            .iter()
+            .any(|c| matches!(c, CommandKind::Select(_))),
+        "the queued command outlived the drain"
+    );
+    let block = model::find_by_name(&st.world, "Block").expect("seed has Block");
+    assert!(model::is_selected(&st.world, &block), "click did not select the model");
+    let op = model::find_by_name(&st.world, "Contour1").expect("seed has Contour1");
+    assert!(
+        !model::is_selected(&st.world, &op),
+        "a model click must move the highlight off the operation"
+    );
+}
+
+/// The hot-window gate, the negative way: a click far outside the pane's
+/// rect must not touch the pick machinery at all - no status, no queue.
+/// (The corner is ribbon paint; paint is not the viewport.)
+#[test]
+fn click_outside_the_viewport_is_not_a_pick() {
+    let mut harness = shell_harness();
+    harness.run();
+    let status0 = harness.state().state.status.clone();
+    click_viewport(&mut harness, egui::pos2(4.0, 4.0));
+    let st = &harness.state().state;
+    assert_eq!(st.status, status0, "a stray click ran a pick");
+    assert!(
+        !st.pending
+            .iter()
+            .any(|c| matches!(c, CommandKind::Select(_))),
+        "the stray click queued a command"
+    );
+}
+
+/// The travel threshold is THE law separating click from orbit: past
+/// CLICK_TRAVEL_PX the gesture is a drag - the camera turns, the release
+/// picks nothing, and no command rides the queue.
+#[test]
+fn drag_promotes_past_the_travel_threshold() {
+    let mut harness = shell_harness();
+    harness.run();
+    let c = vp_center(harness.state());
+    let status0 = harness.state().state.status.clone();
+    let (yaw0, pitch0) = (harness.state().state.cam.yaw, harness.state().state.cam.pitch);
+    set_pos(&mut harness, c);
+    button_at(&mut harness, egui::PointerButton::Primary, c, true);
+    let d = c + egui::vec2(25.0, 0.0);
+    set_pos(&mut harness, d);
+    {
+        let st = harness.state();
+        assert_eq!(st.state.drag, Some(DragMode::Orbit), "25 px must promote to orbit");
+        assert_ne!(st.state.cam.yaw, yaw0, "orbit must turn yaw");
+        assert_eq!(st.state.cam.pitch, pitch0, "a pure horizontal drag keeps pitch");
+    }
+    button_at(&mut harness, egui::PointerButton::Primary, d, false);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    assert_eq!(st.drag, None, "the release must end the drag");
+    assert_eq!(st.status, status0, "a drag must not pick");
+    assert!(
+        !st.pending
+            .iter()
+            .any(|c| matches!(c, CommandKind::Select(_))),
+        "the drag queued a Select"
+    );
+}
+
+/// Middle orbits, right pans, and neither is a pick - the drag arms of the
+/// shared law, driven through egui's own button events.
+#[test]
+fn mmb_orbits_and_rmb_pans() {
+    let mut harness = shell_harness();
+    let c = vp_center(harness.state());
+    let status0 = harness.state().state.status.clone();
+    set_pos(&mut harness, c);
+    let (yaw0, t0) = (harness.state().state.cam.yaw, harness.state().state.cam.target);
+    button_at(&mut harness, egui::PointerButton::Middle, c, true);
+    let m1 = c + egui::vec2(20.0, 10.0);
+    set_pos(&mut harness, m1);
+    {
+        let st = harness.state();
+        assert_eq!(st.state.drag, Some(DragMode::Orbit));
+        assert_ne!(st.state.cam.yaw, yaw0, "MMB drag must orbit");
+        assert_eq!(st.state.cam.target, t0, "orbit must not move the target");
+    }
+    button_at(&mut harness, egui::PointerButton::Middle, m1, false);
+    assert_eq!(harness.state().state.drag, None, "release must end the drag");
+
+    button_at(&mut harness, egui::PointerButton::Secondary, c, true);
+    // yaw1: the MMB orbit left its mark - the pan must not add another.
+    let yaw1 = harness.state().state.cam.yaw;
+    let m2 = c + egui::vec2(15.0, 0.0);
+    set_pos(&mut harness, m2);
+    {
+        let st = harness.state();
+        assert_eq!(st.state.drag, Some(DragMode::Pan));
+        assert_ne!(st.state.cam.target, t0, "RMB drag must pan the target");
+        assert_eq!(st.state.cam.yaw, yaw1, "pan must not rotate");
+    }
+    button_at(&mut harness, egui::PointerButton::Secondary, m2, false);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    assert_eq!(st.drag, None);
+    assert_eq!(st.status, status0, "camera gestures must not report picks");
+    assert!(st.pending.is_empty(), "camera gestures are not commands");
+}
+
+/// Wheel = dolly, one notch of the Line unit to one step of
+/// `dolly_cursor`, positive toward the cursor - the same units the imgui
+/// shell's raw `mouse_wheel` feeds. Pure camera state: nothing queued.
+#[test]
+fn wheel_dollies_toward_the_cursor() {
+    let mut harness = shell_harness();
+    let c = vp_center(harness.state());
+    let status0 = harness.state().state.status.clone();
+    set_pos(&mut harness, c);
+    let d0 = harness.state().state.cam.dist;
+    harness.input_mut().events.push(Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, 1.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    assert!(
+        st.cam.dist < d0 * 0.95,
+        "one notch in must shorten dist (got {} vs {})",
+        st.cam.dist,
+        d0
+    );
+    assert!(st.pending.is_empty());
+    assert_eq!(st.status, status0);
+}
+
+/// The Geometry section's radio row drives `state.geo_pick` - the same
+/// immediate-mode law as the imgui radio, no command - and a Face-mode
+/// click on a vertical block face queues SetOperationGeometry for the open
+/// operation. The seed's Contour1 already carries the TOP face; the click
+/// must REPLACE it with the side face (a plain click is a set, not an
+/// add), naming both the face and the operation in the status.
+#[test]
+fn face_mode_click_replaces_geometry_of_the_open_op() {
+    let mut harness = shell_harness();
+    harness.run();
+    harness.get_by_label("Faces").click();
+    harness.run();
+    assert_eq!(harness.state().state.geo_pick, GeoPick::Face);
+
+    // The four vertical faces of the seed's 60x60x30 block; the most
+    // front-facing one whose projection sits clear inside the pane is the
+    // deterministic click target (a convex body's front faces tile the
+    // silhouette, so that pixel ray enters that face - never the top).
+    let ([x0, y0], [x1, y1]) = harness.state().state.viewport_rect;
+    let (w, hgt) = (x1 - x0, y1 - y0);
+    let mvp = harness.state().state.cam.mvp((w / hgt) as f64);
+    let eye = harness.state().state.cam.eye_f32();
+    let sides = [
+        ([60.0, 30.0, 15.0], [1.0, 0.0, 0.0]),
+        ([0.0, 30.0, 15.0], [-1.0, 0.0, 0.0]),
+        ([30.0, 60.0, 15.0], [0.0, 1.0, 0.0]),
+        ([30.0, 0.0, 15.0], [0.0, -1.0, 0.0]),
+    ];
+    let mut best: Option<(f32, egui::Pos2)> = None;
+    for (c, n) in sides {
+        let facing = ((f64::from(eye[0]) - c[0]) * n[0]
+            + (f64::from(eye[1]) - c[1]) * n[1]
+            + (f64::from(eye[2]) - c[2]) * n[2]) as f32;
+        let Some(uv) = interact::project_uv(&mvp, c) else { continue };
+        if !(uv[0] > 0.1 && uv[0] < 0.9 && uv[1] > 0.15 && uv[1] < 0.85 && facing > 0.0) {
+            continue;
+        }
+        let p = egui::pos2(x0 + uv[0] * w, y0 + uv[1] * hgt);
+        if best.is_none_or(|(bf, _)| facing > bf) {
+            best = Some((facing, p));
+        }
+    }
+    let p = best.expect("the block shows a vertical face to the default camera").1;
+    click_viewport(&mut harness, p);
+    let st = &harness.state().state;
+    // The pick's "added to" line rides one frame, then the drain's
+    // execution status replaces it - seeing the executed status is the
+    // proof the command went through the machinery, not a field poke.
+    assert_eq!(st.status, "geometry selection updated for Contour1");
+    assert!(
+        !st.pending
+            .iter()
+            .any(|c| matches!(c, CommandKind::SetOperationGeometry { .. })),
+        "the queued command outlived the drain"
+    );
+    let op = model::find_by_name(&st.world, "Contour1").expect("seed has Contour1");
+    let items = match model::operation_of(&st.world, &op).map(|o| o.src) {
+        Some(SrcRef::Selection(items)) => items,
+        other => panic!("Contour1's source became {other:?}"),
+    };
+    assert_eq!(items.len(), 1, "a plain click sets the list, not grows it");
+    assert_eq!(items[0].entity, "Block");
+    let FeatureSel::Face(fid) = items[0].feature else {
+        panic!("a face click must queue a face, got {:?}", items[0].feature);
+    };
+    // And it must be the SIDE face the pixel was chosen for - the seed's
+    // top face has normal z = 1; a vertical face's is ~0. This is what
+    // distinguishes "replaced with the click" from "no-op on the old pick".
+    let block = model::find_by_name(&st.world, "Block").expect("seed has Block");
+    let faces = model::features_of(&st.world, &block).expect("Block has features");
+    let face = faces.faces.iter().find(|f| f.id == fid).expect("picked face exists");
+    assert!(face.normal[2].abs() < 0.3, "the click landed on a horizontal face");
+}
+
+/// Anchor pick mode through the viewport: a click ON a marker queues the
+/// SAME `SetWcs` the pane's grid buttons queue, at that anchor's exact
+/// position. `pick_anchor` is immediate UI state, like the pick-mode radio
+/// above - not undoable, not queued.
+#[test]
+fn anchor_click_queues_setwcs() {
+    let mut harness = shell_harness();
+    let slot = WCS_SLOTS[0];
+    let pos0 = {
+        let e = model::find_by_name(&harness.state().state.world, slot).expect("seed sets G54");
+        let p = model::transform_of(&harness.state().state.world, &e).unwrap_or_default().pos;
+        [p.x, p.y, p.z]
+    };
+    // The first anchor that projects clearly inside the laid-out pane.
+    let ([x0, y0], [x1, y1]) = harness.state().state.viewport_rect;
+    let (w, hgt) = (x1 - x0, y1 - y0);
+    let mvp = harness.state().state.cam.mvp((w / hgt) as f64);
+    let (want, p) = interact::anchor_points(&harness.state().state)
+        .into_iter()
+        .filter_map(|(pt, _)| {
+            let uv = interact::project_uv(&mvp, pt)?;
+            (uv[0] > 0.02 && uv[0] < 0.98 && uv[1] > 0.02 && uv[1] < 0.98)
+                .then_some((pt, egui::pos2(x0 + uv[0] * w, y0 + uv[1] * hgt)))
+        })
+        .next()
+        .expect("the anchor grid faces the default camera");
+    assert!(
+        (want[0] - pos0[0]).abs() + (want[1] - pos0[1]).abs() + (want[2] - pos0[2]).abs() > 1e-6,
+        "the anchor coincides with the seed's origin - the assertion would prove nothing"
+    );
+
+    harness.state_mut().state.wcs_ui.pick_anchor = true;
+    click_viewport(&mut harness, p);
+    let st = &harness.state().state;
+    assert!(
+        !st.pending
+            .iter()
+            .any(|c| matches!(c, CommandKind::SetWcs { .. })),
+        "the queued command outlived the drain"
+    );
+    let e = model::find_by_name(&st.world, slot).expect("G54 exists");
+    let q = model::transform_of(&st.world, &e).unwrap_or_default().pos;
+    let pos = [q.x, q.y, q.z];
+    assert!(
+        (pos[0] - want[0]).abs() < 1e-6
+            && (pos[1] - want[1]).abs() < 1e-6
+            && (pos[2] - want[2]).abs() < 1e-6,
+        "the anchor click did not place {slot} at the marker (got {pos:?}, wanted {want:?})"
     );
 }
 

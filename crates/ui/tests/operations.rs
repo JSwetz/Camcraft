@@ -545,7 +545,7 @@ fn delete_operation_round_trips_through_the_queue() {
 use hsmworks_app::commands::ImportModel;
 use hsmworks_app::geometry::{cube, feature, Point3};
 use hsmworks_app::operation::{FeatureSel, GeoSel};
-use hsmworks_ui::app::queue_feature_pick;
+use hsmworks_ui::interact::queue_feature_pick;
 
 /// A cube part (so faces and chains exist to pick) with Face1 targeted as
 /// the pane's draft, exactly as selecting it in the browser would.

@@ -47,7 +47,7 @@ use hsmworks_app::verify::Warning;
 
 
 use crate::operations::{fold_warnings, side_names, strategy_names};
-use crate::state::{CommandKind, ErrorScope, State, UiTarget, quat_yaw_deg};
+use crate::state::{CommandKind, ErrorScope, GeoPick, State, UiTarget, quat_yaw_deg};
 
 use super::panes::{TYPES, kind_name, retype};
 use super::theme::Palette;
@@ -215,20 +215,45 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     // Geometry.
     ui.separator();
     ui.heading("Geometry");
+    // Viewport pick mode - transient view state like the drafts this page
+    // edits: the mode itself is not undoable; what a Face/Edge click
+    // changes is (M-e: the imgui radio row, ported, because the egui
+    // viewport now honors geo_pick exactly like the imgui one).
+    ui.horizontal(|ui| {
+        ui.label("Click selects:");
+        let mut pick_mode = match state.geo_pick {
+            GeoPick::Model => 0,
+            GeoPick::Face => 1,
+            GeoPick::Edge => 2,
+        };
+        ui.radio_value(&mut pick_mode, 0, "Models");
+        ui.radio_value(&mut pick_mode, 1, "Faces");
+        ui.radio_value(&mut pick_mode, 2, "Edges");
+        state.geo_pick = match pick_mode {
+            1 => GeoPick::Face,
+            2 => GeoPick::Edge,
+            _ => GeoPick::Model,
+        };
+    });
     ui.label("Click in the viewport - Ctrl adds; Alt in Edge mode takes one edge.");
     if state.op_ui.src_kind == 2 {
-        let chips: Vec<(String, bool)> = state
+        // Hovering a row lights that feature in the viewport (screen-space
+        // amber, the shared interact law) - so the chip carries its GeoSel.
+        let chips: Vec<(String, bool, GeoSel)> = state
             .geo_chips()
             .into_iter()
-            .map(|c| (c.label, c.missing))
+            .map(|c| (c.label, c.missing, c.sel))
             .collect();
-        for (i, (label, missing)) in chips.into_iter().enumerate() {
+        for (i, (label, missing, sel)) in chips.into_iter().enumerate() {
             let remove = ui
                 .horizontal(|ui| {
-                    if missing {
-                        ui.colored_label(AMBER, label);
+                    let resp = if missing {
+                        ui.colored_label(AMBER, &label)
                     } else {
-                        ui.label(label);
+                        ui.label(&label)
+                    };
+                    if resp.hovered() {
+                        state.geo_hover = Some(sel);
                     }
                     ui.small_button("×").clicked()
                 })
