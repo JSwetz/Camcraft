@@ -10,16 +10,23 @@
 //! only, and every change goes through `state.pending` / the command
 //! methods, never an ad-hoc field poke. The whole-pane law
 //! (docs/spike-egui-go-no-go.md) forbids porting a pane by halves.
+//!
+//! Since M-f the surfaces here stopped forking their own command logic: the
+//! ribbon cells, browser rows and keyboard shortcuts all fire through the
+//! shared `crate::actions` layer - the same one the imgui ribbon/browser/menu
+//! call - so each effect lives exactly once across both shells. `Cmd::Paths`
+//! stays a direct field flip (view state, mirroring imgui ribbon.rs) and the
+//! browser pushes its `Select` alongside `actions::target` (the tree law).
 
 use egui::{Key, Label, Rect, RichText, Sense, Ui, Vec2};
 
-use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
 use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, HeightReference, OpParams, SrcRef};
+use hsmworks_app::operation::{self, OpParams};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::tools::ToolKind;
 
-use crate::state::{CommandKind, OpUi, State, UiTarget};
+use crate::actions;
+use crate::state::{CommandKind, State, UiTarget};
 
 use super::painted;
 use super::theme::Palette;
@@ -31,13 +38,18 @@ pub(crate) const TYPES: [&str; 5] = ["Face", "2D Contour", "2D Pocket", "Slot", 
 
 // ---------------------------------------------------------------- shortcuts
 
-/// The shell's keyboard layer: history keys always, destructive keys only
-/// while no text field owns focus (imgui's io.WantTextInput guard).
+/// The shell's keyboard layer: history keys always, destructive and file
+/// keys only while no text field owns focus (imgui's io.WantTextInput
+/// guard - a dialog must never spawn mid-type). Every arm fires through
+/// `crate::actions`, the same entry the ribbon uses.
 pub fn shortcuts(ui: &mut Ui, state: &mut State) {
     let typing = ui.memory(|m| m.focused().is_some());
-    let (modifiers, z, y, del, f) = ui.input(|i| {
+    let (modifiers, n, o, s, z, y, del, f) = ui.input(|i| {
         (
             i.modifiers,
+            i.key_pressed(Key::N),
+            i.key_pressed(Key::O),
+            i.key_pressed(Key::S),
             i.key_pressed(Key::Z),
             i.key_pressed(Key::Y),
             i.key_pressed(Key::Delete),
@@ -46,17 +58,34 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
     });
     let cmd = modifiers.command;
     if cmd && z && !modifiers.shift && !modifiers.alt {
-        state.pending.push_back(CommandKind::Undo);
+        actions::undo(state);
     }
     if cmd && y {
         // Ctrl+Y and Ctrl+Shift+Y both redo (imgui law).
-        state.pending.push_back(CommandKind::Redo);
+        actions::redo(state);
+    }
+    if cmd && !typing {
+        // The File tips' keys (ribbon.rs strings): N new, O a model,
+        // Shift+O a project, S save. Shift is what tells the two opens
+        // apart, so it must be tested, not ignored (imgui law).
+        if n {
+            actions::new_document(state);
+        }
+        if o && !modifiers.shift {
+            actions::open_model_dialog(state);
+        }
+        if o && modifiers.shift {
+            actions::open_project(state);
+        }
+        if s {
+            actions::save_project(state);
+        }
     }
     if del && !typing {
-        state.pending.push_back(CommandKind::DeleteSelected);
+        actions::delete_selected(state);
     }
     if f && !typing && !cmd && !modifiers.alt {
-        state.pending.push_back(CommandKind::FrameAll);
+        actions::frame_all(state);
     }
 }
 
@@ -65,8 +94,8 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
 /// One ribbon cell: command identity plus the state it reads for enabled,
 /// toggled, label and tip. The table is the whole group layout
 /// (ribbon.rs's, command for command).
-#[derive(Clone, Copy)]
-enum Cmd {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Cmd {
     New,
     Model,
     Project,
@@ -129,22 +158,35 @@ fn text_of(c: Cmd) -> String {
     }
 }
 
-fn tip_of(c: Cmd) -> String {
+/// The tip table, imgui's strings verbatim (ribbon.rs:140-222) - the
+/// test `tips_match_the_imgui_table` keeps it that way. Every advertised
+/// key is live: `shortcuts` implements them all.
+pub(super) fn tip_of(c: Cmd, state: &State) -> String {
     match c {
-        Cmd::New => "New document".into(),
-        Cmd::Model => "Import a model\tCtrl+M".into(),
-        Cmd::Project => "Open a project\tCtrl+O".into(),
+        Cmd::New => "New document\tCtrl+N".into(),
+        Cmd::Model => "Open a mesh model\tCtrl+O".into(),
+        Cmd::Project => "Open a project\tCtrl+Shift+O".into(),
         Cmd::Save => "Save the project\tCtrl+S".into(),
-        Cmd::Stock => "Edit the stock".into(),
-        Cmd::Origin => "Edit the work offsets".into(),
-        Cmd::Tools => "Tools".into(),
-        Cmd::Create(i) => format!("Add a {} operation", TYPES[i]),
+        Cmd::Stock => "Stock definition".into(),
+        Cmd::Origin => "Work offset (WCS)".into(),
+        Cmd::Tools => "Tool library".into(),
+        Cmd::Create(i) => {
+            // imgui's swap: the buttons sit disabled over an empty tool
+            // list, and the tip says what to do about it (ribbon.rs:138).
+            if state.tool_names().is_empty() {
+                "No tool yet - add one (Setup > Tools)".into()
+            } else if i == 0 {
+                "Add a Face mill operation".into()
+            } else {
+                format!("Add a {} operation", TYPES[i])
+            }
+        }
         Cmd::Undo => "Undo\tCtrl+Z".into(),
         Cmd::Redo => "Redo\tCtrl+Y".into(),
-        Cmd::Run => "Regenerate the selected operation".into(),
+        Cmd::Run => "Generate the selected operation".into(),
         Cmd::Delete => "Delete the selection\tDel".into(),
-        Cmd::Frame => "Frame the model\tF".into(),
-        Cmd::Paths => "Show every operation's path".into(),
+        Cmd::Frame => "Frame all\tF".into(),
+        Cmd::Paths => "Show every cached toolpath".into(),
     }
 }
 
@@ -166,98 +208,105 @@ fn toggled(c: Cmd, state: &State) -> bool {
     }
 }
 
-/// The property-pane target. Ephemeral UI state (AGENTS.md): immediate,
-/// not queued - the imgui shell's actions::target, same field, same law.
-fn target(state: &mut State, t: UiTarget) {
-    state.ui_target = t;
-}
-
-fn add_operation(state: &mut State, kind: usize) {
-    // Mirrors actions.rs: the new op cuts with the newest tool in the
-    // document; no tools, no operation - and say so.
-    let Some(tool) = state.tool_names().pop() else {
-        state.status = "cannot add an operation: no tool in the document".to_owned();
-        return;
-    };
-    let mut n = model::named_entities(&state.world)
-        .iter()
-        .filter(|(_, e)| model::is_operation(&state.world, e))
-        .count()
-        + 1;
-    let mut name = format!("Operation{n}");
-    while model::find_by_name(&state.world, &name).is_some() {
-        n += 1;
-        name = format!("Operation{n}");
-    }
-    state.pending.push_back(CommandKind::CreateOperation {
-        name: name.clone(),
-        tool,
-        src: SrcRef::Stock,
-        params: quick_params(kind),
-    });
-    state.pending.push_back(CommandKind::Select(Some(name.clone())));
-    state.ui_target = UiTarget::Operation(name);
-}
-
-fn generate_selected(state: &mut State) {
-    if let Some(name) = state.selected_operation() {
-        state.generate_operation(&name);
-    }
-}
-
+/// The ribbon's one command path: every cell fires the shared actions
+/// layer (`crate::actions`), so the effect lives there exactly once and
+/// menu, tree and shortcut cannot fork a variant of it (actions.rs's
+/// rule). `Cmd::Paths` stays a direct field flip - view state, not a
+/// command, exactly imgui's run_toggle_paths (ribbon.rs:98).
 fn run_cmd(c: Cmd, state: &mut State) {
     match c {
-        Cmd::New => state.pending.push_back(CommandKind::NewDocument),
-        Cmd::Model => state.pending.push_back(CommandKind::OpenModelDialog),
-        Cmd::Project => state.pending.push_back(CommandKind::OpenProjectDialog),
-        Cmd::Save => state.pending.push_back(CommandKind::SaveProjectDialog),
-        Cmd::Stock => target(state, UiTarget::Stock),
+        Cmd::New => actions::new_document(state),
+        Cmd::Model => actions::open_model_dialog(state),
+        Cmd::Project => actions::open_project(state),
+        Cmd::Save => actions::save_project(state),
+        Cmd::Stock => actions::target(state, UiTarget::Stock),
         Cmd::Origin => {
             let slot = state.wcs_ui.slot.min(WCS_SLOTS.len() - 1);
-            target(state, UiTarget::WcsSlot(slot));
+            actions::target(state, UiTarget::WcsSlot(slot));
         }
-        Cmd::Tools => target(state, UiTarget::Tool(String::new())),
-        Cmd::Create(i) => add_operation(state, i),
-        Cmd::Undo => state.pending.push_back(CommandKind::Undo),
-        Cmd::Redo => state.pending.push_back(CommandKind::Redo),
-        Cmd::Run => generate_selected(state),
-        Cmd::Delete => state.pending.push_back(CommandKind::DeleteSelected),
-        Cmd::Frame => state.pending.push_back(CommandKind::FrameAll),
+        Cmd::Tools => actions::target(state, UiTarget::Tool(String::new())),
+        Cmd::Create(i) => actions::add_operation(state, i),
+        Cmd::Undo => actions::undo(state),
+        Cmd::Redo => actions::redo(state),
+        Cmd::Run => actions::generate_selected(state),
+        Cmd::Delete => actions::delete_selected(state),
+        Cmd::Frame => actions::frame_all(state),
         Cmd::Paths => state.show_all_paths = !state.show_all_paths,
     }
 }
 
-/// The ribbon strip: painted cells over a fixed-height top panel. Group
-/// captions and hairline dividers match imgui's layout math (CELL_W/GAP/
-/// PAD_H from ribbon.rs), the cells themselves are painted::cell.
-pub fn ribbon(ui: &mut Ui, state: &mut State, pal: &Palette) {
-    let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
-    painted::strip_bg(ui.painter(), rect, pal);
-    let cell_top = rect.top() + 3.0;
-    let caption_y = rect.top() + 31.0;
-    let mut x = rect.left() + PAD_H;
-    let base = ui.id().with("ribbon");
-    for (gi, (title, cells)) in GROUPS.iter().enumerate() {
+/// One laid-out ribbon cell: which command, where, and its id salt.
+/// A flat index salt (was `(group, index)`) - the value only has to be
+/// stable across frames for hover bookkeeping, and the flat list is
+/// what the gesture tests can reach.
+pub(super) struct Cell {
+    pub cmd: Cmd,
+    pub rect: Rect,
+    pub salt: usize,
+}
+
+/// The ribbon's layout math, pure: cell rects, then the group captions
+/// (centre x, title) and the divider x's between groups. `ribbon` draws
+/// exactly this, and the tests click through it - one source of truth
+/// for where each command lives. CELL_W/GAP/PAD_H are ribbon.rs's.
+pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>, Vec<f32>) {
+    let mut cells = Vec::new();
+    let mut captions = Vec::new();
+    let mut dividers = Vec::new();
+    let cell_top = strip.top() + 3.0;
+    let mut x = strip.left() + PAD_H;
+    let mut salt = 0usize;
+    for (gi, (title, group)) in GROUPS.iter().enumerate() {
         let start = x;
-        for (ci, c) in cells.iter().enumerate() {
-            let r = Rect::from_min_size(egui::Pos2::new(x, cell_top), Vec2::new(CELL_W, CELL_H));
-            let id = base.with((gi, ci));
-            let resp = painted::cell(ui, id, r, &text_of(*c), pal, enabled(*c, state), toggled(*c, state));
-            let fired = resp.clicked() && enabled(*c, state);
-            let cell = *c;
-            resp.on_hover_text(tip_of(cell));
-            if fired {
-                run_cmd(cell, state);
-            }
+        for c in *group {
+            cells.push(Cell {
+                cmd: *c,
+                rect: Rect::from_min_size(egui::Pos2::new(x, cell_top), Vec2::new(CELL_W, CELL_H)),
+                salt,
+            });
+            salt += 1;
             x += CELL_W + GAP;
         }
         x -= GAP;
-        let mid = (start + x) * 0.5;
-        painted::caption(ui.painter(), mid, caption_y, title, pal);
+        captions.push(((start + x) * 0.5, *title));
         if gi + 1 < GROUPS.len() {
             x += GAP + 2.0;
-            painted::divider(ui.painter(), x - (GAP + 2.0) / 2.0 - 1.0, rect, pal);
+            dividers.push(x - (GAP + 2.0) / 2.0 - 1.0);
         }
+    }
+    (cells, captions, dividers)
+}
+
+/// The ribbon strip: painted cells over a fixed-height top panel. Group
+/// captions and hairline dividers match imgui's layout math, the cells
+/// themselves are painted::cell - all from `ribbon_cells`'s geometry.
+pub fn ribbon(ui: &mut Ui, state: &mut State, pal: &Palette) {
+    let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
+    painted::strip_bg(ui.painter(), rect, pal);
+    let base = ui.id().with("ribbon");
+    let (cells, captions, dividers) = ribbon_cells(rect);
+    for cell in &cells {
+        let c = cell.cmd;
+        let resp = painted::cell(
+            ui,
+            base.with(cell.salt),
+            cell.rect,
+            &text_of(c),
+            pal,
+            enabled(c, state),
+            toggled(c, state),
+        );
+        let fired = resp.clicked() && enabled(c, state);
+        resp.on_hover_text(tip_of(c, state));
+        if fired {
+            run_cmd(c, state);
+        }
+    }
+    for (mid, title) in captions {
+        painted::caption(ui.painter(), mid, rect.top() + 31.0, title, pal);
+    }
+    for dx in dividers {
+        painted::divider(ui.painter(), dx, rect, pal);
     }
     ui.allocate_rect(rect, Sense::hover());
 }
@@ -276,7 +325,7 @@ pub fn status(ui: &mut Ui, state: &State, pal: &Palette) {
         ui.add(Label::new(RichText::new(text).weak()).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                RichText::new("egui shell (M-e) - imgui stays default until M-g")
+                RichText::new("egui shell (M-f) - imgui stays default until M-g")
                     .color(pal.text_faint)
                     .small(),
             );
@@ -471,13 +520,13 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Palette) {
         match leaves[ix].clone() {
             Leaf::Section => {}
             Leaf::Stock => {
-                target(state, UiTarget::Stock);
+                actions::target(state, UiTarget::Stock);
                 if model::find_by_name(&state.world, STOCK_NAME).is_some() {
                     state.pending.push_back(CommandKind::Select(Some(STOCK_NAME.to_owned())));
                 }
             }
             Leaf::Wcs(i) => {
-                target(state, UiTarget::WcsSlot(i));
+                actions::target(state, UiTarget::WcsSlot(i));
                 if let Some(slot) = WCS_SLOTS.get(i)
                     && model::find_by_name(&state.world, slot).is_some()
                 {
@@ -485,13 +534,13 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Palette) {
                 }
             }
             Leaf::Model(n) => {
-                target(state, UiTarget::Model(n.clone()));
+                actions::target(state, UiTarget::Model(n.clone()));
                 state.pending.push_back(CommandKind::Select(Some(n)));
             }
             // Target only: no Select, so browsing tools never arms Del.
-            Leaf::Tool(n) => target(state, UiTarget::Tool(n)),
+            Leaf::Tool(n) => actions::target(state, UiTarget::Tool(n)),
             Leaf::Op(n) => {
-                target(state, UiTarget::Operation(n.clone()));
+                actions::target(state, UiTarget::Operation(n.clone()));
                 state.pending.push_back(CommandKind::Select(Some(n)));
             }
         }
@@ -501,146 +550,14 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Palette) {
 
 // --------------------------------------------------------------- parameters
 
-/// The parameters' type-change law, graduated with the ribbon's Create
-/// cells (it is what a new operation is built from; actions.rs mirrors
-/// it). Carries every field across, the way the imgui panel's kind combo
-/// does; M-c's property pages reuse the same function, so creation and
-/// editing cannot disagree on what a retype preserves.
+/// The parameters' type-change law. Since M-f this is a thin pointer to
+/// `crate::operations::retype` - the SAME function `crate::actions::add_
+/// operation` builds quick-adds with (through `quick_params`) and the
+/// imgui panel retypes with. The ribbon's Create cells and pages.rs's
+/// Type combo cannot disagree about what a retype preserves, because
+/// there is exactly one of them. The former egui mirror of this law is
+/// retired with M-f.
 pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
-    let (feed, plunge_feed, climb, clearance, stepover, stepdown, top, bottom, retract) = match cur {
-        OpParams::Face { feed, plunge_feed, climb, clearance_z, stepover, .. } => (
-            *feed,
-            *plunge_feed,
-            *climb,
-            *clearance_z,
-            Some(*stepover),
-            None,
-            None,
-            None,
-            None,
-        ),
-        OpParams::Contour { feed, plunge_feed, climb, clearance_z, retract_z, top_z, bottom_z, stepdown, .. } => (
-            *feed,
-            *plunge_feed,
-            *climb,
-            *clearance_z,
-            None,
-            Some(*stepdown),
-            Some(*top_z),
-            Some(*bottom_z),
-            Some(*retract_z),
-        ),
-        OpParams::Pocket { feed, plunge_feed, climb, clearance_z, retract_z, top_z, bottom_z, stepdown, stepover, .. } => (
-            *feed,
-            *plunge_feed,
-            *climb,
-            *clearance_z,
-            Some(*stepover),
-            Some(*stepdown),
-            Some(*top_z),
-            Some(*bottom_z),
-            *retract_z,
-        ),
-        OpParams::Slot { feed, plunge_feed, climb, clearance_z, retract_z, top_z, bottom_z, stepdown, stepover, .. } => (
-            *feed,
-            *plunge_feed,
-            *climb,
-            *clearance_z,
-            Some(*stepover),
-            Some(*stepdown),
-            Some(*top_z),
-            Some(*bottom_z),
-            *retract_z,
-        ),
-        OpParams::Trace { feed, plunge_feed, climb, clearance_z, retract_z, top_z, bottom_z, stepdown, .. } => (
-            *feed,
-            *plunge_feed,
-            *climb,
-            *clearance_z,
-            None,
-            Some(*stepdown),
-            Some(*top_z),
-            Some(*bottom_z),
-            *retract_z,
-        ),
-    };
-    let top = top.unwrap_or(Height::of(HeightReference::TopOfModel, 0.0));
-    let bottom = bottom.unwrap_or(Height::of(HeightReference::WorkOffset(0), 0.0));
-    let retract = retract.unwrap_or(Height::of(HeightReference::TopOfStock, 10.0));
-    let stepover = stepover.unwrap_or(3.0);
-    let stepdown = stepdown.unwrap_or(5.0);
-    match kind {
-        1 => OpParams::Contour {
-            stock_to_leave: 0.0,
-            clearance_z: clearance,
-            retract_z: retract,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            feed,
-            plunge_feed,
-            climb,
-            side: Side::Auto,
-            lead: Lead::Linear { length: 8.0 },
-            tolerance: 0.01,
-            tab_count: 0,
-            tab_width: 5.0,
-            tab_height: 1.0,
-        },
-        2 => OpParams::Pocket {
-            stepover,
-            stock_to_leave: 0.0,
-            clearance_z: clearance,
-            retract_z: None,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            feed,
-            plunge_feed,
-            climb,
-            strategy: PocketStrategy::Auto,
-        },
-        3 => OpParams::Slot {
-            a: hsmworks_app::geo2d::Point2::new(-20.0, 0.0),
-            b: hsmworks_app::geo2d::Point2::new(20.0, 0.0),
-            width: 4.0,
-            stock_to_leave: 0.0,
-            clearance_z: clearance,
-            retract_z: None,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            stepover,
-            feed,
-            plunge_feed,
-            climb,
-        },
-        4 => OpParams::Trace {
-            clearance_z: clearance,
-            retract_z: None,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            feed,
-            plunge_feed,
-            climb,
-        },
-        _ => OpParams::Face {
-            stepover,
-            clearance_z: clearance,
-            cut_z: Height::of(HeightReference::TopOfStock, 0.0),
-            top_z: None,
-            stepdown: None,
-            feed,
-            plunge_feed,
-            climb,
-        },
-    }
-}
-
-/// The defaults for a brand-new operation of kind `kind` (actions.rs
-/// mirror: a default draft, retyped).
-fn quick_params(kind: usize) -> OpParams {
-    retype(&OpUi::default().params, kind)
+    crate::operations::retype(cur, kind)
 }
 

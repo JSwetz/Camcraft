@@ -43,7 +43,7 @@ use super::world;
 const VIEW3D_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// Ribbon strip height (cells at top+3, group captions at top+31 - the
 /// imgui ribbon's geometry, which M-b's painted::cell reproduces).
-const RIBBON_H: f32 = 49.0;
+pub(crate) const RIBBON_H: f32 = 49.0;
 /// Status strip height (imgui's single-line bottom bar).
 const STATUS_H: f32 = 22.0;
 

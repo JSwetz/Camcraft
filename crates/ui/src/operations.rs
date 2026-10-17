@@ -1062,7 +1062,7 @@ fn side_note(state: &State) -> Option<String> {
 /// a `top - 5.0` anymore; Face cuts one skim at the stock top (`cut_z`
 /// is a single plane, so a deeper reference would cut through the whole
 /// stock in the default op - the same safe z retype produced before).
-fn retype(cur: &OpParams, kind: usize) -> OpParams {
+pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
     let feed = feed_of(cur);
     let plunge = plunge_of(cur);
     let climb = climb_of(cur);

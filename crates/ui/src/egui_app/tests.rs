@@ -40,8 +40,9 @@ use hsmworks_app::operation::{FeatureSel, OpParams, SrcRef};
 use hsmworks_app::schema::WCS_SLOTS;
 
 use crate::interact;
-use crate::state::{CommandKind, DragMode, GeoPick, State};
+use crate::state::{CommandKind, DragMode, GeoPick, State, UiTarget};
 
+use super::panes::{self, Cmd};
 use super::shell::{Tab, build_dock, headless, shell_layout};
 use super::{theme, world};
 
@@ -114,6 +115,22 @@ fn shell_harness() -> Harness<'static, ShellUi> {
     Harness::builder()
         .with_size(Vec2::new(1280.0, 720.0))
         .build_ui_state(frame, ShellUi::seeded())
+}
+
+/// A frame body with ONLY the keyboard layer: no shell, and crucially no
+/// `drain_actions` - `State::run`'s dialog arms open real rfd modals, so
+/// the file-key proof here is queue membership, never an executed command.
+fn shortcuts_only(ui: &mut egui::Ui, st: &mut State) {
+    panes::shortcuts(ui, st);
+}
+
+/// ...same, with a text field owning focus (the live shell always has one
+/// reachable - imgui's io.WantTextInput gate mirrored by `typing`).
+fn shortcuts_with_field(ui: &mut egui::Ui, st: &mut State) {
+    let mut scratch = String::new();
+    ui.add(egui::TextEdit::singleline(&mut scratch).desired_width(80.0))
+        .request_focus();
+    panes::shortcuts(ui, st);
 }
 
 /// Port of the spike's `egui_frames_run`: real frames of the real shell.
@@ -759,4 +776,161 @@ fn wgpu_types_are_unified() {
     }
     // The coercion itself is the assertion; the pointer bind is the use.
     let _f: fn(&dear_imgui_wgpu::wgpu::Device) -> &egui_wgpu::wgpu::Device = coerce;
+}
+
+// ------------------------------------------------------- M-f: the actions law
+
+/// The keyboard law M-f closes: every file key the ribbon tips advertise
+/// must queue exactly its command, and must stay silent while a text field
+/// owns focus. Driven through the keyboard layer alone (`shortcuts_only`),
+/// so the proof is queue membership - never a drain that would raise rfd.
+#[test]
+fn file_keys_queue_their_commands() {
+    let ctrl = Modifiers { command: true, ..Default::default() };
+    let ctrl_shift = Modifiers { command: true, shift: true, ..Default::default() };
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(400.0, 200.0))
+        .build_ui_state(shortcuts_only, State::new());
+
+    // Ctrl+<key> arms exactly the command its tip promises. The shift
+    // variant must split the two Open arms, and it must not double-fire.
+    let expect = |h: &mut Harness<'static, State>,
+                      mods: Modifiers,
+                      key: Key,
+                      want: fn(&CommandKind) -> bool,
+                      name: &str| {
+        h.state_mut().pending.clear();
+        // ModifiersChanged first: i.modifiers only tracks that event (the
+        // law proven in `history_key_queues_command`).
+        h.input_mut().events.push(Event::ModifiersChanged(mods));
+        h.input_mut().events.push(Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: mods,
+        });
+        h.run();
+        let p = &h.state().pending;
+        assert_eq!(p.len(), 1, "{name} armed {} commands, expected exactly one", p.len());
+        assert!(want(&p[0]), "{name} armed {p:?}");
+    };
+    expect(&mut harness, ctrl, Key::N, |c| matches!(c, CommandKind::NewDocument), "Ctrl+N");
+    expect(
+        &mut harness,
+        ctrl,
+        Key::O,
+        |c| matches!(c, CommandKind::OpenModelDialog),
+        "Ctrl+O",
+    );
+    expect(
+        &mut harness,
+        ctrl_shift,
+        Key::O,
+        |c| matches!(c, CommandKind::OpenProjectDialog),
+        "Ctrl+Shift+O",
+    );
+    expect(
+        &mut harness,
+        ctrl,
+        Key::S,
+        |c| matches!(c, CommandKind::SaveProjectDialog),
+        "Ctrl+S",
+    );
+
+    // The focus gate: the same Ctrl+O over a focused text field arms
+    // nothing (a dialog must never spawn mid-type - imgui's io.WantTextInput).
+    let mut typing = Harness::builder()
+        .with_size(Vec2::new(400.0, 200.0))
+        .build_ui_state(shortcuts_with_field, State::new());
+    typing.run();
+    typing.state_mut().pending.clear();
+    typing.input_mut().events.push(Event::ModifiersChanged(ctrl));
+    typing.input_mut().events.push(Event::Key {
+        key: Key::O,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: ctrl,
+    });
+    typing.run();
+    assert!(
+        typing.state().pending.is_empty(),
+        "Ctrl+O armed a dialog over a focused text field: {:?}",
+        typing.state().pending
+    );
+}
+
+/// The painted ribbon cell is a click on the actions law: `ribbon_cells`
+/// (the single layout source) locates the Pocket cell, a real pointer
+/// press/release there must run `actions::add_operation`, and the shell's
+/// next-frame drain must land the operation in the world. Proves the ribbon
+/// fires the shared layer, not a forked poke - the seam M-a left open.
+#[test]
+fn ribbon_click_creates_through_the_actions_law() {
+    let mut harness = shell_harness();
+    harness.run();
+    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        Vec2::new(1280.0, super::shell::RIBBON_H),
+    ));
+    let pocket = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Create(2))
+        .expect("the Create group carries a Pocket cell");
+    let at = pocket.rect.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    assert!(
+        model::find_by_name(&st.world, "Operation2").is_some(),
+        "the Pocket click did not create through the actions layer (status: {})",
+        st.status
+    );
+    assert!(
+        matches!(&st.ui_target, UiTarget::Operation(n) if n == "Operation2"),
+        "quick-add must leave its target on the new operation"
+    );
+}
+
+/// The tip table is imgui's string law (ribbon.rs verbatim). Row-for-row,
+/// this is the guard against the drift M-f found on 7 of 18 cells - and the
+/// Create row's no-tool swap, the case the empty startup actually shows.
+#[test]
+fn tips_match_the_imgui_table() {
+    let with_tool = ShellUi::seeded().state;
+    let empty = State::new();
+    let rows: &[(Cmd, &str)] = &[
+        (Cmd::New, "New document\tCtrl+N"),
+        (Cmd::Model, "Open a mesh model\tCtrl+O"),
+        (Cmd::Project, "Open a project\tCtrl+Shift+O"),
+        (Cmd::Save, "Save the project\tCtrl+S"),
+        (Cmd::Stock, "Stock definition"),
+        (Cmd::Origin, "Work offset (WCS)"),
+        (Cmd::Tools, "Tool library"),
+        (Cmd::Create(0), "Add a Face mill operation"),
+        (Cmd::Create(1), "Add a 2D Contour operation"),
+        (Cmd::Create(2), "Add a 2D Pocket operation"),
+        (Cmd::Create(3), "Add a Slot operation"),
+        (Cmd::Create(4), "Add a Trace operation"),
+        (Cmd::Undo, "Undo\tCtrl+Z"),
+        (Cmd::Redo, "Redo\tCtrl+Y"),
+        (Cmd::Run, "Generate the selected operation"),
+        (Cmd::Delete, "Delete the selection\tDel"),
+        (Cmd::Frame, "Frame all\tF"),
+        (Cmd::Paths, "Show every cached toolpath"),
+    ];
+    for (c, want) in rows {
+        assert_eq!(&panes::tip_of(*c, &with_tool), want, "tip drifted for {c:?}");
+    }
+    // Every Create button shares imgui's swap while the tool list is empty.
+    for i in 0..panes::TYPES.len() {
+        assert_eq!(
+            panes::tip_of(Cmd::Create(i), &empty),
+            "No tool yet - add one (Setup > Tools)",
+            "the no-tool tip must name the fix (Create({i}))"
+        );
+    }
 }

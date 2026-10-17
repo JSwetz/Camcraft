@@ -354,8 +354,16 @@ fn shortcuts(ui: &Ui, state: &mut State) {
     if ctrl && ui.is_key_pressed(Key::Y) {
         state.pending.push_back(CommandKind::Redo);
     }
-    if ctrl && ui.is_key_pressed(Key::O) {
+    // Shift must not cross the two Open arms (the tips advertise both keys).
+    let shift = ui.is_key_down(Key::ModShift);
+    if ctrl && !shift && ui.is_key_pressed(Key::O) {
         state.pending.push_back(CommandKind::OpenModelDialog);
+    }
+    if ctrl && shift && ui.is_key_pressed(Key::O) {
+        state.pending.push_back(CommandKind::OpenProjectDialog);
+    }
+    if ctrl && ui.is_key_pressed(Key::N) {
+        state.pending.push_back(CommandKind::NewDocument);
     }
     if ctrl && ui.is_key_pressed(Key::S) {
         state.pending.push_back(CommandKind::SaveProjectDialog);

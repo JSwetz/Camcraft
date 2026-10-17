@@ -9,8 +9,10 @@
 //! what the harnesses and the headless proof call directly. Since M-e the
 //! viewport takes pointer gestures: `shell`'s viewport panel drives the same
 //! `crate::interact` pick, hover and camera functions the imgui shell does,
-//! from egui's own input state. Both stacks
-//! coexist as entries until M-g retires imgui
+//! from egui's own input state. Since M-f the surfaces here fire commands
+//! through the shared `crate::actions` layer - the same entry the imgui
+//! ribbon, tree and menu call - so the effects live once across both
+//! shells. Both stacks coexist as entries until M-g retires imgui
 //! (docs/spike-egui-go-no-go.md, migration law); the generators, commands
 //! and persistence underneath are shared and untouched.
 //! Provenance: our own code, from our own spike.
