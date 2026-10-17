@@ -25,6 +25,12 @@ egui-winit = { workspace = true }
 egui-wgpu = { workspace = true }
 egui_dock = { workspace = true }
 
+[dev-dependencies]
+# M1.4.1 spike S3: egui's own test harness, for the bin's frame tests
+# (tests live in the bin: the point is to run the SAME shell_layout code
+# the window runs, and a bin's modules are invisible to tests/).
+egui_kittest = { workspace = true }
+
 [[bin]]
 name = "hsmworks-ui"
 path = "src/main.rs"

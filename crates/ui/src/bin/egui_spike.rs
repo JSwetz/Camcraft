@@ -48,6 +48,11 @@ mod shots;
 mod theme;
 #[path = "egui_spike/world.rs"]
 mod world;
+// M1.4.1 spike S3: the frame tests run THIS bin's shell_layout, so they live
+// here (a bin's modules are invisible to tests/) behind the test cfg.
+#[cfg(test)]
+#[path = "egui_spike/tests.rs"]
+mod tests;
 
 const VIEW3D_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// Ribbon strip height (cells at top+3, group captions at top+31 - the

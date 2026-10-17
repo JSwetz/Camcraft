@@ -34,12 +34,13 @@ pollster = "0.4"
 # Hard-pinned AS A SET: egui_dock 0.21.1 wants egui ^0.36 (not 0.37), and
 # 0.36.2 pins wgpu ^30.0 / winit ^0.30.13 - exactly our lock (30.0.1 /
 # 0.30.13), so the spike adds zero forced upgrades. Bump together or hold
-# (verified 2026-10-16 against crates.io). egui_kittest joins in S3 (its
-# dev-dep would pull eframe into every test build until then).
+# (verified 2026-10-16 against crates.io). egui_kittest is dev-only and
+# joined at S3, on the same set.
 egui = "=0.36.2"
 egui-winit = "=0.36.2"
 egui-wgpu = "=0.36.2"
 egui_dock = "=0.21.1"
+egui_kittest = { version = "=0.36.2", features = ["wgpu", "snapshot"] }
 # PNG decode for the UI icon set (assets/ui/*.png -> crates/ui/src/icons.rs).
 # Png only: everything else (formats, headers of other codecs) stays off.
 image = { version = "0.25", default-features = false, features = ["png"] }
