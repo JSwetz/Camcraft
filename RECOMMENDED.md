@@ -9,6 +9,46 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.4 — tabbed property pages (commit `feat(ui): tabbed property pages - the operation page is five named sections`)
+
+- **Status lives above the tab bar, not inside a tab.** The stale badge and
+  the folded collision warning render between the Type/Tool/Source block and
+  the tabs, so a warning can never hide behind an unopened section. The
+  report-visibility law outranked the tidier look of folding it into
+  Geometry. Cost to change: move one block in `operation_page`.
+- **The open tab is `State::op_tab`, deliberately not a field of `OpUi`.**
+  `sync_ops_ui` rebuilds the drafts wholesale whenever the operation
+  identity or doc version changes; a tab stored inside them would reset to
+  Geometry on every Apply and every drained command - reads as a bug. On
+  `State` it survives edits like the other transient view state (geo_pick,
+  display mode): never a command, never saved, never undoable. Cost to
+  change: one field relocation.
+- **No dead tabs; an out-of-set tab falls back to Geometry.** A kind renders
+  only the sections it has fields for (Trace has no Passes, non-Contour has
+  no Leads & Links), and if `op_tab` names a section the kind lacks (the
+  user switched the Type combo while on Leads), the page resolves to
+  Geometry instead of clamping to an empty pane. The drift test asserts the
+  cell is absent *and* the fallback paints. Cost to change: `has_section` +
+  the one-line resolution.
+- **Field-to-section placement** (the judgment call, one field per section,
+  within-section order preserved from the long stack): Geometry takes the
+  pick row + selection echoes, Contour's Side/Tolerance, Slot's A/B points
+  and width; Heights takes every Z plane including Stepdown (a stepdown is
+  a height law, not a pass count); Passes takes Stepover, Stock to leave,
+  Strategy; Leads & Links takes Contour's leads and tabs only; Feeds takes
+  the three feed fields. Stock-to-leave under Passes (it's how much stays
+  per cut) rather than Heights. Cost to change: one `if tab ==` gate per
+  group + the test table's placement list.
+- **The tab bar wraps** (`horizontal_wrapped`): the properties pane is ~280
+  px in the docked default, five cells do not fit on one row, and the
+  M1.4-pane-width law says an overflowing widget keeps its a11y node but
+  its clicks land in the wrong pane. Two tidy rows beat a clipped row.
+  Cost to change: layout only.
+- **The roadmap's M-c entry said "pages arrived already tabbed" - it was
+  wrong and is corrected** (they arrived as one scroll; parity first). The
+  redesign is this commit. Discussion point: whether the ROADMAP phrasing
+  misled the hand-tests.
+
 ## M1.4 — viewport display modes (commit `feat(ui): viewport display modes - wireframe with honest hidden lines`)
 
 - **Wireframe is a hidden-line drawing, not an x-ray.** Faces still
