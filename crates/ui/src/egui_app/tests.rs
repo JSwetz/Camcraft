@@ -42,6 +42,7 @@ use hsmworks_app::schema::WCS_SLOTS;
 use crate::interact;
 use crate::state::{CommandKind, DragMode, GeoPick, State, UiTarget};
 
+use super::icons::IconSet;
 use super::panes::{self, Cmd};
 use super::shell::{Tab, build_dock, headless, shell_layout};
 use super::{theme, world};
@@ -54,6 +55,10 @@ struct ShellUi {
     viewport_points: [f32; 2],
     left_press: Option<[f32; 2]>,
     viewport_tex: Option<egui::TextureHandle>,
+    /// The icon set, built lazily like `Shell`'s - the registration is
+    /// CPU-side (`ctx.load_texture`), so the harness proves the PNG path,
+    /// not just the painted fallback.
+    icons: Option<IconSet>,
     themed: bool,
 }
 
@@ -67,6 +72,7 @@ impl ShellUi {
             viewport_points: [1280.0, 649.0],
             left_press: None,
             viewport_tex: None,
+            icons: None,
             themed: false,
         }
     }
@@ -99,11 +105,15 @@ fn frame(ui: &mut egui::Ui, sh: &mut ShellUi) {
         .viewport_tex
         .get_or_insert_with(|| ctx.load_texture("egui-viewport", img, TextureOptions::NEAREST))
         .id();
+    if sh.icons.is_none() {
+        sh.icons = Some(IconSet::load(&ctx));
+    }
     shell_layout(
         ui,
         &mut sh.state,
         &mut sh.dock,
         tex,
+        sh.icons.as_ref(),
         &mut sh.viewport_points,
         &mut sh.left_press,
     );
@@ -763,20 +773,9 @@ fn egui_shell_snapshot() {
     harness.snapshot("egui_app");
 }
 
-/// Compile-time proof of the S0 gate, kept through graduation: exactly ONE
-/// wgpu in the tree. If egui-wgpu resolved a different wgpu major than the
-/// imgui renderer's re-export, the reference below would not typecheck and
-/// the shell's registered-texture plan would be dead on arrival.
-#[test]
-fn wgpu_types_are_unified() {
-    // Elided lifetimes bind output to the single input lifetime, so the
-    // coercion is only accepted when both paths name the SAME type.
-    fn coerce(d: &dear_imgui_wgpu::wgpu::Device) -> &egui_wgpu::wgpu::Device {
-        d
-    }
-    // The coercion itself is the assertion; the pointer bind is the use.
-    let _f: fn(&dear_imgui_wgpu::wgpu::Device) -> &egui_wgpu::wgpu::Device = coerce;
-}
+// The S0 one-wgpu proof retired with the imgui renderer at M-g: with
+// `dear_imgui_wgpu` gone there is a single wgpu in the tree by
+// construction, and nothing left to coerce.
 
 // ------------------------------------------------------- M-f: the actions law
 

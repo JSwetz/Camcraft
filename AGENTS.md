@@ -3,7 +3,7 @@
 ## What This Is
 
 A clean-room implementation of HSMWorks: a CAM system that turns 3D models into
-NC programs (G-code) for CNC milling machines. Rust, Flecs ECS, Dear ImGui.
+NC programs (G-code) for CNC milling machines. Rust, Flecs ECS, egui.
 
 "HSMWorks" is a trademark of Autodesk. This project is independent and
 unaffiliated — it reimplements user-visible behavior (operation types,
@@ -98,7 +98,7 @@ at 16px. Keep the copyright/license texts of any bundled set in
 `assets/ui/LICENSES.md` (this is also the home for third-party notices like
 clipper2-rust's BSL text) - retention is a license condition, not a credit.
 Operation-specific glyphs are drawn original when no generic set fits. All
-icons referenced from `crates/ui/src/icons.rs`. Icons and post-processor
+icons referenced from `crates/ui/src/egui_app/icons.rs`. Icons and post-processor
 templates (see below) must be original or licensed without attribution —
 never adapted from HSMWorks material.
 

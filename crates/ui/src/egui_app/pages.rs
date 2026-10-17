@@ -2,11 +2,15 @@
 //! dispatcher on the shell's ui target plus the five 2D operation pages, the
 //! height law, and the setup pages (stock / work offsets / tool / model).
 //!
-//! This is the mirror law of `operations.rs` and `setup.rs` (the imgui
-//! originals): same fields, same order, same notes and echoes, same command
-//! shapes - every change rides `state.pending` / the command methods, never
-//! an ad-hoc field poke (AGENTS.md, "Everything Is a Command"). Two
-//! deliberate translations, both from the go/no-go report (S4):
+//! These pages graduated from the spike verbatim; the imgui panels they
+//! mirrored (operations.rs/setup.rs, plus the property-page code in
+//! app.rs) retired at M-g, so the law they shared now lives in
+//! `crate::operations` (height wording, retypes, warning folds - called
+//! through, never restated) and here. Same fields, same order, same notes
+//! and echoes, same command shapes - every change rides `state.pending` /
+//! the command methods, never an ad-hoc field poke (AGENTS.md, "Everything
+//! Is a Command"). Two deliberate translations, both from the go/no-go
+//! report (S4):
 //!
 //! * `InputDouble` becomes `DragValue` (divergence D5): egui has no
 //!   InputDouble, and DragValue edits + commits with no custom state -
@@ -46,7 +50,9 @@ use hsmworks_app::tools;
 use hsmworks_app::verify::Warning;
 
 
-use crate::operations::{fold_warnings, side_names, strategy_names};
+use crate::operations::{
+    fold_warnings, height_echo, offset_label, side_names, strategy_names, unresolved_note,
+};
 use crate::state::{CommandKind, ErrorScope, GeoPick, State, UiTarget, quat_yaw_deg};
 
 use super::panes::{TYPES, kind_name, retype};
@@ -326,8 +332,10 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
 
     // Parameters.
     params_fields(ui, state);
-    if let Err(w) = operation::resolve_params(&state.world, &state.op_ui.params.clone()) {
-        ui.label(format!("{w}; set the source up or switch the reference"));
+    // The whole-panel unresolved line is operations.rs's law, same as the
+    // retired imgui page's.
+    if let Some(note) = unresolved_note(&state.world, &state.op_ui.params) {
+        ui.label(note);
     }
     ui.separator();
 
@@ -800,22 +808,12 @@ fn height_editor_inner(ui: &mut Ui, world: &flecs_ecs::prelude::World, h: &mut H
         });
         h.reference = HeightReference::WorkOffset(slot.min(WCS_SLOTS.len() - 1));
     }
-    let vlabel = if matches!(h.reference, HeightReference::Fixed) {
-        "Value"
-    } else {
-        "Offset"
-    };
+    // Both strings are operations.rs's law (the retired imgui height row
+    // said the same words); the page only lays them out.
     ui.horizontal(|ui| {
-        ui.label(vlabel);
+        ui.label(offset_label(h.reference));
         ui.add(DragValue::new(&mut h.offset).speed(0.1));
-        let echo = match h.z(world) {
-            Some(z) => format!("(= Z {z:.3})"),
-            None => format!(
-                "(unresolved: {})",
-                operation::missing_source(world, h.reference).unwrap_or("source missing")
-            ),
-        };
-        ui.add(Label::new(egui::RichText::new(echo).weak()).selectable(false));
+        ui.add(Label::new(egui::RichText::new(height_echo(world, h)).weak()).selectable(false));
     });
 }
 
@@ -1162,6 +1160,84 @@ fn model_page(ui: &mut Ui, state: &mut State, name: String) {
         ui.label("It is also the stock solid (Setup > Stock).");
     }
     ui.label("Selected now: Del removes it (undo restores).");
+}
+
+#[cfg(test)]
+mod turn_tests {
+    //! The turn/Level buttons are commands of their own now: the world -
+    //! and with it the viewport gizmo - moves on the press. Moved verbatim
+    //! from the retired imgui setup.rs at M-g; the code under test is
+    //! pages.rs's own `turn_wcs`/`apply_wcs_drafts`.
+
+    use super::*;
+    use hsmworks_app::geometry::{Point3, transform_point};
+
+    fn place(state: &mut State, pos: [f64; 3], yaw_deg: f64) {
+        state.pending.push_back(CommandKind::SetWcs {
+            slot: "G54".to_string(),
+            pos,
+            roll_deg: 0.0,
+            pitch_deg: 0.0,
+            yaw_deg,
+        });
+        state.drain_actions();
+    }
+
+    fn location(state: &State, slot: &str) -> hsmworks_app::schema::Location {
+        let entity = model::find_by_name(&state.world, slot).expect("offset entity");
+        model::transform_of(&state.world, &entity).expect("location")
+    }
+
+    #[test]
+    fn a_turn_moves_the_world_not_just_the_drafts() {
+        let mut state = State::new();
+        place(&mut state, [10.0, 0.0, 0.0], 0.0);
+        state.sync_setup_ui();
+        turn_wcs(&mut state, 0, 1.0); // X+ quarter about the world X
+        state.drain_actions();
+        let loc = location(&state, "G54");
+        assert_eq!([loc.pos.x, loc.pos.y, loc.pos.z], [10.0, 0.0, 0.0]);
+        // Right-hand +90 about X takes +Z to -Y.
+        let p = transform_point(Point3::new(0.0, 0.0, 1.0), loc.pos, loc.rot);
+        assert!(
+            [(p.x - 10.0), (p.y + 1.0), p.z].iter().all(|v| v.abs() < 1e-9),
+            "{p:?}"
+        );
+    }
+
+    #[test]
+    fn four_turns_about_one_axis_return_to_the_start() {
+        let mut state = State::new();
+        place(&mut state, [0.0, 0.0, 0.0], 30.0);
+        state.sync_setup_ui();
+        for _ in 0..4 {
+            turn_wcs(&mut state, 2, 1.0);
+        }
+        state.drain_actions();
+        let loc = location(&state, "G54");
+        // Same rotation as the 30-degree start: quaternion equal up to sign.
+        let start = quat_from_euler(0.0, 0.0, 30.0f64.to_radians());
+        let dot: f64 = start.iter().zip(loc.rot).map(|(a, b)| a * b).sum();
+        assert!((dot.abs() - 1.0).abs() < 1e-9, "closed the circle: {:?}", loc.rot);
+    }
+
+    #[test]
+    fn turning_an_unplaced_slot_applies_the_typed_position() {
+        let mut state = State::new();
+        state.wcs_ui.slot = 1; // G55
+        state.wcs_ui.x = 5.0;
+        turn_wcs(&mut state, 1, -1.0); // Y- quarter
+        state.drain_actions();
+        let loc = location(&state, "G55");
+        assert_eq!([loc.pos.x, loc.pos.y, loc.pos.z], [5.0, 0.0, 0.0]);
+        // Right-hand -90 about Y takes +X to +Z: the drafts, not just a
+        // rotation, rode along.
+        let p = transform_point(Point3::new(1.0, 0.0, 0.0), loc.pos, loc.rot);
+        assert!(
+            [(p.x - 5.0), p.y, (p.z - 1.0)].iter().all(|v| v.abs() < 1e-9),
+            "{p:?}"
+        );
+    }
 }
 
 

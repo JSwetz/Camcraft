@@ -10,19 +10,22 @@
 //! viewport takes pointer gestures: `shell`'s viewport panel drives the same
 //! `crate::interact` pick, hover and camera functions the imgui shell does,
 //! from egui's own input state. Since M-f the surfaces here fire commands
-//! through the shared `crate::actions` layer - the same entry the imgui
-//! ribbon, tree and menu call - so the effects live once across both
-//! shells. Both stacks coexist as entries until M-g retires imgui
+//! through the shared `crate::actions` layer - the entry every surface,
+//! here and (until it retired) on the imgui side, calls - so the effects
+//! live once. At M-g imgui retired and this is the shell
 //! (docs/spike-egui-go-no-go.md, migration law); the generators, commands
-//! and persistence underneath are shared and untouched.
+//! and persistence underneath were shared and untouched throughout.
 //! Provenance: our own code, from our own spike.
 
+mod icons;
 mod painted;
 mod pages;
 mod panes;
 mod shell;
 mod theme;
-mod world;
+// pub(crate) past egui_app: the crate-level law tests read the scene
+// digest straight (the imgui panels' fold checks moved there at M-g).
+pub(crate) mod world;
 
 #[cfg(test)]
 mod tests;

@@ -1,40 +1,30 @@
 [package]
 name = "hsmworks-ui"
-description = "Dear ImGui shell: dockspace, menus, entity tree, 3D viewport."
+description = "egui shell: docked panels, entity tree, ribbon, 3D viewport."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
-# The spike bin is additive: plain `cargo run -p hsmworks-ui` must keep
-# launching the imgui app (the headless gate depends on it).
-default-run = "hsmworks-ui"
-
 [dependencies]
 hsmworks-app = { workspace = true }
 flecs_ecs = { workspace = true }
-dear-imgui-rs = { workspace = true }
-dear-imgui-winit = { workspace = true }
-dear-imgui-wgpu = { workspace = true }
 winit = { workspace = true }
 rfd = { workspace = true }
 pollster = { workspace = true }
 image = { workspace = true }
-# M1.4.1 spike: additive - the imgui lib and bin are untouched.
+# The shell stack (M1.4.2): egui + its winit/wgpu adapters + the dock
+# area. egui_wgpu re-exports wgpu - the unified workspace wgpu - so
+# viewport.rs and the renderer agree on types without a second dep line.
 egui = { workspace = true }
 egui-winit = { workspace = true }
 egui-wgpu = { workspace = true }
 egui_dock = { workspace = true }
 
 [dev-dependencies]
-# M1.4.1 spike S3: egui's own test harness, for the bin's frame tests
-# (tests live in the bin: the point is to run the SAME shell_layout code
-# the window runs, and a bin's modules are invisible to tests/).
+# egui's own test harness, for the frame tests in the lib (egui_app) -
+# the point is to run the SAME shell_layout code the window runs.
 egui_kittest = { workspace = true }
 
 [[bin]]
 name = "hsmworks-ui"
 path = "src/main.rs"
-
-[[bin]]
-name = "hsmworks-ui-egui"
-path = "src/bin/hsmworks_ui_egui.rs"

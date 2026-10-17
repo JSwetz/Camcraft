@@ -1,6 +1,7 @@
-//! M-a: the `--ui egui` entry contract, in-process (the same spawn law
-//! tests/shell.rs runs for imgui — here the "test_harness learns to spawn
-//! it" line of the migration plan: run() itself must route the flag).
+//! The `--ui` entry contract, in-process (run() itself must route the flag -
+//! the migration-plan law from M-a). Since M-g the flag is a formality:
+//! egui is the only shell, and anything else refuses by name rather than
+//! silently drawing a different app.
 //! Provenance: our own tests.
 
 #[test]
@@ -13,4 +14,23 @@ fn egui_headless_cli_exit_code_is_zero() {
         ]),
         0
     );
+}
+
+#[test]
+fn selecting_the_retired_imgui_shell_refuses_with_rc_2() {
+    // The M-g law: no silent fallback. A user scripting `--ui imgui` gets a
+    // named refusal and rc 2, before any window or renderer is touched.
+    assert_eq!(
+        hsmworks_ui::run(&[
+            String::from("--ui"),
+            String::from("imgui"),
+            String::from("--headless")
+        ]),
+        2
+    );
+}
+
+#[test]
+fn ui_flag_without_a_value_refuses_with_rc_2() {
+    assert_eq!(hsmworks_ui::run(&[String::from("--ui")]), 2);
 }

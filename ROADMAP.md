@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> _Last updated: 2026-10-16_
+> _Last updated: 2026-10-17_
 
 ## North Star
 
@@ -59,10 +59,13 @@ hops, per-level planes and translucent cut-region fills; M1.5.3: browser-row
 ids that stop stealing clicks, and From/Offset height references riding
 stock, model and work-offset sources; M1.5.4: a bore's wall contoured from
 inside by default (Side), collision warnings folded to one line per kind,
-height offsets back in view in docked panes) - the ⏸ items below
-remain open, and the M1.4 look-and-feel verdict has prioritized M1.4.1,
-the Dear ImGui → egui stack rework, ahead of the remaining surface
-polish; then units for the early phase, drilling and the first post.
+height offsets back in view in docked panes) - the ⏸ items below remain
+open. The M1.4 look-and-feel verdict prioritized the Dear ImGui → egui
+stack rework, and that rework has now shipped: M1.4.1 (the decision and
+GO spike) and M1.4.2 (the per-panel graduation, imgui retired) are both
+done - egui is the shell. What's left of the early phase is the remaining
+M1.4 surface polish (graphical tool editor, viewport display modes),
+units, drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -248,8 +251,8 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
 **Goal: make the look-and-feel complaint structural instead of another
 restyle - rebuild the shell on a toolkit we fully control, keep every
 behavior the app layer has earned, and ship the Fusion 360-caliber dark
-UI that ImGui styling has not reached.** — 🔄 spike done (GO), migration
-in progress
+UI that ImGui styling has not reached.** — ✅ decision + spike done 2026-10-17
+(GO verdict; the graduation itself shipped as M1.4.2 below)
 
 Prompted by the M1.4 hand-test verdict: testers' single biggest complaint
 is the Dear ImGui look and feel, and restyling inside ImGui has not closed
@@ -300,45 +303,50 @@ verdict **GO** in `docs/spike-egui-go-no-go.md`; `ui-egui-spike`
       and a committed snapshot as the migration churn gate; the golden
       CLFile/G-code gate was untouched throughout.
 
-Migration after go - per-panel commits, 1.5-3 months: ~3.4k LOC and ~350
-imgui-facing call sites, all inside the ui crates; crates/app is 100%
-imgui-free, so the layering (ui → app → flecs), commands, systems,
-persistence and every generator stay untouched. Order (report §
-"Migration order"):
+### M1.4.2 - egui graduation - the migration itself
+**Goal: every surface runs on egui, imgui exits the tree, nothing the app
+layer earned changes behavior.** — ✅ done 2026-10-17
 
-- 📋 **M-a** shell graduation - the egui loop/dock/View3D-texture law
-      moves from the spike bin into the lib as the `--ui egui` entry,
-      stub panes; `test_harness` learns to spawn it.
-- 📋 **M-b** ribbon + browser - painted strips graduate, tree column
-      model per browser.rs (kills the spike's eye/warn overlap).
-- 📋 **M-c** property pages - the five 2D operation pages + heights +
-      warning fold, then setup pages; pages arrive already tabbed (the
-      panel-UX carry-over rides here).
-- 📋 **M-d** dialogs + file ops - rfd wiring, new/open/save, error
-      surfaces.
-- 📋 **M-e** viewport interaction - pick, hover chips, anchor grid,
-      overlay handles through egui pointer events.
-- 📋 **M-f** actions + paths panels - post/report surfaces.
-- 📋 **M-g** retire imgui - drop the three dear-imgui deps, icons fold
-      into egui textures, graphify rebuild; carry-overs (tool editor
-      window) then ride the new stack as M1.4.2+.
+Ran the spike report's "Migration order" as one commit per step, full
+gate ladder green at each: ~3.4k LOC and ~350 imgui-facing call sites,
+all inside the ui crates; crates/app was already 100% imgui-free, so the
+layering (ui → app → flecs), commands, systems, persistence and every
+generator stayed untouched (the golden CLFile/G-code suite never moved).
 
-- 📋 Each panel ships with parity - same features, same command wiring;
-      undo/redo behavior is a test gate, not a hand-test; ImGui exits
-      with the last panel.
-- 📋 The M1.4 carry-overs build directly on the new stack: the
-      graphical tool editor window and the tabbed property panels ride
-      the migration, not ImGui restyle commits; viewport display modes
-      are renderer work, independent of the framework.
-- 📋 Version coupling managed: egui + egui_dock pinned together at
-      spike sign-off; then track egui minors with egui_kittest
-      snapshot diffs as the churn gate, and if the dock lags a release,
-      hold the pin or vendor the patch.
+- ✅ **M-a** shell graduation @ `b7527c7` - the egui loop/dock/View3D-texture
+      law moved from the spike bin into the lib as the `--ui egui` entry;
+      `test_harness` learned to spawn it.
+- ✅ **M-b** ribbon + browser @ `b687407` - painted strips graduated, tree
+      column model per browser.rs (the spike's eye/warn overlap is gone).
+- ✅ **M-c** property pages @ `8e5a988` - the five 2D operation pages +
+      heights + warning fold, then setup pages; pages arrived already
+      tabbed (the panel-UX carry-over rode here).
+- ✅ **M-d** dialogs + file ops @ `44c6e3a` - rfd wiring, new/open/save,
+      error surfaces; the window opens on a real empty document, the demo
+      seed retired to the harnesses and the headless proof.
+- ✅ **M-e** viewport interaction @ `431a32f` - pick, hover chips, anchor
+      grid, overlay handles through egui pointer events; the law moved to
+      `crate::interact`, shared, not mirrored.
+- ✅ **M-f** actions + paths panels @ `0bacce2` - every surface fires
+      through `crate::actions`; tips name keys that actually work (both
+      shells gained Ctrl+N/O/Shift+O/S arms); the painted ribbon became
+      hit-testable through `ribbon_layout`.
+- ✅ **M-g** retire imgui @ this commit - the three dear-imgui deps and
+      `--ui imgui` left the tree (named refusal, rc 2), the nine imgui
+      surface modules deleted, the Tabler glyphs now ride egui textures
+      through `egui_app/icons.rs` with the painted vectors as fallback,
+      and the graphify rebuild re-baselined the knowledge graph.
 
-Honest risks: immediate-mode focus/IME edge cases (Latin-first fine -
-revisit before internationalization), no built-in animation easing (add
-it where it earns its keep), breaking churn every egui minor (the cost
-the spike measures - bounded because the surface is 3.4k LOC, not 30k).
+Parity held as promised: same features, same command wiring, undo/redo
+gated by tests, not hand-test. The remaining M1.4 carry-overs (graphical
+tool editor window, viewport display modes) ride the new stack as
+open M1.4 items; tabbed panels landed with M-c. Version coupling came
+true the cheap way: egui 0.36.2 + egui_dock 0.21.1 held the pin through
+the whole migration, snapshot diffs caught every paint change.
+
+Honest risks (from the spike, now measured): focus/IME edge cases stayed
+Latin-first fine; no built-in animation easing; egui-minor churn is
+bounded by the kittest snapshots.
 
 ### M1.5 - Feature Selection
 **Goal: pick a face or an edge chain and machine that - not just whole
@@ -704,7 +712,8 @@ programming department.
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window, wireframe/shaded-with-edges display modes, and tabbed-panels UX overhaul open - the tool editor and tabbed panels ride the M1.4.1 stack | ⚠️ |
-| **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`); per-panel migration M-a…M-g in progress | 🔄 |
+| **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
+| **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |

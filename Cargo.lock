@@ -796,65 +796,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "dear-imgui-build-support"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728af47c10cb2b12aa36b942e610f894ecafc5d61d0056ab61f9629f02b3d5dc"
-dependencies = [
- "cc",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "dear-imgui-rs"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40f283479a70f65bb3f1239b48116a65272a51c7d1cda718b6149823fb0f2444"
-dependencies = [
- "bitflags 2.13.2",
- "dear-imgui-sys",
- "parking_lot",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "dear-imgui-sys"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c70a5f41bba03683065fd068881da406d1dfe76ec47fe276837017ac210a46f8"
-dependencies = [
- "cc",
- "dear-imgui-build-support",
- "mint",
-]
-
-[[package]]
-name = "dear-imgui-wgpu"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f45f48e041efa96288d1a25f2bd46353b4cb4e1ed32f760bff05aa2a4f19aa6b"
-dependencies = [
- "bytemuck",
- "dear-imgui-rs",
- "thiserror 2.0.21",
- "wgpu",
-]
-
-[[package]]
-name = "dear-imgui-winit"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3fc660ebd43aa683724b6f7404a27e5f3df45aa526f2ba4555f05137cae9937"
-dependencies = [
- "dear-imgui-rs",
- "thiserror 2.0.21",
- "web-sys",
- "web-time",
- "winit",
-]
-
-[[package]]
 name = "derive-new"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1634,9 +1575,6 @@ dependencies = [
 name = "hsmworks-ui"
 version = "0.1.0"
 dependencies = [
- "dear-imgui-rs",
- "dear-imgui-wgpu",
- "dear-imgui-winit",
  "egui",
  "egui-wgpu",
  "egui-winit",
@@ -2127,12 +2065,6 @@ dependencies = [
  "adler2",
  "simd-adler32",
 ]
-
-[[package]]
-name = "mint"
-version = "0.5.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e53debba6bda7a793e5f99b8dacf19e626084f525f7829104ba9898f367d85ff"
 
 [[package]]
 name = "moxcms"

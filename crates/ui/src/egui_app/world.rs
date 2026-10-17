@@ -1,6 +1,6 @@
 //! The egui shell's demo document and per-frame scene collectors, graduated
-//! from the M1.4.1 spike (world.rs) — the mirror law of app.rs's private
-//! collectors.
+//! from the M1.4.1 spike (world.rs) — the mirror of the retired app.rs's
+//! private collectors, now the only collectors in the tree.
 //!
 //! `seed` builds what the panels and viewport show without a file dialog:
 //! a 60x60x30 block, fitted stock, a 6 mm end mill from the catalog, and one

@@ -35,15 +35,18 @@ use crate::interact;
 use crate::state::{DragMode, State};
 use crate::viewport::View3D;
 
+use super::icons;
 use super::pages;
 use super::panes;
 use super::theme;
 use super::world;
 
 const VIEW3D_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-/// Ribbon strip height (cells at top+3, group captions at top+31 - the
-/// imgui ribbon's geometry, which M-b's painted::cell reproduces).
-pub(crate) const RIBBON_H: f32 = 49.0;
+/// Ribbon strip height: imgui's `height()` formula - `2*PAD_V + cell_h +
+/// 5 + line` = 8 + 35 + 5 + 13. Since M-g the cells are that formula's
+/// real size (icon 20 over the label at +22, captions at top+44), where
+/// the pre-icon spike squeezed them into 49.
+pub(crate) const RIBBON_H: f32 = 61.0;
 /// Status strip height (imgui's single-line bottom bar).
 const STATUS_H: f32 = 22.0;
 
@@ -88,6 +91,10 @@ struct Shell {
     dock_state: DockState<Tab>,
     view: Option<View3D>,
     view_tex: Option<egui::TextureId>,
+    /// The bundled glyphs, built once on the first GPU-backed frame (the
+    /// retired imgui loader's law: lazy, and `None` means painted fallback,
+    /// never blank strips).
+    icons: Option<icons::IconSet>,
     /// Last laid-out viewport size in logical points; drives the View3D
     /// extent for the NEXT frame (imgui's shell uses the same deferral).
     viewport_points: [f32; 2],
@@ -162,6 +169,7 @@ impl Shell {
             dock_state,
             view: None,
             view_tex: None,
+            icons: None,
             viewport_points: [600.0, 400.0],
             left_press: None,
             scene_digest: 0,
@@ -322,6 +330,7 @@ impl Shell {
             dock_state,
             view,
             view_tex,
+            icons,
             viewport_points,
             left_press,
             scene_digest,
@@ -381,10 +390,26 @@ impl Shell {
             );
         }
 
+        // Icons decode once, on the first frame that reaches this point -
+        // the GPU-backed one. The deltas they queue ride the drain below
+        // like the font atlas does.
+        if icons.is_none() {
+            *icons = Some(icons::IconSet::load(egui_ctx));
+        }
+
         // UI logic first: the dock reports the viewport tab's size, the GPU
-        // passes follow (same ordering law as app.rs - panels drive extent).
+        // passes follow (the imgui shell's ordering law - panels drive
+        // extent).
         let mut full_output = egui_ctx.run_ui(raw_input, |ui| {
-            shell_layout(ui, state, dock_state, tex_id, viewport_points, left_press);
+            shell_layout(
+                ui,
+                state,
+                dock_state,
+                tex_id,
+                icons.as_ref(),
+                viewport_points,
+                left_press,
+            );
         });
         drain_textures(renderer, device, queue, &mut full_output);
         winit_state.handle_platform_output(window, full_output.platform_output);
@@ -468,19 +493,20 @@ pub(crate) fn shell_layout(
     state: &mut State,
     dock: &mut DockState<Tab>,
     tex: egui::TextureId,
+    icons: Option<&icons::IconSet>,
     viewport_points: &mut [f32; 2],
     left_press: &mut Option<[f32; 2]>,
 ) {
     // Ephemeral hover clears every frame before anything recomputes it (the
-    // App::draw law); the viewport's update_hover and the property-page chip
-    // hovers then own it until the pointer moves on.
+    // imgui App::draw law); the viewport's update_hover and the property-page
+    // chip hovers then own it until the pointer moves on.
     state.geo_hover = None;
     panes::shortcuts(ui, state);
     egui::Panel::top("ribbon")
         .frame(egui::Frame::NONE)
         .exact_size(RIBBON_H)
         .show(ui, |ui| {
-            panes::ribbon(ui, &mut *state, &theme::Palette::DARK);
+            panes::ribbon(ui, &mut *state, &theme::Palette::DARK, icons);
         });
     egui::Panel::bottom("status")
         .frame(egui::Frame::NONE)
@@ -494,6 +520,7 @@ pub(crate) fn shell_layout(
             .show_inside(ui, &mut ShellTabs {
                 state: &mut *state,
                 tex,
+                icons,
                 viewport_points,
                 left_press,
             });
@@ -572,6 +599,7 @@ impl Shell {
 struct ShellTabs<'a> {
     state: &'a mut State,
     tex: egui::TextureId,
+    icons: Option<&'a icons::IconSet>,
     viewport_points: &'a mut [f32; 2],
     left_press: &'a mut Option<[f32; 2]>,
 }
@@ -601,7 +629,7 @@ impl TabViewer for ShellTabs<'_> {
                 );
             }
             Tab::Browser => {
-                panes::browser(ui, self.state, &theme::Palette::DARK);
+                panes::browser(ui, self.state, &theme::Palette::DARK, self.icons);
             }
             Tab::Properties => {
                 pages::properties(ui, self.state, &theme::Palette::DARK);
@@ -611,13 +639,13 @@ impl TabViewer for ShellTabs<'_> {
 }
 
 /// The viewport tab: the 3D image, the pointer law, and the screen-space
-/// overlays. M-e moved the law to `crate::interact` so both shells share
-/// one: a short LMB press picks (Ctrl adds, the imgui gesture table), an LMB
-/// drag past the click-travel threshold orbits, MMB orbits, RMB pans, wheel
-/// dollies toward the cursor. egui's press/drag bookkeeping differs from
-/// winit's raw stream, so the gestures are read off `ui.input` directly,
-/// the same CLICK_TRAVEL_PX law applied by hand; the spike's simplified
-/// mapping is retired.
+/// overlays. M-e moved the law to `crate::interact`, where the retired
+/// imgui shell had it first: a short LMB press picks (Ctrl adds, the
+/// gesture table), an LMB drag past the click-travel threshold orbits, MMB
+/// orbits, RMB pans, wheel dollies toward the cursor. egui's press/drag
+/// bookkeeping differs from winit's raw stream, so the gestures are read
+/// off `ui.input` directly, the same CLICK_TRAVEL_PX law applied by hand;
+/// the spike's simplified mapping is retired.
 fn viewport_panel(
     ui: &mut egui::Ui,
     state: &mut State,
@@ -627,7 +655,9 @@ fn viewport_panel(
 ) {
     let avail = ui.available_size();
     if avail.x > 1.0 && avail.y > 1.0 {
-        state.viewport_size = [avail.x, avail.y];
+        // The 3D extent deferral (last frame's layout sizes next frame's
+        // target); `interact` hit-tests pointers against viewport_rect,
+        // set below - no separate size channel since M-g.
         *viewport_points = [avail.x.max(1.0), avail.y.max(1.0)];
     }
     let resp = ui.add(

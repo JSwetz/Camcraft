@@ -33,14 +33,24 @@
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
-    Align2, Color32, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, TextFormat, Ui, Vec2,
+    Align2, Color32, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, TextureHandle, TextFormat,
+    Ui, Vec2,
 };
 
+use super::icons::{Icon, IconSet, ICON_PX};
 use super::theme::Palette;
 
-/// One painted ribbon cell: fixed-size, text caption centered, tinted
-/// background by state, dimmed ink when disabled (the imgui rule: a
-/// disabled cell stays hoverable and greys, it never vanishes).
+/// The full-texel uv of an uploaded image.
+const UV_FULL: Rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
+
+/// One painted ribbon cell: fixed-size, the bundled glyph centered over a
+/// short caption, tinted background by state, dimmed ink when disabled
+/// (the imgui rule: a disabled cell stays hoverable and greys, it never
+/// vanishes). The label row sits at `icon + 2` below the cell top WHETHER
+/// OR NOT a texture is available - headless frames lay out exactly like
+/// GPU frames, the M1.4.2 icon law (ribbon.rs: "layout never depends on
+/// the GPU").
+#[allow(clippy::too_many_arguments)] // flat paint args, same shape as push_row
 pub fn cell(
     ui: &mut Ui,
     id: egui::Id,
@@ -49,6 +59,7 @@ pub fn cell(
     pal: &Palette,
     enabled: bool,
     toggled: bool,
+    icon: Option<&TextureHandle>,
 ) -> Response {
     let resp = ui.interact(rect, id, Sense::click());
     let bg = if !enabled {
@@ -66,10 +77,20 @@ pub fn cell(
     if let Some(bg) = bg {
         painter.add(Shape::rect_filled(rect, 2.0, bg));
     }
+    if let Some(tex) = icon {
+        // White line art already carries the ink; the enabled/disabled
+        // rule rides the tint (imgui's x1.0 / x0.45).
+        let r = Rect::from_min_size(
+            Pos2::new(rect.left() + (rect.width() - ICON_PX) * 0.5, rect.top()),
+            Vec2::splat(ICON_PX),
+        );
+        let tint = if enabled { Color32::WHITE } else { Color32::from_white_alpha(115) };
+        painter.image(tex.id(), r, UV_FULL, tint);
+    }
     let ink = if enabled { pal.text } else { pal.text_faint };
     painter.text(
-        rect.center(),
-        Align2::CENTER_CENTER,
+        Pos2::new(rect.center().x, rect.top() + ICON_PX + 2.0),
+        Align2::CENTER_TOP,
         label,
         FontId::proportional(11.5),
         ink,
@@ -105,6 +126,12 @@ pub struct Row {
     /// (tool sizes, op kind/status), mirrored from browser.rs.
     pub suffix: String,
     pub kind: Kind,
+    /// The bundled glyph for this row (browser.rs's `spec.icon`: Stock,
+    /// WorkOffset, Model, Tools, the op's operation icon, `Generate` as
+    /// the fallback the eye-list refuses). `None` only where imgui drew
+    /// no PNG - section headers - and for the placeholder rows; the
+    /// painted `glyph` is the no-GPU twin of every real icon.
+    pub icon: Option<Icon>,
     /// Selection band - the WORLD's selection mirrored, never a local flag.
     pub selected: bool,
     pub hidden: bool,
@@ -122,7 +149,13 @@ pub enum Kind {
     Op,
 }
 
+/// Row height: browser.rs's `(INK + 2).max(line + 4)` at the panel's font,
+/// 20 px - unchanged by the icon fold, so the tree's column model and the
+/// row-click hit-tests are pixel-stable.
 pub const ROW_H: f32 = 20.0;
+
+/// Tree icon edge (browser.rs: 32 px sources render at 16).
+const TREE_INK: f32 = 16.0;
 
 /// The eye column's reserved width at the row's right edge: the 18 px hit
 /// band plus margin (browser.rs's `eye_x = avail - INK - 6.0`).
@@ -143,7 +176,18 @@ pub struct TreeHit {
 /// Paint the rows and collect this frame's clicks. Input first (real
 /// `ui.interact` responses), then the ink - so hover state and painted
 /// background cannot disagree within a frame.
-pub fn tree(ui: &mut Ui, rect: Rect, rows: &[Row], pal: &Palette) -> TreeHit {
+///
+/// `icons` is the loaded glyph set (`None` headless). Where a row owns an
+/// icon and the texture is present, the PNG rides the row (dimmed to the
+/// imgui 0.55 when hidden); everywhere else the painted `glyph`/`eye_glyph`
+/// vector marks stand in, so a GPU-less frame lays out identically.
+pub fn tree(
+    ui: &mut Ui,
+    rect: Rect,
+    rows: &[Row],
+    pal: &Palette,
+    icons: Option<&IconSet>,
+) -> TreeHit {
     let mut hit = TreeHit { row: None, eye: None };
     let mut eye_resps: Vec<(usize, Response)> = Vec::new();
     for (ix, row) in rows.iter().enumerate() {
@@ -181,10 +225,43 @@ pub fn tree(ui: &mut Ui, rect: Rect, rows: &[Row], pal: &Palette) -> TreeHit {
             painter.add(Shape::rect_filled(rr.shrink(1.0), 2.0, pal.field_hover));
         }
         let gx = rr.left() + 10.0 + row.depth as f32 * 14.0;
+        // PNG first (browser.rs: the tree icon rides the row, dimmed to
+        // 0.55 when hidden), the painted glyph as the no-GPU twin.
+        let tex = icons.and_then(|s| row.icon.map(|i| s.texture(i))).flatten();
+        if let Some(tex) = tex {
+            let dim = if row.hidden { 140 } else { 255 };
+            painter.image(
+                tex.id(),
+                Rect::from_center_size(Pos2::new(gx, rr.center().y), Vec2::splat(TREE_INK)),
+                UV_FULL,
+                Color32::from_white_alpha(dim),
+            );
+        }
         let mut shapes = Vec::new();
-        glyph(&mut shapes, Pos2::new(gx, rr.center().y), row.kind, pal);
+        if tex.is_none() {
+            glyph(&mut shapes, Pos2::new(gx, rr.center().y), row.kind, pal);
+        }
         if let Some(er) = eye_rect {
-            eye_glyph(&mut shapes, er, row.hidden, pal);
+            let eye_tex = icons
+                .and_then(|s| {
+                    s.texture(if row.hidden {
+                        Icon::EyeOff
+                    } else {
+                        Icon::Toolpaths
+                    })
+                })
+                .map(|t| t.id());
+            match eye_tex {
+                Some(id) => {
+                    painter.image(
+                        id,
+                        er.shrink(2.0),
+                        UV_FULL,
+                        Color32::from_white_alpha(if row.hidden { 140 } else { 217 }),
+                    );
+                }
+                None => eye_glyph(&mut shapes, er, row.hidden, pal),
+            }
         }
         painter.add(Shape::Vec(shapes));
         // The column model: one galley, label + suffix, truncated into the

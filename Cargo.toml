@@ -19,21 +19,20 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# UI stack - imgui fork with docking; winit platform + wgpu renderer backends
-# No direct wgpu dep: hsmworks-ui uses dear_imgui_wgpu::wgpu so types match the
-# renderer exactly (wgpu is re-exported, version-selected by the wgpu-30 feature).
-dear-imgui-rs = "0.19"
-dear-imgui-winit = "0.19"
-dear-imgui-wgpu = "0.19"
+# Platform + dialog deps shared with the UI stack; imgui retired at M1.4.2
+# M-g (the dear-imgui-* trio left with it).
+# No direct wgpu dep: hsmworks-ui uses egui_wgpu::wgpu so types match the
+# renderer exactly (wgpu is re-exported, version-selected by the set below).
 winit = "0.30"
 rfd = "0.15"
 pollster = "0.4"
 
-# M1.4.1 spike (branch ui-egui-spike; decision in ROADMAP.md): egui stack,
-# MIT OR Apache-2.0 (egui_dock: MIT) - notices in assets/ui/LICENSES.md.
+# The shell (M1.4.2 graduation; was the M1.4.1 spike, decision in
+# ROADMAP.md): egui stack, MIT OR Apache-2.0 (egui_dock: MIT) - notices in
+# assets/ui/LICENSES.md.
 # Hard-pinned AS A SET: egui_dock 0.21.1 wants egui ^0.36 (not 0.37), and
 # 0.36.2 pins wgpu ^30.0 / winit ^0.30.13 - exactly our lock (30.0.1 /
-# 0.30.13), so the spike adds zero forced upgrades. Bump together or hold
+# 0.30.13), so no forced upgrades. Bump together or hold
 # (verified 2026-10-16 against crates.io). egui_kittest is dev-only and
 # joined at S3, on the same set.
 egui = "=0.36.2"
@@ -41,7 +40,7 @@ egui-winit = "=0.36.2"
 egui-wgpu = "=0.36.2"
 egui_dock = "=0.21.1"
 egui_kittest = { version = "=0.36.2", features = ["wgpu", "snapshot"] }
-# PNG decode for the UI icon set (assets/ui/*.png -> crates/ui/src/icons.rs).
+# PNG decode for the UI icon set (assets/ui/*.png -> egui_app/icons.rs).
 # Png only: everything else (formats, headers of other codecs) stays off.
 image = { version = "0.25", default-features = false, features = ["png"] }
 

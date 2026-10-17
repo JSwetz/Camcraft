@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
-use dear_imgui_rs::TextureId;
 use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation, DeleteTool,
@@ -443,7 +442,7 @@ pub fn quat_yaw_deg(q: [f64; 4]) -> f64 {
 }
 
 /// Which viewport drag is live; ephemeral UI state, deliberately not
-/// undoable (AGENTS.md). app.rs owns it from raw winit events.
+/// undoable (AGENTS.md). The shell's pointer layer owns it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DragMode {
     Orbit,
@@ -489,28 +488,20 @@ pub struct State {
     /// Bumped whenever selection changed; re-sends the vertex stream (the
     /// selection tint is baked per vertex) without re-uploading geometry.
     pub selection_version: u64,
-    /// 3D render target exposed to ImGui (None while headless / pre-GPU).
-    pub viewport_tex: Option<TextureId>,
-    /// Logical-pixel size the Viewport panel reported last frame; drives
-    /// offscreen target sizing (shell writes it, app reads it).
-    pub viewport_size: [f32; 2],
     /// Viewport image rect in logical screen coords; the shell publishes it
-    /// each frame, app.rs hit-tests raw pointer events against it.
+    /// each frame, `interact` hit-tests pointer events against it.
     pub viewport_rect: ([f32; 2], [f32; 2]),
-    /// Live viewport drag (orbit/pan), driven by app.rs from winit events.
+    /// Live viewport drag (orbit/pan), driven by the shell's pointer layer.
     pub drag: Option<DragMode>,
-    /// Facet currently under the cursor (app.rs refreshes it from raw
-    /// `CursorMoved` events with a filtered raycast; it clears when the
+    /// Facet currently under the cursor (`interact` refreshes it from the
+    /// shell's pointer events with a filtered raycast; it clears when the
     /// pointer leaves the viewport). View state like the camera and the
     /// drag - not undoable, not saved.
     pub hover: Option<HoverHit>,
-    /// True when the Viewport window was the topmost hovered window last
-    /// frame (the shell writes it, app.rs gates raw pointer drags on it -
-    /// a click on a menu or popup over the image must never orbit).
+    /// True when the viewport panel was under the pointer last frame (the
+    /// shell writes it, and gates pointer drags on it - a click on a menu
+    /// or popup over the image must never orbit).
     pub viewport_hot: bool,
-    /// Loaded UI glyph textures; `None` headless and pre-GPU, so every
-    /// consumer falls back to text (see [`crate::icons`]).
-    pub icons: Option<crate::icons::Icons>,
     pub cam: Camera,
     /// Models hidden in the viewport (eye toggle in the browser). View
     /// state like the camera - not undoable, not saved; a hidden model
@@ -649,15 +640,12 @@ impl State {
             status: String::from("ready"),
             doc_version: 0,
             selection_version: 0,
-            viewport_tex: None,
-            viewport_size: [960.0, 540.0],
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
             drag: None,
             hover: None,
             viewport_hot: false,
             geo_pick: GeoPick::Model,
             geo_hover: None,
-            icons: None,
             hidden_models: Vec::new(),
             hidden_paths: Vec::new(),
             cam: Camera::default(),
@@ -1151,13 +1139,6 @@ impl State {
             .into_iter()
             .filter(|(_, e)| model::is_operation(&self.world, e))
             .count()
-    }
-
-    /// Texture for a glyph slot (`None` headless or after a failed decode;
-    /// every consumer must degrade to text, never to nothing).
-    #[must_use]
-    pub(crate) fn icon(&self, which: crate::icons::Icon) -> Option<TextureId> {
-        self.icons.as_ref().and_then(|i| i.texture(which))
     }
 
     /// Flip one name's visibility in a browser eye list.

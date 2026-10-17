@@ -1,9 +1,8 @@
-//! The viewport interaction law (M1.4.2 M-e), moved verbatim out of
-//! `app.rs` so BOTH shells drive one copy: imgui's raw-winit pipeline and
-//! the egui shell's pointer events both end in these free functions, and
-//! the screen-space producers (`overlay_labels`, `hover_features`,
-//! `edge_nearest`, `anchor_*`) feed each shell's viewport panel. app.rs is
-//! retired at M-g; the law it carried is what lives here - not a mirror.
+//! The viewport interaction law (M1.4.2 M-e), moved verbatim out of the
+//! then-live `app.rs` so BOTH shells of the migration drove one copy -
+//! imgui's raw-winit pipeline and the egui shell's pointer events both
+//! ended in these free functions. The imgui half retired at M-g; the law
+//! it carried is what lives here - not a mirror.
 //!
 //! The law, in one breath: a press starts a gesture only while the
 //! viewport is the topmost hovered window and the cursor is inside the

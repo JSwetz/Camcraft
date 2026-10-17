@@ -9,7 +9,7 @@
 
 use std::collections::HashSet;
 
-use dear_imgui_wgpu::wgpu;
+use egui_wgpu::wgpu;
 use hsmworks_app::stock::{StockShape, stock_mesh};
 use hsmworks_ui::viewport::{Camera, GpuPart, View3D};
 

@@ -1,5 +1,9 @@
-//! One entry point per command: what every surface (menu, ribbon, tree,
+//! One entry point per command: what every surface (ribbon, tree,
 //! shortcuts) fires, so no surface forks command-queue logic of its own.
+//! The menu surface retired with the imgui shell at M-g; two menu-only
+//! helpers (`new_operation`, `delete_operation`) left with it - the
+//! ribbon's Create/Delete cells already cover both effects through this
+//! same module.
 //!
 //! Provenance: our own module, the standard "actions layer" pattern of CAM
 //! shells. The rule it exists to enforce: a surface never pushes a
@@ -30,6 +34,9 @@ pub(crate) fn save_project(state: &mut State) {
     state.pending.push_back(CommandKind::SaveProjectDialog);
 }
 
+/// Close the app through the same queue as everything else (the window
+/// button and, since M-g, Ctrl+Q both land here; the imgui File menu that
+/// used to was retired with that shell).
 pub(crate) fn quit(state: &mut State) {
     state.pending.push_back(CommandKind::Quit);
 }
@@ -58,15 +65,6 @@ pub(crate) fn frame_all(state: &mut State) {
 /// viewport picks) push a `Select` alongside; a bare retarget never does.
 pub(crate) fn target(state: &mut State, t: UiTarget) {
     state.ui_target = t;
-}
-
-/// Show the new-operation form: nothing targeted, and the selection
-/// cleared so the panes' fallback can't resolve straight back onto some
-/// other operation. The `Select(None)` is the command; the blanked target
-/// is view state.
-pub(crate) fn new_operation(state: &mut State) {
-    state.ui_target = UiTarget::None;
-    state.pending.push_back(CommandKind::Select(None));
 }
 
 /// Quick-add an operation of `kind` (index into the `OpType` order the
@@ -105,11 +103,5 @@ pub(crate) fn add_operation(state: &mut State, kind: usize) {
 pub(crate) fn generate_selected(state: &mut State) {
     if let Some(name) = state.selected_operation() {
         state.generate_operation(&name);
-    }
-}
-
-pub(crate) fn delete_operation(state: &mut State) {
-    if let Some(name) = state.selected_operation() {
-        state.pending.push_back(CommandKind::DeleteOperation(name));
     }
 }

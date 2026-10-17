@@ -1,43 +1,42 @@
-//! HSMWorks clean-room UI shell: winit + Dear ImGui (docking) + wgpu viewport.
+//! HSMWorks clean-room UI shell: winit + egui (docked panels) + wgpu viewport.
 //!
 //! Layering (AGENTS.md): ui -> app -> flecs. This crate renders and routes
 //! input; every persistent world change goes through `hsmworks_app::commands`.
+//! The imgui stack that lived here until M1.4.2 M-g is retired: `egui_app`
+//! is the shell, `interact` and `state` the shared law underneath it.
 
 pub mod actions;
-pub mod app;
-pub mod browser;
 pub mod egui_app;
-pub mod form;
-pub mod headless;
 pub mod interact;
-pub mod icons;
 pub mod operations;
-pub mod ribbon;
-pub mod setup;
-pub mod shell;
 pub mod state;
 pub mod viewport;
 
-/// Entry point used by `main.rs`; returns the process exit code.
-/// `--ui egui` selects the migrating egui shell (M1.4.2); without it the
-/// imgui app is the default until M-g retires it.
+#[cfg(test)]
+mod law_tests;
+
+/// Entry point used by `main.rs`; returns the process exit code. The egui
+/// shell is the shell: `--headless` runs its no-window proof, anything else
+/// opens the window. `--ui egui` still selects it (the M1.4.2 migration
+/// flag); `--ui <anything else>` refuses by name - the imgui stack retired
+/// at M-g and there is nothing left to select.
 /// Provenance: our own shell, specced from public CAM workflow conventions.
 pub fn run(args: &[String]) -> i32 {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == "--ui" && it.next().is_some_and(|v| *v == "egui") {
-            return egui_app::run(args);
-        }
-    }
-    if args.iter().any(|a| a == "--headless") {
-        match headless::run_frames(10) {
-            Ok(()) => 0,
-            Err(msg) => {
-                eprintln!("headless run failed: {msg}");
-                1
+        if a == "--ui" {
+            match it.next().map(String::as_str) {
+                None => {
+                    eprintln!("--ui needs a value: egui is the only shell (imgui retired at M1.4.2 M-g)");
+                    return 2;
+                }
+                Some("egui") => {}
+                Some(other) => {
+                    eprintln!("unknown --ui {other}: the imgui stack retired at M1.4.2 M-g; egui is the only shell");
+                    return 2;
+                }
             }
         }
-    } else {
-        app::run()
     }
+    egui_app::run(args)
 }

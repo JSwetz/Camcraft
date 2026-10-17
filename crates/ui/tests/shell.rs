@@ -1,12 +1,8 @@
-//! UI shell smoke tests: real ImGui frames, no GPU, no window.
+//! State/contract smoke tests through the queue: no GPU, no window.
 //! Provenance: our own harness; behavior specced from the shell itself.
-
-#[test]
-fn headless_frames_run() {
-    hsmworks_ui::headless::run_frames(8)
-        .map_err(|err| panic!("headless run failed: {err}"))
-        .ok();
-}
+//! The imgui-era `headless::run_frames` probe retired at M-g - the egui
+//! headless proof is `headless_cli_exit_code_is_zero` below, which runs the
+//! real app through `run()`, and tests/egui_app.rs covers the same entry.
 
 #[test]
 fn headless_cli_exit_code_is_zero() {

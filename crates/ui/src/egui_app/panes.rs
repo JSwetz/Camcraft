@@ -1,10 +1,12 @@
 //! The egui shell's pane layer, graduated from the spike's panels.rs -
-//! every pane a faithful re-implementation of its imgui original
-//! (`crates/ui/src/{ribbon,browser}.rs`): same strings, same command
-//! shapes, same enabled rules. The strips are painted (super::painted)
-//! because that is the law the spike proved; the property pages moved to
-//! `pages` with M-c, leaving this module the keyboard layer and the two
-//! painted panes.
+//! every pane a faithful re-implementation of its imgui original (the
+//! retired ribbon.rs/browser.rs): same strings, same command shapes, same
+//! enabled rules. The strips are painted (super::painted) because that is
+//! the law the spike proved; the property pages moved to `pages` with M-c,
+//! leaving this module the keyboard layer and the two painted panes. Since
+//! M-g the bundled Tabler glyphs ride both strips as egui textures
+//! (super::icons), with the painted vector marks as their no-GPU twins -
+//! the retired imgui icons module folded into this stack, not replaced.
 //!
 //! Layering holds (AGENTS.md): world access is `hsmworks_app`'s public API
 //! only, and every change goes through `state.pending` / the command
@@ -21,13 +23,14 @@
 use egui::{Key, Label, Rect, RichText, Sense, Ui, Vec2};
 
 use hsmworks_app::model;
-use hsmworks_app::operation::{self, OpParams};
+use hsmworks_app::operation::{self, OpParams, OpType};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::tools::ToolKind;
 
 use crate::actions;
 use crate::state::{CommandKind, State, UiTarget};
 
+use super::icons::{Icon, IconSet};
 use super::painted;
 use super::theme::Palette;
 
@@ -44,12 +47,13 @@ pub(crate) const TYPES: [&str; 5] = ["Face", "2D Contour", "2D Pocket", "Slot", 
 /// `crate::actions`, the same entry the ribbon uses.
 pub fn shortcuts(ui: &mut Ui, state: &mut State) {
     let typing = ui.memory(|m| m.focused().is_some());
-    let (modifiers, n, o, s, z, y, del, f) = ui.input(|i| {
+    let (modifiers, n, o, s, q, z, y, del, f) = ui.input(|i| {
         (
             i.modifiers,
             i.key_pressed(Key::N),
             i.key_pressed(Key::O),
             i.key_pressed(Key::S),
+            i.key_pressed(Key::Q),
             i.key_pressed(Key::Z),
             i.key_pressed(Key::Y),
             i.key_pressed(Key::Delete),
@@ -79,6 +83,14 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
         }
         if s {
             actions::save_project(state);
+        }
+        if q {
+            // The window close button (CloseRequested) always quit; since
+            // M-g it has a keyboard sibling. imgui's only quit surface was
+            // its File menu, which retired with the imgui shell - Ctrl+Q
+            // keeps that capability on the shared law (Quit -> request_quit
+            // -> exit_requested -> el.exit()).
+            actions::quit(state);
         }
     }
     if del && !typing {
@@ -121,7 +133,11 @@ const GROUPS: [(&str, &[Cmd]); 5] = [
 ];
 
 const CELL_W: f32 = 56.0;
-const CELL_H: f32 = 24.0;
+/// Icon over caption, ribbon.rs's cell: ICON_PX + 2 + one line, so the
+/// PNG and the painted fallback occupy the same box. The egui font's
+/// 11.5 px label needs 35; the fold's one geometry change (RIBBON_H in
+/// shell.rs follows it).
+const CELL_H: f32 = 35.0;
 const GAP: f32 = 4.0;
 const PAD_H: f32 = 8.0;
 
@@ -208,6 +224,47 @@ fn toggled(c: Cmd, state: &State) -> bool {
     }
 }
 
+/// Command to bundled glyph: the same table the retired imgui icons.rs
+/// store keyed (and ribbon.rs's `Item.icon` chose per cell), so the ribbon,
+/// the browser's `spec.icon` slots and the store name one set of pixels.
+fn icon_of(c: Cmd) -> Icon {
+    match c {
+        Cmd::New => Icon::New,
+        Cmd::Model => Icon::OpenModel,
+        Cmd::Project => Icon::OpenProject,
+        Cmd::Save => Icon::Save,
+        Cmd::Stock => Icon::Stock,
+        Cmd::Origin => Icon::WorkOffset,
+        Cmd::Tools => Icon::Tools,
+        Cmd::Create(i) => match i {
+            0 => Icon::Face,
+            1 => Icon::Contour,
+            2 => Icon::Pocket,
+            3 => Icon::Slot,
+            _ => Icon::Trace,
+        },
+        Cmd::Undo => Icon::Undo,
+        Cmd::Redo => Icon::Redo,
+        Cmd::Run => Icon::Generate,
+        Cmd::Delete => Icon::Delete,
+        Cmd::Frame => Icon::FrameAll,
+        Cmd::Paths => Icon::Toolpaths,
+    }
+}
+
+/// The op row's glyph (browser.rs's `op_icon`); `Generate` stands in where
+/// the operation component is gone but the entity still names itself -
+/// the fallback imgui's eyes list refuses to leave blank.
+fn op_icon(kind: OpType) -> Icon {
+    match kind {
+        OpType::Face => Icon::Face,
+        OpType::Contour => Icon::Contour,
+        OpType::Pocket => Icon::Pocket,
+        OpType::Slot => Icon::Slot,
+        OpType::Trace => Icon::Trace,
+    }
+}
+
 /// The ribbon's one command path: every cell fires the shared actions
 /// layer (`crate::actions`), so the effect lives there exactly once and
 /// menu, tree and shortcut cannot fork a variant of it (actions.rs's
@@ -253,7 +310,8 @@ pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>,
     let mut cells = Vec::new();
     let mut captions = Vec::new();
     let mut dividers = Vec::new();
-    let cell_top = strip.top() + 3.0;
+    // PAD_V (ribbon.rs): cells start 4 below the strip top.
+    let cell_top = strip.top() + 4.0;
     let mut x = strip.left() + PAD_H;
     let mut salt = 0usize;
     for (gi, (title, group)) in GROUPS.iter().enumerate() {
@@ -280,7 +338,14 @@ pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>,
 /// The ribbon strip: painted cells over a fixed-height top panel. Group
 /// captions and hairline dividers match imgui's layout math, the cells
 /// themselves are painted::cell - all from `ribbon_cells`'s geometry.
-pub fn ribbon(ui: &mut Ui, state: &mut State, pal: &Palette) {
+/// Since M-g each cell carries its bundled glyph (the retired imgui
+/// ribbon's Item.icon table), or the painted fallback headless.
+pub fn ribbon(
+    ui: &mut Ui,
+    state: &mut State,
+    pal: &Palette,
+    icons: Option<&IconSet>,
+) {
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
     let base = ui.id().with("ribbon");
@@ -295,6 +360,7 @@ pub fn ribbon(ui: &mut Ui, state: &mut State, pal: &Palette) {
             pal,
             enabled(c, state),
             toggled(c, state),
+            icons.and_then(|s| s.texture(icon_of(c))),
         );
         let fired = resp.clicked() && enabled(c, state);
         resp.on_hover_text(tip_of(c, state));
@@ -303,7 +369,7 @@ pub fn ribbon(ui: &mut Ui, state: &mut State, pal: &Palette) {
         }
     }
     for (mid, title) in captions {
-        painted::caption(ui.painter(), mid, rect.top() + 31.0, title, pal);
+        painted::caption(ui.painter(), mid, rect.top() + 44.0, title, pal);
     }
     for dx in dividers {
         painted::divider(ui.painter(), dx, rect, pal);
@@ -325,7 +391,7 @@ pub fn status(ui: &mut Ui, state: &State, pal: &Palette) {
         ui.add(Label::new(RichText::new(text).weak()).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                RichText::new("egui shell (M-f) - imgui stays default until M-g")
+                RichText::new("egui shell (M-g) - imgui retired")
                     .color(pal.text_faint)
                     .small(),
             );
@@ -347,7 +413,9 @@ enum Leaf {
     Op(String),
 }
 
-/// Append one tree row and its parallel leaf.
+/// Append one tree row and its parallel leaf. `icon` is browser.rs's
+/// `spec.icon`: the bundled glyph for the row's subject, `None` only for
+/// section headers and placeholders (where imgui drew no PNG either).
 #[allow(clippy::too_many_arguments)]
 fn push_row(
     rows: &mut Vec<painted::Row>,
@@ -355,12 +423,13 @@ fn push_row(
     label: String,
     suffix: String,
     kind: painted::Kind,
+    icon: Option<Icon>,
     selected: bool,
     hidden: bool,
     depth: usize,
     leaf: Leaf,
 ) {
-    rows.push(painted::Row { label, suffix, kind, selected, hidden, depth });
+    rows.push(painted::Row { label, suffix, kind, icon, selected, hidden, depth });
     leaves.push(leaf);
 }
 
@@ -383,13 +452,14 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     let mut leaves = Vec::new();
     let t = state.pane_target();
 
-    push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Section, false, false, 0, Leaf::Section);
+    push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
     push_row(
         &mut rows,
         &mut leaves,
         STOCK_NAME.to_owned(),
         String::new(),
         painted::Kind::Stock,
+        Some(Icon::Stock),
         matches!(t, UiTarget::Stock),
         false,
         1,
@@ -403,6 +473,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             (*slot).to_owned(),
             if placed { String::new() } else { "not placed".into() },
             painted::Kind::Wcs,
+            Some(Icon::WorkOffset),
             matches!(t, UiTarget::WcsSlot(j) if j == i),
             false,
             1,
@@ -410,10 +481,10 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
         );
     }
 
-    push_row(&mut rows, &mut leaves, "Models".into(), String::new(), painted::Kind::Section, false, false, 0, Leaf::Section);
+    push_row(&mut rows, &mut leaves, "Models".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
     let entities = model::model_entities(&state.world);
     if entities.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no models yet)".into(), String::new(), painted::Kind::Section, false, true, 1, Leaf::Section);
+        push_row(&mut rows, &mut leaves, "(no models yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
     }
     for (name, entity) in entities {
         let selected = model::is_selected(&state.world, &entity);
@@ -424,6 +495,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             name.clone(),
             if hidden { " (hidden)".into() } else { String::new() },
             painted::Kind::Model,
+            Some(Icon::Model),
             matches!(&t, UiTarget::Model(n) if *n == name) || selected,
             hidden,
             1,
@@ -431,14 +503,14 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
         );
     }
 
-    push_row(&mut rows, &mut leaves, "Tools".into(), String::new(), painted::Kind::Section, false, false, 0, Leaf::Section);
+    push_row(&mut rows, &mut leaves, "Tools".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
     let tools: Vec<(String, hsmworks_app::tools::Tool)> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_tool(&state.world, e))
         .filter_map(|(name, e)| model::tool_of(&state.world, &e).map(|t| (name, t)))
         .collect();
     if tools.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no tools yet)".into(), String::new(), painted::Kind::Section, false, true, 1, Leaf::Section);
+        push_row(&mut rows, &mut leaves, "(no tools yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
     }
     for (name, tool) in tools {
         push_row(
@@ -447,6 +519,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             name.clone(),
             format!("Ø{} {}", tool.diameter, kind_name(tool.kind)),
             painted::Kind::Tool,
+            Some(Icon::Tools),
             matches!(&t, UiTarget::Tool(n) if *n == name),
             false,
             1,
@@ -454,22 +527,27 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
         );
     }
 
-    push_row(&mut rows, &mut leaves, "Operations".into(), String::new(), painted::Kind::Section, false, false, 0, Leaf::Section);
+    push_row(&mut rows, &mut leaves, "Operations".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
     let names: Vec<String> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_operation(&state.world, e))
         .map(|(name, _)| name)
         .collect();
     if names.is_empty() {
-        push_row(&mut rows, &mut leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, false, true, 1, Leaf::Section);
+        push_row(&mut rows, &mut leaves, "(no operations yet)".into(), String::new(), painted::Kind::Section, None, false, true, 1, Leaf::Section);
     }
     for name in names {
         let Some(entity) = model::find_by_name(&state.world, &name) else {
             continue;
         };
-        let kind = model::operation_of(&state.world, &entity)
-            .map(|op| op.params.kind().to_string())
-            .unwrap_or_default();
+        // imgui browser.rs's law: the op's own kind glyphs the row, and a
+        // missing operation component falls back to Generate, never blank.
+        let (kind, icon) = model::operation_of(&state.world, &entity)
+            .map(|op| {
+                let k = op.params.kind();
+                (k.to_string(), op_icon(k))
+            })
+            .unwrap_or_else(|| (String::new(), Icon::Generate));
         let tag = match operation::status_of(&state.world, &entity) {
             operation::OpStatus::Never => "never",
             operation::OpStatus::Ok => "ok",
@@ -488,6 +566,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             name.clone(),
             format!("{kind}  {tag}{warn_text}"),
             painted::Kind::Op,
+            Some(icon),
             matches!(&t, UiTarget::Operation(n) if *n == name),
             hidden,
             1,
@@ -499,7 +578,12 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
 
 /// The browser pane: the two global view toggles, then the painted tree
 /// with per-row click/eye dispatch identical to browser.rs.
-pub fn browser(ui: &mut Ui, state: &mut State, pal: &Palette) {
+pub fn browser(
+    ui: &mut Ui,
+    state: &mut State,
+    pal: &Palette,
+    icons: Option<&IconSet>,
+) {
     ui.checkbox(&mut state.show_world_axes, "Show world origin axes");
     ui.checkbox(&mut state.show_all_paths, "Show all toolpaths");
     ui.separator();
@@ -508,7 +592,7 @@ pub fn browser(ui: &mut Ui, state: &mut State, pal: &Palette) {
         ui.cursor().min,
         Vec2::new(ui.available_width(), rows.len() as f32 * painted::ROW_H),
     );
-    let hit = painted::tree(ui, rect, &rows, pal);
+    let hit = painted::tree(ui, rect, &rows, pal, icons);
     if let Some(ix) = hit.eye {
         match leaves[ix].clone() {
             Leaf::Model(n) => State::toggle_visibility(&mut state.hidden_models, &n),

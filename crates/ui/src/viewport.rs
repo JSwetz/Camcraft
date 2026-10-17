@@ -1,5 +1,7 @@
 //! 3D viewport: indexed triangles with a z-buffer, rendered offscreen and
-//! handed to ImGui as an external texture so the view docks like any panel.
+//! handed to the shell as a texture so the view docks like any panel (the
+//! imgui external-texture bridge retired at M1.4.2 M-g; the wgpu types
+//! come through `egui_wgpu` now - the same unified wgpu underneath).
 //! Provenance: standard orbit camera + z-buffered indexed rendering from
 //! public graphics literature.
 //!
@@ -9,7 +11,7 @@
 //! upload per frame and one draw call.
 
 
-use dear_imgui_wgpu::wgpu;
+use egui_wgpu::wgpu;
 
 /// vec3 position + f32 selection flag.
 const VERTEX_STRIDE: u64 = 16;
@@ -540,7 +542,7 @@ impl View3D {
         }
     }
 
-    /// The ImGui-facing color target; re-register/update after resize.
+    /// The shell-facing color target; re-register/update after resize.
     #[must_use]
     pub fn color_view(&self) -> &wgpu::TextureView {
         &self.color_view
