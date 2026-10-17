@@ -4,12 +4,11 @@
 //! shipping code; the spike's bin-local tests retire with the bin.)
 //!
 //! Ported from the spike's tests: `egui_frames_run` (8 frames, seeded
-//! document survives the round trip). The spike's click-through tests
-//! (`click_toggles_view_state`, `click_apply_edits_operation_through_commands`)
-//! drive REAL pane widgets, so they graduate with their panes - M-b (browser
-//! toggles) and M-c (the Contour page) port them back. `history_key_queues_
-//! command` proves the keyboard layer that M-a does ship. The snapshot is the
-//! churn gate for the per-panel migration steps that follow.
+//! document survives the round trip) and, with M-b's browser pane,
+//! `click_toggles_view_state` (a real pointer event on a real checkbox).
+//! `click_apply_edits_operation_through_commands` still waits for M-c's
+//! Contour page. `history_key_queues_command` proves the keyboard layer.
+//! The snapshot is the churn gate for the per-panel migration steps.
 //!
 //! The harness runs the managed-texture path: the viewport leaf shows a flat
 //! placeholder instead of View3D's offscreen render, because the GPU
@@ -23,6 +22,7 @@
 
 use egui::{ColorImage, Event, Key, Modifiers, TextureOptions, Vec2};
 use egui_dock::DockState;
+use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 
 use hsmworks_app::model;
@@ -151,6 +151,18 @@ fn history_key_queues_command() {
             .any(|c| matches!(c, CommandKind::Undo)),
         "the queued command outlived the drain - queue and shell disagree"
     );
+}
+
+/// Port of the spike's `click_toggles_view_state` (M-b's browser pane):
+/// the global view toggles are immediate UI state (AGENTS.md: not
+/// undoable), reached here through a real pointer event, not a poke.
+#[test]
+fn click_toggles_view_state() {
+    let mut harness = shell_harness();
+    assert!(!harness.state().state.show_all_paths);
+    harness.get_by_label("Show all toolpaths").click();
+    harness.run();
+    assert!(harness.state().state.show_all_paths);
 }
 
 /// The exit contract, lib side (the integration tests/egui_app.rs covers the

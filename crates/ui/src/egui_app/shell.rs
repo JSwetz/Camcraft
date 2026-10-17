@@ -467,13 +467,13 @@ pub(crate) fn shell_layout(
         .frame(egui::Frame::NONE)
         .exact_size(RIBBON_H)
         .show(ui, |ui| {
-            panes::ribbon(ui);
+            panes::ribbon(ui, &mut *state, &theme::Palette::DARK);
         });
     egui::Panel::bottom("status")
         .frame(egui::Frame::NONE)
         .exact_size(STATUS_H)
         .show(ui, |ui| {
-            panes::status(ui, &*state);
+            panes::status(ui, &*state, &theme::Palette::DARK);
         });
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
@@ -603,10 +603,10 @@ impl TabViewer for ShellTabs<'_> {
                 }
             }
             Tab::Browser => {
-                panes::browser(ui);
+                panes::browser(ui, self.state, &theme::Palette::DARK);
             }
             Tab::Properties => {
-                panes::properties(ui);
+                panes::properties(ui, self.state, &theme::Palette::DARK);
             }
         }
     }

@@ -1,0 +1,299 @@
+//! The draw-list port, graduated from the spike: ribbon cells and browser
+//! rows as Shape/Painter custom paint, not stock widgets.
+//!
+//! In the imgui shell these strips are one `get_window_draw_list()` call
+//! per mark (ribbon.rs's `cell`, browser.rs's row loop): background rects,
+//! glyphs and captions added as ink over invisible buttons. egui's answer
+//! is the same division of labor - `Painter` + `Shape` for the ink,
+//! `ui.interact` for the input - and this module is that port: what is
+//! painted could not be done with a widget table, while every click is
+//! still a real egui response with real hover/active state.
+//!
+//! M-b graduation: the tree rows move to browser.rs's COLUMN MODEL
+//! (go/no-go report, divergence 1 - the spike's Contour1 row let the
+//! warning suffix slide under the trailing eye). Each row is now laid out
+//! right-to-left: the eye column is reserved (rows that own an eye get a
+//! 24 px band at the right edge, browser.rs's `avail - INK - 6.0` rule in
+//! points), and label + suffix form ONE galley truncated into the
+//! remaining column - egui's own `TextWrapping::truncate_at_width`, so an
+//! over-long name elides with "…" instead of colliding. The spike's extra
+//! right-anchored marks (the green path dot and a second STALE text) are
+//! gone: imgui's law is that the suffix column carries the whole status
+//! ("Contour  ok  2 warnings"), and two channels overlapped at narrow
+//! widths.
+//!
+//! The shapes are original marks (rectangle outlines, triangles, a
+//! two-stroke eye), drawn from the geometry of what they name - not
+//! adapted from any icon set, per AGENTS.md. Colors are the shared
+//! `Palette` tokens, so the painted strips and the widget panes cannot
+//! drift apart on a retheme.
+//!
+//! Provenance: our own port, specced from imgui browser.rs/ribbon.rs
+//! (our code) and the egui vendored sources.
+
+use egui::text::{LayoutJob, TextWrapping};
+use egui::{
+    Align2, Color32, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, TextFormat, Ui, Vec2,
+};
+
+use super::theme::Palette;
+
+/// One painted ribbon cell: fixed-size, text caption centered, tinted
+/// background by state, dimmed ink when disabled (the imgui rule: a
+/// disabled cell stays hoverable and greys, it never vanishes).
+pub fn cell(
+    ui: &mut Ui,
+    id: egui::Id,
+    rect: Rect,
+    label: &str,
+    pal: &Palette,
+    enabled: bool,
+    toggled: bool,
+) -> Response {
+    let resp = ui.interact(rect, id, Sense::click());
+    let bg = if !enabled {
+        None
+    } else if resp.clicked() || resp.is_pointer_button_down_on() {
+        Some(pal.accent)
+    } else if toggled {
+        Some(pal.selection_bg)
+    } else if resp.hovered() {
+        Some(pal.field_hover)
+    } else {
+        None
+    };
+    let painter = ui.painter();
+    if let Some(bg) = bg {
+        painter.add(Shape::rect_filled(rect, 2.0, bg));
+    }
+    let ink = if enabled { pal.text } else { pal.text_faint };
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(11.5),
+        ink,
+    );
+    resp
+}
+
+/// A group divider: one vertical hairline, ink only.
+pub fn divider(painter: &egui::Painter, x: f32, rect: Rect, pal: &Palette) {
+    painter.line_segment(
+        [Pos2::new(x, rect.top() + 4.0), Pos2::new(x, rect.bottom() - 4.0)],
+        Stroke::new(1.0, pal.border),
+    );
+}
+
+/// A group caption: small dim text centered under its cells' row.
+pub fn caption(painter: &egui::Painter, center_x: f32, y: f32, title: &str, pal: &Palette) {
+    painter.text(
+        Pos2::new(center_x, y),
+        Align2::CENTER_TOP,
+        title,
+        FontId::proportional(10.0),
+        pal.text_dim,
+    );
+}
+
+/// One browser row: what it says, what it is, how it must read. The
+/// suffix is the row's whole status column (browser.rs's law) - kind,
+/// cache tag, warnings - so there is exactly one text channel to lay out.
+pub struct Row {
+    pub label: String,
+    /// Faint tail text after the label - the browser's suffix column
+    /// (tool sizes, op kind/status), mirrored from browser.rs.
+    pub suffix: String,
+    pub kind: Kind,
+    /// Selection band - the WORLD's selection mirrored, never a local flag.
+    pub selected: bool,
+    pub hidden: bool,
+    /// Indent level (sections 0, children 1).
+    pub depth: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Section,
+    Model,
+    Stock,
+    Wcs,
+    Tool,
+    Op,
+}
+
+pub const ROW_H: f32 = 20.0;
+
+/// The eye column's reserved width at the row's right edge: the 18 px hit
+/// band plus margin (browser.rs's `eye_x = avail - INK - 6.0`).
+const EYE_RESERVE: f32 = 24.0;
+
+/// Rows whose visibility the user can toggle get the eye (browser.rs's
+/// `eye: true` rows; sections, stock, WCS and tools never do).
+fn has_eye(kind: Kind) -> bool {
+    matches!(kind, Kind::Model | Kind::Op)
+}
+
+/// Hit result for one frame of the tree.
+pub struct TreeHit {
+    pub row: Option<usize>,
+    pub eye: Option<usize>,
+}
+
+/// Paint the rows and collect this frame's clicks. Input first (real
+/// `ui.interact` responses), then the ink - so hover state and painted
+/// background cannot disagree within a frame.
+pub fn tree(ui: &mut Ui, rect: Rect, rows: &[Row], pal: &Palette) -> TreeHit {
+    let mut hit = TreeHit { row: None, eye: None };
+    let mut eye_resps: Vec<(usize, Response)> = Vec::new();
+    for (ix, row) in rows.iter().enumerate() {
+        let top = rect.top() + ix as f32 * ROW_H;
+        if top >= rect.bottom() {
+            break; // scrolled past the pane: no row, no input, no ink
+        }
+        let rr = Rect::from_min_size(
+            Pos2::new(rect.left(), top),
+            Vec2::new(rect.width(), ROW_H),
+        );
+        // Row first, eye after: egui's last-wins interaction order plus the
+        // clicked() guard below means an eye pixel is one action, never
+        // row+eye (browser.rs reaches the same law by submitting the eye's
+        // invisible button before the Selectable).
+        let row_resp = ui.interact(rr, ui.id().with(("tree-row", ix)), Sense::click());
+        let eye_rect = if has_eye(row.kind) {
+            let er = Rect::from_center_size(
+                Pos2::new(rr.right() - 12.0, rr.center().y),
+                Vec2::new(18.0, 16.0),
+            );
+            let r = ui.interact(er, ui.id().with(("tree-eye", ix)), Sense::click());
+            if r.clicked() {
+                hit.eye = Some(ix);
+            }
+            eye_resps.push((ix, r));
+            Some(er)
+        } else {
+            None
+        };
+        let painter = ui.painter();
+        if row.selected {
+            painter.add(Shape::rect_filled(rr.shrink(1.0), 2.0, pal.selection_bg));
+        } else if row_resp.hovered() {
+            painter.add(Shape::rect_filled(rr.shrink(1.0), 2.0, pal.field_hover));
+        }
+        let gx = rr.left() + 10.0 + row.depth as f32 * 14.0;
+        let mut shapes = Vec::new();
+        glyph(&mut shapes, Pos2::new(gx, rr.center().y), row.kind, pal);
+        if let Some(er) = eye_rect {
+            eye_glyph(&mut shapes, er, row.hidden, pal);
+        }
+        painter.add(Shape::Vec(shapes));
+        // The column model: one galley, label + suffix, truncated into the
+        // text column - everything right of it belongs to the eye, never
+        // to overflowing ink (divergence 1's fix).
+        let ink = if row.hidden { pal.text_faint } else { pal.text };
+        let suffix_ink = if row.hidden { pal.text_faint } else { pal.text_dim };
+        let reserve = if has_eye(row.kind) { EYE_RESERVE } else { 6.0 };
+        let max_w = (rr.right() - reserve - (gx + 12.0)).max(0.0);
+        let mut job = LayoutJob {
+            wrap: TextWrapping::truncate_at_width(max_w),
+            ..LayoutJob::default()
+        };
+        job.append(&row.label, 0.0, TextFormat::simple(FontId::proportional(12.5), ink));
+        if !row.suffix.is_empty() {
+            job.append(
+                &row.suffix,
+                6.0,
+                TextFormat::simple(FontId::proportional(10.5), suffix_ink),
+            );
+        }
+        let galley = painter.layout_job(job);
+        painter.galley(
+            Pos2::new(gx + 12.0, rr.center().y - galley.size().y * 0.5),
+            galley,
+            ink,
+        );
+        if row_resp.clicked() && hit.eye != Some(ix) {
+            hit.row = Some(ix);
+        }
+    }
+    // The eye's tooltip (browser.rs: Hide/Show + the view-state promise),
+    // after the loop so the response lives past its borrow of `ui`.
+    for (ix, r) in eye_resps {
+        let tip = if rows[ix].hidden { "Show" } else { "Hide" };
+        r.on_hover_text(format!("{tip} in the viewport (view state; geometry still cuts)"));
+    }
+    hit
+}
+
+/// The ~9-px marks, per kind: original geometry, one stroke family.
+fn glyph(shapes: &mut Vec<Shape>, c: Pos2, kind: Kind, pal: &Palette) {
+    let s = Stroke::new(1.0, pal.text_dim);
+    match kind {
+        Kind::Section => {
+            // Open folder: a body with a back-tab.
+            let body = Rect::from_min_size(c + Vec2::new(-5.0, -3.0), Vec2::new(10.0, 7.0));
+            shapes.push(Shape::rect_stroke(body, 1.0, s, egui::StrokeKind::Middle));
+            shapes.push(Shape::rect_filled(
+                Rect::from_min_size(body.left_top() + Vec2::new(1.0, -2.5), Vec2::new(4.0, 2.5)),
+                0.0,
+                pal.text_dim,
+            ));
+        }
+        Kind::Model => {
+            let r = Rect::from_center_size(c, Vec2::new(9.0, 7.0));
+            shapes.push(Shape::rect_stroke(r, 0.0, s, egui::StrokeKind::Middle));
+        }
+        Kind::Stock => {
+            let r = Rect::from_center_size(c, Vec2::new(9.0, 8.0));
+            shapes.push(Shape::rect_stroke(r, 0.0, s, egui::StrokeKind::Middle));
+            shapes.push(Shape::line_segment([r.left_top(), r.right_bottom()], s));
+        }
+        Kind::Wcs => {
+            shapes.push(Shape::line_segment([c - Vec2::X * 4.5, c + Vec2::X * 4.5], s));
+            shapes.push(Shape::line_segment([c - Vec2::Y * 4.5, c + Vec2::Y * 4.5], s));
+        }
+        Kind::Tool => {
+            shapes.push(Shape::circle_stroke(c, 4.0, s));
+        }
+        Kind::Op => {
+            // A play-triangle in a square frame: "this op owns a path",
+            // drawn from what it names, original.
+            let r = Rect::from_center_size(c, Vec2::new(9.0, 9.0));
+            shapes.push(Shape::rect_stroke(r, 1.0, s, egui::StrokeKind::Middle));
+            shapes.push(Shape::convex_polygon(
+                vec![
+                    Pos2::new(c.x - 1.8, c.y - 3.0),
+                    Pos2::new(c.x + 3.0, c.y),
+                    Pos2::new(c.x - 1.8, c.y + 3.0),
+                ],
+                Color32::TRANSPARENT,
+                Stroke::new(1.0, pal.text_dim),
+            ));
+        }
+    }
+}
+
+/// The browser eye: an outlined lid-rect with a pupil, or crossed when
+/// hidden (display state - the row click still selects, the eye never
+/// destroys).
+fn eye_glyph(shapes: &mut Vec<Shape>, r: Rect, hidden: bool, pal: &Palette) {
+    let s = Stroke::new(1.0, if hidden { pal.text_faint } else { pal.text_dim });
+    shapes.push(Shape::rect_stroke(r, 4.0, s, egui::StrokeKind::Middle));
+    if hidden {
+        shapes.push(Shape::line_segment([r.left_top(), r.right_bottom()], s));
+        shapes.push(Shape::line_segment([r.left_bottom(), r.right_top()], s));
+    } else {
+        shapes.push(Shape::circle_filled(r.center(), 2.2, pal.text_dim));
+    }
+}
+
+/// Ground and hairline under a painted strip (ribbon rows, the status
+/// line): the caller sizes the panel, this makes it read as chrome.
+pub fn strip_bg(painter: &egui::Painter, rect: Rect, pal: &Palette) {
+    painter.rect_filled(rect, 0.0, pal.strip_fill());
+    let y = rect.bottom() - 0.5;
+    painter.line_segment(
+        [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+        Stroke::new(1.0, pal.border),
+    );
+}
