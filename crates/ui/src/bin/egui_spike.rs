@@ -1,19 +1,26 @@
 //! M1.4.1 spike binary (branch ui-egui-spike; see ROADMAP.md).
 //!
-//! S1: an eframe-less egui shell - winit 0.30 loop, our own wgpu instance/
+//! S2: the S1 shell wearing the real UI - the demo document is a seeded
+//! `State` (the same one the imgui app runs), the dock holds three leaves
+//! (browser 17% left, properties 22% right, mirroring shell.rs's ratios),
+//! the ribbon and status strips are painted one-panel widgets (panels.rs),
+//! and the property pages bind to the SAME commands as imgui - every edit
+//! queues a `CommandKind` and lands in the undo history.
+//!
+//! The GPU loop is S1's, unchanged: winit 0.30, our own wgpu instance/
 //! surface (mirroring app.rs, no unwrap), egui-wgpu's low-level Renderer,
-//! and an egui_dock dockspace whose one tab hosts the existing View3D: its
-//! offscreen color texture is registered as a native egui texture once and
-//! rebound on resize. Camera orbit/pan/zoom ride egui's own pointer
-//! responses (the imgui shell needed raw-winit drag tracking precisely
-//! because imgui's docked Image proved unreliable; egui's response model
-//! is the fix we are spiking).
+//! View3D's offscreen texture registered once as a native egui texture and
+//! rebound on resize. What is new per frame: `drain_actions` first (the
+//! commands the panels queued last frame), then a digest-gated re-upload of
+//! document + overlay - the imgui shell's exact upload law, mirrored.
 //! Provenance: our own spike harness, specced from the egui/egui-wgpu/
 //! egui_dock docs and vendored sources; no HSMWorks material involved.
 
 use std::sync::Arc;
 
-use egui_dock::{DockArea, DockState, Style as DockStyle, TabViewer};
+use egui_dock::{
+    DockArea, DockState, Node, NodePath, Split, Style as DockStyle, SurfaceIndex, TabViewer,
+};
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -25,20 +32,40 @@ use winit::window::{Window, WindowId};
 use egui_wgpu::wgpu;
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 
-use hsmworks_ui::viewport::{Camera, GpuPart, View3D};
+use hsmworks_ui::state::{CommandKind, State};
+use hsmworks_ui::viewport::{Camera, View3D};
+
+// The Cargo bin declares an explicit `path` (src/bin/egui_spike.rs), so
+// Rust looks for children in src/bin/ rather than src/bin/egui_spike/ -
+// pin the paths.
+#[path = "egui_spike/painted.rs"]
+mod painted;
+#[path = "egui_spike/panels.rs"]
+mod panels;
+#[path = "egui_spike/shots.rs"]
+mod shots;
+#[path = "egui_spike/theme.rs"]
+mod theme;
+#[path = "egui_spike/world.rs"]
+mod world;
 
 const VIEW3D_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Ribbon strip height (cells at top+3, group captions at top+31 - the
+/// imgui ribbon's geometry, which painted::cell reproduces).
+const RIBBON_H: f32 = 49.0;
+/// Status strip height (imgui's single-line bottom bar).
+const STATUS_H: f32 = 22.0;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--headless") {
         std::process::exit(match headless::run() {
             Ok(()) => {
-                println!("egui spike S1 headless: offscreen View3D + native-texture path green");
+                println!("egui spike S2 headless: seeded document, panels' world, View3D green");
                 0
             }
             Err(err) => {
-                eprintln!("egui spike S1 headless FAILED: {err}");
+                eprintln!("egui spike S2 headless FAILED: {err}");
                 1
             }
         });
@@ -68,8 +95,10 @@ fn run_windowed() -> i32 {
 }
 
 /// Everything the loop owns. Field order matters at shutdown: the surface
-/// borrows the window's raw handle, so it must drop before `window`
-/// (same SAFETY argument as app.rs).
+/// borrows the window's raw handle, so it must drop before `window`, and
+/// `state`'s world holds Rust-owned components whose delete hooks touch no
+/// GPU resource - dropping it last is safe and keeps the ECS alive for
+/// every other field's drop.
 struct Shell {
     // Set on first resumed(); None until GPU init succeeds.
     window: Option<Arc<Window>>,
@@ -83,33 +112,64 @@ struct Shell {
     dock_state: DockState<Tab>,
     view: Option<View3D>,
     view_tex: Option<egui::TextureId>,
-    cam: Camera,
     /// Last laid-out viewport size in logical points; drives the View3D
     /// extent for the NEXT frame (imgui's shell uses the same deferral).
     viewport_points: [f32; 2],
-    parts: Vec<GpuPart>,
+    /// Content digest of the scene last uploaded to View3D; re-uploads are
+    /// gated on it (App::sync_gpu's law, mirrored).
+    scene_digest: u64,
     exit_code: i32,
     failed: bool,
+    shots_done: bool,
+    exit_requested: bool,
+    state: State,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Tab {
     Viewport,
+    Browser,
+    Properties,
 }
 
 impl Tab {
     fn title(&self) -> &'static str {
         match self {
             Tab::Viewport => "viewport",
+            Tab::Browser => "browser",
+            Tab::Properties => "properties",
         }
     }
 }
 
+/// The spike's fixed three-pane layout, as egui_dock splits: the browser
+/// takes 17% at the left and the properties pane 22% at the right of what
+/// remains - shell.rs's DockLayout ratios, restated as split fractions.
+/// A fraction governs the TOP/LEFT child (SplitNode docs), and a `Left`
+/// split puts the NEW node left, a `Right` split the OLD one - so the
+/// first fraction is the browser's share, the second the viewport's.
+fn build_dock() -> DockState<Tab> {
+    let mut dock = DockState::new(vec![Tab::Viewport]);
+    let [vp, _browser] =
+        dock.split(NodePath::MAIN_ROOT, Split::Left, 0.17, Node::leaf(Tab::Browser));
+    dock.split(
+        NodePath::new(SurfaceIndex::main(), vp),
+        Split::Right,
+        0.735,
+        Node::leaf(Tab::Properties),
+    );
+    dock
+}
+
 impl Shell {
     fn new() -> Self {
-        // One fresh dockspace per process; layout persistence (save/load) is
-        // deliberately off for the spike - nothing to port or version yet.
-        let dock_state = DockState::new(vec![Tab::Viewport]);
+        // The demo document through the real command machinery (world.rs);
+        // FrameAll rides the same queue a ribbon click would use.
+        let mut state = State::new();
+        world::seed(&mut state);
+        state.pending.push_back(CommandKind::FrameAll);
+        state.drain_actions();
+        let dock_state = build_dock();
         Self {
             window: None,
             device: None,
@@ -122,11 +182,13 @@ impl Shell {
             dock_state,
             view: None,
             view_tex: None,
-            cam: Camera::frame([0.0, 0.0, 20.0], 70.0),
             viewport_points: [600.0, 400.0],
-            parts: sample_parts(),
+            scene_digest: 0,
             exit_code: 0,
             failed: false,
+            shots_done: false,
+            exit_requested: false,
+            state,
         }
     }
 
@@ -139,7 +201,7 @@ impl Shell {
 
     fn init_gpu(&mut self, el: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
-            .with_title("HSMWorks (egui spike S1)")
+            .with_title("HSMWorks (egui spike S2)")
             .with_inner_size(LogicalSize::new(1280.0, 800.0));
         let window = match el.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -199,7 +261,7 @@ impl Shell {
         surface.configure(&device, &config);
 
         let mut renderer = Renderer::new(&device, config.format, RendererOptions::default());
-        let scale = window.scale_factor().clamp(0.1, 8.0) as f32;
+        let scale = window.scale_factor().clamp(0.1, 8.0);
         let mut view = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // View3D renders into its OWN texture (Rgba8Unorm, the format
             // egui's native-texture registration demands), decoupled from
@@ -207,8 +269,8 @@ impl Shell {
             View3D::new(
                 &device,
                 VIEW3D_FORMAT,
-                (self.viewport_points[0] * scale).max(1.0) as u32,
-                (self.viewport_points[1] * scale).max(1.0) as u32,
+                (f64::from(self.viewport_points[0]) * scale).max(1.0) as u32,
+                (f64::from(self.viewport_points[1]) * scale).max(1.0) as u32,
             )
         })) {
             Ok(v) => v,
@@ -217,7 +279,10 @@ impl Shell {
                 return;
             }
         };
-        view.set_document(&device, &queue, &self.parts);
+        let scene = world::collect(&self.state);
+        self.scene_digest = scene.digest();
+        view.set_document(&device, &queue, &scene.parts);
+        view.set_overlay(&device, &queue, &scene.overlay);
         let tex = renderer.register_native_texture(
             &device,
             view.color_view(),
@@ -227,10 +292,11 @@ impl Shell {
             self.egui_ctx.clone(),
             egui::ViewportId::ROOT,
             &*window,
-            Some(scale),
+            Some(scale as f32),
             window.theme(),
             Some(device.limits().max_texture_dimension_2d as usize),
         );
+        theme::apply(&self.egui_ctx);
 
         self.window = Some(window);
         self.device = Some(device);
@@ -262,6 +328,11 @@ impl Shell {
         if self.failed {
             return;
         }
+        // Commands the panels queued last frame land before the scene is
+        // collected, so this frame draws what the user's click did.
+        self.state.drain_actions();
+        let scene = world::collect(&self.state);
+
         let Self {
             window,
             device,
@@ -274,8 +345,11 @@ impl Shell {
             dock_state,
             view,
             view_tex,
-            cam,
             viewport_points,
+            scene_digest,
+            shots_done,
+            exit_requested,
+            state,
             ..
         } = self;
         let (
@@ -302,6 +376,15 @@ impl Shell {
             return;
         };
 
+        // Re-upload only a scene whose content actually changed (the imgui
+        // shell's digest gate; camera motion costs zero traffic).
+        let d = scene.digest();
+        if d != *scene_digest {
+            view.set_document(device, queue, &scene.parts);
+            view.set_overlay(device, queue, &scene.overlay);
+            *scene_digest = d;
+        }
+
         let scale = window.scale_factor().clamp(0.1, 8.0);
         let raw_input = winit_state.take_egui_input(window);
 
@@ -323,27 +406,10 @@ impl Shell {
 
         // UI logic first: the dock reports the viewport tab's size, the GPU
         // passes follow (same ordering law as app.rs - panels drive extent).
-        let mut viewer = ShellTabs {
-            tex: tex_id,
-            cam,
-            viewport_points,
-        };
         let mut full_output = egui_ctx.run_ui(raw_input, |ui| {
-            DockArea::new(&mut *dock_state)
-                .style(DockStyle::from_egui(ui.style().as_ref()))
-                .show_inside(ui, &mut viewer);
+            shell_layout(ui, state, dock_state, tex_id, viewport_points);
         });
-        // CPU textures egui produced this pass (font atlas first of all):
-        // without this feed the shell renders with no text. 0.36's
-        // TexturesDelta asserts on drop unless drained - consume, don't peek.
-        for (id, deltas) in full_output.textures_delta.set.drain() {
-            for delta in deltas {
-                renderer.update_texture(device, queue, id, &delta);
-            }
-        }
-        for id in full_output.textures_delta.free.drain() {
-            renderer.free_texture(&id);
-        }
+        drain_textures(renderer, device, queue, &mut full_output);
         winit_state.handle_platform_output(window, full_output.platform_output);
 
         let clipped = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
@@ -362,10 +428,10 @@ impl Shell {
         let target = st.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Pass 1: the 3D offscreen target (its own bind group, mvp from the
-        // camera the viewer just moved).
+        // camera the panels' FrameAll and the orbit gestures just moved).
         let (ew, eh) = view.extent();
-        let mvp = cam.mvp(f64::from(ew.max(1)) / f64::from(eh.max(1)));
-        let eye = cam.eye_f32();
+        let mvp = state.cam.mvp(f64::from(ew.max(1)) / f64::from(eh.max(1)));
+        let eye = state.cam.eye_f32();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("egui-spike-frame"),
         });
@@ -414,6 +480,79 @@ impl Shell {
         submits.push(encoder.finish());
         queue.submit(submits);
         queue.present(st);
+
+        if state.request_quit {
+            *exit_requested = true;
+        }
+        // First frame only: the text-crispness dumps S2 owes the user's
+        // eyes (shots.rs). The viewport image rides on this frame's own
+        // offscreen readback - the dump shows what the shell shows.
+        if !*shots_done {
+            *shots_done = true;
+            match view.snapshot_rgba(device, queue) {
+                Some((rgba, w, h)) => {
+                    if let Err(err) = shots::dump(device, queue, rgba, w, h) {
+                        eprintln!("egui spike: shots: {err}");
+                    }
+                }
+                None => eprintln!("egui spike: shots: no readback path"),
+            }
+        }
+    }
+}
+
+/// The whole shell for one egui pass: keyboard shortcuts, the painted
+/// ribbon and status strips, and the three-leaf dock. Shared by the live
+/// frame (draw) and the crispness dumps (shots.rs) so the two can never
+/// disagree about layout; the borrow order is deliberate - each pane
+/// reborrows `state` in sequence, the dock tabs only after the strips end.
+fn shell_layout(
+    ui: &mut egui::Ui,
+    state: &mut State,
+    dock: &mut DockState<Tab>,
+    tex: egui::TextureId,
+    viewport_points: &mut [f32; 2],
+) {
+    panels::shortcuts(ui, state);
+    egui::Panel::top("ribbon")
+        .frame(egui::Frame::NONE)
+        .exact_size(RIBBON_H)
+        .show(ui, |ui| {
+            panels::ribbon(ui, &mut *state, &theme::Palette::DARK);
+        });
+    egui::Panel::bottom("status")
+        .frame(egui::Frame::NONE)
+        .exact_size(STATUS_H)
+        .show(ui, |ui| {
+            panels::status(ui, &*state, &theme::Palette::DARK);
+        });
+    egui::CentralPanel::default().show(ui, |ui| {
+        DockArea::new(&mut *dock)
+            .style(DockStyle::from_egui(ui.style().as_ref()))
+            .show_inside(ui, &mut ShellTabs {
+                state: &mut *state,
+                tex,
+                viewport_points,
+            });
+    });
+}
+
+/// Feed this pass's CPU-texture deltas (the font atlas first of all) to the
+/// renderer. 0.36's TexturesDelta asserts on drop unless drained - consume,
+/// don't peek (the S1 panic this replaced was exactly that).
+fn drain_textures(
+    renderer: &mut Renderer,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    out: &mut egui::FullOutput,
+) {
+    for (id, deltas) in out.textures_delta.set.drain() {
+        for delta in deltas {
+            renderer.update_texture(device, queue, id, &delta);
+        }
+    }
+    for id in out.textures_delta.free.drain() {
+        renderer.free_texture(&id);
     }
 }
 
@@ -435,7 +574,12 @@ impl winit::application::ApplicationHandler for Shell {
         match &event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => self.on_resize(*size),
-            WindowEvent::RedrawRequested => self.draw(),
+            WindowEvent::RedrawRequested => {
+                self.draw();
+                if self.exit_requested {
+                    el.exit();
+                }
+            }
             _ => {}
         }
     }
@@ -449,7 +593,8 @@ impl winit::application::ApplicationHandler for Shell {
 
 impl Shell {
     fn shutdown(&mut self) {
-        // Surface/renderer first, window last (see the field-order note).
+        // Surface/renderer first, window last (see the field-order note);
+        // `state` (and its world) drops after all GPU objects.
         self.renderer = None;
         self.view = None;
         self.surface = None;
@@ -462,8 +607,8 @@ impl Shell {
 }
 
 struct ShellTabs<'a> {
+    state: &'a mut State,
     tex: egui::TextureId,
-    cam: &'a mut Camera,
     viewport_points: &'a mut [f32; 2],
 }
 
@@ -495,72 +640,58 @@ impl TabViewer for ShellTabs<'_> {
                 // primary drag orbits, middle drag pans, wheel dollies.
                 if resp.dragged_by(egui::PointerButton::Primary) {
                     let d = resp.drag_delta();
-                    self.cam.orbit(d.x, d.y);
+                    self.state.cam.orbit(d.x, d.y);
                 }
                 if resp.dragged_by(egui::PointerButton::Middle) {
                     let d = resp.drag_delta();
-                    self.cam.pan(d.x, d.y);
+                    self.state.cam.pan(d.x, d.y);
                 }
                 if resp.hovered() {
                     let scroll = ui.input(|i| i.smooth_scroll_delta.y);
                     if scroll != 0.0 {
-                        self.cam.zoom(scroll);
+                        self.state.cam.zoom(scroll);
                     }
                 }
             }
-        }
-    }
-}
-
-/// A stock box around a smaller solid part, both centered on z=20 (the
-/// vantage the gpu_render smoke tests frame): the two pipelines the docked
-/// View3D must show, without dragging the ECS in before S2's command wiring.
-fn sample_parts() -> Vec<GpuPart> {
-    // Proportions mirror the gpu_render smoke tests (60x60x40 stock around
-    // a 40mm model) so the changed-pixel band the headless proof asserts
-    // against is a known-good frame footprint on both adapters.
-    let model = box_soup([0.0, 0.0, 20.0], [20.0, 20.0, 20.0]);
-    let stock = box_soup([0.0, 0.0, 20.0], [30.0, 30.0, 20.0]);
-    vec![
-        GpuPart { verts: stock, selected: false, stock: true, fill: false },
-        GpuPart { verts: model, selected: false, stock: false, fill: false },
-    ]
-}
-
-/// Axis-aligned box as a triangle soup centered on `c` with half-extents `h`.
-fn box_soup(c: [f32; 3], h: [f32; 3]) -> Vec<[f32; 3]> {
-    let [cx, cy, cz] = c;
-    let [x, y, z] = h;
-    let shift = |p: [f32; 3]| [p[0] + cx, p[1] + cy, p[2] + cz];
-    let faces: [[ [f32; 3]; 4]; 6] = [
-        [[-x, -y, z], [x, -y, z], [x, y, z], [-x, y, z]],
-        [[-x, y, -z], [x, y, -z], [x, -y, -z], [-x, -y, -z]],
-        [[x, -y, -z], [x, y, -z], [x, y, z], [x, -y, z]],
-        [[-x, y, -z], [-x, -y, -z], [-x, -y, z], [-x, y, z]],
-        [[-x, y, z], [x, y, z], [x, y, -z], [-x, y, -z]],
-        [[-x, -y, -z], [x, -y, -z], [x, -y, z], [-x, -y, z]],
-    ];
-    let mut v = Vec::with_capacity(36);
-    for f in faces {
-        for tri in [[f[0], f[1], f[2]], [f[0], f[2], f[3]]] {
-            for p in tri {
-                v.push(shift(p));
+            Tab::Browser => {
+                panels::browser(ui, self.state, &theme::Palette::DARK);
+            }
+            Tab::Properties => {
+                panels::properties(ui, self.state, &theme::Palette::DARK);
             }
         }
     }
-    v
 }
 
-/// Headless proof (the S1 gate): no window, no surface - the fallback
+/// Headless proof (the S2 gate): no window, no surface - the fallback
 /// adapter (the same deterministic choice as tests/gpu_render.rs), View3D
-/// on the spike's Rgba8Unorm offscreen format, a cube rendered, and the
-/// readback showing a solid footprint of pixels changed from the corner
-/// (background) color. The UI-logic half of egui needs no GPU and is
-/// pinned by kittest in S3.
+/// on the spike's Rgba8Unorm offscreen format, the SEEDED document rendered
+/// (block + stock + region + cached path through set_overlay), and the
+/// readback showing a solid footprint of changed pixels - the S1 gate, now
+/// driven by the real command machinery instead of a hand-built cube.
+/// The second half of the proof is the world itself: Contour1 carries a
+/// non-empty cached toolpath, i.e. seed -> commands -> generate worked.
 mod headless {
-    use crate::{Camera, View3D, wgpu};
+    use hsmworks_app::model;
+    use hsmworks_ui::state::{CommandKind, State};
+
+    use crate::{Camera, View3D, wgpu, world};
 
     pub fn run() -> Result<(), String> {
+        let mut state = State::new();
+        world::seed(&mut state);
+        state.pending.push_back(CommandKind::FrameAll);
+        state.drain_actions();
+        let op_ok = model::find_by_name(&state.world, "Contour1")
+            .and_then(|e| model::toolpath_of(&state.world, &e))
+            .map_or(0, |tp| tp.path.moves.len());
+        if op_ok == 0 {
+            return Err(format!(
+                "seed produced no cached toolpath for Contour1 (status: {})",
+                state.status
+            ));
+        }
+
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             force_fallback_adapter: true,
@@ -577,8 +708,9 @@ mod headless {
             View3D::new(&device, crate::VIEW3D_FORMAT, 320, 240)
         }))
         .map_err(|_| "View3D pipeline panicked on validation".to_string())?;
-        let parts = crate::sample_parts();
-        view.set_document(&device, &queue, &parts);
+        let scene = world::collect(&state);
+        view.set_document(&device, &queue, &scene.parts);
+        view.set_overlay(&device, &queue, &scene.overlay);
 
         // Same vantage the gpu_render smoke tests use on equivalent parts.
         let cam = Camera {
@@ -617,11 +749,11 @@ mod headless {
             .count();
         let total = (w as usize * h as usize).max(1);
         if changed * 20 < total {
-            // less than 5% of the frame: the cube did not rasterize
+            // less than 5% of the frame: the seeded stock did not rasterize
             return Err(format!("readback looks empty ({changed}/{total} changed px)"));
         }
         println!(
-            "headless snapshot: {w}x{h}, {}% pixels changed from background",
+            "headless snapshot: {w}x{h}, {}% pixels changed; Contour1 cached {op_ok} moves",
             changed * 100 / total
         );
         Ok(())
