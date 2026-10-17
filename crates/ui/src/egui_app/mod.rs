@@ -1,10 +1,12 @@
 //! The egui shell (M1.4.2 migration), selected with `--ui egui`.
 //!
 //! Graduated from the M1.4.1 spike binary: `shell` runs the loop, `world`
-//! seeds the demo document and mirrors app.rs's scene collectors, `theme`
+//! mirrors app.rs's scene collectors and holds the demo seed, `theme`
 //! carries the color tokens, `painted` is the draw-list port (ribbon cells,
 //! tree rows), `panes` holds the keyboard layer and the painted ribbon and
-//! browser (M-b), and `pages` the property pages (M-c). Both stacks
+//! browser (M-b), and `pages` the property pages (M-c). Since M-d the window
+//! opens on a plain empty document - `world::seed` is what the harnesses and
+//! the headless proof call directly. Both stacks
 //! coexist as entries until M-g retires imgui
 //! (docs/spike-egui-go-no-go.md, migration law); the generators, commands
 //! and persistence underneath are shared and untouched.

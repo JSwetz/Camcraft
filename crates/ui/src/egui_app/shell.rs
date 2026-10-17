@@ -31,7 +31,7 @@ use winit::window::{Window, WindowId};
 use egui_wgpu::wgpu;
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 
-use crate::state::{CommandKind, State};
+use crate::state::State;
 use crate::viewport::View3D;
 
 use super::pages;
@@ -137,13 +137,13 @@ pub(crate) fn build_dock() -> DockState<Tab> {
 
 impl Shell {
     fn new() -> Self {
-        // The demo document through the real command machinery (world.rs);
-        // FrameAll rides the same queue a ribbon click would use. M-d
-        // replaces the startup seed with the real New/Open commands.
-        let mut state = State::new();
-        world::seed(&mut state);
-        state.pending.push_back(CommandKind::FrameAll);
-        state.drain_actions();
+        // M-d: startup is a plain State::new() - byte-identical in shape to
+        // imgui's App::new. The demo seed left the window path; world::seed
+        // is what the harnesses and the headless proof call directly now.
+        // File work is the real thing: New/Model/Project/Save on the ribbon
+        // queue the shared command kinds, rfd picks the path, State::run
+        // does the work - the machinery was never egui's to rebuild.
+        let state = State::new();
         let dock_state = build_dock();
         Self {
             window: None,

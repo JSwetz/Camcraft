@@ -10,8 +10,12 @@
 //! commands` (the draft/Apply law) plus the DragValue parity test: the drag
 //! path and the typed path commit the same staged field the imgui
 //! InputDouble did (divergence D5's proof). `history_key_queues_command`
-//! proves the keyboard layer. The snapshot is the churn gate for the
-//! per-panel migration steps.
+//! proves the keyboard layer. M-d adds the file law:
+//! `blank_startup_renders_and_frames_honestly` (the window opens empty -
+//! the seed is gone from `Shell::new`) and `file_ops_round_trip_through_
+//! commands` (Save/New/Open through the queue; the rfd modals are
+//! hand-test-only). The snapshot is the churn gate for the per-panel
+//! migration steps.
 //!
 //! The harness runs the managed-texture path: the viewport leaf shows a flat
 //! placeholder instead of View3D's offscreen render, because the GPU
@@ -47,20 +51,27 @@ struct ShellUi {
 }
 
 impl ShellUi {
-    /// The same birth `Shell::new` has: the demo document through the real
-    /// command machinery (world.rs), then FrameAll off the queue.
-    fn seeded() -> Self {
-        let mut state = State::new();
-        world::seed(&mut state);
-        state.pending.push_back(CommandKind::FrameAll);
-        state.drain_actions();
+    /// The birth `Shell::new` has since M-d: a plain empty document, no
+    /// seed, no startup command - the window's real shape, rendered.
+    fn blank() -> Self {
         Self {
-            state,
+            state: State::new(),
             dock: build_dock(),
             viewport_points: [1280.0, 649.0],
             viewport_tex: None,
             themed: false,
         }
+    }
+
+    /// `blank` plus the demo document through the real command machinery
+    /// (world.rs), then FrameAll off the queue - the harness default,
+    /// because the property pages need content to hold up.
+    fn seeded() -> Self {
+        let mut sh = Self::blank();
+        world::seed(&mut sh.state);
+        sh.state.pending.push_back(CommandKind::FrameAll);
+        sh.state.drain_actions();
+        sh
     }
 }
 
@@ -167,6 +178,84 @@ fn click_toggles_view_state() {
     harness.get_by_label("Show all toolpaths").click();
     harness.run();
     assert!(harness.state().state.show_all_paths);
+}
+
+/// M-d's startup law, proven in pixels: the window opens on a plain
+/// empty document - the seed left `Shell::new` for real file ops - and
+/// the whole shell renders it without a hiccup. Then a bare FrameAll on
+/// the blank world must refuse by name ("nothing to frame", the camera
+/// untouched) instead of fitting a bogus box: Prime Directive on the one
+/// command the empty startup actually receives.
+#[test]
+fn blank_startup_renders_and_frames_honestly() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(1280.0, 720.0))
+        .build_ui_state(frame, ShellUi::blank());
+    harness.run_steps(3);
+    let st = &harness.state().state;
+    assert_eq!(st.status, "ready", "startup must not run any command");
+    assert!(
+        model::named_entities(&st.world).is_empty(),
+        "the window must start on an empty document"
+    );
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::FrameAll);
+    harness.run();
+    assert_eq!(harness.state().state.status, "nothing to frame");
+}
+
+/// M-d's file law through the machinery the ribbon drives: the queue's
+/// dialog-free path (the `*File` arms - the same `project::save` /
+/// `project::load` the rfd dialogs invoke once a path is picked; the
+/// modal itself is hand-test-only). Save, New, Open: New must retire
+/// the undo timeline (state.rs), and the reopened document must carry
+/// the saved operation's parameters back verbatim.
+#[test]
+fn file_ops_round_trip_through_commands() {
+    let mut harness = shell_harness();
+    let path = std::env::temp_dir().join(format!("hsmworks-egui-md-{}.hsmproj", std::process::id()));
+
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::SaveProjectFile(path.clone()));
+    harness.run();
+    assert!(
+        harness.state().state.status.starts_with("saved"),
+        "save did not report success (status: {})",
+        harness.state().state.status
+    );
+
+    harness.state_mut().state.pending.push_back(CommandKind::NewDocument);
+    harness.run();
+    let st = &harness.state().state;
+    assert!(
+        model::find_by_name(&st.world, "Contour1").is_none(),
+        "New left entities behind (status: {})",
+        st.status
+    );
+    assert!(!st.history.can_undo(), "New must retire the timeline");
+    assert_eq!(st.status, "new document");
+
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::OpenProjectFile(path.clone()));
+    harness.run();
+    let st = &harness.state().state;
+    let climb = model::find_by_name(&st.world, "Contour1")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|op| match op.params {
+            OpParams::Contour { climb, .. } => climb,
+            _ => false,
+        });
+    assert_eq!(
+        climb,
+        Some(true),
+        "the reopened document lost Contour1's saved params (status: {})",
+        st.status
+    );
+    assert!(st.status.starts_with("opened"), "open status: {}", st.status);
+    let _ = std::fs::remove_file(&path);
 }
 
 /// Port of the spike's `click_apply_edits_operation_through_commands`

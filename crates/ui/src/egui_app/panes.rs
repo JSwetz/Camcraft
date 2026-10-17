@@ -263,9 +263,11 @@ pub fn ribbon(ui: &mut Ui, state: &mut State, pal: &Palette) {
 }
 
 /// The status strip (bottom panel): the shell's one-line feedback, dimmer,
-/// with the chrome the painted ground gives it. A seed or command refusal
-/// is visible from the first frame (empty status reads "ready"); the
-/// error-surface display half arrives with M-d.
+/// with the chrome the painted ground gives it. Since M-d this is the
+/// file-op outcome line too ("saved …", "open failed: …" - State::run
+/// writes them all), while command refusals read twice by design: here for
+/// everyone, and on their own pane through `error_for` (M-c). Startup is a
+/// plain empty document; an untouched status reads "ready".
 pub fn status(ui: &mut Ui, state: &State, pal: &Palette) {
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
@@ -274,7 +276,7 @@ pub fn status(ui: &mut Ui, state: &State, pal: &Palette) {
         ui.add(Label::new(RichText::new(text).weak()).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
-                RichText::new("egui shell (M-c) - imgui stays default until M-g")
+                RichText::new("egui shell (M-d) - imgui stays default until M-g")
                     .color(pal.text_faint)
                     .small(),
             );

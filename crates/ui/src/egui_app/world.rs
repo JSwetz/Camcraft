@@ -9,8 +9,11 @@
 //! imgui app runs. Nothing here pokes world state ad hoc: every change is a
 //! `CommandKind` through `State::drain_actions`, so the egui shell exercises
 //! the real validation, undo and staleness machinery (AGENTS.md: everything
-//! is a command - the migration must not become an exception). M-d replaces
-//! the startup seed with the real New/Open commands.
+//! is a command - the migration must not become an exception). Since M-d the
+//! window does NOT seed at startup - it opens on a plain `State::new()`,
+//! exactly like imgui's `App::new`; the ribbon's New/Model/Project/Save are
+//! the real file ops (rfd dialog, shared command machinery). This seed is
+//! what the frame harnesses and the headless proof call directly.
 //!
 //! `collect` mirrors app.rs's private collectors (collect_parts, the region
 //! outlines, the draft height planes, committed-pick outlines, cached-path
