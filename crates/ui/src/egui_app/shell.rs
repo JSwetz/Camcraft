@@ -437,7 +437,7 @@ impl Shell {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("egui-shell-frame"),
         });
-        view.render(queue, &mut encoder, &mvp, eye);
+        view.render(queue, &mut encoder, &mvp, eye, state.display);
 
         // Pass 2: egui over the surface.
         let sd = ScreenDescriptor {
@@ -893,7 +893,7 @@ pub(crate) mod headless {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("egui-shell-headless"),
         });
-        view.render(&queue, &mut encoder, &mvp, cam.eye_f32());
+        view.render(&queue, &mut encoder, &mvp, cam.eye_f32(), state.display);
         queue.submit([encoder.finish()]);
 
         let (rgba, w, h) = view

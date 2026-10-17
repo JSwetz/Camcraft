@@ -28,7 +28,7 @@ use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::tools::ToolKind;
 
 use crate::actions;
-use crate::state::{CommandKind, State, UiTarget};
+use crate::state::{CommandKind, DisplayMode, State, UiTarget};
 
 use super::icons::{Icon, IconSet};
 use super::painted;
@@ -576,7 +576,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     (rows, leaves)
 }
 
-/// The browser pane: the two global view toggles, then the painted tree
+/// The browser pane: the global view toggles, then the painted tree
 /// with per-row click/eye dispatch identical to browser.rs.
 pub fn browser(
     ui: &mut Ui,
@@ -586,6 +586,18 @@ pub fn browser(
 ) {
     ui.checkbox(&mut state.show_world_axes, "Show world origin axes");
     ui.checkbox(&mut state.show_all_paths, "Show all toolpaths");
+    // The display mode rides the same law as the checkboxes: a direct
+    // field flip (view state like the camera, never a command, never on
+    // the ribbon - the M-f tip table is imgui's 18-cell law untouched).
+    // Radios, not a combo: the same idiom the Geometry page uses for
+    // `geo_pick`, and the whole choice is legible without a click.
+    // Short names by pane-width law (the Geometry row's Models/Faces/Edges
+    // precedent): the browser column clips anything longer.
+    ui.horizontal(|ui| {
+        ui.label("Solids");
+        ui.radio_value(&mut state.display, DisplayMode::ShadedEdges, "Shaded");
+        ui.radio_value(&mut state.display, DisplayMode::Wireframe, "Wireframe");
+    });
     ui.separator();
     let (rows, leaves) = browser_rows(state);
     let rect = Rect::from_min_size(

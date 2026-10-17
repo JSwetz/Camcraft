@@ -219,6 +219,13 @@ fn click_toggles_view_state() {
     harness.get_by_label("Show all toolpaths").click();
     harness.run();
     assert!(harness.state().state.show_all_paths);
+    // The display mode follows the same law through the same door: a real
+    // pointer event, view state (never a command, never the undo stack).
+    assert_eq!(harness.state().state.display, crate::state::DisplayMode::ShadedEdges);
+    harness.get_by_label("Wireframe").click();
+    harness.run();
+    assert_eq!(harness.state().state.display, crate::state::DisplayMode::Wireframe);
+    assert!(harness.state().state.pending.is_empty(), "a view toggle queues nothing");
 }
 
 /// M-d's startup law, proven in pixels: the window opens on a plain

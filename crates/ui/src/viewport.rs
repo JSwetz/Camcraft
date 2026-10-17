@@ -19,7 +19,7 @@ const VERTEX_STRIDE: u64 = 16;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 const SHADER: &str = "
-struct U { mvp: mat4x4<f32>, eye: vec3<f32> };
+struct U { mvp: mat4x4<f32>, eye: vec3<f32>, wire: f32 };
 @group(0) @binding(0) var<uniform> u: U;
 
 struct VSOut {
@@ -60,11 +60,18 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 }
 
 // Facet edges: dark over the shaded pass, warm when the part is selected.
+// In wireframe mode the same wire runs over the dark background instead of
+// over lit metal, so it brightens to a cool gray (and the selection warm
+// lifts to the same hot amber the fills use) - `u.wire` is the mode flag.
 @fragment
 fn fs_edge(in: VSOut) -> @location(0) vec4<f32> {
     let dark = vec3<f32>(0.06, 0.07, 0.09);
+    let gray = vec3<f32>(0.62, 0.66, 0.72);
+    let unlit = mix(dark, gray, u.wire);
     let warm = vec3<f32>(0.55, 0.35, 0.05);
-    return vec4<f32>(mix(dark, warm, in.sel), 1.0);
+    let hot = vec3<f32>(0.98, 0.72, 0.20);
+    let sel = mix(warm, hot, u.wire);
+    return vec4<f32>(mix(unlit, sel, in.sel), 1.0);
 }
 
 // Stock: same flat shading, cool steel tint, translucent - the model must
@@ -129,6 +136,9 @@ pub struct GpuPart {
 
 pub struct View3D {
     pipeline: wgpu::RenderPipeline,
+    /// Faces that only write depth - the wireframe mode's hidden-line
+    /// prepass (same vertex stage and culling as `pipeline`, no color).
+    depth_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
     stock_pipeline: wgpu::RenderPipeline,
     region_pipeline: wgpu::RenderPipeline,
@@ -253,6 +263,62 @@ impl View3D {
                     format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Depth-only pass for wireframe mode: the same solid geometry,
+        // rasterized with color writes off. Faces occlude the far wire
+        // exactly as they occlude it when lit - the hidden-line law is
+        // then one branch in `render`, not a second geometry.
+        let depth_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport3d-depth"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32,
+                            offset: 12,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_edge"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::empty(),
                 })],
             }),
             multiview_mask: None,
@@ -517,6 +583,7 @@ impl View3D {
 
         View3D {
             pipeline,
+            depth_pipeline,
             line_pipeline,
             stock_pipeline,
             region_pipeline,
@@ -675,14 +742,18 @@ impl View3D {
     }
 
     /// Encode the 3D pass into the offscreen target. `eye` is the camera
-    /// position in world space, for the specular term.
+    /// position in world space, for the specular term; `display` selects
+    /// shaded-with-wire or hidden-line wireframe (the buffers are identical
+    /// either way - only the pass order and the `u.wire` flag differ).
     pub fn render(
         &self,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         mvp: &[[f32; 4]; 4],
         eye: [f32; 3],
+        display: crate::state::DisplayMode,
     ) {
+        let wireframe = display == crate::state::DisplayMode::Wireframe;
         let mut data = [0u8; 80];
         let mut o = 0usize;
         for col in mvp {
@@ -695,6 +766,7 @@ impl View3D {
             data[o..o + 4].copy_from_slice(&v.to_le_bytes());
             o += 4;
         }
+        data[76..80].copy_from_slice(&(f32::from(u8::from(wireframe))).to_le_bytes());
         queue.write_buffer(&self.uniform, 0, &data);
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -730,27 +802,38 @@ impl View3D {
         // order is opaque models, their wire, then translucent stock with
         // its wire on top, then the cut-region fills last among triangles -
         // a light film over everything it overlaps - then the reference-
-        // geometry overlay lines on top of all of it.
+        // geometry overlay lines on top of all of it. Wireframe keeps the
+        // law, swaps the models' color pass for a depth-only one (so the
+        // hidden-line cull still holds) and drops the stock faces - the
+        // box is a volume of stock, not a surface, and its full wire reads
+        // truer than an occluded one.
         pass.set_bind_group(0, &self.bind_group, &[]);
         if self.index_count > 0 {
             pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
             pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
-            pass.set_pipeline(&self.pipeline);
-            pass.draw_indexed(0..self.model_index_count, 0, 0..1);
+            if wireframe {
+                if self.model_index_count > 0 {
+                    pass.set_pipeline(&self.depth_pipeline);
+                    pass.draw_indexed(0..self.model_index_count, 0, 0..1);
+                }
+            } else {
+                pass.set_pipeline(&self.pipeline);
+                pass.draw_indexed(0..self.model_index_count, 0, 0..1);
+            }
             pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
+            pass.set_pipeline(&self.line_pipeline);
             if self.model_edge_count > 0 {
-                pass.set_pipeline(&self.line_pipeline);
                 pass.draw_indexed(0..self.model_edge_count, 0, 0..1);
             }
-            if self.model_index_count < self.stock_index_end {
+            if self.model_index_count < self.stock_index_end && !wireframe {
                 pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_pipeline(&self.stock_pipeline);
                 pass.draw_indexed(self.model_index_count..self.stock_index_end, 0, 0..1);
+            }
+            if self.model_edge_count < self.edge_count {
                 pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
-                if self.model_edge_count < self.edge_count {
-                    pass.set_pipeline(&self.line_pipeline);
-                    pass.draw_indexed(self.model_edge_count..self.edge_count, 0, 0..1);
-                }
+                pass.set_pipeline(&self.line_pipeline);
+                pass.draw_indexed(self.model_edge_count..self.edge_count, 0, 0..1);
             }
             if self.stock_index_end < self.index_count {
                 pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);

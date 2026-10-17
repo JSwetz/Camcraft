@@ -466,6 +466,21 @@ pub enum GeoPick {
     Edge,
 }
 
+/// How the viewport paints solid geometry. Transient view state - like
+/// the camera and [`GeoPick`], never a command, never saved. The wire is
+/// always the same feature-edge set (`geometry::feature`, crease and
+/// boundary); the modes differ in what happens *behind* it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DisplayMode {
+    /// Flat-shaded faces with the CAD wire over them - the default look.
+    #[default]
+    ShadedEdges,
+    /// Wireframe only: faces go to the depth buffer and nowhere else, so
+    /// the model reads as a hidden-line drawing; the stock - never a
+    /// surface you trust to occlude anything - draws as its full wire.
+    Wireframe,
+}
+
 /// The thing under the cursor, from the viewport hover pass: the named
 /// entity, the facet index the raycast resolved (into `model::facets_of`'s
 /// order for that entity), and - in Face/Edge pick mode - the feature the
@@ -524,6 +539,10 @@ pub struct State {
     /// the one the tree highlights. View state like the camera - not
     /// undoable, not saved; the overlay rebuild gate reads it.
     pub show_all_paths: bool,
+    /// How solids paint: shaded-with-wire or hidden-line wireframe. View
+    /// state like the camera - not undoable, not saved; the render call
+    /// reads it, nothing in the document does.
+    pub display: DisplayMode,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -651,6 +670,7 @@ impl State {
             cam: Camera::default(),
             show_world_axes: true,
             show_all_paths: false,
+            display: DisplayMode::default(),
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,

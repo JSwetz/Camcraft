@@ -11,6 +11,7 @@ use std::collections::HashSet;
 
 use egui_wgpu::wgpu;
 use hsmworks_app::stock::{StockShape, stock_mesh};
+use hsmworks_ui::state::DisplayMode;
 use hsmworks_ui::viewport::{Camera, GpuPart, View3D};
 
 const SIDE: u32 = 256;
@@ -51,12 +52,22 @@ fn stock_part(shape: &StockShape) -> GpuPart {
 }
 
 fn model_part(shape_d: f64) -> GpuPart {
+    model_part_at(shape_d, [0.0, 0.0, 0.0])
+}
+
+fn model_part_at(shape_d: f64, off: [f32; 3]) -> GpuPart {
+    let mut verts = soup_of(&StockShape::Box {
+        dx: shape_d,
+        dy: shape_d,
+        dz: shape_d,
+    });
+    for v in &mut verts {
+        for k in 0..3 {
+            v[k] += off[k];
+        }
+    }
     GpuPart {
-        verts: soup_of(&StockShape::Box {
-            dx: shape_d,
-            dy: shape_d,
-            dz: shape_d,
-        }),
+        verts,
         selected: false,
         stock: false,
         fill: false,
@@ -82,6 +93,15 @@ fn fill_square(h: f32, z: f32) -> GpuPart {
 }
 
 fn render(parts: &[GpuPart], cam: &Camera) -> Option<(Vec<u8>, u32, u32)> {
+    render_mode(parts, cam, DisplayMode::ShadedEdges)
+}
+
+/// One frame of `parts` under an explicit display mode.
+fn render_mode(
+    parts: &[GpuPart],
+    cam: &Camera,
+    display: DisplayMode,
+) -> Option<(Vec<u8>, u32, u32)> {
     let (device, queue) = device_and_queue()?;
     let mut view = View3D::new(&device, FORMAT, SIDE, SIDE);
     view.set_document(&device, &queue, parts);
@@ -90,9 +110,18 @@ fn render(parts: &[GpuPart], cam: &Camera) -> Option<(Vec<u8>, u32, u32)> {
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("gpu-test-frame"),
     });
-    view.render(&queue, &mut enc, &mvp, eye);
+    view.render(&queue, &mut enc, &mvp, eye, display);
     queue.submit([enc.finish()]);
     view.snapshot_rgba(&device, &queue)
+}
+
+/// True when the pixel differs from the frame's corner (background).
+fn off_background(img: &[u8], ix: usize) -> bool {
+    let bg: [u8; 4] = img[..4].try_into().expect("frame wider than 4 px");
+    let p = &img[ix * 4..ix * 4 + 4];
+    p.iter()
+        .zip(bg)
+        .any(|(a, b)| i32::from(*a) - i32::from(b) > 6 || i32::from(b) - i32::from(*a) > 6)
 }
 
 /// Pixels differing from the corner (background) color by a small epsilon.
@@ -198,6 +227,71 @@ fn empty_document_clears_to_background_only() {
     };
     let changed = changed_pixels(&img);
     assert_eq!(changed, 0, "empty document on {w}x{h} should be uniform");
+}
+
+#[test]
+fn wireframe_paints_wire_not_faces() {
+    // The M1.4 display-mode law, pixel half: the SAME buffers render two
+    // ways. Shaded floods the silhouette with painted faces; wireframe
+    // leaves the face interiors as background and keeps only the (bright,
+    // over the dark background - `u.wire` lifts the wire color) wire.
+    let cube = [model_part(60.0)];
+    let Some((shaded, w, h)) = render(&cube, &test_cam()) else {
+        eprintln!("gpu test skipped: no usable adapter");
+        return;
+    };
+    let Some((wire, _, _)) = render_mode(&cube, &test_cam(), DisplayMode::Wireframe) else {
+        return; // the shaded render found an adapter; this one cannot differ
+    };
+    let total = (w * h) as usize;
+    let s = changed_pixels(&shaded);
+    let t = changed_pixels(&wire);
+    assert!(s > total / 16, "shaded should flood the silhouette: {s}/{total}");
+    assert!(t > 100, "wireframe must still draw its (brightened) wire: {t} px");
+    assert!(t * 3 < s, "wireframe paints lines, not faces: {t} vs {s}");
+}
+
+#[test]
+fn wireframe_hides_wire_behind_solids() {
+    // The hidden-line half of the law: the wireframe faces write depth, so
+    // a bigger cube farther down the view line may add wire OUTSIDE the
+    // front cube's silhouette but never pierce through it. The front
+    // cube's shaded render is the mask - faces are exactly its footprint.
+    let cam = test_cam();
+    let e = cam.eye_f32();
+    let t = [0.0f32, 0.0, 20.0]; // the same target test_cam orbits
+    let k = 140.0 / 160.0; // push the back cube 140 units past the target
+    let back = [t[0] + (t[0] - e[0]) * k, t[1] + (t[1] - e[1]) * k, t[2] + (t[2] - e[2]) * k];
+    let front = [model_part(60.0)];
+    let both = [model_part(60.0), model_part_at(90.0, back)];
+    let Some((mask, w, h)) = render(&front, &cam) else {
+        eprintln!("gpu test skipped: no usable adapter");
+        return;
+    };
+    let Some((a, _, _)) = render_mode(&front, &cam, DisplayMode::Wireframe) else {
+        return;
+    };
+    let Some((b, _, _)) = render_mode(&both, &cam, DisplayMode::Wireframe) else {
+        return;
+    };
+    let total = (w * h) as usize;
+    let mut inside = 0usize;
+    let mut pierced = 0usize;
+    let mut outside_added = 0usize;
+    for i in 0..total {
+        let in_face = off_background(&mask, i);
+        if in_face {
+            inside += 1;
+            if off_background(&a, i) != off_background(&b, i) {
+                pierced += 1;
+            }
+        } else if !off_background(&a, i) && off_background(&b, i) {
+            outside_added += 1;
+        }
+    }
+    assert!(inside > total / 16, "the front silhouette should be a real mask");
+    assert!(pierced * 200 < inside, "wire must not bleed through solids: {pierced}/{inside}");
+    assert!(outside_added > 100, "the far cube must still draw around the near one: {outside_added}");
 }
 
 #[test]

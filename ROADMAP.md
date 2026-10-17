@@ -64,8 +64,9 @@ open. The M1.4 look-and-feel verdict prioritized the Dear ImGui → egui
 stack rework, and that rework has now shipped: M1.4.1 (the decision and
 GO spike) and M1.4.2 (the per-panel graduation, imgui retired) are both
 done - egui is the shell. What's left of the early phase is the remaining
-M1.4 surface polish (graphical tool editor, viewport display modes),
-units, drilling and the first post.
+M1.4 surface polish (graphical tool editor, tabbed-panels UX - viewport
+display modes landed right after the graduation), units, drilling and the
+first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -227,7 +228,8 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
       highlights the facet under the cursor (`pick::first_hit_f`) - the
       facet-index hook M1.5 feature picking builds on
 - ⏸ **View cube + viewport navigation bar**: deferred to the M1.5 viewport
-      work (three open items below it join this milestone's list)
+      work (the open items below it join this milestone's list; display
+      modes landed first, right after the egui graduation)
 - 📋 **Graphical tool editor**: tool creation and editing move from the
       property page's field list to its own window with a live preview -
       the tool, shank and holder drawn to scale and updating as the
@@ -236,11 +238,14 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
       considered revisit of this milestone's "standalone tool library
       window is gone" decision (keep the dock for the library, open a
       window for the editor) - builds on the M1.4.1 stack
-- 📋 **Viewport display modes**: wireframe-only, and shaded-with-edges
-      (solid fill plus the feature-edge overlay), switchable per view -
-      navigation and selection aids: wireframe to see through stock and
-      toolpaths, edges to know what a click will grab. Generalizes the
-      STEP feature-edge wireframe from M1.2 to every model
+- ✅ **Viewport display modes**: wireframe-only and shaded-with-edges,
+      switched by the browser pane's Solids radios - view state under the
+      same law as the axes and paths checkboxes, never a command.
+      Wireframe sends faces to the depth buffer only (hidden lines stay
+      hidden) and brightens the feature-edge wire for the dark background;
+      the stock, a volume rather than a surface, keeps its full wire.
+      Generalizes the STEP feature-edge wireframe from M1.2 to every
+      model - the pixel law is tested in `tests/gpu_render.rs` (this commit)
 - 📋 **Panel UX overhaul**: property panels reorganized into tabs and
       named sections (geometry, heights, passes, leads and links,
       feeds) instead of long stacks of dropdowns and inputs, so a
@@ -711,7 +716,7 @@ programming department.
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
-| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window, wireframe/shaded-with-edges display modes, and tabbed-panels UX overhaul open - the tool editor and tabbed panels ride the M1.4.1 stack | ⚠️ |
+| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window and tabbed-panels UX overhaul open (wireframe/shaded-with-edges display modes done) - the tool editor and tabbed panels ride the egui stack | ⚠️ |
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
