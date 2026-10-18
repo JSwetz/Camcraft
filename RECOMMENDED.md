@@ -9,6 +9,68 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.7a — post engine core + `.cnc` intermediate (commit `feat(app): post engine core + .cnc intermediate (M1.7a)`)
+
+- **JS runtime: boa_engine 0.21, not SpiderMonkey** (the user raised
+  SpiderMonkey on 2026-10-19 — considered, this is the answer). Why:
+  boa is pure Rust — it builds in seconds on every platform our CI
+  matrix will have, adds no C++ toolchain requirement, and has no FFI
+  crash surface, which is a Prime Directive argument (a segfault in
+  the mozjs servo crates' build or in a JS-API boundary is exactly the
+  "silent wrong answer" class we refuse to ship; their Windows build
+  fragility is a well-known tax). SM's real advantage is exact
+  SpiderMonkey-era semantics for running *third-party vendor-style
+  scripts* — which the clean-room protocol excludes by construction:
+  every `.cps` in this product is ours, written against our own
+  documented prelude, so engine fidelity beyond ES5 is not a
+  requirement. Cost to change later: the host is one file —
+  `crates/app/src/post/js.rs` is the only code that touches boa's API
+  (eval-in/`to_json`-out, no captures); a SM or deno_core swap
+  reimplements `Script` there and nothing else moves. Cheap insurance
+  already shipped: the prelude defines `setLanguageVersion` as an
+  accepted-and-ignored no-op, so a reference-era pragma line in a
+  script never throws here. Revisit trigger: if we ever choose to run
+  unmodified third-party posts, or posting shows up hot in simulation-
+  scale batch runs.
+- **The intermediate is a superset of the goldens, by parser law not
+  by migration.** A stream with no `HSMW-CNC` magic parses by the
+  legacy `.cl` rules, and every word accepts four spellings (bare
+  positional, spaced key, joined `X1000`, separated `X:1000`), so the
+  committed `.cl` goldens (all thirteen) are legal post inputs
+  unchanged - the law test says so. Why: it
+  makes "the real product eats its own dog food" testable in CI from
+  day one - the Fanuc post must post the goldens; rewriting committed
+  goldens would launder a format bug into history. Cost: the parser
+  carries one classifier for all forms (~40 lines); the roundtrip law
+  test pins canonical (spaced) output re-parsing to identity.
+- **Legacy `; CYCLE` markers are re-seated by the engine, not the
+  file.** `normalize_program_order` moves each cycle record to just
+  before its `AT`-anchored move before hooks start; idempotent on
+  `dump` output, which is written in program order already. Why: v3
+  goldens append markers after the chain (M1.6's writer shape), and
+  program order is what the hook contract means; files on disk stay
+  byte-frozen while the driver sees the right order. Cost: `line_map`
+  and record indices are into the *normalized* stream - documented.
+- **The boa host uses a pull model: pure-JS prelude, no Rust
+  callbacks.** boa's `NativeFunction::from_fn_ptr` cannot capture
+  environment, so instead of shimming `writeln` in Rust the prelude
+  pushes lines to a global `OUT` array and the driver evals globals
+  in (`properties`, `currentPosition`, `machine`) and pulls buffers
+  out (`OUT`, `MESSAGES`) as JSON. One direction per seam, and the
+  whole host interface is string eval - the same shape any future
+  runtime would need. Cost: one extra JSON round-trip per record;
+  irrelevant at our stream sizes.
+- **Nothing is silent: warnings and swallows are counted.** Stream
+  `WARN` records plus every script `message()` land in
+  `PostOutput.warnings`; a record swallowed by `onCommand` returning
+  `false` increments `PostOutput.swallowed` (legal filtering, but the
+  reviewer sees the count). The CLI exits 0 *with* warnings printed -
+  it is a developer tool and the diffable program is its product; the
+  in-app Post gate (M1.7b) blocks on them instead. Why: the Prime
+  Directive's two consumers need two severities; one stream, one
+  source of truth. Cost: the 1.7b gate must remember to fail where
+  the CLI passed - planned, this is the decision it inherits.
+
 ## M1.6 — drilling: cycles, hole recognition, canned-cycle representation (commit `feat(app,ui): drilling - hole recognition, cycles, and canned-cycle representation (M1.6)`)
 
 - **Cycles ride alongside the moves, not instead of them.** A drill
