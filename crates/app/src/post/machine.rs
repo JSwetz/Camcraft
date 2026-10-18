@@ -1,0 +1,73 @@
+//! The machine definition - our `.mch` role.
+//!
+//! Provenance: a JSON file carrying capability flags and a kinematics
+//! tree (head → axes → table), a layout specced from Autodesk's
+//! published post-processor documentation (behavior only, per the
+//! Clean-Room Protocol). The grammar and every key name are ours.
+
+use serde_json::{json, Value};
+
+/// Parse the file text (syntax only; absent fields default at read
+/// time, so a minimal file is legal).
+pub fn from_json(text: &str) -> Result<Value, serde_json::Error> {
+    serde_json::from_str(text)
+}
+
+/// Walk a path of object keys; `None` on any missing or mismatched hop.
+fn get<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut cur = v;
+    for k in path {
+        cur = cur.get(*k)?;
+    }
+    Some(cur)
+}
+
+fn f64_or(v: Option<&Value>, default: f64) -> f64 {
+    v.and_then(|x| x.as_f64()).unwrap_or(default)
+}
+
+/// The flattened object the script's `machine` global sees, per the
+/// format doc: name, rate maxima, spindle bound, coolant names.
+pub fn script_props(m: &Value) -> Value {
+    // An axes-array form contributes the max rapid across axes (the
+    // post uses rapidRate as a ceiling, so the max is the permissive
+    // bound).
+    let axes_rapid = get(m, &["kinematics", "static", "axes"])
+        .and_then(Value::as_array)
+        .map(|axes| {
+            axes.iter()
+                .map(|a| f64_or(get(a, &["speeds", "rapid"]), 0.0))
+                .fold(0.0_f64, f64::max)
+        })
+        .unwrap_or(0.0);
+    let rapid = f64_or(get(m, &["rapidRate"]), 0.0).max(axes_rapid);
+    let feed = f64_or(get(m, &["feedRateMax"]), 0.0);
+    let spindle = f64_or(
+        get(m, &["kinematics", "static", "head", "spindle", "max"]).or(get(m, &["spindleMax"])),
+        0.0,
+    );
+    let coolants: Vec<Value> = get(m, &["kinematics", "static", "head", "toolStation", "coolants"])
+        .or(get(m, &["coolants"]))
+        .and_then(Value::as_array)
+        .map(|c| {
+            c.iter()
+                .map(|e| {
+                    e.as_str().map(Value::from).unwrap_or_else(|| {
+                        json!({
+                            "name": get(e, &["name"]).and_then(Value::as_str).unwrap_or(""),
+                            "mCode": get(e, &["mCode"]).and_then(Value::as_str).unwrap_or(""),
+                        })
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({
+        "name": get(m, &["name"]).and_then(Value::as_str).unwrap_or(""),
+        "capabilities": get(m, &["capabilities"]).cloned().unwrap_or_else(|| json!({})),
+        "rapidRate": f64::max(rapid, axes_rapid),
+        "feedRateMax": feed,
+        "spindleMax": spindle,
+        "coolants": coolants,
+    })
+}

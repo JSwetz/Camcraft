@@ -1,0 +1,234 @@
+//! The post script host: boa_engine with our own JS prelude.
+//!
+//! Provenance: the lifecycle-hook *contract* follows the published
+//! Fusion 360 post architecture (behavior only, per the Clean-Room
+//! Protocol); everything below - the shim text, the property names, the
+//! `OUT` buffer design - is ours, written for this repo. No vendor
+//! script text or engine code is reproduced.
+//!
+//! Design note: boa's host functions cannot capture environment
+//! (`NativeFunction::from_fn_ptr` is a bare `fn`), so the prelude is
+//! pure JS and the Rust side *pulls*: it sets the globals
+//! (`properties`, `currentPosition`, `machine`), calls the hooks, and
+//! reads the output buffer back as JSON. One direction per seam.
+
+use super::PostError;
+use boa_engine::{Context, JsValue, Source};
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+/// The JS shim every script sees before its own text. Original,
+/// in-repo; specced by `docs/CNC-INTERMEDIATE.md`.
+pub const PRELUDE: &str = r#"
+var OUT = [];
+var MESSAGES = [];
+var LINE = "";
+var properties = {};
+var W = properties;
+var currentPosition = { X: 0, Y: 0, Z: 0 };
+var machine = { name: "", rapidRate: 0, feedRateMax: 0, spindleMax: 0, coolants: [] };
+function _flushLine() { if (LINE !== "") { OUT.push(LINE); LINE = ""; } }
+function writeln(s) { if (s !== undefined) LINE += String(s); _flushLine(); }
+function write(s) { if (s !== undefined) LINE += String(s); }
+function writeBlock() {
+  _flushLine();
+  var parts = [];
+  for (var i = 0; i < arguments.length; i++) {
+    var a = arguments[i];
+    if (a === undefined || a === null || a === "") continue;
+    parts.push(String(a));
+  }
+  if (parts.length > 0) OUT.push(parts.join(" "));
+}
+function writeWord(w) { if (w !== undefined && w !== null && w !== "") write(String(w)); }
+function writeAddress(letter, value, dp) {
+  if (value === undefined || value === null) return;
+  write(String(letter) + formatUnit(Number(value), dp));
+}
+function writeComment(s) { writeln("(" + String(s) + ")"); }
+function writeBlankLine() { _flushLine(); OUT.push(""); }
+function writeOutput(s) { write(s); }
+function message(s) { MESSAGES.push(String(s)); }
+function getProperty(k) { return properties[k]; }
+function setProperty(k, v) { properties[k] = v; }
+function formatUnit(v, dp) {
+  if (typeof v !== "number" || !isFinite(v)) return "0";
+  if (dp === undefined) dp = 3;
+  var s = v.toFixed(dp);
+  if (s.indexOf(".") >= 0) { s = s.replace(/0+$/, "").replace(/\.$/, ""); }
+  if (s === "-0") s = "0";
+  return s;
+}
+function formatMotion(v) { return formatUnit(v, 3); }
+function formatFeed(v) {
+  if (typeof v !== "number" || !isFinite(v) || v <= 0) return "0";
+  return String(Math.round(v));
+}
+function onComment(s) { writeln(s); }
+// The reference-era language-version pragma: accepted and ignored,
+// because the engine (not the script) decides semantics.
+function setLanguageVersion(_v) { return 0; }
+"#;
+
+/// Strict boolean tests for hook returns (an `undefined` from a
+/// missing hook is neither - only a literal `false` swallows).
+#[must_use]
+pub fn is_true(v: &JsValue) -> bool {
+    v.as_boolean() == Some(true)
+}
+
+#[must_use]
+pub fn is_false(v: &JsValue) -> bool {
+    v.as_boolean() == Some(false)
+}
+
+/// The hook names the engine may call, per the format doc.
+pub const HOOKS: &[&str] = &[
+    "onOpen",
+    "onParameter",
+    "onSection",
+    "onSectionEnd",
+    "onCommand",
+    "onRapid",
+    "onLinear",
+    "onCircular",
+    "onPlunge",
+    "onCycle",
+    "onCyclePoint",
+    "onCycleEnd",
+    "onDwell",
+    "onSpindleSpeed",
+    "onRadiusCompensation",
+    "onComment",
+    "onClose",
+];
+
+/// One loaded post script.
+pub struct Script {
+    ctx: Context,
+    present: Vec<(&'static str, bool)>,
+}
+
+impl Script {
+    /// Load the prelude plus one `.cps` text. A syntax error is a clean
+    /// refusal, never a half-defined script.
+    pub fn load(cps: &str) -> Result<Self, PostError> {
+        let mut ctx = Context::default();
+        let src = format!("{PRELUDE}\n{cps}");
+        if let Err(e) = ctx.eval(Source::from_bytes(src.as_bytes())) {
+            return Err(PostError::Script(format!("{e}")));
+        }
+        let mut s = Self {
+            ctx,
+            present: Vec::new(),
+        };
+        let mut present = Vec::new();
+        for h in HOOKS {
+            let yes = s
+                .eval(&format!("typeof {h} === \"function\""))
+                .map(|v| is_true(&v))
+                .unwrap_or(false);
+            present.push((*h, yes));
+        }
+        s.present = present;
+        Ok(s)
+    }
+
+    fn has(&self, name: &str) -> bool {
+        self.present.iter().any(|(h, yes)| *h == name && *yes)
+    }
+
+    fn eval(&mut self, src: &str) -> Result<JsValue, PostError> {
+        self.ctx
+            .eval(Source::from_bytes(src.as_bytes()))
+            .map_err(|e| PostError::Script(format!("{e}")))
+    }
+
+    /// Publish the flattened machine object once.
+    pub fn set_machine(&mut self, m: &Value) -> Result<(), PostError> {
+        self.eval(&format!("machine = {m};"))?;
+        Ok(())
+    }
+
+    /// Publish this record's property object (params + record +
+    /// position keys), keeping the `W` alias honest.
+    pub fn set_properties(&mut self, props: &BTreeMap<String, Value>) -> Result<(), PostError> {
+        let obj: serde_json::Map<String, Value> =
+            props.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        self.eval(&format!(
+            "properties = {}; W = properties;",
+            Value::Object(obj)
+        ))?;
+        Ok(())
+    }
+
+    pub fn set_current(&mut self, x: f64, y: f64, z: f64) -> Result<(), PostError> {
+        self.eval(&format!(
+            "currentPosition = {{ X: {}, Y: {}, Z: {} }};",
+            lit(x),
+            lit(y),
+            lit(z)
+        ))?;
+        Ok(())
+    }
+
+    /// Call a hook by name with raw argument text ("" for none); the
+    /// missing-hook case is a no-op returning undefined. A JS throw is
+    /// a `Script` error - the Prime Directive's refusal shape.
+    pub fn call(&mut self, name: &str, args: &str) -> Result<JsValue, PostError> {
+        if !self.has(name) {
+            return Ok(JsValue::undefined());
+        }
+        self.eval(&format!("{name}({args})"))
+    }
+
+    /// True when `name` exists (used for the onPlunge preference).
+    pub fn hook_exists(&self, name: &str) -> bool {
+        self.has(name)
+    }
+
+    /// Lines flushed so far (the driver's section boundary marker).
+    /// Open partial lines count as flushed: a hook that ends a record
+    /// mid-line still wrote a line of the program.
+    pub fn out_len(&mut self) -> Result<usize, PostError> {
+        let v = self.eval("(_flushLine(), OUT.length)")?;
+        Ok(v.as_number().map(|n| n.max(0.0) as usize).unwrap_or(0))
+    }
+
+    /// Pull the finished line buffer and the `message()` log.
+    pub fn drain(&mut self) -> Result<(Vec<String>, Vec<String>), PostError> {
+        let out = self.pull("OUT")?;
+        let msgs = self.pull("MESSAGES")?;
+        Ok((out, msgs))
+    }
+
+    fn pull(&mut self, global: &str) -> Result<Vec<String>, PostError> {
+        self.eval("_flushLine();")?; // any open line is program text, not lost
+        let v = self.eval(global)?;
+        let j = v
+            .to_json(&mut self.ctx)
+            .map_err(|e| PostError::Script(format!("{e}")))?
+            .unwrap_or(Value::Array(vec![]));
+        Ok(match j {
+            Value::Array(items) => items
+                .iter()
+                .map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .collect(),
+            _ => Vec::new(),
+        })
+    }
+}
+
+/// A finite f64 as JS literal text; a non-finite one is the driver's
+/// bug, surfaced as zero rather than as invalid JS (`NaN` parses, but
+/// `null` is the honest CAM-side shape for "no value").
+fn lit(v: f64) -> String {
+    if v.is_finite() {
+        format!("{v}")
+    } else {
+        "null".into()
+    }
+}
