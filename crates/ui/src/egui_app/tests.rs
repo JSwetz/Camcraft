@@ -534,6 +534,28 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
+        (
+            // A drill has no climb (the cycle owns the retract), no
+            // Leads & Links (no wall to enter), and its Passes are the
+            // cycle's own numbers - the tab law this row pins.
+            "Drill",
+            vec![
+                ("Geometry", vec!["Click selects:", "Holes", "Detect holes"]),
+                (
+                    "Heights",
+                    vec![
+                        "Clearance Z",
+                        "R plane (feed starts here)",
+                        "Retract plane (between holes)",
+                        "Hop below clearance",
+                        "Depth",
+                        "Override the hole floors",
+                    ],
+                ),
+                ("Passes", vec!["Cycle", "Peck depth", "Dwell at bottom (s)"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)"]),
+            ],
+        ),
     ];
     for (ki, (kind_name, sections)) in table.iter().enumerate() {
         let cur = harness.state().state.op_ui.params.clone();
@@ -1151,6 +1173,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Create(2), "Add a 2D Pocket operation"),
         (Cmd::Create(3), "Add a Slot operation"),
         (Cmd::Create(4), "Add a Trace operation"),
+        (Cmd::Create(5), "Add a Drill operation"),
         (Cmd::Undo, "Undo\tCtrl+Z"),
         (Cmd::Redo, "Redo\tCtrl+Y"),
         (Cmd::Run, "Generate the selected operation"),
@@ -1484,4 +1507,148 @@ fn the_cube_leaves_the_viewport_gestures_alone() {
         "selected Block",
         "the ordinary pick law must survive the cube"
     );
+}
+
+// ---------------------------------------------------------- M1.6: drilling
+
+/// The 40x40x8 block bored through by a 16-facet bore - the app's own
+/// recognition fixture, imported here so the UI law runs against the
+/// same pixels a STEP file hands us.
+fn bored_block() -> hsmworks_app::geometry::Mesh {
+    use hsmworks_app::geometry::{Point3, Triangle};
+    let tau = std::f64::consts::TAU;
+    let bp = |i: usize, z: f64| {
+        let a = tau * (i % 16) as f64 / 16.0;
+        Point3::new(12.0 * a.cos(), 12.0 * a.sin(), z)
+    };
+    // Bore vertices pushed radially onto the 40x40 square: the diagonal
+    // ones carry a corner, so each side's wall quads share its plane.
+    let op = |i: usize, z: f64| {
+        let a = tau * (i % 16) as f64 / 16.0;
+        let (x, y) = (a.cos(), a.sin());
+        let s = x.abs().max(y.abs());
+        Point3::new(x * 20.0 / s, y * 20.0 / s, z)
+    };
+    let quad = |a: Point3, b: Point3, c: Point3, d: Point3, facets: &mut Vec<Triangle>| {
+        facets.push(Triangle::new(a, b, c));
+        facets.push(Triangle::new(a, c, d));
+    };
+    let mut facets = Vec::new();
+    for i in 0..16 {
+        let j = i + 1;
+        // Caps: annuli wound outward (+z top, -z bottom).
+        quad(bp(j, 8.0), bp(i, 8.0), op(i, 8.0), op(j, 8.0), &mut facets);
+        quad(bp(i, 0.0), bp(j, 0.0), op(j, 0.0), op(i, 0.0), &mut facets);
+        // Bore wall faces the axis; the block wall faces away.
+        quad(bp(i, 8.0), bp(j, 8.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
+        quad(op(j, 8.0), op(i, 8.0), op(i, 0.0), op(j, 0.0), &mut facets);
+    }
+    hsmworks_app::geometry::Mesh { facets }
+}
+
+#[test]
+fn ribbon_drill_cell_creates_a_drill_operation() {
+    let mut harness = shell_harness();
+    harness.run();
+    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        Vec2::new(1280.0, super::shell::RIBBON_H),
+    ));
+    let drill = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Create(5))
+        .expect("the Create group carries a sixth, Drill cell");
+    let at = drill.rect.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let op = model::find_by_name(&st.world, "Operation2")
+        .as_ref()
+        .and_then(|e| model::operation_of(&st.world, e))
+        .expect("the Drill cell created its operation through the actions law");
+    // Empty holes at creation is legal (the page shows the list's
+    // placeholder); the generator is what refuses, at Generate time.
+    let OpParams::Drill { holes, cycle, .. } = &op.params else {
+        panic!("the sixth cell must create a Drill operation, got {:?}", op.params.kind())
+    };
+    assert!(holes.is_empty(), "a fresh drill starts without a hole list");
+    assert_eq!(*cycle, hsmworks_app::drilling::CycleChoice::Auto);
+}
+
+#[test]
+fn detect_holes_refuses_recognizes_and_undo_empties_again() {
+    let mut harness = shell_harness();
+    crate::actions::add_operation(&mut harness.state_mut().state, 5);
+    harness.run_steps(2);
+    // The pane now targets the new Drill op; its Geometry tab is the
+    // Detect button's home, and the draft reads the created params.
+    {
+        let sh = harness.state_mut();
+        sh.state.op_tab = 0;
+        sh.state.sync_ops_ui();
+    }
+    harness.run();
+
+    // 1. Refusal, honest and scoped: the op still stands on the stock,
+    // and a stock's box walls are not holes.
+    harness.get_by_label("Detect holes").click();
+    harness.run_steps(2);
+    {
+        let st = &harness.state().state;
+        assert!(st.pending.is_empty(), "a refused detection must queue nothing");
+        assert!(
+            st.error_for(crate::state::ErrorScope::Operation)
+                .is_some_and(|m| m.contains("no drilled holes")),
+            "the refusal must name the fix, got: {}",
+            st.status
+        );
+    }
+
+    // 2. Aim the op at a plate that does have a bore, and click again.
+    // The import goes straight through history (the mesh-import command
+    // has no queue arm - the file dialog's worker executes it this way
+    // too); the retarget rides the queue like any pane edit.
+    {
+        let sh = harness.state_mut();
+        sh.state.pending.push_back(CommandKind::EditOperationLinks {
+            name: "Operation2".into(),
+            tool: None,
+            src: Some(SrcRef::Entity("Plate".into())),
+        });
+        let (world, history) = (&sh.state.world, &mut sh.state.history);
+        history.execute(
+            world,
+            hsmworks_app::commands::ImportModel::from_mesh("Plate", bored_block()),
+        );
+    }
+    harness.run_steps(2);
+    harness.get_by_label("Detect holes").click();
+    harness.run_steps(2);
+    let op_params = {
+        let st = &harness.state().state;
+        model::find_by_name(&st.world, "Operation2")
+            .as_ref()
+            .and_then(|e| model::operation_of(&st.world, e))
+            .expect("Operation2 survives")
+            .params
+            .clone()
+    };
+    let OpParams::Drill { holes, .. } = &op_params else { unreachable!() };
+    assert_eq!(holes.len(), 1, "the bore is the plate's only hole");
+    assert!(holes[0].through && (holes[0].radius - 12.0).abs() < 1e-6);
+    // The draft mirrors what the world now holds - rows show, no lie.
+    assert_eq!(harness.state().state.op_ui.params, op_params);
+
+    // 3. Undo retires the detection alone - holes were a command.
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let op = model::find_by_name(&st.world, "Operation2")
+        .as_ref()
+        .and_then(|e| model::operation_of(&st.world, e))
+        .unwrap();
+    let OpParams::Drill { holes, .. } = &op.params else { unreachable!() };
+    assert!(holes.is_empty(), "undo must empty the detected list again");
 }

@@ -1136,7 +1136,8 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         operation::OpParams::Contour { retract_z, .. } => Some(*retract_z),
         operation::OpParams::Pocket { retract_z, .. }
         | operation::OpParams::Slot { retract_z, .. }
-        | operation::OpParams::Trace { retract_z, .. } => *retract_z,
+        | operation::OpParams::Trace { retract_z, .. }
+        | operation::OpParams::Drill { retract_z, .. } => *retract_z,
         operation::OpParams::Face { .. } => None,
     };
     if let Some(hop) = hop
@@ -1206,6 +1207,34 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                     src: *bottom_z,
                     rgb: CUT_RGB,
                     name: "Bottom",
+                    corner: 3,
+                    skip_rect: false,
+                });
+            }
+        }
+        // A drill's Top is its R plane - where the feed move starts in
+        // every hole - and its Bottom exists only as an override: the
+        // hole floors ride the holes themselves, and a floor per hole
+        // is not a plane.
+        operation::OpParams::Drill { top_z, bottom_z, .. } => {
+            if let Some(z) = top_z.z(world) {
+                out.push(HeightPlane {
+                    z,
+                    src: *top_z,
+                    rgb: REGION_RGB,
+                    name: "R plane",
+                    corner: 2,
+                    skip_rect: stands(z),
+                });
+            }
+            if let Some(b) = bottom_z
+                && let Some(z) = b.z(world)
+            {
+                out.push(HeightPlane {
+                    z,
+                    src: *b,
+                    rgb: CUT_RGB,
+                    name: "Depth",
                     corner: 3,
                     skip_rect: false,
                 });

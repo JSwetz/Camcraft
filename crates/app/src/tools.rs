@@ -3,10 +3,11 @@
 //!
 //! Provenance: end mill / ball nose / bull nose geometry and the
 //! diameter-flute-shank-holder stack are standard machine-tool handbook
-//! descriptions. The catalog's sizes are ordinary metric stock; the
-//! speeds and feeds are our own numbers, set for aluminum with carbide
-//! tooling at typical chip loads - general published practice, no vendor
-//! library copied.
+//! descriptions; the drill point angle and the tap pitch are the handbook
+//! cone and the published ISO 261 metric coarse pitches. The catalog's
+//! sizes are ordinary metric stock; the speeds and feeds are our own
+//! numbers, set for aluminum with carbide tooling at typical chip loads -
+//! general published practice, no vendor library copied.
 //!
 //! Pure module: no flecs, no I/O. Commands persist a `Tool` on a `ToolDef`
 //! component; the operation layer reads radii and lengths out of it for
@@ -19,6 +20,15 @@ pub enum ToolKind {
     EndMill,
     BallNose,
     BullNose,
+    /// Twist drill: a conical point (`tip_angle` included degrees) behind
+    /// a straight-diameter flute. Only `Drill` reads `tip_angle`.
+    Drill,
+    /// Rigid tap: a thread-forming cylinder; `pitch` (mm/rev) is what the
+    /// tapping cycle feeds at - rpm x pitch. Only `Tap` reads `pitch`.
+    Tap,
+    /// Boring bar: single-point, hole-sized by the slide, profiled as a
+    /// plain cylinder. Geometry beyond the diameter is not modeled.
+    Bore,
 }
 
 /// One rotating cutter, coaxial with the spindle: a cutting body of
@@ -32,6 +42,13 @@ pub struct Tool {
     /// Corner radius: 0 for a square end mill, d/2 for a ball, between
     /// for a bull.
     pub corner_r: f64,
+    /// Point angle in degrees, included across the cone: 118 is the
+    /// general-purpose twist-drill standard. Inert unless kind is Drill -
+    /// every other kind reads it as 0.0 and draws flat.
+    pub tip_angle: f64,
+    /// Thread pitch in mm per turn (ISO coarse for the catalog taps).
+    /// Inert unless kind is Tap, where the cycle feeds at rpm x pitch.
+    pub pitch: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -54,6 +71,8 @@ impl Tool {
         let fin = [
             self.diameter,
             self.corner_r,
+            self.tip_angle,
+            self.pitch,
             self.flute_len,
             self.shank_d,
             self.shank_len,
@@ -68,6 +87,8 @@ impl Tool {
             && self.diameter <= 500.0
             && self.corner_r >= 0.0
             && self.corner_r <= self.diameter * 0.5
+            && self.tip_angle < 180.0
+            && self.pitch >= 0.0
             && self.flute_len > 0.0
             && self.shank_d >= 0.0
             && self.shank_len >= 0.0
@@ -75,6 +96,14 @@ impl Tool {
             && self.holder_len >= 0.0
             && self.rpm > 0.0
             && self.feed > 0.0
+            && match self.kind {
+                // A point that cannot self-center is not a drill, and a
+                // tap with no thread pitch has no feed the cycle could
+                // derive. Other kinds carry both fields inert.
+                ToolKind::Drill => self.tip_angle > 60.0,
+                ToolKind::Tap => self.pitch > 0.0,
+                _ => true,
+            }
     }
 
     /// The same tool as the verifier sees it: coaxial radii upward from
@@ -101,12 +130,14 @@ impl Tool {
     ///
     /// Tip by kind: a flat rim on an end mill, a sampled hemispherical
     /// dome on a ball nose, a toroidal corner (clamped to what the
-    /// diameter and the flute allow) on a bull nose. Degenerate numbers
-    /// (a half-typed draft) yield a shorter picture, never a NaN and
-    /// never a panic - the drawing Prime Directive mirrors `is_sane`.
+    /// diameter and the flute allow) on a bull nose, a cone on a twist
+    /// drill (inert `tip_angle` of 0 reads as the flat it degenerates
+    /// to), and a plain cylinder on a tap or boring bar. Degenerate
+    /// numbers (a half-typed draft) yield a shorter picture, never a NaN
+    /// and never a panic - the drawing Prime Directive mirrors `is_sane`.
     ///
-    /// Provenance: our own `Tool` schema; the three tip shapes are the
-    /// standard machine-tool handbook side views.
+    /// Provenance: our own `Tool` schema; the tip shapes are the standard
+    /// machine-tool handbook side views.
     #[must_use]
     pub fn profile(&self) -> Vec<(f64, f64)> {
         let r = self.diameter.max(0.0) * 0.5;
@@ -135,7 +166,19 @@ impl Tool {
                 }
                 add_pt(&mut p, cr, r);
             }
-            ToolKind::EndMill => add_pt(&mut p, 0.0, r),
+            ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore => add_pt(&mut p, 0.0, r),
+            ToolKind::Drill => {
+                // The point cone: apex at the tip center, opening at
+                // half the included angle, meeting the full radius at
+                // z = r / tan(tip/2) - or the flute top first, clamped,
+                // with the straight land above drawn by the shared band
+                // step. Nonsense angles (0, negative) read as a flat.
+                let tan_half = (self.tip_angle.to_radians() * 0.5).tan();
+                if tan_half > 0.0 && tan_half.is_finite() {
+                    let zr = (r / tan_half).min(zc);
+                    add_pt(&mut p, zr, (zr * tan_half).min(r));
+                }
+            }
         }
         add_pt(&mut p, zc, r);
         let sr = self.shank_d.max(0.0) * 0.5;
@@ -179,6 +222,8 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         kind,
         diameter,
         corner_r,
+        tip_angle: 0.0,
+        pitch: 0.0,
         flute_len,
         shank_d,
         shank_len: 40.0,
@@ -187,6 +232,12 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         material_group: "aluminum".into(),
         rpm,
         feed,
+    };
+    // Cycle tools: straight-shank bodies (a jobber drill's shank is its
+    // own diameter), no corner radius, 118-degree points, ISO coarse
+    // pitches; a tap's feed number is the rpm x pitch starting value.
+    let cy = |kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| {
+        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed }
     };
     vec![
         ("EM-0200-2FL", em(2.0, 0.0, ToolKind::EndMill, 6.0, 4.0, 18000.0, 600.0)),
@@ -199,6 +250,13 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("BN-0600", em(6.0, 3.0, ToolKind::BallNose, 15.0, 8.0, 9000.0, 1500.0)),
         ("BN-1000", em(10.0, 5.0, ToolKind::BallNose, 22.0, 10.0, 6000.0, 2000.0)),
         ("BB-1000-R1", em(10.0, 1.0, ToolKind::BullNose, 20.0, 10.0, 6500.0, 2200.0)),
+        ("DR-0200", cy(ToolKind::Drill, 2.0, 118.0, 0.0, 6.0, 2.0, 15000.0, 150.0)),
+        ("DR-0300", cy(ToolKind::Drill, 3.0, 118.0, 0.0, 9.0, 3.0, 12000.0, 120.0)),
+        ("DR-0400", cy(ToolKind::Drill, 4.0, 118.0, 0.0, 12.0, 4.0, 10000.0, 130.0)),
+        ("DR-0600", cy(ToolKind::Drill, 6.0, 118.0, 0.0, 18.0, 6.0, 7500.0, 115.0)),
+        ("TAP-M4", cy(ToolKind::Tap, 4.0, 0.0, 0.7, 18.0, 4.5, 800.0, 560.0)),
+        ("TAP-M6", cy(ToolKind::Tap, 6.0, 0.0, 1.0, 20.0, 6.0, 600.0, 600.0)),
+        ("BR-1000", cy(ToolKind::Bore, 10.0, 0.0, 0.0, 20.0, 10.0, 4000.0, 400.0)),
     ]
 }
 
@@ -224,6 +282,14 @@ mod tests {
         assert!(!Tool { corner_r: base.diameter, ..base.clone() }.is_sane());
         assert!(!Tool { flute_len: -1.0, ..base.clone() }.is_sane());
         assert!(!Tool { rpm: 0.0, ..base }.is_sane());
+        // Kind-conditional: a drill point must self-center, a tap must
+        // have a thread to derive its feed from.
+        let drill = catalog().into_iter().find(|(n, _)| *n == "DR-0400").unwrap().1;
+        assert!(!Tool { tip_angle: 200.0, ..drill.clone() }.is_sane());
+        assert!(!Tool { tip_angle: 45.0, ..drill.clone() }.is_sane());
+        assert!(!Tool { pitch: -1.0, ..drill }.is_sane());
+        let tap = catalog().into_iter().find(|(n, _)| *n == "TAP-M6").unwrap().1;
+        assert!(!Tool { pitch: 0.0, ..tap }.is_sane());
     }
 
     /// The preview-drawing law: the profile's band breakpoints are the
@@ -313,5 +379,16 @@ mod tests {
         let em = catalog().into_iter().find(|(n, _)| *n == "EM-0600-4FL").unwrap().1;
         let p = em.profile();
         assert_eq!(&p[..2], &[(0.0, 0.0), (0.0, em.diameter * 0.5)]);
+        // Drill: a cone from the axis, meeting full radius at the
+        // handbook height r / tan(tip/2), then the straight land.
+        let dr = catalog().into_iter().find(|(n, _)| *n == "DR-0400").unwrap().1;
+        let p = dr.profile();
+        let (r, zr) = (dr.diameter * 0.5, dr.diameter * 0.5 / (118.0_f64.to_radians() * 0.5).tan());
+        assert!(p[1].0 > 0.0 && p[1].1 > 0.0, "a drill opens from a point, not a flat rim");
+        assert!(p.iter().any(|&(z, rad)| (z - zr).abs() < 1e-6 && (rad - r).abs() < 1e-6));
+        // Tap: a plain cylinder - pitch is a feed number, never drawn.
+        let tap = catalog().into_iter().find(|(n, _)| *n == "TAP-M6").unwrap().1;
+        let p = tap.profile();
+        assert_eq!(&p[..2], &[(0.0, 0.0), (0.0, tap.diameter * 0.5)]);
     }
 }

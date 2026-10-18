@@ -26,6 +26,9 @@
 //! - Contour / Pocket / Trace: the source's cross-section at `top_z`
 //!   (`slice::slice`, half-open; a grazing slice is retried one micron in).
 //! - Slot: the closed-form stadium between the two endpoints.
+//! - Drill: the XY silhouette again, plus one rim loop per hole whose rim
+//!   the projection did not already carry - the rim is what makes the
+//!   gouge law's tangency test mean something at a plunge.
 //!
 //! Meshes are sliced because STEP import is tessellate-only (no curve data
 //! survives), which is also what makes STL, OBJ and STEP sources take the
@@ -46,6 +49,7 @@ use std::hash::Hasher;
 use flecs_ecs::prelude::World;
 
 use crate::cl::Toolpath;
+use crate::drilling::{self, CycleChoice, Hole};
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Triangle;
 use crate::geometry::feature::{self, LoopKind};
@@ -119,6 +123,7 @@ pub enum OpType {
     Pocket,
     Slot,
     Trace,
+    Drill,
 }
 
 impl core::fmt::Display for OpType {
@@ -129,6 +134,7 @@ impl core::fmt::Display for OpType {
             OpType::Pocket => "2D Pocket",
             OpType::Slot => "Slot",
             OpType::Trace => "Trace",
+            OpType::Drill => "Drill",
         };
         f.write_str(s)
     }
@@ -323,7 +329,8 @@ pub fn region_z(world: &flecs_ecs::prelude::World, params: &OpParams) -> Option<
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
         | OpParams::Slot { top_z, .. }
-        | OpParams::Trace { top_z, .. } => resolve_height(world, *top_z),
+        | OpParams::Trace { top_z, .. }
+        | OpParams::Drill { top_z, .. } => resolve_height(world, *top_z),
     }
 }
 
@@ -390,6 +397,16 @@ pub fn resolve_params(
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),
+            None,
+            opt("Retract Z", *retract_z)?,
+        ),
+        // The drill bottom is an override of the whole pattern, not a
+        // requirement: each hole's own floor is the default depth, so an
+        // unresolved (None) bottom is the normal shape, not a failure.
+        OpParams::Drill { clearance_z, retract_z, top_z, bottom_z, .. } => (
+            req("Clearance Z", *clearance_z)?,
+            Some(req("Top of Part Z", *top_z)?),
+            opt("Bottom Z", *bottom_z)?,
             None,
             opt("Retract Z", *retract_z)?,
         ),
@@ -522,6 +539,31 @@ pub enum OpParams {
         plunge_feed: f64,
         climb: bool,
     },
+    /// Hole machining. The hole list is params data - recognized from the
+    /// model by an action in the panel, or typed - so it is undoable,
+    /// visible, and part of the stamp; a model edit that moves the holes
+    /// turns the op Stale through the source digest, never by re-running
+    /// recognition behind the user's back. `bottom_z` overrides the depth
+    /// of every hole at once; `None` (the normal shape) machines each
+    /// hole to its own floor, plus the through-hole exit allowance.
+    Drill {
+        clearance_z: Height,
+        /// Hop plane between holes; `None` hops to clearance, like the
+        /// pocket family.
+        retract_z: Option<Height>,
+        /// The cycle's R plane: where the feed move starts in each hole.
+        top_z: Height,
+        bottom_z: Option<Height>,
+        cycle: CycleChoice,
+        /// Depth per peck; `0.0` lets the Auto law pick.
+        peck: f64,
+        /// Seconds at the bottom; posted as the dwell word on the cycles
+        /// that honor one.
+        dwell: f64,
+        feed: f64,
+        plunge_feed: f64,
+        holes: Vec<Hole>,
+    },
 }
 
 impl OpParams {
@@ -533,6 +575,7 @@ impl OpParams {
             OpParams::Pocket { .. } => OpType::Pocket,
             OpParams::Slot { .. } => OpType::Slot,
             OpParams::Trace { .. } => OpType::Trace,
+            OpParams::Drill { .. } => OpType::Drill,
         }
     }
 
@@ -544,7 +587,8 @@ impl OpParams {
             | OpParams::Contour { clearance_z, .. }
             | OpParams::Pocket { clearance_z, .. }
             | OpParams::Slot { clearance_z, .. }
-            | OpParams::Trace { clearance_z, .. } => *clearance_z,
+            | OpParams::Trace { clearance_z, .. }
+            | OpParams::Drill { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -559,7 +603,8 @@ impl OpParams {
             OpParams::Contour { top_z, .. }
             | OpParams::Pocket { top_z, .. }
             | OpParams::Slot { top_z, .. }
-            | OpParams::Trace { top_z, .. } => *top_z,
+            | OpParams::Trace { top_z, .. }
+            | OpParams::Drill { top_z, .. } => *top_z,
         }
     }
 
@@ -689,6 +734,34 @@ impl OpParams {
                     && pos(*stepdown)
                     && pos(*feed)
                     && pos(*plunge_feed)
+            }
+            OpParams::Drill {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                peck,
+                dwell,
+                feed,
+                plunge_feed,
+                holes,
+                ..
+            } => {
+                // An empty hole list is sane here: a new Drill op exists
+                // before its holes are detected, and creation must be
+                // allowed to get the panel on screen. Generation is the
+                // gate that refuses it, by name.
+                clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_none_or(|b| b.is_sane())
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && peck.is_finite()
+                    && *peck >= 0.0
+                    && dwell.is_finite()
+                    && *dwell >= 0.0
+                    && holes.iter().all(|h| h.is_usable())
             }
         }
     }
@@ -901,6 +974,48 @@ impl OpParams {
                 h.write_u8(u8::from(*climb));
                 wh_opt(h, *retract_z);
             }
+            OpParams::Drill {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                cycle,
+                peck,
+                dwell,
+                feed,
+                plunge_feed,
+                holes,
+            } => {
+                h.write_u8(5);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh_opt(h, *bottom_z);
+                wh_opt(h, *retract_z);
+                for v in [*feed, *plunge_feed, *peck, *dwell] {
+                    w(h, v);
+                }
+                h.write_u8(match cycle {
+                    CycleChoice::Auto => 0,
+                    CycleChoice::Spot => 1,
+                    CycleChoice::Drill => 2,
+                    CycleChoice::Peck => 3,
+                    CycleChoice::Tap => 4,
+                    CycleChoice::Bore => 5,
+                    CycleChoice::BackBore => 6,
+                });
+                // The hole list is params data, so it digests: recognition
+                // output, a typed edit, or a moved model (whose re-
+                // detect changes the numbers) all mark the op Stale
+                // through here or through the source arm.
+                h.write_u32(holes.len() as u32);
+                for hole in holes {
+                    wp2(h, hole.xy);
+                    w(h, hole.radius);
+                    w(h, hole.entry_z);
+                    w(h, hole.floor_z);
+                    h.write_u8(u8::from(hole.through));
+                }
+            }
         }
     }
 }
@@ -959,6 +1074,9 @@ pub fn current_stamp(
         crate::tools::ToolKind::EndMill => 0,
         crate::tools::ToolKind::BallNose => 1,
         crate::tools::ToolKind::BullNose => 2,
+        crate::tools::ToolKind::Drill => 3,
+        crate::tools::ToolKind::Tap => 4,
+        crate::tools::ToolKind::Bore => 5,
     });
     for v in [
         tool.diameter,
@@ -970,6 +1088,16 @@ pub fn current_stamp(
         tool.holder_len,
     ] {
         w(&mut h, v);
+    }
+    // Kind-scoped numbers: a tool digests only what its kind reads. A
+    // tip_angle parked on a ball nose is inert data, and inert data must
+    // never make an operation look stale - the same law the profile and
+    // the cycles draw by. It also keeps every pre-M1.6 stamp value
+    // unchanged: no one-time churn for the milling kinds.
+    match tool.kind {
+        crate::tools::ToolKind::Drill => w(&mut h, tool.tip_angle),
+        crate::tools::ToolKind::Tap => w(&mut h, tool.pitch),
+        _ => {}
     }
     params.stamp_with(world, &mut h);
     match src {
@@ -1134,6 +1262,16 @@ fn material_of(world: &World, src: &SrcRef) -> Result<Material, GenError> {
     }
 }
 
+/// The hole list of one source, for the panel's Detect holes button:
+/// the SAME world-transformed facets generation machines, so what is
+/// detected is what will be drilled - a local-frame list would drift
+/// from a moved part. A pure read; the caller (the UI, through a
+/// command) decides what to do with the list.
+pub fn holes_of(world: &World, src: &SrcRef) -> Result<Vec<crate::drilling::Hole>, GenError> {
+    let m = material_of(world, src)?;
+    Ok(crate::drilling::recognize(&m.facets))
+}
+
 fn named_material(world: &World, name: &str, gone: &str) -> Result<Material, GenError> {
     let Some(entity) = model::find_by_name(world, name) else {
         return Err(GenError::Invalid(gone.to_string()));
@@ -1211,7 +1349,7 @@ fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> {
 #[must_use]
 pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
     if let SrcRef::Selection(items) = &op.src
-        && !matches!(op.params, OpParams::Slot { .. })
+        && !matches!(op.params, OpParams::Slot { .. } | OpParams::Drill { .. })
     {
         return selection_region(world, items, &op.params).ok();
     }
@@ -1239,7 +1377,9 @@ pub fn chains_of(world: &World, op: &Operation) -> Vec<Vec<Point2>> {
 /// The source dispatch shared by `generate` and `region_of`: a selection
 /// resolves its picked features, anything else slices its material, and
 /// Slot keeps its closed-form stadium regardless of source (its boundary
-/// is the two endpoints, not the model).
+/// is the two endpoints, not the model). Drill likewise ignores a
+/// selection source: its geometry is the hole list in the params, so
+/// picking features could only disagree with it.
 fn region_for_src(
     world: &World,
     src: &SrcRef,
@@ -1247,7 +1387,9 @@ fn region_for_src(
     material: &Material,
 ) -> Result<Region, GenError> {
     match src {
-        SrcRef::Selection(items) if !matches!(params, OpParams::Slot { .. }) => {
+        SrcRef::Selection(items)
+            if !matches!(params, OpParams::Slot { .. } | OpParams::Drill { .. }) =>
+        {
             selection_region(world, items, params)
         }
         _ => region_for(world, material, params),
@@ -1272,7 +1414,78 @@ fn region_for(world: &World, material: &Material, params: &OpParams) -> Result<R
             section(&material.facets, z)
         }
         OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
+        OpParams::Drill { holes, .. } => {
+            // The silhouette, plus a rim loop for every hole (a blind
+            // hole's mouth sits inside the material's shadow and the
+            // projection never sees it; a through wall does show up,
+            // but as the mesh's own coarse polygon). The rims are what
+            // make the gouge law's tangency test mean something at a
+            // plunge: d(center, rim) = hole radius, so a matched drill
+            // passes silent and an oversized tool is honestly flagged.
+            // A silhouette loop tracing a hole is REPLACED, not kept:
+            // a 16-facet wall's apothem sits a chord-sag inside its own
+            // radius - far more than the gouge law's slack at drill
+            // diameters - and the law would read that tessellation as
+            // tool bite. The hole's parameters are the truth here.
+            let base = slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)?;
+            if holes.is_empty() {
+                return Ok(base);
+            }
+            let mut loops: Vec<Loop> = base
+                .loops()
+                .iter()
+                .filter(|l| !holes.iter().any(|h| rim_is(l, *h)))
+                .cloned()
+                .collect();
+            for hole in holes {
+                loops.push(rim_loop(*hole)?);
+            }
+            Ok(Region::new(loops)?)
+        }
     }
+}
+
+/// Rim loop segments: enough that the chord sag below the circle,
+/// r·(1−cos(π/n)), stays under RIM_SAG_BUDGET - half the tolerance the
+/// gouge law grants, so a matched tool clears its own rim by the other
+/// half, never by an accident of the segment count. That is 48 sides at
+/// drill diameters and ~110 at a 12 mm bore radius; the floor keeps
+/// tiny holes from degenerating and the ceiling keeps huge ones cheap.
+const RIM_SAG_BUDGET: f64 = 0.005;
+const DRILL_RIM_SEGMENTS: usize = 48;
+const DRILL_RIM_MAX_SEGMENTS: usize = 4096;
+
+fn rim_segments(r: f64) -> usize {
+    let x = (RIM_SAG_BUDGET / r).clamp(0.0, 2.0);
+    let n = (std::f64::consts::PI / (1.0 - x).acos()).ceil() as usize;
+    n.clamp(DRILL_RIM_SEGMENTS, DRILL_RIM_MAX_SEGMENTS)
+}
+
+/// A polygonal circle at a hole's XY - the loop the rim of `h` adds to a
+/// drill region. `Region::new` orients by nesting, so the winding here
+/// is free.
+fn rim_loop(h: Hole) -> Result<Loop, GenError> {
+    let n = rim_segments(h.radius);
+    let mut pts = Vec::with_capacity(n);
+    for i in 0..n {
+        let th = std::f64::consts::TAU * i as f64 / n as f64;
+        pts.push(Point2::new(h.xy.x + h.radius * th.cos(), h.xy.y + h.radius * th.sin()));
+    }
+    Ok(Loop::new(pts)?)
+}
+
+/// Whether `l` is `h`'s rim already: enough vertices, and every one of
+/// them on the hole's circle within a band that forgives tessellation
+/// (the fitted radius and the sliced rim share the mesh's own vertices
+/// for a through wall; only quantization separates them). A square, a
+/// slot end, or a different concentric circle fails.
+fn rim_is(l: &Loop, h: Hole) -> bool {
+    let pts = l.points();
+    if pts.len() < 8 {
+        return false;
+    }
+    let tol = (0.02 * h.radius).max(0.1);
+    pts.iter().all(|p| ((p.x - h.xy.x).hypot(p.y - h.xy.y) - h.radius).abs() <= tol)
 }
 
 /// The shared refusal phrasing for an unresolved height, named by field.
@@ -2256,6 +2469,7 @@ fn stitch(mut a: Toolpath, mut b: Toolpath) -> Toolpath {
         first.from = to;
     }
     a.moves.append(&mut b.moves);
+    a.cycles.append(&mut b.cycles);
     a
 }
 
@@ -2295,7 +2509,13 @@ pub fn generate(
         .max(model::stock_world_aabb(world).map(|b| b.max.z).unwrap_or(f64::NEG_INFINITY));
 
     let mode = match op.params.kind() {
-        OpType::Face | OpType::Contour => Mode::Boundary,
+        // Drill verifies as Boundary on purpose: its region's rim loops
+        // put the gouge law's tangency test at the hole wall, where a
+        // matched drill passes and an oversized tool is flagged. What
+        // the move-by-move laws cannot see for a straight deep plunge
+        // (it clears its own kerf, so the band sampling never fires)
+        // the cycle reach law in `verify` checks over `path.cycles`.
+        OpType::Face | OpType::Contour | OpType::Drill => Mode::Boundary,
         OpType::Pocket | OpType::Slot => Mode::Area,
         OpType::Trace => Mode::Engrave,
     };
@@ -2487,6 +2707,26 @@ pub fn generate(
             )?;
             (region, path)
         }
+        OpParams::Drill { cycle, peck, dwell, feed, plunge_feed, holes, .. } => {
+            // No region feeds the generator - the hole list is the
+            // geometry - but the verify pass below needs one, and it is
+            // built the same shared way as every other kind's.
+            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let path = drilling::drill(&drilling::CycleParams {
+                clearance_z: hs.clearance,
+                r_z: req_z(hs.top, "Top of Part Z")?,
+                hop_z: hs.retract,
+                bottom_z: hs.bottom,
+                cycle: *cycle,
+                peck: *peck,
+                dwell: *dwell,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                tool: &tool,
+                holes,
+            })?;
+            (region, path)
+        }
     };
 
     let geom = tool.geom();
@@ -2500,7 +2740,7 @@ pub fn generate(
             stock_top_z,
             clearance_z: hs.clearance,
             stock_to_leave: match &op.params {
-                OpParams::Face { .. } | OpParams::Trace { .. } => 0.0,
+                OpParams::Face { .. } | OpParams::Trace { .. } | OpParams::Drill { .. } => 0.0,
                 OpParams::Contour { stock_to_leave, .. }
                 | OpParams::Pocket { stock_to_leave, .. }
                 | OpParams::Slot { stock_to_leave, .. } => *stock_to_leave,

@@ -34,7 +34,14 @@ source-form distributions.
     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
     USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## Tabler Icons (UI glyphs, assets/ui/*.png, loaded by crates/ui/src/egui_app/icons.rs)
+## Original artwork (assets/ui/drill.png)
+
+The drill-bit glyph is our own drawing, authored for M1.6 (no Tabler
+drill-bit exists; AGENTS.md's "operation-specific glyphs are drawn
+original when no generic set fits"). Public-domain subject, our rendering;
+no license notice owed, and it is not part of the Tabler set below.
+
+## Tabler Icons (UI glyphs, assets/ui/*.png except drill.png, loaded by crates/ui/src/egui_app/icons.rs)
 
 Outline glyphs from Tabler Icons (https://tabler-icons.io), version 3.49.0,
 MIT (below): recolored to white at load; shapes otherwise unmodified.

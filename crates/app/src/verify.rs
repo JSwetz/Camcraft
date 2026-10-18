@@ -9,7 +9,7 @@
 //! approximation, stated in full where it is used. No vendor source was
 //! consulted.
 //!
-//! Four checks, each with the exact condition that raises it:
+//! Five checks, each with the exact condition that raises it:
 //!
 //! - [`Warning::Crossing`] - two Feed moves whose Z ranges overlap cross
 //!   in XY. Proper crossings only: touching at a shared vertex (a closed
@@ -31,10 +31,17 @@
 //! - [`Warning::RapidInStock`] - a *lateral* rapid below the clearance
 //!   plane whose XY path still has material above it. Vertical rapids
 //!   are the tool retracting through its own kerf and stay exempt.
+//! - [`Warning::ShankHit`] again, from the cycle list: a hole whose
+//!   entry-to-bottom span exceeds flute + shank + holder pushes the
+//!   assembly below the entry surface no matter what the path looks
+//!   like. The move laws cannot see this at a matched drill - the
+//!   plunge sweeps exactly its own disc, so the hole's rim samples
+//!   fall inside the flute radius where law (c)'s annulus is empty -
+//!   which is why the reach law reads the cycles, not the moves.
 //!
 //! Conservative by design: it may warn where nothing is wrong (a wall
 //! thinner than the sampling, an exotic holder shape), it must never
-//! stay silent about the four classes above. The hard post-gate that
+//! stay silent about the five classes above. The hard post-gate that
 //! blocks on these lands with the post processor (M2.3); until then the
 //! operation layer attaches them to the operation for display.
 //!
@@ -401,6 +408,29 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         let bad = [a, mid, b].into_iter().any(|q| in_stock(q) && low < surface(q));
         if bad {
             warns.push(Warning::RapidInStock { at: i });
+        }
+    }
+
+    // (e) Cycle reach: a hole deeper than the tool assembly reaches is
+    // a shank collision, reported at the hole's first move. The law
+    // reads the cycle list on purpose - a vertical plunge at a matched
+    // drill sweeps exactly its own disc, so every rim sample sits inside
+    // the flute radius and law (c) has nothing to sample in the annulus;
+    // the plate top around the hole is part, so `part` is true. An
+    // oversized hole deeper than full reach is visible to (c) as well;
+    // the same-move report is not repeated.
+    // No mode gate: only drilling paths ever carry cycles, so this is a
+    // no-op everywhere else.
+    let reach = cx.tool.flute_len + cx.tool.shank_len + cx.tool.holder_len;
+    for c in &path.cycles {
+        if c.entry_z - c.bottom_z > reach {
+            let hit = Warning::ShankHit {
+                at: c.first_move,
+                part: true,
+            };
+            if !warns.contains(&hit) {
+                warns.push(hit);
+            }
         }
     }
 

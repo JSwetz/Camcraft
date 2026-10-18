@@ -78,17 +78,17 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v8
+    // Anything newer than this build's format stays refused; v1..v9
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
     // side_roundtrip_v6_defaults_to_auto the v6 contour -> v7 side step,
-    // units_round_trip_and_a_v7_file_means_millimeters v7 -> v8, and
-    // v8_file_steps_to_v9 v8 -> v9).
-    let text = r#"{"version": 10, "entities": []}"#;
+    // units_round_trip_and_a_v7_file_means_millimeters v7 -> v8,
+    // v8_file_steps_to_v9 v8 -> v9, and v9_file_steps_to_v10 v9 -> v10).
+    let text = r#"{"version": 11, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(10)) => {}
+        Err(ProjectError::UnsupportedVersion(11)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1037,6 +1037,144 @@ fn v8_file_steps_to_v9() {
             && saved.contains("\"arc\"")
             && saved.contains("\"radius\": 3.0"),
         "the migration writes the v9 shape: {saved}"
+    );
+}
+
+#[test]
+fn v9_file_steps_to_v10() {
+    // A literal v9 project: the drilling landing adds no required keys.
+    // ToolDto's tip_angle/pitch serde-default to the inert 0.0 they meant
+    // before, PathDto's cycles defaults to empty (no pre-v10 build ever
+    // generated a cycle), and ParamsDto just gains a variant - so the
+    // v9 -> v10 step is the stamp itself, exactly like v8 -> v9.
+    let text = r#"{
+        "version": 9,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "end_mill", "diameter": 4.0, "corner_r": 0.0,
+                      "flute_len": 12.0, "shank_d": 6.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 10000.0, "feed": 1200.0}},
+            {"name": "C1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"contour": {
+                 "stock_to_leave": 0.0, "clearance_z": 10.0, "retract_z": 8.0,
+                 "top_z": 5.0, "bottom_z": 3.0, "stepdown": 8.0,
+                 "feed": 800.0, "plunge_feed": 200.0, "climb": true,
+                 "lead": "none", "tolerance": 0.01,
+                 "tab_count": 0, "tab_width": 0.0, "tab_height": 0.0}},
+                 "cache": {"moves": [
+                     {"kind": "rapid", "from": [-50.0, -50.0, 10.0], "to": [0.0, 0.0, 10.0]},
+                     {"kind": "plunge", "from": [0.0, 0.0, 10.0], "to": [0.0, 0.0, 3.0]}
+                 ], "warnings": []}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v9 file must migrate");
+    let e = model::find_by_name(&world, "C1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    assert!(
+        matches!(o.params, OpParams::Contour { .. }),
+        "the contour params read unchanged: {:?}",
+        o.params
+    );
+
+    let path = tmp_path("v10");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v10 shape: {saved}"
+    );
+    // skip_serializing_if keeps a cycle-free cache byte-identical to its
+    // v9 form; the key must not appear just because the build learned it.
+    assert!(
+        !saved.contains("\"cycles\""),
+        "an empty cycle list is not written: {saved}"
+    );
+}
+
+#[test]
+fn drill_params_and_cycle_cache_round_trip_and_a_stray_cycle_is_refused() {
+    // Hand-written v10 text, so the drill wire grammar itself is pinned:
+    // the "drill" params tag, holes with through stored (not re-derived),
+    // and cycles beside the moves of a drilling cache.
+    let text = r#"{
+        "version": 10,
+        "entities": [
+            {"name": "D1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"drill": {
+                 "clearance_z": {"reference": "fixed", "offset": 10.0},
+                 "top_z": {"reference": "top_of_stock", "offset": 0.0},
+                 "cycle": "peck", "peck": 6.0, "dwell": 0.0,
+                 "feed": 240.0, "plunge_feed": 120.0,
+                 "holes": [
+                     {"xy": [0.0, 0.0], "radius": 3.0, "entry_z": 10.0,
+                      "floor_z": -5.0, "through": false},
+                     {"xy": [20.0, 15.5], "radius": 3.0, "entry_z": 10.0,
+                      "floor_z": 0.0, "through": true}
+                 ]}},
+                 "cache": {"moves": [
+                     {"kind": "rapid", "from": [-50.0, -50.0, 10.0], "to": [0.0, 0.0, 10.0]},
+                     {"kind": "feed", "from": [0.0, 0.0, 10.0], "to": [0.0, 0.0, 4.0], "feed": 240.0},
+                     {"kind": "plunge", "from": [0.0, 0.0, 4.0], "to": [0.0, 0.0, -5.0]},
+                     {"kind": "rapid", "from": [0.0, 0.0, -5.0], "to": [20.0, 15.5, 10.0]}
+                 ], "warnings": [], "cycles": [
+                     {"kind": "peck", "xy": [0.0, 0.0], "r_z": 4.0,
+                      "bottom_z": -5.0, "entry_z": 10.0, "peck": 6.0,
+                      "dwell": 0.0, "first_move": 1}
+                 ]}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v10 drill grammar must read");
+    let e = model::find_by_name(&world, "D1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Drill {
+        cycle,
+        peck,
+        holes,
+        ..
+    } = &o.params
+    else {
+        panic!("drill params expected, got {:?}", o.params);
+    };
+    assert_eq!(*cycle, hsmworks_app::drilling::CycleChoice::Peck);
+    assert_eq!(*peck, 6.0);
+    assert_eq!(holes.len(), 2);
+    assert_eq!((holes[1].xy.x, holes[1].xy.y), (20.0, 15.5));
+    assert!(holes[1].through && !holes[0].through, "through reads verbatim");
+
+    // Save, reload, save again: every float the file carries is a fixed
+    // point of write-parse, so the drill shape must be byte-stable too.
+    let path = tmp_path("drill");
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &path).expect("reload");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the drill shape round-trips byte-identically");
+    assert!(first.contains("\"drill\"") && first.contains("\"cycles\""));
+
+    // Prime Directive: a cycle pointing past the end of its chain is a
+    // corrupt file, refused before any world write - the warning index a
+    // shank law would read out of it has nothing to point at.
+    let stray = text.replace("\"first_move\": 1", "\"first_move\": 99");
+    let world3 = new_world();
+    match project::open(&world3, &stray) {
+        Err(ProjectError::Corrupt(msg)) => assert!(msg.contains("past"), "{msg}"),
+        other => panic!("expected Corrupt, got {other:?}"),
+    }
+    assert!(model::named_entities(&world3).is_empty());
+    // An unusable hole (a floor above the entry is not a hole) fails the
+    // parameter sanity gate at open, not the generator.
+    let bad_hole = text.replace("\"floor_z\": -5.0", "\"floor_z\": 12.0");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &bad_hole), Err(ProjectError::Corrupt(_))),
+        "must refuse a hole whose floor is above its entry"
     );
 }
 

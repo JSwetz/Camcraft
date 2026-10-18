@@ -368,10 +368,15 @@ fn fit_circle(pts: &[[f64; 3]]) -> Option<([f64; 2], f64)> {
 pub struct ToolUi {
     pub name: String,
     pub exists: bool,
-    /// 0 end mill, 1 ball nose, 2 bull nose.
+    /// 0 end mill, 1 ball nose, 2 bull nose, 3 drill, 4 tap, 5 bore.
     pub kind: usize,
     pub diameter: f64,
     pub corner_r: f64,
+    /// Included degrees of a drill's conical point; inert on the other
+    /// kinds (the same rule the app's `Tool` field follows).
+    pub tip_angle: f64,
+    /// Thread pitch, mm per turn; the tap cycle feeds at rpm x pitch.
+    pub pitch: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -401,9 +406,14 @@ impl ToolUi {
                 ToolKind::EndMill => 0,
                 ToolKind::BallNose => 1,
                 ToolKind::BullNose => 2,
+                ToolKind::Drill => 3,
+                ToolKind::Tap => 4,
+                ToolKind::Bore => 5,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
+            tip_angle: t.tip_angle,
+            pitch: t.pitch,
             flute_len: t.flute_len,
             shank_d: t.shank_d,
             shank_len: t.shank_len,
@@ -421,10 +431,15 @@ impl ToolUi {
             kind: match self.kind {
                 1 => ToolKind::BallNose,
                 2 => ToolKind::BullNose,
+                3 => ToolKind::Drill,
+                4 => ToolKind::Tap,
+                5 => ToolKind::Bore,
                 _ => ToolKind::EndMill,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,
+            tip_angle: self.tip_angle,
+            pitch: self.pitch,
             flute_len: self.flute_len,
             shank_d: self.shank_d,
             shank_len: self.shank_len,
@@ -916,6 +931,57 @@ impl State {
             });
         }
         self.pending.push_back(CommandKind::GenerateOperation(name.to_string()));
+    }
+
+    /// Arm the Drill page's "Detect holes" click: recognize against the
+    /// operation's source geometry *now* - one pass per click, never per
+    /// paint frame - and commit the result as an undoable parameter edit.
+    /// The geometry comes from the draft when this pane targets the
+    /// operation (what the user sees is what gets stored, so a dirty
+    /// draft's other edits ride along and the panel never shows holes the
+    /// world does not have); a click aimed at another operation refetches
+    /// from the world instead of silently flushing some other pane's
+    /// unsaved typing.
+    pub fn detect_holes(&mut self, name: &str) {
+        let Some(entity) = model::find_by_name(&self.world, name) else {
+            self.refuse(ErrorScope::Operation, format!("no operation named '{name}'"));
+            return;
+        };
+        let Some(op) = model::operation_of(&self.world, &entity) else {
+            self.refuse(ErrorScope::Operation, format!("'{name}' is not an operation"));
+            return;
+        };
+        let draft = name == self.op_ui.name;
+        let mut params = if draft {
+            self.op_ui.params.clone()
+        } else {
+            op.params.clone()
+        };
+        let OpParams::Drill { holes, .. } = &mut params else {
+            self.refuse(
+                ErrorScope::Operation,
+                format!("'{name}' is not a drilling operation"),
+            );
+            return;
+        };
+        match operation::holes_of(&self.world, &op.src) {
+            Ok(found) if found.is_empty() => self.refuse(
+                ErrorScope::Operation,
+                "no drilled holes found in the source model".to_string(),
+            ),
+            Ok(found) => {
+                *holes = found;
+                if draft {
+                    self.op_ui.params = params.clone();
+                }
+                self.pending
+                    .push_back(CommandKind::EditOperationParams {
+                        name: name.to_string(),
+                        params,
+                    });
+            }
+            Err(err) => self.refuse(ErrorScope::Operation, err.to_string()),
+        }
     }
 
     /// The document's display unit - a read of the flecs singleton, so it

@@ -28,11 +28,23 @@ fn q(mm: f64) -> i64 {
 /// segment), destination coordinates, feed in mm/min when the move has
 /// one, and for an arc the center `I`/`J` plus sense `S` (+1 ccw, -1
 /// cw). v2 (the `Arc` token) appears only when the path carries arcs;
-/// straight paths dump exactly as in v1. Nothing in the dump depends on
-/// the run: no timestamps, no hash-map iteration order,
-/// full-precision-integer coordinates.
+/// straight paths dump exactly as in v1. v3 adds `; CYCLE` comment
+/// lines - one per canned cycle, in hole order - so drilling goldens
+/// diff the POSTING INTENT (what M1.7's post must emit as G73/G81/G83/
+/// G84 blocks) alongside the expanded move chain that verify and the
+/// simulator read. Lengths are microns like coordinates; dwell is
+/// milliseconds. `AT` is the cycle's first move index: the anchor of
+/// the agreement law that pins chain and record to each other. Nothing
+/// in the dump depends on the run: no timestamps, no hash-map iteration
+/// order, full-precision-integer coordinates.
 pub fn gen_to_cltext(t: &Toolpath) -> String {
-    let version = if t.has_arcs() { 2 } else { 1 };
+    let version = if !t.cycles.is_empty() {
+        3
+    } else if t.has_arcs() {
+        2
+    } else {
+        1
+    };
     let mut s = format!("; HSMW-CL v{version} scale={CL_SCALE}mm moves={}\n", t.len());
     match t.start() {
         Some(p) => s.push_str(&format!("START {} {} {}\n", q(p.x), q(p.y), q(p.z))),
@@ -63,6 +75,28 @@ pub fn gen_to_cltext(t: &Toolpath) -> String {
         }
         s.push_str(&arc);
         s.push('\n');
+    }
+    for c in &t.cycles {
+        let kind = match c.kind {
+            hsmworks_app::cl::CycleKind::Spot => "Spot",
+            hsmworks_app::cl::CycleKind::Drill => "Drill",
+            hsmworks_app::cl::CycleKind::Peck => "Peck",
+            hsmworks_app::cl::CycleKind::Deep => "Deep",
+            hsmworks_app::cl::CycleKind::Tap => "Tap",
+            hsmworks_app::cl::CycleKind::Bore => "Bore",
+            hsmworks_app::cl::CycleKind::BackBore => "BackBore",
+        };
+        s.push_str(&format!(
+            "; CYCLE {kind} X{} Y{} RZ{} BZ{} ENTRY{} PECK{} DWELL{} AT{}\n",
+            q(c.xy.x),
+            q(c.xy.y),
+            q(c.r_z),
+            q(c.bottom_z),
+            q(c.entry_z),
+            q(c.peck),
+            (c.dwell * 1000.0).round() as i64,
+            c.first_move,
+        ));
     }
     s
 }

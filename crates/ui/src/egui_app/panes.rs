@@ -37,7 +37,7 @@ use super::theme::Palette;
 /// The operation kinds in panel order (mirrors operations.rs's TYPES).
 /// Shared with pages.rs: the Type combo there and the ribbon tips here
 /// quote the same table.
-pub(crate) const TYPES: [&str; 5] = ["Face", "2D Contour", "2D Pocket", "Slot", "Trace"];
+pub(crate) const TYPES: [&str; 6] = ["Face", "2D Contour", "2D Pocket", "Slot", "Trace", "Drill"];
 
 // ---------------------------------------------------------------- shortcuts
 
@@ -127,7 +127,17 @@ pub(super) enum Cmd {
 const GROUPS: [(&str, &[Cmd]); 5] = [
     ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save]),
     ("Setup", &[Cmd::Stock, Cmd::Origin, Cmd::Tools]),
-    ("Create", &[Cmd::Create(0), Cmd::Create(1), Cmd::Create(2), Cmd::Create(3), Cmd::Create(4)]),
+    (
+        "Create",
+        &[
+            Cmd::Create(0),
+            Cmd::Create(1),
+            Cmd::Create(2),
+            Cmd::Create(3),
+            Cmd::Create(4),
+            Cmd::Create(5),
+        ],
+    ),
     ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]),
     ("Inspect", &[Cmd::Frame, Cmd::Paths]),
 ];
@@ -167,7 +177,8 @@ fn text_of(c: Cmd) -> String {
             1 => "Contour",
             2 => "Pocket",
             3 => "Slot",
-            _ => "Trace",
+            4 => "Trace",
+            _ => "Drill",
         }
         .to_owned(),
         other => label_of(other).to_owned(),
@@ -241,7 +252,8 @@ fn icon_of(c: Cmd) -> Icon {
             1 => Icon::Contour,
             2 => Icon::Pocket,
             3 => Icon::Slot,
-            _ => Icon::Trace,
+            4 => Icon::Trace,
+            _ => Icon::Drill,
         },
         Cmd::Undo => Icon::Undo,
         Cmd::Redo => Icon::Redo,
@@ -262,6 +274,7 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Pocket => Icon::Pocket,
         OpType::Slot => Icon::Slot,
         OpType::Trace => Icon::Trace,
+        OpType::Drill => Icon::Drill,
     }
 }
 
@@ -438,6 +451,9 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::EndMill => "end mill",
         ToolKind::BallNose => "ball nose",
         ToolKind::BullNose => "bull nose",
+        ToolKind::Drill => "drill",
+        ToolKind::Tap => "tap",
+        ToolKind::Bore => "boring bar",
     }
 }
 

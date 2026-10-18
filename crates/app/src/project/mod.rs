@@ -1,4 +1,4 @@
-//! Project save/load: `.hsmproj`, JSON, version 9.
+//! Project save/load: `.hsmproj`, JSON, version 10.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -41,14 +41,22 @@
 //! every v7 file displayed. v9 widens the contour `lead` vocabulary with
 //! `tangential` (see `LeadDto`); `lead` has been a required key since
 //! v1, so no older file contains the new tag and none needs a content
-//! change. v1-v8 files migrate on load, one version step at a time.
+//! change. v10 is the drilling landing shape: the `drill` operation
+//! params (with its hole list, see `HoleDto`), the `tip_angle`/`pitch`
+//! tool fields, and the cached cycle list (`PathDto.cycles`) all arrive
+//! at once, each with a serde default that reads as exact legacy
+//! behavior - no pre-v10 file could contain a drill-kind tool or a
+//! drill operation (the tags did not exist), and no pre-v10 path ever
+//! had cycles, so absent means precisely what it behaved as. v1-v9
+//! files migrate on load, one version step at a time.
 
 use std::path::Path;
 
 use flecs_ecs::prelude::World;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::cl::{Move, MoveKind, Toolpath, lattice};
+use crate::cl::{Cycle, CycleKind, Move, MoveKind, Toolpath, lattice};
+use crate::drilling::{CycleChoice, Hole};
 use crate::geo2d::Point2;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
 use crate::machining2d::{Lead, PocketStrategy, Side};
@@ -62,7 +70,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 9;
+pub const PROJECT_VERSION: u32 = 10;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -150,6 +158,12 @@ pub struct ToolDto {
     pub kind: ToolKindDto,
     pub diameter: f64,
     pub corner_r: f64,
+    /// M1.6 additions: absent from a v9 file, serde-defaults to the
+    /// inert 0.0 both fields were behaviorally equal to before.
+    #[serde(default)]
+    pub tip_angle: f64,
+    #[serde(default)]
+    pub pitch: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -166,6 +180,9 @@ pub enum ToolKindDto {
     EndMill,
     BallNose,
     BullNose,
+    Drill,
+    Tap,
+    Bore,
 }
 
 impl ToolDto {
@@ -175,9 +192,14 @@ impl ToolDto {
                 ToolKind::EndMill => ToolKindDto::EndMill,
                 ToolKind::BallNose => ToolKindDto::BallNose,
                 ToolKind::BullNose => ToolKindDto::BullNose,
+                ToolKind::Drill => ToolKindDto::Drill,
+                ToolKind::Tap => ToolKindDto::Tap,
+                ToolKind::Bore => ToolKindDto::Bore,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
+            tip_angle: t.tip_angle,
+            pitch: t.pitch,
             flute_len: t.flute_len,
             shank_d: t.shank_d,
             shank_len: t.shank_len,
@@ -195,9 +217,14 @@ impl ToolDto {
                 ToolKindDto::EndMill => ToolKind::EndMill,
                 ToolKindDto::BallNose => ToolKind::BallNose,
                 ToolKindDto::BullNose => ToolKind::BullNose,
+                ToolKindDto::Drill => ToolKind::Drill,
+                ToolKindDto::Tap => ToolKind::Tap,
+                ToolKindDto::Bore => ToolKind::Bore,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,
+            tip_angle: self.tip_angle,
+            pitch: self.pitch,
             flute_len: self.flute_len,
             shank_d: self.shank_d,
             shank_len: self.shank_len,
@@ -320,6 +347,85 @@ pub enum ParamsDto {
         plunge_feed: f64,
         climb: bool,
     },
+    /// Declared at v10 with the drilling operation. The hole list is
+    /// params data, not a live query: what recognition (or a typed edit)
+    /// produced is what the file holds, and the source digest makes a
+    /// moved model mark the op Stale beside it.
+    Drill {
+        clearance_z: HeightDto,
+        /// Absent means the hop-to-clearance every drilling default
+        /// uses, like the pocket family's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        /// The whole-pattern depth override; absent is each hole's own
+        /// floor - the normal shape, so `skip_serializing_if` keeps the
+        /// common file lean.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bottom_z: Option<HeightDto>,
+        cycle: CycleChoiceDto,
+        peck: f64,
+        dwell: f64,
+        feed: f64,
+        plunge_feed: f64,
+        holes: Vec<HoleDto>,
+    },
+}
+
+/// One hole of a drill op's list, on the wire: world XY, the model's
+/// hole radius, the entry surface and floor it was recognized between,
+/// and `through` - stored, because it selects the exit allowance at
+/// generation and a live re-query of the mesh would let a model edit
+/// silently redefine a hole nobody re-detected.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct HoleDto {
+    pub xy: [f64; 2],
+    pub radius: f64,
+    pub entry_z: f64,
+    pub floor_z: f64,
+    pub through: bool,
+}
+
+impl HoleDto {
+    fn from_hole(h: &Hole) -> Self {
+        HoleDto {
+            // The lattice snap is idempotent, and recognition's output is
+            // already snapped; this only levels a typed value onto the
+            // file's fixed-point law (see MoveDto).
+            xy: [lattice(h.xy.x), lattice(h.xy.y)],
+            radius: lattice(h.radius),
+            entry_z: lattice(h.entry_z),
+            floor_z: lattice(h.floor_z),
+            through: h.through,
+        }
+    }
+
+    fn to_hole(self) -> Hole {
+        Hole {
+            xy: Point2::new(self.xy[0], self.xy[1]),
+            radius: self.radius,
+            entry_z: self.entry_z,
+            floor_z: self.floor_z,
+            through: self.through,
+        }
+    }
+}
+
+/// Which canned cycle a drill op runs; the file mirror of
+/// `drilling::CycleChoice`. `Auto` resolves at generate time (tool kind
+/// first, then the depth-vs-diameter law), so the file stores only the
+/// user's ask, like `StrategyDto::Auto` and `SideDto::Auto`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CycleChoiceDto {
+    #[default]
+    Auto,
+    Spot,
+    Drill,
+    Peck,
+    Tap,
+    Bore,
+    BackBore,
 }
 
 /// The reference part of a stored height. Serialized as a plain string;
@@ -598,7 +704,38 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
-            }
+            },
+            OpParams::Drill {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                cycle,
+                peck,
+                dwell,
+                feed,
+                plunge_feed,
+                holes,
+            } => ParamsDto::Drill {
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).map(Into::into),
+                cycle: match cycle {
+                    CycleChoice::Auto => CycleChoiceDto::Auto,
+                    CycleChoice::Spot => CycleChoiceDto::Spot,
+                    CycleChoice::Drill => CycleChoiceDto::Drill,
+                    CycleChoice::Peck => CycleChoiceDto::Peck,
+                    CycleChoice::Tap => CycleChoiceDto::Tap,
+                    CycleChoice::Bore => CycleChoiceDto::Bore,
+                    CycleChoice::BackBore => CycleChoiceDto::BackBore,
+                },
+                peck: *peck,
+                dwell: *dwell,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                holes: holes.iter().map(HoleDto::from_hole).collect(),
+            },
         }
     }
 
@@ -737,7 +874,38 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
-            }
+            },
+            ParamsDto::Drill {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                cycle,
+                peck,
+                dwell,
+                feed,
+                plunge_feed,
+                holes,
+            } => OpParams::Drill {
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).map(Into::into),
+                cycle: match cycle {
+                    CycleChoiceDto::Auto => CycleChoice::Auto,
+                    CycleChoiceDto::Spot => CycleChoice::Spot,
+                    CycleChoiceDto::Drill => CycleChoice::Drill,
+                    CycleChoiceDto::Peck => CycleChoice::Peck,
+                    CycleChoiceDto::Tap => CycleChoice::Tap,
+                    CycleChoiceDto::Bore => CycleChoice::Bore,
+                    CycleChoiceDto::BackBore => CycleChoice::BackBore,
+                },
+                peck: *peck,
+                dwell: *dwell,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                holes: holes.iter().copied().map(HoleDto::to_hole).collect(),
+            },
         }
     }
 }
@@ -773,11 +941,89 @@ pub enum MoveKindDto {
     Plunge,
 }
 
-/// The cached generation output: path plus the warnings that came with it.
+/// The cached generation output: path plus the warnings that came with it,
+/// plus - from v10 - the canned-cycle list that rides alongside the moves
+/// of a drilling path (see `crate::cl::Cycle`). Absent from any pre-v10
+/// cache, which is exactly right: no pre-v10 build ever generated a cycle.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct PathDto {
     pub moves: Vec<MoveDto>,
     pub warnings: Vec<Warning>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cycles: Vec<CycleDto>,
+}
+
+/// One cached cycle: the post's source of truth for a hole, stored beside
+/// (not instead of) the moves it expands to. Floats take the same lattice
+/// snap `MoveDto` gives its coordinates, so a cycle round-trips
+/// byte-identically and stays bit-exact with its moves' depths - what the
+/// agreement law pins.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct CycleDto {
+    pub kind: CycleKindDto,
+    pub xy: [f64; 2],
+    pub r_z: f64,
+    pub bottom_z: f64,
+    pub entry_z: f64,
+    pub peck: f64,
+    pub dwell: f64,
+    pub first_move: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CycleKindDto {
+    Spot,
+    Drill,
+    Peck,
+    Deep,
+    Tap,
+    Bore,
+    BackBore,
+}
+
+impl CycleDto {
+    fn from_cycle(c: &Cycle) -> Self {
+        CycleDto {
+            kind: match c.kind {
+                CycleKind::Spot => CycleKindDto::Spot,
+                CycleKind::Drill => CycleKindDto::Drill,
+                CycleKind::Peck => CycleKindDto::Peck,
+                CycleKind::Deep => CycleKindDto::Deep,
+                CycleKind::Tap => CycleKindDto::Tap,
+                CycleKind::Bore => CycleKindDto::Bore,
+                CycleKind::BackBore => CycleKindDto::BackBore,
+            },
+            xy: [lattice(c.xy.x), lattice(c.xy.y)],
+            r_z: lattice(c.r_z),
+            bottom_z: lattice(c.bottom_z),
+            entry_z: lattice(c.entry_z),
+            peck: lattice(c.peck),
+            dwell: lattice(c.dwell),
+            first_move: c.first_move as u64,
+        }
+    }
+
+    fn to_cycle(self) -> Cycle {
+        Cycle {
+            kind: match self.kind {
+                CycleKindDto::Spot => CycleKind::Spot,
+                CycleKindDto::Drill => CycleKind::Drill,
+                CycleKindDto::Peck => CycleKind::Peck,
+                CycleKindDto::Deep => CycleKind::Deep,
+                CycleKindDto::Tap => CycleKind::Tap,
+                CycleKindDto::Bore => CycleKind::Bore,
+                CycleKindDto::BackBore => CycleKind::BackBore,
+            },
+            xy: Point2::new(self.xy[0], self.xy[1]),
+            r_z: self.r_z,
+            bottom_z: self.bottom_z,
+            entry_z: self.entry_z,
+            peck: self.peck,
+            dwell: self.dwell,
+            first_move: usize::try_from(self.first_move).unwrap_or(usize::MAX),
+        }
+    }
 }
 
 /// An operation as files hold it: definition, the stamp the last generate
@@ -847,14 +1093,14 @@ impl PathDto {
         PathDto {
             moves: t.path.moves.iter().map(MoveDto::from_move).collect(),
             warnings: t.warnings.clone(),
+            cycles: t.path.cycles.iter().map(CycleDto::from_cycle).collect(),
         }
     }
 
     fn to_cache(&self) -> ToolpathCache {
-        ToolpathCache {
-            path: Toolpath::new(self.moves.iter().map(|m| m.to_move()).collect()),
-            warnings: self.warnings.clone(),
-        }
+        let mut path = Toolpath::new(self.moves.iter().map(|m| m.to_move()).collect());
+        path.cycles = self.cycles.iter().copied().map(CycleDto::to_cycle).collect();
+        ToolpathCache { path, warnings: self.warnings.clone() }
     }
 }
 
@@ -1078,6 +1324,16 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // contain the new tag, and no v8 file needs a content change to
         // live in v9. Step-up is the stamp itself, like v7 -> v8.
         file.version = 9;
+    }
+    if file.version == 9 {
+        // v9 -> v10: drilling arrives - the `drill` params variant, the
+        // `drill`/`tap`/`bore` tool-kind tags, `tip_angle`/`pitch`, and
+        // cached `cycles`. A v9 file can contain none of them (the tags
+        // and keys did not exist), and the serde defaults for the two
+        // optional-shaped additions (`cycles` -> empty, tool floats ->
+        // the inert 0.0) are exactly v9's behavior. No content change;
+        // step-up is the stamp itself, like every bump since v6.
+        file.version = 10;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
@@ -1304,7 +1560,7 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
                 )));
             }
             if let Some(cache) = &op.cache {
-                let path = cl_path(&cache.moves);
+                let path = cl_path(&cache.moves, &cache.cycles);
                 if path.is_empty() {
                     return Err(corrupt(format!(
                         "'{}' carries a cached path with no moves",
@@ -1317,14 +1573,25 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
                 if !path.is_chained() {
                     return Err(corrupt(format!("'{}' cache is not a linked path", dto.name)));
                 }
+                if path.cycles.iter().any(|c| c.first_move >= path.moves.len()) {
+                    return Err(corrupt(format!(
+                        "'{}' cache has a cycle pointing past the end of its chain",
+                        dto.name
+                    )));
+                }
             }
         }
     }
     Ok(())
 }
 
-/// Moves only, for the cache's structural checks (the warnings ride along
-/// untouched; `Warning`'s serde shape is its own contract).
-fn cl_path(moves: &[MoveDto]) -> Toolpath {
-    Toolpath::new(moves.iter().map(|m| m.to_move()).collect())
+/// Moves and cycles, for the cache's structural checks (the warnings ride
+/// along untouched; `Warning`'s serde shape is its own contract). The
+/// cycles join the checks on purpose: `all_finite` reads them, and the
+/// `first_move` gate below makes sure a warning pointed at a cycle has
+/// something in the chain to point at.
+fn cl_path(moves: &[MoveDto], cycles: &[CycleDto]) -> Toolpath {
+    let mut path = Toolpath::new(moves.iter().map(|m| m.to_move()).collect());
+    path.cycles = cycles.iter().copied().map(CycleDto::to_cycle).collect();
+    path
 }

@@ -317,3 +317,136 @@ fn trace_plate_with_hole_matches_golden() {
     let t = trace(&plate_with_hole(), &p).unwrap();
     write_golden("trace_plate_with_hole.cl", &gen_to_cltext(&t));
 }
+
+// ------------------------------------------------------------ drilling
+
+use hsmworks_app::drilling::{CycleChoice, CycleParams, Hole, drill};
+use hsmworks_app::tools::{Tool, ToolKind};
+
+fn cycle_tool(kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64) -> Tool {
+    Tool {
+        kind,
+        diameter,
+        corner_r: 0.0,
+        tip_angle,
+        pitch,
+        flute_len: 40.0,
+        shank_d: diameter.min(10.0),
+        shank_len: 30.0,
+        holder_d: 20.0,
+        holder_len: 40.0,
+        material_group: String::from("steel"),
+        rpm: 500.0,
+        feed: 200.0,
+    }
+}
+
+#[test]
+fn drill_plate_matches_golden() {
+    // Auto law, shallow side: both holes are within one diameter deep,
+    // so both post as plain G81s. The through hole's floor carries the
+    // 1 mm exit allowance; the `; CYCLE` lines are the v3 witness that
+    // the intent rides alongside the chain.
+    let tool = cycle_tool(ToolKind::Drill, 6.0, 118.0, 0.0);
+    let holes = [
+        Hole {
+            xy: Point2::new(10.0, 10.0),
+            radius: 3.0,
+            entry_z: 0.0,
+            floor_z: -4.0,
+            through: true,
+        },
+        Hole {
+            xy: Point2::new(30.0, 10.0),
+            radius: 3.0,
+            entry_z: 0.0,
+            floor_z: -3.0,
+            through: false,
+        },
+    ];
+    let p = CycleParams {
+        clearance_z: 5.0,
+        r_z: 0.0,
+        hop_z: None,
+        bottom_z: None,
+        cycle: CycleChoice::Auto,
+        peck: 0.0,
+        dwell: 0.0,
+        feed: 200.0,
+        plunge_feed: 60.0,
+        tool: &tool,
+        holes: &holes,
+    };
+    let t = drill(&p).unwrap();
+    assert_eq!(t.cycles.len(), 2);
+    assert!(
+        t.cycles.iter().all(|c| c.kind == hsmworks_app::cl::CycleKind::Drill),
+        "one-diameter depths must Auto to plain Drill"
+    );
+    write_golden("drill_plate.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn drill_peck_matches_golden() {
+    // Auto law, deep side: 24 mm on a 6 mm drill is exactly 4
+    // diameters - the chip-break Peck band (G73 shape), auto step 3d.
+    // The record says the same: one hop, two plunges, one path.
+    let tool = cycle_tool(ToolKind::Drill, 6.0, 118.0, 0.0);
+    let holes = [Hole {
+        xy: Point2::new(20.0, 10.0),
+        radius: 3.0,
+        entry_z: 0.0,
+        floor_z: -23.0,
+        through: true,
+    }];
+    let p = CycleParams {
+        clearance_z: 6.0,
+        r_z: 0.0,
+        hop_z: None,
+        bottom_z: None,
+        cycle: CycleChoice::Auto,
+        peck: 0.0,
+        dwell: 0.0,
+        feed: 200.0,
+        plunge_feed: 60.0,
+        tool: &tool,
+        holes: &holes,
+    };
+    let t = drill(&p).unwrap();
+    assert_eq!(t.cycles.len(), 1);
+    assert_eq!(t.cycles[0].kind, hsmworks_app::cl::CycleKind::Peck);
+    assert!((t.cycles[0].peck - 18.0).abs() < 1e-9, "auto chip-break step = 3d");
+    write_golden("drill_peck.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn tap_plate_matches_golden() {
+    // Rigid tapping: Auto sees the Tap tool and taps - feed down and
+    // back at rpm x pitch, no rapids inside the hole. The chain is the
+    // truth for verify; the cycle line is what the post emits as G84.
+    let tool = cycle_tool(ToolKind::Tap, 10.0, 0.0, 1.5);
+    let holes = [Hole {
+        xy: Point2::new(15.0, 15.0),
+        radius: 2.5,
+        entry_z: 0.0,
+        floor_z: -12.0,
+        through: false,
+    }];
+    let p = CycleParams {
+        clearance_z: 5.0,
+        r_z: 0.0,
+        hop_z: None,
+        bottom_z: None,
+        cycle: CycleChoice::Auto,
+        peck: 0.0,
+        dwell: 0.0,
+        feed: 200.0,
+        plunge_feed: 60.0,
+        tool: &tool,
+        holes: &holes,
+    };
+    let t = drill(&p).unwrap();
+    assert_eq!(t.cycles.len(), 1);
+    assert_eq!(t.cycles[0].kind, hsmworks_app::cl::CycleKind::Tap);
+    write_golden("tap_plate.cl", &gen_to_cltext(&t));
+}

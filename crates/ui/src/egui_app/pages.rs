@@ -61,7 +61,8 @@ use hsmworks_app::verify::Warning;
 
 use crate::actions;
 use crate::operations::{
-    fold_warnings, height_echo, offset_label, side_names, strategy_names, unresolved_note,
+    cycle_index, cycle_names, fold_warnings, height_echo, offset_label, side_names,
+    strategy_names, unresolved_note,
 };
 use crate::state::{CommandKind, ErrorScope, GeoPick, State, UiTarget, quat_yaw_deg};
 
@@ -69,7 +70,7 @@ use super::panes::{TYPES, kind_name, retype};
 use super::theme::Palette;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
-const TOOL_KINDS: [&str; 3] = ["End mill", "Ball nose", "Bull nose"];
+const TOOL_KINDS: [&str; 6] = ["End mill", "Ball nose", "Bull nose", "Drill", "Tap", "Bore"];
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
 const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
@@ -100,6 +101,8 @@ const SEC_FEEDS: usize = 4;
 fn has_section(kind: OpType, s: usize) -> bool {
     match s {
         SEC_GEO | SEC_HEIGHTS | SEC_FEEDS => true,
+        // Trace cuts no passes; a drill's Passes are the cycle's own -
+        // peck depth and bottom dwell, the numbers that shape its hops.
         SEC_PASSES => !matches!(kind, OpType::Trace),
         SEC_LEADS => matches!(kind, OpType::Contour),
         _ => false,
@@ -174,7 +177,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     combo(ui, "op_type", &mut kind, &TYPES);
     if kind != cur_kind_idx {
         let cur = state.op_ui.params.clone();
-        state.op_ui.params = retype(&cur, kind.min(4));
+        state.op_ui.params = retype(&cur, kind);
     }
 
     // Tool.
@@ -469,6 +472,7 @@ fn kind_index(kind: OpType) -> usize {
         OpType::Pocket => 2,
         OpType::Slot => 3,
         OpType::Trace => 4,
+        OpType::Drill => 5,
     }
 }
 
@@ -485,7 +489,41 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let u = state.units();
     let mut side_note: Option<String> = None;
     let mut auto_note: Option<String> = None;
+    let mut cycle_note: Option<String> = None;
     let nm = state.op_ui.name.clone();
+    if let OpParams::Drill { cycle: hsmworks_app::drilling::CycleChoice::Auto, holes, .. } =
+        &state.op_ui.params
+    {
+        // What Auto answers for, in the tool's and first hole's own
+        // numbers - the same call generation makes (`auto_kind`), never
+        // a panel-side guess that could drift from it.
+        cycle_note = match (
+            model::find_by_name(&state.world, &state.op_ui.tool)
+                .as_ref()
+                .and_then(|t| model::tool_of(&state.world, t)),
+            holes.first(),
+        ) {
+            (Some(t), Some(h)) => {
+                let depth = h.entry_z - h.floor_z;
+                let pick = hsmworks_app::drilling::auto_kind(t.kind, depth, t.diameter);
+                let name = match pick {
+                    hsmworks_app::cl::CycleKind::Spot => "Spot",
+                    hsmworks_app::cl::CycleKind::Drill => "Drill",
+                    hsmworks_app::cl::CycleKind::Peck => "Peck",
+                    hsmworks_app::cl::CycleKind::Deep => "Deep (G83)",
+                    hsmworks_app::cl::CycleKind::Tap => "Tap",
+                    hsmworks_app::cl::CycleKind::Bore => "Bore",
+                    hsmworks_app::cl::CycleKind::BackBore => "Back bore",
+                };
+                Some(format!(
+                    "Auto -> {name} for this tool and a depth of {}",
+                    units::len(depth, units::of(&state.world), 3)
+                ))
+            }
+            _ => Some("Auto picks the cycle from the tool and each hole's depth.".into()),
+        };
+    }
+    let mut detect_holes = false;
     let op = model::find_by_name(&state.world, &nm)
         .as_ref()
         .and_then(|e| model::operation_of(&state.world, e));
@@ -846,6 +884,123 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
+        OpParams::Drill {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            cycle,
+            peck,
+            dwell,
+            feed,
+            plunge_feed,
+            holes,
+        } => {
+            if tab == SEC_GEO {
+                field(ui, "Holes");
+                if holes.is_empty() {
+                    ui.label("none yet - Detect holes reads them from the model");
+                } else {
+                    for (i, h) in holes.iter().enumerate() {
+                        let floor = if h.through {
+                            "through".to_owned()
+                        } else {
+                            format!("floor {}", units::len(h.floor_z, u, 3))
+                        };
+                        ui.label(format!(
+                            "{}  X {}  Y {}  Ø{}  entry {}  {floor}",
+                            i + 1,
+                            units::len(h.xy.x, u, 3),
+                            units::len(h.xy.y, u, 3),
+                            units::len(2.0 * h.radius, u, 3),
+                            units::len(h.entry_z, u, 3),
+                        ));
+                    }
+                }
+                // Edge-driven, one recognize pass per click (never per
+                // paint frame): the list it finds replaces the draft's,
+                // and the command lands so undo restores the old one.
+                if ui.button("Detect holes").clicked() {
+                    detect_holes = true;
+                }
+            }
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, clearance_z, "drill.clearance");
+                field(ui, "R plane (feed starts here)");
+                height_editor(ui, &state.world, top_z, "drill.top");
+                field(ui, "Retract plane (between holes)");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    height_editor(ui, &state.world, r, "drill.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Depth");
+                let mut over = bottom_z.is_some();
+                if ui.checkbox(&mut over, "Override the hole floors").changed() {
+                    *bottom_z = if over {
+                        Some(Height::of(top_z.reference, top_z.offset - 1.0))
+                    } else {
+                        None
+                    };
+                }
+                match bottom_z {
+                    Some(b) => height_editor(ui, &state.world, b, "drill.bottom"),
+                    None => {
+                        ui.label("every hole stops at its own floor from the model");
+                    }
+                }
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Cycle");
+                let mut c_idx = cycle_index(cycle);
+                let before = c_idx;
+                combo(ui, "d_cycle", &mut c_idx, cycle_names());
+                if c_idx != before {
+                    *cycle = match c_idx {
+                        1 => hsmworks_app::drilling::CycleChoice::Spot,
+                        2 => hsmworks_app::drilling::CycleChoice::Drill,
+                        3 => hsmworks_app::drilling::CycleChoice::Peck,
+                        4 => hsmworks_app::drilling::CycleChoice::Tap,
+                        5 => hsmworks_app::drilling::CycleChoice::Bore,
+                        6 => hsmworks_app::drilling::CycleChoice::BackBore,
+                        _ => hsmworks_app::drilling::CycleChoice::Auto,
+                    };
+                }
+                if let Some(note) = &cycle_note {
+                    ui.label(note.clone());
+                }
+                field(ui, "Peck depth");
+                num(ui, u, peck);
+                ui.label("0 lets the cycle size itself: 3 x dia chip-break, 1 x dia full-retract");
+                field(ui, "Dwell at bottom (s)");
+                num(ui, u, dwell);
+                ui.label("seconds held at the bottom; honored on the cycles that dwell");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+            }
+        }
+    }
+    if detect_holes {
+        state.detect_holes(&nm);
     }
 }
 
@@ -1323,13 +1478,47 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         );
                     }
                     field(ui, "Type");
-                    let mut k = state.tool_ui.kind.min(2);
+                    let before = state.tool_ui.kind;
+                    let mut k = state.tool_ui.kind.min(TOOL_KINDS.len() - 1);
                     combo(ui, "tool_kind", &mut k, &TOOL_KINDS);
-                    state.tool_ui.kind = k.min(2);
+                    state.tool_ui.kind = k.min(TOOL_KINDS.len() - 1);
+                    if state.tool_ui.kind != before {
+                        // A draft inherited from a mill carries both
+                        // specialty fields inert (0.0); moving to a kind
+                        // that READS them seeds the standard value, so
+                        // flipping the combo alone never leaves the Add
+                        // button refusing on a half-built tool.
+                        if state.tool_ui.kind == 3
+                            && (state.tool_ui.tip_angle.is_nan() || state.tool_ui.tip_angle <= 60.0)
+                        {
+                            state.tool_ui.tip_angle = 118.0;
+                        }
+                        if state.tool_ui.kind == 4
+                            && (state.tool_ui.pitch.is_nan() || state.tool_ui.pitch <= 0.0)
+                        {
+                            state.tool_ui.pitch = 1.0;
+                        }
+                    }
                     field(ui, "Diameter");
                     num(ui, u, &mut state.tool_ui.diameter);
-                    field(ui, "Corner radius");
-                    num(ui, u, &mut state.tool_ui.corner_r);
+                    // Kind-read fields (the inert-unless-the-kind-reads-them
+                    // law): a point angle means nothing on an end mill, a
+                    // pitch means nothing on a drill - show each only where
+                    // it feeds a generator or the collision profile.
+                    if state.tool_ui.kind == 3 {
+                        field(ui, "Point angle (deg)");
+                        num_plain(ui, &mut state.tool_ui.tip_angle);
+                        ui.label("cone tip, 60 to 180; standard twist drill is 118");
+                    }
+                    if state.tool_ui.kind == 4 {
+                        field(ui, "Thread pitch");
+                        num(ui, u, &mut state.tool_ui.pitch);
+                        ui.label("distance advanced per turn - M6 is 1.0, M8 is 1.25");
+                    }
+                    if state.tool_ui.kind != 4 {
+                        field(ui, "Corner radius");
+                        num(ui, u, &mut state.tool_ui.corner_r);
+                    }
                     field(ui, "Flute length");
                     num(ui, u, &mut state.tool_ui.flute_len);
                     field(ui, "Shank diameter");

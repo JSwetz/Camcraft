@@ -40,6 +40,29 @@ pub fn side_names() -> &'static [&'static str] {
     &["Auto", "Inside", "Outside"]
 }
 
+/// The Cycle combo's labels, in `CycleChoice` index order (M1.6). Auto
+/// again sits beside the explicit choices - and it is the tool that
+/// answers for it ([`hsmworks_app::drilling::auto_kind`]: a tap cycle
+/// for a tap, a boring cycle for a bore, depth-vs-diameter otherwise),
+/// so the note next to the combo reads from the op's tool, not a guess.
+pub fn cycle_names() -> &'static [&'static str] {
+    &["Auto", "Spot", "Drill", "Peck", "Tap", "Bore", "Back bore"]
+}
+
+/// Combo index for a cycle choice - the inverse of what picking names.
+pub(crate) fn cycle_index(c: &hsmworks_app::drilling::CycleChoice) -> usize {
+    use hsmworks_app::drilling::CycleChoice as C;
+    match c {
+        C::Auto => 0,
+        C::Spot => 1,
+        C::Drill => 2,
+        C::Peck => 3,
+        C::Tap => 4,
+        C::Bore => 5,
+        C::BackBore => 6,
+    }
+}
+
 /// The row-2 caption: under `Fixed` the number *is* the world z, so do
 /// not call it an offset from something (and under the other references
 /// never pretend the box holds an absolute plane). Pure so a test can pin
@@ -158,6 +181,23 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             plunge_feed: plunge,
             climb,
         },
+        5 => OpParams::Drill {
+            clearance_z: clearance,
+            retract_z: None,
+            top_z: top,
+            // No shared bottom: each hole's floor rides the hole itself
+            // (or the explicit Depth field if one is set); the G54
+            // default below would be a plane no drilled hole implies.
+            bottom_z: None,
+            cycle: hsmworks_app::drilling::CycleChoice::Auto,
+            peck: 0.0,
+            dwell: 0.0,
+            feed,
+            plunge_feed: plunge,
+            // Creation is legal with an empty list; the generator
+            // refuses to run one, and Detect holes fills it.
+            holes: Vec::new(),
+        },
         _ => OpParams::Face {
             stepover,
             clearance_z: clearance,
@@ -187,7 +227,8 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Contour { feed, .. }
         | OpParams::Pocket { feed, .. }
         | OpParams::Slot { feed, .. }
-        | OpParams::Trace { feed, .. } => *feed,
+        | OpParams::Trace { feed, .. }
+        | OpParams::Drill { feed, .. } => *feed,
     }
 }
 
@@ -197,7 +238,8 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Contour { plunge_feed, .. }
         | OpParams::Pocket { plunge_feed, .. }
         | OpParams::Slot { plunge_feed, .. }
-        | OpParams::Trace { plunge_feed, .. } => *plunge_feed,
+        | OpParams::Trace { plunge_feed, .. }
+        | OpParams::Drill { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -208,6 +250,9 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::Pocket { climb, .. }
         | OpParams::Slot { climb, .. }
         | OpParams::Trace { climb, .. } => *climb,
+        // A drill has no climb notion - re-typing one to a milling kind
+        // starts from the fresh default instead of inventing a carry.
+        OpParams::Drill { .. } => true,
     }
 }
 
@@ -236,7 +281,10 @@ fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Pocket { bottom_z, .. }
         | OpParams::Slot { bottom_z, .. }
         | OpParams::Trace { bottom_z, .. } => Some(*bottom_z),
-        _ => None,
+        // A drill's floor is normally the hole's own, from the model;
+        // only an explicit Depth override is a plane to carry over.
+        OpParams::Drill { bottom_z, .. } => *bottom_z,
+        OpParams::Face { .. } => None,
     }
 }
 
@@ -245,8 +293,9 @@ fn top_of(p: &OpParams) -> Option<Height> {
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
         | OpParams::Slot { top_z, .. }
-        | OpParams::Trace { top_z, .. } => Some(*top_z),
-        _ => None,
+        | OpParams::Trace { top_z, .. }
+        | OpParams::Drill { top_z, .. } => Some(*top_z),
+        OpParams::Face { .. } => None,
     }
 }
 
@@ -257,8 +306,9 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         OpParams::Contour { retract_z, .. } => Some(*retract_z),
         OpParams::Pocket { retract_z, .. }
         | OpParams::Slot { retract_z, .. }
-        | OpParams::Trace { retract_z, .. } => *retract_z,
-        _ => None,
+        | OpParams::Trace { retract_z, .. }
+        | OpParams::Drill { retract_z, .. } => *retract_z,
+        OpParams::Face { .. } => None,
     }
 }
 
@@ -426,6 +476,76 @@ mod height_row_tests {
             "a fresh face skims the stock top - a Bottom default would cut through everything",
         );
         assert!(top_z.is_none(), "staging is opt-in, never a surprise default");
+    }
+
+    #[test]
+    fn a_fresh_drill_starts_empty_auto_and_floorless() {
+        // Kind 5's own contract (M1.6): the shared law covers it - R
+        // plane at the model top, rapids above the stock - but its
+        // bottom is deliberately None: a drilled hole's floor is the
+        // hole's own, recorded by recognition, not a work-offset
+        // plane. Creation with no holes is legal (the generator
+        // refuses to run one, by name), and the cycle rides Auto.
+        let OpParams::Drill { top_z, bottom_z, clearance_z, cycle, holes, peck, dwell, retract_z, .. } =
+            quick_params(5)
+        else {
+            panic!("kind 5 is a Drill");
+        };
+        assert_eq!(top_z.reference, HeightReference::TopOfModel);
+        assert!(bottom_z.is_none(), "hole floors ride the holes, not G54");
+        assert_eq!(clearance_z.reference, HeightReference::TopOfStock);
+        assert!(retract_z.is_none(), "None hops to clearance, like the pocket family");
+        assert_eq!(cycle, hsmworks_app::drilling::CycleChoice::Auto);
+        assert!(holes.is_empty());
+        assert_eq!((peck, dwell), (0.0, 0.0), "0 peck lets the Auto law size it; no dwell");
+    }
+
+    /// A fixed-height contour with the numbers the retype law carries.
+    fn cont_seed() -> OpParams {
+        OpParams::Contour {
+            side: Side::Auto,
+            stock_to_leave: 0.0,
+            clearance_z: Height::fixed(20.0),
+            retract_z: Height::fixed(8.0),
+            top_z: Height::fixed(-1.0),
+            bottom_z: Height::fixed(-9.0),
+            stepdown: 2.0,
+            feed: 700.0,
+            plunge_feed: 90.0,
+            climb: false,
+            lead: Lead::None,
+            tolerance: 0.01,
+            tab_count: 0,
+            tab_width: 5.0,
+            tab_height: 1.0,
+        }
+    }
+
+    #[test]
+    fn retype_to_and_from_drill_carries_the_shared_numbers() {
+        // The retype law's drill legs: feeds and the R plane survive
+        // contour -> drill -> pocket; the drill's hole list can only
+        // arrive through a command, never through a type change; and a
+        // drill's climb-less nature retypes to the milling default.
+        let OpParams::Drill { top_z, feed, plunge_feed, holes, cycle, retract_z, .. } =
+            retype(&cont_seed(), 5)
+        else {
+            panic!("kind 5 is a Drill");
+        };
+        assert_eq!(top_z, Height::fixed(-1.0), "the contour's top becomes the R plane");
+        assert_eq!((feed, plunge_feed), (700.0, 90.0));
+        assert!(holes.is_empty(), "a type change never invents a hole list");
+        assert_eq!(cycle, hsmworks_app::drilling::CycleChoice::Auto);
+        assert!(retract_z.is_none(), "like the pocket family, a fresh hop plane is None");
+        let OpParams::Pocket { top_z, feed, climb, stepdown, .. } =
+            retype(&retype(&cont_seed(), 5), 2)
+        else {
+            panic!("kind 2 is a Pocket");
+        };
+        assert_eq!(feed, 700.0);
+        assert!(climb, "a drill has no climb - the milling default wins");
+        assert_eq!(top_z, Height::fixed(-1.0), "and its R plane rides on as the pocket top");
+        assert_eq!(stepdown, 5.0, "a drill has no stepdown - the fresh default");
     }
 }
 

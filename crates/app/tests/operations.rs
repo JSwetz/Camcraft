@@ -2165,3 +2165,197 @@ fn side_change_goes_stale_once_and_generate_clears_it() {
     history.undo(&world);
     assert_eq!(status(&world, "Stale1"), OpStatus::Ok, "undo restores ask and digest together");
 }
+
+// ---------------------------------------------------------------- M1.6 drilling
+
+use hsmworks_app::cl::CycleKind;
+use hsmworks_app::drilling::{self, CycleChoice, Hole};
+
+/// A 20x20x10 block bored through by a sixteen-facet Ø4 hole - the closed
+/// solid form of what STEP hands back for a drilled part, the same weld
+/// as `bored_block` at drill scale so recognition can see a wall.
+fn drilled_block() -> hsmworks_app::geometry::Mesh {
+    let tau = std::f64::consts::TAU;
+    let bp = |i: usize, z: f64| {
+        let a = tau * (i % 16) as f64 / 16.0;
+        Point3::new(2.0 * a.cos(), 2.0 * a.sin(), z)
+    };
+    // Wall vertices pushed radially onto the 20x20 square, as in
+    // bored_block: each side's wall quads share their plane.
+    let op = |i: usize, z: f64| {
+        let a = tau * (i % 16) as f64 / 16.0;
+        let (x, y) = (a.cos(), a.sin());
+        let s = x.abs().max(y.abs());
+        Point3::new(x * 10.0 / s, y * 10.0 / s, z)
+    };
+    let quad = |a: Point3, b: Point3, c: Point3, d: Point3, facets: &mut Vec<Triangle>| {
+        facets.push(Triangle::new(a, b, c));
+        facets.push(Triangle::new(a, c, d));
+    };
+    let mut facets = Vec::new();
+    for i in 0..16 {
+        let j = i + 1;
+        // Caps: annuli wound outward (+z top, -z bottom).
+        quad(bp(j, 10.0), bp(i, 10.0), op(i, 10.0), op(j, 10.0), &mut facets);
+        quad(bp(i, 0.0), bp(j, 0.0), op(j, 0.0), op(i, 0.0), &mut facets);
+        // The hole wall faces the axis; the block wall faces away.
+        quad(bp(i, 10.0), bp(j, 10.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
+        quad(op(j, 10.0), op(i, 10.0), op(i, 0.0), op(j, 0.0), &mut facets);
+    }
+    hsmworks_app::geometry::Mesh { facets }
+}
+
+fn drill_params(holes: Vec<Hole>, top_z: f64, clearance_z: f64) -> OpParams {
+    OpParams::Drill {
+        clearance_z: Height::fixed(clearance_z),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: None,
+        cycle: CycleChoice::Auto,
+        peck: 0.0,
+        dwell: 0.0,
+        feed: 130.0,
+        plunge_feed: 100.0,
+        holes,
+    }
+}
+
+#[test]
+fn drill_op_recognizes_from_the_model_then_machines_clean() {
+    // The M1.6 acceptance shape: holes come out of the mesh as an action,
+    // ride the params as data, and the generated path verifies silent -
+    // a matched drill leaves no law anything to say about.
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, ImportModel::from_mesh("pblock", drilled_block()));
+    add_tool(&world, &mut history, "DR-0400");
+    let e = model::find_by_name(&world, "pblock").expect("part");
+    let facets = model::facets_of(&world, &e).expect("mesh");
+    let holes = drilling::recognize(&facets);
+    assert_eq!(holes.len(), 1, "the bore reads as one hole: {holes:?}");
+
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Drill1",
+            "DR-0400",
+            SrcRef::Entity("pblock".into()),
+            drill_params(holes.clone(), 10.0, 25.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Drill1").expect("generate"));
+    assert_eq!(status(&world, "Drill1"), OpStatus::Ok);
+    let cache = cache(&world, "Drill1").expect("cached");
+    assert_eq!(cache.warnings, Vec::new(), "{:?}", cache.warnings);
+    assert_eq!(cache.path.cycles.len(), 1);
+    let c = &cache.path.cycles[0];
+    // Auto's depth law: 11 mm of cut (10 + the through exit) in a 4 mm
+    // drill - past d, within 4d - so the peck shape, with the exit
+    // allowance recorded on the cycle the post will read.
+    assert_eq!(c.kind, CycleKind::Peck);
+    assert_eq!((c.xy.x, c.xy.y), (0.0, 0.0));
+    assert_eq!(c.entry_z, 10.0);
+    assert_eq!(c.bottom_z, -1.0);
+    assert!(!c.xy.x.is_nan() && c.first_move < cache.path.moves.len());
+}
+
+#[test]
+fn a_hole_deeper_than_the_drill_reaches_warns_and_still_generates() {
+    // The hole list is data, not a theorem: a hand-edited floor below
+    // the tool's reach must still generate (so the user can read the
+    // numbers) while verification names the exact collision - the cycle
+    // reach law, at the hole's first move, on the part.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 100.0, 100.0, 130.0);
+    add_tool(&world, &mut history, "DR-0400");
+    let deep = Hole {
+        xy: Point2::new(0.0, 0.0),
+        radius: 2.0,
+        entry_z: 130.0,
+        floor_z: 0.0,
+        through: true,
+    };
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Deep1",
+            "DR-0400",
+            SrcRef::Stock,
+            drill_params(vec![deep], 130.0, 140.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Deep1").expect("generate"));
+    let cache = cache(&world, "Deep1").expect("cached");
+    assert_eq!(cache.path.cycles[0].kind, CycleKind::Deep, "131 mm past 4d");
+    assert!(
+        cache
+            .warnings
+            .iter()
+            .any(|w| matches!(w, hsmworks_app::verify::Warning::ShankHit { part: true, .. })),
+        "reach law must speak: {:?}",
+        cache.warnings
+    );
+    assert_eq!(status(&world, "Deep1"), OpStatus::Ok, "a warning is not a refusal");
+}
+
+#[test]
+fn a_drill_op_without_holes_creates_but_refuses_generation_by_name() {
+    // The law behind the UI flow: creation is legal before detection
+    // (that is how the property page gets on screen), and generation is
+    // the gate that refuses it - by name, not as an empty success.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 20.0, 20.0, 10.0);
+    add_tool(&world, &mut history, "DR-0400");
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "Empty1", "DR-0400", SrcRef::Stock, drill_params(vec![], 10.0, 25.0))
+            .expect("a hole list arrives via Detect; creation must not need it"),
+    );
+    let err = GenerateOperation::new(&world, "Empty1")
+        .err()
+        .expect("an empty hole list must not generate");
+    assert!(err.to_string().contains("holes"), "{err}");
+    assert_eq!(status(&world, "Empty1"), OpStatus::Never);
+}
+
+#[test]
+fn moving_the_part_marks_the_drill_op_stale_until_regen() {
+    // Holes are stored data, so a moved model cannot silently redefine
+    // them: the source digest moves the stamp, a regenerate proceeds on
+    // the stored list, and re-detection stays the explicit action it is.
+    let (world, mut history) = {
+        let world = new_world();
+        let mut history = History::default();
+        history.execute(&world, ImportModel::from_mesh("pblock", drilled_block()));
+        add_tool(&world, &mut history, "DR-0400");
+        let e = model::find_by_name(&world, "pblock").expect("part");
+        let holes = drilling::recognize(&model::facets_of(&world, &e).expect("mesh"));
+        history.execute(
+            &world,
+            CreateOperation::new(
+                &world,
+                "Move1",
+                "DR-0400",
+                SrcRef::Entity("pblock".into()),
+                drill_params(holes, 10.0, 25.0),
+            )
+            .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, "Move1").expect("generate"));
+        (world, history)
+    };
+    assert_eq!(status(&world, "Move1"), OpStatus::Ok);
+    let e = model::find_by_name(&world, "pblock").expect("part");
+    model::set_location(&world, &e, Point3::new(0.0, 0.0, 2.0));
+    assert_eq!(status(&world, "Move1"), OpStatus::Stale, "the part moved under the hole list");
+    history.execute(&world, GenerateOperation::new(&world, "Move1").expect("regen"));
+    assert_eq!(status(&world, "Move1"), OpStatus::Ok);
+    let cache = cache(&world, "Move1").expect("cached");
+    assert_eq!(cache.path.cycles[0].entry_z, 10.0, "stored holes are not re-detected");
+}

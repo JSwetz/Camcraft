@@ -176,16 +176,77 @@ pub fn arc_chords(a: Point2, b: Point2, arc: ArcMove, tol: f64) -> Vec<(Point2, 
     pts.windows(2).map(|w| (w[0], w[1])).collect()
 }
 
-/// A generated path: linked moves, nothing else. Caching, staleness and
+/// What a drilled hole's cycle is, in the vocabulary the post needs.
+/// The names carry the RS-274 canned cycles they post to (public
+/// standard, general machining practice); the expanded move chain
+/// remains the truth for verification, display and simulation, so the
+/// two must agree — that agreement is a law with a test, not a hope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CycleKind {
+    /// Shallow conical entry dimple (G81 with dwell at a spot depth).
+    Spot,
+    /// One straight plunge to depth, rapid retract (G81).
+    Drill,
+    /// Chip-breaking pecks, each retracted a hair to snap the chip
+    /// before continuing (G73).
+    Peck,
+    /// Deep-hole pecks: every peck fully retracts to R, dwells at the
+    /// bottom (G83).
+    Deep,
+    /// Rigid tapping: feed down and back at pitch·rpm (G84).
+    Tap,
+    /// Boring: feed in, rapid out (G86's mill-side shape; spindle
+    /// orientation is the machine's, M1.7's post word).
+    Bore,
+    /// Back-boring: feed in AND feed out — the retract must not drag
+    /// the already-cut back surface, so no rapid on the way home.
+    BackBore,
+}
+
+/// One hole's machining intent, standing beside the expanded chain:
+/// the center, the feed plane it enters at, its bottom, and the cycle's
+/// numbers. A post emits one canned block per cycle; re-deriving the
+/// cycle from the move chain is exactly what this replaces. Zs are
+/// world coordinates, on the same lattice the moves keep.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cycle {
+    pub kind: CycleKind,
+    pub xy: Point2,
+    /// Retract/feed plane: rapids above it, the cycle's feed moves start there.
+    pub r_z: f64,
+    /// The bottom the cycle cuts to (through holes clear the far wall).
+    pub bottom_z: f64,
+    /// The material's entry surface at the hole: the plane the tool's
+    /// total length may never sink below whole (the reach law's datum).
+    pub entry_z: f64,
+    /// Depth per peck; 0.0 outside peck cycles.
+    pub peck: f64,
+    /// Seconds at the bottom; 0.0 means no dwell word.
+    pub dwell: f64,
+    /// This hole's first move in the chain. Cycle groups are contiguous
+    /// in hole order, so `first_move..next.first_move` bounds the moves
+    /// that carry the cycle - what the agreement law pins, and what the
+    /// reach law's warning points a panel at.
+    pub first_move: usize,
+}
+
+/// A generated path: linked moves, plus — for drilling paths only — the
+/// per-hole cycle records the post needs. Caching, staleness and
 /// serialization wrap this at the schema/project layer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Toolpath {
     pub moves: Vec<Move>,
+    /// Empty for every non-drilling path; drilling keeps these in hole
+    /// order and in agreement with `moves` (there is a law, and a test).
+    pub cycles: Vec<Cycle>,
 }
 
 impl Toolpath {
     pub fn new(moves: Vec<Move>) -> Self {
-        Toolpath { moves }
+        Toolpath {
+            moves,
+            cycles: Vec::new(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -207,6 +268,15 @@ impl Toolpath {
 
     pub fn all_finite(&self) -> bool {
         self.moves.iter().all(|m| m.is_finite())
+            && self.cycles.iter().all(|c| {
+                c.xy.x.is_finite()
+                    && c.xy.y.is_finite()
+                    && c.r_z.is_finite()
+                    && c.entry_z.is_finite()
+                    && c.bottom_z.is_finite()
+                    && c.peck.is_finite()
+                    && c.dwell.is_finite()
+            })
     }
 
     /// True when every move starts where its predecessor ended.
@@ -260,15 +330,35 @@ impl Toolpath {
 pub struct PathBuilder {
     at: Point3,
     moves: Vec<Move>,
+    cycles: Vec<Cycle>,
 }
 
 impl PathBuilder {
     pub fn new(at: Point3) -> Self {
-        PathBuilder { at, moves: Vec::new() }
+        PathBuilder {
+            at,
+            moves: Vec::new(),
+            cycles: Vec::new(),
+        }
     }
 
     pub fn at(&self) -> Point3 {
         self.at
+    }
+
+    /// Moves laid down so far - a cycle generator snapshots this to
+    /// stamp the cycle's `first_move` once the tool stands at the cycle
+    /// entry plane, so the group boundary never swallows positioning
+    /// rapids.
+    pub fn moves_len(&self) -> usize {
+        self.moves.len()
+    }
+
+    /// Record a hole's cycle intent alongside the moves built so far.
+    /// The expanded chain stays the physical truth; this is what lets
+    /// the post emit one canned block instead of the chain's letters.
+    pub fn push_cycle(&mut self, cycle: Cycle) {
+        self.cycles.push(cycle);
     }
 
     /// Append a move to `to`; degenerate zero-length moves are dropped (a
@@ -316,7 +406,10 @@ impl PathBuilder {
     }
 
     pub fn finish(self) -> Toolpath {
-        Toolpath { moves: self.moves }
+        Toolpath {
+            moves: self.moves,
+            cycles: self.cycles,
+        }
     }
 }
 
