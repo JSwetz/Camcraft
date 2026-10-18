@@ -39,6 +39,7 @@ use super::icons;
 use super::pages;
 use super::panes;
 use super::theme;
+use super::viewcube;
 use super::world;
 
 const VIEW3D_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -678,6 +679,10 @@ fn viewport_panel(
     let hot = resp.hovered();
     state.viewport_hot = hot;
     let (rw, rh) = (rx1 - rx0, ry1 - ry0);
+    // The M1.5 corner furniture, laid out from the pane rect alone: the
+    // pointer law consults it before it arms any gesture, the overlay
+    // pass draws it last, and both calls see the same rects.
+    let hud = viewcube::Hud::new(resp.rect);
 
     // One wheel notch must dolly by one line in both shells: egui bakes
     // `line_scroll_speed` pixels into smooth_scroll_delta, so undo it here
@@ -714,9 +719,20 @@ fn viewport_panel(
         });
 
     // Presses - only over the pane, like the imgui hot-window gate. A press
-    // is remembered, not acted on: the release decides pick vs orbit.
+    // is remembered, not acted on: the release decides pick vs orbit. The
+    // corner furniture answers first (M1.5): a press inside it acts at
+    // press time and is never remembered, so the release-pick below sees
+    // no press to release and the motion pass sees nothing to promote -
+    // the whole gesture is absorbed, exactly like a ribbon button's.
     if hot && let Some(p) = pos {
-        if interact::inside_viewport(state, parr(p)) {
+        let over_hud = hud.as_ref().is_some_and(|h| h.contains(p));
+        if let Some(h) = &hud
+            && over_hud
+            && left_pressed
+        {
+            viewcube::click(state, h, p);
+        }
+        if !over_hud && interact::inside_viewport(state, parr(p)) {
             if mid_press {
                 state.drag = Some(DragMode::Orbit);
             }
@@ -821,10 +837,24 @@ fn viewport_panel(
                 resp.rect.max - egui::vec2(12.0, 12.0),
                 egui::Align2::RIGHT_BOTTOM,
                 hint,
-                font,
+                font.clone(),
                 egui::Color32::from_white_alpha(200),
             );
         }
+        // The corner furniture paints last of all: opaque over the scene,
+        // and it lights the feature a click would command.
+        if let Some(h) = &hud {
+            let hp = if state.drag.is_none() {
+                pos.filter(|p| hot && h.contains(*p))
+            } else {
+                None
+            };
+            viewcube::draw(ui, h, &state.cam, state, hp, font);
+        }
+    }
+    // The furniture asks for the pointer's hand, not the crosshair.
+    if hot && hud.as_ref().is_some_and(|h| pos.is_some_and(|p| h.contains(p))) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 }
 

@@ -1556,3 +1556,179 @@ mod height_plane_tests {
         assert!(cut_zs.is_empty(), "no cut geometry without a bottom: {cut_zs:?}");
     }
 }
+
+#[cfg(test)]
+mod view_cube_tests {
+    //! The M1.5 laws: the standard-orientation rule `Camera::toward`
+    //! bakes, the hud's layout off the pane rect alone, and the cube's
+    //! pick classification - every feature the painter draws facing the
+    //! eye must classify back as exactly what it is.
+
+    use crate::egui_app::viewcube::{self, Hud};
+    use crate::viewport::Camera;
+
+    /// A pane the size the 1280-wide dock leaves the viewport.
+    fn hud() -> Hud {
+        Hud::new(egui::Rect::from_min_max(
+            egui::pos2(0.0, 0.0),
+            egui::pos2(900.0, 640.0),
+        ))
+        .expect("a 900 x 640 pane has room for the furniture")
+    }
+
+    fn near(a: [f64; 3], b: [f64; 3]) -> bool {
+        (0..3).all(|i| (a[i] - b[i]).abs() < 1e-9)
+    }
+
+    #[test]
+    fn toward_turns_the_eye_without_moving_it() {
+        let cam = Camera {
+            target: [2.0, -3.0, 4.0],
+            yaw: 0.7,
+            pitch: 0.2,
+            dist: 55.0,
+        };
+        let top = cam.toward([0.0, 0.0, 1.0]);
+        assert_eq!((top.target, top.dist), (cam.target, cam.dist));
+        assert!((top.pitch - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert!(top.yaw.abs() < 1e-12, "atan2(0, 0) must read 0, not NaN");
+        let front = cam.toward([0.0, -1.0, 0.0]);
+        assert!((front.yaw + std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert!(front.pitch.abs() < 1e-12);
+        let right = cam.toward([1.0, 0.0, 0.0]);
+        assert!(right.yaw.abs() < 1e-12 && right.pitch.abs() < 1e-12);
+        // Degenerate directions are no-ops, never NaN cameras (the
+        // Prime Directive's belt on the cube's finite-by-construction
+        // classifications).
+        assert!(cam.toward([0.0, 0.0, 0.0]).yaw.is_finite());
+        assert_eq!(cam.toward([0.0, 0.0, 0.0]).yaw, cam.yaw);
+        assert_eq!(cam.toward([f64::NAN, 0.0, 0.0]).pitch, cam.pitch);
+    }
+
+    #[test]
+    fn pole_views_hold_a_stable_roll() {
+        // Straight up and straight down are the basis degeneracies; the
+        // zero-guard in basis_right pins screen-right to +X and
+        // basis_up follows, whatever the yaw atan2 picked.
+        for d in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]] {
+            for yaw0 in [0.0, 0.9, -2.3] {
+                let cam = Camera {
+                    target: [0.0; 3],
+                    yaw: yaw0,
+                    pitch: 0.0,
+                    dist: 80.0,
+                }
+                .toward(d);
+                let (r, u, _) = cam.view_basis();
+                let (r, u): ([f64; 3], [f64; 3]) = (r.into(), u.into());
+                assert!(near(r, [1.0, 0.0, 0.0]), "screen right at the {d:?} pole: {r:?}");
+                assert!(
+                    u[0].abs() < 1e-9 && u[2].abs() < 1e-9,
+                    "screen up must ride a world axis at the {d:?} pole: {u:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_feature_facing_the_eye_classifies_as_itself() {
+        // The three feature families over the house iso, demanded of the
+        // exact screen point the painter would put them at: face centers,
+        // edges whose two faces both face the eye, the corner all three
+        // face through. Hidden features must still answer with SOME
+        // feature - a solid cube never picks through its own front.
+        let h = hud();
+        let cam = Camera::default();
+        let (_, _, rf) = cam.view_basis();
+        let eye = [-rf.0, -rf.1, -rf.2];
+        let dot = |n: [f64; 3], v: [f64; 3]| n[0] * v[0] + n[1] * v[1] + n[2] * v[2];
+        let unit = |v: [f64; 3]| {
+            let l = dot(v, v).sqrt();
+            [v[0] / l, v[1] / l, v[2] / l]
+        };
+        let axes: [[f64; 3]; 6] = [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ];
+        let is_feature = |d: [f64; 3]| {
+            axes.iter().any(|a| near(d, *a))
+                || d.iter().all(|v| {
+                    v.abs() < 1e-9
+                        || (v.abs() - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-6
+                })
+                || d.iter().all(|v| (v.abs() - 3.0f64.sqrt() / 3.0).abs() < 1e-6)
+        };
+        for &n in &axes {
+            let p = viewcube::point_screen(&cam, &h, n);
+            let got = viewcube::hit_dir(&cam, &h, p).expect("a feature projects onto a feature");
+            assert!(is_feature(got), "{n:?} answered a non-feature {got:?}");
+            if dot(n, eye) > 0.3 {
+                assert!(near(got, n), "visible face {n:?} answered {got:?}");
+            }
+        }
+        for &a in &axes {
+            for &b in &axes {
+                if dot(a, b).abs() > 1e-9 || dot(a, eye) <= 0.3 || dot(b, eye) <= 0.3 {
+                    continue;
+                }
+                let m = unit([a[0] + b[0], a[1] + b[1], a[2] + b[2]]);
+                let p = viewcube::point_screen(&cam, &h, [a[0] + b[0], a[1] + b[1], a[2] + b[2]]);
+                let got = viewcube::hit_dir(&cam, &h, p).expect("an edge projects onto a feature");
+                assert!(near(got, m), "edge {m:?} answered {got:?}");
+            }
+        }
+        // The near corner: the three faces' shared sign vector, the cube
+        // point standing toward the eye - unit(sign(eye)).
+        let sgn = |v: f64| if v >= 0.0 { 1.0 } else { -1.0 };
+        let c = unit([sgn(eye[0]), sgn(eye[1]), sgn(eye[2])]);
+        let p = viewcube::point_screen(&cam, &h, [c[0] * 3.0f64.sqrt(), c[1] * 3.0f64.sqrt(), c[2] * 3.0f64.sqrt()]);
+        let got = viewcube::hit_dir(&cam, &h, p).expect("a corner projects onto a feature");
+        assert!(near(got, c), "corner {c:?} answered {got:?}");
+    }
+
+    #[test]
+    fn a_click_past_the_silhouette_is_a_miss() {
+        // The bounding box's corners stand outside the projected cube at
+        // any sane angle - they must answer None, not a stray feature.
+        let h = hud();
+        for (yaw, pitch) in [(0.9, 0.5), (0.0, 0.3), (-2.0, 1.2)] {
+            let cam = Camera {
+                target: [0.0; 3],
+                yaw,
+                pitch,
+                dist: 80.0,
+            };
+            let corner = egui::pos2(h.cube.min.x + 0.5, h.cube.min.y + 0.5);
+            assert_eq!(
+                viewcube::hit_dir(&cam, &h, corner),
+                None,
+                "yaw {yaw} pitch {pitch}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_hud_is_laid_out_from_the_pane_alone() {
+        // Cube top-right (the hint owns bottom-right), five buttons
+        // below it, right-aligned; and no room, no furniture.
+        let pane = egui::Rect::from_min_max(egui::pos2(300.0, 100.0), egui::pos2(1200.0, 700.0));
+        let h = Hud::new(pane).expect("900 x 600 has room");
+        assert!((h.cube.max.x - (1200.0 - 10.0)).abs() < 1e-6);
+        assert!((h.cube.min.y - 110.0).abs() < 1e-6, "the cube hugs the top");
+        let bottom = h.nav_rect(viewcube::Nav::Axes);
+        assert!(
+            bottom.max.x <= h.cube.max.x + 1e-6 && bottom.min.x >= pane.min.x,
+            "the nav column stays in the pane"
+        );
+        assert!(bottom.max.y < pane.max.y, "the column ends inside the pane");
+        let top_button = h.nav_rect(viewcube::Nav::Frame);
+        assert!(top_button.min.y > h.cube.max.y, "buttons start under the cube");
+        assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(120.0, 800.0))).is_none());
+        assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 250.0))).is_none());
+        assert!(Hud::new(egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(130.0, 260.0))).is_some());
+    }
+}

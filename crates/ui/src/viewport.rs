@@ -965,6 +965,11 @@ fn make_targets(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, 
     }
 }
 
+/// A world direction spelled as its three components - what `normalize`,
+/// `fwd`, `basis_right` and `basis_up` all produce, so the orthonormal
+/// basis `view_basis` returns is three of these.
+type UnitVec = (f64, f64, f64);
+
 /// Orbit camera around a target point, Z-up (the CAM convention).
 #[derive(Clone, Copy, Debug)]
 pub struct Camera {
@@ -1112,6 +1117,58 @@ impl Camera {
             pitch: 0.5,
             dist: (radius * 3.2).clamp(1.0, 50_000.0),
         }
+    }
+
+    /// Look at the same target, from the same distance, along the world
+    /// direction `d` (the eye stands at `target + dist * d`): the view-cube
+    /// law of [`crate::egui_app::viewcube`], and the one place a
+    /// standard orientation turns yaw/pitch. Non-finite `d` is a no-op
+    /// that answers `self` - the cube's classification is finite by
+    /// construction, so this is the Prime Directive's belt, not a path.
+    /// The straight-up/straight-down cases need no special yaw: `d.z`
+    /// lands pitch on `±pi/2`, and `basis_right`'s zero-guard (normalize
+    /// reads a squared length below EPSILON first) pins screen-right to
+    /// world +X there - so a pole view is roll-stable whatever `atan2`
+    /// returns for a vanishing `d.x`, `d.y`.
+    #[must_use]
+    pub fn toward(&self, d: [f64; 3]) -> Camera {
+        if d.iter().any(|v| !v.is_finite()) {
+            return *self;
+        }
+        let mut n = d;
+        let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        // Degenerate or non-finite length is a no-op (a finite `d` can
+        // overflow its squares to infinity, never to NaN).
+        if l <= f64::EPSILON || l.is_nan() {
+            return *self;
+        }
+        n = [n[0] / l, n[1] / l, n[2] / l];
+        Camera {
+            target: self.target,
+            yaw: n[1].atan2(n[0]),
+            pitch: n[2].clamp(-1.0, 1.0).asin(),
+            dist: self.dist,
+        }
+    }
+
+    /// The same camera at an exact (yaw, pitch) - the house isometric the
+    /// frame default keeps, spelled for the nav bar.
+    #[must_use]
+    pub fn oriented(&self, yaw: f64, pitch: f64) -> Camera {
+        Camera {
+            target: self.target,
+            yaw,
+            pitch,
+            dist: self.dist,
+        }
+    }
+
+    /// The camera's orthonormal world basis (right, up, forward) - the
+    /// rotation a view-cube projection is drawn through, and the frame
+    /// an edge or corner hit is classified in.
+    #[must_use]
+    pub fn view_basis(&self) -> (UnitVec, UnitVec, UnitVec) {
+        (self.basis_right(), self.basis_up(), self.fwd())
     }
 
     #[must_use]

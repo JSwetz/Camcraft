@@ -59,6 +59,20 @@ pub(crate) fn frame_all(state: &mut State) {
     state.pending.push_back(CommandKind::FrameAll);
 }
 
+/// View: look at the current target along a world direction - the
+/// view cube's face/edge/corner law resolving to `Camera::toward`
+/// (ephemeral, like the camera itself - no command; `target` and `dist`
+/// survive, so orienting never pans or zooms).
+pub(crate) fn orient_view(state: &mut State, d: [f64; 3]) {
+    state.cam = state.cam.toward(d);
+}
+
+/// View: the house isometric (yaw 0.9, pitch 0.5) - what `FrameAll`
+/// lands on, spelled as an orientation for the nav bar.
+pub(crate) fn view_iso(state: &mut State) {
+    state.cam = state.cam.oriented(0.9, 0.5);
+}
+
 /// Point the context panes at `t`. Pure view state: the panes read it
 /// through `State::pane_target`, which validates it against the world each
 /// frame. Surfaces that also change what the world highlights (tree nodes,

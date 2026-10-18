@@ -50,6 +50,7 @@ use crate::state::{CommandKind, DragMode, GeoPick, State, UiTarget};
 use super::icons::IconSet;
 use super::panes::{self, Cmd};
 use super::shell::{Tab, build_dock, headless, shell_layout};
+use super::viewcube;
 use super::{theme, world};
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
@@ -1296,5 +1297,191 @@ fn inch_mode_drag_keeps_px_parity_and_types_onto_the_lattice() {
         12.7,
         "Apply must land the snapped millimeters (status: {})",
         harness.state().state.status
+    );
+}
+
+// --------------------------------------------- view cube and nav bar (M1.5)
+//
+// The furniture is painted, not widdgitised (the icon law's vector path), so
+// these tests aim raw pointer events at rects the hud module recomputes from
+// the laid-out pane - the same arithmetic the shell's own routing uses.
+
+/// The furniture over the laid-out pane - `shell_layout`'s call, reproduced.
+fn hud(sh: &ShellUi) -> viewcube::Hud {
+    let ([x0, y0], [x1, y1]) = sh.state.viewport_rect;
+    viewcube::Hud::new(egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1)))
+        .expect("the 1280-wide dock leaves the viewport room for the furniture")
+}
+
+fn face_center(h: &mut Harness<'static, ShellUi>, q: [f64; 3]) -> egui::Pos2 {
+    let sh = h.state();
+    viewcube::point_screen(&sh.state.cam, &hud(sh), q)
+}
+
+/// The cube's core claim: clicking a face's center turns the camera to that
+/// standard view, immediately and with no command - and because the press is
+/// never armed, the release picks nothing behind the cube.
+#[test]
+fn view_cube_face_click_orients_and_arms_nothing() {
+    let mut harness = shell_harness();
+    harness.run();
+    let status0 = harness.state().state.status.clone();
+    let (target0, dist0) = (
+        harness.state().state.cam.target,
+        harness.state().state.cam.dist,
+    );
+    let p = face_center(&mut harness, [0.0, 0.0, 1.0]);
+    set_pos(&mut harness, p);
+    button_at(&mut harness, egui::PointerButton::Primary, p, true);
+    {
+        let sh = harness.state();
+        assert!(
+            (sh.state.cam.pitch - std::f64::consts::FRAC_PI_2).abs() < 1e-9,
+            "the TOP face must stand the camera over the part, pitch {}",
+            sh.state.cam.pitch
+        );
+        assert_eq!((sh.state.cam.target, sh.state.cam.dist), (target0, dist0));
+        assert!(sh.left_press.is_none(), "the furniture must never arm a press");
+        assert!(sh.state.drag.is_none());
+        assert!(sh.state.pending.is_empty(), "orientation queues nothing");
+    }
+    button_at(&mut harness, egui::PointerButton::Primary, p, false);
+    harness.run_steps(2);
+    let sh = harness.state();
+    assert_eq!(sh.state.status, status0, "a cube click is not a pick");
+    assert!(sh.left_press.is_none());
+}
+
+/// A press on the cube that is then dragged: oriented at the press, and the
+/// motion must not promote to orbit - the gesture stays absorbed end to end.
+#[test]
+fn a_drag_started_on_the_cube_is_absorbed() {
+    let mut harness = shell_harness();
+    harness.run();
+    let status0 = harness.state().state.status.clone();
+    let p = face_center(&mut harness, [0.0, 0.0, 1.0]);
+    set_pos(&mut harness, p);
+    button_at(&mut harness, egui::PointerButton::Primary, p, true);
+    let yaw0 = harness.state().state.cam.yaw;
+    let d = p + egui::vec2(40.0, 0.0);
+    set_pos(&mut harness, d);
+    {
+        let sh = harness.state();
+        assert!(sh.state.drag.is_none(), "the cube must not promote a held press");
+        assert_eq!(sh.state.cam.yaw, yaw0, "moving after a cube press must not orbit");
+    }
+    button_at(&mut harness, egui::PointerButton::Primary, d, false);
+    harness.run_steps(2);
+    let sh = harness.state();
+    assert_eq!(sh.state.status, status0, "the release behind the cube must not pick");
+    assert!(sh.state.pending.is_empty());
+}
+
+/// The nav column's five buttons: the exact house iso (after an orbit moved
+/// it off), the two toggles flipping their fields twice, and Fit riding the
+/// same queued `FrameAll` the F key pushes.
+#[test]
+fn the_nav_bar_drives_view_state() {
+    let mut harness = shell_harness();
+    harness.run();
+    let p = {
+        let h = hud(harness.state());
+        h.nav_rect(viewcube::Nav::Frame).center()
+    };
+
+    // Fit rides the same queued `FrameAll` as the F key - proven through
+    // the drain, like every other command test: asserting a command on
+    // its press frame is egui-pass fragile (a later pass's drain can
+    // execute it before we look), while the executed effect is the law.
+    // Park the camera far off the framing, click, and it must be back.
+    let framed = {
+        let sh = harness.state();
+        (sh.state.cam.target, sh.state.cam.dist)
+    };
+    harness.state_mut().state.cam.target = [400.0, 400.0, 400.0];
+    harness.state_mut().state.cam.dist = 999.0;
+    click_viewport(&mut harness, p);
+    {
+        let sh = harness.state();
+        assert_eq!(
+            (sh.state.cam.target, sh.state.cam.dist),
+            framed,
+            "Fit must run the same reframe the F key does"
+        );
+        assert!(
+            !sh.state
+                .pending
+                .iter()
+                .any(|c| matches!(c, CommandKind::FrameAll)),
+            "the queued command outlived the drain"
+        );
+    }
+
+    // Orbit away, then let Iso bring the house angle back exactly.
+    let c = vp_center(harness.state());
+    set_pos(&mut harness, c);
+    button_at(&mut harness, egui::PointerButton::Primary, c, true);
+    set_pos(&mut harness, c + egui::vec2(30.0, 0.0));
+    button_at(&mut harness, egui::PointerButton::Primary, c + egui::vec2(30.0, 0.0), false);
+    harness.run_steps(2);
+    assert_ne!(harness.state().state.cam.yaw, 0.9, "the orbit must move yaw");
+    let p = {
+        let h = hud(harness.state());
+        h.nav_rect(viewcube::Nav::Iso).center()
+    };
+    click_viewport(&mut harness, p);
+    {
+        let sh = harness.state();
+        assert_eq!(sh.state.cam.yaw, 0.9, "Iso is the house yaw, exactly");
+        assert_eq!(sh.state.cam.pitch, 0.5);
+    }
+
+    // Wireframe: the same field the Solids radios own, flipped twice.
+    let p = {
+        let h = hud(harness.state());
+        h.nav_rect(viewcube::Nav::Wire).center()
+    };
+    click_viewport(&mut harness, p);
+    assert_eq!(harness.state().state.display, crate::state::DisplayMode::Wireframe);
+    click_viewport(&mut harness, p);
+    assert_eq!(
+        harness.state().state.display,
+        crate::state::DisplayMode::ShadedEdges
+    );
+
+    // Paths and Axes flip their booleans, twice each, queueing nothing -
+    // counting from their defaults (State::new: axes on, paths off).
+    for (kind, want_paths, want_axes) in [
+        (viewcube::Nav::Paths, true, true),
+        (viewcube::Nav::Paths, false, true),
+        (viewcube::Nav::Axes, false, false),
+        (viewcube::Nav::Axes, false, true),
+    ] {
+        let p = {
+            let h = hud(harness.state());
+            h.nav_rect(kind).center()
+        };
+        click_viewport(&mut harness, p);
+        let sh = harness.state();
+        assert_eq!(sh.state.show_all_paths, want_paths);
+        assert_eq!(sh.state.show_world_axes, want_axes);
+        assert!(sh.state.pending.is_empty(), "{kind:?} queued a command");
+    }
+}
+
+/// The furniture never interferes with the pane's own gestures: the center
+/// click still picks (the seeded Block is under it), and the cube sits where
+/// it cannot (top-right, away from the block's projection).
+#[test]
+fn the_cube_leaves_the_viewport_gestures_alone() {
+    let mut harness = shell_harness();
+    let c = vp_center(harness.state());
+    let h = hud(harness.state());
+    assert!(!h.contains(c), "the block under the pane center is not furniture");
+    click_viewport(&mut harness, c);
+    assert_eq!(
+        harness.state().state.status,
+        "selected Block",
+        "the ordinary pick law must survive the cube"
     );
 }

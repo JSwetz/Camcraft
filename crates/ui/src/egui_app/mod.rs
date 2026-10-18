@@ -14,7 +14,11 @@
 //! here and (until it retired) on the imgui side, calls - so the effects
 //! live once. At M-g imgui retired and this is the shell
 //! (docs/spike-egui-go-no-go.md, migration law); the generators, commands
-//! and persistence underneath were shared and untouched throughout.
+//! and persistence underneath were shared and untouched throughout. Since
+//! M1.5 the viewport wears its corner furniture - `viewcube` owns the
+//! cube's drawing, its face/edge/corner pick law and the nav bar, and
+//! keeps the gesture-eating rule (a press on the furniture arms nothing)
+//! in one place.
 //! Provenance: our own code, from our own spike.
 
 mod icons;
@@ -24,7 +28,9 @@ mod panes;
 mod shell;
 mod theme;
 // pub(crate) past egui_app: the crate-level law tests read the scene
-// digest straight (the imgui panels' fold checks moved there at M-g).
+// digest straight (the imgui panels' fold checks moved there at M-g), and
+// the view cube's pick law straight.
+pub(crate) mod viewcube;
 pub(crate) mod world;
 
 #[cfg(test)]
