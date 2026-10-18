@@ -47,7 +47,7 @@ the contract; the Goal line is what the feature list adds up to.
 Everything a machinist needs to cut a 2.5D part on a vertical mill today:
 setup, tools, 2D operations, drilling, simulation, and one trustworthy post.
 
-**Current status snapshot**: M1.1 (mesh side), the M1.2 shell, viewport, job
+**Current status snapshot**: M1.1 (mesh side and units), the M1.2 shell, viewport, job
 setup (stock + WCS) and toolpath display, M1.3 2D machining (face, contour,
 pocket, slot, trace over mesh-sliced geometry, with the tool library,
 operation parameters and verification warnings), and the M1.4 ribbon/browser
@@ -63,10 +63,10 @@ height offsets back in view in docked panes) - the ⏸ items below remain
 open. The M1.4 look-and-feel verdict prioritized the Dear ImGui → egui
 stack rework, and that rework has now shipped: M1.4.1 (the decision and
 GO spike) and M1.4.2 (the per-panel graduation, imgui retired) are both
-done - egui is the shell. What's left of the early phase is the remaining
-M1.4 surface polish (graphical tool editor - viewport display modes and
-the tabbed-panels UX landed right after the graduation), units, drilling
-and the first post.
+done - egui is the shell. The remaining M1.4 surface polish landed right
+after the graduation - viewport display modes, the tabbed-panels UX and
+the graphical tool editor window. What's left of the early phase is
+drilling and the first post.
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -82,7 +82,16 @@ and the first post.
       v1→2→3→4→5→6→7, never skipping one)
 - ✅ **Command foundation**: command pattern with undo/redo driving all
       UI-visible state changes from day one
-- 📋 **Units**: millimeters and inches, correct everywhere including posts
+- ✅ **Units**: millimeters and inches as a document-level lens - storage
+      stays millimeters (geometry, the micron lattice, toolpaths, goldens,
+      entity parameters) and the unit converts only at the widget and
+      string edges, so flipping it changes the screen and nothing else;
+      SetUnits is an undoable command (no-ops refused), the unit control
+      is a radio pair on the stock page, inch input snaps onto the micron
+      lattice, and the project file grew to v8 (an absent key reads mm,
+      so the v7 corpus is its own migration). The post's half of the
+      claim - converting at output time and declaring G20/G21 (RS-274) -
+      is specced in `app::units` and lands with the first post (M1.7)
 - ⏸ **IGES import**: still refused with a clean diagnostic - no IGES
       translator exists in pure Rust. STEP import shipped early, in M1.2
       (below), via the truck tessellator
@@ -352,10 +361,10 @@ generator stayed untouched (the golden CLFile/G-code suite never moved).
       and the graphify rebuild re-baselined the knowledge graph.
 
 Parity held as promised: same features, same command wiring, undo/redo
-gated by tests, not hand-test. The remaining M1.4 carry-over (graphical
-tool editor window) rides the new stack as an open M1.4 item; viewport
-display modes and the tabbed panel-UX redesign landed right after the
-graduation as their own M1.4 items. Version coupling came
+gated by tests, not hand-test. The M1.4 carry-over (graphical tool
+editor window) rode the new stack to done; viewport display modes and
+the tabbed panel-UX redesign landed right after the graduation as their
+own M1.4 items. Version coupling came
 true the cheap way: egui 0.36.2 + egui_dock 0.21.1 held the pin through
 the whole migration, snapshot diffs caught every paint change.
 
@@ -723,7 +732,7 @@ programming department.
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
-| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
+| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units (IGES deferred) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; display modes, the tabbed-panels overhaul and the graphical tool editor window all done - riding the graduated egui stack | ⚠️ |

@@ -9,6 +9,59 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.1 — document units, millimeters and inches (commit `feat(app,ui): document units - millimeters and inches everywhere including the post law`)
+
+- **The unit is a lens, not a storage choice.** Every stored number -
+  geometry, the micron lattice, toolpaths, the goldens, entity and draft
+  parameters - is millimeters, always. The document's unit is one flecs
+  world singleton (`schema::Units`), read at paint time through
+  `units::of` and on no entity, so it never appears in a browser row or a
+  saved entity list and needs no mirror in UI state that could go stale.
+  This is the international inch (exactly 25.4 mm) and the
+  internal-metric/display-at-the-edge pattern of CAD/CAM systems and
+  G-code (`G20`/`G21`). Cost to change: storing dual representations or
+  per-widget unit state - precisely what the singleton exists to prevent.
+- **SetUnits is a command, and setting the unit the document already has
+  is refused at construction.** The lens change is undoable like every
+  other UI-visible change (its inverse writes the previous value back, so
+  undo restores exactly what was on screen), and a no-op does not belong
+  in the history. The control itself is a two-radio pair on the stock
+  page - document-global, one place, not per-pane toggles. Cost to
+  change: a silent history step, cheap to add and impossible to notice.
+- **Widgets convert on a display copy with `speed ÷ 25.4`.** One physical
+  pixel moves the same millimeters in either mode, so drag muscle memory
+  is unit-fair; and because egui's smart-aim rounds the *shown* value
+  inside a one-pixel radius, the identical ±0.1 mm aim window applies in
+  both modes - the assist never favors one unit. `from_display` snaps
+  inch-typed values onto the micron lattice (the same quantum as
+  `cl::lattice`), so `0.5 in` stores exactly `12.7 mm` and no stored
+  number ever carries float-conversion dust - the goldens keep their
+  bits. mm mode stays identity: the historical DragValue, untouched.
+  Cost to change: none wanted; the snap is the only rounding in the
+  path.
+- **Display precision keeps mm's bits and widens inches only where the
+  unit demands it.** `units::len` prints the site's own millimeter
+  decimals verbatim in mm mode and mm+2 decimals in inch mode (a mil is
+  finer than a hundredth of a mm, so an inch readout must not lose
+  information the mm one carried); feeds print bare in mm and `÷25.4` at
+  two decimals in inches; areas divide twice and get +3. Every pre-existing
+  string in mm mode is byte-identical - both snapshot gates passed with
+  zero churn, which is the empirical proof the lens never leaked into
+  storage or formatting. Cost to change: rounding in `len`, which is the
+  round-trip-through-a-string bug this law exists to avoid.
+- **Project file v8: an absent `units` key means millimeters.** The
+  chained migration adds the key (`v7→8`), making the whole v7 corpus its
+  own migration - older files reach v8 through the existing ladder, never
+  skipping a step. Cost to change: a reader that defaults instead of
+  migrating - rejected because the ladder is the file format's law.
+- **"Correct everywhere including posts" is half specced, honestly.**
+  There is no post yet (M1.7 ships the first), so nothing that exists can
+  be wrong; the post's rule - convert at output time, declare the mode
+  with `G20`/`G21` - is written into `app::units`' provenance header so
+  the M1.7 post inherits it rather than reinventing it. Discussion point:
+  confirm the Fanuc post keeps mm-internal numbers and converts per-line,
+  not a whole-program mm→inch pass at the end.
+
 ## M1.4 — graphical tool editor (commit `feat(ui): graphical tool editor - its own window with a live to-scale preview`)
 
 - **The editor is an in-app `egui::Window`, not an OS viewport.** egui's
