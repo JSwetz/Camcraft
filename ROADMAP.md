@@ -230,14 +230,18 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
 - ⏸ **View cube + viewport navigation bar**: deferred to the M1.5 viewport
       work (the open items below it join this milestone's list; display
       modes landed first, right after the egui graduation)
-- 📋 **Graphical tool editor**: tool creation and editing move from the
+- ✅ **Graphical tool editor**: tool creation and editing move from the
       property page's field list to its own window with a live preview -
-      the tool, shank and holder drawn to scale and updating as the
-      numbers change, from the same geometry the viewport shows. Owns
-      the preview the parameter page can't give; the window form is a
-      considered revisit of this milestone's "standalone tool library
-      window is gone" decision (keep the dock for the library, open a
-      window for the editor) - builds on the M1.4.1 stack
+      the dock keeps the LIBRARY (a composed world summary, Edit/Delete,
+      the catalog) and the editor is the shell's first floating surface:
+      fields left, tool-shank-holder side view right, drawn to scale
+      from `tools::Tool::profile` - the same band stack `verify`
+      collides - and updating as the numbers change, the draft law
+      keeping the world untouched until Apply. ✕ closing plus the ghost
+      law in the drain keep it honest; the open subject is ephemeral
+      view state, never a command. The window form is the considered
+      revisit of the "standalone tool library window is gone" decision,
+      as specced - builds on the M1.4.1 stack (this commit)
 - ✅ **Viewport display modes**: wireframe-only and shaded-with-edges,
       switched by the browser pane's Solids radios - view state under the
       same law as the axes and paths checkboxes, never a command.
@@ -722,7 +726,7 @@ programming department.
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness (IGES deferred; units open) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
-| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; graphical tool editor window open (wireframe/shaded-with-edges display modes and the tabbed-panels UX overhaul done) - the tool editor rides the egui stack | ⚠️ |
+| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; display modes, the tabbed-panels overhaul and the graphical tool editor window all done - riding the graduated egui stack | ⚠️ |
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |

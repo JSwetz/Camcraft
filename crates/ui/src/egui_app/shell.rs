@@ -525,6 +525,12 @@ pub(crate) fn shell_layout(
                 left_press,
             });
     });
+    // Last, so it floats over the dock: the M1.4 graphical tool editor.
+    // An in-app egui::Window - this is the shell's only kind of extra
+    // surface; the single-OS-window law stands. Closed by default
+    // (`state.tool_editor` is None on a fresh State), so no panel below
+    // it ever moves in the snapshot until something opens it.
+    pages::tool_editor_window(ui.ctx(), state);
 }
 
 /// Feed this pass's CPU-texture deltas (the font atlas first of all) to the

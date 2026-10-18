@@ -18,7 +18,11 @@
 //! gesture tests drive `crate::interact::pick_at` and the camera arms
 //! through egui's own pointer events - click-and-pick, the travel
 //! threshold, MMB/RMB, wheel, the Face radio and anchor picking. The
-//! snapshot is the churn gate for the per-panel migration steps.
+//! snapshot is the churn gate for the per-panel migration steps. M1.4's
+//! graphical tool editor adds the first floating surface: the flow test
+//! drives the window (Edit opens, drag stages, Apply lands, Delete
+//! ghost-closes) and `tool_editor_snapshot` pins its pixels beside the
+//! shell's, which the closed-by-default window must leave untouched.
 //!
 //! The harness runs the managed-texture path: the viewport leaf shows a flat
 //! placeholder instead of View3D's offscreen render, because the GPU
@@ -911,6 +915,97 @@ fn egui_shell_snapshot() {
     let mut harness = shell_harness();
     harness.run_steps(3);
     harness.snapshot("egui_app");
+}
+
+/// M1.4: the graphical tool editor, end to end through the real drain. The
+/// dock page is the LIBRARY (no field widgets, so every label queried here
+/// resolves in exactly one surface); `Edit` opens the window on the world's
+/// numbers; a drag stages into `tool_ui` WITHOUT touching the world (the
+/// draft law); `Apply` lands it through `ChangeTool`; and the dock's
+/// `Delete` proves the ghost law - the named tool is gone, so the window
+/// is gone the next frame.
+#[test]
+fn tool_editor_window_edits_live_and_stages_through_commands() {
+    let mut harness = shell_harness();
+    // Browser rows are painted strips; retargeting is the established
+    // navigation idiom (state_mut like the gesture tests).
+    harness.state_mut().state.ui_target = UiTarget::Tool("EM-0600-4FL".to_owned());
+    harness.run();
+    harness.run();
+    let world_d = |h: &Harness<'static, ShellUi>| {
+        model::find_by_name(&h.state().state.world, "EM-0600-4FL")
+            .and_then(|e| model::tool_of(&h.state().state.world, &e))
+            .map(|t| t.diameter)
+    };
+    assert!(
+        harness.query_by_label("Diameter").is_none(),
+        "the dock library must not own the editor's labels"
+    );
+    harness.get_by_label("Edit").click();
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().state.tool_editor.as_deref(), Some("EM-0600-4FL"));
+    assert!(harness.state().state.pending.is_empty(), "opening must queue nothing");
+    let d0 = world_d(&harness).expect("the seed owns EM-0600-4FL");
+    assert!(
+        (harness.state().state.tool_ui.diameter - d0).abs() < 1e-12,
+        "the window must open on the world's diameter"
+    );
+    // The window's first SpinButton is Diameter (the library renders no
+    // DragValues, so "first" is deterministic): 30 px at speed 0.1.
+    let c = harness
+        .get_all_by_role(egui::accesskit::Role::SpinButton)
+        .next()
+        .expect("the editor window owns DragValues")
+        .rect()
+        .center();
+    harness.drag_at(c);
+    harness.run();
+    harness.hover_at(c + Vec2::new(30.0, 0.0));
+    harness.run();
+    harness.drop_at(c + Vec2::new(30.0, 0.0));
+    harness.run();
+    assert!(
+        (harness.state().state.tool_ui.diameter - (d0 + 3.0)).abs() < 0.05,
+        "the drag must stage the draft"
+    );
+    assert!(
+        (world_d(&harness).expect("still there") - d0).abs() < 1e-12,
+        "a drag must not touch the world"
+    );
+    harness.get_by_label("Apply").click();
+    harness.run();
+    assert!(
+        (world_d(&harness).expect("still there") - (d0 + 3.0)).abs() < 0.05,
+        "Apply must land the staged number (status: {})",
+        harness.state().state.status
+    );
+    // Ghost law: deleting the tool from the library closes the window.
+    harness.get_by_label("Delete").click();
+    harness.run();
+    assert!(
+        harness.state().state.tool_editor.is_none(),
+        "the window must not outlive its tool"
+    );
+    assert!(
+        harness.query_by_label("Shank diameter").is_none(),
+        "the window's widgets must go with it"
+    );
+    assert!(world_d(&harness).is_none(), "Delete must empty the library too");
+}
+
+/// The editor's pixels are their own churn gate, so the shell snapshot can
+/// keep its "window closed by default" law: fields left, banded to-scale
+/// profile right, floating over the dock. Regenerate with UPDATE_SNAPSHOTS=1.
+#[test]
+fn tool_editor_snapshot() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.ui_target = UiTarget::Tool("EM-0600-4FL".to_owned());
+    harness.run();
+    harness.run();
+    harness.get_by_label("Edit").click();
+    harness.run_steps(3);
+    harness.snapshot("egui_tool_editor");
 }
 
 // The S0 one-wgpu proof retired with the imgui renderer at M-g: with

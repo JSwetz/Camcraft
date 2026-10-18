@@ -576,6 +576,13 @@ pub struct State {
     /// every sync, and a tab reset on Apply would read as a bug.
     pub op_tab: usize,
     pub tool_ui: ToolUi,
+    /// The tool editor window (M1.4): `None` closed, `Some(name)` editing
+    /// that tool, `Some("")` the blank creation form. Ephemeral window
+    /// state like [`State::op_tab`] - never a command, never saved, never
+    /// undoable; the edits it drives are. `State::drain_actions` closes it
+    /// when the named tool vanishes (the ghost law, mirrored from
+    /// [`State::pane_target`]).
+    pub tool_editor: Option<String>,
     /// `doc_version` the setup drafts were last refetched at.
     ui_synced_doc: u64,
     /// (draft identity, `doc_version` it was fetched at) per pane; see
@@ -701,6 +708,7 @@ impl State {
                 name: String::from("Tool1"),
                 ..ToolUi::default()
             },
+            tool_editor: None,
             ui_synced_doc: 0,
             op_synced: (String::new(), 0),
             tool_synced: (String::new(), 0),
@@ -1183,6 +1191,16 @@ impl State {
             self.run(action);
         }
         self.poll_import();
+        // The editor window's ghost law (M1.4), mirroring `pane_target`:
+        // an open editor never keeps pointing at a name the document lost
+        // under it - deleted, undone, or swapped by New/Open all land here.
+        // The blank form creates rather than points, so it survives.
+        if let Some(name) = &self.tool_editor
+            && !name.is_empty()
+            && !model::find_by_name(&self.world, name).is_some_and(|e| model::is_tool(&self.world, &e))
+        {
+            self.tool_editor = None;
+        }
     }
 
     /// Drive the queue and the import worker to completion, blocking. For

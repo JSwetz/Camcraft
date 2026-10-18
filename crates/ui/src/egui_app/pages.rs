@@ -43,7 +43,10 @@
 //! Provenance: our own port, specced from imgui operations.rs/setup.rs
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
-use egui::{Color32, ComboBox, DragValue, Label, ScrollArea, TextEdit, Ui};
+use egui::{
+    Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense, Shape,
+    Stroke, TextEdit, Ui, Vec2, Window,
+};
 
 use hsmworks_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
 use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
@@ -55,6 +58,7 @@ use hsmworks_app::tools;
 use hsmworks_app::verify::Warning;
 
 
+use crate::actions;
 use crate::operations::{
     fold_warnings, height_echo, offset_label, side_names, strategy_names, unresolved_note,
 };
@@ -1119,85 +1123,55 @@ fn turn_wcs(state: &mut State, axis: usize, sign: f64) {
 
 // ----------------------------------------------------------------- tool page
 
+/// The dock's tool surface is the LIBRARY (M1.4): what a tool in the
+/// document is, in plain text, plus the verbs that point at it. The field
+/// list moved to `tool_editor_window` - deliberately NO field widgets
+/// live here, so every labeled field resolves in exactly one surface
+/// (the a11y-query law the tests ride on).
 fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
     if !name.is_empty() && state.tool_ui.name != name {
         state.tool_ui.name = name.to_owned();
     }
     state.sync_tool_ui();
-    let tu = &mut state.tool_ui;
-    let nm = tu.name.clone();
     // sync_tool_ui maintains `exists` from the world; the pane trusts it.
-    let exists = tu.exists;
+    let exists = state.tool_ui.exists;
+    let nm = state.tool_ui.name.clone();
     if exists {
         ui.heading(format!("Tool: {nm}"));
-    } else {
-        // Typing the name is not an event; it rides the next Add command.
-        ui.label("Name");
-        ui.add(TextEdit::singleline(&mut tu.name).desired_width(f32::INFINITY));
-    }
-    ui.separator();
-    field(ui, "Type");
-    let mut k = tu.kind.min(2);
-    combo(ui, "tool_kind", &mut k, &TOOL_KINDS);
-    tu.kind = k.min(2);
-    field(ui, "Diameter");
-    num(ui, &mut tu.diameter);
-    field(ui, "Corner radius");
-    num(ui, &mut tu.corner_r);
-    field(ui, "Flute length");
-    num(ui, &mut tu.flute_len);
-    field(ui, "Shank diameter");
-    num(ui, &mut tu.shank_d);
-    field(ui, "Shank length");
-    num(ui, &mut tu.shank_len);
-    field(ui, "Holder diameter");
-    num(ui, &mut tu.holder_d);
-    field(ui, "Holder length");
-    num(ui, &mut tu.holder_len);
-    field(ui, "Material group");
-    ui.add(TextEdit::singleline(&mut tu.material_group).desired_width(140.0));
-    field(ui, "Spindle rpm");
-    num(ui, &mut tu.rpm);
-    field(ui, "Feed (mm/min)");
-    num(ui, &mut tu.feed);
-    ui.add_space(6.0);
-    let name_now = tu.name.clone();
-    let tool = tu.to_tool();
-    let block = if name_now.trim().is_empty() {
-        "Name the tool first.".to_owned()
-    } else if !exists && model::find_by_name(&state.world, &name_now).is_some() {
-        "That name is already in the document.".to_owned()
-    } else {
-        String::new()
-    };
-    if exists {
-        ui.horizontal(|ui| {
-            if ui.button("Apply").clicked() {
-                state.pending.push_back(CommandKind::ChangeTool {
-                    name: name_now.clone(),
-                    tool: state.tool_ui.to_tool(),
-                });
-            }
-            if ui.button("Delete").clicked() {
-                state.pending.push_back(CommandKind::DeleteTool(name_now.clone()));
-            }
-        });
-    } else {
-        let add = ui.add_enabled(block.is_empty(), egui::Button::new("Add"));
-        if add.clicked() {
-            state.pending.push_back(CommandKind::AddTool {
-                name: name_now.trim().to_owned(),
-                tool,
-            });
+        ui.separator();
+        // The summary: the WORLD's numbers, not the draft's - what the
+        // document holds right now, one line per fact.
+        if let Some(t) = model::find_by_name(&state.world, &nm).and_then(|e| model::tool_of(&state.world, &e)) {
+            ui.label(format!(
+                "{}  Ø{:.2}  corner r {:.2}",
+                kind_name(t.kind),
+                t.diameter,
+                t.corner_r
+            ));
+            ui.label(format!(
+                "cut {:.1}  shank Ø{:.1}×{:.1}  holder Ø{:.1}×{:.1}",
+                t.flute_len, t.shank_d, t.shank_len, t.holder_d, t.holder_len
+            ));
+            ui.label(format!("{} rpm  {:.0} mm/min  {}", t.rpm, t.feed, t.material_group));
         }
-        if !block.is_empty() {
-            ui.label(block);
+        ui.add_space(4.0);
+        let (edit, del) = ui
+            .horizontal(|ui| {
+                (ui.button("Edit").clicked(), ui.button("Delete").clicked())
+            })
+            .inner;
+        if del {
+            state.pending.push_back(CommandKind::DeleteTool(nm.clone()));
         }
+        if edit {
+            actions::open_tool_editor(state, &nm);
+        }
+    } else {
+        ui.heading("Tool library");
+        ui.label("Pick a tool in the browser, or open the editor to create one.");
     }
-    if ui.button("New").clicked() {
-        let draft = state.new_tool_draft();
-        state.ui_target = UiTarget::Tool(String::new());
-        state.tool_ui = draft;
+    if ui.button("New tool…").clicked() {
+        actions::open_tool_editor(state, "");
     }
     if let Some(msg) = state.error_for(ErrorScope::Tool).map(str::to_owned) {
         ui.colored_label(RED, msg);
@@ -1224,6 +1198,233 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
             });
         }
     }
+}
+
+/// M1.4: the graphical tool editor - its own window, fields on the left,
+/// a live to-scale side view on the right. An in-app `egui::Window`: the
+/// shell has exactly one OS window and that law stands (RECOMMENDED.md).
+/// Ephemeral subject like every pane: `state.tool_editor` says whether and
+/// what it shows (None closed, Some(name) editing, Some("") a blank
+/// draft); opening queues nothing, and the ghost law in
+/// `State::drain_actions` closes it when the tool it names stops existing.
+/// The numbers edit the shared `state.tool_ui` draft; only Apply/Add here
+/// reach the world, through the same commands the dock's field list used
+/// to carry. Delete stays a library verb (the dock owns it), which also
+/// keeps every button label unique across the two surfaces.
+pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
+    let Some(_subject) = state.tool_editor.clone() else {
+        return;
+    };
+    state.sync_tool_ui();
+    let exists = state.tool_ui.exists;
+    let title = if exists {
+        format!("Tool: {}", state.tool_ui.name)
+    } else {
+        "New tool".to_owned()
+    };
+    let mut open = true;
+    Window::new(title)
+        .id(Id::new("tool-editor"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .default_pos([
+            ctx.viewport_rect().center().x - 270.0,
+            ctx.viewport_rect().center().y - 210.0,
+        ])
+        .show(ctx, |ui| {
+            // One snapshot of the draft drives the picture, so fields and
+            // preview cannot disagree mid-frame; the DragValues below still
+            // edit the live draft, and the next frame's snapshot follows.
+            let preview_tool = state.tool_ui.to_tool();
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(220.0);
+                    if !exists {
+                        // Typing the name is not an event; it rides the
+                        // Add command at the bottom, same law as ever.
+                        field(ui, "Name");
+                        ui.add(
+                            TextEdit::singleline(&mut state.tool_ui.name)
+                                .desired_width(f32::INFINITY),
+                        );
+                    }
+                    field(ui, "Type");
+                    let mut k = state.tool_ui.kind.min(2);
+                    combo(ui, "tool_kind", &mut k, &TOOL_KINDS);
+                    state.tool_ui.kind = k.min(2);
+                    field(ui, "Diameter");
+                    num(ui, &mut state.tool_ui.diameter);
+                    field(ui, "Corner radius");
+                    num(ui, &mut state.tool_ui.corner_r);
+                    field(ui, "Flute length");
+                    num(ui, &mut state.tool_ui.flute_len);
+                    field(ui, "Shank diameter");
+                    num(ui, &mut state.tool_ui.shank_d);
+                    field(ui, "Shank length");
+                    num(ui, &mut state.tool_ui.shank_len);
+                    field(ui, "Holder diameter");
+                    num(ui, &mut state.tool_ui.holder_d);
+                    field(ui, "Holder length");
+                    num(ui, &mut state.tool_ui.holder_len);
+                    field(ui, "Material group");
+                    ui.add(
+                        TextEdit::singleline(&mut state.tool_ui.material_group)
+                            .desired_width(140.0),
+                    );
+                    field(ui, "Spindle rpm");
+                    num(ui, &mut state.tool_ui.rpm);
+                    field(ui, "Feed (mm/min)");
+                    num(ui, &mut state.tool_ui.feed);
+                });
+                ui.vertical(|ui| {
+                    draw_tool_preview(ui, &preview_tool);
+                });
+            });
+            ui.separator();
+            let name_now = state.tool_ui.name.clone();
+            let block = if name_now.trim().is_empty() {
+                "Name the tool first.".to_owned()
+            } else if !exists && model::find_by_name(&state.world, &name_now).is_some() {
+                "That name is already in the document.".to_owned()
+            } else {
+                String::new()
+            };
+            if exists {
+                if ui.button("Apply").clicked() {
+                    state.pending.push_back(CommandKind::ChangeTool {
+                        name: name_now.clone(),
+                        tool: state.tool_ui.to_tool(),
+                    });
+                }
+            } else {
+                let add = ui.add_enabled(block.is_empty(), egui::Button::new("Add tool"));
+                if add.clicked() {
+                    state.pending.push_back(CommandKind::AddTool {
+                        name: name_now.trim().to_owned(),
+                        tool: state.tool_ui.to_tool(),
+                    });
+                }
+                if !block.is_empty() {
+                    ui.label(block);
+                }
+            }
+            if let Some(msg) = state.error_for(ErrorScope::Tool).map(str::to_owned) {
+                ui.colored_label(RED, msg);
+            }
+        });
+    if !open {
+        state.tool_editor = None;
+    }
+}
+
+/// The live preview: the tool drawn to scale from `tools::Tool::profile`,
+/// the same band stack the collision checker sweeps, so what you see is
+/// what `verify` would collide.
+///
+/// Pure state→paint: nothing here queues a command; it renders the draft
+/// the fields beside it are editing. Tip at the bottom (z = 0 upward),
+/// equal aspect both axes - "to scale" means to scale. A half-typed draft
+/// renders a stub and a word, never a NaN.
+fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool) {
+    const SIDE: f32 = 260.0;
+    const PAD: f32 = 18.0;
+    let (resp, painter) = ui.allocate_painter(Vec2::splat(SIDE), Sense::hover());
+    let rect = resp.rect;
+    let axis_x = rect.center().x;
+    painter.rect_filled(rect, 4.0, Color32::from_rgb(24, 26, 31));
+    let outline = t.profile();
+    let r_max = outline.iter().map(|q| q.1).fold(0.0f64, f64::max);
+    let z_max = outline.iter().map(|q| q.0).fold(0.0f64, f64::max);
+    if r_max <= 0.0 || z_max <= 0.0 || !r_max.is_finite() || !z_max.is_finite() {
+        painter.line_segment(
+            [
+                Pos2::new(axis_x, rect.min.y + PAD),
+                Pos2::new(axis_x, rect.max.y - PAD),
+            ],
+            Stroke::new(1.0, NOTE),
+        );
+        painter.text(
+            Pos2::new(axis_x, rect.center().y),
+            Align2::CENTER_CENTER,
+            "enter dimensions",
+            FontId::proportional(11.0),
+            NOTE,
+        );
+        return;
+    }
+    let base_y = rect.max.y - PAD;
+    let scale = (((rect.width() - 2.0 * PAD) / (r_max as f32 * 2.0))
+        .min((rect.height() - 2.0 * PAD) / z_max as f32))
+        .max(f32::EPSILON);
+    let at = |z: f64, r: f64| -> Pos2 {
+        Pos2::new(
+            axis_x + (r as f32 * scale),
+            base_y - (z as f32 * scale),
+        )
+    };
+    // The axis first, so everything steel-colored lies over it.
+    painter.line_segment(
+        [
+            Pos2::new(axis_x, rect.min.y + 6.0),
+            Pos2::new(axis_x, rect.max.y - 6.0),
+        ],
+        Stroke::new(1.0, Color32::from_rgb(70, 74, 84)),
+    );
+    let zc = t.flute_len.max(0.0);
+    let zs = zc + t.shank_len.max(0.0);
+    let steel = [
+        Color32::from_rgb(168, 178, 192), // cutting band
+        Color32::from_rgb(122, 130, 142), // shank
+        Color32::from_rgb(86, 92, 104),   // holder
+    ];
+    // Band fills, one quad per outline pair: each z-monotone symmetric
+    // slice is convex, so it fills honestly - the whole stepped silhouette
+    // is not (concave at every band step) and egui fills convex only.
+    // Radius steps (z0 == z1) carry no area; the slice above paints them.
+    for w in outline.windows(2) {
+        let (z0, r0) = w[0];
+        let (z1, r1) = w[1];
+        if !(z0.is_finite() && z1.is_finite() && r0.is_finite() && r1.is_finite()) || z1 <= z0 {
+            continue;
+        }
+        let zm = (z0 + z1) * 0.5;
+        let band = (usize::from(zm >= zc) + usize::from(zm >= zs)).min(2);
+        painter.add(Shape::convex_polygon(
+            vec![at(z0, -r0), at(z0, r0), at(z1, r1), at(z1, -r1)],
+            steel[band],
+            Stroke::NONE,
+        ));
+    }
+    // The outline as one closed polyline (a stroke has no convexity rule):
+    // right side up, then the mirrored left side back down. Axis points
+    // (r = 0) appear on the right only - the mirror skips them so the tip
+    // and top close with a single straight segment.
+    let mut pts: Vec<Pos2> = Vec::with_capacity(outline.len() * 2);
+    for &(z, r) in &outline {
+        pts.push(at(z, r));
+    }
+    for &(z, r) in outline.iter().filter(|q| q.1 > 0.0).rev() {
+        pts.push(at(z, -r));
+    }
+    painter.add(Shape::closed_line(
+        pts,
+        Stroke::new(1.0, Color32::from_rgb(214, 220, 228)),
+    ));
+    painter.text(
+        Pos2::new(axis_x, rect.max.y - 4.0),
+        Align2::CENTER_BOTTOM,
+        format!("Ø {:.2}", t.diameter),
+        FontId::proportional(10.0),
+        NOTE,
+    );
+    painter.text(
+        Pos2::new(rect.min.x + 6.0, rect.min.y + 6.0),
+        Align2::LEFT_TOP,
+        format!("{z_max:.1} mm overall"),
+        FontId::proportional(10.0),
+        NOTE,
+    );
 }
 
 // ---------------------------------------------------------------- model page
@@ -1342,6 +1543,40 @@ mod turn_tests {
             [(p.x - 5.0), p.y, (p.z - 1.0)].iter().all(|v| v.abs() < 1e-9),
             "{p:?}"
         );
+    }
+
+    /// M1.4: opening the editor is pure view state - the named path
+    /// re-fetches the draft from the world (every field starts at the
+    /// document's numbers, the law that lets the live preview be honest),
+    /// the blank path starts a real draft numbered past what's taken, and
+    /// neither queues a command.
+    #[test]
+    fn open_tool_editor_syncs_the_draft_from_the_world() {
+        let mut state = State::new();
+        let (name, tool) = tools::catalog()
+            .into_iter()
+            .find(|(n, _)| *n == "EM-0600-4FL")
+            .expect("test fixture: the catalog has it");
+        state.pending.push_back(CommandKind::AddTool {
+            name: name.to_owned(),
+            tool: tool.clone(),
+        });
+        state.drain_actions();
+        actions::open_tool_editor(&mut state, name);
+        assert_eq!(state.tool_editor.as_deref(), Some(name));
+        assert!(state.pending.is_empty(), "opening an editor queues nothing");
+        assert!(state.tool_ui.exists);
+        assert_eq!(state.tool_ui.name, name);
+        assert_eq!(state.tool_ui.diameter, tool.diameter);
+        assert_eq!(state.tool_ui.shank_d, tool.shank_d);
+        assert_eq!(state.tool_ui.holder_len, tool.holder_len);
+        // The blank path: "Tool2" - numbered past the one tool the
+        // document now holds, with the starter's plausible numbers.
+        actions::open_tool_editor(&mut state, "");
+        assert_eq!(state.tool_editor.as_deref(), Some(""));
+        assert_eq!(state.tool_ui.name, "Tool2");
+        assert!(!state.tool_ui.exists);
+        assert!(state.pending.is_empty());
     }
 }
 

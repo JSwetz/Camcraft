@@ -90,6 +90,83 @@ impl Tool {
             holder_len: self.holder_len,
         }
     }
+
+    /// The tool's side profile as an axisymmetric outline: (z, radius)
+    /// points from the tip center at `z = 0` up the right side of the
+    /// revolve to `(flute_len + shank_len + holder_len, 0)` at the top.
+    /// The band breakpoints are exactly what the shank-reach law sweeps
+    /// (`verify`'s bands start at `flute_len` and `flute_len + shank_len`
+    /// and skip the zero-length ones - so does this), which is what lets
+    /// the editor's preview draw the very geometry the checker collides.
+    ///
+    /// Tip by kind: a flat rim on an end mill, a sampled hemispherical
+    /// dome on a ball nose, a toroidal corner (clamped to what the
+    /// diameter and the flute allow) on a bull nose. Degenerate numbers
+    /// (a half-typed draft) yield a shorter picture, never a NaN and
+    /// never a panic - the drawing Prime Directive mirrors `is_sane`.
+    ///
+    /// Provenance: our own `Tool` schema; the three tip shapes are the
+    /// standard machine-tool handbook side views.
+    #[must_use]
+    pub fn profile(&self) -> Vec<(f64, f64)> {
+        let r = self.diameter.max(0.0) * 0.5;
+        let zc = self.flute_len.max(0.0);
+        let zs = zc + self.shank_len.max(0.0);
+        let zh = zs + self.holder_len.max(0.0);
+        let cr = self.corner_r.clamp(0.0, r).min(zc);
+        let mut p: Vec<(f64, f64)> = Vec::new();
+        add_pt(&mut p, 0.0, 0.0);
+        match self.kind {
+            ToolKind::BallNose => {
+                let steps = 24;
+                let top = r.min(zc);
+                for i in 1..steps {
+                    let z = top * f64::from(i) / f64::from(steps);
+                    add_pt(&mut p, z, dome_radius(r, z));
+                }
+                add_pt(&mut p, top, dome_radius(r, top));
+            }
+            ToolKind::BullNose => {
+                add_pt(&mut p, 0.0, r - cr);
+                let steps = 12;
+                for i in 1..steps {
+                    let t = std::f64::consts::FRAC_PI_2 * f64::from(i) / f64::from(steps);
+                    add_pt(&mut p, cr * (1.0 - t.cos()), r - cr + cr * t.sin());
+                }
+                add_pt(&mut p, cr, r);
+            }
+            ToolKind::EndMill => add_pt(&mut p, 0.0, r),
+        }
+        add_pt(&mut p, zc, r);
+        let sr = self.shank_d.max(0.0) * 0.5;
+        if zs > zc {
+            add_pt(&mut p, zc, sr);
+            add_pt(&mut p, zs, sr);
+        }
+        let hr = self.holder_d.max(0.0) * 0.5;
+        if zh > zs {
+            add_pt(&mut p, zs, hr);
+            add_pt(&mut p, zh, hr);
+        }
+        add_pt(&mut p, zh, 0.0);
+        p
+    }
+}
+
+/// Append unless it equals the previous point: the band steps share a z
+/// with the wall's top, and duplicates only thicken the polyline.
+fn add_pt(p: &mut Vec<(f64, f64)>, z: f64, r: f64) {
+    if p.last().copied() != Some((z, r)) {
+        p.push((z, r));
+    }
+}
+
+/// A sphere of radius `rad`, tip at z=0, center at z=rad: the cross-section
+/// radius at height z. The `max(0.0)` before the sqrt is the clamped
+/// half-typed-draft guard (rounding at the pole cannot go negative;
+/// nonsense z can, and the Prime Directive says it renders short, not NaN).
+fn dome_radius(rad: f64, z: f64) -> f64 {
+    (2.0 * rad * z - z * z).max(0.0).sqrt()
 }
 
 /// The starter catalog: name, then tool. Ordinary metric sizes in a
@@ -147,5 +224,94 @@ mod tests {
         assert!(!Tool { corner_r: base.diameter, ..base.clone() }.is_sane());
         assert!(!Tool { flute_len: -1.0, ..base.clone() }.is_sane());
         assert!(!Tool { rpm: 0.0, ..base }.is_sane());
+    }
+
+    /// The preview-drawing law: the profile's band breakpoints are the
+    /// same z's `verify` sweeps for shank and holder reach, and each band
+    /// carries that band's radius. If the checker and the picture ever
+    /// disagree about where a band starts, this fails.
+    #[test]
+    fn profile_segments_match_the_collision_bands() {
+        let near = |p: &[(f64, f64)], z: f64, r: f64| {
+            p.iter().any(|&(pz, pr)| (pz - z).abs() < 1e-9 && (pr - r).abs() < 1e-9)
+        };
+        for (name, t) in catalog() {
+            let g = t.geom();
+            let p = t.profile();
+            assert!(p.len() >= 3, "{name}: an outline needs vertices");
+            assert_eq!(p[0], (0.0, 0.0), "{name}: tip center first");
+            assert!(
+                near(&p, g.flute_len, g.shank_radius),
+                "{name}: the shank band must start where verify says"
+            );
+            assert!(
+                near(&p, g.flute_len + g.shank_len, g.holder_radius),
+                "{name}: the holder band must start at flute + shank"
+            );
+            assert!(
+                near(&p, g.flute_len + g.shank_len + g.holder_len, 0.0),
+                "{name}: the outline must end on the axis at the top"
+            );
+            // z is non-decreasing along the outline - the picture never
+            // runs backwards, whatever the numbers are.
+            assert!(
+                p.windows(2).all(|w| w[0].0 <= w[1].0 + 1e-12),
+                "{name}: profile z ran backwards: {p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn profile_degeneracies_draw_short_never_wrong() {
+        let base = catalog()[3].1.clone();
+        // A zero-length holder contributes nothing: the picture tops out
+        // at the shank, exactly as verify skips that band.
+        let no_holder = Tool { holder_len: 0.0, ..base.clone() };
+        let p = no_holder.profile();
+        let z_max = p.iter().map(|q| q.0).fold(0.0f64, f64::max);
+        assert_eq!(z_max, base.flute_len + base.shank_len);
+        // A half-typed draft (all zeros) is a point, not a panic, and no
+        // NaN rides anywhere in the polyline.
+        let blank = Tool {
+            diameter: 0.0,
+            corner_r: 0.0,
+            flute_len: 0.0,
+            shank_d: 0.0,
+            shank_len: 0.0,
+            holder_d: 0.0,
+            holder_len: 0.0,
+            ..base.clone()
+        };
+        let p = blank.profile();
+        assert_eq!(p, vec![(0.0, 0.0)], "an empty tool is one point");
+        // A negative typed length clamps to zero rather than pointing down.
+        let neg = Tool { shank_len: -5.0, ..base };
+        assert!(neg.profile().iter().all(|q| q.0 >= 0.0 && q.0.is_finite()));
+    }
+
+    #[test]
+    fn tip_shapes_read_from_the_kind() {
+        // Ball: a dome - center on the axis, widening to full radius at
+        // z = d/2, all strictly inside the cutting envelope before that.
+        let ball = catalog().into_iter().find(|(n, _)| *n == "BN-0600").unwrap().1;
+        let p = ball.profile();
+        let r = ball.diameter * 0.5;
+        assert!(p.iter().any(|&(z, rad)| (z - r).abs() < 1e-9 && (rad - r).abs() < 1e-9));
+        assert!(
+            p.iter()
+                .all(|&(z, rad)| z >= ball.flute_len - 1e-9 || rad <= r + 1e-9),
+            "the cutting body must not grow outside the tool: {p:?}"
+        );
+        assert!(p[1].1 < p[2].1, "a dome opens widening, not narrowing");
+        // Bull: flat center, a rounded corner, full radius by z = corner_r.
+        let bull = catalog().into_iter().find(|(n, _)| *n == "BB-1000-R1").unwrap().1;
+        let p = bull.profile();
+        let (r, cr) = (bull.diameter * 0.5, bull.corner_r);
+        assert_eq!(p[1], (0.0, r - cr), "flat runs from the axis to the corner");
+        assert!(p.iter().any(|&(z, rad)| (z - cr).abs() < 1e-9 && (rad - r).abs() < 1e-9));
+        // End mill: nothing between the tip and the wall.
+        let em = catalog().into_iter().find(|(n, _)| *n == "EM-0600-4FL").unwrap().1;
+        let p = em.profile();
+        assert_eq!(&p[..2], &[(0.0, 0.0), (0.0, em.diameter * 0.5)]);
     }
 }

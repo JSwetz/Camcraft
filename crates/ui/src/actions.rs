@@ -67,6 +67,24 @@ pub(crate) fn target(state: &mut State, t: UiTarget) {
     state.ui_target = t;
 }
 
+/// Open the tool editor window (M1.4) on `name` - the named tool through
+/// the same sync law the panes use, so the fields (and the live preview)
+/// start at the world's numbers; the empty name opens a numbered blank
+/// draft as the creation form. View state like `target`: opening itself
+/// queues nothing; closing is the window's ✕ or the ghost law in
+/// `State::drain_actions`, and only the form's buttons ever push
+/// Add/Change/Delete.
+pub(crate) fn open_tool_editor(state: &mut State, name: &str) {
+    if name.is_empty() {
+        let draft = state.new_tool_draft();
+        state.tool_ui = draft;
+    } else {
+        state.tool_ui.name = name.to_owned();
+        state.sync_tool_ui();
+    }
+    state.tool_editor = Some(name.to_owned());
+}
+
 /// Quick-add an operation of `kind` (index into the `OpType` order the
 /// Create group buttons follow): name it past the existing ones, give it
 /// the newest tool, cut the stock with retyped default params, then make
