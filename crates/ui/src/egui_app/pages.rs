@@ -70,8 +70,9 @@ use super::theme::Palette;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
 const TOOL_KINDS: [&str; 3] = ["End mill", "Ball nose", "Bull nose"];
-/// Lead in/out combo items (mirrors operations.rs's LEADS).
-const LEADS: [&str; 3] = ["None", "Linear", "Arc"];
+/// Lead in/out combo items - the whole `Lead` vocabulary, index order
+/// matching the combo-arm mapping in the contour page.
+const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
 const AMBER: Color32 = Color32::from_rgb(0xB8, 0xB8, 0xC8);
@@ -633,6 +634,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     Lead::None => 0,
                     Lead::Linear { .. } => 1,
                     Lead::Arc { .. } => 2,
+                    Lead::Tangential { .. } => 3,
                 };
                 let before = l_idx;
                 combo(ui, "c_lead", &mut l_idx, &LEADS);
@@ -640,6 +642,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *lead = match l_idx {
                         1 => Lead::Linear { length: 8.0 },
                         2 => Lead::Arc { radius: 5.0 },
+                        3 => Lead::Tangential { radius: 5.0 },
                         _ => Lead::None,
                     };
                 }
@@ -648,7 +651,11 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         field(ui, "Lead length");
                         num(ui, u, length);
                     }
-                    Lead::Arc { radius } => {
+                    Lead::Arc { radius } | Lead::Tangential { radius } => {
+                        // One label for both arc radii: the widgets can
+                        // never coexist (the draft holds one lead), and
+                        // the number is the same thing - the arc's
+                        // radius.
                         field(ui, "Lead arc radius");
                         num(ui, u, radius);
                     }

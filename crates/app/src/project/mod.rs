@@ -1,4 +1,4 @@
-//! Project save/load: `.hsmproj`, JSON, version 8.
+//! Project save/load: `.hsmproj`, JSON, version 9.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -36,8 +36,12 @@
 //! adds the contour side choice (`side` on contour params, see
 //! `SideDto`): an absent key reads as `auto` - today's Outside law until
 //! the selection walk resolves it - so a v6 file changes nothing in
-//! meaning. v1/v2/v3/v4/v5/v6 files migrate on load, one version step at
-//! a time.
+//! meaning. v8 adds document units (a top-level `units` key, see
+//! `crate::units`): an absent key reads as `mm`, which is exactly what
+//! every v7 file displayed. v9 widens the contour `lead` vocabulary with
+//! `tangential` (see `LeadDto`); `lead` has been a required key since
+//! v1, so no older file contains the new tag and none needs a content
+//! change. v1-v8 files migrate on load, one version step at a time.
 
 use std::path::Path;
 
@@ -58,7 +62,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 8;
+pub const PROJECT_VERSION: u32 = 9;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -418,6 +422,10 @@ pub enum LeadDto {
     None,
     Linear { length: f64 },
     Arc { radius: f64 },
+    /// Added at v9 with the tangential lead: older files carry no key
+    /// change at all (`lead` has been required since v1), only this new
+    /// tag can appear in newer ones.
+    Tangential { radius: f64 },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -500,6 +508,7 @@ impl ParamsDto {
                     Lead::None => LeadDto::None,
                     Lead::Linear { length } => LeadDto::Linear { length: *length },
                     Lead::Arc { radius } => LeadDto::Arc { radius: *radius },
+                    Lead::Tangential { radius } => LeadDto::Tangential { radius: *radius },
                 },
                 tolerance: *tolerance,
                 tab_count: *tab_count,
@@ -640,6 +649,7 @@ impl ParamsDto {
                     LeadDto::None => Lead::None,
                     LeadDto::Linear { length } => Lead::Linear { length: *length },
                     LeadDto::Arc { radius } => Lead::Arc { radius: *radius },
+                    LeadDto::Tangential { radius } => Lead::Tangential { radius: *radius },
                 },
                 tolerance: *tolerance,
                 tab_count: *tab_count,
@@ -1061,6 +1071,13 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // millimeters), and the field's default - absent means mm - is
         // exactly that. Step-up is the stamp itself, like v6 -> v7.
         file.version = 8;
+    }
+    if file.version == 8 {
+        // v8 -> v9: the Lead vocabulary grows a tangential member, and
+        // `lead` has been a required key since v1 - no v8 file can
+        // contain the new tag, and no v8 file needs a content change to
+        // live in v9. Step-up is the stamp itself, like v7 -> v8.
+        file.version = 9;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

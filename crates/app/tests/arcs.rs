@@ -108,6 +108,26 @@ fn arc_lead_emits_one_arc_move() {
 }
 
 #[test]
+fn tangential_leads_post_as_half_sweeps() {
+    // Same baseline as the arc lead test: 8 recovered corner arcs for
+    // the two levels. A tangential lead adds exactly one posted arc
+    // move per entry and exit - and each of those is a half circle,
+    // endpoints antipodal about the center (which no corner round
+    // ever is), so the sweep law is counted, not assumed.
+    let r = rect(0.0, 0.0, 40.0, 20.0);
+    let led = contour(&r, &contour_params(Lead::Tangential { radius: 3.0 })).unwrap();
+    assert_eq!(led.arc_count(), 8 + 4, "four lead joins, two levels");
+    let halves = led.moves.iter().filter(|m| {
+        m.arc.is_some_and(|c| {
+            (m.from.x + m.to.x - 2.0 * c.center.x).abs() < 1e-6
+                && (m.from.y + m.to.y - 2.0 * c.center.y).abs() < 1e-6
+        })
+    }).count();
+    assert_eq!(halves, 4, "the joins are the only antipodal arcs");
+    assert!(led.is_chained() && led.all_finite());
+}
+
+#[test]
 fn arc_moves_chain_end_to_end() {
     // Plate with a round bore, arcs from both leads and the fitted rim:
     // the chain invariant is exact, not approximate - every arc's `to`

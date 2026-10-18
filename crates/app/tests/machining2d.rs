@@ -559,7 +559,7 @@ fn linear_lead_overshoots_the_tangent() {
 }
 
 #[test]
-fn arc_lead_enters_tangentially_as_a_quarter_arc() {
+fn arc_lead_enters_as_a_quarter_arc() {
     let base = contour(&rect(0.0, 0.0, 20.0, 20.0), &cp()).unwrap();
     let mut p = cp();
     p.lead = Lead::Arc { radius: 5.0 };
@@ -594,6 +594,105 @@ fn arc_lead_enters_tangentially_as_a_quarter_arc() {
     }
     // Every arc move is a planar feed; chords chain and stay finite.
     assert!(led.is_chained() && led.all_finite());
+}
+
+#[test]
+fn tangential_lead_enters_parallel_and_lands_g1() {
+    let base = contour(&rect(0.0, 0.0, 20.0, 20.0), &cp()).unwrap();
+    let mut p = cp();
+    p.lead = Lead::Tangential { radius: 5.0 };
+    let led = contour(&rect(0.0, 0.0, 20.0, 20.0), &p).unwrap();
+    let (s, e) = (plunge_xy(&base)[0], plunge_xy(&led)[0]);
+    // The half-arc law, from one measurement chain: the landing arc
+    // (a) has radius 5 at the join, (b) sits with its center on the
+    // wall's air-side normal (center - s perpendicular to the wall's
+    // own direction there), and (c) ends where it began: e and s are
+    // antipodal about the center, so |e - s| = 2r and the motion at the
+    // plunge point is PARALLEL to the wall - the difference from the
+    // quarter arc, which starts normal to it. (c) also forces the
+    // landing direction to be tangent to the path: at s the arc's
+    // tangent is perpendicular to (s - o) which is the normal.
+    let arcs = |t: &Toolpath| t.moves.iter().filter(|m| m.arc.is_some()).count();
+    assert_eq!(arcs(&led), arcs(&base) + 2, "one arc lands, one arc leaves");
+    let land = led
+        .moves
+        .iter()
+        .find(|m| m.arc.is_some() && m.to.x == s.0 && m.to.y == s.1)
+        .expect("the landing arc hands off at the rim start, vertex-exact");
+    let o = land.arc.unwrap().center;
+    // The arc center carries a lattice snap (half a micron at most);
+    // every bound below allows it.
+    let d_os = ((o.x - s.0).powi(2) + (o.y - s.1).powi(2)).sqrt();
+    assert!((d_os - 5.0).abs() < 1e-6, "center one radius off the wall: {d_os}");
+    assert!(
+        ((e.0 - s.0).powi(2) + (e.1 - s.1).powi(2)).sqrt() - 10.0 < 1e-5,
+        "plunge stands 2*radius off the join"
+    );
+    assert!(
+        (e.0 - (2.0 * o.x - s.0)).abs() < 1e-6 && (e.1 - (2.0 * o.y - s.1)).abs() < 1e-6,
+        "e and s antipodal about the center"
+    );
+    // Center on the air normal: perpendicular to the wall's TRUE
+    // tangent at the seam (the fitted walk's, which is what lead_in was
+    // handed), not a chord across a corner. Whichever the first rim
+    // move is - line or arc - its tangent at `from` is exact geometry.
+    let li = led.moves.iter().position(|m| m.arc.is_some() && m.to.x == s.0 && m.to.y == s.1).unwrap();
+    let next = &led.moves[li + 1];
+    let tan = match next.arc {
+        Some(a) => {
+            let (rx, ry) = (next.from.x - a.center.x, next.from.y - a.center.y);
+            if a.ccw { (-ry, rx) } else { (ry, -rx) }
+        }
+        None => (next.to.x - next.from.x, next.to.y - next.from.y),
+    };
+    let tn = tan.0.hypot(tan.1).max(1e-12);
+    // (o - s) lies along the normal means it is PERPENDICULAR to the
+    // tangent: the tangent-normalized dot vanishes (a cross here would
+    // read R for a perfect join - the sign trap this line exists to
+    // show).
+    let along = ((o.x - s.0) * tan.0 + (o.y - s.1) * tan.1) / tn;
+    assert!(along.abs() < 5e-6, "center lies on the normal: {along}");
+    // And on the AIR side: farther from the region's centroid than the
+    // rim is (the rect is centered at 10,10; the Outside law puts air
+    // away from it).
+    let d_c = |x: f64, y: f64| ((x - 10.0).powi(2) + (y - 10.0).powi(2)).sqrt();
+    assert!(d_c(o.x, o.y) > d_c(s.0, s.1), "lead arcs bulge into air");
+    // The sign law, stated machine-independently: arriving at s moving
+    // along +t means the traversal turns from the plunge side - ccw iff
+    // the air normal bears RIGHT of t (cross(air, t) < 0 with
+    // air = o - s). air_side's own rotation convention is then verified
+    // through the air test above, not assumed here.
+    let u = (o.x - s.0, o.y - s.1); // = radius * air, unit it
+    let un = (u.0 / 5.0, u.1 / 5.0);
+    let want_ccw = (un.0 * tan.1 - un.1 * tan.0) / tn < 0.0;
+    assert_eq!(land.arc.unwrap().ccw, want_ccw, "ccw law = cross(air,t)<0");
+    let mut c = cp();
+    c.lead = Lead::Tangential { radius: 5.0 };
+    c.climb = false;
+    let down = contour(&rect(0.0, 0.0, 20.0, 20.0), &c).unwrap();
+    let land_d = down
+        .moves
+        .iter()
+        .find(|m| m.arc.is_some() && m.to.x == plunge_xy(&down)[0].0)
+        .expect("conventional lands too");
+    assert_ne!(
+        land_d.arc.unwrap().ccw,
+        land.arc.unwrap().ccw,
+        "conventional reverses the traversal, so the lead mirrors too"
+    );
+    // The exit arc mirrors the entry: antipodal endpoints, same radius.
+    let last = led
+        .moves
+        .iter()
+        .rev()
+        .find(|m| m.arc.is_some())
+        .expect("a leave arc exists");
+    assert!(
+        ((last.to.x - (2.0 * last.arc.unwrap().center.x - last.from.x)).abs() < 1e-6)
+            && ((last.to.y - (2.0 * last.arc.unwrap().center.y - last.from.y)).abs() < 1e-6),
+        "exit arc's endpoints are antipodal about its center"
+    );
+    assert!(led.is_chained() && led.all_finite() && down.is_chained());
 }
 
 #[test]
@@ -659,6 +758,11 @@ fn contour_refuses_bad_input() {
         {
             let mut p = cp();
             p.lead = Lead::Arc { radius: 0.0 };
+            p
+        },
+        {
+            let mut p = cp();
+            p.lead = Lead::Tangential { radius: 0.0 };
             p
         },
         {

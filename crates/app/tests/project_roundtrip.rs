@@ -78,16 +78,17 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v7
+    // Anything newer than this build's format stays refused; v1..v8
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
     // side_roundtrip_v6_defaults_to_auto the v6 contour -> v7 side step,
-    // and units_round_trip_and_a_v7_file_means_millimeters v7 -> v8).
-    let text = r#"{"version": 9, "entities": []}"#;
+    // units_round_trip_and_a_v7_file_means_millimeters v7 -> v8, and
+    // v8_file_steps_to_v9 v8 -> v9).
+    let text = r#"{"version": 10, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(9)) => {}
+        Err(ProjectError::UnsupportedVersion(10)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -995,6 +996,82 @@ fn side_roundtrip_v6_defaults_to_auto() {
         saved.contains("\"side\": \"auto\"")
             && saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
         "the migration writes the v7 shape: {saved}"
+    );
+}
+
+#[test]
+fn v8_file_steps_to_v9() {
+    // A literal v8 project: `lead` has been a required key since v1, so
+    // the v8 -> v9 step is the stamp itself - the file reads unchanged
+    // and saving restamps it at this build's version.
+    let text = r#"{
+        "version": 8,
+        "entities": [
+            {"name": "C1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T", "src": "stock", "params": {"contour": {
+                 "stock_to_leave": 0.0, "clearance_z": 10.0, "retract_z": 8.0,
+                 "top_z": 5.0, "bottom_z": 3.0, "stepdown": 8.0,
+                 "feed": 800.0, "plunge_feed": 200.0, "climb": true,
+                 "lead": {"arc": {"radius": 3.0}}, "tolerance": 0.01,
+                 "tab_count": 0, "tab_width": 0.0, "tab_height": 0.0}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v8 file must migrate");
+    let e = model::find_by_name(&world, "C1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Contour { lead, .. } = &o.params else {
+        panic!("contour params expected, got {:?}", o.params);
+    };
+    assert_eq!(*lead, Lead::Arc { radius: 3.0 }, "an arc lead reads verbatim");
+
+    let path = tmp_path("v9");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    // save() is to_string_pretty, so match format-agnostic fragments:
+    // the tag key and the radius value, which nowhere else in this
+    // document can both occur.
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION))
+            && saved.contains("\"arc\"")
+            && saved.contains("\"radius\": 3.0"),
+        "the migration writes the v9 shape: {saved}"
+    );
+}
+
+#[test]
+fn tangential_lead_round_trips() {
+    // The new tag in both directions, and by hand-written text so the
+    // wire spelling itself is pinned, not just Rust's serde mirror.
+    let text = r#"{
+        "version": 9,
+        "entities": [
+            {"name": "C1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T", "src": "stock", "params": {"contour": {
+                 "stock_to_leave": 0.0, "clearance_z": 10.0, "retract_z": 8.0,
+                 "top_z": 5.0, "bottom_z": 3.0, "stepdown": 8.0,
+                 "feed": 800.0, "plunge_feed": 200.0, "climb": true,
+                 "lead": {"tangential": {"radius": 4.5}}, "tolerance": 0.01,
+                 "tab_count": 0, "tab_width": 0.0, "tab_height": 0.0}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("a v9 file with the tangential tag must read");
+    let e = model::find_by_name(&world, "C1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Contour { lead, .. } = &o.params else {
+        panic!("contour params expected, got {:?}", o.params);
+    };
+    assert_eq!(*lead, Lead::Tangential { radius: 4.5 });
+
+    let path = tmp_path("lead-t");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains("\"tangential\"") && saved.contains("\"radius\": 4.5"),
+        "the tag writes back: {saved}"
     );
 }
 

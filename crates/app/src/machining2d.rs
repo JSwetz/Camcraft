@@ -190,9 +190,13 @@ fn band(a: f64, b: f64, r: f64, step: f64) -> Vec<f64> {
     ys
 }
 
-/// Entry/exit motion appended to each contour subpath. Tangential leads
-/// keep the tool from dwelling (and gouging) at a plunge point directly on
-/// the finished wall; linear leads simply overrun the corner in air.
+/// Entry/exit motion appended to each contour subpath. Every lead that
+/// is not [`Lead::None`] keeps the tool from dwelling (and gouging) at a
+/// plunge point directly on the finished wall: it starts the cut already
+/// moving, in air, and joins the wall tangent-continuous. Specced from
+/// published CAM practice (lead-in families: linear, quarter-arc and the
+/// tangential half-arc that enters parallel to the path), no vendor
+/// material.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Lead {
     /// Plunge straight onto the path.
@@ -201,10 +205,19 @@ pub enum Lead {
     /// overrun the same way on exit.
     Linear { length: f64 },
     /// Quarter arc of `radius`, tangent to the path at entry and exit,
-    /// bulging to the air side. Posted as one arc move; chord error at
-    /// `tolerance` only appears where a path gets flattened downstream
-    /// (verification, display, the golden dump).
+    /// bulging to the air side. The tool starts the arc moving normal to
+    /// the path. Posted as one arc move; chord error at `tolerance` only
+    /// appears where a path gets flattened downstream (verification,
+    /// display, the golden dump).
     Arc { radius: f64 },
+    /// Half arc of `radius` (a semicircle), tangent to the path at the
+    /// join: the tool plunges `2 * radius` off the wall, in air, moving
+    /// *parallel* to the path, curves over and merges into the cut at the
+    /// join still moving along it - G1 continuous end to end, which is
+    /// what earns the name. Lead-out mirrors it: the tool overruns the
+    /// end tangentially and leaves the wall moving parallel to the path.
+    /// One posted arc move like [`Lead::Arc`].
+    Tangential { radius: f64 },
 }
 
 /// Which side of a contour boundary the cutter runs on - a sign law on
@@ -316,6 +329,7 @@ impl ContourParams {
             Lead::None => {}
             Lead::Linear { length } if length >= 0.0 && length.is_finite() => {}
             Lead::Arc { radius } if radius > 0.0 => {}
+            Lead::Tangential { radius } if radius > 0.0 => {}
             _ => return Err(GenError::Invalid("bad lead-in parameters".into())),
         }
         if self.tab_count > 0 && (self.tab_width <= 0.0 || self.tab_height < 0.0) {
@@ -968,6 +982,20 @@ fn lead_in(s: Point2, t: Point2, air: Point2, p: &ContourParams) -> (Point2, Vec
             let ccw = ((e.x - o.x) * (s.y - o.y) - (e.y - o.y) * (s.x - o.x)) > 0.0;
             (e, vec![Seg::Arc { center: o, ccw, to: s }])
         }
+        Lead::Tangential { radius } => {
+            // Semicircle e -> s about o = s + air*radius, with the plunge
+            // point e = s + 2*radius*air: e - o and s - o are antiparallel,
+            // so the quarter arm's radius-vector cross would vanish. The
+            // surviving law is its limit: arrive at s moving along +t means
+            // turning ccw iff air bears left of t - cross(air, t) < 0.
+            // air_side puts climb's air right of t: cw; conventional ccw
+            // (arcs.rs and machining2d.rs derive this from the law, never
+            // hardcode it).
+            let o = Point2::new(s.x + air.x * radius, s.y + air.y * radius);
+            let e = Point2::new(s.x + air.x * 2.0 * radius, s.y + air.y * 2.0 * radius);
+            let ccw = (air.x * t.y - air.y * t.x) < 0.0;
+            (e, vec![Seg::Arc { center: o, ccw, to: s }])
+        }
     }
 }
 
@@ -986,6 +1014,17 @@ fn lead_out(e: Point2, t: Point2, air: Point2, p: &ContourParams) -> Vec<Seg> {
                 e.y + (air.y + t.y) * radius,
             );
             let ccw = ((e.x - o.x) * (q.y - o.y) - (e.y - o.y) * (q.x - o.x)) > 0.0;
+            vec![Seg::Arc { center: o, ccw, to: q }]
+        }
+        Lead::Tangential { radius } => {
+            // The mirror of the lead-in half arc: leave the path end
+            // overruning tangentially, sweep the semicircle out through
+            // air, and stand off the wall 2*radius on the normal, moving
+            // parallel to where the cut was going. Same sign law at the
+            // tangent point as the lead-in: climb cw, conventional ccw.
+            let o = Point2::new(e.x + air.x * radius, e.y + air.y * radius);
+            let q = Point2::new(e.x + air.x * 2.0 * radius, e.y + air.y * 2.0 * radius);
+            let ccw = (air.x * t.y - air.y * t.x) < 0.0;
             vec![Seg::Arc { center: o, ccw, to: q }]
         }
     }

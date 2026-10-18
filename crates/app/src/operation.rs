@@ -805,6 +805,10 @@ impl OpParams {
                         h.write_u8(2);
                         w(h, *radius);
                     }
+                    Lead::Tangential { radius } => {
+                        h.write_u8(3);
+                        w(h, *radius);
+                    }
                 }
                 // Appended at the v7-era side field: even a pre-Side
                 // contour op digests differently - the mechanism saying
@@ -906,6 +910,7 @@ fn lead_sane(lead: &Lead) -> bool {
         Lead::None => true,
         Lead::Linear { length } => length.is_finite() && *length >= 0.0,
         Lead::Arc { radius } => radius.is_finite() && *radius > 0.0,
+        Lead::Tangential { radius } => radius.is_finite() && *radius > 0.0,
     }
 }
 

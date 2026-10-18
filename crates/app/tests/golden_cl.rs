@@ -109,6 +109,38 @@ fn contour_disc_hole_matches_golden() {
 }
 
 #[test]
+fn contour_tangential_lead_matches_golden() {
+    // The same plate-and-bore job, tangential entry instead of quarter:
+    // this golden is the byte-witness that the half-arc leads post as
+    // single S{±1} arc moves with a 2*radius standoff - rerun
+    // WRITE_GOLDEN=1 only together with a deliberate law change.
+    let mut loops = rect(0.0, 0.0, 40.0, 20.0).loops().to_vec();
+    loops.push(circle(Point2::new(20.0, 10.0), 6.0, 128));
+    let region = Region::new(loops).unwrap();
+    let p = ContourParams {
+        tool_diameter: 6.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        retract_z: 2.0,
+        top_z: 0.0,
+        bottom_z: -4.0,
+        stepdown: 2.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        side: Side::Auto,
+        lead: Lead::Tangential { radius: 3.0 },
+        tolerance: 0.01,
+        tab_count: 0,
+        tab_width: 0.0,
+        tab_height: 0.0,
+    };
+    let t = contour(&region, &p).unwrap();
+    assert!(t.has_arcs());
+    write_golden("contour_tangential_lead.cl", &gen_to_cltext(&t));
+}
+
+#[test]
 fn face_square_40x40_matches_golden() {
     // The same plain 40x40 square the row-count tests use, at the
     // default parameters: five rows, rapids only at the ends.
