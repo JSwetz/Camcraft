@@ -9,6 +9,59 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.4 — graphical tool editor (commit `feat(ui): graphical tool editor - its own window with a live to-scale preview`)
+
+- **The editor is an in-app `egui::Window`, not an OS viewport.** egui's
+  multi-viewport machinery (`show_viewport`) needs an OS window per
+  surface - unhittable by the kittest harness, invisible to the snapshot
+  gate, and unprovable by any test we can run headless. An in-app floating
+  surface is the only windowing form this project can *verify*, and it
+  behaves identically to the user (draggable, ✕-closeable, floats over the
+  dock). The single-root-viewport law from the egui graduation stands
+  untouched - this is an overlay, not a second winit window. Cost to
+  change: swap `Window::show` for a deferred viewport and lose both the
+  flow test and the snapshot.
+- **Dock = library, window = editor - a considered revisit of this
+  milestone's "standalone tool library window is gone" decision.** That
+  retirement removed a *second browsing surface* duplicating the dock; the
+  roadmap then asked for the editor to be "its own window". Both survive:
+  the dock keeps the one library (rows, catalog, summaries), and the only
+  window is the editor for one tool. The decision didn't reverse; it found
+  the shape the two roadmap lines actually agree on. Cost to change:
+  re-fusing editor fields back into the dock page (that's the pre-M1.4
+  code - easy to resurrect, harder to keep uncramped at 280 px).
+- **The preview draws `tools::Tool::profile`, and `profile` segments on
+  purpose.** The side view's band breakpoints are verbatim
+  `verify`'s shank/holder collision bands (cross-ref comment in
+  `tools.rs`), zero-length bands skipped exactly as the checker skips
+  them, and the drift test `profile_segments_match_the_collision_bands`
+  fails if the picture and the checker ever disagree about where a band
+  starts. One segmentation law, drawn and enforced from the same numbers.
+  Cost to change: none wanted - drift here is gouge-adjacent.
+- **Label ownership: the dock summary is composed text, so every field
+  label resolves in exactly one surface.** `query_by_label("Diameter")`
+  must never be ambiguous between dock and window - the dock shows a
+  tool's numbers as three formatted `format!` lines (no widgets), the
+  window owns all field labels. Buttons split the same way: "Add" is the
+  catalog, "Add tool" the window's blank form, "Apply" window-only,
+  "Delete" dock-only. Cost to change: any labeled widget added to the
+  dock silently breaks the flow test's queries.
+- **Closing is ✕-plus-ghost; no Esc binding.** The `open` mirror flips
+  `State::tool_editor` to `None` on the ✕, and the ghost law mirrors
+  `pane_target`'s: at the end of `drain_actions`, a window whose tool no
+  longer exists (Delete, undo-of-Add, document swap) closes itself in one
+  line. Esc was deliberately not wired to close - Esc must stay a no-op
+  while a `TextEdit` has focus, and half-wiring it invites the bug where
+  Esc-in-a-field both cancels the edit and kills the editor. Cost to
+  change: one keyboard hook and a focus question.
+- **`tool_editor: Option<String>` is view state on `State`, like
+  `op_tab`** - never a command, never saved, never undoable; `Some("")`
+  is the blank new-tool form so the "numbered past taken names" prefill
+  rides `new_tool_draft` unchanged. Opening queues nothing (asserted);
+  all drafting still lives in `ToolUi`, so the window reuses the
+  existing sync/stage/Apply loop with zero new command surface. Cost to
+  change: field relocation only.
+
 ## M1.4 — tabbed property pages (commit `feat(ui): tabbed property pages - the operation page is five named sections`)
 
 - **Status lives above the tab bar, not inside a tab.** The stale badge and
