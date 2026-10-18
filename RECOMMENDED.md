@@ -9,6 +9,95 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.6 — drilling: cycles, hole recognition, canned-cycle representation (commit `feat(app,ui): drilling - hole recognition, cycles, and canned-cycle representation (M1.6)`)
+
+- **Cycles ride alongside the moves, not instead of them.** A drill
+  operation generates the fully expanded chain (rapids, plunges, peck
+  hops) *and* a parallel `Toolpath.cycles` list, one `Cycle` per hole
+  with kind, XY, R/B/entry planes, peck, dwell and its `first_move`
+  anchor. Why: the chain is the truth verify and simulation must see
+  (a canned-cycle short-cut would blind the collision laws), while the
+  cycle list is the truth the post must see (G81 per hole, not 40
+  re-derived moves); an agreement law test pins the two views of every
+  path together, and the `.cl` golden format grew `; CYCLE` comment
+  lines so goldens diff the intent, not just the geometry - old
+  goldens stay byte-identical because the marker is version-gated on
+  "cycles exist". Cost: every drill-side change must keep both views
+  consistent; the law test is the tripwire.
+- **Recognition reads raw world-transformed facets, not the feature
+  index.** `drilling::recognize` BFS-welds near-vertical wall facets
+  (|nz| below a cosine limit) into components, circle-fits each
+  (Kasa), and admits only closed rims whose XY normal span exceeds
+  270°, so block sides and slot-end arcs fail the shape test by law.
+  Why: features are M1.5 selection plumbing that can drift or be
+  absent (mesh-only imports); holes are a geometric fact about the
+  mesh and should be computed from nothing else. Cost: it re-scans the
+  mesh per Detect click - fine, the button is an action, not a pass.
+- **Holes are Z-axis only.** No cylindrical-axis detection. Why: the
+  whole codebase is a 2.5D Z-plunge CAM; a 4/5-axis hole list would be
+  unmachinable by every generator downstream. Cost: a part with side
+  holes silently gets a short list - recognized as the right failure
+  mode for 0.1.0, logged against the M3 axis work.
+- **The hole list lives in the operation params, so it is data -
+  editable, undoable, and stamped.** Detect holes queues one
+  `EditOperationParams` carrying the whole `Drill` params with the new
+  holes; the recognition result is snapshotted into the project digest
+  so any model edit marks the op Stale rather than pretending the
+  holes still match. Why: "recognition is an action, its output is
+  data" is the commands-law restated; a live re-recognize per pass
+  would violate it. Cost: stale ops need a re-Detect the user must
+  trigger; the status line says so. An empty hole list is legal at
+  creation (a fresh Drill op) and only the generator refuses (
+  `GenError::Empty`), with a named reason.
+- **The Auto cycle picks its shape from depth against diameter: ≤1d
+  drill, ≤4d peck with a 1 mm chip-break hop, deeper a full-retract
+  peck with dwell (the G83 shape); peck step 3d/1d, floored at 0.25d,
+  guarded at 4096 pecks; Spot is never automatic.** Why: this is the
+  textbook chip-evacuation ladder expressed in the only two numbers
+  the op is guaranteed to have; auto-spotting would move the tool to a
+  center-punched hole the user never asked for. Cost: an
+  HSMWorks-parity "auto spot" would be a new choice arm, not a
+  rewrite.
+- **Constants carried in the open:** spot depth 2.0 mm, through-hole
+  exit clearance 1.0 mm past the floor (the tip cone needs the
+  allowance to make a full-diameter wall), dwell and peck in the
+  cycle's own units, tap feed = rpm × pitch exactly. Why: each one is
+  a machining convention with a real reason, not a tuned number.
+  Cost: trivial to expose as params later.
+- **Dwells and taps are representation-only where moves can't speak
+  them.** A dwell adds no zero-length move; the chain carries no
+  spindle-sync arc - the `Cycle` record holds `dwell` and the kind,
+  and M1.7's post emits the P word or the rigid-tap block. Why:
+  zero-length moves poison every distance-based law (feed/rapid
+  length checks, kerf self-clearing). Cost: the sim timeline will
+  ignore dwell time until the post exists; logged on the M1.7 list.
+- **Verify learned two things for drilling:** the gouge law skips
+  zero-XY-length plunges in every mode (a vertical plunge cuts
+  exactly its swept disc - boundary tangency is the wrong predicate
+  for it), and the shank/holder band law plus a new reach check turn
+  "hole deeper than the tool" into a `ShankHit { part: true }` from
+  the cycle record itself. Why: the bands already handled vertical
+  moves correctly; only the two blind spots above were real. Cost:
+  none - both are strictly narrower than before.
+- **`tip_angle` and `pitch` are inert unless the kind reads them.**
+  Tool gained both fields (`serde(default)`, drills 60<tip<180, taps
+  pitch>0 in `is_sane`); profile() draws the cone tip only for
+  kind=Drill. The editor seeds 118° / 1.0 mm on kind change, in an
+  is_nan-guarded form so a cleared field never posts nonsense.
+  Persistence stepped v9→v10 as a pure serde-default no-op - the
+  step-up is the stamp itself. Cost: a future countersink kind reads
+  `tip_angle` and gets the collision shape free.
+- **Bore/BackBore post as their own cycles in M1.7 (G86/G89 shapes);
+  thread milling stays unshipped.** Why: the milestone text asked for
+  "basic cycles", and a helical thread-mill path needs circular
+  interpolation the post doesn't have yet. Cost: one generator + one
+  post arm.
+- **Both UI snapshots churned (egui_app, egui_tool_editor) -
+  intended.** The 6th Create cell shifts the Modify/Inspect group
+  right by one cell width, and the tool catalog grew DR-0200/0300/
+  0400/0600 + TAP-M4/M6 + BR-1000 rows. The diff images were checked to
+  contain nothing else before regenerating.
+
 ## M1.5 — view cube + viewport navigation bar (commit `feat(ui): view cube + viewport navigation bar (M1.5)`)
 
 - **The furniture is painted, not widgeted.** `viewcube::Hud` is a layout

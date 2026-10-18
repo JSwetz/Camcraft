@@ -65,8 +65,9 @@ stack rework, and that rework has now shipped: M1.4.1 (the decision and
 GO spike) and M1.4.2 (the per-panel graduation, imgui retired) are both
 done - egui is the shell. The remaining M1.4 surface polish landed right
 after the graduation - viewport display modes, the tabbed-panels UX and
-the graphical tool editor window. What's left of the early phase is
-drilling and the first post.
+the graphical tool editor window; M1.6 drilling has shipped cycles,
+recognition and the canned-cycle representation. What's left of the
+early phase is the first post (M1.7).
 
 ### M1.1 - Core Foundation & File I/O
 **Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
@@ -593,13 +594,37 @@ degrades by rule, none guesses silently:
       facing rows
 
 ### M1.6 - Drilling
-**Goal: a complete hole list is machined correctly.**
+**Goal: a complete hole list is machined correctly.** — ✅
 
-- **Drill cycles**: spot, drill, peck (chip-breaking), deep-hole with dwell
-- **Rigid tapping** and thread milling (simple, small pitch first)
-- **Boring and back-boring**: basic cycles
-- **Hole recognition**: extract holes from the model into an operation automatically
-- **Canned-cycle posting**: G73/G81/G83/G84 output, not retracted point-to-point moves
+- ✅ **Drill cycles**: spot, drill, peck (chip-breaking), deep-hole with
+      dwell - `drilling::generate` expands each hole into a chained move
+      sequence (Rapid over, Plunge, retract), and `CycleChoice::Auto`
+      picks the shape from the hole: depth ≤ d drills in one plunge,
+      ≤ 4d pecks with a chip-break hop, deeper pecks with a full
+      retract and dwell; Spot is never automatic, only a spot tool or
+      an explicit choice
+- ✅ **Rigid tapping** (simple, small pitch first): Tap cycles descend
+      and retract as Feeds at rpm × pitch (the Tool's `pitch` field),
+      the spindle-sync shape the post will emit as G84. **Thread
+      milling stays open** - no helical-interp post exists yet (M1.7+)
+- ✅ **Boring and back-boring**: basic cycles - Bore feeds down and
+      rapids out, BackBore feeds down and feeds up; the tool's `kind`
+      (with `tip_angle` for drills, `pitch` for taps) drives the
+      collision profile
+- ✅ **Hole recognition**: `drilling::recognize` works on the raw
+      world-transformed facets, not features - welded connected
+      components of near-vertical wall facets, closed-rim and
+      normal-span tested so slots and block sides never qualify, a
+      Kasa circle fit per component; the **Detect holes** button on the
+      Drill page turns the result into `Hole` rows on the operation's
+      params (editable, undoable, stale on model change)
+- ✅ **Canned-cycle representation**: posting itself is M1.7, but the
+      path now carries the intent - `Toolpath.cycles` records one
+      `Cycle` per hole (kind, xy, R/B/entry planes, peck, dwell, first
+      move) beside the fully expanded chain, the `.cl` golden writer
+      emits them as `; CYCLE` comments, and a law test pins the two
+      views agree. The post will consume them instead of
+      re-deriving G73/G81/G83/G84 from moves
 
 ### M1.7 - Simulation & Post (Release 0.1.0)
 **Goal: verified output - first public release.**
@@ -745,7 +770,7 @@ programming department.
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
-| **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
+| **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
 | **M2.2** | Finish 3D to tolerance | Parallel, waterline, scallop, contour family | 📋 |
