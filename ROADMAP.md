@@ -632,8 +632,11 @@ degrades by rule, none guesses silently:
 - **Move simulation**: rapid vs feed differentiation, feedrate readout, play/pause/scrub
 - **Validation warnings**: rapid-move violations and holder-vs-stock contact, blocking the post
 - **Post engine + CPS posts**: not a hard-coded writer - the Fusion 360
-      post architecture, implemented clean-room against its publicly
-      documented behavior, with three file roles and one engine:
+      post architecture adopted as file-format conventions, specced
+      from Autodesk's published post-processor documentation
+      (behavior only) per the Clean-Room Protocol; the engine is our
+      own, written from scratch in Rust - three file roles and one
+      engine:
   - **`.cps` post scripts** (our own format implementation, our own
         text): a manifest header (`description`, `vendor`, `legal`,
         `certificationLevel`, `minimumRevision`, `extension`,
@@ -661,15 +664,20 @@ degrades by rule, none guesses silently:
         `--machine`, `--log` and counted warning reporting, plus the
         same in-app post path
   - the reference `post.exe` and the root fixture trio
-        (`05-xyz-2.cps`, `1001.cnc`, `MIllingmachine.mch`) stay local
-        development validators - our `.cps` files must run through the
-        reference engine as a format check, and none of their text is
-        ever vendored into ours
+        (`05-xyz-2.cps`, `1001.cnc`, `MIllingmachine.mch`) are local
+        development validators only - our `.cps` files must run
+        through the reference engine as a format check; the vendor
+        binary is never bundled or redistributed as product content,
+        no vendor script text is ported into our files, and every
+        shipped post, machine file and our `post` binary are original
+        work
 - **Fanuc post**: the first `.cps` we ship - program header, tool
       changes (T../M6), work offsets (G54+ from the machine/setup),
       canned cycles emitted from `Toolpath.cycles` (G73/G81/G83/G84
       with R/Z/Q/P/F words, G98/G99 retract modes), G2/G3 arc motion,
-      G40/G41/G42 radius compensation, coolant M-codes
+      G40/G41/G42 radius compensation, coolant M-codes (read from the
+      `.mch` tool-station coolant list - the in-app machine workflow
+      for those files is M3.3's addition, not a prerequisite)
 - **G-code viewer**: inspect the posted program in-app, with toolpath highlighting on scroll
 - **CI**: build matrix, regression test suite on golden models, all tests green
 - **Release build**: signed installer + portable zip (incl. the `post` binary), release notes
