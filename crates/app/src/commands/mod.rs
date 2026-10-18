@@ -8,6 +8,7 @@ pub mod import_model;
 pub mod operation;
 pub mod select_entity;
 pub mod set_stock;
+pub mod set_units;
 pub mod set_wcs;
 pub mod tool;
 
@@ -21,6 +22,7 @@ pub use operation::{
 };
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
+pub use set_units::SetUnits;
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
 

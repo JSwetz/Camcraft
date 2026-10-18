@@ -16,5 +16,6 @@ pub mod project;
 pub mod schema;
 pub mod stock;
 pub mod tools;
+pub mod units;
 pub mod verify;
 pub mod world;

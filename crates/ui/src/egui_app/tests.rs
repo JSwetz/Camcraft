@@ -42,6 +42,7 @@ use egui_kittest::Harness;
 use hsmworks_app::model;
 use hsmworks_app::operation::{FeatureSel, OpParams, SrcRef};
 use hsmworks_app::schema::WCS_SLOTS;
+use hsmworks_app::units::{self, Unit};
 
 use crate::interact;
 use crate::state::{CommandKind, DragMode, GeoPick, State, UiTarget};
@@ -1167,4 +1168,133 @@ fn tips_match_the_imgui_table() {
             "the no-tool tip must name the fix (Create({i}))"
         );
     }
+}
+
+// ------------------------------------------------------------- M1.1: units
+
+/// The Units radio on the setup page is the whole lens control: it rides
+/// `SetUnits` through the queue (a command, not a field poke), undo puts
+/// the millimeter default back, and a document never changes because of
+/// it - the world's numbers stay exactly as they were.
+#[test]
+fn units_radio_flips_the_lens_and_undo_puts_it_back() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.ui_target = UiTarget::Stock;
+    harness.run();
+    harness.run();
+    assert_eq!(harness.state().state.units(), Unit::Millimeters);
+
+    harness.get_by_label("Inches").click();
+    harness.run();
+    assert_eq!(
+        units::of(&harness.state().state.world),
+        Unit::Inches,
+        "the click must reach the world through SetUnits"
+    );
+
+    // A second click on the already-shown choice queues nothing: a no-op
+    // does not belong in the history (SetUnits validates at construction).
+    let before = harness.state().state.history.can_redo();
+    harness.get_by_label("Inches").click();
+    harness.run();
+    assert_eq!(harness.state().state.history.can_redo(), before, "no-op must be inert");
+
+    // Ctrl+Z back to millimeters - same keyboard lane as every command.
+    harness
+        .input_mut()
+        .events
+        .push(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.input_mut().events.push(Event::Key {
+        key: Key::Z,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run_steps(2);
+    assert_eq!(
+        units::of(&harness.state().state.world),
+        Unit::Millimeters,
+        "undo restores the lens"
+    );
+}
+
+/// The inch lens in action, through the real editor window: the DragValue
+/// moves per dragged pixel the SAME millimeter distance it moves in mm
+/// mode (speed ÷ 25.4 - a lens, not a gearbox), a typed `0.5` stores
+/// exactly 12.7 on the micron lattice, and Apply lands snapped numbers
+/// through `ChangeTool` like always.
+#[test]
+fn inch_mode_drag_keeps_px_parity_and_types_onto_the_lattice() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.ui_target = UiTarget::Stock;
+    harness.run();
+    harness.get_by_label("Inches").click();
+    harness.run();
+    assert_eq!(harness.state().state.units(), Unit::Inches);
+
+    harness.state_mut().state.ui_target = UiTarget::Tool("EM-0600-4FL".to_owned());
+    harness.run();
+    harness.get_by_label("Edit").click();
+    harness.run();
+    harness.run();
+    let world_d = |h: &Harness<'static, ShellUi>| {
+        model::find_by_name(&h.state().state.world, "EM-0600-4FL")
+            .and_then(|e| model::tool_of(&h.state().state.world, &e))
+            .map(|t| t.diameter)
+    };
+    let d0 = world_d(&harness).expect("the seed owns EM-0600-4FL");
+
+    let c = harness
+        .get_all_by_role(egui::accesskit::Role::SpinButton)
+        .next()
+        .expect("the editor window owns DragValues")
+        .rect()
+        .center();
+    harness.drag_at(c);
+    harness.run();
+    harness.hover_at(c + Vec2::new(30.0, 0.0));
+    harness.run();
+    harness.drop_at(c + Vec2::new(30.0, 0.0));
+    harness.run();
+    // The same 0.05 tolerance the mm drag test carries, and the same
+    // reason: egui's smart aim rounds a drag toward the nicest number of
+    // the SHOWN unit inside a one-physical-pixel radius, which by the
+    // speed-÷25.4 law is the identical ±0.1 mm in both modes (here it
+    // pulled 9.000 to 0.355 in = 9.017 mm, 0.017 off).
+    assert!(
+        (harness.state().state.tool_ui.diameter - (d0 + 3.0)).abs() < 0.05,
+        "inch px-parity: 30 px must move 3.0 mm from {d0}, got {}",
+        harness.state().state.tool_ui.diameter
+    );
+    assert!(
+        (world_d(&harness).expect("still there") - d0).abs() < 1e-12,
+        "a drag must not touch the world"
+    );
+
+    harness
+        .get_all_by_role(egui::accesskit::Role::SpinButton)
+        .next()
+        .unwrap()
+        .click();
+    harness.run();
+    harness
+        .get_all_by_role(egui::accesskit::Role::SpinButton)
+        .next()
+        .unwrap()
+        .type_text("0.5");
+    harness.run();
+    assert_eq!(
+        harness.state().state.tool_ui.diameter,
+        12.7,
+        "a typed half inch must store exactly 12.7 mm"
+    );
+    harness.get_by_label("Apply").click();
+    harness.run();
+    assert_eq!(
+        world_d(&harness).expect("still there"),
+        12.7,
+        "Apply must land the snapped millimeters (status: {})",
+        harness.state().state.status
+    );
 }

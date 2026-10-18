@@ -55,6 +55,7 @@ use hsmworks_app::operation::{self, GeoSel, Height, HeightReference, OpParams, O
 use hsmworks_app::schema::{Operation, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools;
+use hsmworks_app::units::{self, Unit};
 use hsmworks_app::verify::Warning;
 
 
@@ -480,6 +481,7 @@ fn kind_index(kind: OpType) -> usize {
 /// InputDouble (divergence D5, S4 report): egui has no InputDouble;
 /// DragValue edits + commits with no custom state.
 fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
+    let u = state.units();
     let mut side_note: Option<String> = None;
     let mut auto_note: Option<String> = None;
     let nm = state.op_ui.name.clone();
@@ -550,18 +552,18 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
                     height_editor(ui, &state.world, top_z.get_or_insert(seed), "face.top");
                     field(ui, "Stepdown");
-                    num(ui, stepdown.get_or_insert(1.0));
+                    num(ui, u, stepdown.get_or_insert(1.0));
                 }
             }
             if tab == SEC_PASSES {
                 field(ui, "Stepover (Y spacing)");
-                num(ui, stepover);
+                num(ui, u, stepover);
             }
             if tab == SEC_FEEDS {
-                field(ui, "Feed (mm/min)");
-                num(ui, feed);
-                field(ui, "Plunge feed (mm/min)");
-                num(ui, plunge_feed);
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
             }
         }
@@ -599,7 +601,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     ui.label(note.clone());
                 }
                 field(ui, "Tolerance");
-                num(ui, tolerance);
+                num(ui, u, tolerance);
             }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -611,7 +613,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     && rz > cz
                 {
                     ui.label(format!(
-                        "above clearance - the hop travels at {cz:.3} (min of the two)"
+                        "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
                     ));
                 }
                 field(ui, "Top Z");
@@ -619,11 +621,11 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, "Bottom Z");
                 height_editor(ui, &state.world, bottom_z, "contour.bottom");
                 field(ui, "Stepdown");
-                num(ui, stepdown);
+                num(ui, u, stepdown);
             }
             if tab == SEC_PASSES {
                 field(ui, "Stock to leave");
-                num(ui, stock_to_leave);
+                num(ui, u, stock_to_leave);
             }
             if tab == SEC_LEADS {
                 field(ui, "Lead in/out");
@@ -644,28 +646,28 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 match lead {
                     Lead::Linear { length } => {
                         field(ui, "Lead length");
-                        num(ui, length);
+                        num(ui, u, length);
                     }
                     Lead::Arc { radius } => {
                         field(ui, "Lead arc radius");
-                        num(ui, radius);
+                        num(ui, u, radius);
                     }
                     Lead::None => {}
                 }
                 field(ui, "Tab count");
                 let mut tabs = f64::from(*tab_count);
-                num(ui, &mut tabs);
+                num_plain(ui, &mut tabs);
                 *tab_count = tabs.clamp(0.0, 99.0).round().max(0.0) as u32;
                 field(ui, "Tab width");
-                num(ui, tab_width);
+                num(ui, u, tab_width);
                 field(ui, "Tab height");
-                num(ui, tab_height);
+                num(ui, u, tab_height);
             }
             if tab == SEC_FEEDS {
-                field(ui, "Feed (mm/min)");
-                num(ui, feed);
-                field(ui, "Plunge feed (mm/min)");
-                num(ui, plunge_feed);
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
             }
         }
@@ -702,7 +704,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {cz:.3} (min of the two)"
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
                         ));
                     }
                 }
@@ -711,13 +713,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, "Bottom Z");
                 height_editor(ui, &state.world, bottom_z, "pocket.bottom");
                 field(ui, "Stepdown");
-                num(ui, stepdown);
+                num(ui, u, stepdown);
             }
             if tab == SEC_PASSES {
                 field(ui, "Stepover");
-                num(ui, stepover);
+                num(ui, u, stepover);
                 field(ui, "Stock to leave");
-                num(ui, stock_to_leave);
+                num(ui, u, stock_to_leave);
                 field(ui, "Strategy");
                 let mut st_idx = match strategy {
                     PocketStrategy::Zigzag => 0,
@@ -739,10 +741,10 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
             }
             if tab == SEC_FEEDS {
-                field(ui, "Feed (mm/min)");
-                num(ui, feed);
-                field(ui, "Plunge feed (mm/min)");
-                num(ui, plunge_feed);
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
             }
         }
@@ -763,15 +765,15 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_GEO {
                 field(ui, "A X");
-                num(ui, &mut a.x);
+                num(ui, u, &mut a.x);
                 field(ui, "A Y");
-                num(ui, &mut a.y);
+                num(ui, u, &mut a.y);
                 field(ui, "B X");
-                num(ui, &mut b.x);
+                num(ui, u, &mut b.x);
                 field(ui, "B Y");
-                num(ui, &mut b.y);
+                num(ui, u, &mut b.y);
                 field(ui, "Slot width");
-                num(ui, width);
+                num(ui, u, width);
             }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -781,19 +783,19 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, "Bottom Z");
                 height_editor(ui, &state.world, bottom_z, "slot.bottom");
                 field(ui, "Stepdown");
-                num(ui, stepdown);
+                num(ui, u, stepdown);
             }
             if tab == SEC_PASSES {
                 field(ui, "Stock to leave");
-                num(ui, stock_to_leave);
+                num(ui, u, stock_to_leave);
                 field(ui, "Stepover");
-                num(ui, stepover);
+                num(ui, u, stepover);
             }
             if tab == SEC_FEEDS {
-                field(ui, "Feed (mm/min)");
-                num(ui, feed);
-                field(ui, "Plunge feed (mm/min)");
-                num(ui, plunge_feed);
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
             }
         }
@@ -818,7 +820,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {cz:.3} (min of the two)"
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
                         ));
                     }
                 }
@@ -827,13 +829,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, "Bottom Z");
                 height_editor(ui, &state.world, bottom_z, "trace.bottom");
                 field(ui, "Stepdown");
-                num(ui, stepdown);
+                num(ui, u, stepdown);
             }
             if tab == SEC_FEEDS {
-                field(ui, "Feed (mm/min)");
-                num(ui, feed);
-                field(ui, "Plunge feed (mm/min)");
-                num(ui, plunge_feed);
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
             }
         }
@@ -845,7 +847,44 @@ fn field(ui: &mut Ui, label: &str) {
     ui.label(label);
 }
 
-fn num(ui: &mut Ui, v: &mut f64) {
+fn num(ui: &mut Ui, u: Unit, v: &mut f64) {
+    num_prec(ui, u, v, 4);
+}
+
+/// The unit-lens widget law (M1.1): in mm mode this is the untouched
+/// historical `DragValue` (speed 0.1, default format), so every pre-inch
+/// string, test and snapshot keeps its bits. In inch mode the widget
+/// works on a display copy - `units::from_display` puts the world value
+/// back on the micron lattice, so a typed `0.5` stores exactly `12.7`.
+/// The drag speed divides by 25.4 so one pixel moves the same *millimeter*
+/// distance either way - the unit is a lens, not a gearbox. egui's smart
+/// aim rounds a drag toward the nicest number of the SHOWN unit within a
+/// one-pixel radius; because of that speed law the radius is the same
+/// ±0.1 mm in both modes, so the assist is unit-fair (0.355 in is exactly
+/// what a machinist dragging near it wants).
+fn num_prec(ui: &mut Ui, u: Unit, v: &mut f64, prec: usize) {
+    if u == Unit::Millimeters {
+        ui.add(DragValue::new(v).speed(0.1));
+    } else {
+        let mut d = units::to_display(*v, u);
+        let resp = ui.add(
+            DragValue::new(&mut d)
+                .speed(0.1 / 25.4)
+                .custom_formatter(move |n, _| format!("{n:.prec$}")),
+        );
+        if resp.changed() {
+            *v = units::from_display(d, u);
+        }
+    }
+}
+
+/// Feed rates (mm/min stored, in/min shown): same lens, coarser text.
+fn num_feed(ui: &mut Ui, u: Unit, v: &mut f64) {
+    num_prec(ui, u, v, 2);
+}
+
+/// Degrees, rpm, counts: no lens - these were never millimeters.
+fn num_plain(ui: &mut Ui, v: &mut f64) {
     ui.add(DragValue::new(v).speed(0.1));
 }
 
@@ -893,6 +932,7 @@ fn height_editor(ui: &mut Ui, world: &flecs_ecs::prelude::World, h: &mut Height,
 }
 
 fn height_editor_inner(ui: &mut Ui, world: &flecs_ecs::prelude::World, h: &mut Height) {
+    let u = units::of(world);
     let mut idx = h.reference.kind_index().min(5);
     let before = idx;
     ui.horizontal(|ui| {
@@ -921,7 +961,7 @@ fn height_editor_inner(ui: &mut Ui, world: &flecs_ecs::prelude::World, h: &mut H
     // said the same words); the page only lays them out.
     ui.horizontal(|ui| {
         ui.label(offset_label(h.reference));
-        ui.add(DragValue::new(&mut h.offset).speed(0.1));
+        num(ui, u, &mut h.offset);
         ui.add(Label::new(egui::RichText::new(height_echo(world, h)).weak()).selectable(false));
     });
 }
@@ -929,6 +969,19 @@ fn height_editor_inner(ui: &mut Ui, world: &flecs_ecs::prelude::World, h: &mut H
 // --------------------------------------------------------------- stock page
 
 fn stock_page(ui: &mut Ui, state: &mut State) {
+    let u = state.units();
+    // The document's unit lens, straight off the world singleton - the
+    // click queues SetUnits; the numbers below re-render from the world
+    // next pass, so there is no mirror to keep in step.
+    ui.horizontal(|ui| {
+        ui.label("Units");
+        for cand in [Unit::Millimeters, Unit::Inches] {
+            if ui.radio(u == cand, cand.label()).clicked() && u != cand {
+                state.pending.push_back(CommandKind::SetUnits(cand));
+            }
+        }
+    });
+    ui.add_space(3.0);
     ui.horizontal(|ui| {
         for (i, name) in ["Box", "Cylinder", "From model"].iter().enumerate() {
             if ui.radio_value(&mut state.stock_ui.shape, i as i32, *name).changed() {}
@@ -937,9 +990,9 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     let shape = state.stock_ui.shape;
     if shape == 1 {
         field(ui, "Diameter");
-        num(ui, &mut state.stock_ui.diameter);
+        num(ui, u, &mut state.stock_ui.diameter);
         field(ui, "Height");
-        num(ui, &mut state.stock_ui.height);
+        num(ui, u, &mut state.stock_ui.height);
     } else if shape == 2 {
         let models: Vec<String> = model::named_entities(&state.world)
             .into_iter()
@@ -966,24 +1019,24 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
         }
     } else {
         field(ui, "Length (X)");
-        num(ui, &mut state.stock_ui.dx);
+        num(ui, u, &mut state.stock_ui.dx);
         field(ui, "Width (Y)");
-        num(ui, &mut state.stock_ui.dy);
+        num(ui, u, &mut state.stock_ui.dy);
         field(ui, "Height (Z)");
-        num(ui, &mut state.stock_ui.dz);
+        num(ui, u, &mut state.stock_ui.dz);
     }
     ui.add_space(6.0);
     field(ui, "X center");
-    num(ui, &mut state.stock_ui.x);
+    num(ui, u, &mut state.stock_ui.x);
     field(ui, "Y center");
-    num(ui, &mut state.stock_ui.y);
+    num(ui, u, &mut state.stock_ui.y);
     field(ui, "Z bottom");
-    num(ui, &mut state.stock_ui.z);
+    num(ui, u, &mut state.stock_ui.z);
     field(ui, "Rotation (yaw deg)");
-    num(ui, &mut state.stock_ui.yaw_deg);
+    num_plain(ui, &mut state.stock_ui.yaw_deg);
     ui.add_space(6.0);
     field(ui, "Fit margin");
-    num(ui, &mut state.stock_ui.fit_margin);
+    num(ui, u, &mut state.stock_ui.fit_margin);
     let shape = state.stock_ui.shape;
     let (dx, dy, dz) = (state.stock_ui.dx, state.stock_ui.dy, state.stock_ui.dz);
     let (diameter, height) = (state.stock_ui.diameter, state.stock_ui.height);
@@ -1020,21 +1073,22 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
 // ------------------------------------------------------------------ wcs page
 
 fn wcs_page(ui: &mut Ui, state: &mut State, slot: usize) {
+    let u = state.units();
     if state.wcs_ui.slot != slot {
         load_wcs_slot(state, slot);
     }
     field(ui, "X origin");
-    num(ui, &mut state.wcs_ui.x);
+    num(ui, u, &mut state.wcs_ui.x);
     field(ui, "Y origin");
-    num(ui, &mut state.wcs_ui.y);
+    num(ui, u, &mut state.wcs_ui.y);
     field(ui, "Z origin");
-    num(ui, &mut state.wcs_ui.z);
+    num(ui, u, &mut state.wcs_ui.z);
     field(ui, "Tilt about X (roll)");
-    num(ui, &mut state.wcs_ui.roll_deg);
+    num_plain(ui, &mut state.wcs_ui.roll_deg);
     field(ui, "Tilt about Y (pitch)");
-    num(ui, &mut state.wcs_ui.pitch_deg);
+    num_plain(ui, &mut state.wcs_ui.pitch_deg);
     field(ui, "Turn about Z (yaw)");
-    num(ui, &mut state.wcs_ui.yaw_deg);
+    num_plain(ui, &mut state.wcs_ui.yaw_deg);
     ui.add_space(6.0);
     ui.label("Quarter-turns about world axes (apply immediately):");
     const TURNS: [(&str, usize, f64); 6] = [
@@ -1073,10 +1127,10 @@ fn wcs_page(ui: &mut Ui, state: &mut State, slot: usize) {
             .and_then(|e| model::transform_of(&state.world, e))
         {
             Some(loc) => format!(
-                "{name}: {:.2}, {:.2}, {:.2}  yaw {:.1}",
-                loc.pos.x,
-                loc.pos.y,
-                loc.pos.z,
+                "{name}: {}, {}, {}  yaw {:.1}",
+                units::len(loc.pos.x, u, 2),
+                units::len(loc.pos.y, u, 2),
+                units::len(loc.pos.z, u, 2),
                 quat_yaw_deg(loc.rot)
             ),
             None => format!("{name}: -"),
@@ -1129,6 +1183,7 @@ fn turn_wcs(state: &mut State, axis: usize, sign: f64) {
 /// live here, so every labeled field resolves in exactly one surface
 /// (the a11y-query law the tests ride on).
 fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
+    let u = state.units();
     if !name.is_empty() && state.tool_ui.name != name {
         state.tool_ui.name = name.to_owned();
     }
@@ -1143,16 +1198,26 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
         // document holds right now, one line per fact.
         if let Some(t) = model::find_by_name(&state.world, &nm).and_then(|e| model::tool_of(&state.world, &e)) {
             ui.label(format!(
-                "{}  Ø{:.2}  corner r {:.2}",
+                "{}  Ø{}  corner r {}",
                 kind_name(t.kind),
-                t.diameter,
-                t.corner_r
+                units::len(t.diameter, u, 2),
+                units::len(t.corner_r, u, 2)
             ));
             ui.label(format!(
-                "cut {:.1}  shank Ø{:.1}×{:.1}  holder Ø{:.1}×{:.1}",
-                t.flute_len, t.shank_d, t.shank_len, t.holder_d, t.holder_len
+                "cut {}  shank Ø{}×{}  holder Ø{}×{}",
+                units::len(t.flute_len, u, 1),
+                units::len(t.shank_d, u, 1),
+                units::len(t.shank_len, u, 1),
+                units::len(t.holder_d, u, 1),
+                units::len(t.holder_len, u, 1)
             ));
-            ui.label(format!("{} rpm  {:.0} mm/min  {}", t.rpm, t.feed, t.material_group));
+            ui.label(format!(
+                "{} rpm  {} {}  {}",
+                t.rpm,
+                units::feed(t.feed, u),
+                u.feed_suffix(),
+                t.material_group
+            ));
         }
         ui.add_space(4.0);
         let (edit, del) = ui
@@ -1212,6 +1277,7 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
 /// to carry. Delete stays a library verb (the dock owns it), which also
 /// keeps every button label unique across the two surfaces.
 pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
+    let u = state.units();
     let Some(_subject) = state.tool_editor.clone() else {
         return;
     };
@@ -1254,31 +1320,31 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                     combo(ui, "tool_kind", &mut k, &TOOL_KINDS);
                     state.tool_ui.kind = k.min(2);
                     field(ui, "Diameter");
-                    num(ui, &mut state.tool_ui.diameter);
+                    num(ui, u, &mut state.tool_ui.diameter);
                     field(ui, "Corner radius");
-                    num(ui, &mut state.tool_ui.corner_r);
+                    num(ui, u, &mut state.tool_ui.corner_r);
                     field(ui, "Flute length");
-                    num(ui, &mut state.tool_ui.flute_len);
+                    num(ui, u, &mut state.tool_ui.flute_len);
                     field(ui, "Shank diameter");
-                    num(ui, &mut state.tool_ui.shank_d);
+                    num(ui, u, &mut state.tool_ui.shank_d);
                     field(ui, "Shank length");
-                    num(ui, &mut state.tool_ui.shank_len);
+                    num(ui, u, &mut state.tool_ui.shank_len);
                     field(ui, "Holder diameter");
-                    num(ui, &mut state.tool_ui.holder_d);
+                    num(ui, u, &mut state.tool_ui.holder_d);
                     field(ui, "Holder length");
-                    num(ui, &mut state.tool_ui.holder_len);
+                    num(ui, u, &mut state.tool_ui.holder_len);
                     field(ui, "Material group");
                     ui.add(
                         TextEdit::singleline(&mut state.tool_ui.material_group)
                             .desired_width(140.0),
                     );
                     field(ui, "Spindle rpm");
-                    num(ui, &mut state.tool_ui.rpm);
-                    field(ui, "Feed (mm/min)");
-                    num(ui, &mut state.tool_ui.feed);
+                    num_plain(ui, &mut state.tool_ui.rpm);
+                    field(ui, &format!("Feed ({})", u.feed_suffix()));
+                    num_feed(ui, u, &mut state.tool_ui.feed);
                 });
                 ui.vertical(|ui| {
-                    draw_tool_preview(ui, &preview_tool);
+                    draw_tool_preview(ui, &preview_tool, u);
                 });
             });
             ui.separator();
@@ -1326,7 +1392,7 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
 /// the fields beside it are editing. Tip at the bottom (z = 0 upward),
 /// equal aspect both axes - "to scale" means to scale. A half-typed draft
 /// renders a stub and a word, never a NaN.
-fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool) {
+fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit) {
     const SIDE: f32 = 260.0;
     const PAD: f32 = 18.0;
     let (resp, painter) = ui.allocate_painter(Vec2::splat(SIDE), Sense::hover());
@@ -1414,14 +1480,14 @@ fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool) {
     painter.text(
         Pos2::new(axis_x, rect.max.y - 4.0),
         Align2::CENTER_BOTTOM,
-        format!("Ø {:.2}", t.diameter),
+        format!("Ø {}", units::len(t.diameter, u, 2)),
         FontId::proportional(10.0),
         NOTE,
     );
     painter.text(
         Pos2::new(rect.min.x + 6.0, rect.min.y + 6.0),
         Align2::LEFT_TOP,
-        format!("{z_max:.1} mm overall"),
+        format!("{} {} overall", units::len(z_max, u, 1), u.suffix()),
         FontId::proportional(10.0),
         NOTE,
     );
@@ -1430,6 +1496,7 @@ fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool) {
 // ---------------------------------------------------------------- model page
 
 fn model_page(ui: &mut Ui, state: &mut State, name: String) {
+    let u = state.units();
     ui.heading(format!("Model: {name}"));
     let Some(entity) = model::find_by_name(&state.world, &name) else {
         ui.label("It is gone from the document.");
@@ -1439,10 +1506,11 @@ fn model_page(ui: &mut Ui, state: &mut State, name: String) {
     ui.label(format!("{tris} triangle(s)"));
     if let Some(a) = model::entity_world_aabb(&state.world, &entity) {
         ui.label(format!(
-            "{:.1} x {:.1} x {:.1} mm",
-            a.max.x - a.min.x,
-            a.max.y - a.min.y,
-            a.max.z - a.min.z
+            "{} x {} x {} {}",
+            units::len(a.max.x - a.min.x, u, 1),
+            units::len(a.max.y - a.min.y, u, 1),
+            units::len(a.max.z - a.min.z, u, 1),
+            u.suffix()
         ));
     }
     let users: Vec<String> = model::named_entities(&state.world)

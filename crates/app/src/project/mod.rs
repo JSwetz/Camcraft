@@ -1,4 +1,4 @@
-//! Project save/load: `.hsmproj`, JSON, version 6.
+//! Project save/load: `.hsmproj`, JSON, version 8.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -55,9 +55,10 @@ use crate::schema::{
 };
 use crate::stock::{self, StockShape};
 use crate::tools::{Tool, ToolKind};
+use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 7;
+pub const PROJECT_VERSION: u32 = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -72,6 +73,12 @@ pub enum ProjectError {
 #[derive(Serialize, Deserialize)]
 pub struct ProjectFile {
     pub version: u32,
+    /// The document's display unit ("mm" | "in"), v8+. Absent means
+    /// millimeters - exactly what every pre-v8 file displayed, so the
+    /// serde default is itself the whole migration. A millimeter document
+    /// omits the field (byte-shape of the pre-v8 files, plus the stamp).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub units: Option<String>,
     pub entities: Vec<EntityDto>,
 }
 
@@ -970,6 +977,12 @@ pub fn collect(world: &World) -> ProjectFile {
         .collect();
     ProjectFile {
         version: PROJECT_VERSION,
+        // mm omits the field (the default); only an inch document pays
+        // for saying so.
+        units: match units::of(world) {
+            Unit::Millimeters => None,
+            Unit::Inches => Some("in".into()),
+        },
         entities,
     }
 }
@@ -1042,14 +1055,31 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // stored path is unchanged. Step-up is the stamp itself.
         file.version = 7;
     }
+    if file.version == 7 {
+        // v7 -> v8: document units arrive as a top-level `units` field.
+        // Every v7 file displayed millimeters (its numbers always were
+        // millimeters), and the field's default - absent means mm - is
+        // exactly that. Step-up is the stamp itself, like v6 -> v7.
+        file.version = 8;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
+    // The document's unit first (it belongs to the whole file, not to an
+    // entity): an unspellable value is a corrupt file, refused before any
+    // world write. Opening always lands the file's value - including mm,
+    // so a stale singleton from the previous document can never leak in.
+    let doc_units = match file.units.as_deref() {
+        None | Some("mm") => Unit::Millimeters,
+        Some("in") => Unit::Inches,
+        Some(other) => return Err(corrupt(format!("unknown units {other:?}"))),
+    };
     // Whole-file validation BEFORE any world write: a corrupt entity deeper
     // in the list must not leave a half-loaded document behind.
     for dto in &file.entities {
         validate_kind(dto, dto.kind.unwrap_or(EntityKind::Model))?;
     }
+    units::set(world, doc_units);
     for dto in file.entities {
         let kind = dto.kind.unwrap_or(EntityKind::Model);
         let entity = model::spawn(world, &dto.name);

@@ -4,8 +4,9 @@
 use std::path::{Path, PathBuf};
 
 use hsmworks_app::commands::{
-    CommandError, DeleteEntity, History, ImportModel, SetStock, SetWcsOrigin,
+    CommandError, DeleteEntity, History, ImportModel, SetStock, SetUnits, SetWcsOrigin,
 };
+use hsmworks_app::units::{self, Unit};
 use hsmworks_app::geometry::{cube, Mesh, Point3};
 use hsmworks_app::model;
 use hsmworks_app::schema::{Location, STOCK_NAME};
@@ -540,4 +541,26 @@ fn set_geometry_refusals_never_write_the_world() {
 
     assert_eq!(op_src(&world, "G1"), before, "every refusal left the world alone");
     let _ = &history; // history untouched: nothing constructed entered it
+}
+
+#[test]
+fn units_set_undo_redo_is_exact_and_no_op_refused() {
+    let world = new_world();
+    let mut history = History::default();
+    assert_eq!(units::of(&world), Unit::Millimeters, "fresh world is mm");
+
+    history.execute(&world, SetUnits::new(&world, Unit::Inches).expect("a real change"));
+    assert_eq!(units::of(&world), Unit::Inches);
+
+    assert!(history.undo(&world));
+    assert_eq!(units::of(&world), Unit::Millimeters, "undo restores the lens");
+    assert!(history.redo(&world));
+    assert_eq!(units::of(&world), Unit::Inches);
+
+    // Validate early: switching inches to inches never enters history,
+    // so undo after a refused no-op still lands where the user was.
+    let err = SetUnits::new(&world, Unit::Inches).expect_err("no-op must refuse");
+    assert!(matches!(err, CommandError::Invalid(_)), "{err:?}");
+    assert!(history.undo(&world));
+    assert_eq!(units::of(&world), Unit::Millimeters);
 }

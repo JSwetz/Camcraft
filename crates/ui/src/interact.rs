@@ -26,6 +26,7 @@ use hsmworks_app::geometry::{Aabb, Point3, transform_point};
 use hsmworks_app::geo2d::Region;
 use hsmworks_app::operation::{FeatureSel, GeoSel, Height};
 use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
+use hsmworks_app::units;
 use hsmworks_app::{model, operation, pick};
 use winit::keyboard::ModifiersState;
 
@@ -705,16 +706,17 @@ pub(crate) fn overlay_labels(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
                 // screen says what it rides on: "Operation1 · Bottom
                 // 22.00 (G54 +0.00)". Fixed heights are their own
                 // number and carry no parenthetical.
+                let u = state.units();
                 let chip = if p.src.is_fixed() {
-                    format!("{} · {} {:.2}", state.op_ui.name, p.name, p.z)
+                    format!("{} · {} {}", state.op_ui.name, p.name, units::len(p.z, u, 2))
                 } else {
                     format!(
-                        "{} · {} {:.2} ({} {:+.2})",
+                        "{} · {} {} ({} {})",
                         state.op_ui.name,
                         p.name,
-                        p.z,
+                        units::len(p.z, u, 2),
                         p.src.reference,
-                        p.src.offset,
+                        units::len_signed(p.src.offset, u, 2),
                     )
                 };
                 out.push((uv, p.rgb, chip));

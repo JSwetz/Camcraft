@@ -100,6 +100,14 @@ pub struct Toolpath {
     pub warnings: Vec<Warning>,
 }
 
+/// The document's display unit, stored as a flecs singleton (M1.1): on
+/// the world, not on any entity - so it can never leak into a browser
+/// row, a name lookup, or the saved entity list. Millimeters until a
+/// `SetUnits` command or a v8 project file says otherwise; every stored
+/// number stays millimeters whatever this says (see `units` module law).
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Units(pub crate::units::Unit);
+
 /// The single stock entity's name. Identity by name, like everything else:
 /// tree, undo, and save all reach stock through this.
 pub const STOCK_NAME: &str = "Stock";
@@ -120,4 +128,5 @@ pub fn register_schema(world: &World) {
     world.component::<ToolDef>();
     world.component::<Operation>();
     world.component::<Toolpath>();
+    world.component::<Units>();
 }

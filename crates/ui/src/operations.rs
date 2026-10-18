@@ -20,6 +20,7 @@ use flecs_ecs::prelude::World;
 use hsmworks_app::geo2d::Point2;
 use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
 use hsmworks_app::operation::{self, Height, HeightReference, OpParams};
+use hsmworks_app::units;
 use hsmworks_app::verify::Warning;
 
 /// The Strategy combo's labels, in index order - one source for the
@@ -56,7 +57,7 @@ pub(crate) fn offset_label(reference: HeightReference) -> &'static str {
 /// the tests can pin the exact wording; the draw code only labels it.
 pub(crate) fn height_echo(world: &World, h: &Height) -> String {
     match h.z(world) {
-        Some(z) => format!("(= Z {z:.3})"),
+        Some(z) => format!("(= Z {})", units::len(z, units::of(world), 3)),
         None => format!(
             "(unresolved: {})",
             operation::missing_source(world, h.reference).unwrap_or("source missing")

@@ -18,13 +18,14 @@ use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, SelectEntity,
-    SetOperationGeometry, SetStock, SetWcsOrigin,
+    SetOperationGeometry, SetStock, SetUnits, SetWcsOrigin,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
 use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
+use hsmworks_app::units::{self, Unit};
 use hsmworks_app::{model, project, world::new_world};
 
 use crate::viewport::Camera;
@@ -58,6 +59,9 @@ pub enum CommandKind {
         margin: f64,
         shape: i32,
     },
+    /// The document's display unit (M1.1): a lens over numbers that all
+    /// stay millimeters in the world. Undo restores the previous lens.
+    SetUnits(Unit),
     /// Work offset: slot origin plus full orientation as yaw-pitch-roll
     /// degrees (R = Rz ⊗ Ry ⊗ Rx). The world stores a unit quaternion;
     /// pure-yaw setups use roll = pitch = 0.
@@ -914,6 +918,15 @@ impl State {
         self.pending.push_back(CommandKind::GenerateOperation(name.to_string()));
     }
 
+    /// The document's display unit - a read of the flecs singleton, so it
+    /// is always current whatever ran (Apply, Undo, Open): there is no
+    /// mirror to go stale. Millimeters until `SetUnits` or a v8 file says
+    /// otherwise (M1.1).
+    #[must_use]
+    pub fn units(&self) -> Unit {
+        units::of(&self.world)
+    }
+
     /// The Geometry section's list: one row per pick-list entry, in order,
     /// resolved against the model as it stands now. Each row *describes*
     /// its pick in machining terms - a face says where it is and how big
@@ -924,7 +937,6 @@ impl State {
     /// with new geometry) reads amber and falls back to its short id with
     /// "missing" - removing it is always safe, because the reduced list
     /// only gets shorter.
-    #[must_use]
     pub fn geo_chips(&self) -> Vec<GeoChip> {
         // Open runs are pieces of one loop the user watches get
         // completed: the "2 of 3" in a run's label counts chain picks
@@ -940,6 +952,9 @@ impl State {
         // own walk - the same one the region geometry is built through,
         // so a row's `· → ring k` cannot disagree with the preview.
         let stitched = operation::stitched_rings(&self.world, &self.op_ui.geo);
+        // One lens for the whole row set: chip numbers follow the
+        // document's unit (M1.1); the mm law underneath is untouched.
+        let unit = units::of(&self.world);
         self.op_ui
             .geo
             .iter()
@@ -966,7 +981,13 @@ impl State {
                                     ('y', f.offset)
                                 };
                                 let mut label =
-                                    format!("Face {} · {axis}={:.2} · {:.1} mm²", g.entity, v, f.area);
+                                    format!(
+                                        "Face {} · {axis}={} · {} {}",
+                                        g.entity,
+                                        units::len(v, unit, 2),
+                                        units::area(f.area, unit),
+                                        unit.area_suffix()
+                                    );
                                 if f.loops.len() > 1 {
                                     label.push_str(&format!(" · {} loops", f.loops.len()));
                                 }
@@ -1009,16 +1030,21 @@ impl State {
                                         }
                                     }
                                     format!(
-                                        "Chain {} · closed · {:.1} mm · {:.1} × {:.1}",
-                                        g.entity, len, hi[0] - lo[0], hi[1] - lo[1]
+                                        "Chain {} · closed · {} {} · {} × {}",
+                                        g.entity,
+                                        units::len(len, unit, 1),
+                                        unit.suffix(),
+                                        units::len(hi[0] - lo[0], unit, 1),
+                                        units::len(hi[1] - lo[1], unit, 1)
                                     )
                                 } else {
                                     let i = run_seq.entry(g.entity.clone()).or_default();
                                     *i += 1;
                                     format!(
-                                        "Chain {} · open · {:.1} mm · {} of {}",
+                                        "Chain {} · open · {} {} · {} of {}",
                                         g.entity,
-                                        len,
+                                        units::len(len, unit, 1),
+                                        unit.suffix(),
                                         i,
                                         run_totals.get(&g.entity).copied().unwrap_or(1)
                                     )
@@ -1092,14 +1118,19 @@ impl State {
                                                     (d - r).abs() <= r.max(1e-3) * 0.02
                                                 }) =>
                                             {
-                                                format!("bore Ø{:.1}", 2.0 * r)
+                                                format!("bore Ø{}", units::len(2.0 * r, unit, 1))
                                             }
-                                            _ => format!("{:.1} × {:.1}", hi[0] - lo[0], hi[1] - lo[1]),
+                                            _ => format!(
+                                                "{} × {}",
+                                                units::len(hi[0] - lo[0], unit, 1),
+                                                units::len(hi[1] - lo[1], unit, 1)
+                                            ),
                                         };
                                         format!(
-                                            "Welded face {} · {shape} · {:.1} mm² · {strips} strips",
+                                            "Welded face {} · {shape} · {} {} · {strips} strips",
                                             g.entity,
-                                            shoelace(rim)
+                                            units::area(shoelace(rim), unit),
+                                            unit.area_suffix()
                                         )
                                     }
                                     None => format!("Welded face {} · open band", g.entity),
@@ -1236,6 +1267,10 @@ impl State {
             CommandKind::NewDocument => {
                 self.abandon_imports();
                 model::clear_named(&self.world);
+                // Units belong to the document, and clear_named cannot
+                // reach a singleton: reset the lens so a fresh blank is
+                // millimeters, never the last document's inches.
+                units::set(&self.world, Unit::default());
                 self.history.clear();
                 self.doc_version += 1;
                 self.status = String::from("new document");
@@ -1324,6 +1359,16 @@ impl State {
                         self.status = String::from("stock set");
                     }
                     Err(err) => self.refuse(ErrorScope::Setup, format!("stock not set: {err}")),
+                }
+            }
+            CommandKind::SetUnits(next) => {
+                match SetUnits::new(&self.world, next) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("units: {}", next.label());
+                    }
+                    Err(err) => self.refuse(ErrorScope::Setup, format!("units not set: {err}")),
                 }
             }
             CommandKind::StockFit { margin, shape: radio } => {
@@ -1521,8 +1566,11 @@ impl State {
                         self.doc_version += 1;
                         let cache = model::find_by_name(&self.world, &name)
                             .and_then(|e| model::toolpath_of(&self.world, &e));
+                        // The feed in the summary reads in the document's
+                        // unit (M1.1); the path itself is mm law, always.
+                        let unit = self.units();
                         self.status = match cache {
-                            Some(tp) => tp.path.status_summary(&name, tp.warnings.len()),
+                            Some(tp) => tp.path.status_summary(&name, tp.warnings.len(), unit),
                             None => format!("generated {name}"),
                         };
                     }

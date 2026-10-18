@@ -17,6 +17,7 @@ use std::f64::consts::PI;
 
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
+use crate::units::Unit;
 
 /// G0 rapid, G1 feed, G1 with a plunge (reduced) feed - the three verbs a
 /// 2.5-D path needs. The distinction drives display color now and post
@@ -231,7 +232,7 @@ impl Toolpath {
     /// verify warnings. Nothing a generator merely intended - only what
     /// the path shows.
     #[must_use]
-    pub fn status_summary(&self, name: &str, warnings: usize) -> String {
+    pub fn status_summary(&self, name: &str, warnings: usize, unit: Unit) -> String {
         let n = self.moves.len();
         let p = self.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count();
         let a = self.arc_count();
@@ -246,7 +247,7 @@ impl Toolpath {
             .iter()
             .find(|m| m.kind == MoveKind::Plunge)
             .and_then(|m| m.feed)
-            .map_or(String::new(), |f| format!(" @ {f}"));
+            .map_or(String::new(), |f| format!(" @ {}", crate::units::feed(f, unit)));
         format!(
             "generated {name}: {n} moves ({p} plunge(s){feed}, {} level(s), {a} arc(s)), {warnings} warning(s)",
             levels.len()
@@ -379,7 +380,7 @@ mod tests {
         let t = b.finish();
         assert_eq!(t.len(), 9, "every move above is real motion");
         assert_eq!(
-            t.status_summary("P1", 2),
+            t.status_summary("P1", 2, Unit::Millimeters),
             "generated P1: 9 moves (2 plunge(s) @ 100, 2 level(s), 1 arc(s)), 2 warning(s)"
         );
     }

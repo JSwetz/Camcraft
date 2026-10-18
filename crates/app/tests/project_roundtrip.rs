@@ -78,15 +78,16 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1/v2/v3/v4/v5
+    // Anything newer than this build's format stays refused; v1..v7
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
-    // the v5 numeric heights -> v6 Fixed migration, and
-    // side_roundtrip_v6_defaults_to_auto the v6 contour -> v7 side step).
-    let text = r#"{"version": 8, "entities": []}"#;
+    // the v5 numeric heights -> v6 Fixed migration,
+    // side_roundtrip_v6_defaults_to_auto the v6 contour -> v7 side step,
+    // and units_round_trip_and_a_v7_file_means_millimeters v7 -> v8).
+    let text = r#"{"version": 9, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(8)) => {}
+        Err(ProjectError::UnsupportedVersion(9)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1144,4 +1145,64 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
         panic!("contour params expected, got {:?}", o.params);
     };
     assert_eq!(*side, Side::Inside, "Inside survives the file unchanged");
+}
+
+#[test]
+fn units_round_trip_and_a_v7_file_means_millimeters() {
+    use hsmworks_app::units::{self, Unit};
+
+    // An inch document: the file says so, a save-load-save is stable,
+    // and the millimeter numbers inside are untouched by the lens.
+    let world = populated_world();
+    units::set(&world, Unit::Inches);
+    let path = tmp_path("units_in");
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(first.contains("\"units\": \"in\""), "inch must be written: {first}");
+    let world2 = new_world();
+    project::open(&world2, &first).expect("reopen");
+    assert_eq!(units::of(&world2), Unit::Inches);
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "save-load-save must be stable");
+
+    // A millimeter document writes no units key at all - the whole v7
+    // corpus is mm, so absence must keep meaning mm.
+    let world = populated_world();
+    let path = tmp_path("units_mm");
+    project::save(&world, &path).expect("save");
+    let text = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(!text.contains("\"units\""), "mm is the default, not a key: {text}");
+
+    // A literal v7 file: no units key anywhere, the step-up is the stamp.
+    let text = r#"{
+        "version": 7,
+        "entities": [{
+            "name": "legacy",
+            "translation": [0.0, 0.0, 0.0],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "facets": [[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]]
+        }]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v7 must migrate");
+    assert_eq!(units::of(&world), Unit::Millimeters, "a v7 file is millimeters");
+
+    // Opening always lands the value: an inch file into an inch-leaked
+    // world must come back mm.
+    let world = new_world();
+    units::set(&world, Unit::Inches);
+    project::open(&world, text).expect("reopen into a dirty world");
+    assert_eq!(units::of(&world), Unit::Millimeters, "no previous-document leak");
+
+    // A nonsense unit is a corrupt file, refused before any world write.
+    let text = r#"{"version": 8, "units": "furlongs", "entities": []}"#;
+    let world = new_world();
+    match project::open(&world, text) {
+        Err(ProjectError::Corrupt(msg)) => assert!(msg.contains("furlongs"), "{msg}"),
+        other => panic!("expected Corrupt, got {other:?}"),
+    }
+    assert_eq!(units::of(&world), Unit::Millimeters, "refusal wrote nothing");
 }
