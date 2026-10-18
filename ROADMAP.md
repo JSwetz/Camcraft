@@ -237,9 +237,16 @@ our own glyphs); icons are Tabler Icons (MIT) bundled under `assets/ui/`.
       region builder (`operation::region_of`), and hovering a model
       highlights the facet under the cursor (`pick::first_hit_f`) - the
       facet-index hook M1.5 feature picking builds on
-- ⏸ **View cube + viewport navigation bar**: deferred to the M1.5 viewport
-      work (the open items below it join this milestone's list; display
-      modes landed first, right after the egui graduation)
+- ✅ **View cube + viewport navigation bar**: the viewport's corner
+      furniture - a top-right cube and a nav column beneath it. The cube is
+      drawn through the camera basis and picked by the same projection (an
+      orthographic slab raycast classifies the click's cube-space entry as a
+      face, edge or corner and commands `Camera::toward`), so what lights
+      under the cursor is what the click turns to; a press on the furniture
+      arms no gesture, exactly like a ribbon button's. The nav bar's Fit
+      queues the same `FrameAll` the F key does, Iso is the house
+      orientation, and Wire/Paths/Axes are direct view-state writes as
+      panes.rs does them (the milestone the display modes opened)
 - ✅ **Graphical tool editor**: tool creation and editing move from the
       property page's field list to its own window with a live preview -
       the dock keeps the LIBRARY (a composed world summary, Edit/Delete,
@@ -555,8 +562,6 @@ the 2.5D/3D ones.
   Face's complement comparison, which misfires on a small boss.
 - ⏸ **WCS face/vertex snap**: deferred again, honestly - it needs the
       vertex pick above; M1.2's box-point placement stands
-- ⏸ **View cube + navigation bar**: still the viewport affordances
-      deferred from M1.4; orthogonal to selection
 
 Known limits from the M1.5.1-M1.5.4 reworks - each one refuses by name or
 degrades by rule, none guesses silently:
@@ -736,10 +741,10 @@ programming department.
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units (IGES deferred) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings, tangential leads; G41/G42 output, spiral/helical entries open | ⚠️ |
-| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; display modes, the tabbed-panels overhaul and the graphical tool editor window all done - riding the graduated egui stack | ⚠️ |
+| **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; display modes, the tabbed-panels overhaul and the graphical tool editor window all done - riding the graduated egui stack | ⚠️ |
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
-| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence; vertex picking, WCS snapping, view cube deferred | ⚠️ |
+| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Drill/peck/tap/bore, hole recognition, canned cycles | 📋 |
 | **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |

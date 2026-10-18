@@ -9,6 +9,52 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.5 — view cube + viewport navigation bar (commit `feat(ui): view cube + viewport navigation bar (M1.5)`)
+
+- **The furniture is painted, not widgeted.** `viewcube::Hud` is a layout
+  struct, the cube a `Painter` pass, the nav buttons painted rects with a
+  hit-test - zero `egui::Window`/`Button` machinery. Why: the cube must
+  be drawn through exactly the projection its pick inverts (one
+  `point_screen` serves painter and pointer, so a feature that lights is
+  a feature that orients), no widget graph can express that identity, and
+  the kittest harness and snapshot gate can only prove in-root surfaces -
+  the first floating `Window` would have been new ground twice. Cost to
+  change: a real `ui.button` row for the nav bar is easy; a GPU-viewport
+  cube is the expensive version nobody asked for.
+- **Top-right, and it eats gestures by never arming.** The hint line owns
+  the bottom-right corner, so the cube takes the top one. A press inside
+  the hud acts at press time and never records into `left_press` - the
+  existing release-pick and motion-promote passes then no-op on their
+  own, which is how "a press on the cube must not orbit or pick" holds
+  with zero new flags. Misses inside the hud are consumed too: a stray
+  click between cube and buttons does nothing at all, silently.
+- **Widgets outrank the raycast.** Discovered while testing: a nav button
+  sits 8 px below the cube's box, but the cube's volume stands behind it
+  in 3-D, so a raycast-first `click` oriented the camera when Fit was
+  clicked. The law now: nav rects own their pixels first, and the cube
+  raycast is gated to the cube's own box. Cost to change: none wanted;
+  it's in `click()` with a comment.
+- **One orientation law: `Camera::toward(d)`.** Face, edge and corner all
+  classify to a unit world direction - the slab raycast's entry point,
+  coordinates past 1−SNAP(0.16 cube units) counted: 1 → that face axis,
+  2-3 → the sign vector. `toward` keeps `target`/`dist` (orienting never
+  pans or zooms), and the poles need no special yaw because
+  `basis_right`'s zero-guard pins screen-right to +X there - a law test
+  holds the roll stable at six pole/yaw combos rather than trusting the
+  mvp layout. Cost to change: the SNAP width is the edge/corner grab
+  radius - a wider one makes faces harder to hit dead-center.
+- **Fit is a command; the toggles are not.** The Fit button queues the
+  same `FrameAll` the F key pushes (the nav bar's one real command);
+  Iso/Wire/Paths/Axes are direct view-state writes, exactly as panes.rs
+  flips the same fields - the camera/display exemption from
+  everything-is-a-command, applied by the nav column's precedent. The
+  command test asserts through the drain, not on a press frame: egui's
+  multi-pass can run the next frame's drain before we look, so queue
+  membership is pass-fragile while the executed effect is the law.
+- **Vector-only glyphs.** The five buttons and the cube are drawn from
+  line segments, arcs and text - no new PNGs, in step with the icon law;
+  the cube's labels are the three-letter strings we already own.
+
 ## M1.3 — tangential leads for 2D contour (commit `feat(app,ui): tangential leads for 2D contour - half-arc entry parallel to the wall (M1.3)`)
 
 - **Tangential means a half arc - a true semicircle.** `Lead::Tangential`
