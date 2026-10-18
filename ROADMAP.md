@@ -631,10 +631,48 @@ degrades by rule, none guesses silently:
 
 - **Move simulation**: rapid vs feed differentiation, feedrate readout, play/pause/scrub
 - **Validation warnings**: rapid-move violations and holder-vs-stock contact, blocking the post
-- **Fanuc post**: first class post - program header, tool changes, work offsets, canned cycles, coolant M-codes
+- **Post engine + CPS posts**: not a hard-coded writer - the Fusion 360
+      post architecture, implemented clean-room against its publicly
+      documented behavior, with three file roles and one engine:
+  - **`.cps` post scripts** (our own format implementation, our own
+        text): a manifest header (`description`, `vendor`, `legal`,
+        `certificationLevel`, `minimumRevision`, `extension`,
+        `setCodePage`, `capabilities`) plus the lifecycle hook set an
+        intermediate drives - `onOpen`, `onParameter`, `onSection`/
+        `onSectionEnd`, `onCommand`, `onLinear`/`onRapid`/`onCircular`,
+        `onCycle`/`onCyclePoint`/`onCycleEnd`, `onDwell`,
+        `onSpindleSpeed`, `onRadiusCompensation`, `onComment`,
+        `onClose` - reading the CL stream through `getProperty`/
+        `setProperty` and emitting text through the write primitives.
+        The control dialect lives in the script, never in the engine
+  - **`.mch` machine configurations**: JSON definitions - capabilities
+        ("milling"), a kinematics tree (static → head with spindle
+        min/max speed and a tool station listing supported coolants →
+        driven X→Y→Z axes with direction, reversal, rapid/normal
+        speeds, zero offsets and TCP → table) and the rotation
+        convention; they feed the post's WCS/offset and machine-limit
+        decisions
+  - **our own `.cnc` intermediate**: the CL stream the post consumes -
+        our `.cl` Toolpath dump, carrying per-operation parameters and
+        the M1.6 `; CYCLE` records, is the posting input (we define the
+        format; only its *role* matches the reference tool's
+        intermediate); engine CLI mirrors the reference:
+        `post [OPTIONS] <config> <intermediate> <output>` with
+        `--machine`, `--log` and counted warning reporting, plus the
+        same in-app post path
+  - the reference `post.exe` and the root fixture trio
+        (`05-xyz-2.cps`, `1001.cnc`, `MIllingmachine.mch`) stay local
+        development validators - our `.cps` files must run through the
+        reference engine as a format check, and none of their text is
+        ever vendored into ours
+- **Fanuc post**: the first `.cps` we ship - program header, tool
+      changes (T../M6), work offsets (G54+ from the machine/setup),
+      canned cycles emitted from `Toolpath.cycles` (G73/G81/G83/G84
+      with R/Z/Q/P/F words, G98/G99 retract modes), G2/G3 arc motion,
+      G40/G41/G42 radius compensation, coolant M-codes
 - **G-code viewer**: inspect the posted program in-app, with toolpath highlighting on scroll
 - **CI**: build matrix, regression test suite on golden models, all tests green
-- **Release build**: signed installer + portable zip, release notes
+- **Release build**: signed installer + portable zip (incl. the `post` binary), release notes
 
 ---
 
@@ -699,7 +737,9 @@ own.
 ### M3.3 - Post System & Machine Library (Release 0.3.0)
 **Goal: real G-code for real controls, written by the user, not by us guessing.**
 
-- **Post template engine**: an embedded scripting runtime so users own their posts (a clean-room design: no adaptation of the original .post JavaScript files)
+- **Post template engine**: generalizes M1.7's CPS engine so users own
+      their posts in the app (same clean-room line: our format, our
+      text, no adaptation of any vendor's post files)
 - **Built-in posts**: Fanuc, Haas, Siemens 840D, Heidenhain, Mazak - each with conformance tests against a golden G-code suite
 - **Machine definitions**: a machine group in the Setup pane - select or edit a
       machine, its name shown in the setup, driving simulation limits and post
@@ -711,8 +751,8 @@ own.
       checked against), rotary axes where present
       (A/B/C travel, rapid speed, positioning resolution), tool changer
       capacity, and coolant options (none / mist / flood / high-pressure /
-      through-spindle) that reach the post as M-codes (M1.7's Fanuc coolant
-      output reads them from here). The user-facing workflow (pick a machine,
+      through-spindle) that reach the post as M-codes (M1.7's posts read
+      the coolant set from the `.mch` machine file). The user-facing workflow (pick a machine,
       edit it, see it on the setup) is specced from published CAM user
       documentation only; no vendor strings, templates, or post files are
       copied or adapted
@@ -771,7 +811,7 @@ programming department.
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
-| **M1.7** | Verified first output | Move simulation, validation, Fanuc post, 0.1.0 | 📋 |
+| **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, 0.1.0 | 📋 |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
 | **M2.2** | Finish 3D to tolerance | Parallel, waterline, scallop, contour family | 📋 |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
