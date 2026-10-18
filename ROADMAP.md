@@ -171,12 +171,13 @@ undoes and redoes exactly, replaying byte-identical paths.
       (M1.5.2; the default stays the single level of M1.3, so pre-stepdown
       paths are byte-stable), with rapids only at the ends
 - ⚠️ **2D Contour**: islands (even-odd region sets), climb vs conventional,
-      linear and arc lead in/out, tabs as skipped segments, per-level
+      linear, arc and tangential lead in/out, tabs as skipped segments, per-level
       stepdowns with same-level hops to the retract plane between loops
       (M1.5.2), tolerance-driven arc tessellation - and since M1.5.2 the arc
-      leads and fitted rims travel as single arc moves, not chord fans (G2/G3
-      text emission waits for the post, M2.3). Missing: tangential
-      leads, and G41/G42 output - the compensation side is recorded in the
+      leads (the tangential half-arc since M1.3: it plunges 2*radius off the
+      wall and lands moving parallel to it) and fitted rims travel as single
+      arc moves, not chord fans (G2/G3 text emission waits for the post,
+      M2.3). Missing: G41/G42 output - the compensation side is recorded in the
       parameters but the path is cutter-center until the post emits it (M1.7)
 - ⚠️ **2D Pocket**: zigzag (scanline parity walk; islands fall out of the
       even-odd set) and waterline (inward buffers), with an Auto choice
@@ -734,7 +735,7 @@ programming department.
 |-----------|------|--------------|--------|
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units (IGES deferred) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
-| **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings; tangential leads, G41/G42 output, spiral/helical entries open | ⚠️ |
+| **M1.3** | Cut a 2.5D plate | Face, contour, pocket, slot, trace, tool library, parameters, verification warnings, tangential leads; G41/G42 output, spiral/helical entries open | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; view cube deferred to M1.5; display modes, the tabbed-panels overhaul and the graphical tool editor window all done - riding the graduated egui stack | ⚠️ |
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |

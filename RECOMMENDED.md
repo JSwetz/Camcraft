@@ -9,6 +9,51 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.3 — tangential leads for 2D contour (commit `feat(app,ui): tangential leads for 2D contour - half-arc entry parallel to the wall (M1.3)`)
+
+- **Tangential means a half arc - a true semicircle.** `Lead::Tangential`
+  `{ radius }` centers `radius` off the wall on the air normal and plunges
+  at `2 * radius`: the tool starts its feed moving *parallel* to the path
+  and lands on it already moving along it - G1 continuous end to end,
+  which is what earns the name. The quarter arc starts its motion along
+  the normal (across the air), the linear slams straight in; the three
+  cover the classic lead-in families. Lead-out mirrors it: overrun
+  tangentially, sweep out, stand off parallel. Cost to change: a new
+  `Lead` variant - additive in the enum, on the wire (`LeadDto`, v9) and
+  in the combo; removal touches every contour-params surface at once.
+- **The posted sense is the quarter law's limit, not a new rule.** The
+  quarter arm decides ccw from `cross((e-o), (s-o)) > 0` - the two radius
+  vectors' cross, which is sin(sweep) and degenerates to exactly 0 at
+  180°, where the semicircle lives. The quarter's radius vectors are
+  `-R*t` and `-R*air`, so its rule factors to `-R^2 * cross(air, t) > 0`;
+  the tangential posts exactly that survivor, `cross(air, t) < 0`, which
+  is why the two arms agree at every sweep below π instead of inventing a
+  second convention. A visible
+  consequence: with `air_side`'s conventions the tangential posts CW for
+  climb where the quarter posts CCW - the tests derive the expected flag
+  from the law rather than pinning it, so a deliberate `air_side` change
+  stays a one-place decision. Cost to change: pinning either way would
+  freeze a secondary convention in a primary test.
+- **Project v9, stamp-only migration.** `lead` has been a required key
+  since v1, so no older file can carry the new tag - v8→v9 is the version
+  step itself, like v7→v8, and every older file keeps reading with
+  identical meaning. `GenStamp`'s digest gained tag byte 3 so a
+  lead-kind switch marks cached toolpaths stale exactly like a radius
+  edit does - file bytes are untouched by that.
+- **The combo grows a fourth item sharing the arc-radius label.** Arc and
+  Tangential are mutually exclusive branches and both radii mean "the
+  lead arc's radius", so one `Lead arc radius` DragValue serves either -
+  the label can never be ambiguous in a document. Switching to
+  Tangential seeds the draft at 5.0 mm, the same shape as the Arc choice;
+  the old value rides the undoable `EditOperationParams` like every other
+  contour parameter.
+- **The goldens say so: `contour_tangential_lead.cl` is the byte witness**
+  that a half arc posts as one `S±1` arc move with the 2×radius standoff,
+  and the disk-plate job is otherwise move-for-move the quarter-lead
+  file - every pre-existing golden re-ran byte-identical, which is the
+  law a new enum member must obey: it cannot disturb a path that never
+  asks for it.
+
 ## M1.1 — document units, millimeters and inches (commit `feat(app,ui): document units - millimeters and inches everywhere including the post law`)
 
 - **The unit is a lens, not a storage choice.** Every stored number -
