@@ -9,6 +9,38 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## Regression fix — the origin anchor picker returns to the Origin page (commit `fix(ui): restore the origin anchor picker on the Origin page`)
+
+- **What was wrong**: the 3x3 compass grid, the stock-vs-model source
+  choice, the Z-level radios and the "Pick markers in viewport" toggle all
+  lived in the imgui setup pane, and the egui port never carried them over
+  (retired un-ported at M-g, `6071415`). `interact.rs` kept its half of the
+  law intact - the marker overlay, the screen-space hit test, the
+  pick-beats-entity routing - so the symptom was specifically: crosses
+  never render (nothing could set `pick_anchor`) and no grid to click.
+  Found by `git log -S pick_anchor`, not by code archaeology in the live
+  tree.
+- **Restored shape, deliberately literal**: the imgui layout ported
+  one-for-one - ComboBox for the source (imgui combo), three radios for the
+  level, the checkbox, and the grid with the chosen cell bracketed
+  (`[SE]`) as the imgui highlight law. Alternative considered: an egui-
+  idiomatic segmented control or colored highlight; kept the bracket
+  because the hand-eyeballs know that look, and the parity law for
+  ported panes is "same fields, same order, same echoes" (pages.rs header
+  comment). Cost to change: one widget block.
+- **One-law preservation**: the pane grid calls `interact::anchor_points`
+  - the same function the viewport markers and the pick hit-test read - and
+  a click commits through the existing `SetWcs` draft law (write drafts,
+  queue the command), so grid click, marker click and *Set Origin* cannot
+  disagree. A viewport pick sets `anchor_xy` and queues `SetWcs` with the
+  marker's position but leaves the pane's numeric drafts to
+  `sync_setup_ui`'s next pass - the imgui-era behavior, kept, not
+  "fixed".
+- **Pinned by** `origin_page_shows_the_anchor_grid_and_arms_pick_mode`
+  (ui lib tests): grid present, click places the slot on exactly the point
+  `anchor_points[8]` says, the chosen cell brackets, and the checkbox arms
+  the overlay - the last one being the exact half that regressed away.
+
 ## M1.7c — move simulation: transport bar, timeline laws, tool marker (commit `feat(app,ui): move simulation - transport bar, timeline laws, and tool marker (M1.7c)`)
 
 - **The chain is truth; cycles contribute only dwell seconds.** `sim::script`
