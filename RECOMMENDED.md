@@ -9,6 +9,61 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.1d - Engagement-based feed modulation (commit `b164c69`)
+
+- **The median-anchor law: the path's own median loaded engagement sets
+  what runs at the programmed feed.** f = F0 · clamp(ae_median/ae_move,
+  FFO_FLOOR, 1). Why: the textbook alternative — derive ae from the
+  nominal stepover (ae = step/2r, or the M2.1c sagitta relation) —
+  under-reads whole strategy families: an adaptive ring engages the full
+  core on its inside, a zigzag's links engage the fresh shelf ahead, and
+  neither is a "stepover number". Measuring against the dexel field that
+  already exists costs one dry sim run and is strategy-blind by
+  construction (the dexel-as-verification-layer law again: measure, never
+  derive, from the sim). Cost to change: the anchor lives in one block of
+  `optimize_feed`; a nominal-formula variant would replace ~10 lines.
+- **Never faster, floor 0.25: the op's feed word IS the modeled tool
+  limit.** Modulation only slows toward it; light bites never bank speed.
+  Why: speeding up needs a spindle/torque/power curve this build does not
+  carry, and a silent speed-up is exactly the class of surprise the Prime
+  Directive forbids. FFO_FLOOR = 0.25 is the handbook's roughing
+  slow-down band's safe end and keeps a near-tangent read (ae→0) from
+  dividing out toward a stopped tool. Discussion point: with a real
+  machine file (M3.3's) a >1 band could open later, ceilinged by it.
+- **The two-station chord, found by a median collapse.** v1 sampled one
+  perpendicular chord at each move's midpoint; on the flat slab the
+  modulation was inert — every F word stayed at the programmed feed.
+  The histogram led to the two pathologies: stepover links read ae=0 (the
+  chord across their travel sits fully in the trough just cut — their
+  fresh material is *ahead*, along travel), and the level-1 skin moves
+  read ae=0 honestly (cut plane == stock top: `top > z` is false
+  everywhere). Fix: average the perpendicular chord at mid-move and at
+  3/4 along the move — the trapezoid of the swept side width; a link
+  now reads ~0.5, which is what it cuts, and rows are unmoved. Same
+  lineage as M2.1b's phantom-cutter lesson: the measurement window must
+  match what the move sweeps, and a law test now pins that the first cut
+  of a level is its slowest kind.
+- **Loaded-only median; air keeps the programmed feed.** Zero-engagement
+  readings hold no vote in the anchor and modulate by ratio 1 (no load,
+  no reason to slow — and never below the floor's division by ~0). If
+  *nothing* in a path is loaded, the pass returns the path byte-identical
+  — the rapid-only identity law test.
+- **Planar moves only.** Plunges, ramps and helix feeds keep their
+  assigned plunge_feed/feed: axial engagement is a different curve
+  (chip thinning vs depth, not width) and modulating it needs a model we
+  did not write. Honest scope note, not an oversight — the doc comment
+  says so at the function.
+- **Placement: `feed_opt: bool` on the params (the rest_rough pattern),
+  stamped, v14 step-up a serde-default no-op.** It changes every F word
+  it touches, so flipping it changes the stamp — old paths go Stale
+  exactly when the answer changes. Absent in a v13 file means off: those
+  files post byte-identical to before.
+- **The post needs no change** — M1.7a's per-move F-word representation
+  pays off: modulated feeds flow through `.cnc` and the Fanuc post with
+  zero new machinery. One sim run per generate when the toggle is on is
+  the only cost (the rest pass already runs one; discussion point if
+  users find generation slow on big pockets).
+
 ## M2.1c - Constant-engagement adaptive clearing (commit `70c356b`)
 
 - **The engagement sagitta law is the strategy: step = r·(1 − cos θ).**

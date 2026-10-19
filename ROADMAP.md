@@ -722,8 +722,8 @@ before touching metal.
       sweep cuts the later-listed such chord into an honest rapid hop; and ring
       closure is a property of the point DATA, never a motion the walker adds
       (the closing diagonal a verify test caught). Trochoidal slot paths and
-      corner-contact/trochoidal fallbacks stay open with **Feed-rate
-      optimization** below.
+      corner-contact/trochoidal fallbacks stay open (M2.1d feed modulation
+      closed alongside them, separately below).
 - ✅ **3D Pocket** (M2.1a): mesh-driven, not sketch-driven — the *level law*
       makes each Z-plane's target the silhouette footprint minus the columns
       the solid still fills at that plane (`machining3d::material_above`), so
@@ -760,7 +760,22 @@ before touching metal.
       surface before it is trusted, and the staircase it leaves is reported
       in volume, cells and height, never averaged away (color-mapped
       deviation against the final model is M2.3's)
-- **Feed-rate optimization**: engagement-based feed modulation within tool limits
+- ✅ **Feed-rate optimization** (M2.1d): engagement-based feed modulation
+      within tool limits - `optimize_feed` re-runs the finished path through
+      the dexel sim and scales every planar feed word by
+      `median/engagement`, clamped to `[FFO_FLOOR, 1]` of the programmed
+      feed (the *median-anchor law*: the path's own median loaded bite is
+      what runs at the programmed feed; heavier peaks - full-width first
+      cuts, links into fresh shelf - slow toward it, never past it, because
+      the op's feed *is* the tool limit this build models). The probe is a
+      two-station perpendicular chord (mid and 3/4 along the move), the
+      trapezoid of the swept side width, so a stepover link reads its real
+      half-bite instead of the trough it exits; air and zero-depth skin
+      read 0, keep the programmed feed and hold no vote in the median.
+      Geometry is byte-identical - only F words move. Vertical feeds are
+      untouched (axial engagement is a different curve). Toggle
+      `feed_opt` on the operation params (stamped, undoable; v14 step-up
+      is a serde-default no-op).
 
 ### M2.2 - 3D Finishing
 **Goal: mold-quality surfaces at a stated tolerance.**
@@ -883,7 +898,7 @@ programming department.
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
-| **M2.1** | Rough 3D at constant load | 3D Pocket, rest material and adaptive clearing done (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data); feed-rate optimization open | ⚠️ |
+| **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) | ✅ |
 | **M2.2** | Finish 3D to tolerance | Parallel, waterline, scallop, contour family | 📋 |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
