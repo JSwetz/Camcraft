@@ -9,6 +9,48 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.7d - G-code viewer with scroll-synced toolpath highlight (commit `98bf320`)
+
+- **The viewer shows what the post kept, not what the file says.**
+  `posting::Posted` now carries the exact program text plus a per-line
+  position map out of the same engine run; the UI never re-reads the
+  `.nc` file. Why: text and positions must be one artifact - if
+  something edits the file afterward (or the dialog target moves),
+  highlighting a line must not silently disagree with what the viewer
+  printed. Cost to change: a file re-read + parse pass, and the sync
+  law weakens to "probably the same file".
+- **Line positions resolved app-side from the stream's own laws**
+  (`viewer_map`): one Move record per path move in chain order (the
+  dump's law), so the k-th Move record is the k-th global move - the
+  same counter M1.7b used to seat cycles' `first_move`; a canned-cycle
+  line resolves to its first expanded move. Coordinates stay
+  pre-origin-shift world mm (the script applies the shift), i.e. the
+  numbers the viewport already draws - a highlighted line and a
+  highlighted move cannot drift apart by construction. Cost to change:
+  none worth naming; this is the seam the viewer was designed around.
+- **`State.post_view` is frozen evidence, unlike the sim clock.** The
+  M1.7c law ("rebuild from the world every frame, no resets") applies
+  to the timeline; it deliberately does NOT apply here: a program is
+  the record of one specific post, so New/Open retire it, but
+  in-document edits and undo leave it (it truthfully says what was
+  posted, and re-posting replaces it wholesale - a refused post
+  touches nothing, same gate law). Cost to change: pick which edits
+  mark a viewer stale; none felt honest short of a diff view.
+- **The scroll cursor is measured, not stored.** Uniform monospace
+  rows (spacing zeroed, `add_sized`) let the ScrollArea clip rect's
+  center line divide back to the middle row each frame - no offset
+  state to drift, no per-row responses. The viewport highlight is then
+  one pure resolver (`shell::gcode_segment`): previous stored position
+  to current, comment lines rest the cursor, closed window shows
+  nothing (hidden is display, M1.7c's law reused). Cost to change: a
+  virtualized list would need the stored offset again; 2^3 lines is
+  fine un-virtualized.
+- **ROADMAP honesty sweep while tick-listing M1.7d**: the M1.7a/b
+  bullets (validation gate, post engine + CPS, Fanuc post) shipped in
+  `13eff0d`/`d30f39a` but were never ticked - done here, ✅ with
+  nothing added to their text but the gate note. The table row stays
+  📋 until CI and the release build (M1.7e) land.
+
 ## Regression fix — the origin anchor picker returns to the Origin page (commit `fix(ui): restore the origin anchor picker on the Origin page`)
 
 - **What was wrong**: the 3x3 compass grid, the stock-vs-model source

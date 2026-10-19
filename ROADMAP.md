@@ -634,8 +634,8 @@ degrades by rule, none guesses silently:
       seconds only), transport bar with play/pause/scrub and 1-8x speed, live
       op/feed readout and a projected tool marker; machine-file traverse rates
       pace the rapids
-- **Validation warnings**: rapid-move violations and holder-vs-stock contact, blocking the post
-- **Post engine + CPS posts**: not a hard-coded writer - the Fusion 360
+- ✅ **Validation warnings**: rapid-move violations and holder-vs-stock contact, blocking the post (M1.7b gate)
+- ✅ **Post engine + CPS posts**: not a hard-coded writer - the Fusion 360
       post architecture adopted as file-format conventions, specced
       from Autodesk's published post-processor documentation
       (behavior only) per the Clean-Room Protocol; the engine is our
@@ -675,14 +675,19 @@ degrades by rule, none guesses silently:
         no vendor script text is ported into our files, and every
         shipped post, machine file and our `post` binary are original
         work
-- **Fanuc post**: the first `.cps` we ship - program header, tool
+- ✅ **Fanuc post**: the first `.cps` we ship - program header, tool
       changes (T../M6), work offsets (G54+ from the machine/setup),
       canned cycles emitted from `Toolpath.cycles` (G73/G81/G83/G84
       with R/Z/Q/P/F words, G98/G99 retract modes), G2/G3 arc motion,
       G40/G41/G42 radius compensation, coolant M-codes (read from the
       `.mch` tool-station coolant list - the in-app machine workflow
       for those files is M3.3's addition, not a prerequisite)
-- **G-code viewer**: inspect the posted program in-app, with toolpath highlighting on scroll
+- ✅ **G-code viewer**: inspect the posted program in-app, with toolpath
+      highlighting on scroll - a successful post keeps the exact text it
+      wrote, the viewer resolves each line to the move that line posts
+      (from the post's own stream records, pre-origin-shift world mm), and
+      scrolling the listing draws that move amber in the viewport. The
+      window follows the tool editor's law; a document switch retires it.
 - **CI**: build matrix, regression test suite on golden models, all tests green
 - **Release build**: signed installer + portable zip (incl. the `post` binary), release notes
 
