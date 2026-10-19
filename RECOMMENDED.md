@@ -9,6 +9,89 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.1c - Constant-engagement adaptive clearing (commit `70c356b`)
+
+- **The engagement sagitta law is the strategy: step = r·(1 − cos θ).**
+  Chord geometry, published HEM literature (the 7–15 % radial-engagement
+  band roughers are specced in). Why: it makes the ring family a function
+  of tool radius and a single angle the user can reason about — the
+  scallop on flats then follows from the same geometry — instead of a
+  stepover number that silently changes load with wall curvature. Cost to
+  change: the law lives in ONE function,
+  `machining3d::engagement_step(tool_r, deg)`, read only through
+  `Pocket3DParams::tiling_step()`; the sim cell (`min(r, step/2)`) and the
+  offset machinery already key off `tiling_step()`, so any restatement of
+  the law is one line.
+- **Adaptive ≡ Waterline at the law step — the *tiling law*.** Both the
+  3D `PocketStrategy::Adaptive` and the 2D pocket's `Adaptive` alias feed
+  the same ring engine (`plan_passes`/waterline) that Waterline uses, only
+  with the step computed by the engagement law instead of typed in;
+  "Adaptive rings are Waterline's geometry; who chose the step is the
+  caller's business" is the comment that keeps them from diverging. Why:
+  one engine, one set of correctness laws; a second ring generator would
+  double every join bug we could ship. Cost to change: low (a strategy
+  enum arm), but then the join laws below must be proved twice.
+- **Ring closure is a property of the point DATA, never a motion the
+  walker adds (`close_rings` removed).** `waterline_passes` emits every
+  loop with its start point repeated; `walk_pass` walks and adds nothing.
+  Why: the old flag's per-level closing diagonal dragged one giant
+  last→first feed across chained multi-ring passes — the crossing a verify
+  test caught — and its predecessor had been *keeping the old balance law
+  green* with a phantom edge; a tour that needs a synthetic move to close
+  was never closed, it was papered over. Cost to change: none — moving
+  closure back into the walker re-imports the phantom.
+- **Containment is not non-crossing (`chord_clears` +
+  `chord_crosses_path`).** A join chord proven inside the cutter-center
+  area can still cut across another planned ring of the same level, so
+  phase 2 now plans every ring of the level first and chains only along
+  chords that properly cross none of them; the test is verify's Crossing
+  criterion restricted to one chord, so an accepted chord is verify-clean
+  *by construction*. Why: the Prime Directive — silent crossings are the
+  worst failure, and a plan that verify would refuse must not be made.
+  Cost to change: none; it is a correctness gate, not a preference.
+- **Chords from different chains can cross without touching any loop —
+  the cut sweep.** A shattered ring family (the boss fixture's k=3 level:
+  the hole offset pokes past the box offset, four 31-pt corner slivers
+  remain) links its sliver entries with chords running along the broken
+  wall, and those cut across a spiral's closing chords; acceptance-time
+  tests are blind to chords of not-yet-built chains. Fix: build chains,
+  test every cross-chain chord pair, cut the later-listed one into an
+  honest rapid hop, iterate — cutting only shrinks chord sets, so the
+  sweep converges. Why: a hop is a machine movement that is TRUE; a
+  crossing feed is a crash. Cost to change: none — it's the same
+  non-crossing law, applied where the first version couldn't see.
+- **The per-level tour-closure law, restated where close_rings died:**
+  on each cutting plane every XY is feed-entered exactly as often as it is
+  feed-left, except the level's two honest open ends (the plunge landing
+  point, the level handoff point). Why: the old global-balance test only
+  passed because of the phantom closing edge; this version says what the
+  tours actually do (an open zigzag still fails it, which is the point).
+  Cost to change: none — it is the test, not the policy.
+- **`max_engagement` legality: (0°, 90°], default 45°, only read when
+  `strategy` is Adaptive** (`is_sane` guards; 90° = half-radius step,
+  beyond that the sagitta law's chord model is meaningless for a
+  round tool). The 2D pocket's Adaptive needs no new field — its alias
+  shares the stepover gate. Persistence v13 is a pure `#[serde(default =
+  "default_engagement_deg")]` no-op step-up: old files open on
+  Waterline-shaped Adaptive defaults; stamp strategy index
+  `Adaptive = 3`. Cost to change: a wider range rewrites the is_sane arm
+  and the page tooltip, nothing else.
+- **Corner-contact geometry and engagement-based feed modulation stay in
+  Feed-rate optimization, not here.** This milestone makes lateral load
+  constant by SHAPE; trochoidal slots, corner-aware step handling and
+  feed-rate along the path are load handled by MOTION/SPEED. Why: they
+  are separately testable laws and the ROADMAP already lists them as a
+  bullet. Cost to change: the enum arm for trochoidal exists in spirit
+  only — no stub was added to tempt a half-law.
+- **Freedom-to-operate review WAIVED by the user, 2026-10-19** ("Ignore
+  any patent claims for now. Clean room or not, this is an opensource
+  project with no monetary gain."), against ROADMAP's standing pre-M2.1
+  note. The clean-room protocol is unchanged: HEM here is derived from
+  published technical literature (sagitta/chord geometry, the
+  engagement-band rule), no vendor implementation inspected. Cost to
+  change: revisit before any distribution beyond open-source; the
+  derivation comments in each module are the evidence trail.
+
 ## M2.1b - Dexel material simulation and rest roughing (commit `4e077ae`)
 
 - **The dexel grid is the VERIFICATION layer, never a second source of
