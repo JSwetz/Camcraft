@@ -9,6 +9,78 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.1b - Dexel material simulation and rest roughing (commit `4e077ae`)
+
+- **The dexel grid is the VERIFICATION layer, never a second source of
+  truth.** One number per column - the Z of the top of standing material -
+  and every verdict (rest, gouge, removed) is measured against the part
+  surface read off the MESH's own facet planes, never a re-entered
+  approximation. Why: the ROADMAP's standing rule for any discretized stock;
+  a grid that generates while a mesh verifies is two worlds that drift.
+  Cost to change: none structurally - M2.3's color map shades this same
+  field; only resolution policy could move.
+- **The segment-window cut law, learned the honest way: a test caught a
+  phantom cutter.** `cut_chord`'s reach parameter window must be
+  intersected with `[0, 1]`, and an empty window must cut NOTHING - the
+  first version clamped the window's ends instead, which turned "the disc
+  never reached this column on this move" into "the disc cut at the
+  segment's endpoint anyway": a silent wrong answer exactly in the Prime
+  Directive's forbidden class, and it had been *hiding* the corner-rest
+  residue the fixed sim then honestly reports (15 false gouge cells became
+  0). Why noted here: it is the strongest evidence yet that the sim exists
+  to be tested against, not trusted. Cost to change: none - the clamp is
+  the bug, the intersection is the law, pinned by
+  `an_oblique_chord_cuts_the_reach_interval_not_the_endpoints`.
+- **Chords under-sweep, so the sim over-reports rest and never invents a
+  gouge.** Arcs ride `arc_chords` at `CHORD_TOL = 0.01` mm (the same
+  sagitta law as everywhere else), Z interpolated at each chord endpoint;
+  rapids touch nothing (G0 practice). Why: the one asymmetry worth having -
+  a rest pass that chases ghosts is waste, a sim that flatters a gouge is
+  danger. Cost to change: tightening the tol is a parameter; reversing the
+  direction is not ever.
+- **Corner rest is reported, never hidden.** A round disc has no legal
+  center that reaches a square pocket's corner columns (distance > r to
+  every point of the eroded center region), and the honest fixtures say
+  so: 4 cells on the staircase grid, 8 on the flat slab (3+2+2+1 - grid
+  phase puts the lattice 0.75 mm nearer one pair of walls), four boss
+  wedges + four pocket wedges on the slab-with-boss, ≈2.9 % of removed
+  volume. The pre-fix sim "passed" those tests by phantom-cutting them.
+  Why: this is standard CAM reality (corner radius of a round tool), and
+  the fillet / point-plunge strategies (M2.1c+ rest work) are what close
+  it - not a rounding in the report. Cost to change: a fillet pass would
+  make the numbers smaller, never the law different.
+- **Rest entries are always plain plunges, by the nesting law.** Deeper
+  plane ⇒ larger island ⇒ smaller target, so any standing column is
+  superset-clear above and a vertical dive is provably legal; Ramp/Helix
+  arms are guarded OFF when a rest ladder is running (`li > 0 &&
+  rest.is_none()`). Why: a diagonal entry through standing stair material
+  would be a lie the level law never sanctioned. Cost to change: low, once
+  per-level side-clear proofs exist.
+- **The rest ladder's all-clear is SUCCESS, not an error.** A fully-cut
+  pocket has empty targets at every level; `GenError::Empty` from the rest
+  run is caught, the path byte-identical to the plain ladder (prefix
+  identity is asserted in-test as the determinism witness). The rest
+  ladder runs at HALF the stepdown (`cut_levels` at `stepdown * 0.5`) - the
+  convergence knob; deeper ladders are the same call with a different
+  constant. `target ∩ dex.above(z)` makes each level cut only where
+  material stands, so the staircase floors close without touching the
+  finished columns. Cost to change: the fraction is one line.
+- **`rest_rough` rides `OpParams::Pocket3D` only** - stamped into the
+  digest (a flip marks the path Stale), undoable via the existing
+  EditOperationParams flow, and the generator struct
+  `machining3d::Pocket3DParams` stayed untouched (ten test literals' worth
+  of churn saved). v11→v12 persistence is a pure `#[serde(default)]`
+  no-op step-up - old files open with the checkbox off. Cost to change:
+  moving it into the generator params means touching every direct
+  generator call site.
+- **Grid law (`sim_of`): grid = footprint bbox, cell = min(r, stepover/2),
+  each column starts at `max(stock_z, part top)`.** The raise is the
+  "stock contains its model" invariant - a model standing above the
+  entered stock surface is still material the sim must show standing.
+  `measure` counts removal from `stock_z` (gross, the tool's verdict) and
+  judges rest/gouge against the part at `tol = EPS`. Cost to change: cell
+  policy is the performance knob for big models (M4), structure is sound.
+
 ## M2.1a - Mesh-driven 3D pocket (commit `7672c06`)
 
 - **The level law is the whole design: the model is the FINAL part, and

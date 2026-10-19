@@ -721,8 +721,30 @@ before touching metal.
       proved falls back to a slower vertical dive rather than a gouge.
       Waterline rings (concentric-offset spirals) and zigzag scans share the
       level generator; zigzag can serve as Waterline under `Auto`.
-- **Rest material**: toolpath computed against the stock left by the previous tool, as a difference of voxelized tool sweeps — *and* the pocket's staircase floors: a rest-material pass over the level law's output is the honest closing of its one acknowledged approximation (M2.1b)
-- **Roughing simulation**: verify material removal, never crash
+- ✅ **Rest material** (M2.1b): the stock model is a column-wise Z-map
+      (`stock_sim::Dexel`) — the *verification layer*, never a second source
+      of truth: operation geometry and the tolerance laws still answer against
+      the mesh. Subtraction is the exact reach-interval of each swept disc on
+      the move's segment (an empty window cuts nothing — no endpoint
+      phantom-cuts; arcs ride their sagitta chords, so the sim over-reports
+      rest and never invents a gouge; rapids touch nothing), the part surface
+      is read off the mesh's own facet planes, and `measure` reports rest,
+      gouge and gross removal against it. `pocket3d_with_rest` runs the level
+      ladder, re-simulates it, and plans a half-step closing ladder over only
+      what stands (`above(z)` per level), entering always by plain plunge (the
+      nesting law makes deeper columns superset-clear) with the all-clear
+      verdict as success; `rest_rough` rides the operation params (stamped,
+      undoable; the v12 step-up is a serde-default no-op). The *corner law*
+      came out of the honest reports: no disc center reaches a square
+      pocket's corner columns — the report names them, and fillet or
+      point-pass strategies (M2.1c+) are what close them. Tool-vs-tool rest
+      (previous-tool stock) inherits the same grid the moment operations
+      share one.
+- ✅ **Roughing simulation**: the same dexel grid, as verdict not shader —
+      a generated pocket path measures zero gouge cells against the model
+      surface before it is trusted, and the staircase it leaves is reported
+      in volume, cells and height, never averaged away (color-mapped
+      deviation against the final model is M2.3's)
 - **Feed-rate optimization**: engagement-based feed modulation within tool limits
 
 ### M2.2 - 3D Finishing
@@ -846,7 +868,7 @@ programming department.
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
-| **M2.1** | Rough 3D at constant load | 3D Pocket done (level law, computed islands, plunge/ramp/helix entries); adaptive clearing, rest material, roughing sim open | ⚠️ |
+| **M2.1** | Rough 3D at constant load | 3D Pocket and rest material done (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law); adaptive clearing, feed-rate optimization open | ⚠️ |
 | **M2.2** | Finish 3D to tolerance | Parallel, waterline, scallop, contour family | 📋 |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
