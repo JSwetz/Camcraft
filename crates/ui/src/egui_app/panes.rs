@@ -37,7 +37,8 @@ use super::theme::Palette;
 /// The operation kinds in panel order (mirrors operations.rs's TYPES).
 /// Shared with pages.rs: the Type combo there and the ribbon tips here
 /// quote the same table.
-pub(crate) const TYPES: [&str; 6] = ["Face", "2D Contour", "2D Pocket", "Slot", "Trace", "Drill"];
+pub(crate) const TYPES: [&str; 7] =
+    ["Face", "2D Contour", "2D Pocket", "Slot", "Trace", "Drill", "3D Pocket"];
 
 // ---------------------------------------------------------------- shortcuts
 
@@ -144,6 +145,7 @@ const GROUPS: [(&str, &[Cmd]); 5] = [
             Cmd::Create(3),
             Cmd::Create(4),
             Cmd::Create(5),
+            Cmd::Create(6),
         ],
     ),
     ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]),
@@ -188,7 +190,8 @@ fn text_of(c: Cmd) -> String {
             2 => "Pocket",
             3 => "Slot",
             4 => "Trace",
-            _ => "Drill",
+            5 => "Drill",
+            _ => "3D Pocket",
         }
         .to_owned(),
         other => label_of(other).to_owned(),
@@ -268,7 +271,11 @@ fn icon_of(c: Cmd) -> Icon {
             2 => Icon::Pocket,
             3 => Icon::Slot,
             4 => Icon::Trace,
-            _ => Icon::Drill,
+            // The 3-D pocket wears the pocket's glyph - same family,
+            // captioned apart by text_of (RECOMMENDED.md: no new asset
+            // for a kind whose 2-D sibling already says "pocket").
+            5 => Icon::Drill,
+            _ => Icon::Pocket,
         },
         Cmd::Undo => Icon::Undo,
         Cmd::Redo => Icon::Redo,
@@ -291,6 +298,7 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Slot => Icon::Slot,
         OpType::Trace => Icon::Trace,
         OpType::Drill => Icon::Drill,
+        OpType::Pocket3D => Icon::Pocket,
     }
 }
 
@@ -346,6 +354,21 @@ pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>,
     let mut cells = Vec::new();
     let mut captions = Vec::new();
     let mut dividers = Vec::new();
+    // The row is a flow, not the fixed imgui pitch: cells share the strip's
+    // width, so adding an operation kind can never push the last group off
+    // the edge of the window (M2.1a's seventh Create cell was what the
+    // fixed 56 px box could no longer hold at 1280). CELL_W stands as the
+    // cap, so a roomy window still draws ribbon.rs's exact geometry; below
+    // FLOOR_W the row overflows on purpose rather than rendering illegible
+    // cells. Painted content is centered in each rect, so narrowing is
+    // pure geometry, no clipping law to re-learn.
+    let n_cells: usize = GROUPS.iter().map(|(_, g)| g.len()).sum();
+    let n_groups = GROUPS.len();
+    let overhead = 2.0 * PAD_H
+        + (n_cells - n_groups) as f32 * GAP
+        + (n_groups - 1) as f32 * (GAP + 2.0);
+    const FLOOR_W: f32 = 40.0;
+    let cell_w = ((strip.width() - overhead) / n_cells as f32).clamp(FLOOR_W, CELL_W);
     // PAD_V (ribbon.rs): cells start 4 below the strip top.
     let cell_top = strip.top() + 4.0;
     let mut x = strip.left() + PAD_H;
@@ -355,15 +378,15 @@ pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>,
         for c in *group {
             cells.push(Cell {
                 cmd: *c,
-                rect: Rect::from_min_size(egui::Pos2::new(x, cell_top), Vec2::new(CELL_W, CELL_H)),
+                rect: Rect::from_min_size(egui::Pos2::new(x, cell_top), Vec2::new(cell_w, CELL_H)),
                 salt,
             });
             salt += 1;
-            x += CELL_W + GAP;
+            x += cell_w + GAP;
         }
         x -= GAP;
         captions.push(((start + x) * 0.5, *title));
-        if gi + 1 < GROUPS.len() {
+        if gi + 1 < n_groups {
             x += GAP + 2.0;
             dividers.push(x - (GAP + 2.0) / 2.0 - 1.0);
         }

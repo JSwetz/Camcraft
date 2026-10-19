@@ -75,6 +75,9 @@ const TOOL_KINDS: [&str; 6] = ["End mill", "Ball nose", "Bull nose", "Drill", "T
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
 const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
+/// Descent combo items - the whole `Entry3D` vocabulary, index order
+/// matching the combo-arm mapping in the 3-D pocket's passes section.
+const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
 const AMBER: Color32 = Color32::from_rgb(0xB8, 0xB8, 0xC8);
@@ -474,6 +477,7 @@ fn kind_index(kind: OpType) -> usize {
         OpType::Slot => 3,
         OpType::Trace => 4,
         OpType::Drill => 5,
+        OpType::Pocket3D => 6,
     }
 }
 
@@ -997,6 +1001,103 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 num_feed(ui, u, feed);
                 field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
                 num_feed(ui, u, plunge_feed);
+            }
+        }
+        OpParams::Pocket3D {
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            strategy,
+            entry,
+            helix_radius,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, clearance_z, "pocket3d.clearance");
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, r, "pocket3d.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, top_z, "pocket3d.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, bottom_z, "pocket3d.bottom");
+                field(ui, "Stepdown");
+                num(ui, u, stepdown);
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Stepover");
+                num(ui, u, stepover);
+                field(ui, "Stock to leave");
+                num(ui, u, stock_to_leave);
+                field(ui, "Strategy");
+                let mut st_idx = match strategy {
+                    PocketStrategy::Zigzag => 0,
+                    PocketStrategy::Waterline => 1,
+                    PocketStrategy::Auto => 2,
+                };
+                let names = strategy_names();
+                let before = st_idx;
+                combo(ui, "p3_strat", &mut st_idx, names);
+                if st_idx != before {
+                    *strategy = match st_idx {
+                        1 => PocketStrategy::Waterline,
+                        2 => PocketStrategy::Auto,
+                        _ => PocketStrategy::Zigzag,
+                    };
+                }
+                ui.label("levels come from the mesh: each shelf cuts around the material standing above it");
+                field(ui, "Entry");
+                let mut e_idx = match entry {
+                    hsmworks_app::machining3d::Entry3D::Plunge => 0,
+                    hsmworks_app::machining3d::Entry3D::Ramp => 1,
+                    hsmworks_app::machining3d::Entry3D::Helix => 2,
+                };
+                let before = e_idx;
+                combo(ui, "p3_entry", &mut e_idx, &ENTRY_KINDS);
+                if e_idx != before {
+                    *entry = match e_idx {
+                        1 => hsmworks_app::machining3d::Entry3D::Ramp,
+                        2 => hsmworks_app::machining3d::Entry3D::Helix,
+                        _ => hsmworks_app::machining3d::Entry3D::Plunge,
+                    };
+                }
+                if matches!(entry, hsmworks_app::machining3d::Entry3D::Helix) {
+                    field(ui, "Helix lead radius");
+                    num(ui, u, helix_radius);
+                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+                }
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
             }
         }
     }

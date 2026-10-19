@@ -47,8 +47,13 @@
 //! at once, each with a serde default that reads as exact legacy
 //! behavior - no pre-v10 file could contain a drill-kind tool or a
 //! drill operation (the tags did not exist), and no pre-v10 path ever
-//! had cycles, so absent means precisely what it behaved as. v1-v9
-//! files migrate on load, one version step at a time.
+//! had cycles, so absent means precisely what it behaved as. v11 is the
+//! 3-D pocket landing shape: the `pocket3d` operation params arrive with
+//! a serde default on every new key (`retract_z` absent is
+//! hop-to-clearance, `entry` absent is Plunge), and no pre-v11 file could
+//! contain a 3-D pocket operation at all - the tag did not exist - so the
+//! step-up is the stamp itself. v1-v10 files migrate on load, one version
+//! step at a time.
 
 use std::path::Path;
 
@@ -60,6 +65,7 @@ use crate::drilling::{CycleChoice, Hole};
 use crate::geo2d::Point2;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
 use crate::machining2d::{Lead, PocketStrategy, Side};
+use crate::machining3d::Entry3D;
 use crate::model;
 use crate::operation::{FeatureSel, GenStamp, GeoSel, OpParams, SrcRef};
 use crate::schema::{
@@ -70,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 10;
+pub const PROJECT_VERSION: u32 = 11;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -370,6 +376,45 @@ pub enum ParamsDto {
         plunge_feed: f64,
         holes: Vec<HoleDto>,
     },
+    /// Declared at v11 with the 3-D pocket. No footprint on the wire:
+    /// a 3-D op's machine area is the model's silhouette at generation
+    /// time (the level law reads the mesh, not picks), and the source
+    /// digest is what marks a moved model Stale beside it. The rename
+    /// states the tag - the automatic snake_case of `Pocket3D` would be
+    /// `pocket3_d`, and a file contract deserves the cleaner word.
+    #[serde(rename = "pocket3d")]
+    Pocket3D {
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        strategy: StrategyDto,
+        /// Absent means hop-to-clearance, the pocket family's law.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        #[serde(default)]
+        entry: EntryDto,
+        /// Read only when `entry` is Helix; a stored number is the
+        /// user's choice, never a stale derivation from the tool.
+        helix_radius: f64,
+    },
+}
+
+/// The file mirror of `machining3d::Entry3D`; `default` is Plunge, the
+/// engagement every pre-3-D op had and the one no legality gate can
+/// refuse.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryDto {
+    #[default]
+    Plunge,
+    Ramp,
+    Helix,
 }
 
 /// One hole of a drill op's list, on the wire: world XY, the model's
@@ -657,6 +702,43 @@ impl ParamsDto {
                 // pocket performed; a set plane round-trips exactly.
                 retract_z: (*retract_z).map(Into::into),
             },
+            OpParams::Pocket3D {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                strategy,
+                entry,
+                helix_radius,
+            } => ParamsDto::Pocket3D {
+                stepover: *stepover,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                strategy: match strategy {
+                    PocketStrategy::Zigzag => StrategyDto::Zigzag,
+                    PocketStrategy::Waterline => StrategyDto::Waterline,
+                    PocketStrategy::Auto => StrategyDto::Auto,
+                },
+                retract_z: (*retract_z).map(Into::into),
+                entry: match entry {
+                    Entry3D::Plunge => EntryDto::Plunge,
+                    Entry3D::Ramp => EntryDto::Ramp,
+                    Entry3D::Helix => EntryDto::Helix,
+                },
+                helix_radius: *helix_radius,
+            },
             OpParams::Slot {
                 a,
                 b,
@@ -826,6 +908,43 @@ impl ParamsDto {
                     StrategyDto::Waterline => PocketStrategy::Waterline,
                     StrategyDto::Auto => PocketStrategy::Auto,
                 },
+            },
+            ParamsDto::Pocket3D {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                strategy,
+                retract_z,
+                entry,
+                helix_radius,
+            } => OpParams::Pocket3D {
+                stepover: *stepover,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                strategy: match strategy {
+                    StrategyDto::Zigzag => PocketStrategy::Zigzag,
+                    StrategyDto::Waterline => PocketStrategy::Waterline,
+                    StrategyDto::Auto => PocketStrategy::Auto,
+                },
+                entry: match entry {
+                    EntryDto::Plunge => Entry3D::Plunge,
+                    EntryDto::Ramp => Entry3D::Ramp,
+                    EntryDto::Helix => Entry3D::Helix,
+                },
+                helix_radius: *helix_radius,
             },
             ParamsDto::Slot {
                 a,
@@ -1334,6 +1453,13 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // the inert 0.0) are exactly v9's behavior. No content change;
         // step-up is the stamp itself, like every bump since v6.
         file.version = 10;
+    }
+    if file.version == 10 {
+        // v10 -> v11: the 3-D pocket arrives as one new params variant
+        // (`pocket3d`), which no v10 file can contain - the tag did not
+        // exist. Nothing existing changed shape, so no content change;
+        // step-up is the stamp itself, like every bump since v6.
+        file.version = 11;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

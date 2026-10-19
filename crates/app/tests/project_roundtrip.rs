@@ -78,17 +78,18 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v9
+    // Anything newer than this build's format stays refused; v1..v10
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
     // side_roundtrip_v6_defaults_to_auto the v6 contour -> v7 side step,
     // units_round_trip_and_a_v7_file_means_millimeters v7 -> v8,
-    // v8_file_steps_to_v9 v8 -> v9, and v9_file_steps_to_v10 v9 -> v10).
-    let text = r#"{"version": 11, "entities": []}"#;
+    // v8_file_steps_to_v9 v8 -> v9, v9_file_steps_to_v10 v9 -> v10, and
+    // v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips v10 -> v11).
+    let text = r#"{"version": 12, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(11)) => {}
+        Err(ProjectError::UnsupportedVersion(12)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1175,6 +1176,113 @@ fn drill_params_and_cycle_cache_round_trip_and_a_stray_cycle_is_refused() {
     assert!(
         matches!(project::open(&world4, &bad_hole), Err(ProjectError::Corrupt(_))),
         "must refuse a hole whose floor is above its entry"
+    );
+}
+
+#[test]
+fn v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips() {
+    // A literal v10 project (the newest shape before the 3-D pocket):
+    // the v10 -> v11 step is the stamp itself - no required key is added,
+    // since Pocket3D is a new variant and entry defaults to Plunge.
+    let text = r#"{
+        "version": 10,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "end_mill", "diameter": 4.0, "corner_r": 0.0,
+                      "flute_len": 12.0, "shank_d": 6.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 10000.0, "feed": 1200.0}},
+            {"name": "P1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"pocket": {
+                 "stepover": 2.0, "stock_to_leave": 0.0, "clearance_z": 10.0,
+                 "top_z": 5.0, "bottom_z": -2.0, "stepdown": 2.0,
+                 "feed": 800.0, "plunge_feed": 200.0, "climb": true,
+                 "strategy": "zigzag"}},
+                 "cache": {"moves": [
+                     {"kind": "rapid", "from": [-50.0, -50.0, 10.0], "to": [0.0, 0.0, 10.0]},
+                     {"kind": "plunge", "from": [0.0, 0.0, 10.0], "to": [0.0, 0.0, 5.0]}
+                 ], "warnings": []}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v10 file must migrate");
+    let e = model::find_by_name(&world, "P1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    assert!(
+        matches!(o.params, OpParams::Pocket { .. }),
+        "the pocket params read unchanged: {:?}",
+        o.params
+    );
+    let path = tmp_path("v11");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v11 stamp: {saved}"
+    );
+
+    // The pocket3d wire grammar, hand-written so the tags are pinned:
+    // "pocket3d", snake_case entry, and no footprint key - the silhouette
+    // is derived at generate, never carried.
+    let text = r#"{
+        "version": 11,
+        "entities": [
+            {"name": "P3", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"pocket3d": {
+                 "stepover": 2.5, "stock_to_leave": 0.4, "clearance_z": {"reference": "fixed", "offset": 10.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "stepdown": 1.5, "feed": 900.0, "plunge_feed": 150.0, "climb": true,
+                 "strategy": "waterline", "entry": "helix", "helix_radius": 2.0}},
+                 "cache": {"moves": [
+                     {"kind": "rapid", "from": [-50.0, -50.0, 10.0], "to": [0.0, 0.0, 10.0]}
+                 ], "warnings": []}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v11 pocket3d grammar must read");
+    let e = model::find_by_name(&world, "P3").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Pocket3D {
+        stepover,
+        stock_to_leave,
+        strategy,
+        entry,
+        helix_radius,
+        retract_z,
+        ..
+    } = &o.params
+    else {
+        panic!("pocket3d params expected, got {:?}", o.params);
+    };
+    assert_eq!(*stepover, 2.5);
+    assert_eq!(*stock_to_leave, 0.4);
+    assert_eq!(*strategy, PocketStrategy::Waterline);
+    assert_eq!(*entry, hsmworks_app::machining3d::Entry3D::Helix);
+    assert_eq!(*helix_radius, 2.0);
+    assert!(retract_z.is_none(), "absent retract stays absent");
+
+    // Write-parse-write is a fixed point, and the entry tag is snake_case.
+    let path = tmp_path("p3");
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &path).expect("reload");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the pocket3d shape round-trips byte-identically");
+    assert!(first.contains("\"pocket3d\""), "{first}");
+    assert!(first.contains("\"entry\": \"helix\""), "{first}");
+    assert!(!first.contains("footprint"), "the silhouette is never on the wire");
+
+    // An unknown entry tag is corrupt text, refused, not defaulted.
+    let bad = text.replace("\"helix\"", "\"spiral\"");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "must refuse an entry tag outside the vocabulary"
     );
 }
 

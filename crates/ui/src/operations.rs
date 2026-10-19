@@ -198,6 +198,23 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             // refuses to run one, and Detect holes fills it.
             holes: Vec::new(),
         },
+        6 => OpParams::Pocket3D {
+            stepover,
+            stock_to_leave: 0.0,
+            clearance_z: clearance,
+            retract_z: None,
+            top_z: top,
+            bottom_z: bottom,
+            stepdown,
+            feed,
+            plunge_feed: plunge,
+            climb,
+            strategy: PocketStrategy::Auto,
+            // The dive the 2-D pocket already makes; ramp and helix are
+            // opt-in once the walls are known to allow them.
+            entry: hsmworks_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
+        },
         _ => OpParams::Face {
             stepover,
             clearance_z: clearance,
@@ -226,6 +243,7 @@ fn feed_of(p: &OpParams) -> f64 {
         OpParams::Face { feed, .. }
         | OpParams::Contour { feed, .. }
         | OpParams::Pocket { feed, .. }
+        | OpParams::Pocket3D { feed, .. }
         | OpParams::Slot { feed, .. }
         | OpParams::Trace { feed, .. }
         | OpParams::Drill { feed, .. } => *feed,
@@ -237,6 +255,7 @@ fn plunge_of(p: &OpParams) -> f64 {
         OpParams::Face { plunge_feed, .. }
         | OpParams::Contour { plunge_feed, .. }
         | OpParams::Pocket { plunge_feed, .. }
+        | OpParams::Pocket3D { plunge_feed, .. }
         | OpParams::Slot { plunge_feed, .. }
         | OpParams::Trace { plunge_feed, .. }
         | OpParams::Drill { plunge_feed, .. } => *plunge_feed,
@@ -248,6 +267,7 @@ fn climb_of(p: &OpParams) -> bool {
         OpParams::Face { climb, .. }
         | OpParams::Contour { climb, .. }
         | OpParams::Pocket { climb, .. }
+        | OpParams::Pocket3D { climb, .. }
         | OpParams::Slot { climb, .. }
         | OpParams::Trace { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
@@ -260,6 +280,7 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
     match p {
         OpParams::Face { stepover, .. }
         | OpParams::Pocket { stepover, .. }
+        | OpParams::Pocket3D { stepover, .. }
         | OpParams::Slot { stepover, .. } => Some(*stepover),
         _ => None,
     }
@@ -269,6 +290,7 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
     match p {
         OpParams::Contour { stepdown, .. }
         | OpParams::Pocket { stepdown, .. }
+        | OpParams::Pocket3D { stepdown, .. }
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         _ => None,
@@ -279,6 +301,7 @@ fn bottom_of(p: &OpParams) -> Option<Height> {
     match p {
         OpParams::Contour { bottom_z, .. }
         | OpParams::Pocket { bottom_z, .. }
+        | OpParams::Pocket3D { bottom_z, .. }
         | OpParams::Slot { bottom_z, .. }
         | OpParams::Trace { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
@@ -292,6 +315,7 @@ fn top_of(p: &OpParams) -> Option<Height> {
     match p {
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
+        | OpParams::Pocket3D { top_z, .. }
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
         | OpParams::Drill { top_z, .. } => Some(*top_z),
@@ -305,6 +329,7 @@ fn retract_of(p: &OpParams) -> Option<Height> {
     match p {
         OpParams::Contour { retract_z, .. } => Some(*retract_z),
         OpParams::Pocket { retract_z, .. }
+        | OpParams::Pocket3D { retract_z, .. }
         | OpParams::Slot { retract_z, .. }
         | OpParams::Trace { retract_z, .. }
         | OpParams::Drill { retract_z, .. } => *retract_z,

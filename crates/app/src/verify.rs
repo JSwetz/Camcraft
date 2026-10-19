@@ -39,6 +39,13 @@
 //!   fall inside the flute radius where law (c)'s annulus is empty -
 //!   which is why the reach law reads the cycles, not the moves.
 //!
+//! With [`VerifyContext::model`] set (the 3-D pocket, M2.1a) the
+//! boundary is depth-dependent: the gouge law adds the model's
+//! cross-section strictly above each move's deepest plane, the reach
+//! laws sample those sections' walls like any other island, and rest
+//! material counts from the deepest plane whose section does not hold
+//! the column - cutting around an island removes nothing inside it.
+//!
 //! Conservative by design: it may warn where nothing is wrong (a wall
 //! thinner than the sampling, an exotic holder shape), it must never
 //! stay silent about the five classes above. The hard post-gate that
@@ -51,6 +58,8 @@
 //! radial laws already grant - so no violation beyond tolerance hides
 //! in an arc. Warnings keep indexing *moves*; an arc is one move, so
 //! swapping chords for arcs never shifts an index.
+
+use std::collections::HashMap;
 
 use crate::cl::{Move, MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
@@ -87,6 +96,14 @@ pub struct VerifyContext<'a> {
     /// The stock prism footprint; pass it when part islands must be
     /// checked too - otherwise the region stands in for it.
     pub stock: Option<&'a Region>,
+    /// The mesh a model-driven op cuts to (M2.1's 3-D pocket): the cut
+    /// target changes with depth, so the static region cannot be the
+    /// whole law. Given, the gouge law checks each move against the
+    /// model's cross-section strictly above that move's deepest plane
+    /// (the level law's own islands), and the reach laws sample those
+    /// sections' walls as the islands they are. Every 2.5-D op passes
+    /// `None` - its laws are byte-identical to what they always were.
+    pub model: Option<&'a [crate::geometry::Triangle]>,
     pub tool: &'a ToolGeom,
     pub mode: Mode,
     /// Top of the stock column in Z (the surface the tool starts from).
@@ -269,7 +286,23 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
             if ia == ib {
                 continue; // chords of one move share their joints
             }
-            let z_hit = zb0.max(zb1).min(za0.max(za1)) >= zb0.min(zb1).max(za0.min(za1));
+            // Two planar chords cross only at a shared plane, exactly
+            // as always. When a chord descends (a ramp diagonal, a
+            // helix arc chord), a Z-interval that touches the other's
+            // plane at a single endpoint is a GRAZE of the already-cut
+            // floor at the dive's own start or end depth - which is
+            // what every 3-D entry does by construction, over XY the
+            // level law already proved open. For a non-planar pair
+            // only a shared depth RANGE (two descents whose bands
+            // overlap) counts as crossing. (M2.1a's superset law is
+            // what makes the graze safe; without it this would be a
+            // gouge.)
+            let planar_pair = za0 == za1 && zb0 == zb1;
+            let z_hit = if planar_pair {
+                za0 == zb0
+            } else {
+                za0.max(za1).min(zb0.max(zb1)) - za0.min(za1).max(zb0.min(zb1)) > 0.0
+            };
             if z_hit && proper_cross(a0, a1, b0, b1) {
                 crossed.push([ia.min(ib), ia.max(ib)]);
             }
@@ -279,13 +312,56 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     crossed.dedup();
     warns.extend(crossed.into_iter().map(|moves| Warning::Crossing { moves }));
 
+    // A model-driven path's islands per plane - the generator's own
+    // `material_above`, so one law has two readers (M2.1a). Cached by
+    // the plane's bits: the level ladder repeats its planes across all
+    // three readers below. `None` means the slice failed; every use of
+    // a failed slice fails closed (no proof, no pass).
+    let island_cache: std::cell::RefCell<HashMap<u64, Option<Region>>> =
+        std::cell::RefCell::new(HashMap::new());
+    let islands_at = |facets: &[crate::geometry::Triangle], z: f64| -> Option<Region> {
+        let key = z.to_bits();
+        if let Some(hit) = island_cache.borrow().get(&key) {
+            return hit.clone();
+        }
+        let fresh = crate::machining3d::material_above(facets, z).ok();
+        island_cache
+            .borrow_mut()
+            .entry(key)
+            .or_insert_with(|| fresh.clone());
+        fresh
+    };
+    // Deepest plane the path cuts at (drives the island law of the
+    // reach samples and the part label below).
+    let z_deepest = path
+        .moves
+        .iter()
+        .filter(|m| m.kind != MoveKind::Rapid)
+        .map(|m| m.from.z.min(m.to.z))
+        .fold(f64::INFINITY, f64::min);
+
     // (b) Gouge: tangency law d(center, boundary) >= r - leave - tol,
-    // held at every law point of the move (see law_points).
+    // held at every law point of the move (see law_points). For a
+    // model-driven path the boundary is level-dependent: the region's
+    // silhouette walls plus the model's cross-section strictly above
+    // the move's deepest plane. That section is exact for a fixed-Z
+    // level pass, and conservative for a ramp or helix, whose whole XY
+    // the generator already proved inside the deepest level's center
+    // area (the chord and swept-disc laws) - a column that is only an
+    // island deeper is not a hole here, and one the ladder must never
+    // enter is. A center inside the section is a full collision, not
+    // a near miss, so containment joins the distance test.
     if cx.mode != Mode::Engrave {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;
             }
+            let section = cx.model.map(|f| islands_at(f, m.from.z.min(m.to.z)));
+            if let Some(None) = section {
+                warns.push(Warning::Gouge { at: i }); // cannot prove the slice
+                continue;
+            }
+            let section = section.flatten();
             let mut gouged = false;
             for p in law_points(m, chord_tol) {
                 let mut d2 = f64::INFINITY;
@@ -293,6 +369,18 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                     let pts = l.points();
                     for k in 0..pts.len() {
                         d2 = d2.min(dist2_seg(p, pts[k], pts[(k + 1) % pts.len()]));
+                    }
+                }
+                if let Some(s) = &section {
+                    if s.contains(p) {
+                        gouged = true;
+                        break;
+                    }
+                    for l in s.loops() {
+                        let pts = l.points();
+                        for k in 0..pts.len() {
+                            d2 = d2.min(dist2_seg(p, pts[k], pts[(k + 1) % pts.len()]));
+                        }
                     }
                 }
                 if d2.sqrt() < r - cx.stock_to_leave - cx.gouge_tol {
@@ -310,7 +398,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // segment's whole disc sweep clears its column down to `to.z`
     // (plunges are degenerate segments at their XY, arcs contribute
     // their chords - all within chord_tol of the true arc).
-    let cut: Vec<(Point2, Point2, f64)> = path
+    let mut cut: Vec<(Point2, Point2, f64)> = path
         .moves
         .iter()
         .filter(|m| m.kind != MoveKind::Rapid)
@@ -320,18 +408,29 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                 .map(move |(a, b)| (a, b, m.to.z))
         })
         .collect();
+    // Deepest plane first, so `surface`'s first reach is its deepest
+    // reach - the min the law always asked for, found without a scan.
+    cut.sort_by(|a, b| a.2.total_cmp(&b.2));
     // Material footprint for the reach laws: the stock prism when given,
     // the region standing in for it otherwise.
     let in_stock = |q: Point2| -> bool { cx.stock.map_or_else(|| cx.region.contains(q), |s| s.contains(q)) };
     // m(q): the surface height of remaining material in q's column.
+    // A model-driven path adds one clause (M2.1a): a chord at plane z
+    // cleared q's column only if the section at z does not hold q -
+    // cutting around an island removes nothing inside it, and the
+    // staircase's top is the shallower plane that did reach. Sections
+    // are monotone in z, so the island test is a point-in-region on a
+    // cached slice, run only for chords that are already within reach.
     let surface = |q: Point2| -> f64 {
         let r2 = (r + 1e-9) * (r + 1e-9);
         let cleared = cut
             .iter()
-            .filter(|(a, b, _)| dist2_seg(q, *a, *b) <= r2)
-            .map(|(_, _, z)| *z)
-            .min_by(f64::total_cmp)
-            .unwrap_or(f64::INFINITY);
+            .find(|(a, b, z)| {
+                dist2_seg(q, *a, *b) <= r2
+                    && cx.model
+                        .is_none_or(|f| !islands_at(f, *z).is_some_and(|s| s.contains(q)))
+            })
+            .map_or(f64::INFINITY, |(_, _, z)| *z);
         cleared.min(cx.stock_top_z)
     };
 
@@ -339,11 +438,34 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     if cx.mode != Mode::Engrave {
         // Both boundaries matter: the region's loops carry the part
         // islands (holes in the region), the stock's carry its outer
-        // walls wherever they stand beyond the region.
+        // walls wherever they stand beyond the region. A model-driven
+        // path's islands are not holes in its silhouette region - they
+        // are computed per plane - so their walls join the sample set
+        // at every plane the ladder cuts at (M2.1a). The part flag
+        // follows the law that keeps them out of the cut: a column
+        // inside the deepest section is material the ladder swore
+        // never to chase below, stair left by a shallower pass
+        // notwithstanding - reported part, worst case.
         let mut samples = boundary_samples(cx.region);
         if let Some(s) = cx.stock {
             samples.extend(boundary_samples(s));
         }
+        if let Some(f) = cx.model {
+            let mut zs: Vec<u64> = cut.iter().map(|(_, _, z)| z.to_bits()).collect();
+            zs.sort_unstable();
+            zs.dedup();
+            for k in zs {
+                if let Some(s) = islands_at(f, f64::from_bits(k)) {
+                    samples.extend(boundary_samples(&s));
+                }
+            }
+        }
+        let part_at = |q: Point2| -> bool {
+            !cx.region.contains(q)
+                || cx.model.is_some_and(|f| {
+                    islands_at(f, z_deepest).is_some_and(|s| s.contains(q))
+                })
+        };
         let bands = [
             (cx.tool.flute_len, cx.tool.shank_radius, cx.tool.shank_len),
             (
@@ -375,7 +497,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                                 continue;
                             }
                             if h0 < surface(*q) {
-                                hit = Some(!cx.region.contains(*q));
+                                hit = Some(part_at(*q));
                                 if hit == Some(true) {
                                     break 'worst; // report the worst offender
                                 }

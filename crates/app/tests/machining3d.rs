@@ -1,0 +1,385 @@
+//! M2.1a: the mesh-driven 3-D pocket. The level law (the model is the
+//! FINAL part; each level cuts the footprint minus the columns the solid
+//! still fills at its plane), the entry ladder's legality fallbacks, and
+//! the generated paths' silence under the verify laws that read the same
+//! islands. Provenance: our own design, specced from published CAM
+//! behavior, per the Clean-Room Protocol.
+
+use hsmworks_app::cl::{MoveKind, Toolpath};
+use hsmworks_app::geo2d::{Loop, Point2, Region};
+use hsmworks_app::geometry::{Point3, Triangle};
+use hsmworks_app::machining2d::{GenError, PocketStrategy};
+use hsmworks_app::machining3d::{Entry3D, Pocket3DParams, material_above, pocket3d};
+use hsmworks_app::verify::{Mode, ToolGeom, VerifyContext, verify};
+
+fn p(x: f64, y: f64, z: f64) -> Point3 {
+    Point3::new(x, y, z)
+}
+
+fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
+    Region::new(vec![Loop::new(vec![
+        Point2::new(x0, y0),
+        Point2::new(x1, y0),
+        Point2::new(x1, y1),
+        Point2::new(x0, y1),
+    ])
+    .unwrap()])
+    .unwrap()
+}
+
+/// A solid axis-aligned box as a facet soup - six quads, two triangles
+/// each, outward CCW. Watertight by construction; the slice law needs
+/// only the closed shell.
+fn box_facets(min: [f64; 3], max: [f64; 3]) -> Vec<Triangle> {
+    let v = |i: usize| {
+        p(
+            [min[0], max[0]][i & 1],
+            [min[1], max[1]][(i >> 1) & 1],
+            [min[2], max[2]][(i >> 2) & 1],
+        )
+    };
+    let quad = |a: usize, b: usize, c: usize, d: usize| -> [Triangle; 2] {
+        [
+            Triangle::new(v(a), v(b), v(c)),
+            Triangle::new(v(a), v(c), v(d)),
+        ]
+    };
+    let mut t = Vec::with_capacity(12);
+    t.extend(quad(4, 5, 7, 6)); // +z top
+    t.extend(quad(0, 2, 3, 1)); // -z bottom
+    t.extend(quad(0, 1, 5, 4)); // -y
+    t.extend(quad(2, 6, 7, 3)); // +y
+    t.extend(quad(1, 3, 7, 5)); // +x
+    t.extend(quad(2, 0, 4, 6)); // -x
+    t
+}
+
+/// The workpiece slab: material from z = -20 up to the finished floor
+/// at -10 - the pocket's job is everything of it above bottom_z.
+fn slab() -> Vec<Triangle> {
+    box_facets([-20.0, -20.0, -20.0], [20.0, 20.0, -10.0])
+}
+
+/// The slab with a 10x10 boss at the center standing to z = 0: its
+/// columns must never be cut below their own surface.
+fn slab_with_boss() -> Vec<Triangle> {
+    let mut f = slab();
+    f.extend(box_facets([-5.0, -5.0, -10.0], [5.0, 5.0, 0.0]));
+    f
+}
+
+fn params(entry: Entry3D, helix_radius: f64) -> Pocket3DParams {
+    Pocket3DParams {
+        tool_diameter: 8.0,
+        stepover: 3.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        top_z: 0.0,
+        bottom_z: -10.0,
+        stepdown: 5.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        strategy: PocketStrategy::Zigzag,
+        retract_z: None,
+        entry,
+        helix_radius,
+    }
+}
+
+fn tool() -> ToolGeom {
+    ToolGeom {
+        radius: 4.0,
+        flute_len: 30.0,
+        shank_radius: 9.0,
+        shank_len: 40.0,
+        holder_radius: 20.0,
+        holder_len: 60.0,
+    }
+}
+
+/// The 40x40 silhouette the slab projects to - what the operation layer
+/// hands the generator (region_for's Pocket3D arm), asked of the law
+/// itself here so the fixtures stay honest about it.
+fn silhouette(facets: &[Triangle]) -> Region {
+    hsmworks_app::geometry::slice::project(facets, 64).unwrap()
+}
+
+fn verify_against(facets: &[Triangle], region: &Region, path: &Toolpath) -> Vec<hsmworks_app::verify::Warning> {
+    let tool = tool();
+    let cx = VerifyContext {
+        region,
+        stock: None,
+        model: Some(facets),
+        tool: &tool,
+        mode: Mode::Area,
+        stock_top_z: 0.0,
+        clearance_z: 5.0,
+        stock_to_leave: 0.0,
+        gouge_tol: 0.01,
+        z_tol: 1e-6,
+    };
+    verify(path, &cx)
+}
+
+#[test]
+fn flat_floor_comes_out_exact_and_silent() {
+    // The ladder's last level snaps to bottom_z, so a flat-topped slab
+    // gets a flat floor - and no law has a word against any of it.
+    let f = slab();
+    let region = silhouette(&f);
+    let t = pocket3d(&f, &region, &params(Entry3D::Plunge, 1.0)).unwrap();
+    let feed_zs: Vec<f64> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Feed || m.kind == MoveKind::Plunge)
+        .flat_map(|m| [m.from.z, m.to.z])
+        .collect();
+    assert!(
+        feed_zs.iter().any(|&z| z == -10.0),
+        "the floor level is cut: {feed_zs:?}"
+    );
+    assert!(
+        t.moves.iter().all(|m| m.to.z >= -10.0),
+        "nothing dips below the finished floor"
+    );
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+#[test]
+fn a_raised_boss_is_never_cut_below_its_own_surface() {
+    // The boss columns fill every plane below z = 0, so the level law
+    // excludes them at every level beneath; the path rings around them.
+    let f = slab_with_boss();
+    let region = silhouette(&f);
+    let t = pocket3d(&f, &region, &params(Entry3D::Plunge, 1.0)).unwrap();
+    for m in &t.moves {
+        for q in [&m.from, &m.to] {
+            if q.z < 0.0 {
+                assert!(
+                    !(q.x.abs() < 5.0 && q.y.abs() < 5.0),
+                    "move {:?} at z {} enters the boss column",
+                    m.kind,
+                    q.z
+                );
+            }
+        }
+    }
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+#[test]
+fn a_surface_between_levels_leaves_a_staircase_not_a_lie() {
+    // The part tops out at z = -7.5, between the -5.0 and -10.0 levels:
+    // the ladder floors those columns at -5.0 - at most one stepdown of
+    // rest material, exactly what M2.1's simulation is for.
+    let f = box_facets([-20.0, -20.0, -20.0], [20.0, 20.0, -7.5]);
+    // Pocket to -10 around it: deeper than the part anywhere = nothing
+    // below -7.5 to cut, so the -10 level's target must come out empty.
+    let region = rect(-15.0, -15.0, 15.0, 15.0);
+    let t = pocket3d(
+        &f,
+        &region,
+        &Pocket3DParams {
+            bottom_z: -10.0,
+            stepdown: 5.0,
+            ..params(Entry3D::Plunge, 1.0)
+        },
+    )
+    .unwrap();
+    let deepest = t.moves.iter().map(|m| m.to.z.min(m.from.z)).fold(f64::INFINITY, f64::min);
+    assert_eq!(deepest, -5.0, "one stepdown above the surface - never below it");
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+#[test]
+fn waterline_closes_its_rings() {
+    // Ring passes repeat the walk closed: the XY start multiset equals
+    // the XY end multiset (a law no open zigzag satisfies).
+    let f = slab();
+    let region = silhouette(&f);
+    let t = pocket3d(
+        &f,
+        &region,
+        &Pocket3DParams {
+            strategy: PocketStrategy::Waterline,
+            ..params(Entry3D::Plunge, 1.0)
+        },
+    )
+    .unwrap();
+    let mut starts: Vec<(f64, f64)> = Vec::new();
+    let mut ends: Vec<(f64, f64)> = Vec::new();
+    for m in t.moves.iter().filter(|m| m.kind == MoveKind::Feed) {
+        starts.push((m.from.x, m.from.y));
+        ends.push((m.to.x, m.to.y));
+    }
+    starts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    ends.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    assert!(!starts.is_empty());
+    assert_eq!(starts, ends, "every XY is left as often as it is entered");
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+#[test]
+fn zigzag_walks_feed_lines() {
+    // The same slab under Zigzag: feed moves with real XY travel, and
+    // silence under the same laws - the strategies differ in shape,
+    // never in what is allowed.
+    let f = slab();
+    let region = silhouette(&f);
+    let t = pocket3d(&f, &region, &params(Entry3D::Plunge, 1.0)).unwrap();
+    assert!(
+        t.moves.iter().any(|m| m.kind == MoveKind::Feed
+            && (m.from.x != m.to.x || m.from.y != m.to.y)),
+        "a straight pass exists"
+    );
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+#[test]
+fn a_helix_that_fits_descends_in_arcs() {
+    // Open floor at -5.0 with a 60x60 footprint: the swept disc of a
+    // 1 mm helix about a tool standing mid-floor clears everything, so
+    // the entry is earned - Z-descending arc moves, silent below.
+    let f = slab();
+    let region = rect(-30.0, -30.0, 30.0, 30.0);
+    let t = pocket3d(&f, &region, &params(Entry3D::Helix, 1.0)).unwrap();
+    assert!(
+        t.moves.iter().any(|m| m.arc.is_some() && m.to.z < -5.0),
+        "the helix posts arcs that sink"
+    );
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+#[test]
+fn a_helix_that_does_not_fits_falls_back_to_a_plunge() {
+    // The boss slab at its own silhouette: every row's span is the 7 mm
+    // band between wall-erosion and boss-erosion, narrower than the
+    // widened disc (r + rh) of a 4 mm helix - no midpoint has room, at
+    // either plane. The level plunges instead: a slower dive, never a
+    // gouge.
+    let f = slab_with_boss();
+    let region = silhouette(&f);
+    let t = pocket3d(&f, &region, &params(Entry3D::Helix, 4.0)).unwrap();
+    for level in [-5.0, -10.0] {
+        let first = t
+            .moves
+            .iter()
+            .find(|m| m.to.z == level)
+            .unwrap_or_else(|| panic!("level {level} was cut by nothing"));
+        assert_eq!(first.kind, MoveKind::Plunge, "level {level} entry");
+    }
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+#[test]
+fn a_ramp_over_open_floor_feeds_down_in_one_diagonal() {
+    let f = slab();
+    let region = rect(-30.0, -30.0, 30.0, 30.0);
+    let t = pocket3d(&f, &region, &params(Entry3D::Ramp, 1.0)).unwrap();
+    // The first level can only plunge; a later one earns the diagonal.
+    assert_eq!(t.moves[1].kind, MoveKind::Plunge, "the dive into the top");
+    assert!(
+        t.moves.iter().any(|m| {
+            m.kind == MoveKind::Feed
+                && (m.from.x != m.to.x || m.from.y != m.to.y)
+                && m.from.z != m.to.z
+                && m.from.z > -10.0
+                && m.to.z == -10.0
+        }),
+        "the -10.0 level is entered on a ramp"
+    );
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+#[test]
+fn degenerate_input_refuses_cleanly() {
+    let f = slab();
+    let region = rect(-15.0, -15.0, 15.0, 15.0);
+    // Nothing to section.
+    assert!(matches!(
+        pocket3d(&[], &region, &params(Entry3D::Plunge, 1.0)),
+        Err(GenError::Empty(_))
+    ));
+    // An empty footprint is not a pocket.
+    assert!(matches!(
+        pocket3d(&f, &Region::empty(), &params(Entry3D::Plunge, 1.0)),
+        Err(GenError::Empty(_))
+    ));
+    // Non-finite numbers die at validation, not in the slice.
+    assert!(matches!(
+        pocket3d(
+            &f,
+            &region,
+            &Pocket3DParams {
+                feed: f64::NAN,
+                ..params(Entry3D::Plunge, 1.0)
+            }
+        ),
+        Err(GenError::Invalid(_))
+    ));
+    // A stepdown of zero would hang the ladder.
+    assert!(matches!(
+        pocket3d(
+            &f,
+            &region,
+            &Pocket3DParams {
+                stepdown: 0.0,
+                ..params(Entry3D::Plunge, 1.0)
+            }
+        ),
+        Err(GenError::Invalid(_))
+    ));
+    // A helix wider than the tool leaves its own swept disc short of
+    // overlap - unvalidated, that is a gouge shape.
+    assert!(matches!(
+        pocket3d(&f, &region, &params(Entry3D::Helix, 4.5)),
+        Err(GenError::Invalid(_))
+    ));
+    // A block exactly filling the footprint: the top level's ε-probe
+    // stands above the block top, so that face is cut tangentially -
+    // one real path, not a refusal; the levels under it are all island
+    // and get skipped.
+    let block = box_facets([-5.0, -5.0, -10.0], [5.0, 5.0, 0.0]);
+    assert!(
+        pocket3d(
+            &block,
+            &rect(-5.0, -5.0, 5.0, 5.0),
+            &Pocket3DParams {
+                top_z: 0.0,
+                ..params(Entry3D::Plunge, 1.0)
+            }
+        )
+        .is_ok()
+    );
+    let filled = box_facets([-20.0, -20.0, -10.0], [20.0, 20.0, 2.0]);
+    assert!(matches!(
+        pocket3d(&filled, &region, &params(Entry3D::Plunge, 1.0)),
+        Err(GenError::Empty(msg)) if msg.contains("fills")
+    ));
+}
+
+#[test]
+fn material_above_holds_its_monotonic_law() {
+    // Deeper planes fill with more columns: the boss slab's islands grow
+    // from nothing above 0, to the boss below it, to everything below
+    // the slab top. (The inclusion is the level law's backbone.)
+    let f = slab_with_boss();
+    let at = |z: f64| material_above(&f, z).unwrap();
+    let shallow = at(1.0);
+    let mid = at(-5.0);
+    let deep = at(-15.0);
+    assert!(shallow.is_empty(), "nothing stands above the whole model");
+    // Inclusion, probed where the two regions differ: every mid-column
+    // is a deep column, and the boss is the witness that mid is not yet
+    // everything.
+    for q in [Point2::new(0.0, 0.0), Point2::new(15.0, 0.0)] {
+        assert!(
+            !mid.contains(q) || deep.contains(q),
+            "{q:?}: an island above -5.0 stands above -15.0 too"
+        );
+    }
+    assert!(mid.contains(Point2::new(0.0, 0.0)), "the boss fills -5.0");
+    assert!(!mid.contains(Point2::new(15.0, 0.0)), "the slab top is at -10");
+    assert!(deep.contains(Point2::new(15.0, 0.0)), "and below it all is solid");
+}

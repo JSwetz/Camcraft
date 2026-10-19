@@ -737,6 +737,31 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)"]),
             ],
         ),
+        (
+            // The 3-D pocket picks no geometry (the mesh silhouette is
+            // the region - islands are computed, never selected): its
+            // Geometry tab is the bare pick law, and its Passes carry
+            // the entry ladder's own fields. "Retract Z" and "Helix
+            // lead radius" are guard-rendered (retype's defaults have
+            // neither on), so they are not in this table.
+            "3D Pocket",
+            vec![
+                ("Geometry", vec!["Click selects:"]),
+                (
+                    "Heights",
+                    vec![
+                        "Clearance Z",
+                        "Retract plane",
+                        "Hop below clearance",
+                        "Top Z",
+                        "Bottom Z",
+                        "Stepdown",
+                    ],
+                ),
+                ("Passes", vec!["Stepover", "Stock to leave", "Strategy", "Entry"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
     ];
     for (ki, (kind_name, sections)) in table.iter().enumerate() {
         let cur = harness.state().state.op_ui.params.clone();
@@ -1416,6 +1441,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Create(3), "Add a Slot operation"),
         (Cmd::Create(4), "Add a Trace operation"),
         (Cmd::Create(5), "Add a Drill operation"),
+        (Cmd::Create(6), "Add a 3D Pocket operation"),
         (Cmd::Undo, "Undo\tCtrl+Z"),
         (Cmd::Redo, "Redo\tCtrl+Y"),
         (Cmd::Run, "Generate the selected operation"),
@@ -1818,6 +1844,41 @@ fn ribbon_drill_cell_creates_a_drill_operation() {
     };
     assert!(holes.is_empty(), "a fresh drill starts without a hole list");
     assert_eq!(*cycle, hsmworks_app::drilling::CycleChoice::Auto);
+}
+
+#[test]
+fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
+    let mut harness = shell_harness();
+    harness.run();
+    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        Vec2::new(1280.0, super::shell::RIBBON_H),
+    ));
+    let pocket3d = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Create(6))
+        .expect("the Create group carries a seventh, 3D Pocket cell");
+    let at = pocket3d.rect.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let op = model::find_by_name(&st.world, "Operation2")
+        .as_ref()
+        .and_then(|e| model::operation_of(&st.world, e))
+        .expect("the 3D Pocket cell created its operation through the actions law");
+    // The defaults state the level law with: a plunge ladder from the
+    // stock top, Auto strategy - no geometry pick field exists for this
+    // kind because the region is the model's silhouette.
+    let OpParams::Pocket3D { strategy, entry, .. } = &op.params else {
+        panic!(
+            "the seventh cell must create a 3D Pocket operation, got {:?}",
+            op.params.kind()
+        )
+    };
+    assert_eq!(*strategy, hsmworks_app::machining2d::PocketStrategy::Auto);
+    assert_eq!(*entry, hsmworks_app::machining3d::Entry3D::Plunge);
 }
 
 #[test]

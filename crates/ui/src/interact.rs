@@ -1135,6 +1135,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
     let hop = match draft {
         operation::OpParams::Contour { retract_z, .. } => Some(*retract_z),
         operation::OpParams::Pocket { retract_z, .. }
+        | operation::OpParams::Pocket3D { retract_z, .. }
         | operation::OpParams::Slot { retract_z, .. }
         | operation::OpParams::Trace { retract_z, .. }
         | operation::OpParams::Drill { retract_z, .. } => *retract_z,
@@ -1187,8 +1188,13 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                 });
             }
         }
+        // The 3-D pocket's Top plane is its first level - the one plane
+        // of a ladder the viewport cannot draw here (the model's own
+        // sections are the rest); Bottom is the snapped last level, cut
+        // exact, so the shared depth-kind drawing is right for both.
         operation::OpParams::Contour { top_z, bottom_z, .. }
         | operation::OpParams::Pocket { top_z, bottom_z, .. }
+        | operation::OpParams::Pocket3D { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
         | operation::OpParams::Trace { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {

@@ -96,7 +96,9 @@ fn arc_lead_emits_one_arc_move() {
     assert!(led.arc_count() >= 2, "each pass lands and leaves on an arc");
     for m in led.moves.iter().filter(|m| m.arc.is_some()) {
         assert_eq!(m.kind, MoveKind::Feed, "an arc is always feed motion");
-        assert_eq!(m.from.z, m.to.z, "M2.1 owns helicals; every arc is planar");
+        // The helical law (M2.1) belongs to the roughing entries; the
+        // 2.5-D generators' arcs - leads, rings, corners - stay planar.
+        assert_eq!(m.from.z, m.to.z, "a 2.5-D generator's arc is planar");
         let c = m.arc.unwrap();
         let ra = ((m.from.x - c.center.x).powi(2) + (m.from.y - c.center.y).powi(2)).sqrt();
         let rb = ((m.to.x - c.center.x).powi(2) + (m.to.y - c.center.y).powi(2)).sqrt();

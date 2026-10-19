@@ -59,6 +59,8 @@ fn ctx<'a>(region: &'a Region, stock: Option<&'a Region>, tool: &'a ToolGeom, mo
     VerifyContext {
         region,
         stock,
+        // Every fixture here is a 2.5-D op: no mesh, the static laws.
+        model: None,
         tool,
         mode,
         stock_top_z: 0.0,

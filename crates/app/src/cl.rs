@@ -6,8 +6,11 @@
 //! segment (center + direction); the arc is geometry, the kind stays the
 //! motion class. Chord flattening - for verification, display and the
 //! golden dump - is [`Move::chords`], the one sagitta law for the whole
-//! codebase. Helical (in-Z) arcs are M2.1: an arc move is planar, and
-//! [`PathBuilder::push_arc`] says so by falling back to a straight move.
+//! codebase. Arcs turn in XY; M2.1 (helical entries) widened the law so an
+//! arc's endpoints may differ in Z - a Z change along an XY circle is a
+//! helix, which the timeline (`sim::path_len`, exact arc length over Z) and
+//! the post (`G2/G3` blocks carry the Z word) already read. Endpoints whose
+//! XY coincides are never an arc: that is a plunge, and straight it stays.
 //!
 //! Invariant: every move's `from` equals the previous move's `to` (the path
 //! is a chain, no gaps); generators build through [`PathBuilder`], which
@@ -67,8 +70,10 @@ pub struct Move {
     /// mm/min while in contact with material; None for rapids.
     pub feed: Option<f64>,
     /// None: a straight segment. Some: the circular arc from `from` to
-    /// `to` about this center - planar (the endpoints share Z;
-    /// `push_arc` keeps that by construction).
+    /// `to` about this center - in XY; the endpoints' Zs may differ
+    /// (a helix, M2.1) or agree (the planar case every 2.5-D path so far
+    /// has had). `chords` speaks XY; the Z ride between the endpoints is
+    /// the timeline's and the post's to read.
     pub arc: Option<ArcMove>,
 }
 
@@ -380,10 +385,10 @@ impl PathBuilder {
     /// Refusals, never normalizations: a zero-sweep arc (no XY motion)
     /// is dropped like any no-motion move - which is why `fit_arcs`
     /// splits full circles before they reach this call, so a ring is
-    /// never silently erased. And anything an XY arc cannot describe -
-    /// a Z change (helical is M2.1), a non-finite center - falls back
-    /// to the straight move: the motion always posts, only its exact
-    /// shape gets the honest simpler answer.
+    /// never silently erased - and a non-finite center falls back to the
+    /// straight move: the motion always posts, only its exact shape gets
+    /// the honest simpler answer. A Z change between the endpoints is a
+    /// helix (M2.1); XY motion is what makes it an arc.
     pub fn push_arc(
         &mut self,
         kind: MoveKind,
@@ -392,11 +397,10 @@ impl PathBuilder {
         center: Point2,
         ccw: bool,
     ) {
-        let planar = to.z == self.at.z
-            && (to.x != self.at.x || to.y != self.at.y)
+        let arcable = (to.x != self.at.x || to.y != self.at.y)
             && center.x.is_finite()
             && center.y.is_finite();
-        if !planar {
+        if !arcable {
             self.push(kind, to, feed);
             return;
         }

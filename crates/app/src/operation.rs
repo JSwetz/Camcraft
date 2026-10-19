@@ -59,6 +59,7 @@ use crate::machining2d::{
     self, ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, Side,
     SlotParams, TraceParams,
 };
+use crate::machining3d::{self, Entry3D, Pocket3DParams};
 use crate::model;
 use crate::schema::Operation;
 use crate::stock::StockShape;
@@ -124,6 +125,9 @@ pub enum OpType {
     Slot,
     Trace,
     Drill,
+    /// Mesh-driven Z-level pocketing: the model is the final part, every
+    /// level's islands are computed from it (see [`crate::machining3d`]).
+    Pocket3D,
 }
 
 impl core::fmt::Display for OpType {
@@ -135,6 +139,7 @@ impl core::fmt::Display for OpType {
             OpType::Slot => "Slot",
             OpType::Trace => "Trace",
             OpType::Drill => "Drill",
+            OpType::Pocket3D => "3D Pocket",
         };
         f.write_str(s)
     }
@@ -330,7 +335,8 @@ pub fn region_z(world: &flecs_ecs::prelude::World, params: &OpParams) -> Option<
         | OpParams::Pocket { top_z, .. }
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
-        | OpParams::Drill { top_z, .. } => resolve_height(world, *top_z),
+        | OpParams::Drill { top_z, .. }
+        | OpParams::Pocket3D { top_z, .. } => resolve_height(world, *top_z),
     }
 }
 
@@ -393,7 +399,8 @@ pub fn resolve_params(
         ),
         OpParams::Pocket { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Slot { clearance_z, retract_z, top_z, bottom_z, .. }
-        | OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. } => (
+        | OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Pocket3D { clearance_z, retract_z, top_z, bottom_z, .. } => (
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),
@@ -564,6 +571,36 @@ pub enum OpParams {
         plunge_feed: f64,
         holes: Vec<Hole>,
     },
+    /// Mesh-driven 3D pocketing. The model is the final part: every
+    /// level cuts the footprint minus the model's section strictly above
+    /// it - islands are computed, never picked (the level law,
+    /// [`crate::machining3d`]). The region is the model's silhouette,
+    /// not a section: unlike the 2.5-D kinds, the cut area changes with
+    /// Z, so a selection could only disagree with the mesh.
+    Pocket3D {
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: Height,
+        /// Hop plane between rings of one level; `None` hops to
+        /// clearance, like the pocket family.
+        retract_z: Option<Height>,
+        /// The first level's plane - the stock surface the ladder
+        /// descends from.
+        top_z: Height,
+        /// The last level snaps here: the model's lowest floor.
+        bottom_z: Height,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        strategy: PocketStrategy,
+        /// How the cutter engages each level; see
+        /// [`crate::machining3d::Entry3D`].
+        entry: Entry3D,
+        /// Helix centerline radius, mm; read only when `entry` is
+        /// Helix, validated there against the tool radius at generate.
+        helix_radius: f64,
+    },
 }
 
 impl OpParams {
@@ -576,6 +613,7 @@ impl OpParams {
             OpParams::Slot { .. } => OpType::Slot,
             OpParams::Trace { .. } => OpType::Trace,
             OpParams::Drill { .. } => OpType::Drill,
+            OpParams::Pocket3D { .. } => OpType::Pocket3D,
         }
     }
 
@@ -588,7 +626,8 @@ impl OpParams {
             | OpParams::Pocket { clearance_z, .. }
             | OpParams::Slot { clearance_z, .. }
             | OpParams::Trace { clearance_z, .. }
-            | OpParams::Drill { clearance_z, .. } => *clearance_z,
+            | OpParams::Drill { clearance_z, .. }
+            | OpParams::Pocket3D { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -604,7 +643,8 @@ impl OpParams {
             | OpParams::Pocket { top_z, .. }
             | OpParams::Slot { top_z, .. }
             | OpParams::Trace { top_z, .. }
-            | OpParams::Drill { top_z, .. } => *top_z,
+            | OpParams::Drill { top_z, .. }
+            | OpParams::Pocket3D { top_z, .. } => *top_z,
         }
     }
 
@@ -686,6 +726,35 @@ impl OpParams {
                     && pos(*stepdown)
                     && pos(*feed)
                     && pos(*plunge_feed)
+            }
+            OpParams::Pocket3D {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                helix_radius,
+                ..
+            } => {
+                // Structural only, like the pocket's: the helix radius
+                // is checked against the tool radius by the generator,
+                // which is the only reader that owns a tool. A Plunge
+                // entry never consults it, so any positive finite value
+                // - the default 1.0 among them - is sane here.
+                pos(*stepover)
+                    && nneg(*stock_to_leave)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && pos(*helix_radius)
             }
             OpParams::Slot {
                 a,
@@ -923,6 +992,43 @@ impl OpParams {
                 });
                 // v5-era hop plane: presence, then the value (same shape
                 // as Face's staging fields appended above).
+                wh_opt(h, *retract_z);
+            }
+            OpParams::Pocket3D {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                strategy,
+                entry,
+                helix_radius,
+            } => {
+                h.write_u8(6);
+                w(h, *stepover);
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u8(match strategy {
+                    PocketStrategy::Zigzag => 0,
+                    PocketStrategy::Waterline => 1,
+                    PocketStrategy::Auto => 2,
+                });
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
+                });
                 wh_opt(h, *retract_z);
             }
             OpParams::Slot {
@@ -1349,7 +1455,10 @@ fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> {
 #[must_use]
 pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
     if let SrcRef::Selection(items) = &op.src
-        && !matches!(op.params, OpParams::Slot { .. } | OpParams::Drill { .. })
+        && !matches!(
+            op.params,
+            OpParams::Slot { .. } | OpParams::Drill { .. } | OpParams::Pocket3D { .. }
+        )
     {
         return selection_region(world, items, &op.params).ok();
     }
@@ -1379,7 +1488,9 @@ pub fn chains_of(world: &World, op: &Operation) -> Vec<Vec<Point2>> {
 /// Slot keeps its closed-form stadium regardless of source (its boundary
 /// is the two endpoints, not the model). Drill likewise ignores a
 /// selection source: its geometry is the hole list in the params, so
-/// picking features could only disagree with it.
+/// picking features could only disagree with it. Pocket3D too: its
+/// footprint is the model's own silhouette - the level law reads the
+/// mesh at every Z, so a picked loop could only disagree with it.
 fn region_for_src(
     world: &World,
     src: &SrcRef,
@@ -1388,7 +1499,10 @@ fn region_for_src(
 ) -> Result<Region, GenError> {
     match src {
         SrcRef::Selection(items)
-            if !matches!(params, OpParams::Slot { .. } | OpParams::Drill { .. }) =>
+            if !matches!(
+                params,
+                OpParams::Slot { .. } | OpParams::Drill { .. } | OpParams::Pocket3D { .. }
+            ) =>
         {
             selection_region(world, items, params)
         }
@@ -1405,6 +1519,14 @@ fn region_for_src(
 fn region_for(world: &World, material: &Material, params: &OpParams) -> Result<Region, GenError> {
     match params {
         OpParams::Face { .. } => {
+            slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
+        }
+        // The 3D pocket's machine area is a silhouette, not a section:
+        // columns whose surface sits below the first level are still
+        // cut, down to that surface - a section would miss them. The
+        // per-level islands come from the mesh, in the generator and in
+        // the verify pass, never from this region.
+        OpParams::Pocket3D { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }
@@ -2516,7 +2638,10 @@ pub fn generate(
         // (it clears its own kerf, so the band sampling never fires)
         // the cycle reach law in `verify` checks over `path.cycles`.
         OpType::Face | OpType::Contour | OpType::Drill => Mode::Boundary,
-        OpType::Pocket | OpType::Slot => Mode::Area,
+        // The 3-D pocket verifies as Area with the mesh in hand (the
+        // `model` field below): the region is its silhouette, the
+        // per-level islands come from the facets.
+        OpType::Pocket | OpType::Slot | OpType::Pocket3D => Mode::Area,
         OpType::Trace => Mode::Engrave,
     };
 
@@ -2657,6 +2782,46 @@ pub fn generate(
             )?;
             (region, path)
         }
+        OpParams::Pocket3D {
+            stepover,
+            stock_to_leave,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            strategy,
+            entry,
+            helix_radius,
+            ..
+        } => {
+            // The region is the model's own silhouette (see
+            // `region_for`); the level law sections the facets
+            // themselves at every plane, so there is nothing here for a
+            // picked loop to add - and nothing to erode by hand either:
+            // one erosion per level, from that level's target.
+            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let path = machining3d::pocket3d(
+                &material.facets,
+                &region,
+                &Pocket3DParams {
+                    tool_diameter: d,
+                    stepover: *stepover,
+                    stock_to_leave: *stock_to_leave,
+                    clearance_z: hs.clearance,
+                    top_z: req_z(hs.top, "Top of Part Z")?,
+                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                    stepdown: *stepdown,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                    strategy: *strategy,
+                    retract_z: hs.retract,
+                    entry: *entry,
+                    helix_radius: *helix_radius,
+                },
+            )?;
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -2735,6 +2900,9 @@ pub fn generate(
         &VerifyContext {
             region: &region,
             stock: stock_region.as_ref(),
+            // Only the 3-D pocket's laws are depth-dependent; every
+            // other op verifies against its static region, untouched.
+            model: matches!(&op.params, OpParams::Pocket3D { .. }).then_some(&material.facets[..]),
             tool: &geom,
             mode,
             stock_top_z,
@@ -2743,7 +2911,8 @@ pub fn generate(
                 OpParams::Face { .. } | OpParams::Trace { .. } | OpParams::Drill { .. } => 0.0,
                 OpParams::Contour { stock_to_leave, .. }
                 | OpParams::Pocket { stock_to_leave, .. }
-                | OpParams::Slot { stock_to_leave, .. } => *stock_to_leave,
+                | OpParams::Slot { stock_to_leave, .. }
+                | OpParams::Pocket3D { stock_to_leave, .. } => *stock_to_leave,
             },
             gouge_tol: GOUGE_TOL,
             z_tol: Z_TOL,

@@ -347,7 +347,7 @@ impl ContourParams {
 
 /// Cut levels from `top` down to `bottom`, snapped so the last level is
 /// `bottom` exactly. Shared by depth-stepping operations.
-fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
+pub(crate) fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
     let span = top - bottom;
     if span <= 0.0 {
         return vec![bottom];
@@ -1433,10 +1433,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         }
         s => s,
     };
-    let passes = match strategy {
-        PocketStrategy::Zigzag | PocketStrategy::Auto => zigzag_passes(&center, p)?,
-        PocketStrategy::Waterline => waterline_passes(&center, p)?,
-    };
+    let passes = plan_passes(&center, p.stepover, p.climb, strategy)?;
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
@@ -1465,17 +1462,17 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
 /// the extremes kept: a row on the area's own boundary is the pass whose
 /// edge grazes the wall, and dropping it would leave the wall's last band
 /// standing.
-fn zigzag_passes(center: &Region, p: &PocketParams) -> Result<Vec<Vec<Point2>>, GenError> {
+fn zigzag_passes(center: &Region, stepover: f64, climb: bool) -> Result<Vec<Vec<Point2>>, GenError> {
     let (lo, hi) = match center.bounds() {
         Some(b) => b,
         None => return Err(GenError::Empty("empty pocket region".into())),
     };
-    let ys = band(lo.y, hi.y, 0.0, p.stepover);
+    let ys = band(lo.y, hi.y, 0.0, stepover);
     let mut passes: Vec<Vec<Point2>> = Vec::new();
     let mut cur: Vec<Point2> = Vec::new();
     for (i, &y) in ys.iter().enumerate() {
         let segs = scan_row(center, y, y == hi.y);
-        let left_to_right = p.climb == (i % 2 == 0);
+        let left_to_right = climb == (i % 2 == 0);
         for k in 0..segs.len() {
             let (x0, x1) = segs[if left_to_right { k } else { segs.len() - 1 - k }];
             let (s, e) = if left_to_right {
@@ -1512,21 +1509,37 @@ fn zigzag_passes(center: &Region, p: &PocketParams) -> Result<Vec<Vec<Point2>>, 
 /// eroded by `k * stepover`, travelled closed. Offsets are taken from
 /// `center` at absolute distances (never buffer-of-buffer), so micron
 /// quantization cannot compound across rings.
-fn waterline_passes(center: &Region, p: &PocketParams) -> Result<Vec<Vec<Point2>>, GenError> {
+/// The cutter-center passes for one planar area: the shape law both the
+/// 2-D pocket and the 3-D pocket's per-level plan share (the strategies
+/// band/erode `center` identically; only the numbers come from the
+/// operation's params either way).
+pub(crate) fn plan_passes(
+    center: &Region,
+    stepover: f64,
+    climb: bool,
+    strategy: PocketStrategy,
+) -> Result<Vec<Vec<Point2>>, GenError> {
+    match strategy {
+        PocketStrategy::Zigzag | PocketStrategy::Auto => zigzag_passes(center, stepover, climb),
+        PocketStrategy::Waterline => waterline_passes(center, stepover, climb),
+    }
+}
+
+fn waterline_passes(center: &Region, stepover: f64, climb: bool) -> Result<Vec<Vec<Point2>>, GenError> {
     let (lo, hi) = match center.bounds() {
         Some(b) => b,
         None => return Err(GenError::Empty("empty pocket region".into())),
     };
     // Erosion by more than the diagonal can never be non-empty; the cap
     // only fires if some Clipper path stops shrinking.
-    let cap = (dist(lo, hi) / p.stepover + 10.0).max(16.0) as u32;
+    let cap = (dist(lo, hi) / stepover + 10.0).max(16.0) as u32;
     let mut passes: Vec<Vec<Point2>> = Vec::new();
     let mut cur: Vec<Point2> = Vec::new();
     for k in 0..=cap {
         let ring = if k == 0 {
             center.clone()
         } else {
-            center.offset(-f64::from(k) * p.stepover)?
+            center.offset(-f64::from(k) * stepover)?
         };
         if ring.is_empty() {
             if cur.len() >= 2 {
@@ -1537,7 +1550,7 @@ fn waterline_passes(center: &Region, p: &PocketParams) -> Result<Vec<Vec<Point2>
         let mut loops: Vec<&Loop> = ring.loops().iter().collect();
         loops.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
         for l in loops {
-            let pts: Vec<Point2> = if p.climb {
+            let pts: Vec<Point2> = if climb {
                 l.points().to_vec()
             } else {
                 l.points().iter().rev().copied().collect()

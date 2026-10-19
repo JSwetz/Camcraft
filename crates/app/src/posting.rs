@@ -276,6 +276,13 @@ impl HeightRefs for OpParams {
                 top_z,
                 bottom_z,
                 ..
+            }
+            | OpParams::Pocket3D {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
             } => {
                 let mut v = vec![clearance_z, top_z, bottom_z];
                 v.extend(retract_z.iter());
