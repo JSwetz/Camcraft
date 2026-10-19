@@ -202,6 +202,16 @@ pub fn toolpath_of(world: &World, entity: &Entity) -> Option<Toolpath> {
     entity.entity_view(world).try_get::<&Toolpath>(|t| t.clone())
 }
 
+/// Is there a cached path here at all - [`toolpath_of`]'s cheap cousin
+/// for enable-gates that must not clone every path per frame.
+#[must_use]
+pub fn has_toolpath(world: &World, entity: &Entity) -> bool {
+    entity
+        .entity_view(world)
+        .try_get::<&Toolpath>(|_| ())
+        .is_some()
+}
+
 /// Facets with the entity's rigid transform applied - the frame the
 /// slicers, regions and generators work in.
 #[must_use]

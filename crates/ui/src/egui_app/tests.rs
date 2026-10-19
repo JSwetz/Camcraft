@@ -1369,6 +1369,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Delete, "Delete the selection\tDel"),
         (Cmd::Frame, "Frame all\tF"),
         (Cmd::Paths, "Show every cached toolpath"),
+        (Cmd::Simulate, "Simulate tool moves (transport bar)"),
     ];
     for (c, want) in rows {
         assert_eq!(&panes::tip_of(*c, &with_tool), want, "tip drifted for {c:?}");
@@ -1840,4 +1841,145 @@ fn detect_holes_refuses_recognizes_and_undo_empties_again() {
         .unwrap();
     let OpParams::Drill { holes, .. } = &op.params else { unreachable!() };
     assert!(holes.is_empty(), "undo must empty the detected list again");
+}
+
+// ------------------------------------------- M1.7c: move simulation
+
+/// The playhead's law, pinned pure (kittest frames advance ~0 seconds,
+/// so the arithmetic must be proven directly): time moves only while
+/// playing, speed rides dt, the clamp lands exactly on the end and
+/// stops there - no wrap - and pathological seconds freeze the
+/// playhead rather than poison it.
+#[test]
+fn playhead_advance_law() {
+    use crate::state::Sim;
+    let mut s = Sim::new();
+    assert!(s.playing, "arming a simulation starts it running");
+    s.advance(2.0, 10.0);
+    assert_eq!(s.t, 2.0);
+    s.playing = false;
+    s.advance(2.0, 10.0);
+    assert_eq!(s.t, 2.0, "paused time stands still");
+    s.playing = true;
+    s.speed = 4.0;
+    s.advance(2.0, 10.0);
+    assert_eq!(s.t, 10.0, "4x of 2 s must land exactly on the end");
+    assert!(!s.playing, "the playhead stops at the end - it never wraps");
+    s.playing = true; // even a manual re-play must not push t past total
+    s.advance(1.0, 10.0);
+    assert_eq!(s.t, 10.0);
+    let mut n = Sim::new();
+    n.advance(f64::NAN, 10.0);
+    assert_eq!(n.t, 0.0, "a NaN dt freezes the playhead");
+    n.advance(1.0, f64::NAN);
+    assert_eq!(n.t, 0.0, "a NaN total freezes it too");
+    n.speed = f64::NAN;
+    n.advance(1.0, 10.0);
+    assert!(n.t.is_finite(), "a poisoned speed must never move t");
+}
+
+/// The ribbon gate mirrors the post gate: a document with a generated
+/// operation arms the cell, an empty one does not. The transport bar is
+/// real shipping UI (Play/Pause by label, Stop disarms), and the whole
+/// point is view state - arming queues no command and undo never sees
+/// it.
+#[test]
+fn simulate_cell_arms_transport_and_stop_disarms() {
+    let mut harness = shell_harness();
+    harness.run();
+    assert!(
+        panes::enabled(Cmd::Simulate, &harness.state().state),
+        "the seeded doc has a generated op - the cell must be live"
+    );
+    assert!(
+        !panes::enabled(Cmd::Simulate, &State::new()),
+        "nothing to simulate on an empty document"
+    );
+    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        Vec2::new(1280.0, super::shell::RIBBON_H),
+    ));
+    let cell = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Simulate)
+        .expect("the Inspect group carries a Simulate cell");
+    let at = cell.rect.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    {
+        let st = &harness.state().state;
+        assert!(st.sim.is_some(), "the cell must arm the transport");
+        assert!(st.sim.as_ref().is_some_and(|s| s.playing), "armed means running");
+        assert!(panes::toggled(Cmd::Simulate, st));
+        // The command law: nothing was queued and nothing can be undone.
+        assert!(st.pending.is_empty());
+    }
+    harness.get_by_label("Pause").click();
+    harness.run_steps(2);
+    assert!(
+        harness.state().state.sim.as_ref().is_some_and(|s| !s.playing),
+        "the transport's Pause must reach the playhead"
+    );
+
+    // Play at the end rewinds - no separate back-to-start control.
+    {
+        let sim = harness.state_mut().state.sim.as_mut().unwrap();
+        sim.t = 1.0e9; // parked past the finish, as a finished run is
+    }
+    harness.run_steps(1); // let the slider/advance settle the parked value
+    harness.get_by_label("Play").click();
+    harness.run_steps(1);
+    {
+        let sim = harness.state().state.sim.as_ref().unwrap();
+        assert!(sim.playing, "Play at the end restarts the run");
+        assert!(sim.t < 1.0, "rewound playhead sits at the start, got {}", sim.t);
+    }
+
+    // Stop leaves simulation: the cell un-toggles, the bar is gone.
+    harness.get_by_label("Stop").click();
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    assert!(st.sim.is_none());
+    assert!(!panes::toggled(Cmd::Simulate, st));
+}
+
+/// The readout string is a pure law too - the bar's whole job is this
+/// text, and the seeded contour pins op name, verb progression and the
+/// units lens without opening a window.
+#[test]
+fn sim_readout_names_the_op_and_the_verb() {
+    let sh = ShellUi::seeded();
+    let sc = super::shell::sim_script(&sh.state);
+    assert!(!sc.is_empty() && sc.total > 0.0, "the seed must produce a timed path");
+    assert_eq!(sc.ops.len(), 1);
+    let s = super::shell::sim_readout(&sc, 0.0, Unit::Millimeters);
+    assert!(s.starts_with("Contour1 · STANDBY · "), "before the first move: {s}");
+    let r = super::shell::sim_readout(&sc, sc.cum[0] * 0.5, Unit::Millimeters);
+    assert!(r.starts_with("Contour1 · RAPID · "), "the contour opens on a rapid: {r}");
+    let e = super::shell::sim_readout(&sc, sc.total, Unit::Millimeters);
+    assert!(e.starts_with("Contour1 · END · "), "the finish says so: {e}");
+    // The first cutting move names its feed in the active unit system.
+    let fi = sc
+        .segs
+        .iter()
+        .position(|g| g.secs > 0.0 && g.feed.is_some())
+        .expect("a contour has feed moves");
+    let start = if fi == 0 { 0.0 } else { sc.cum[fi - 1] };
+    let mid = start + (sc.cum[fi] - start) * 0.5;
+    let f = super::shell::sim_readout(&sc, mid, Unit::Millimeters);
+    assert!(f.starts_with("Contour1 · F ") && f.contains("mm/min"), "feed verb: {f}");
+    let i = super::shell::sim_readout(&sc, mid, Unit::Inches);
+    assert!(i.contains("in/min"), "the verb rides the units lens: {i}");
+    // An empty script has no name to show and must not pretend.
+    let none = super::shell::sim_readout(
+        &hsmworks_app::sim::Script::default(),
+        0.0,
+        Unit::Millimeters,
+    );
+    // The empty script is spent by sim.rs law (no segments, done at once),
+    // so the verb is END - the bar itself never shows it (the total==0 arm
+    // prints "nothing to run"); this row pins the name, not the verb.
+    assert!(none.starts_with("(none) · END · "), "degenerate: {none}");
 }

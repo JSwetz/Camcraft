@@ -660,6 +660,78 @@ fn viewport_panel(
     viewport_points: &mut [f32; 2],
     left_press: &mut Option<[f32; 2]>,
 ) {
+    // M1.7c move simulation: the timeline is rebuilt from the world every
+    // frame (`sim_script` below), which is why a document switch needs no
+    // reset - the playhead simply indexes the new program. The transport
+    // bar takes its strip BEFORE the image so `avail` measures what the 3D
+    // view actually gets. Like the view cube and the hover hint, all of it
+    // draws only while the ribbon cell is armed: a snapshot with no
+    // simulation running sees zero churn. The playhead is immediate-mode
+    // view state (AGENTS.md's explicit exemption), never a command.
+    let mut sim_marker: Option<[f64; 3]> = None;
+    if state.sim.is_some() {
+        let sc = sim_script(state);
+        let total = sc.total.max(0.0);
+        let unit = hsmworks_app::units::of(&state.world);
+        if let Some(sim) = state.sim.as_mut() {
+            // Clamp a stalled frame's dt: a hiccup never teleports the
+            // tool through material.
+            sim.advance(f64::from(ui.input(|i| i.stable_dt).clamp(0.0, 0.1)), total);
+        }
+        let mut stop = false;
+        ui.horizontal(|ui| {
+            let Some(sim) = state.sim.as_mut() else {
+                return;
+            };
+            let at_end = total > 0.0 && !sim.playing && sim.t >= total;
+            let label = if sim.playing { "Pause" } else { "Play" };
+            if ui
+                .button(label)
+                .on_hover_text("Start or stop the tool at the playhead")
+                .clicked()
+            {
+                if at_end {
+                    // Pressing Play on a finished run rewinds; the
+                    // transport has no separate back-to-start button.
+                    sim.t = 0.0;
+                    sim.playing = true;
+                } else {
+                    sim.playing = !sim.playing;
+                }
+            }
+            if ui.button("Stop").on_hover_text("Leave simulation").clicked() {
+                stop = true;
+            }
+            if total > 0.0 {
+                ui.add(egui::Slider::new(&mut sim.t, 0.0..=total).show_value(false));
+                egui::ComboBox::from_id_salt("sim_speed")
+                    .selected_text(format!("{:.0}x", sim.speed))
+                    .show_ui(ui, |ui| {
+                        for sp in [1.0, 2.0, 4.0, 8.0] {
+                            ui.selectable_value(&mut sim.speed, sp, format!("{sp:.0}x"));
+                        }
+                    });
+                // Readout AFTER the widgets: the scrub sets t this frame.
+                let t = sim.t;
+                ui.label(sim_readout(&sc, t, unit));
+            } else {
+                ui.label(if sc.truncated {
+                    "timeline truncated - too many moves to time"
+                } else {
+                    "nothing to run"
+                });
+            }
+        });
+        if stop {
+            state.sim = None;
+        } else if !sc.is_empty()
+            && let Some(sim) = &state.sim
+        {
+            let p = sc.at(sim.t).pos;
+            sim_marker = Some([p.x, p.y, p.z]);
+        }
+        ui.separator();
+    }
     let avail = ui.available_size();
     if avail.x > 1.0 && avail.y > 1.0 {
         // The 3D extent deferral (last frame's layout sizes next frame's
@@ -826,6 +898,46 @@ fn viewport_panel(
                 egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 217, 102)),
             );
         }
+        // The tool marker, last of the scene-space furniture but under the
+        // chrome: a white ring at the tool point with three stubs along the
+        // axes it actually moves on, projected through the same camera math
+        // as the labels. Stubs keep screen-space length (a zoomed-out view
+        // must not lose the marker) and drop when they project away, so a
+        // behind-the-camera point never draws garbage.
+        if let Some(p) = sim_marker {
+            let mvp = state.cam.mvp(aspect);
+            if let Some(u) = interact::project_uv(&mvp, p) {
+                let c = egui::pos2(rx0 + u[0] * rw, ry0 + u[1] * rh);
+                for (d, rgb) in [
+                    ([4.0, 0.0, 0.0], (235u8, 90, 90)),
+                    ([0.0, 4.0, 0.0], (90, 210, 110)),
+                    ([0.0, 0.0, 4.0], (100, 140, 255)),
+                ] {
+                    let q = [p[0] + d[0], p[1] + d[1], p[2] + d[2]];
+                    if let Some(v) = interact::project_uv(&mvp, q) {
+                        let dir = egui::pos2(rx0 + v[0] * rw, ry0 + v[1] * rh) - c;
+                        let len = dir.length();
+                        if len > 0.5 {
+                            let k = len.min(12.0) / len;
+                            ui.painter().line_segment(
+                                [c, c + dir * k],
+                                egui::Stroke::new(
+                                    1.5,
+                                    egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2),
+                                ),
+                            );
+                        }
+                    }
+                }
+                ui.painter().circle_stroke(
+                    c,
+                    5.0,
+                    egui::Stroke::new(1.5, egui::Color32::from_gray(240)),
+                );
+                ui.painter()
+                    .circle_filled(c, 2.0, egui::Color32::WHITE);
+            }
+        }
         // Corner hint: the control legend, or the live mode while dragging.
         let hint = match state.drag {
             Some(DragMode::Orbit) => "orbit",
@@ -856,6 +968,46 @@ fn viewport_panel(
     if hot && hud.as_ref().is_some_and(|h| pos.is_some_and(|p| h.contains(p))) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
+}
+
+/// The transport bar's right-hand text: `{op} · {verb} · {t}/{total} s`,
+/// the verb the current segment reports (RAPID, the live feed through the
+/// units lens, DWELL n s, END at the finish, STANDBY before the first
+/// move). Pure and `pub(crate)` so the tests pin the string law without a
+/// window.
+pub(crate) fn sim_readout(
+    sc: &hsmworks_app::sim::Script,
+    t: f64,
+    unit: hsmworks_app::units::Unit,
+) -> String {
+    let f = sc.at(t);
+    let verb = match f.readout {
+        hsmworks_app::sim::Readout::Rapid => "RAPID".to_owned(),
+        hsmworks_app::sim::Readout::Feed(v) => {
+            format!("F {} {}", hsmworks_app::units::feed(v, unit), unit.feed_suffix())
+        }
+        hsmworks_app::sim::Readout::Dwell(x) => format!("DWELL {x:.1} s"),
+        hsmworks_app::sim::Readout::Idle if f.done => "END".to_owned(),
+        hsmworks_app::sim::Readout::Idle => "STANDBY".to_owned(),
+    };
+    let op = f
+        .op
+        .and_then(|i| sc.ops.get(i))
+        .map_or("(none)", |s| s.as_str());
+    format!("{op} · {verb} · {t:.1}/{:.1} s", sc.total.max(0.0))
+}
+
+pub(crate) fn sim_script(state: &State) -> hsmworks_app::sim::Script {
+    use hsmworks_app::{model, posting, sim};
+    // (doc comment above the readout helper covers this seam too; the walk
+    // law is stated on `State::has_toolpaths`.)
+    let tr = sim::Traverse::from_machine(&posting::default_machine());
+    let paths: Vec<(String, hsmworks_app::cl::Toolpath)> = model::named_entities(&state.world)
+        .into_iter()
+        .filter(|(_, e)| model::is_operation(&state.world, e))
+        .filter_map(|(n, e)| model::toolpath_of(&state.world, &e).map(|tp| (n, tp.path)))
+        .collect();
+    sim::script(paths.iter().map(|(n, t)| (n.as_str(), t)), &tr)
 }
 
 /// egui Pos2 -> the `[f32; 2]` convention interact.rs speaks (0.36 has no

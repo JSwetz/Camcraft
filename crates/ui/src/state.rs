@@ -518,6 +518,55 @@ pub struct HoverHit {
     pub feature: Option<FeatureSel>,
 }
 
+/// M1.7c move-simulation playhead. View state like the camera and
+/// [`DisplayMode`] - never a command, never saved (AGENTS.md exempts
+/// playback position explicitly). The timeline itself is not stored
+/// here: the viewport pass rebuilds it from the world every frame, so
+/// a document switch needs no reset - the same `t` simply indexes the
+/// new program.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sim {
+    /// Playhead, seconds into the script.
+    pub t: f64,
+    pub playing: bool,
+    /// Playback multiplier; real programs run minutes, so watching one
+    /// at 1× is not a workflow - 1/2/4/8 are the transport's entries.
+    pub speed: f64,
+}
+
+impl Sim {
+    /// Arm the simulation at the start of the timeline, playing.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            t: 0.0,
+            playing: true,
+            speed: 1.0,
+        }
+    }
+
+    /// The playback law, pure so the ui tests pin it deterministically
+    /// (frames under the harness advance by ~0): time moves only while
+    /// playing, clamps at the timeline's end, and stops there - no
+    /// wrap. Pathological seconds (NaN dt or total) freeze the
+    /// playhead rather than poison it.
+    pub fn advance(&mut self, dt: f64, total: f64) {
+        if !self.playing || !(dt.is_finite() && total.is_finite()) {
+            return;
+        }
+        self.t = (self.t + dt.max(0.0) * self.speed.max(0.0)).min(total.max(0.0));
+        if self.t >= total {
+            self.playing = false;
+        }
+    }
+}
+
+impl Default for Sim {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct State {
     pub world: World,
     pub history: History,
@@ -567,6 +616,11 @@ pub struct State {
     /// state like the camera - not undoable, not saved; the render call
     /// reads it, nothing in the document does.
     pub display: DisplayMode,
+    /// M1.7c move simulation: None while off, [`Sim`] while the
+    /// transport bar is up. View state like the camera - what it holds
+    /// is only the playhead; the timeline is rebuilt from the world
+    /// each frame, so editing or switching documents never strands it.
+    pub sim: Option<Sim>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -709,6 +763,7 @@ impl State {
             show_world_axes: true,
             show_all_paths: false,
             display: DisplayMode::default(),
+            sim: None,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,
@@ -1660,6 +1715,21 @@ impl State {
     #[must_use]
     pub fn has_selection(&self) -> bool {
         !model::selected_names(&self.world).is_empty()
+    }
+
+    /// Is there anything to simulate: an operation carrying a cached
+    /// path. The walk mirrors the post gate's exactly
+    /// (`posting::stream_records`: `named_entities` filtered by
+    /// `is_operation`) - and display-hidden paths are included, by
+    /// the same law that keeps them posted: hidden is display, not
+    /// suppression, and the simulation rehearses the machine's
+    /// program, not the picture.
+    #[must_use]
+    pub fn has_toolpaths(&self) -> bool {
+        model::named_entities(&self.world)
+            .into_iter()
+            .filter(|(_, e)| model::is_operation(&self.world, e))
+            .any(|(_, e)| model::has_toolpath(&self.world, &e))
     }
 
     /// Center the orbit camera on the document's bounding sphere.

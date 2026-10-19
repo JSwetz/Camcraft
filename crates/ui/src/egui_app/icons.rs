@@ -43,11 +43,12 @@ pub(crate) enum Icon {
     Toolpaths,
     Model,
     EyeOff,
+    Simulate,
 }
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 22] = [
+    pub(crate) const ALL: [Icon; 23] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -70,6 +71,7 @@ impl Icon {
         Icon::Toolpaths,
         Icon::Model,
         Icon::EyeOff,
+        Icon::Simulate,
     ];
 
     fn png(self) -> &'static [u8] {
@@ -101,6 +103,7 @@ impl Icon {
             Icon::Toolpaths => include_bytes!("../../../../assets/ui/eye.png"),
             Icon::Model => include_bytes!("../../../../assets/ui/cube.png"),
             Icon::EyeOff => include_bytes!("../../../../assets/ui/eye-off.png"),
+            Icon::Simulate => include_bytes!("../../../../assets/ui/sim.png"),
         }
     }
 
@@ -130,6 +133,7 @@ impl Icon {
             Icon::Toolpaths => "icon-toolpaths",
             Icon::Model => "icon-model",
             Icon::EyeOff => "icon-eye-off",
+            Icon::Simulate => "icon-simulate",
         }
     }
 }

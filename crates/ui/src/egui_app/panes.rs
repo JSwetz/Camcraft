@@ -28,7 +28,7 @@ use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
 use hsmworks_app::tools::ToolKind;
 
 use crate::actions;
-use crate::state::{CommandKind, DisplayMode, State, UiTarget};
+use crate::state::{CommandKind, DisplayMode, Sim, State, UiTarget};
 
 use super::icons::{Icon, IconSet};
 use super::painted;
@@ -129,6 +129,7 @@ pub(super) enum Cmd {
     Delete,
     Frame,
     Paths,
+    Simulate,
 }
 
 const GROUPS: [(&str, &[Cmd]); 5] = [
@@ -146,7 +147,7 @@ const GROUPS: [(&str, &[Cmd]); 5] = [
         ],
     ),
     ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]),
-    ("Inspect", &[Cmd::Frame, Cmd::Paths]),
+    ("Inspect", &[Cmd::Frame, Cmd::Paths, Cmd::Simulate]),
 ];
 
 const CELL_W: f32 = 56.0;
@@ -175,6 +176,7 @@ fn label_of(c: Cmd) -> &'static str {
         Cmd::Delete => "Delete",
         Cmd::Frame => "Frame",
         Cmd::Paths => "Paths",
+        Cmd::Simulate => "Simulate",
     }
 }
 
@@ -223,23 +225,26 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Delete => "Delete the selection\tDel".into(),
         Cmd::Frame => "Frame all\tF".into(),
         Cmd::Paths => "Show every cached toolpath".into(),
+        Cmd::Simulate => "Simulate tool moves (transport bar)".into(),
     }
 }
 
-fn enabled(c: Cmd, state: &State) -> bool {
+pub(super) fn enabled(c: Cmd, state: &State) -> bool {
     match c {
         Cmd::Undo => state.history.can_undo(),
         Cmd::Redo => state.history.can_redo(),
         Cmd::Run => state.selected_operation().is_some(),
         Cmd::Delete => state.has_selection(),
         Cmd::Create(_) => !state.tool_names().is_empty(),
+        Cmd::Simulate => state.has_toolpaths(),
         _ => true,
     }
 }
 
-fn toggled(c: Cmd, state: &State) -> bool {
+pub(super) fn toggled(c: Cmd, state: &State) -> bool {
     match c {
         Cmd::Paths => state.show_all_paths,
+        Cmd::Simulate => state.sim.is_some(),
         _ => false,
     }
 }
@@ -271,6 +276,7 @@ fn icon_of(c: Cmd) -> Icon {
         Cmd::Delete => Icon::Delete,
         Cmd::Frame => Icon::FrameAll,
         Cmd::Paths => Icon::Toolpaths,
+        Cmd::Simulate => Icon::Simulate,
     }
 }
 
@@ -313,6 +319,12 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Delete => actions::delete_selected(state),
         Cmd::Frame => actions::frame_all(state),
         Cmd::Paths => state.show_all_paths = !state.show_all_paths,
+        Cmd::Simulate => {
+            // View state, like Paths: the cell arms or disarms the
+            // transport. The playhead inside is immediate-mode by
+            // AGENTS.md's explicit exemption - no command to route.
+            state.sim = if state.sim.is_some() { None } else { Some(Sim::new()) };
+        }
     }
 }
 
