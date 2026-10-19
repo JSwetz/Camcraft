@@ -13,7 +13,8 @@ use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::geometry::{Point3, Triangle};
 use hsmworks_app::machining2d::{GenError, PocketStrategy};
 use hsmworks_app::machining3d::{
-    Entry3D, Pocket3DParams, engagement_step, material_above, pocket3d, pocket3d_with_rest,
+    Entry3D, FFO_FLOOR, Pocket3DParams, engagement_step, material_above, optimize_feed, pocket3d,
+    pocket3d_with_rest,
 };
 use hsmworks_app::verify::{Mode, ToolGeom, VerifyContext, verify};
 
@@ -702,4 +703,116 @@ fn adaptive_rings_circle_the_boss() {
         }
     }
     assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}
+
+// ---------------------------------------------------------------- M2.1d
+
+#[test]
+fn ffo_moves_only_feed_words_and_only_down() {
+    // The modulation law in one pass: same kinds, same points, same
+    // order; every planar feed lands inside [floor, programmed], and
+    // nothing else - rapids, plunges, level hops - changes at all.
+    let f = slab();
+    let region = silhouette(&f);
+    let p = params(Entry3D::Plunge, 1.0);
+    let t = pocket3d(&f, &region, &p).unwrap();
+    let o = optimize_feed(&t, &f, &region, &p).unwrap();
+    assert_eq!(o.moves.len(), t.moves.len());
+    let mut slowed = 0;
+    let mut kept = 0;
+    for (a, b) in t.moves.iter().zip(&o.moves) {
+        assert_eq!(a.kind, b.kind);
+        assert_eq!(a.from, b.from);
+        assert_eq!(a.to, b.to);
+        let planar_cut = b.kind == MoveKind::Feed && (b.to.z - b.from.z).abs() <= 1e-6;
+        if !planar_cut {
+            // Vertical feeds keep the plunge word (axial engagement is
+            // a different curve); rapids and links keep theirs entirely.
+            assert_eq!(a.feed, b.feed, "non-planar moves are untouched: {a:?}");
+        }
+        if planar_cut {
+            if let Some(y) = b.feed {
+                assert!(y <= p.feed + 1e-9, "never past the programmed feed: {y}");
+                assert!(
+                    y >= p.feed * FFO_FLOOR - 1e-9,
+                    "never below the floor: {y} of {}",
+                    p.feed * FFO_FLOOR
+                );
+            }
+            match (a.feed, b.feed) {
+                (Some(x), Some(y)) if y + 1e-9 < x => slowed += 1,
+                (Some(x), Some(y)) if (y - x).abs() <= 1e-9 => kept += 1,
+                _ => {}
+            }
+        }
+    }
+    assert!(slowed > 0, "full bites must be read as heavier than the median");
+    assert!(
+        kept > 0,
+        "the median load - the steady cut - keeps the programmed feed"
+    );
+    assert_eq!(verify_against(&f, &region, &o), Vec::new());
+}
+
+#[test]
+fn ffo_the_first_cut_of_a_level_is_its_slowest_kind() {
+    // The first row of a level runs a disc buried at full width in the
+    // untouched shelf - engagement 1.0, the heaviest a planar move
+    // gets - so it takes the level's slowest feed word. Later rows and
+    // links are lighter and run at or above it. A level that engages
+    // nothing anywhere (the top plane here is a zero-depth skin of the
+    // stock face) keeps the programmed feed throughout: no load, no
+    // slowdown, and "first == min of the level" still holds.
+    let f = slab();
+    let region = silhouette(&f);
+    let p = params(Entry3D::Plunge, 1.0);
+    let t = pocket3d(&f, &region, &p).unwrap();
+    let o = optimize_feed(&t, &f, &region, &p).unwrap();
+    let planar: Vec<(f64, f64)> = o
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Feed && (m.to.z - m.from.z).abs() <= 1e-6)
+        .map(|m| (m.to.z, m.feed.unwrap_or(0.0)))
+        .collect();
+    assert!(!planar.is_empty(), "the ladder has planar feeds");
+    let mut slowed_levels = 0;
+    let mut seen: Vec<f64> = Vec::new();
+    for (z, _) in &planar {
+        if seen.iter().any(|s| (s - z).abs() <= 1e-9) {
+            continue;
+        }
+        seen.push(*z);
+        let level: Vec<f64> = planar.iter().filter(|(lz, _)| (lz - z).abs() <= 1e-9).map(|(_, y)| *y).collect();
+        let first = level[0];
+        let min = level.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(
+            (first - min).abs() <= 1e-9,
+            "level z={z}: the first cut must be the slowest kind (first {first}, min {min})"
+        );
+        if first < p.feed - 1e-9 {
+            slowed_levels += 1;
+        }
+    }
+    assert!(
+        slowed_levels > 0,
+        "at least one level actually cuts, and its full bite is slowed"
+    );
+    assert_eq!(verify_against(&f, &region, &o), Vec::new());
+}
+
+#[test]
+fn ffo_is_deterministic_and_hands_a_rapid_only_path_back_untouched() {
+    let f = slab();
+    let region = silhouette(&f);
+    let prm = params(Entry3D::Plunge, 1.0);
+    let t = pocket3d(&f, &region, &prm).unwrap();
+    let o1 = optimize_feed(&t, &f, &region, &prm).unwrap();
+    let o2 = optimize_feed(&t, &f, &region, &prm).unwrap();
+    assert_eq!(o1, o2, "two runs are the same answer");
+
+    let mut b = hsmworks_app::cl::PathBuilder::new(p(0.0, 0.0, 5.0));
+    b.push(MoveKind::Rapid, p(10.0, 10.0, 5.0), None);
+    let rapids = b.finish();
+    let out = optimize_feed(&rapids, &f, &region, &prm).unwrap();
+    assert_eq!(out.moves, rapids.moves, "a path that cuts nothing modulates nothing");
 }

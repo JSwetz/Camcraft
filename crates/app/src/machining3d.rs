@@ -53,6 +53,23 @@
 //! every plane above z, so a dive into rest crosses no part wall. The
 //! staircase bound halves per pass, toward the grid's own resolution;
 //! the closing report is the sim's verdict, never a second surface.
+//!
+//! ## Feed modulation (M2.1d)
+//!
+//! `optimize_feed` re-reads every planned planar feed against the same
+//! dexel field and scales its feedrate by the engagement it actually
+//! meets: the median engagement over the path's loaded bites is the
+//! programmed feed, and bites heavier than the median are slowed
+//! toward it, down to `FFO_FLOOR` of it; bites the sim reads as
+//! engaging nothing (air, zero-depth skin) stay at the programmed
+//! feed and hold no vote in the median. Lighter bites never run
+//! faster than the programmed feed - the op's feed *is* the tool
+//! limit this build models, and speeding past it needs a
+//! spindle/torque curve we do not carry (provenance: the
+//! constant-chip-thickness relation feed ∝ 1/engagement from
+//! machining-handbook side-milling theory; no vendor implementation
+//! inspected). Geometry is byte-identical; only `Move::feed` values
+//! change.
 
 use crate::cl::{lattice, MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::{Point2, Region};
@@ -361,6 +378,146 @@ pub fn pocket3d_with_rest(
     Ok((path, stock_sim::measure(&dex, &part, footprint, EPS)))
 }
 
+/// How far below the programmed feed the modulation may take a planar
+/// cut move. One quarter is a handbook-style floor for a roughing
+/// bite: below it the chip is too thin to evacuate in steel and the
+/// slow feed buys nothing the floor pass will not cut anyway. It is a
+/// law constant, not a parameter - a path with bites needing less
+/// than this wants a smaller stepover, said the strategy, not a
+/// crawl said the feed.
+pub const FFO_FLOOR: f64 = 0.25;
+
+/// Radial engagement of one planar feed move, as a fraction of the
+/// tool diameter (0 = air, 1 = full bite): the perpendicular chord
+/// through the move's midpoint, sampled at `2 * HALF + 1` points,
+/// read against the sim's standing-material field BEFORE the move
+/// cuts it. Sampling the instantaneous field is the whole point - a
+/// static per-level region would report the entire pocket cross-section
+/// as material and slow every ring to the floor. A move too short to
+/// have a direction is treated as a full bite: slowing down is the
+/// safe read of an ambiguity. Grid-quantized by construction (the
+/// same dexel law everywhere: measure, never derive, from the sim).
+///
+/// The chord is sampled at two stations - mid-move and move-end - and
+/// averaged: the trapezoid of the swept side width. A midpoint-only
+/// chord misreads a stepover link, whose fresh material lies *ahead*
+/// along travel rather than beside it, as zero engagement; averaging
+/// the two stations puts a half-engaged link at ~0.5, which is what
+/// it cuts. A move that engages nothing at either station - the
+/// zero-depth skin of the first level, air moves - reads exactly 0
+/// and is held at the programmed feed (there is no load to pay for).
+fn engagement(dex: &Dexel, from: Point2, to: Point2, z: f64, r: f64) -> f64 {
+    const HALF: i32 = 8; // r/8 chord resolution, one lattice step per side
+    let (dx, dy) = (to.x - from.x, to.y - from.y);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= EPS {
+        return 1.0;
+    }
+    // Chords normal to travel: width of cut is measured across the
+    // feed direction, along it the tool is a line.
+    let (nx, ny) = (-dy / len, dx / len);
+    let stations = [
+        Point2::new((from.x + to.x) * 0.5, (from.y + to.y) * 0.5),
+        Point2::new(from.x + dx * 0.75, from.y + dy * 0.75),
+    ];
+    let mut acc = 0.0;
+    for s in stations {
+        let mut hit = 0usize;
+        let mut total = 0usize;
+        for k in -HALF..=HALF {
+            let q = Point2::new(
+                s.x + nx * (k as f64) * r / HALF as f64,
+                s.y + ny * (k as f64) * r / HALF as f64,
+            );
+            total += 1;
+            if let Some(i) = dex.col(q)
+                && dex.top[i] > z + EPS
+            {
+                hit += 1;
+            }
+        }
+        acc += (hit as f64 / total as f64).clamp(0.0, 1.0);
+    }
+    (acc * 0.5).clamp(0.0, 1.0)
+}
+
+/// The M2.1d feed pass: run the finished path through the sim once,
+/// measuring each planar feed move's engagement against the material
+/// standing the instant before it, then scale its feed by
+/// `median / engagement`, clamped to `[FFO_FLOOR, 1]` of the
+/// programmed feed. The median is the self-calibration: whatever the
+/// strategy's nominal load, that is what runs at the programmed feed,
+/// and only the peaks (full bites, corners, the first ring of a
+/// level) are slowed. Never faster, never past the programmed feed -
+/// within tool limits, where the op's feed word is the limit. The
+/// geometry is untouched: same moves, same order, same points; a
+/// law test pins that. Vertical feeds (plunges, ramps, helices) keep
+/// their `plunge_feed`/`feed` as assigned - axial engagement is a
+/// different curve we do not model here (decision, RECOMMENDED).
+pub fn optimize_feed(
+    path: &Toolpath,
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+) -> Result<Toolpath, GenError> {
+    p.validate()?;
+    let r = p.tool_diameter * 0.5;
+    let (mut dex, _) = sim_of(facets, footprint, p)?;
+    let mut moves = path.moves.clone();
+    // (index, engagement) of the planar feed moves, measured before
+    // the sim advances past them.
+    let mut bites: Vec<(usize, f64)> = Vec::new();
+    for (i, m) in moves.iter().enumerate() {
+        if m.kind == MoveKind::Feed && m.arc.is_none() && (m.to.z - m.from.z).abs() <= EPS {
+            bites.push((
+                i,
+                engagement(
+                    &dex,
+                    Point2::new(m.from.x, m.from.y),
+                    Point2::new(m.to.x, m.to.y),
+                    m.to.z,
+                    r,
+                ),
+            ));
+        }
+        dex.subtract(m, r, CHORD_TOL);
+    }
+    if !bites.is_empty() {
+        // The anchor is the median of the *loaded* bites only: an
+        // air cut or a zero-depth skin reading 0 must not drag the
+        // whole job's reference load down to nothing (that would
+        // silently switch the optimization off - the failure mode a
+        // first-run histogram caught). Zero bites stay at the
+        // programmed feed below, which is the honest answer: no
+        // load, no reason to slow.
+        let mut ae: Vec<f64> = bites.iter().map(|&(_, a)| a).filter(|a| *a > EPS).collect();
+        if !ae.is_empty() {
+            ae.sort_by(|a, b| a.total_cmp(b));
+            // Middle of the sorted run; an even count straddles the
+            // two central samples and averages them - one value, no
+            // branch.
+            let mid = ae.len() / 2;
+            let median = if ae.len() % 2 == 1 {
+                ae[mid]
+            } else {
+                (ae[mid - 1] + ae[mid]) * 0.5
+            };
+            for &(i, a) in &bites {
+                let ratio = if a <= EPS { 1.0 } else { (median / a).clamp(FFO_FLOOR, 1.0) };
+                moves[i].feed = Some(p.feed * ratio);
+            }
+        }
+    }
+    let out = Toolpath {
+        moves,
+        cycles: path.cycles.clone(),
+    };
+    if !out.all_finite() {
+        return Err(GenError::Invalid("feed modulation broke the finite horizon".into()));
+    }
+    Ok(out)
+}
+
 fn home(p: &Pocket3DParams) -> Point3 {
     Point3::new(0.0, 0.0, p.clearance_z)
 }
@@ -649,5 +806,50 @@ fn helix_down(b: &mut PathBuilder, xy: Point2, z0: f64, z1: f64, rh: f64, feed: 
             center,
             true,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chord_over_a_step_reads_half_engagement() {
+        // The chord law at its plainest: travel along a wall, half the
+        // disc in standing material, half in air - the measurement says
+        // 0.5 up to the 17-point quantization (8 hits, 9 misses).
+        let mut dex = Dexel::block(0.0, 0.0, 16.0, 16.0, 10.0, 1.0).unwrap();
+        for iy in 0..dex.ny {
+            for ix in 0..dex.nx {
+                dex.top[iy * dex.nx + ix] = if ix < 8 { 10.0 } else { 0.0 };
+            }
+        }
+        let ae = engagement(&dex, Point2::new(8.0, 4.0), Point2::new(8.0, 12.0), 5.0, 8.0);
+        assert!((ae - 0.5).abs() < 0.05, "half-bite read {ae}");
+        // Pure air, and pure solid, at the same place.
+        let out = dex.top.len();
+        let _ = out;
+        for t in dex.top.iter_mut() {
+            *t = 0.0;
+        }
+        let ae = engagement(&dex, Point2::new(8.0, 4.0), Point2::new(8.0, 12.0), 5.0, 8.0);
+        assert!(ae < 1e-9, "air must read zero, got {ae}");
+        for (iy, t) in dex.top.chunks_mut(dex.nx).enumerate() {
+            for (ix, c) in t.iter_mut().enumerate() {
+                *c = if (iy * dex.nx + ix) < 8 * dex.nx { 10.0 } else { 0.0 };
+                let _ = ix;
+            }
+        }
+        let ae = engagement(&dex, Point2::new(8.0, 1.0), Point2::new(8.0, 2.0), 5.0, 0.5);
+        assert!((ae - 1.0).abs() < 1e-9, "solid must read full, got {ae}");
+    }
+
+    #[test]
+    fn a_zero_length_planar_move_reads_as_a_full_bite() {
+        // The ambiguity law: no direction, no chord normal to measure -
+        // the safe read is the heavy one.
+        let dex = Dexel::block(0.0, 0.0, 4.0, 4.0, 10.0, 1.0).unwrap();
+        let ae = engagement(&dex, Point2::new(2.0, 2.0), Point2::new(2.0, 2.0), 5.0, 1.0);
+        assert!((ae - 1.0).abs() < 1e-12, "got {ae}");
     }
 }

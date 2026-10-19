@@ -609,6 +609,11 @@ pub enum OpParams {
         /// (M2.1c); read only when `strategy` is Adaptive, bounds
         /// checked there at generate.
         max_engagement: f64,
+        /// Modulate every planar feed's rate by the engagement the
+        /// dexel sim says the move actually meets, median-anchored to
+        /// the programmed feed ([`crate::machining3d::optimize_feed`],
+        /// M2.1d). Geometry is untouched; only feed words move.
+        feed_opt: bool,
     },
 }
 
@@ -1029,6 +1034,7 @@ impl OpParams {
                 helix_radius,
                 rest_rough,
                 max_engagement,
+                feed_opt,
             } => {
                 h.write_u8(6);
                 w(h, *stepover);
@@ -1056,6 +1062,9 @@ impl OpParams {
                 // switch, so it belongs in the digest (a model edit
                 // must mark a rest path Stale like any other).
                 h.write_u8(u8::from(*rest_rough));
+                // Same law for the v14 feed modulation: flipping it
+                // changes every F word, so it changes the stamp.
+                h.write_u8(u8::from(*feed_opt));
             }
             OpParams::Slot {
                 a,
@@ -2820,6 +2829,7 @@ pub fn generate(
             helix_radius,
             rest_rough,
             max_engagement,
+            feed_opt,
             ..
         } => {
             // The region is the model's own silhouette (see
@@ -2853,6 +2863,14 @@ pub fn generate(
                 machining3d::pocket3d_with_rest(&material.facets, &region, &pp)?.0
             } else {
                 machining3d::pocket3d(&material.facets, &region, &pp)?
+            };
+            // The feed modulation is a re-read of the finished path
+            // against the sim (M2.1d): same moves, new F words - it
+            // runs after both ladder variants, never instead of one.
+            let path = if *feed_opt {
+                machining3d::optimize_feed(&path, &material.facets, &region, &pp)?
+            } else {
+                path
             };
             (region, path)
         }

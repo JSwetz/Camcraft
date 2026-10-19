@@ -78,7 +78,7 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v12
+    // Anything newer than this build's format stays refused; v1..v13
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
@@ -86,12 +86,12 @@ fn wrong_version_is_refused() {
     // units_round_trip_and_a_v7_file_means_millimeters v7 -> v8,
     // v8_file_steps_to_v9 v8 -> v9, v9_file_steps_to_v10 v9 -> v10,
     // v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips v10 ->
-    // v11, v11_file_steps_to_v12 v11 -> v12, and v12_file_steps_to_v13
-    // v12 -> v13).
-    let text = r#"{"version": 14, "entities": []}"#;
+    // v11, v11_file_steps_to_v12 v11 -> v12, v12_file_steps_to_v13
+    // v12 -> v13, and v13_file_steps_to_v14 v13 -> v14).
+    let text = r#"{"version": 15, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(14)) => {}
+        Err(ProjectError::UnsupportedVersion(15)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1394,6 +1394,59 @@ fn v12_file_steps_to_v13() {
     // a second open cannot drift the number.
     assert!(saved.contains("\"strategy\": \"adaptive\""), "{saved}");
     assert!(saved.contains("\"max_engagement\": 45"), "{saved}");
+}
+
+#[test]
+fn v13_file_steps_to_v14() {
+    // A literal v13 project: the feed modulation arrives as one new
+    // params key (`feed_opt`), absent from every v13 file - no v13
+    // generator re-read a path against the sim. The serde default (off)
+    // is exactly what v13 posted, every F word at the programmed feed,
+    // so the step-up is the stamp itself, like every bump since v6.
+    let text = r#"{
+        "version": 13,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "end_mill", "diameter": 4.0, "corner_r": 0.0,
+                      "flute_len": 12.0, "shank_d": 6.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 10000.0, "feed": 1200.0}},
+            {"name": "P3", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"pocket3d": {
+                 "stepover": 2.5, "stock_to_leave": 0.0,
+                 "clearance_z": {"reference": "fixed", "offset": 10.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "stepdown": 1.5, "feed": 900.0, "plunge_feed": 150.0, "climb": true,
+                 "strategy": "waterline", "entry": "plunge", "helix_radius": 1.0,
+                 "rest_rough": true, "max_engagement": 40.0}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v13 file must migrate");
+    let e = model::find_by_name(&world, "P3").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Pocket3D { feed_opt, rest_rough, max_engagement, .. } = &o.params else {
+        panic!("the pocket3d params must read unchanged, got {:?}", o.params);
+    };
+    assert!(!*feed_opt, "a v13 file never modulated feeds; off is its meaning");
+    assert!(*rest_rough, "the stated keys ride through the step-up untouched");
+    assert!(
+        (*max_engagement - 40.0).abs() < 1e-12,
+        "a stated angle must survive the migration, got {max_engagement}"
+    );
+
+    let path = tmp_path("v14");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v14 stamp: {saved}"
+    );
+    // The learned key is written in its false state: a fixed point, so
+    // a second open cannot drift it.
+    assert!(saved.contains("\"feed_opt\": false"), "{saved}");
 }
 
 #[test]

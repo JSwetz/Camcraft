@@ -1023,6 +1023,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             helix_radius,
             rest_rough,
             max_engagement,
+            feed_opt,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1106,6 +1107,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 ui.checkbox(rest_rough, "Rest roughing");
                 ui.label("a closing ladder, half the step, cuts what the levels leave standing");
+                ui.checkbox(feed_opt, "Feed optimization");
+                ui.label("heavier bites slow toward the programmed feed (never faster); the sim measures each move");
             }
             if tab == SEC_FEEDS {
                 field(ui, &format!("Feed ({})", u.feed_suffix()));

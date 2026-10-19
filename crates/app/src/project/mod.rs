@@ -76,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 13;
+pub const PROJECT_VERSION: u32 = 14;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -411,6 +411,11 @@ pub enum ParamsDto {
         /// no Adaptive ring family to feed it.
         #[serde(default = "default_engagement_deg")]
         max_engagement: f64,
+        /// Absent means off: v13 files posted every F word at the
+        /// programmed feed, which is exactly what "no modulation"
+        /// means for them.
+        #[serde(default)]
+        feed_opt: bool,
     },
 }
 
@@ -737,6 +742,7 @@ impl ParamsDto {
                 helix_radius,
                 rest_rough,
                 max_engagement,
+                feed_opt,
             } => ParamsDto::Pocket3D {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -762,6 +768,7 @@ impl ParamsDto {
                 helix_radius: *helix_radius,
                 rest_rough: *rest_rough,
                 max_engagement: *max_engagement,
+                feed_opt: *feed_opt,
             },
             OpParams::Slot {
                 a,
@@ -950,6 +957,7 @@ impl ParamsDto {
                 helix_radius,
                 rest_rough,
                 max_engagement,
+                feed_opt,
             } => OpParams::Pocket3D {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -975,6 +983,7 @@ impl ParamsDto {
                 helix_radius: *helix_radius,
                 rest_rough: *rest_rough,
                 max_engagement: *max_engagement,
+                feed_opt: *feed_opt,
             },
             ParamsDto::Slot {
                 a,
@@ -1508,6 +1517,14 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // Adaptive. No content change; step-up is the stamp itself, like
         // every bump since v6.
         file.version = 13;
+    }
+    if file.version == 13 {
+        // v13 -> v14: the feed modulation arrives as one new params key
+        // (`feed_opt`), absent from every v13 file - the serde default
+        // is off, which is exactly what v13 generated (every F word at
+        // the programmed feed). No content change; step-up is the stamp
+        // itself, like every bump since v6.
+        file.version = 14;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

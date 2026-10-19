@@ -227,6 +227,9 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             // The law's default (r·(1−cos 45°) ≈ 15% of the diameter);
             // reads only under Adaptive, which the fresh op does not pick.
             max_engagement: 45.0,
+            // Feed modulation costs a sim run; the fresh op posts the
+            // programmed feed everywhere until the user asks otherwise.
+            feed_opt: false,
         },
         _ => OpParams::Face {
             stepover,
