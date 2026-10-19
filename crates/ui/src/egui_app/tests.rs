@@ -1101,6 +1101,59 @@ fn anchor_click_queues_setwcs() {
     );
 }
 
+/// The pane half of the same law - the regression this pins: the egui port
+/// kept `interact.rs`'s markers and viewport pick but lost the Origin
+/// page's widgets (they lived in the imgui panes, retired un-ported at
+/// M-g), so nothing could set `pick_anchor` (the crosses never rendered)
+/// and the 3x3 grid was gone. The page must show the compass grid, place
+/// the slot on the SAME point the markers draw from when a cell is
+/// clicked (through SetWcs - the draft law), bracket the chosen cell, and
+/// arm pick mode from the checkbox.
+#[test]
+fn origin_page_shows_the_anchor_grid_and_arms_pick_mode() {
+    let mut harness = shell_harness();
+    harness.state_mut().state.ui_target = UiTarget::WcsSlot(0);
+    harness.run();
+    // The draft default highlight is center (anchor_xy 4), so that cell
+    // already reads bracketed - imgui's law, pinned here too.
+    for name in ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"] {
+        let label = if name == "C" { "[C]" } else { name };
+        assert!(
+            harness.query_by_label(label).is_some(),
+            "the compass cell {name} must be on the Origin page"
+        );
+    }
+    assert!(!harness.state().state.wcs_ui.pick_anchor, "pick mode starts off");
+
+    harness.get_by_label("SE").click();
+    harness.run();
+    let want = interact::anchor_points(&harness.state().state)[8].0;
+    let e = model::find_by_name(&harness.state().state.world, WCS_SLOTS[0])
+        .expect("the seed places G54");
+    let q = model::transform_of(&harness.state().state.world, &e).unwrap_or_default().pos;
+    let got = [q.x, q.y, q.z];
+    assert!(
+        got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6),
+        "the grid click must place the slot on the anchor the markers draw ({q:?} vs {want:?})"
+    );
+    assert_eq!(harness.state().state.wcs_ui.anchor_xy, 8, "the click names the cell");
+    // The chosen cell reads bracketed, imgui's highlight law.
+    harness.run();
+    assert!(
+        harness.query_by_label("[SE]").is_some(),
+        "the selected cell must show its brackets"
+    );
+
+    // The checkbox is the one writer of pick mode - without it the
+    // viewport crosses are unreachable (this half of the regression).
+    harness.get_by_label("Pick markers in viewport").click();
+    harness.run();
+    assert!(
+        harness.state().state.wcs_ui.pick_anchor,
+        "the checkbox must arm the marker overlay"
+    );
+}
+
 /// The exit contract, lib side (the integration tests/egui_app.rs covers the
 /// `--ui egui` dispatch; this one proves the headless body directly,
 /// including the View3D readback and the fallback-adapter law).

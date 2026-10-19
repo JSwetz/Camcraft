@@ -60,6 +60,7 @@ use hsmworks_app::verify::Warning;
 
 
 use crate::actions;
+use crate::interact;
 use crate::operations::{
     cycle_index, cycle_names, fold_warnings, height_echo, offset_label, side_names,
     strategy_names, unresolved_note,
@@ -1281,6 +1282,73 @@ fn wcs_page(ui: &mut Ui, state: &mut State, slot: usize) {
             apply_wcs_drafts(state);
         }
     });
+
+    ui.add_space(6.0);
+    // Box-point anchoring (feedback 5, revised): the reference box is an
+    // explicit choice - stock or model - and the nine points of the chosen
+    // level can be clicked in the viewport as markers instead of hunting
+    // through the button grid. The buttons and the markers share
+    // `interact::anchor_points`, so what you click, what highlights, and
+    // what places are the same points by construction. This section is the
+    // imgui pane's origin picker (setup.rs, de272ca/067f3aa), restored:
+    // `interact.rs` kept the markers and the viewport pick law through the
+    // M-g retirement, but the widgets here died un-ported, leaving the pick
+    // mode unreachable (the crosses only render while `pick_anchor` is
+    // set). Behavior specced from published CAM setup practice; the grid
+    // and its math are ours.
+    const SOURCES: [&str; 2] = ["Stock box", "Model bounds"];
+    field(ui, "Anchor on");
+    ComboBox::from_id_salt("wcs_src")
+        .selected_text(SOURCES[state.wcs_ui.anchor_source.min(1)])
+        .show_ui(ui, |ui| {
+            for (i, s) in SOURCES.iter().enumerate() {
+                ui.selectable_value(&mut state.wcs_ui.anchor_source, i, *s);
+            }
+        });
+    match interact::anchor_reference(state) {
+        Some((_, what)) => {
+            let chosen = SOURCES[state.wcs_ui.anchor_source.min(1)];
+            if !chosen.eq_ignore_ascii_case(what) {
+                ui.label(format!("No {chosen} defined - anchoring on {what}."));
+            }
+            ui.horizontal(|ui| {
+                for (i, name) in ["Bottom", "Middle", "Top"].iter().enumerate() {
+                    ui.radio_value(&mut state.wcs_ui.anchor_z, i, *name);
+                }
+            });
+            ui.checkbox(&mut state.wcs_ui.pick_anchor, "Pick markers in viewport");
+            if state.wcs_ui.pick_anchor {
+                ui.label("Click a yellow marker in the viewport to set the origin.");
+            }
+            let pts = interact::anchor_points(state);
+            for row in 0..3usize {
+                ui.horizontal(|ui| {
+                    for col in 0..3usize {
+                        let k = row * 3 + col;
+                        let code = pts.get(k).map_or("?", |(_, name)| *name);
+                        let label = if state.wcs_ui.anchor_xy == k {
+                            format!("[{code}]")
+                        } else {
+                            code.to_owned()
+                        };
+                        if ui.button(label).clicked()
+                            && let Some((pos, _)) = pts.get(k)
+                        {
+                            state.wcs_ui.anchor_xy = k;
+                            state.wcs_ui.x = pos[0];
+                            state.wcs_ui.y = pos[1];
+                            state.wcs_ui.z = pos[2];
+                            apply_wcs_drafts(state);
+                        }
+                    }
+                });
+            }
+        }
+        None => {
+            ui.label("Import a model or set stock to anchor the origin on a point.");
+        }
+    }
+
     ui.add_space(6.0);
     ui.label("Placed offsets:");
     for (i, name) in WCS_SLOTS.iter().enumerate() {
