@@ -1,0 +1,45 @@
+# CI: the same gate ladder the project runs by hand (M1.7e).
+# Golden regression suite first (named for the ROADMAP bullet), then the
+# full suites, clippy with warnings denied, and the headless app run.
+# Provenance: our own build law; mirrors the AGENTS.md testing layout.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-latest only until the flecs bindings and the egui/wgpu
+        # stack are proven on a Linux runner - green over breadth; the
+        # matrix shape is here so widening it is one line (RECOMMENDED.md).
+        os: [windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Golden regression suite
+        shell: bash
+        run: >-
+          cargo test -p hsmworks-app
+          --test golden_cl --test posting --test fanuc_post
+          --test project_roundtrip -- --test-threads=4
+      - name: App tests
+        shell: bash
+        run: cargo test -p hsmworks-app -- --test-threads=4
+      - name: UI tests
+        shell: bash
+        run: cargo test -p hsmworks-ui -- --test-threads=4
+      - name: Clippy
+        shell: bash
+        run: cargo clippy -p hsmworks-app -p hsmworks-ui --all-targets -- -D warnings
+      - name: Headless app run
+        shell: bash
+        run: cargo run -q -p hsmworks-ui -- --headless

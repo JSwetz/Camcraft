@@ -1,0 +1,54 @@
+# Release build (M1.7e): a v* tag builds the release binaries, assembles
+# the portable zip - app exe, the `post` CLI, and the post/machine data
+# files it reads from disk - and attaches it to the GitHub Release.
+# Unsigned until a code-signing certificate exists; the decision and the
+# installer-vs-zip choice are logged in RECOMMENDED.md.
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binaries
+        shell: bash
+        run: cargo build --release -p hsmworks-ui -p hsmworks-app
+      - name: Assemble portable zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # The version's single truth is the binary we ship (it stamps
+          # CARGO_PKG_VERSION itself); parsing cargo metadata JSON proved
+          # host-dependent (empty workspace_version under PowerShell 5.1).
+          $ver = ((& ".\target\release\post.exe" --version) -split '\s+')[1]
+          if (-not $ver) { throw "cannot read the version from post.exe" }
+          $stage = "dist/hsmworks-$ver-win-x64"
+          New-Item -ItemType Directory -Force `
+              "$stage/assets/posts", "$stage/assets/machines", "$stage/assets/ui" | Out-Null
+          Copy-Item target/release/hsmworks-ui.exe $stage
+          Copy-Item target/release/post.exe $stage
+          Copy-Item assets/posts/* "$stage/assets/posts"
+          Copy-Item assets/machines/* "$stage/assets/machines"
+          Copy-Item assets/ui/* "$stage/assets/ui"
+          Copy-Item RELEASE_NOTES.md $stage
+          Compress-Archive -Path $stage -DestinationPath "dist/hsmworks-$ver-win-x64.zip" -Force
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-zip
+          path: dist/*.zip
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true

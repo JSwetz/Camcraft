@@ -1,5 +1,6 @@
 /target
 /graphify-out
+/dist
 *.exe
 *.dll
 /*.cps
