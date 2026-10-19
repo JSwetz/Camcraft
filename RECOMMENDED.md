@@ -9,6 +9,52 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.7e - CI matrix, release packaging, v0.1.0 (commit `3305468`)
+
+- **The CI matrix is one axis: `windows-latest`, structured to widen.**
+  The job runs on a `strategy.matrix.os` list so adding Linux is one
+  line, but the list holds only the platform this project has proven:
+  the flecs alpha bindings, the wgpu fallback adapter the GPU tests
+  request, and the headless `run()` path have never been executed on a
+  Linux runner. Why: "all tests green" is the bullet — a second axis
+  that flakes or fails makes the CI a lie, and green over breadth is
+  the Prime Directive's CI-side reading. Cost to change: run the ladder
+  once on an `ubuntu-latest` box (or a WSL check locally), fix the
+  fallout, add the entry.
+- **0.1.0 ships as a portable zip, unsigned, no installer.** The bullet
+  said "signed installer + portable zip"; we ship the zip and defer the
+  rest: no Authenticode certificate is owned, and an MSI layer (WiX or
+  similar) would be an unvalidated moving part in the first public
+  build. The zip carries `hsmworks-ui.exe`, our `post.exe`, and the
+  `assets/posts` + `assets/machines` files the CLI reads from disk —
+  the whole product surface. SmartScreen may warn on first run. Cost to
+  change: get a cert, add a sign step before `Compress-Archive`; if an
+  installer is ever wanted it is additive, not a rework.
+- **The release version comes from the binary, not from parsing
+  metadata.** `post.exe --version` stamps `CARGO_PKG_VERSION` itself, so
+  the packaging script splits it from the built artifact. This came out
+  of running the workflow script locally before committing it: the
+  first draft read `workspace_version` out of `cargo metadata` via
+  `ConvertFrom-Json`, which came back *empty* under PowerShell 5.1,
+  silently producing `hsmworks--win-x64.zip`. Why: the artifact we ship
+  is the version's single truth — and the episode is the argument for
+  smoke-testing release scripts locally, not just on the runner. Cost
+  to change: none worth taking.
+- **`v0.1.0` is a local annotated tag for now; `release.yml` is inert
+  until the repo has a remote.** `git remote -v` shows none — the
+  workflows are committed so the moment the repo is pushed the CI and
+  the tag-triggered release publish themselves, but today the honest
+  release artifacts are this zip under `dist/` plus the tag as the
+  milestone restore point (the standing "make a restore check-in / tag"
+  instruction, satisfied at each phase boundary; `pre-egui-spike` was
+  the other). Discussion point: where does this repo actually get
+  published?
+- **Version 0.1.0 does not pre-empt the clean-room audit.** AGENTS.md:
+  "Version is 0.x.0 until the clean-room audit and release" — 0.1.0
+  keeps the 0.x.0 shape, and RELEASE_NOTES.md states plainly that the
+  audit is still ahead. If the audit finds anything, it lands in 0.1.x
+  or the next minor, not a forced renumber.
+
 ## M1.7d - G-code viewer with scroll-synced toolpath highlight (commit `98bf320`)
 
 - **The viewer shows what the post kept, not what the file says.**

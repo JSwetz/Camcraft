@@ -627,7 +627,7 @@ degrades by rule, none guesses silently:
       re-deriving G73/G81/G83/G84 from moves
 
 ### M1.7 - Simulation & Post (Release 0.1.0)
-**Goal: verified output - first public release.**
+**Goal: verified output - first public release.** — ✅
 
 - ✅ **Move simulation**: rapid vs feed differentiation, feedrate readout, play/pause/scrub -
       one timed `Script` per document (chain-is-truth; cycles contribute dwell
@@ -688,8 +688,14 @@ degrades by rule, none guesses silently:
       (from the post's own stream records, pre-origin-shift world mm), and
       scrolling the listing draws that move amber in the viewport. The
       window follows the tool editor's law; a document switch retires it.
-- **CI**: build matrix, regression test suite on golden models, all tests green
-- **Release build**: signed installer + portable zip (incl. the `post` binary), release notes
+- ✅ **CI**: build matrix (`windows-latest` axis, structured to widen - RECOMMENDED.md),
+      golden regression suite named first, then app + UI suites, clippy
+      `-D warnings`, headless app run (.github/workflows/ci.yml)
+- ✅ **Release build**: portable zip (`hsmworks-ui.exe`, our `post.exe`, the
+      `.cps`/`.mch` data the CLI reads from disk) assembled and published on
+      a `v*` tag, version taken from the shipped binary itself; release
+      notes in `RELEASE_NOTES.md`. Unsigned - no code-signing certificate
+      is owned yet; the installer (vs the zip) is a post-0.1.0 discussion
 
 ---
 
@@ -828,7 +834,7 @@ programming department.
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
-| **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, 0.1.0 | 📋 |
+| **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
 | **M2.2** | Finish 3D to tolerance | Parallel, waterline, scallop, contour family | 📋 |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
