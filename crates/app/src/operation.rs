@@ -604,6 +604,11 @@ pub enum OpParams {
         /// pass aimed at what the dexel sim says still stands
         /// ([`crate::machining3d::pocket3d_with_rest`], M2.1b).
         rest_rough: bool,
+        /// Degrees of cutter contact the `Adaptive` strategy keeps its
+        /// ring step under via [`crate::machining3d::engagement_step`]
+        /// (M2.1c); read only when `strategy` is Adaptive, bounds
+        /// checked there at generate.
+        max_engagement: f64,
     },
 }
 
@@ -742,13 +747,19 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 helix_radius,
+                strategy,
+                max_engagement,
                 ..
             } => {
                 // Structural only, like the pocket's: the helix radius
                 // is checked against the tool radius by the generator,
                 // which is the only reader that owns a tool. A Plunge
                 // entry never consults it, so any positive finite value
-                // - the default 1.0 among them - is sane here.
+                // - the default 1.0 among them - is sane here. Same
+                // law for the engagement angle: it must be finite
+                // always, and inside its own (0, 90] only when the
+                // Adaptive strategy actually reads it - the generator
+                // repeats the bound as the refusal of record.
                 pos(*stepover)
                     && nneg(*stock_to_leave)
                     && clearance_z.is_sane()
@@ -759,6 +770,9 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
+                    && (max_engagement.is_finite()
+                        && (!matches!(strategy, PocketStrategy::Adaptive)
+                            || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
             }
             OpParams::Slot {
                 a,
@@ -993,6 +1007,7 @@ impl OpParams {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Auto => 2,
+                    PocketStrategy::Adaptive => 3,
                 });
                 // v5-era hop plane: presence, then the value (same shape
                 // as Face's staging fields appended above).
@@ -1013,6 +1028,7 @@ impl OpParams {
                 entry,
                 helix_radius,
                 rest_rough,
+                max_engagement,
             } => {
                 h.write_u8(6);
                 w(h, *stepover);
@@ -1020,7 +1036,7 @@ impl OpParams {
                 wh(h, *clearance_z);
                 wh(h, *top_z);
                 wh(h, *bottom_z);
-                for v in [*stepdown, *feed, *plunge_feed, *helix_radius] {
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
@@ -1028,6 +1044,7 @@ impl OpParams {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Auto => 2,
+                    PocketStrategy::Adaptive => 3,
                 });
                 h.write_u8(match entry {
                     Entry3D::Plunge => 0,
@@ -2802,6 +2819,7 @@ pub fn generate(
             entry,
             helix_radius,
             rest_rough,
+            max_engagement,
             ..
         } => {
             // The region is the model's own silhouette (see
@@ -2825,6 +2843,7 @@ pub fn generate(
                 retract_z: hs.retract,
                 entry: *entry,
                 helix_radius: *helix_radius,
+                max_engagement: *max_engagement,
             };
             // The rest pass's verdict rides the path: what the sim
             // still reports after the closing ladder is the closing

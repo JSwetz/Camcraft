@@ -31,6 +31,13 @@ use hsmworks_app::verify::Warning;
 pub fn strategy_names() -> &'static [&'static str] {
     &["Zigzag", "Waterline", "Auto"]
 }
+/// The 3-D pocket's Strategy combo, in index order. Adaptive joins the
+/// family (M2.1c); Auto stays last, the same shape as
+/// [`strategy_names`], because it is the same kind of choice - stored,
+/// resolved at generate.
+pub fn strategy3d_names() -> &'static [&'static str] {
+    &["Zigzag", "Waterline", "Adaptive", "Auto"]
+}
 /// The Side combo's labels, in index order (M1.5.4 issue 2). Auto sits
 /// beside the explicit choices like the pocket's Strategy: picking it
 /// stores the choice, and [`hsmworks_app::operation::contour_auto_side`]
@@ -217,6 +224,9 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             // The staircase is honest noise until the user asks for
             // the closing pass: rest roughing costs a second ladder.
             rest_rough: false,
+            // The law's default (r·(1−cos 45°) ≈ 15% of the diameter);
+            // reads only under Adaptive, which the fresh op does not pick.
+            max_engagement: 45.0,
         },
         _ => OpParams::Face {
             stepover,

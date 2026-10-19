@@ -63,7 +63,7 @@ use crate::actions;
 use crate::interact;
 use crate::operations::{
     cycle_index, cycle_names, fold_warnings, height_echo, offset_label, side_names,
-    strategy_names, unresolved_note,
+    strategy3d_names, strategy_names, unresolved_note,
 };
 use crate::state::{CommandKind, ErrorScope, GeoPick, PostView, State, UiTarget, quat_yaw_deg};
 
@@ -775,6 +775,10 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Auto => 2,
+                    // The 2-D family does not offer Adaptive (its combo
+                    // has no such entry); a file that carries it shows
+                    // as Waterline, the alias the generator implements.
+                    PocketStrategy::Adaptive => 1,
                 };
                 let names = strategy_names();
                 let before = st_idx;
@@ -1018,6 +1022,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             entry,
             helix_radius,
             rest_rough,
+            max_engagement,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1059,17 +1064,24 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 let mut st_idx = match strategy {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
-                    PocketStrategy::Auto => 2,
+                    PocketStrategy::Adaptive => 2,
+                    PocketStrategy::Auto => 3,
                 };
-                let names = strategy_names();
+                let names = strategy3d_names();
                 let before = st_idx;
                 combo(ui, "p3_strat", &mut st_idx, names);
                 if st_idx != before {
                     *strategy = match st_idx {
                         1 => PocketStrategy::Waterline,
-                        2 => PocketStrategy::Auto,
+                        2 => PocketStrategy::Adaptive,
+                        3 => PocketStrategy::Auto,
                         _ => PocketStrategy::Zigzag,
                     };
+                }
+                if matches!(strategy, PocketStrategy::Adaptive) {
+                    field(ui, "Max engagement (deg)");
+                    num_plain(ui, max_engagement);
+                    ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
                 }
                 ui.label("levels come from the mesh: each shelf cuts around the material standing above it");
                 field(ui, "Entry");

@@ -741,9 +741,10 @@ fn every_field_lives_on_exactly_one_section() {
             // The 3-D pocket picks no geometry (the mesh silhouette is
             // the region - islands are computed, never selected): its
             // Geometry tab is the bare pick law, and its Passes carry
-            // the entry ladder's own fields. "Retract Z" and "Helix
-            // lead radius" are guard-rendered (retype's defaults have
-            // neither on), so they are not in this table.
+            // the entry ladder's own fields. "Retract Z", "Helix lead
+            // radius" and "Max engagement (deg)" are guard-rendered
+            // (retype's defaults have none of them on), so they are not
+            // in this table.
             "3D Pocket",
             vec![
                 ("Geometry", vec!["Click selects:"]),

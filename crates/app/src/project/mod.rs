@@ -76,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 12;
+pub const PROJECT_VERSION: u32 = 13;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -406,7 +406,16 @@ pub enum ParamsDto {
         /// the plain level ladder is exactly what they generated.
         #[serde(default)]
         rest_rough: bool,
+        /// Max engagement angle, degrees; read only when `strategy` is
+        /// `Adaptive`. Absent means the law's 45° - v12 files can carry
+        /// no Adaptive ring family to feed it.
+        #[serde(default = "default_engagement_deg")]
+        max_engagement: f64,
     },
+}
+
+fn default_engagement_deg() -> f64 {
+    45.0
 }
 
 /// The file mirror of `machining3d::Entry3D`; `default` is Plunge, the
@@ -592,6 +601,11 @@ pub enum StrategyDto {
     /// stored - resolution runs at generate time - only that the user
     /// asked for it.
     Auto,
+    /// Added at v13 with the constant-engagement ring strategy (the 3-D
+    /// pocket's `Adaptive`; in the 2-D pocket it is the documented
+    /// waterline alias - the geometry family has no engagement field to
+    /// feed it).
+    Adaptive,
 }
 
 /// Which side of its geometry a contour runs, on the wire. Added at v7
@@ -701,6 +715,7 @@ impl ParamsDto {
                     PocketStrategy::Zigzag => StrategyDto::Zigzag,
                     PocketStrategy::Waterline => StrategyDto::Waterline,
                     PocketStrategy::Auto => StrategyDto::Auto,
+                    PocketStrategy::Adaptive => StrategyDto::Adaptive,
                 },
                 // Absent means the hop-to-clearance every pre-step-5
                 // pocket performed; a set plane round-trips exactly.
@@ -721,6 +736,7 @@ impl ParamsDto {
                 entry,
                 helix_radius,
                 rest_rough,
+                max_engagement,
             } => ParamsDto::Pocket3D {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -735,6 +751,7 @@ impl ParamsDto {
                     PocketStrategy::Zigzag => StrategyDto::Zigzag,
                     PocketStrategy::Waterline => StrategyDto::Waterline,
                     PocketStrategy::Auto => StrategyDto::Auto,
+                    PocketStrategy::Adaptive => StrategyDto::Adaptive,
                 },
                 retract_z: (*retract_z).map(Into::into),
                 entry: match entry {
@@ -744,6 +761,7 @@ impl ParamsDto {
                 },
                 helix_radius: *helix_radius,
                 rest_rough: *rest_rough,
+                max_engagement: *max_engagement,
             },
             OpParams::Slot {
                 a,
@@ -913,6 +931,7 @@ impl ParamsDto {
                     StrategyDto::Zigzag => PocketStrategy::Zigzag,
                     StrategyDto::Waterline => PocketStrategy::Waterline,
                     StrategyDto::Auto => PocketStrategy::Auto,
+                    StrategyDto::Adaptive => PocketStrategy::Adaptive,
                 },
             },
             ParamsDto::Pocket3D {
@@ -930,6 +949,7 @@ impl ParamsDto {
                 entry,
                 helix_radius,
                 rest_rough,
+                max_engagement,
             } => OpParams::Pocket3D {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -945,6 +965,7 @@ impl ParamsDto {
                     StrategyDto::Zigzag => PocketStrategy::Zigzag,
                     StrategyDto::Waterline => PocketStrategy::Waterline,
                     StrategyDto::Auto => PocketStrategy::Auto,
+                    StrategyDto::Adaptive => PocketStrategy::Adaptive,
                 },
                 entry: match entry {
                     EntryDto::Plunge => Entry3D::Plunge,
@@ -953,6 +974,7 @@ impl ParamsDto {
                 },
                 helix_radius: *helix_radius,
                 rest_rough: *rest_rough,
+                max_engagement: *max_engagement,
             },
             ParamsDto::Slot {
                 a,
@@ -1476,6 +1498,16 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // Nothing existing changed shape; step-up is the stamp itself,
         // like every bump since v6.
         file.version = 12;
+    }
+    if file.version == 12 {
+        // v12 -> v13: the constant-engagement strategy arrives as one
+        // new params key (`max_engagement`) and one new `strategy` tag
+        // (`adaptive`), neither of which any v12 file can contain - the
+        // serde default of 45° is exactly what a v12 file meant, since
+        // its rings were stepover-spaced and the angle reads only under
+        // Adaptive. No content change; step-up is the stamp itself, like
+        // every bump since v6.
+        file.version = 13;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

@@ -58,7 +58,9 @@ use crate::cl::{lattice, MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::slice::{self, SliceError};
 use crate::geometry::{Point3, Triangle};
-use crate::machining2d::{chord_clears, cut_levels, plan_passes, GenError, PocketStrategy};
+use crate::machining2d::{
+    chord_clears, chord_crosses_path, cut_levels, plan_passes, GenError, PocketStrategy,
+};
 use crate::stock_sim::{self, Dexel, StockError, StockReport};
 
 /// The sim's chord budget for arc moves - the sagitta law's own number,
@@ -113,6 +115,25 @@ pub struct Pocket3DParams {
     /// Helix centerline circle radius (mm); validated ≤ tool radius so
     /// successive turns overlap and the dive cuts a clean bore.
     pub helix_radius: f64,
+    /// The `Adaptive` strategy's engagement bound, in degrees of
+    /// instant cutter contact (ignored by the other strategies, still
+    /// validated finite). Drives the ring step through
+    /// [`engagement_step`] - the whole of constant-engagement
+    /// roughing's geometry law (M2.1c).
+    pub max_engagement: f64,
+}
+
+/// The engagement law, in one line of trigonometry: a pass that bites
+/// a wall face radially by `a` with a disc of radius `r` contacts it
+/// over a half-angle `theta` with `a = r (1 - cos theta)` - the sagitta
+/// of the contact arc. Inverting it gives the biggest ring step whose
+/// contact stays under a chosen angle: `a = r (1 - cos theta_max)`.
+/// Published trochoidal/HEM literature is all computations of this
+/// same disc-against-wall geometry; this is our own reading of it,
+/// pinned by `the_engagement_law_is_the_sagitta` (M2.1c).
+#[must_use]
+pub fn engagement_step(tool_r: f64, max_engagement_deg: f64) -> f64 {
+    tool_r * (1.0 - max_engagement_deg.to_radians().cos())
 }
 
 impl Pocket3DParams {
@@ -128,6 +149,7 @@ impl Pocket3DParams {
             self.feed,
             self.plunge_feed,
             self.helix_radius,
+            self.max_engagement,
         ]
         .into_iter()
         .all(f64::is_finite);
@@ -166,7 +188,31 @@ impl Pocket3DParams {
                 ));
             }
         }
+        if self.strategy == PocketStrategy::Adaptive {
+            // The law's own bounds: a zero angle is a zero step (an
+            // infinite ladder), and past 90 degrees the sagitta passes
+            // one radius - past where consecutive rings still overlap,
+            // which is where the waterline reach law already says
+            // rings stop covering honestly.
+            if self.max_engagement <= 0.0 || self.max_engagement > 90.0 {
+                return Err(GenError::Invalid(
+                    "engagement angle must be in (0, 90] degrees".into(),
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// What actually spaces the passes at a level: the engagement-law
+    /// step under `Adaptive`, the stated stepover otherwise. Everything
+    /// that reads the tiling - the pass plan and the sim's cell size -
+    /// asks this one function, so a grid can never be coarser than the
+    /// law's own bands.
+    fn tiling_step(&self) -> f64 {
+        match self.strategy {
+            PocketStrategy::Adaptive => engagement_step(self.tool_diameter * 0.5, self.max_engagement),
+            _ => self.stepover,
+        }
     }
 }
 
@@ -202,6 +248,22 @@ pub fn material_above(facets: &[Triangle], z: f64) -> Result<Region, GenError> {
         GenError::Invalid("cannot section the model".into()),
         from_slice,
     ))
+}
+
+/// Would a feed chord `a -> b` along this level's plane properly cross
+/// the level's own planned paths? `chord_clears` proves the chord stays
+/// inside the cutter-center area, but on a holed area (an island, a
+/// boss) a chord from one family's ring to another's crosses every ring
+/// in between, and `verify` reports each such crossing at the cut depth.
+/// A chord that fails here is flown over instead: rapids, traverse,
+/// plunge. This is the same law `waterline_passes` chains its rings by,
+/// applied where the ladder joins one planned pass to the next.
+fn chord_hits_plan(a: Point2, b: Point2, passes: &[Vec<Point2>]) -> bool {
+    // The planned passes store their full vertex chains - a waterline
+    // ring repeats its entry point at the end, so walking consecutive
+    // pairs covers its closing leg too - so consecutive segments, never
+    // a phantom close, is the exact set of this level's cut paths.
+    passes.iter().any(|p| chord_crosses_path(a, b, p, false))
 }
 
 /// The helix's dive point: the midpoint of the longest straight run in
@@ -315,8 +377,9 @@ fn guard_input(facets: &[Triangle], footprint: &Region, p: &Pocket3DParams) -> R
 }
 
 /// The sim for this operation: the footprint's XY box, cells fine
-/// enough to see both the tool and the stepover gaps, the stock face
-/// at the cut top. A part that stands taller than the cut top is part
+/// enough to see both the tool and the pass gaps (under `Adaptive`
+/// those gaps are the engagement-law step, so the grid follows it -
+/// `tiling_step`), the stock face at the cut top. A part that stands taller than the cut top is part
 /// of the stock there (the setup's stock contains its model, or the
 /// operation's span does not reach it - either way the column starts
 /// full, never half-invented).
@@ -328,7 +391,7 @@ fn sim_of(
     let (lo, hi) = footprint
         .bounds()
         .ok_or_else(|| GenError::Invalid("footprint has no bounds".into()))?;
-    let cell = (p.tool_diameter * 0.5).min(p.stepover * 0.5);
+    let cell = (p.tool_diameter * 0.5).min(p.tiling_step() * 0.5);
     let mut dex = Dexel::block(lo.x, lo.y, hi.x, hi.y, p.top_z, cell)?;
     let part = stock_sim::part_surface(facets, dex.x0, dex.y0, dex.cell, dex.nx, dex.ny);
     for (t, &pt) in dex.top.iter_mut().zip(&part) {
@@ -357,7 +420,7 @@ fn ladder(
     let hop_z = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
 
     let mut b = PathBuilder::new(start);
-    let close_rings = matches!(p.strategy, PocketStrategy::Waterline);
+    let step = p.tiling_step();
     // The last level that actually cut: its plane and center area, the
     // most crowded the entry motions of the next level can meet (a
     // deeper level's target only grows). None until one has cut.
@@ -387,7 +450,7 @@ fn ladder(
                       // staircase (or a wall this tool cannot enter) -
                       // rest material's later problem, never a lie now
         }
-        let passes = plan_passes(&center, p.stepover, p.climb, p.strategy)?;
+        let passes = plan_passes(&center, step, p.climb, p.strategy)?;
         let Some(first_pass) = passes.first() else {
             continue;
         };
@@ -454,7 +517,7 @@ fn ladder(
                     }
                     b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
                     helix_down(&mut b, d, prev_z, z, p.helix_radius, p.feed);
-                    if chord_clears(&center, d, entry) {
+                    if chord_clears(&center, d, entry) && !chord_hits_plan(d, entry, &passes) {
                         b.push(MoveKind::Feed, Point3::new(entry.x, entry.y, z), Some(p.feed));
                     } else {
                         b.push(MoveKind::Rapid, Point3::new(d.x, d.y, hop_z), None);
@@ -488,14 +551,19 @@ fn ladder(
                 );
             }
         }
-        walk_pass(&mut b, first_pass, z, p.feed, /*skip_first=*/ true, close_rings);
-        // Remaining passes: connect as far as the floor allows.
+        walk_pass(&mut b, first_pass, z, p.feed, /*skip_first=*/ true);
+        // Remaining passes: connect as far as the floor allows - and no
+        // further than the level's own planned paths allow (the boss
+        // bug: a chord can clear the cutter-center area yet cross every
+        // ring scheduled under it, which `verify` then reports as a
+        // Crossing at the cut depth; fly over it instead).
         for pass in &passes[1..] {
             let Some(&next_entry) = pass.first() else {
                 continue;
             };
             let prev = b.at();
-            if chord_clears(&center, Point2::new(prev.x, prev.y), next_entry) {
+            let p2 = Point2::new(prev.x, prev.y);
+            if chord_clears(&center, p2, next_entry) && !chord_hits_plan(p2, next_entry, &passes) {
                 // Feed straight on at this level (the join chord the
                 // test just proved).
                 b.push(MoveKind::Feed, Point3::new(next_entry.x, next_entry.y, z), Some(p.feed));
@@ -508,7 +576,7 @@ fn ladder(
                     Some(p.plunge_feed),
                 );
             }
-            walk_pass(&mut b, pass, z, p.feed, /*skip_first=*/ true, close_rings);
+            walk_pass(&mut b, pass, z, p.feed, /*skip_first=*/ true);
         }
         // Hand this level's plan to the next one's entry legality: it
         // is the deepest cut so far, so its center bounds every plane
@@ -530,28 +598,20 @@ fn ladder(
 }
 
 /// Feed-walk a pass's points at plane `z` (the first point is the
-/// current position; `skip_first` avoids a zero move). `close_rings`
-/// is the strategy's own law, not a guess from the point list: a
-/// waterline pass is a spiral of concentric rings whose last point is
-/// the innermost ring's start, so it is closed by a feed back to its
-/// first - that chord runs the 45° corner line and touches every ring
-/// only at a corner, which no law counts as a crossing. A zigzag pass
-/// is an open scan: closing it would drag a diagonal across every row
-/// of the level, and nothing about the point list tells the two apart
-/// (both end where they are, first != last either way).
-fn walk_pass(
-    b: &mut PathBuilder,
-    pass: &[Point2],
-    z: f64,
-    feed: f64,
-    skip_first: bool,
-    close_rings: bool,
-) {
+/// current position; `skip_first` avoids a zero move). Ring closure is
+/// a property of the point DATA, not a motion added here: a waterline
+/// loop arrives with its start point repeated at the end (each ring is
+/// emitted closed by `waterline_passes`, and a chain of rings carries a
+/// closing point per ring), so the walk's final feed lands each ring
+/// back on its own start. Zigzag rows arrive open and stay open. An
+/// earlier draft closed passes here by feeding the walk's last point
+/// back to the first; for a lone ring that was a zero-length duplicate
+/// of the data's own closing, but for a chained multi-ring pass it
+/// dragged a diagonal across every intermediate ring - the boss crossing
+/// bug. The law is: walk the data, add nothing.
+fn walk_pass(b: &mut PathBuilder, pass: &[Point2], z: f64, feed: f64, skip_first: bool) {
     for q in pass.iter().skip(if skip_first { 1 } else { 0 }) {
         b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
-    }
-    if close_rings && let Some(&a) = pass.first() {
-        b.push(MoveKind::Feed, Point3::new(a.x, a.y, z), Some(feed));
     }
 }
 

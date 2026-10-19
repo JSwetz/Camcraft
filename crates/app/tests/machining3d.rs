@@ -13,7 +13,7 @@ use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::geometry::{Point3, Triangle};
 use hsmworks_app::machining2d::{GenError, PocketStrategy};
 use hsmworks_app::machining3d::{
-    Entry3D, Pocket3DParams, material_above, pocket3d, pocket3d_with_rest,
+    Entry3D, Pocket3DParams, engagement_step, material_above, pocket3d, pocket3d_with_rest,
 };
 use hsmworks_app::verify::{Mode, ToolGeom, VerifyContext, verify};
 
@@ -89,6 +89,9 @@ fn params(entry: Entry3D, helix_radius: f64) -> Pocket3DParams {
         retract_z: None,
         entry,
         helix_radius,
+        // The law's default; reads only under Adaptive, which the
+        // helpers here pick explicitly when they need it.
+        max_engagement: 45.0,
     }
 }
 
@@ -199,8 +202,15 @@ fn a_surface_between_levels_leaves_a_staircase_not_a_lie() {
 
 #[test]
 fn waterline_closes_its_rings() {
-    // Ring passes repeat the walk closed: the XY start multiset equals
-    // the XY end multiset (a law no open zigzag satisfies).
+    // Ring walks are closed tours: every ring repeats its start point
+    // in the pass data, and every join chord pairs one ring's leaving
+    // with the next ring's entering. So per cutting level the feed XY
+    // multiset balances at EVERY point except the level's two honest
+    // open ends - the plunge enters the first ring's start without a
+    // feed, and the level hands off (up to the next level, or to the
+    // retract) without a feed leaving the last ring's start. An open
+    // zigzag breaks even this weaker law: each of its N rows dangles a
+    // departure and an arrival of its own.
     let f = slab();
     let region = silhouette(&f);
     let t = pocket3d(
@@ -212,16 +222,32 @@ fn waterline_closes_its_rings() {
         },
     )
     .unwrap();
-    let mut starts: Vec<(f64, f64)> = Vec::new();
-    let mut ends: Vec<(f64, f64)> = Vec::new();
-    for m in t.moves.iter().filter(|m| m.kind == MoveKind::Feed) {
-        starts.push((m.from.x, m.from.y));
-        ends.push((m.to.x, m.to.y));
+    let mut per_level: std::collections::BTreeMap<[u64; 2], std::collections::BTreeMap<[u64; 2], i32>> =
+        Default::default();
+    let mut cuts = 0;
+    for m in t.moves.iter().filter(|m| m.kind == MoveKind::Feed && m.from.z == m.to.z) {
+        if m.from.x == m.to.x && m.from.y == m.to.y {
+            continue; // vertical at the plane: XY-neutral
+        }
+        cuts += 1;
+        let k = [m.from.z.to_bits(), 0];
+        let d = per_level.entry(k).or_default();
+        *d.entry([m.from.x.to_bits(), m.from.y.to_bits()]).or_default() += 1;
+        *d.entry([m.to.x.to_bits(), m.to.y.to_bits()]).or_default() -= 1;
     }
-    starts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
-    ends.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
-    assert!(!starts.is_empty());
-    assert_eq!(starts, ends, "every XY is left as often as it is entered");
+    assert!(cuts > 0, "the tour actually walks");
+    // One tour per cutting plane: the tour closes at every XY but the
+    // plunge's landing point (+1 leaving) and the level's last cut
+    // point (-1). No ring start may dangle more than that.
+    for (z, d) in &per_level {
+        let out = d.values().filter(|&&v| v > 0).count();
+        let into = d.values().filter(|&&v| v < 0).count();
+        assert!(
+            d.values().all(|&v| v == 1 || v == -1 || v == 0) && out == 1 && into == 1,
+            "level z={}: a ring tour must close at every XY but its two open ends; deltas {d:?}",
+            f64::from_bits(z[0]),
+        );
+    }
     assert_eq!(verify_against(&f, &region, &t), Vec::new());
 }
 
@@ -533,3 +559,147 @@ fn material_above_holds_its_monotonic_law() {
     assert!(deep.contains(Point2::new(15.0, 0.0)), "and below it all is solid");
 }
 
+
+// ---------------------------------------------------------------------------
+// M2.1c: constant-engagement rings. The strategy v1 IS the waterline tiling
+// at the sagitta-law step - these tests pin the law, the plumbing that makes
+// the equality true, and the validation that guards it.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_engagement_law_is_the_sagitta() {
+    // a = r(1 - cos theta): the ring step that keeps the wall bite inside
+    // the angle. 60 degrees is exactly half a radius; 90 degrees exactly a
+    // radius - the waterline reach bound, the law's closed end. The default
+    // 45 degrees steps at 14.6% of the diameter, the published HEM band.
+    let r = 4.0;
+    assert!((engagement_step(r, 60.0) - 0.5 * r).abs() < 1e-12);
+    assert!((engagement_step(r, 90.0) - r).abs() < 1e-12);
+    let s45 = engagement_step(r, 45.0);
+    assert!(
+        (s45 / (2.0 * r) - 0.1464).abs() < 1e-3,
+        "45 degrees must step at ~14.6% of D, got {s45}"
+    );
+    // Monotone in the angle, with the two known limits.
+    assert!(engagement_step(r, 10.0) < s45 && s45 < engagement_step(r, 80.0));
+    assert!(engagement_step(r, 0.0).abs() < 1e-12, "no angle bites, no step");
+}
+
+#[test]
+fn adaptive_is_the_waterline_tiling_at_the_law_step() {
+    // The equality is tiling_step made visible: one source for the ring
+    // spacing, read by the pass planner (and, for the sim, by the cell
+    // law). Any drift between the strategies' plumbing fails here.
+    let f = slab();
+    let region = silhouette(&f);
+    let step = engagement_step(4.0, 45.0);
+    let adaptive = pocket3d(
+        &f,
+        &region,
+        &Pocket3DParams {
+            strategy: PocketStrategy::Adaptive,
+            ..params(Entry3D::Plunge, 1.0)
+        },
+    )
+    .unwrap();
+    let waterline_at_step = pocket3d(
+        &f,
+        &region,
+        &Pocket3DParams {
+            strategy: PocketStrategy::Waterline,
+            stepover: step,
+            ..params(Entry3D::Plunge, 1.0)
+        },
+    )
+    .unwrap();
+    assert_eq!(adaptive.moves, waterline_at_step.moves, "one law, one geometry");
+    assert_eq!(verify_against(&f, &region, &adaptive), Vec::new());
+    // And against the untouched params, the engagement step (1.17 mm)
+    // tiles finer than the 3 mm stepover: strictly more cutting passes.
+    let waterline_at_stepover = pocket3d(
+        &f,
+        &region,
+        &Pocket3DParams {
+            strategy: PocketStrategy::Waterline,
+            ..params(Entry3D::Plunge, 1.0)
+        },
+    )
+    .unwrap();
+    assert!(
+        adaptive.moves.len() > waterline_at_stepover.moves.len(),
+        "the law step must tile finer than the stepover it replaces"
+    );
+}
+
+#[test]
+fn adaptive_refuses_what_the_law_refuses() {
+    let f = slab();
+    let region = silhouette(&f);
+    let at = |strategy: PocketStrategy, angle: f64, stepover: f64| {
+        pocket3d(
+            &f,
+            &region,
+            &Pocket3DParams {
+                strategy,
+                stepover,
+                max_engagement: angle,
+                ..params(Entry3D::Plunge, 1.0)
+            },
+        )
+    };
+    // (0, 90] only: 0 rings forever, and past a quarter-turn the sagitta
+    // claims bite the tool cannot take (90 degrees is the reach bound).
+    for bad in [0.0, -45.0, 90.5] {
+        let r = at(PocketStrategy::Adaptive, bad, 3.0);
+        assert!(
+            matches!(r, Err(GenError::Invalid(_))),
+            "{bad} degrees must refuse under Adaptive, got {r:?}"
+        );
+    }
+    assert!(at(PocketStrategy::Adaptive, 90.0, 3.0).is_ok(), "90 is the closed end");
+    assert!(at(PocketStrategy::Adaptive, 45.0, 3.0).is_ok());
+    // Elsewhere the angle is inert: 0 degrees under Waterline changes
+    // nothing, because nothing reads it.
+    assert!(at(PocketStrategy::Waterline, 0.0, 3.0).is_ok());
+    // Finiteness is strategy-blind, as it has always been.
+    assert!(at(PocketStrategy::Zigzag, f64::NAN, 3.0).is_err());
+    assert!(at(PocketStrategy::Adaptive, f64::NAN, 3.0).is_err());
+    // The stepover gate is strategy-blind too: under Adaptive the number
+    // never spaces a ring (tiling_step answers for it), but a non-positive
+    // or over-wide stepover is still a nonsense parameter, refused by the
+    // same gate every other pocket meets. The v1 stance - keep the gate
+    // shared, document the inertness, do not fork legality per strategy.
+    assert!(at(PocketStrategy::Adaptive, 45.0, 0.0).is_err());
+    assert!(at(PocketStrategy::Adaptive, 45.0, 9.0).is_err(), "over the D");
+}
+
+#[test]
+fn adaptive_rings_circle_the_boss() {
+    // The boss law is strategy-independent: the ring family is carved
+    // from the same standing-material centers, so the computed islands
+    // exclude the boss columns exactly as under Waterline.
+    let f = slab_with_boss();
+    let region = silhouette(&f);
+    let t = pocket3d(
+        &f,
+        &region,
+        &Pocket3DParams {
+            strategy: PocketStrategy::Adaptive,
+            ..params(Entry3D::Plunge, 1.0)
+        },
+    )
+    .unwrap();
+    for m in &t.moves {
+        for q in [&m.from, &m.to] {
+            if q.z < 0.0 {
+                assert!(
+                    !(q.x.abs() < 5.0 && q.y.abs() < 5.0),
+                    "move {:?} at z {} enters the boss column",
+                    m.kind,
+                    q.z
+                );
+            }
+        }
+    }
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+}

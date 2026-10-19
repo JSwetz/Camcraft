@@ -1623,3 +1623,20 @@ fn trace_is_deterministic() {
 }
 
 
+
+#[test]
+fn adaptive_is_the_documented_waterline_alias_in_2d() {
+    // The 2-D family has no engagement field to read (the angle rides the
+    // 3-D params only), so Adaptive is implemented as exactly the
+    // waterline geometry - the equality is that decision, move for move.
+    // The 2-D combo never offers it; a file (or a stamp) can carry it.
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let mut w = pp();
+    w.strategy = PocketStrategy::Waterline;
+    let mut a = pp();
+    a.strategy = PocketStrategy::Adaptive;
+    let tw = pocket(&region, &w).expect("waterline valid");
+    let ta = pocket(&region, &a).expect("the alias valid");
+    assert_eq!(ta.moves, tw.moves, "the alias is not a second geometry");
+    assert!(ta.is_chained() && ta.all_finite());
+}
