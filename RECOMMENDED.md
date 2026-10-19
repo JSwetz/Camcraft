@@ -9,6 +9,95 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.7b — in-app Post, the validation gate, Fanuc CPS assets (commit `feat(app,ui): in-app Post with the validation gate + Fanuc CPS assets (M1.7b)`)
+
+- **Span ownership decides cycle seating in a merged stream.**
+  `posting::stream_records` shifts each operation's cycle `first_move`
+  by the moves posted before it (anchors are stream-global); the
+  engine's `normalize_program_order` then assigns each cycle to the
+  SECTION span whose move-range owns that index, and where the anchor
+  index doesn't exist inside the span (a truncated or hand-made
+  stream) the cycle seats at *that* span's end - never re-seated past
+  a boundary. Why: a hole that can't be placed must die inside its
+  own section, where the reviewer sees a hole-less section, not
+  silently relocate into the next operation - cross-span relocation
+  is loss. Cost to change: the law lives in `span_of` (post/mod.rs)
+  plus its test table.
+- **Origin-shift is the script's job: the stream speaks world
+  coordinates, the program speaks machine-relative.** `dump` emits
+  `OriginX/Y/Z` PARAMs (the WCS slot's Transform) and unshifted
+  numbers; `fanuc.cps` subtracts the origin in `wo()` from every
+  absolute word (X/Y/Z and cycle R/B) and passes the *relative*
+  words through untouched - `I/J` derived as center-minus-current,
+  `Q` peck steps. A legacy `.cl` has no PARAMs, so origins stay 0 and
+  old goldens post byte-identical. Why: G54-relative programming is
+  what a work offset *means* to the control; baking the shift in the
+  engine would strip a future post of the choice to emit G10 blocks
+  or take offsets from a macro variable instead. Cost to change: each
+  new `.cps` must remember the subtraction - the law is a header
+  comment in the shipped script.
+- **The WCS origin is post context, not a generation input.** It is
+  resolved at post time from the height grammar's first `WorkOffset`
+  reference (else G54), and it digests into no stamp. Why: moving a
+  datum changes where the machine measures from, not what is cut -
+  making it stamp input would turn fixture setup into a regenerate
+  storm. Cost to change: an op generated against one origin posts
+  under a moved one silently, which is exactly right for 3-axis and
+  worth revisiting when multi-WCS per setup arrives.
+- **Tool number is library rank.** `T..`/`H..` is the tool's 1-based
+  position among the *named* tools in document order - the same
+  number the tool library shows. Why: one law, derived from data the
+  user already sees, and the post can never disagree with the
+  browser. Cost to change: reordering tools in the browser
+  renumbers programs; that is what "magazine equals library order"
+  means, and it's the honest version of a magazine map.
+- **The gate has one body, in the app layer.** `post_setup` refuses
+  stale/never-generated ops *before* building any record, refuses on
+  *any* engine warning after, and writes only a clean program (and
+  deletes its own half-write on an IO failure). The UI seam is two
+  `CommandKind` arms and a status line - zero duplicated logic. Why:
+  the Prime Directive's blocking rule - a half-posted program is the
+  silent wrong answer this file exists to prevent - while the CLI
+  (M1.7a) keeps its developer exit-0-with-warnings; two consumers,
+  two severities, one gate computation, exactly the shape M1.7a's
+  counted-warnings entry planned for.
+- **Post outcomes are status-line-only, like save and open.** No pane
+  error, no dialog: "posted 2 op(s), 214 lines to …" or "post
+  refused - 40 warning(s): Contour1: shank/holder at move 44 …".
+  Why: the file law says an effect's outcome is one line the whole
+  shell agrees on; three surfaces (ribbon, Ctrl+P, tests) then read
+  identically. Cost to change: a warnings pane could consume the
+  same `out.warnings` vector later.
+- **The seed document is honestly blocked.** The first real run of
+  the gate refused `ShellUi::seeded()` with 40 ShankHit warnings -
+  a full-height rim contour beside ~30 mm of uncut stock wall is
+  real geometry the shank really would hit. Kept, not fixed: the
+  kittest proof asserts that refusal (phase 0, nothing written),
+  then makes the doc clean with a 0.5 mm top skim for the positive
+  proof, then staleness, then the repost. Why: a test proving the
+  gate against a fabricated document proves less. Side finding,
+  commented in the test: a *stepdown* edit on a 0.5 mm skim is
+  stale-by-stamp but byte-identical output - the staleness witness
+  must be a field that rides the Z words (plunge feed).
+- **Dialog arms are proven by queue membership.** `rfd` cannot run
+  headless, so the ribbon-click test uses a no-drain frame
+  (`frame_undrained`) and asserts `PostProgramDialog` was pushed;
+  the `*File` arm runs the real gate in tests. Same split as
+  save/open - the dialog is the only untestable millimeter.
+- **gitignore scoping: vendor fixtures in, product assets out.**
+  `*.cps` became `/*.cps`: the root vendor `.cps`/`.mch`/`post.exe`
+  (local validator material, never committed, per the Clean-Room
+  Protocol) stay ignored, while `assets/posts/fanuc.cps` and
+  `assets/machines/3axis-vmc.mch` are tracked product content -
+  `fanuc.cps` is an `include_str!` build dependency, and untracked
+  it was a fresh-checkout build break. Why: "ours in, vendor out"
+  needs the pattern anchored to the root, not the extension.
+- **post.png is an original drawing.** No Tabler glyph fits "post to
+  G-code", so the cell's icon is `</>` chevrons drawn in the set's
+  stroke weight (40×40, round caps, alpha coverage) - the loader's
+  white-repaint contract applies unchanged. Icon law kept: original
+  when no generic set fits.
+
 ## M1.7a — post engine core + `.cnc` intermediate (commit `feat(app): post engine core + .cnc intermediate (M1.7a)`)
 
 - **JS runtime: boa_engine 0.21, not SpiderMonkey** (the user raised
