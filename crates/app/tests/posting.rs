@@ -312,3 +312,53 @@ fn a_non_g54_slot_is_what_the_script_writes() {
     let _ = std::fs::remove_file(&path);
     assert!(text.contains("G90 G55"), "the script took the slot from the PARAM: {text}");
 }
+
+#[test]
+fn posted_carries_line_positions_matching_the_move_chain() {
+    // M1.7d viewer contract, the app half: every position a program
+    // line resolves to is the endpoint of some real move (the map
+    // invents nothing), at least every cycle-free contour move gets a
+    // positioned line (coverage), and the first positioned line is the
+    // stream's first move (order). Floats compare on the lattice law's
+    // tolerance, not bitwise: the round trip is mm -> um -> mm.
+    let (world, _h) = contour_and_drill();
+    let path = tmp_nc("linepos");
+    let posted = posting::post_setup(&world, &path).expect("a fresh, silent world posts");
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(posted.line_pos.len(), posted.lines, "one slot per program line");
+    assert_eq!(posted.lines, posted.program.lines().count(), "the retained text is the program");
+
+    let mut endpoints: Vec<[f64; 3]> = Vec::new();
+    let mut contour_moves = 0usize;
+    for op in ["Contour1", "Drill1"] {
+        let e = model::find_by_name(&world, op).expect("op");
+        let tp = model::toolpath_of(&world, &e).expect("cached path");
+        if op == "Contour1" {
+            contour_moves = tp.path.moves.len();
+        }
+        endpoints.extend(tp.path.moves.iter().map(|m| [m.to.x, m.to.y, m.to.z]));
+    }
+    let same = |a: &[f64; 3], b: &[f64; 3]| {
+        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
+    };
+    let resolved: Vec<[f64; 3]> = posted.line_pos.iter().copied().flatten().collect();
+    assert!(
+        resolved.len() >= contour_moves,
+        "the contour's {} moves must each reach the viewer, got {} positioned lines",
+        contour_moves,
+        resolved.len()
+    );
+    assert!(
+        same(&resolved[0], &endpoints[0]),
+        "first positioned line {:?} is not the first move {:?}",
+        resolved[0],
+        endpoints[0]
+    );
+    for p in &resolved {
+        assert!(
+            endpoints.iter().any(|e| same(e, p)),
+            "position {p:?} is posted by no move - the viewer would highlight a lie"
+        );
+    }
+}

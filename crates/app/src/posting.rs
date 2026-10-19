@@ -40,6 +40,13 @@ pub fn default_machine() -> Value {
 pub struct Posted {
     pub ops: usize,
     pub lines: usize,
+    /// The exact program that was written - the M1.7d viewer shows the
+    /// disk's content without re-reading it (one source of truth: text
+    /// and positions come from the same engine run).
+    pub program: String,
+    /// One entry per program line: the world position of the move that
+    /// line writes, or `None` for header, tool and section lines.
+    pub line_pos: Vec<Option<[f64; 3]>>,
 }
 
 /// Post every operation of the document, in tree order, to one NC
@@ -66,10 +73,47 @@ pub fn post_setup(world: &World, out_path: &Path) -> Result<Posted, String> {
         .iter()
         .filter(|r| matches!(r, cnc::Record::Section { begin: true }))
         .count();
+    let lines = out.program.lines().count();
+    let line_pos = viewer_map(&records, &out);
     Ok(Posted {
         ops,
-        lines: out.program.lines().count(),
+        lines,
+        program: out.program,
+        line_pos,
     })
+}
+
+/// Program line -> world position, by the stream's own laws: the dump
+/// emits exactly one Move record per path move in chain order
+/// ([`post::dump`]), so the k-th Move record is the k-th global move -
+/// the same counter that seats cycles' `first_move` stream-global
+/// above. Move coordinates are pre-origin-shift world millimeters (the
+/// script applies the origin, M1.7b's law) - the very numbers the
+/// viewport draws, so a highlighted line and a highlighted move cannot
+/// disagree.
+fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[f64; 3]>> {
+    let moves: Vec<[f64; 3]> = records
+        .iter()
+        .filter_map(|r| match r {
+            cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
+            _ => None,
+        })
+        .collect();
+    let mut line_pos = vec![None; out.program.lines().count()];
+    for info in &out.line_map {
+        let Some(rec) = info.record.filter(|i| *i < records.len()) else {
+            continue; // header lines carry no record; a broken map must not panic
+        };
+        let pos = match &records[rec] {
+            cnc::Record::Move(m) => Some([m.x, m.y, m.z]),
+            cnc::Record::Cycle(c) => moves.get(c.first_move).copied(),
+            _ => None,
+        };
+        if let Some(slot) = line_pos.get_mut(info.line) {
+            *slot = pos;
+        }
+    }
+    line_pos
 }
 
 /// The stream we would feed the engine: every operation's records,

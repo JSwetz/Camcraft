@@ -532,6 +532,11 @@ pub(crate) fn shell_layout(
     // (`state.tool_editor` is None on a fresh State), so no panel below
     // it ever moves in the snapshot until something opens it.
     pages::tool_editor_window(ui.ctx(), state);
+    // M1.7d: the G-code viewer - same window law as the tool editor (an
+    // in-app egui::Window over the dock; the single-OS-window law
+    // stands). None on a fresh State, closed by ✖, reopened by the next
+    // successful post, so the snapshot never moves until a post happens.
+    pages::gcode_window(ui.ctx(), state);
 }
 
 /// Feed this pass's CPU-texture deltas (the font atlas first of all) to the
@@ -938,6 +943,26 @@ fn viewport_panel(
                     .circle_filled(c, 2.0, egui::Color32::WHITE);
             }
         }
+        // The G-code viewer's sync cursor: the move that line posts,
+        // drawn amber over the paths - the segment arriving at the
+        // scroll line's position, plus a ring at its end. Same display
+        // law as the tool marker: reads view state, never the world,
+        // and drops points that project behind the camera.
+        if let Some((a, b)) = gcode_segment(state) {
+            let mvp = state.cam.mvp(aspect);
+            let pa = interact::project_uv(&mvp, a)
+                .map(|u| egui::pos2(rx0 + u[0] * rw, ry0 + u[1] * rh));
+            let pb = interact::project_uv(&mvp, b)
+                .map(|u| egui::pos2(rx0 + u[0] * rw, ry0 + u[1] * rh));
+            let amber = egui::Color32::from_rgb(255, 170, 60);
+            if let (Some(pa), Some(pb)) = (pa, pb) {
+                ui.painter()
+                    .line_segment([pa, pb], egui::Stroke::new(2.5, amber));
+            }
+            if let Some(pb) = pb {
+                ui.painter().circle_stroke(pb, 4.0, egui::Stroke::new(1.5, amber));
+            }
+        }
         // Corner hint: the control legend, or the live mode while dragging.
         let hint = match state.drag {
             Some(DragMode::Orbit) => "orbit",
@@ -997,10 +1022,12 @@ pub(crate) fn sim_readout(
     format!("{op} · {verb} · {t:.1}/{:.1} s", sc.total.max(0.0))
 }
 
+/// Rebuild the timeline from the live world, every frame: the same
+/// tree-order walk the post takes (hidden paths included - hidden is
+/// display, not suppression; the law stands on `State::has_toolpaths`),
+/// so the transport clock and the posted program count the same moves.
 pub(crate) fn sim_script(state: &State) -> hsmworks_app::sim::Script {
     use hsmworks_app::{model, posting, sim};
-    // (doc comment above the readout helper covers this seam too; the walk
-    // law is stated on `State::has_toolpaths`.)
     let tr = sim::Traverse::from_machine(&posting::default_machine());
     let paths: Vec<(String, hsmworks_app::cl::Toolpath)> = model::named_entities(&state.world)
         .into_iter()
@@ -1008,6 +1035,34 @@ pub(crate) fn sim_script(state: &State) -> hsmworks_app::sim::Script {
         .filter_map(|(n, e)| model::toolpath_of(&state.world, &e).map(|tp| (n, tp.path)))
         .collect();
     sim::script(paths.iter().map(|(n, t)| (n.as_str(), t)), &tr)
+}
+
+/// The move the G-code viewer's cursor points at, as the segment that
+/// arrives at it: the last recorded position at or before the scroll
+/// line, drawn from the one before that (so the highlight is the path's
+/// own polyline, not a floating point - the first move's segment
+/// collapses to its endpoint ring). None with no viewer up, the window
+/// closed, or a map that holds no position yet. Pure, like the readout
+/// - the viewport pass draws what this resolves, nothing more.
+pub(crate) fn gcode_segment(state: &State) -> Option<([f64; 3], [f64; 3])> {
+    let view = state.post_view.as_ref()?;
+    if !view.open {
+        return None;
+    }
+    let cursor = view.line.min(view.line_pos.len().saturating_sub(1));
+    let mut to = None;
+    let mut from = None;
+    for (i, p) in view.line_pos.iter().enumerate() {
+        if i > cursor {
+            break;
+        }
+        if let Some(p) = p {
+            from = to;
+            to = Some(*p);
+        }
+    }
+    let to = to?;
+    Some((from.unwrap_or(to), to))
 }
 
 /// egui Pos2 -> the `[f32; 2]` convention interact.rs speaks (0.36 has no

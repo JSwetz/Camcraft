@@ -567,6 +567,28 @@ impl Default for Sim {
     }
 }
 
+/// The M1.7d G-code viewer's content: the program one successful post
+/// wrote, plus its scroll cursor. Unlike [`Sim`] - which is a clock over
+/// live toolpaths and rebuilds itself every frame - this holds frozen
+/// evidence of one specific file, so a document switch retires it (New
+/// and Open clear it; an in-document edit does not: the program still
+/// truthfully says what was posted, and re-posting replaces it).
+#[derive(Clone, Debug)]
+pub struct PostView {
+    /// The file the program went to - the window's title.
+    pub path: std::path::PathBuf,
+    pub program: String,
+    /// Per program line, the world position of the move it writes
+    /// (`posting::Posted::line_pos`).
+    pub line_pos: Vec<Option<[f64; 3]>>,
+    /// Window visibility (egui::Window::open).
+    pub open: bool,
+    /// Sync cursor: the program line at the viewer's middle. Immediate
+    /// view state like the playhead (AGENTS.md), written by the window's
+    /// pass and read by the viewport's highlight.
+    pub line: usize,
+}
+
 pub struct State {
     pub world: World,
     pub history: History,
@@ -621,6 +643,9 @@ pub struct State {
     /// is only the playhead; the timeline is rebuilt from the world
     /// each frame, so editing or switching documents never strands it.
     pub sim: Option<Sim>,
+    /// M1.7d G-code viewer: None after any document switch or refused
+    /// post, `Some` while a posted program is being reviewed.
+    pub post_view: Option<PostView>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -764,6 +789,7 @@ impl State {
             show_all_paths: false,
             display: DisplayMode::default(),
             sim: None,
+            post_view: None,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,
@@ -1398,6 +1424,8 @@ impl State {
                 // millimeters, never the last document's inches.
                 units::set(&self.world, Unit::default());
                 self.history.clear();
+                // Frozen evidence of the old document retires with it.
+                self.post_view = None;
                 self.doc_version += 1;
                 self.status = String::from("new document");
             }
@@ -1913,6 +1941,7 @@ impl State {
         self.abandon_imports();
         model::clear_named(&self.world);
         self.history.clear();
+        self.post_view = None; // the old document's program is not this one's
         match project::load(&self.world, &path) {
             Ok(()) => {
                 self.doc_version += 1;
@@ -1936,7 +1965,19 @@ impl State {
                     posted.lines,
                     path.display()
                 );
+                // The viewer shows what the gate just wrote - text and
+                // positions from the same engine run, so highlighting a
+                // line highlights the move that line posts.
+                self.post_view = Some(PostView {
+                    path,
+                    program: posted.program,
+                    line_pos: posted.line_pos,
+                    open: true,
+                    line: 0,
+                });
             }
+            // A refused post leaves any previous program (file and viewer)
+            // exactly as it was - the gate writes nothing on refusal.
             Err(err) => self.status = format!("post refused: {err}"),
         }
     }

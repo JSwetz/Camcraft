@@ -45,7 +45,7 @@ use hsmworks_app::schema::WCS_SLOTS;
 use hsmworks_app::units::{self, Unit};
 
 use crate::interact;
-use crate::state::{CommandKind, DragMode, GeoPick, State, UiTarget};
+use crate::state::{CommandKind, DragMode, GeoPick, PostView, State, UiTarget};
 
 use super::icons::IconSet;
 use super::panes::{self, Cmd};
@@ -1406,7 +1406,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Model, "Open a mesh model\tCtrl+O"),
         (Cmd::Project, "Open a project\tCtrl+Shift+O"),
         (Cmd::Save, "Save the project\tCtrl+S"),
-        (Cmd::Post, "Post NC program (validation gate)\tCtrl+P"),
+        (Cmd::Post, "Post NC program (validation gate), then review it\tCtrl+P"),
         (Cmd::Stock, "Stock definition"),
         (Cmd::Origin, "Work offset (WCS)"),
         (Cmd::Tools, "Tool library"),
@@ -2035,4 +2035,147 @@ fn sim_readout_names_the_op_and_the_verb() {
     // so the verb is END - the bar itself never shows it (the total==0 arm
     // prints "nothing to run"); this row pins the name, not the verb.
     assert!(none.starts_with("(none) · END · "), "degenerate: {none}");
+}
+
+// ------------------------------------------- M1.7d: G-code viewer
+
+#[test]
+fn gcode_segment_highlights_the_move_the_scroll_line_posts() {
+    // The resolver behind the amber highlight, pure: the segment is the
+    // path's own polyline arriving at the cursor line - previous stored
+    // position to current; None lines rest the cursor where it was; the
+    // first position collapses to its endpoint ring; a closed viewer
+    // (hidden is display, M1.7c's law) highlights nothing.
+    let mk = |line_pos: Vec<Option<[f64; 3]>>, line: usize, open: bool| {
+        let mut st = State::new();
+        st.post_view = Some(PostView {
+            path: std::path::PathBuf::from("p.nc"),
+            program: String::new(),
+            line_pos,
+            open,
+            line,
+        });
+        super::shell::gcode_segment(&st)
+    };
+    let chain = || {
+        vec![
+            Some([0.0, 0.0, 10.0]),
+            None,
+            Some([10.0, 0.0, 10.0]),
+            Some([10.0, 0.0, 0.0]),
+        ]
+    };
+    assert_eq!(mk(chain(), 0, true), Some(([0.0, 0.0, 10.0], [0.0, 0.0, 10.0])));
+    assert_eq!(
+        mk(chain(), 1, true),
+        Some(([0.0, 0.0, 10.0], [0.0, 0.0, 10.0])),
+        "a comment line rests the cursor on the last move"
+    );
+    assert_eq!(
+        mk(chain(), 2, true),
+        Some(([0.0, 0.0, 10.0], [10.0, 0.0, 10.0])),
+        "the segment arriving at that line's position"
+    );
+    assert_eq!(
+        mk(chain(), 99, true),
+        Some(([10.0, 0.0, 10.0], [10.0, 0.0, 0.0])),
+        "a past-the-end cursor clamps to the last move"
+    );
+    assert_eq!(mk(chain(), 2, false), None);
+    assert_eq!(mk(vec![], 0, true), None, "header-only program: nothing to highlight");
+    assert_eq!(mk(vec![None, None], 1, true), None);
+    // No viewer at all (fresh document) resolves to nothing either.
+    assert_eq!(super::shell::gcode_segment(&State::new()), None);
+}
+
+#[test]
+fn a_successful_post_opens_the_viewer_and_new_document_retires_it() {
+    // The real law end to end: the gate's own story (edit, regenerate,
+    // skim post) is M1.7b's test at the head of this file - reused here
+    // untouched, because what this pins is the viewer half: text and
+    // positions from the same engine run, open on success, gone with
+    // the document.
+    let mut harness = shell_harness();
+    let path = std::env::temp_dir().join(format!("hsmworks-egui-view-{}.nc", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let mut skim = {
+        let st = &harness.state().state;
+        let e = hsmworks_app::model::find_by_name(&st.world, "Contour1").expect("the seed's op");
+        hsmworks_app::model::operation_of(&st.world, &e)
+            .expect("op")
+            .params
+            .clone()
+    };
+    if let hsmworks_app::operation::OpParams::Contour { bottom_z, .. } = &mut skim {
+        *bottom_z = hsmworks_app::operation::Height::fixed(29.5);
+    }
+    harness.state_mut().state.pending.push_back(CommandKind::EditOperationParams {
+        name: "Contour1".into(),
+        params: skim,
+    });
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::GenerateOperation("Contour1".into()));
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::PostProgramFile(path.clone()));
+    harness.run();
+    {
+        let st = &harness.state().state;
+        assert!(st.status.starts_with("posted"), "skim post: {}", st.status);
+        let v = st.post_view.as_ref().expect("a successful post carries the viewer");
+        assert!(v.open, "the post opens the window");
+        assert_eq!(
+            v.program.lines().count(),
+            v.line_pos.len(),
+            "one position slot per program line"
+        );
+        assert!(
+            v.line_pos.iter().any(|p| p.is_some()),
+            "a contour program has moves to highlight"
+        );
+        // The cursor starts at the head when the post sets it; frames
+        // after the window opens publish a center row. What must hold
+        // either way: it is a line the program has, never past the end.
+        assert!(v.line < v.program.lines().count(), "cursor in range: {}", v.line);
+    }
+    let _ = std::fs::remove_file(&path);
+    harness.state_mut().state.pending.push_back(CommandKind::NewDocument);
+    harness.run();
+    assert!(
+        harness.state().state.post_view.is_none(),
+        "a frozen program is evidence of the old document, never the new one"
+    );
+}
+
+#[test]
+fn the_viewer_window_publishes_the_scroll_cursor() {
+    // Paint-side law, no dialog: the window pass writes the middle row
+    // back as the sync cursor, and while the window is open that cursor
+    // resolves to a highlighted segment. 120 lines at ~400 px cannot
+    // all show, so the published row is a real center row - never the
+    // head, never past the tail.
+    let mut harness = shell_harness();
+    harness.state_mut().state.post_view = Some(PostView {
+        path: std::path::PathBuf::from("p.nc"),
+        program: (0..120)
+            .map(|i| format!("G01 X{i}.0 Y0. F200."))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        line_pos: (0..120).map(|i| Some([i as f64, 0.0, 0.0])).collect(),
+        open: true,
+        line: 0,
+    });
+    harness.run();
+    {
+        let st = &harness.state().state;
+        let v = st.post_view.as_ref().expect("the frame keeps the viewer");
+        assert!(v.line > 0 && v.line < 120, "center row published: {}", v.line);
+        assert!(super::shell::gcode_segment(st).is_some(), "and it highlights");
+    }
+    harness.state_mut().state.post_view.as_mut().expect("still there").open = false;
+    assert!(
+        super::shell::gcode_segment(&harness.state().state).is_none(),
+        "closing the window hides the highlight"
+    );
 }

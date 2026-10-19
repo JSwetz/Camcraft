@@ -204,7 +204,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Model => "Open a mesh model\tCtrl+O".into(),
         Cmd::Project => "Open a project\tCtrl+Shift+O".into(),
         Cmd::Save => "Save the project\tCtrl+S".into(),
-        Cmd::Post => "Post NC program (validation gate)\tCtrl+P".into(),
+        Cmd::Post => "Post NC program (validation gate), then review it\tCtrl+P".into(),
         Cmd::Stock => "Stock definition".into(),
         Cmd::Origin => "Work offset (WCS)".into(),
         Cmd::Tools => "Tool library".into(),

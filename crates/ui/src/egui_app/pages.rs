@@ -65,7 +65,7 @@ use crate::operations::{
     cycle_index, cycle_names, fold_warnings, height_echo, offset_label, side_names,
     strategy_names, unresolved_note,
 };
-use crate::state::{CommandKind, ErrorScope, GeoPick, State, UiTarget, quat_yaw_deg};
+use crate::state::{CommandKind, ErrorScope, GeoPick, PostView, State, UiTarget, quat_yaw_deg};
 
 use super::panes::{TYPES, kind_name, retype};
 use super::theme::Palette;
@@ -1506,6 +1506,68 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
 /// reach the world, through the same commands the dock's field list used
 /// to carry. Delete stays a library verb (the dock owns it), which also
 /// keeps every button label unique across the two surfaces.
+/// M1.7d: the G-code viewer. The program one successful post wrote,
+/// line-numbered and monospaced, with the scroll cursor (the line at
+/// the window's middle) published through `PostView::line` for the
+/// viewport's amber segment (`shell::gcode_segment`). It shows the
+/// retained text, not a re-read of the file: text and positions came
+/// from the same engine run, so a highlighted line always highlights
+/// the move that line posts, even if something edits the file after.
+pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
+    let Some(view) = state.post_view.as_mut() else {
+        return;
+    };
+    if !view.open {
+        return; // closed by ✖ or a document switch: allocate nothing
+    }
+    let stem = view
+        .path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("program")
+        .to_owned();
+    let n = view.program.lines().count();
+    let mut open = view.open;
+    // Disjoint field borrows: the closure writes `line` and reads
+    // `program` at once, and `open` is a copy resolved after the pass.
+    let PostView { program, line, .. } = view;
+    Window::new(format!("G-code - {stem}"))
+        .id(Id::new("gcode-viewer"))
+        .open(&mut open)
+        .default_size([560.0, 400.0])
+        .show(ctx, |ui| {
+            ScrollArea::vertical()
+                .id_salt("gcode-scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // The scroll offset is read, not stored: egui lays
+                    // the inner ui out at `-offset`, so the clip rect's
+                    // center against the content top names the middle
+                    // row - that row is the sync cursor. Uniform rows
+                    // (one monospace label per line, spacing fixed) are
+                    // what make the division exact.
+                    let row_h = ui.text_style_height(&egui::TextStyle::Monospace);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let top = ui.min_rect().min.y;
+                    let vis = ui.clip_rect();
+                    *line = (((vis.center().y - top) / row_h).max(0.0) as usize).min(n.saturating_sub(1));
+                    let width = ui.available_width();
+                    for (i, ln) in program.lines().enumerate() {
+                        let label = format!("{:>4}  {}", i + 1, ln);
+                        // add_sized pins every row to exactly row_h, so
+                        // the cursor arithmetic above stays exact over
+                        // a long program instead of drifting a row.
+                        ui.add_sized(
+                            [width, row_h],
+                            Label::new(egui::RichText::new(label).monospace())
+                                .selectable(false),
+                        );
+                    }
+                });
+        });
+    view.open = open;
+}
+
 pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
     let u = state.units();
     let Some(_subject) = state.tool_editor.clone() else {
