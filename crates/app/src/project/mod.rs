@@ -76,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 11;
+pub const PROJECT_VERSION: u32 = 12;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -402,6 +402,10 @@ pub enum ParamsDto {
         /// Read only when `entry` is Helix; a stored number is the
         /// user's choice, never a stale derivation from the tool.
         helix_radius: f64,
+        /// Absent means off: the v11 files predate the rest pass, and
+        /// the plain level ladder is exactly what they generated.
+        #[serde(default)]
+        rest_rough: bool,
     },
 }
 
@@ -716,6 +720,7 @@ impl ParamsDto {
                 strategy,
                 entry,
                 helix_radius,
+                rest_rough,
             } => ParamsDto::Pocket3D {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -738,6 +743,7 @@ impl ParamsDto {
                     Entry3D::Helix => EntryDto::Helix,
                 },
                 helix_radius: *helix_radius,
+                rest_rough: *rest_rough,
             },
             OpParams::Slot {
                 a,
@@ -923,6 +929,7 @@ impl ParamsDto {
                 retract_z,
                 entry,
                 helix_radius,
+                rest_rough,
             } => OpParams::Pocket3D {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -945,6 +952,7 @@ impl ParamsDto {
                     EntryDto::Helix => Entry3D::Helix,
                 },
                 helix_radius: *helix_radius,
+                rest_rough: *rest_rough,
             },
             ParamsDto::Slot {
                 a,
@@ -1460,6 +1468,14 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // exist. Nothing existing changed shape, so no content change;
         // step-up is the stamp itself, like every bump since v6.
         file.version = 11;
+    }
+    if file.version == 11 {
+        // v11 -> v12: the 3-D pocket's rest pass arrives as one new
+        // params key (`rest_rough`), absent from every v11 file - the
+        // serde default is false, which is exactly what v11 generated.
+        // Nothing existing changed shape; step-up is the stamp itself,
+        // like every bump since v6.
+        file.version = 12;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

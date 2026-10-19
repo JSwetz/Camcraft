@@ -600,6 +600,10 @@ pub enum OpParams {
         /// Helix centerline radius, mm; read only when `entry` is
         /// Helix, validated there against the tool radius at generate.
         helix_radius: f64,
+        /// Close the level ladder's staircase with a rest-material
+        /// pass aimed at what the dexel sim says still stands
+        /// ([`crate::machining3d::pocket3d_with_rest`], M2.1b).
+        rest_rough: bool,
     },
 }
 
@@ -1008,6 +1012,7 @@ impl OpParams {
                 strategy,
                 entry,
                 helix_radius,
+                rest_rough,
             } => {
                 h.write_u8(6);
                 w(h, *stepover);
@@ -1030,6 +1035,10 @@ impl OpParams {
                     Entry3D::Helix => 2,
                 });
                 wh_opt(h, *retract_z);
+                // v12-era rest pass: the flag is the generator's
+                // switch, so it belongs in the digest (a model edit
+                // must mark a rest path Stale like any other).
+                h.write_u8(u8::from(*rest_rough));
             }
             OpParams::Slot {
                 a,
@@ -2792,6 +2801,7 @@ pub fn generate(
             strategy,
             entry,
             helix_radius,
+            rest_rough,
             ..
         } => {
             // The region is the model's own silhouette (see
@@ -2800,26 +2810,31 @@ pub fn generate(
             // picked loop to add - and nothing to erode by hand either:
             // one erosion per level, from that level's target.
             let region = region_for_src(world, &op.src, &op.params, &material)?;
-            let path = machining3d::pocket3d(
-                &material.facets,
-                &region,
-                &Pocket3DParams {
-                    tool_diameter: d,
-                    stepover: *stepover,
-                    stock_to_leave: *stock_to_leave,
-                    clearance_z: hs.clearance,
-                    top_z: req_z(hs.top, "Top of Part Z")?,
-                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
-                    stepdown: *stepdown,
-                    feed: *feed,
-                    plunge_feed: *plunge_feed,
-                    climb: *climb,
-                    strategy: *strategy,
-                    retract_z: hs.retract,
-                    entry: *entry,
-                    helix_radius: *helix_radius,
-                },
-            )?;
+            let pp = Pocket3DParams {
+                tool_diameter: d,
+                stepover: *stepover,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: hs.clearance,
+                top_z: req_z(hs.top, "Top of Part Z")?,
+                bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                strategy: *strategy,
+                retract_z: hs.retract,
+                entry: *entry,
+                helix_radius: *helix_radius,
+            };
+            // The rest pass's verdict rides the path: what the sim
+            // still reports after the closing ladder is the closing
+            // report's business (the simulation view), not a silent
+            // extra here.
+            let path = if *rest_rough {
+                machining3d::pocket3d_with_rest(&material.facets, &region, &pp)?.0
+            } else {
+                machining3d::pocket3d(&material.facets, &region, &pp)?
+            };
             (region, path)
         }
         OpParams::Slot {

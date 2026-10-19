@@ -2,14 +2,19 @@
 //! FINAL part; each level cuts the footprint minus the columns the solid
 //! still fills at its plane), the entry ladder's legality fallbacks, and
 //! the generated paths' silence under the verify laws that read the same
-//! islands. Provenance: our own design, specced from published CAM
+//! islands. M2.1b adds the rest pass over the dexel sim: it closes the
+//! staircase, plunges (never ramps) into rest material, and reports the
+//! verdict without inventing a single gouge.
+//! Provenance: our own design, specced from published CAM
 //! behavior, per the Clean-Room Protocol.
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};
 use hsmworks_app::geometry::{Point3, Triangle};
 use hsmworks_app::machining2d::{GenError, PocketStrategy};
-use hsmworks_app::machining3d::{Entry3D, Pocket3DParams, material_above, pocket3d};
+use hsmworks_app::machining3d::{
+    Entry3D, Pocket3DParams, material_above, pocket3d, pocket3d_with_rest,
+};
 use hsmworks_app::verify::{Mode, ToolGeom, VerifyContext, verify};
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
@@ -360,6 +365,150 @@ fn degenerate_input_refuses_cleanly() {
 }
 
 #[test]
+fn the_rest_pass_closes_the_staircase_it_inherited() {
+    // The between-levels slab: the plain ladder floors those columns one
+    // stepdown above the part surface and says so honestly; with the
+    // rest pass, half the step closes the stair. The report is the
+    // witness: rest gone, nothing gouged, and the coarse ladder still
+    // leads the path move for move (the rest is an appendix, never a
+    // rewrite - the same runs, then the closing levels).
+    let f = box_facets([-20.0, -20.0, -20.0], [20.0, 20.0, -7.5]);
+    let region = rect(-15.0, -15.0, 15.0, 15.0);
+    let pp = Pocket3DParams {
+        bottom_z: -10.0,
+        stepdown: 5.0,
+        ..params(Entry3D::Ramp, 1.0)
+    };
+    let coarse = pocket3d(&f, &region, &pp).unwrap();
+    let deepest_coarse = coarse
+        .moves
+        .iter()
+        .map(|m| m.to.z.min(m.from.z))
+        .fold(f64::INFINITY, f64::min);
+    assert_eq!(deepest_coarse, -5.0);
+
+    let (t, rep) = pocket3d_with_rest(&f, &region, &pp).unwrap();
+    assert_eq!(
+        &t.moves[..coarse.moves.len()],
+        &coarse.moves[..],
+        "the coarse ladder is the path's prefix, untouched"
+    );
+    assert!(t.moves.len() > coarse.moves.len(), "rest moves were added");
+    let deepest = t
+        .moves
+        .iter()
+        .map(|m| m.to.z.min(m.from.z))
+        .fold(f64::INFINITY, f64::min);
+    assert_eq!(deepest, -7.5, "the closing level lands exactly on the surface");
+    // The one place a disc cannot go is the pocket's own square
+    // corners: no center both covers a corner column and stays inside
+    // the eroded footprint, so four columns stand at full stock, and
+    // the report says so - the fillet's job in a later strategy,
+    // never a number to hide. Everything the ladder can reach, it
+    // closed.
+    assert_eq!(rep.rest_cells, 4, "the four pocket corners, named");
+    assert!((rep.max_rest_height - 7.5).abs() < 1e-6, "standing at full stock");
+    assert!((rep.rest_volume - 67.5).abs() < 0.1, "{rep:?}");
+    assert_eq!(rep.gouge_cells, 0, "and the closing cut never bit below");
+    // 2.5 mm closed over all but four corner columns of the 30x30
+    // footprint, stock counted from the cut top (the gross law).
+    assert!(
+        (rep.removed_volume - 6682.5).abs() < 1.0,
+        "{rep:?}"
+    );
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+    // The rest level enters by plunge, never a ramp: deeper columns are
+    // superset-clear (the nesting law), so a straight dive is legal and
+    // a diagonal through standing stair material would be a lie.
+    assert!(
+        t.moves.iter().any(|m| m.kind == MoveKind::Plunge && m.to.z == -7.5),
+        "the closing level plunges"
+    );
+}
+
+#[test]
+fn a_path_that_needs_nothing_adds_nothing() {
+    // Two honest verdicts from the boss slab. The floor and the boss
+    // faces land exactly on the part, and that emptiness is success -
+    // the path stays byte-identical to the plain ladder. (Had the
+    // ladder refused emptiness as an error, a fully-cut pocket would
+    // fail to post.) What does remain is corner wedges - where two
+    // pocket walls meet, and where two boss walls do (a disc there
+    // would have to bite the boss to reach the column): the half-step
+    // ladder finds them, plans nothing legal, and REPORTS them - rest
+    // the sim refuses to hide, for the point-plunge and fillet work
+    // of the later rest strategies.
+    let f = slab_with_boss();
+    let region = silhouette(&f);
+    let pp = params(Entry3D::Plunge, 1.0);
+    let coarse = pocket3d(&f, &region, &pp).unwrap();
+    let (t, rep) = pocket3d_with_rest(&f, &region, &pp).unwrap();
+    assert_eq!(t.moves, coarse.moves, "no legal rest pass, no rest moves");
+    assert!(
+        rep.rest_cells > 0 && rep.rest_cells < 32,
+        "corner slivers only, and named: {:?}",
+        rep.rest_cells
+    );
+    // Under 5% of the removed volume, and the residue is not noise:
+    // it is the four square corners of the pocket and the four of the
+    // boss - columns no legal disc center reaches (427.5 of 14872.5
+    // mm3 on this fixture). The honest floor of a line-pass round
+    // tool; fillet strategies are what close it, in a later milestone.
+    assert!(
+        rep.rest_volume < 0.05 * rep.removed_volume,
+        "corner slivers of the whole: {:?} vs {:?}",
+        rep.rest_volume,
+        rep.removed_volume
+    );
+    assert_eq!(rep.gouge_cells, 0, "and it reached nothing it should not have");
+    // The flat slab to its own floor: no islands, and the only rest
+    // left is the corner wedges - columns farther than the disc's
+    // radius from every legal center. Their exact count is grid
+    // phase: the bbox starts the lattice at -20, so columns sit
+    // 0.75 mm nearer the low walls than the high ones and the wedge
+    // is 3 cells wide at (+, +), 2 at the mixed corners, 1 at (-, -).
+    // Eight, standing 10 mm over the part, for 180 mm3 the sim names
+    // instead of hiding - a fillet or point pass closes them later.
+    let s = slab();
+    let sr = silhouette(&s);
+    let (_, rep2) = pocket3d_with_rest(&s, &sr, &pp).unwrap();
+    assert_eq!(rep2.rest_cells, 8, "the corner wedges, per the grid phase");
+    assert!((rep2.rest_volume - 180.0).abs() < 1e-6, "{rep2:?}");
+    assert_eq!(rep2.gouge_cells, 0);
+    // The grid's own area, cell-quantized by construction (the
+    // measure law): 729 in-footprint columns x 2.25 mm2 x 10 mm,
+    // minus the eight standing ones.
+    assert!((rep2.removed_volume - 16222.5).abs() < 0.1, "{rep2:?}");
+}
+
+#[test]
+fn the_rest_ladder_refuses_what_the_plain_one_refuses() {
+    // Same guards, same vocabulary - the rest pass is a consumer of
+    // pocket3d's contract, never a second door around it.
+    let f = slab();
+    let region = rect(-15.0, -15.0, 15.0, 15.0);
+    assert!(matches!(
+        pocket3d_with_rest(&[], &region, &params(Entry3D::Plunge, 1.0)),
+        Err(GenError::Empty(_))
+    ));
+    assert!(matches!(
+        pocket3d_with_rest(&f, &Region::empty(), &params(Entry3D::Plunge, 1.0)),
+        Err(GenError::Empty(_))
+    ));
+    assert!(matches!(
+        pocket3d_with_rest(
+            &f,
+            &region,
+            &Pocket3DParams {
+                feed: f64::NAN,
+                ..params(Entry3D::Plunge, 1.0)
+            }
+        ),
+        Err(GenError::Invalid(_))
+    ));
+}
+
+#[test]
 fn material_above_holds_its_monotonic_law() {
     // Deeper planes fill with more columns: the boss slab's islands grow
     // from nothing above 0, to the boss below it, to everything below
@@ -383,3 +532,4 @@ fn material_above_holds_its_monotonic_law() {
     assert!(!mid.contains(Point2::new(15.0, 0.0)), "the slab top is at -10");
     assert!(deep.contains(Point2::new(15.0, 0.0)), "and below it all is solid");
 }
+

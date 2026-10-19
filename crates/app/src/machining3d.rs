@@ -41,12 +41,40 @@
 //! mid-row instead. A diagonal or an orbit into a wall is a gouge, and
 //! a fallback that costs a slower dive is never one. The first level
 //! always plunges: its plane is the surface itself.
+//!
+//! ## The rest pass (M2.1b)
+//!
+//! `pocket3d_with_rest` runs the ladder, simulates it against the mesh
+//! with the dexel grid (`stock_sim`), then runs a half-stepdown ladder
+//! aimed at the columns the sim says still stand:
+//! `target(z) = footprint ∖ slice(z+ε) ∩ {sim_top > z}`. Entries there
+//! are always plunges - the nesting law (a deeper plane's island is a
+//! superset of a shallower one's) means a column clear at z is clear at
+//! every plane above z, so a dive into rest crosses no part wall. The
+//! staircase bound halves per pass, toward the grid's own resolution;
+//! the closing report is the sim's verdict, never a second surface.
 
 use crate::cl::{lattice, MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::slice::{self, SliceError};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{chord_clears, cut_levels, plan_passes, GenError, PocketStrategy};
+use crate::stock_sim::{self, Dexel, StockError, StockReport};
+
+/// The sim's chord budget for arc moves - the sagitta law's own number,
+/// the same one `Move::chords` is tested at. Finer than the lattice by
+/// four decades, coarser than any gouge tolerance: chords under-sweep
+/// the arc, which the stock_sim header makes conservative by law.
+const CHORD_TOL: f64 = 0.01;
+
+impl From<StockError> for GenError {
+    fn from(e: StockError) -> Self {
+        match e {
+            StockError::Geo(g) => GenError::Geo(g),
+            StockError::Invalid(s) => GenError::Invalid(s),
+        }
+    }
+}
 
 /// How the cutter first engages material at a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -211,6 +239,71 @@ pub fn pocket3d(
     footprint: &Region,
     p: &Pocket3DParams,
 ) -> Result<Toolpath, GenError> {
+    guard_input(facets, footprint, p)?;
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+    ladder(facets, footprint, p, &zs, None, home(p))
+}
+
+/// The rest-material sibling (M2.1b): the same level ladder, then a
+/// second, half-stepdown pass aimed at what the simulation says is
+/// still standing. The coarse ladder's staircase is the acknowledged
+/// price of planes - at most `stepdown` above a raised surface - and
+/// this closes it toward stepdown/2 per round the caller dares to run.
+/// Entries here are always plain plunges, and the superset law is why:
+/// a column the coarse ladder cleared at z is clear at every plane
+/// above z, so a vertical dive into rest material can never cross part
+/// geometry. The report is the sim's verdict on the COMBINED path,
+/// measured against the mesh's own surface.
+pub fn pocket3d_with_rest(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+) -> Result<(Toolpath, StockReport), GenError> {
+    guard_input(facets, footprint, p)?;
+    let r = p.tool_diameter * 0.5;
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+    let coarse = ladder(facets, footprint, p, &zs, None, home(p))?;
+
+    // What the coarse ladder leaves standing, column by column.
+    let (mut dex, _) = sim_of(facets, footprint, p)?;
+    for m in &coarse.moves {
+        dex.subtract(m, r, CHORD_TOL);
+    }
+
+    // The rest ladder: same laws, half the step, rest-shaped targets.
+    let zs_r = cut_levels(p.top_z, p.bottom_z, p.stepdown * 0.5);
+    let start = coarse.moves.last().map_or_else(|| home(p), |m| m.to);
+    let mut moves = coarse.moves;
+    match ladder(facets, footprint, p, &zs_r, Some(&dex), start) {
+        Ok(rp) => moves.extend(rp.moves),
+        // Nothing stood above any rest plane: the coarse path was
+        // already clean at lattice scale. A success, not a refusal.
+        Err(GenError::Empty(_)) => {}
+        Err(e) => return Err(e),
+    }
+    let path = Toolpath {
+        moves,
+        cycles: Vec::new(),
+    };
+    if !path.all_finite() {
+        return Err(GenError::Invalid("path left the finite horizon".into()));
+    }
+
+    // The verdict on the whole job: re-run the sim from raw stock over
+    // the combined path, so the report describes the machining, not
+    // one of its legs.
+    let (mut dex, part) = sim_of(facets, footprint, p)?;
+    for m in &path.moves {
+        dex.subtract(m, r, CHORD_TOL);
+    }
+    Ok((path, stock_sim::measure(&dex, &part, footprint, EPS)))
+}
+
+fn home(p: &Pocket3DParams) -> Point3 {
+    Point3::new(0.0, 0.0, p.clearance_z)
+}
+
+fn guard_input(facets: &[Triangle], footprint: &Region, p: &Pocket3DParams) -> Result<(), GenError> {
     p.validate()?;
     if facets.is_empty() {
         return Err(GenError::Empty("no model facets to section".into()));
@@ -218,11 +311,52 @@ pub fn pocket3d(
     if footprint.is_empty() {
         return Err(GenError::Empty("empty pocket footprint".into()));
     }
+    Ok(())
+}
+
+/// The sim for this operation: the footprint's XY box, cells fine
+/// enough to see both the tool and the stepover gaps, the stock face
+/// at the cut top. A part that stands taller than the cut top is part
+/// of the stock there (the setup's stock contains its model, or the
+/// operation's span does not reach it - either way the column starts
+/// full, never half-invented).
+fn sim_of(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+) -> Result<(Dexel, Vec<f64>), GenError> {
+    let (lo, hi) = footprint
+        .bounds()
+        .ok_or_else(|| GenError::Invalid("footprint has no bounds".into()))?;
+    let cell = (p.tool_diameter * 0.5).min(p.stepover * 0.5);
+    let mut dex = Dexel::block(lo.x, lo.y, hi.x, hi.y, p.top_z, cell)?;
+    let part = stock_sim::part_surface(facets, dex.x0, dex.y0, dex.cell, dex.nx, dex.ny);
+    for (t, &pt) in dex.top.iter_mut().zip(&part) {
+        if pt > *t {
+            *t = pt;
+        }
+    }
+    Ok((dex, part))
+}
+
+/// One ladder run: the level loop shared by both entry points. `zs` is
+/// the plane list, `rest` the post-coarse state whose still-standing
+/// columns the pass is aimed at (None: the pure level law), and
+/// `start` where the builder begins - the home position for the coarse
+/// run, the coarse path's end for the rest run, so the two legs chain
+/// into one path.
+fn ladder(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    zs: &[f64],
+    rest: Option<&Dexel>,
+    start: Point3,
+) -> Result<Toolpath, GenError> {
     let r = p.tool_diameter * 0.5;
-    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     let hop_z = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
 
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut b = PathBuilder::new(start);
     let close_rings = matches!(p.strategy, PocketStrategy::Waterline);
     // The last level that actually cut: its plane and center area, the
     // most crowded the entry motions of the next level can meet (a
@@ -233,8 +367,19 @@ pub fn pocket3d(
         // cutter-center area by one erosion.
         let islands = material_above(facets, z)?;
         let target = footprint.difference(&islands)?;
+        let target = match rest {
+            // The level law on rest terms: only columns the simulated
+            // state still has standing above this plane. The islands
+            // subtraction already ran, and the nesting law keeps the
+            // intersection honest: a part column above z is an island,
+            // so the sim's coarser top cannot smuggle part material
+            // into a rest target.
+            None => target,
+            Some(dex) => target.intersect(&dex.above(z)?)?,
+        };
         if target.is_empty() {
-            continue; // model material across the whole footprint here
+            continue; // nothing above this plane: model material across
+                      // the whole footprint, or nothing standing at all
         }
         let center = target.offset(-(r + p.stock_to_leave))?;
         if center.is_empty() {
@@ -260,7 +405,13 @@ pub fn pocket3d(
         let leg = Point2::new(at.x, at.y);
         let prev_z = prev_state.as_ref().map_or(z, |(q, _)| *q);
         match p.entry {
-            Entry3D::Ramp if li > 0 => {
+            // Ramp and helix are the coarse ladder's motions: a rest
+            // pass starts inside planes that are already cut, where a
+            // diagonal would cross floors the coarse pass owns. The
+            // vertical dive needs no such proof (the nesting law
+            // carries it), so the rest ladder always takes the plunge
+            // arm below.
+            Entry3D::Ramp if li > 0 && rest.is_none() => {
                 // The diagonal's legality is asked of the PREVIOUS
                 // level's center: it is the deepest cut so far, its
                 // islands stand above everything this descent passes,
@@ -281,7 +432,7 @@ pub fn pocket3d(
                     );
                 }
             }
-            Entry3D::Helix if li > 0 => {
+            Entry3D::Helix if li > 0 && rest.is_none() => {
                 // Pass ends sit on the walls by construction, so the
                 // orbit is never legal about one: the dive lives at the
                 // midpoint of the level's longest row, where the

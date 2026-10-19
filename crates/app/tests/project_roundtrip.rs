@@ -78,18 +78,19 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v10
+    // Anything newer than this build's format stays refused; v1..v11
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
     // side_roundtrip_v6_defaults_to_auto the v6 contour -> v7 side step,
     // units_round_trip_and_a_v7_file_means_millimeters v7 -> v8,
-    // v8_file_steps_to_v9 v8 -> v9, v9_file_steps_to_v10 v9 -> v10, and
-    // v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips v10 -> v11).
-    let text = r#"{"version": 12, "entities": []}"#;
+    // v8_file_steps_to_v9 v8 -> v9, v9_file_steps_to_v10 v9 -> v10,
+    // v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips v10 ->
+    // v11, and v11_file_steps_to_v12 v11 -> v12).
+    let text = r#"{"version": 13, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(12)) => {}
+        Err(ProjectError::UnsupportedVersion(13)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1219,7 +1220,7 @@ fn v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips() {
     let _ = std::fs::remove_file(&path);
     assert!(
         saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
-        "the migration writes the v11 stamp: {saved}"
+        "the migration writes the current stamp: {saved}"
     );
 
     // The pocket3d wire grammar, hand-written so the tags are pinned:
@@ -1251,6 +1252,7 @@ fn v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips() {
         entry,
         helix_radius,
         retract_z,
+        rest_rough,
         ..
     } = &o.params
     else {
@@ -1262,6 +1264,10 @@ fn v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips() {
     assert_eq!(*entry, hsmworks_app::machining3d::Entry3D::Helix);
     assert_eq!(*helix_radius, 2.0);
     assert!(retract_z.is_none(), "absent retract stays absent");
+    assert!(
+        !*rest_rough,
+        "absent rest_rough is off - a v11 file generated the plain ladder"
+    );
 
     // Write-parse-write is a fixed point, and the entry tag is snake_case.
     let path = tmp_path("p3");
@@ -1284,6 +1290,54 @@ fn v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips() {
         matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
         "must refuse an entry tag outside the vocabulary"
     );
+}
+
+#[test]
+fn v11_file_steps_to_v12() {
+    // A literal v11 project: the rest pass arrives as one optional key
+    // (`rest_rough`), and a v11 file can contain it nowhere - the pocket
+    // could not rest-rough. The serde default (off) is exactly what v11
+    // generated, so the step-up is the stamp itself, like every bump
+    // since v6.
+    let text = r#"{
+        "version": 11,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "end_mill", "diameter": 4.0, "corner_r": 0.0,
+                      "flute_len": 12.0, "shank_d": 6.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 10000.0, "feed": 1200.0}},
+            {"name": "P3", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"pocket3d": {
+                 "stepover": 2.5, "stock_to_leave": 0.0,
+                 "clearance_z": {"reference": "fixed", "offset": 10.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "stepdown": 1.5, "feed": 900.0, "plunge_feed": 150.0, "climb": true,
+                 "strategy": "zigzag", "entry": "ramp", "helix_radius": 1.0}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v11 file must migrate");
+    let e = model::find_by_name(&world, "P3").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Pocket3D { rest_rough, entry, .. } = &o.params else {
+        panic!("the pocket3d params must read unchanged, got {:?}", o.params);
+    };
+    assert!(!*rest_rough, "a v11 file never rest-roughed; off is its meaning");
+    assert_eq!(*entry, hsmworks_app::machining3d::Entry3D::Ramp);
+
+    let path = tmp_path("v12");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v12 stamp: {saved}"
+    );
+    // The learned key is written in its false state: a v12 file names
+    // the choice it made, so the shape stays a fixed point.
+    assert!(saved.contains("\"rest_rough\": false"), "{saved}");
 }
 
 #[test]

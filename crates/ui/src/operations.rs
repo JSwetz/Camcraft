@@ -214,6 +214,9 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             // opt-in once the walls are known to allow them.
             entry: hsmworks_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
+            // The staircase is honest noise until the user asks for
+            // the closing pass: rest roughing costs a second ladder.
+            rest_rough: false,
         },
         _ => OpParams::Face {
             stepover,

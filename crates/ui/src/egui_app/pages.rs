@@ -1017,6 +1017,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             strategy,
             entry,
             helix_radius,
+            rest_rough,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1091,6 +1092,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     num(ui, u, helix_radius);
                     ui.label("a plunge stands in wherever a helix of this radius cannot fit");
                 }
+                ui.checkbox(rest_rough, "Rest roughing");
+                ui.label("a closing ladder, half the step, cuts what the levels leave standing");
             }
             if tab == SEC_FEEDS {
                 field(ui, &format!("Feed ({})", u.feed_suffix()));

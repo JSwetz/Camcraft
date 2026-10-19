@@ -20,6 +20,7 @@ pub mod project;
 pub mod schema;
 pub mod sim;
 pub mod stock;
+pub mod stock_sim;
 pub mod tools;
 pub mod units;
 pub mod verify;

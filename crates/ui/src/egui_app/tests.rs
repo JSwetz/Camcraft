@@ -758,7 +758,7 @@ fn every_field_lives_on_exactly_one_section() {
                         "Stepdown",
                     ],
                 ),
-                ("Passes", vec!["Stepover", "Stock to leave", "Strategy", "Entry"]),
+                ("Passes", vec!["Stepover", "Stock to leave", "Strategy", "Entry", "Rest roughing"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
