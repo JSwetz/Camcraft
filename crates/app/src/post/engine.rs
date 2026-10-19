@@ -63,6 +63,10 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                     "StartZ" => pos.2 = value.as_f64().unwrap_or(0.0),
                     _ => {}
                 }
+                // Publish the running param set so `onParameter` (and
+                // `onSpindleSpeed` just below) can actually read the
+                // value the hook names.
+                s.set_properties(&merged(&base, &BTreeMap::new(), pos))?;
                 s.call("onParameter", &format!("{}, {}", json!(name), value))?;
                 if name == "SpindleSpeed" {
                     s.call("onSpindleSpeed", "")?;
@@ -72,6 +76,8 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
             Record::Tool { number, name } => {
                 base.insert("ToolNumber".into(), json!(*number));
                 base.insert("ToolName".into(), json!(name));
+                s.set_properties(&merged(&base, &BTreeMap::new(), pos))?;
+                s.call("onToolChange", &format!("{}, {}", json!(number), json!(name)))?;
             }
             Record::Section { begin } => {
                 s.call(if *begin { "onSection" } else { "onSectionEnd" }, "")?;

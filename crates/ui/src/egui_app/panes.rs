@@ -47,12 +47,13 @@ pub(crate) const TYPES: [&str; 6] = ["Face", "2D Contour", "2D Pocket", "Slot", 
 /// `crate::actions`, the same entry the ribbon uses.
 pub fn shortcuts(ui: &mut Ui, state: &mut State) {
     let typing = ui.memory(|m| m.focused().is_some());
-    let (modifiers, n, o, s, q, z, y, del, f) = ui.input(|i| {
+    let (modifiers, n, o, s, p, q, z, y, del, f) = ui.input(|i| {
         (
             i.modifiers,
             i.key_pressed(Key::N),
             i.key_pressed(Key::O),
             i.key_pressed(Key::S),
+            i.key_pressed(Key::P),
             i.key_pressed(Key::Q),
             i.key_pressed(Key::Z),
             i.key_pressed(Key::Y),
@@ -84,6 +85,11 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
         if s {
             actions::save_project(state);
         }
+        if p {
+            // M1.7b: posting joins the file lane - the same dialog law
+            // as Save (the gate's refusals arrive through the queue arm).
+            actions::post_program(state);
+        }
         if q {
             // The window close button (CloseRequested) always quit; since
             // M-g it has a keyboard sibling. imgui's only quit surface was
@@ -112,6 +118,7 @@ pub(super) enum Cmd {
     Model,
     Project,
     Save,
+    Post,
     Stock,
     Origin,
     Tools,
@@ -125,7 +132,7 @@ pub(super) enum Cmd {
 }
 
 const GROUPS: [(&str, &[Cmd]); 5] = [
-    ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save]),
+    ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::Post]),
     ("Setup", &[Cmd::Stock, Cmd::Origin, Cmd::Tools]),
     (
         "Create",
@@ -157,6 +164,7 @@ fn label_of(c: Cmd) -> &'static str {
         Cmd::Model => "Model",
         Cmd::Project => "Project",
         Cmd::Save => "Save",
+        Cmd::Post => "Post",
         Cmd::Stock => "Stock",
         Cmd::Origin => "Origin",
         Cmd::Tools => "Tools",
@@ -194,6 +202,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Model => "Open a mesh model\tCtrl+O".into(),
         Cmd::Project => "Open a project\tCtrl+Shift+O".into(),
         Cmd::Save => "Save the project\tCtrl+S".into(),
+        Cmd::Post => "Post NC program (validation gate)\tCtrl+P".into(),
         Cmd::Stock => "Stock definition".into(),
         Cmd::Origin => "Work offset (WCS)".into(),
         Cmd::Tools => "Tool library".into(),
@@ -244,6 +253,7 @@ fn icon_of(c: Cmd) -> Icon {
         Cmd::Model => Icon::OpenModel,
         Cmd::Project => Icon::OpenProject,
         Cmd::Save => Icon::Save,
+        Cmd::Post => Icon::Post,
         Cmd::Stock => Icon::Stock,
         Cmd::Origin => Icon::WorkOffset,
         Cmd::Tools => Icon::Tools,
@@ -289,6 +299,7 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::Model => actions::open_model_dialog(state),
         Cmd::Project => actions::open_project(state),
         Cmd::Save => actions::save_project(state),
+        Cmd::Post => actions::post_program(state),
         Cmd::Stock => actions::target(state, UiTarget::Stock),
         Cmd::Origin => {
             let slot = state.wcs_ui.slot.min(WCS_SLOTS.len() - 1);

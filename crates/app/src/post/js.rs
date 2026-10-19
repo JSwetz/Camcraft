@@ -86,6 +86,7 @@ pub fn is_false(v: &JsValue) -> bool {
 pub const HOOKS: &[&str] = &[
     "onOpen",
     "onParameter",
+    "onToolChange",
     "onSection",
     "onSectionEnd",
     "onCommand",

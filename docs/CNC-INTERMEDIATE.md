@@ -30,15 +30,18 @@ committed golden is a legal post input.
 | `Feed X <i> Y <i> Z <i> F <i>` | G1 feed move, F = mm/min × 1000 |
 | `Plunge X <i> Y <i> Z <i> F <i>` | G1 at the plunge feed |
 | `Arc CW\|CCW X.. Y.. Z.. F.. I.. J..` | planar arc; I J = absolute center |
-| `CYCLE <TYPE> X.. Y.. Z.. [R.. ENTRY.. Q.. P.. AT..]` | one canned cycle |
+| `CYCLE <TYPE> X.. Y.. Z.. [R.. ENTRY.. Q.. P.. F.. AT..]` | one canned cycle |
 | `START X <i> Y <i> Z <i>` / `END` | legacy `.cl` position lines: consumed silently (END ends the record span) |
 
 `CYCLE` TYPE ∈ SPOT DRILL PECK DEEP TAP BORE BACKBORE. Word meanings
 match the `.cl` v3 `; CYCLE` marker the M1.6 goldens use, and one
 parser reads both: X Y center, Z (or `BZ`) bottom, R (or `RZ`)
 retract/feed plane, `ENTRY` entry plane, Q (or `PECK`) peck, P (or
-`DWELL`) dwell in ms, AT the first move of the hole's chain group
-(defaults to the cycle's own position in the file). A bare number
+`DWELL`) dwell in ms, F cutting feed × 1000 (`dump` synthesizes it
+from the group's first cutting move; legacy markers carry none, so
+the property is `null` and the post keeps the modal feed), AT the
+first move of the hole's chain group (defaults to the cycle's own
+position in the file). A bare number
 (`1000`), a spaced key (`X 1000`), a joined key (`X1000`), and a
 separated key (`X:1000` / `X=1000`) are the same word to the parser,
 so the canonical spaced writer, the compact joined form, and the
@@ -67,7 +70,7 @@ behavior only):
 | `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument) |
 | `CircularDirection` | `CW` / `CCW` (arcs) |
 | `CycleType` | the `CYCLE` TYPE token (cycles) |
-| `EntryZ` `Q` `P` | cycle entry plane, peck mm, dwell s (cycles) |
+| `EntryZ` `Q` `P` `FeedRate` | cycle entry plane, peck mm, dwell s, cutting feed mm/min (`null` for legacy markers) |
 | `LinearMovementIncludeOpts` | `{L:[1]}` on plunges (the skip-the-rapid convention) |
 
 ## The hook contract
@@ -90,8 +93,9 @@ behavior only):
 
 The engine calls, in order, if the script defines them: `onOpen`,
 `onParameter(name, value)` (once per PARAM; `onSpindleSpeed` follows
-the `SpindleSpeed` PARAM), `onSection` / `onSectionEnd` (one per
-span), then per record: `onCommand(name)` — a literal `false` return
+the `SpindleSpeed` PARAM), `onToolChange(number, name)` (once per
+`TOOL`), `onSection` / `onSectionEnd` (one per span), then per
+record: `onCommand(name)` — a literal `false` return
 swallows the record, and the swallow is counted, never silent —
 else the kind hook: `onRapid`, `onLinear`, `onCircular`, or
 `onPlunge` for plunges when the script defines it (else `onLinear`);

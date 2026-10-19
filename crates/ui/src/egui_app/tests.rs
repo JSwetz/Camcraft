@@ -40,7 +40,7 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 
 use hsmworks_app::model;
-use hsmworks_app::operation::{FeatureSel, OpParams, SrcRef};
+use hsmworks_app::operation::{FeatureSel, Height, OpParams, SrcRef};
 use hsmworks_app::schema::WCS_SLOTS;
 use hsmworks_app::units::{self, Unit};
 
@@ -106,6 +106,35 @@ fn frame(ui: &mut egui::Ui, sh: &mut ShellUi) {
         sh.themed = true;
     }
     sh.state.drain_actions();
+    let img = ColorImage::new([8, 8], vec![egui::Color32::from_rgb(24, 26, 31); 64]);
+    let tex = sh
+        .viewport_tex
+        .get_or_insert_with(|| ctx.load_texture("egui-viewport", img, TextureOptions::NEAREST))
+        .id();
+    if sh.icons.is_none() {
+        sh.icons = Some(IconSet::load(&ctx));
+    }
+    shell_layout(
+        ui,
+        &mut sh.state,
+        &mut sh.dock,
+        tex,
+        sh.icons.as_ref(),
+        &mut sh.viewport_points,
+        &mut sh.left_press,
+    );
+}
+
+/// `frame` WITHOUT the drain: the real shell layout, but queued dialog
+/// arms never execute (rfd modals are hand-test-only - same reason
+/// `shortcuts_only` exists, for tests that need the whole ribbon on
+/// screen). Callers assert queue membership and clear after.
+fn frame_undrained(ui: &mut egui::Ui, sh: &mut ShellUi) {
+    let ctx = ui.ctx().clone();
+    if !sh.themed {
+        theme::apply(&ctx);
+        sh.themed = true;
+    }
     let img = ColorImage::new([8, 8], vec![egui::Color32::from_rgb(24, 26, 31); 64]);
     let tex = sh
         .viewport_tex
@@ -309,6 +338,158 @@ fn file_ops_round_trip_through_commands() {
         st.status
     );
     assert!(st.status.starts_with("opened"), "open status: {}", st.status);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// M1.7b's two faces: the ribbon cell (and Ctrl+P) queue the dialog arm -
+/// membership only, the modal is hand-test - while the `*File` arm runs
+/// the validation gate for real: a generated, fresh, silent document
+/// posts one wrapped program, a stale one is refused BY NAME and the
+/// previous program on disk is not touched (the gate writes nothing).
+#[test]
+fn post_cell_queues_and_the_file_arm_runs_the_gate() {
+    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        Vec2::new(1280.0, super::shell::RIBBON_H),
+    ));
+    let post = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Post)
+        .expect("the File group carries a Post cell");
+    {
+        let mut harness = Harness::builder()
+            .with_size(Vec2::new(1280.0, 720.0))
+            .build_ui_state(frame_undrained, ShellUi::seeded());
+        harness.run();
+        let at = post.rect.center();
+        set_pos(&mut harness, at);
+        button_at(&mut harness, egui::PointerButton::Primary, at, true);
+        button_at(&mut harness, egui::PointerButton::Primary, at, false);
+        harness.run_steps(2);
+        assert!(
+            harness.state().state.pending.iter().any(|c| matches!(
+                c,
+                CommandKind::PostProgramDialog
+            )),
+            "the Post cell must fire through the actions law (pending: {:?})",
+            harness.state().state.pending
+        );
+    }
+
+    let mut harness = shell_harness();
+    let path = std::env::temp_dir().join(format!("hsmworks-egui-post-{}.nc", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+
+    // Phase 0 - the warned face of the gate, on the seed as shipped: its
+    // contour takes the full block height, and plunging that rim beside
+    // 30 mm of uncut wall is a ShankHit family the verifier already
+    // cached. Fresh and generated is NOT enough - the post blocks by
+    // name and writes nothing.
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::PostProgramFile(path.clone()));
+    harness.run();
+    {
+        let st = &harness.state().state;
+        assert!(
+            st.status.contains("post refused") && st.status.contains("post blocked")
+                && st.status.contains("Contour1") && st.status.contains("shank"),
+            "a warned path must block the gate (status: {})",
+            st.status
+        );
+        assert!(!path.exists(), "a blocked post is never written");
+    }
+
+    // Phase 1 - the same contour re-cut as a 0.5 mm top skim is legal
+    // geometry and a silent path: edit, regenerate, post, all through
+    // the queue.
+    {
+        let mut skim = {
+            let st = &harness.state().state;
+            let e = model::find_by_name(&st.world, "Contour1").expect("the seed's op");
+            model::operation_of(&st.world, &e).expect("op").params.clone()
+        };
+        if let OpParams::Contour { bottom_z, .. } = &mut skim {
+            *bottom_z = Height::fixed(29.5);
+        }
+        harness.state_mut().state.pending.push_back(CommandKind::EditOperationParams {
+            name: "Contour1".into(),
+            params: skim,
+        });
+        harness
+            .state_mut().state.pending
+            .push_back(CommandKind::GenerateOperation("Contour1".into()));
+    }
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::PostProgramFile(path.clone()));
+    harness.run();
+    let st = &harness.state().state;
+    assert!(st.status.starts_with("posted"), "skim post: {}", st.status);
+    let text = std::fs::read_to_string(&path).expect("a posted program");
+    assert!(
+        text.starts_with('%')
+            && text.contains("G90 G54")
+            && text.contains("T01 M6")
+            && text.trim_end().ends_with('%'),
+        "one wrapped Fanuc program for the skim: {text}"
+    );
+    let before = text.clone();
+
+    // The gate's refusal face, through the queue: an un-regenerated
+    // parameter edit makes Contour1 stale, and a stale document must
+    // not reach the machine.
+    let mut edited_params = {
+        let st = &harness.state().state;
+        let e = model::find_by_name(&st.world, "Contour1").expect("the seed's op");
+        model::operation_of(&st.world, &e).expect("op").params.clone()
+    };
+    // (A stepdown edit would be stale but silent here - the skim's
+    // 0.5 mm span fits under any stepdown - so the witness is the
+    // plunge feed, which rides every Z word's F.)
+    if let OpParams::Contour { plunge_feed, .. } = &mut edited_params {
+        *plunge_feed = 150.0;
+    }
+    harness.state_mut().state.pending.push_back(CommandKind::EditOperationParams {
+        name: "Contour1".into(),
+        params: edited_params,
+    });
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::PostProgramFile(path.clone()));
+    harness.run();
+    let st = &harness.state().state;
+    assert!(
+        st.status.contains("post refused")
+            && st.status.contains("Contour1")
+            && st.status.contains("regenerate"),
+        "a stale post must refuse by name (status: {})",
+        st.status
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("still there"),
+        before,
+        "a refusal rewrites nothing"
+    );
+
+    // Regenerate through the same queue: fresh again, posts again.
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::GenerateOperation("Contour1".into()));
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::PostProgramFile(path.clone()));
+    harness.run();
+    assert!(
+        harness.state().state.status.starts_with("posted"),
+        "regen status: {}",
+        harness.state().state.status
+    );
+    assert_ne!(
+        std::fs::read_to_string(&path).expect("rewritten"),
+        before,
+        "the re-posted program carries the new stepdown's passes"
+    );
     let _ = std::fs::remove_file(&path);
 }
 
@@ -1095,6 +1276,13 @@ fn file_keys_queue_their_commands() {
         |c| matches!(c, CommandKind::SaveProjectDialog),
         "Ctrl+S",
     );
+    expect(
+        &mut harness,
+        ctrl,
+        Key::P,
+        |c| matches!(c, CommandKind::PostProgramDialog),
+        "Ctrl+P",
+    );
 
     // The focus gate: the same Ctrl+O over a focused text field arms
     // nothing (a dialog must never spawn mid-type - imgui's io.WantTextInput).
@@ -1165,6 +1353,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Model, "Open a mesh model\tCtrl+O"),
         (Cmd::Project, "Open a project\tCtrl+Shift+O"),
         (Cmd::Save, "Save the project\tCtrl+S"),
+        (Cmd::Post, "Post NC program (validation gate)\tCtrl+P"),
         (Cmd::Stock, "Stock definition"),
         (Cmd::Origin, "Work offset (WCS)"),
         (Cmd::Tools, "Tool library"),

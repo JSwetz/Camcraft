@@ -34,6 +34,13 @@ pub(crate) fn save_project(state: &mut State) {
     state.pending.push_back(CommandKind::SaveProjectDialog);
 }
 
+/// Post every operation to one NC program (M1.7b). The dialog arm picks
+/// the path; the gate itself - generated, fresh, warning-free or refused
+/// by name - lives once in the app layer (hsmworks_app::posting).
+pub(crate) fn post_program(state: &mut State) {
+    state.pending.push_back(CommandKind::PostProgramDialog);
+}
+
 /// Close the app through the same queue as everything else (the window
 /// button and, since M-g, Ctrl+Q both land here; the imgui File menu that
 /// used to was retired with that shell).

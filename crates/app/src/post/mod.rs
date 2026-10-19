@@ -15,7 +15,7 @@ pub mod machine;
 
 pub use engine::{LineInfo, PostOutput};
 
-use crate::cl::Toolpath;
+use crate::cl::{MoveKind, Toolpath};
 use cnc::{CycleRec, MoveRec, Record};
 use serde_json::{json, Value};
 
@@ -134,9 +134,22 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             peck: c.peck,
             dwell: c.dwell,
             first_move: c.first_move,
+            feed: None,
         })
         .collect();
     owned.sort_by_key(|c| c.first_move);
+    // Each cycle's cutting feed is the first cutting move of its
+    // group - the chain is the agreement-law witness (M1.6 law A).
+    for ci in 0..owned.len() {
+        let start = owned[ci].first_move.min(t.moves.len());
+        let end = cycles_end(t, &owned, ci).max(start);
+        let feed = t
+            .moves
+            .get(start..end)
+            .and_then(|s| s.iter().find(|m| m.kind != MoveKind::Rapid))
+            .and_then(|m| m.feed);
+        owned[ci].feed = feed;
+    }
     let cycles: Vec<&CycleRec> = owned.iter().collect();
 
     let mut ci = 0usize;
@@ -162,6 +175,15 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     out
 }
 
+/// The exclusive move index at which cycle `ci`'s chain group ends:
+/// the next cycle's anchor, or the end of the chain.
+fn cycles_end(t: &Toolpath, owned: &[CycleRec], ci: usize) -> usize {
+    match owned.get(ci + 1) {
+        Some(next) => next.first_move.min(t.moves.len()),
+        None => t.moves.len(),
+    }
+}
+
 /// Normalize any parsed stream to program order: move cycle records
 /// to just before their `AT`-anchored move. Idempotent on `dump`
 /// output; the fix for legacy goldens that append their markers.
@@ -179,9 +201,45 @@ pub fn normalize_program_order(records: Vec<Record>) -> Vec<Record> {
         })
         .collect();
     cycles.sort_by_key(|c| c.first_move); // stable: holes keep stream order
+
+    // Each span (SECTION pair) owns a half-open range of stream-global
+    // move indices. A cycle belongs to the span owning its anchor index
+    // - never to an earlier one, and never past a later boundary.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut moved = 0usize;
+    let mut open: Option<usize> = None;
+    for r in &records {
+        match r {
+            Record::Section { begin: true } => open = Some(moved),
+            Record::Section { begin: false } => {
+                if let Some(s) = open.take() {
+                    spans.push((s, moved));
+                }
+            }
+            Record::Move(_) => moved += 1,
+            _ => {}
+        }
+    }
+    let span_of = |t: usize| -> Option<usize> {
+        spans
+            .iter()
+            .position(|(_, e)| t < *e)
+            .or_else(|| {
+                // Not inside any span's move range: the span that ends
+                // last at-or-before the anchor (its trailing hole group),
+                // else the first span, else none (a section-less legacy
+                // stream seats purely at move boundaries).
+                spans
+                    .iter()
+                    .rposition(|(_, e)| *e > 0)
+                    .or_else(|| spans.first().map(|_| 0))
+            })
+    };
+
     let mut out = Vec::with_capacity(records.len());
     let mut mi = 0usize;
     let mut ci = 0usize;
+    let mut si = 0usize; // span currently open at this point in the walk
     for r in &records {
         if matches!(r, Record::Cycle(_)) {
             continue;
@@ -192,6 +250,18 @@ pub fn normalize_program_order(records: Vec<Record>) -> Vec<Record> {
                 ci += 1;
             }
             mi += 1;
+        }
+        // A span end seats every cycle that belongs to it but whose
+        // anchor move does not exist inside it (a truncated or
+        // hand-made stream): the cycle dies at its own section's
+        // boundary, never re-seated into the next one - silent
+        // cross-span relocation is loss.
+        if matches!(r, Record::Section { begin: false }) {
+            while ci < cycles.len() && span_of(cycles[ci].first_move) == Some(si) {
+                out.push(Record::Cycle(cycles[ci].clone()));
+                ci += 1;
+            }
+            si += 1;
         }
         out.push(r.clone());
     }

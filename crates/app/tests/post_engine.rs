@@ -151,6 +151,8 @@ function onCommand(c) {
   writeln(";cmd " + c + " from " + formatUnit(currentPosition.X) + " " + formatUnit(currentPosition.Z));
   return true;
 }
+function onSpindleSpeed() { writeBlock("S" + formatFeed(properties.SpindleSpeed)); }
+function onToolChange(n, name) { writeBlock(";tool", n, name); }
 function onRapid() { writeBlock("RAPID", formatUnit(properties.X), formatUnit(properties.Y), formatUnit(properties.Z)); }
 function onLinear() {
   writeBlock("LIN", formatUnit(properties.X), formatUnit(properties.Y), formatUnit(properties.Z), properties.FeedRate === null ? "" : "F" + formatFeed(properties.FeedRate));
@@ -165,6 +167,10 @@ fn echo_script_drives_hooks_and_line_map() {
     let text = cnc::serialize(&sample());
     let out = engine::run(ECHO_CPS, &json!(null), &text).expect("echo post");
     assert!(out.program.starts_with("ECHO\n"));
+    // The PARAM arm publishes properties (onSpindleSpeed read the
+    // rpm), and the TOOL record fired onToolChange with both fields.
+    assert!(out.program.contains("S8000\n"), "{}", out.program);
+    assert!(out.program.contains(";tool 3 1/4 INCH 4FL\n"));
     assert!(out.program.contains("RAPID 1.5 -2 0\n"));
     assert!(out.program.contains("LIN 1.5 -2 -1 F1200\n"));
     assert!(out.program.contains("ARC CCW 2\n"));
@@ -217,6 +223,7 @@ fn cycle_sequence_and_dwell_gate() {
         peck: 1.0,
         dwell: 0.0,
         first_move: 0,
+        feed: None,
     }));
     recs.push(Record::Cycle(CycleRec {
         kind: CycleKind::Deep,
@@ -228,6 +235,7 @@ fn cycle_sequence_and_dwell_gate() {
         peck: 2.0,
         dwell: 0.5,
         first_move: 0,
+        feed: None,
     }));
     recs.push(Record::Section { begin: false });
     let out = engine::run(cps, &json!(null), &cnc::serialize(&recs)).expect("post");
@@ -359,6 +367,30 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
     let text = cnc::serialize(&recs);
     let back = normalize_program_order(cnc::parse(&text).expect("parses"));
     assert_eq!(back, recs, "dump -> text -> parse is an identity");
+}
+
+#[test]
+fn coordinates_read_as_millimetres() {
+    // The scale law (`scale=0.001mm`, µm integers both directions) is
+    // pinned by value here - a symmetric serialize/parse mistake
+    // survives the round-trip identity test and must not survive this.
+    let a = cnc::parse("Feed X 1000 Y -2000 Z 3500 F 250000\n").expect("spaced");
+    let Some(Record::Move(m)) = a.first() else {
+        panic!("a move");
+    };
+    assert_eq!((m.x, m.y, m.z), (1.0, -2.0, 3.5));
+    assert_eq!(m.feed, Some(250.0));
+    assert!(cnc::serialize(&a).contains("Feed X 1000 Y -2000 Z 3500 F 250000"));
+    // The goldens themselves: the 40x40 face plate spans +-45 mm.
+    let face = cnc::parse(&golden("face_square_40x40.cl")).expect("parses");
+    let first = face.iter().find_map(|r| match r {
+        Record::Move(mv) if mv.kind == MoveKind::Feed => Some(mv),
+        _ => None,
+    });
+    let m = first.expect("a feed move");
+    assert_eq!(m.x, 45.0);
+    assert_eq!(m.z, -2.0);
+    assert_eq!(m.feed, Some(500.0));
 }
 
 #[test]

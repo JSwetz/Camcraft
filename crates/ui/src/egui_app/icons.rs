@@ -25,6 +25,7 @@ pub(crate) enum Icon {
     OpenModel,
     OpenProject,
     Save,
+    Post,
     Stock,
     WorkOffset,
     Tools,
@@ -46,11 +47,12 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 21] = [
+    pub(crate) const ALL: [Icon; 22] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
         Icon::Save,
+        Icon::Post,
         Icon::Stock,
         Icon::WorkOffset,
         Icon::Tools,
@@ -76,6 +78,9 @@ impl Icon {
             Icon::OpenModel => include_bytes!("../../../../assets/ui/folder-open.png"),
             Icon::OpenProject => include_bytes!("../../../../assets/ui/file-import.png"),
             Icon::Save => include_bytes!("../../../../assets/ui/device-floppy.png"),
+            // Original drawing (no Tabler "post to G-code" glyph exists):
+            // the code chevrons, in the set's stroke weight. Ours to give.
+            Icon::Post => include_bytes!("../../../../assets/ui/post.png"),
             Icon::Stock => include_bytes!("../../../../assets/ui/box-model.png"),
             Icon::WorkOffset => include_bytes!("../../../../assets/ui/transform.png"),
             Icon::Tools => include_bytes!("../../../../assets/ui/tools.png"),
@@ -107,6 +112,7 @@ impl Icon {
             Icon::OpenModel => "icon-open-model",
             Icon::OpenProject => "icon-open-project",
             Icon::Save => "icon-save",
+            Icon::Post => "icon-post",
             Icon::Stock => "icon-stock",
             Icon::WorkOffset => "icon-work-offset",
             Icon::Tools => "icon-tools",

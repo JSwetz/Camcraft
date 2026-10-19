@@ -64,6 +64,11 @@ pub struct CycleRec {
     pub peck: f64,
     pub dwell: f64,
     pub first_move: usize,
+    /// The cycle's cutting feed, mm/min. `dump` synthesizes it from
+    /// the group's first cutting move; legacy `; CYCLE` markers
+    /// carry none, so it is `None` there (the post falls back to the
+    /// modal feed).
+    pub feed: Option<f64>,
 }
 
 impl MoveRec {
@@ -108,6 +113,7 @@ impl CycleRec {
         m.insert("EntryZ".into(), json!(self.entry_z));
         m.insert("Q".into(), json!(self.peck));
         m.insert("P".into(), json!(self.dwell));
+        m.insert("FeedRate".into(), json!(self.feed));
         m
     }
 }
@@ -143,13 +149,13 @@ impl Record {
     }
 }
 
-/// µm-integer formatting, the `.cl` golden law: value times a million,
-/// nearest, written as an integer.
+/// µm-integer formatting, the `.cl` golden law (`scale=0.001mm`):
+/// value times a thousand, nearest, written as an integer.
 fn q(v: f64) -> String {
     if !v.is_finite() {
         return "nan".into();
     }
-    ((v * 1e6).round() as i64).to_string()
+    ((v * 1000.0).round() as i64).to_string()
 }
 
 /// The writer side: the stream as text, `records` in driver order. The
@@ -201,18 +207,25 @@ pub fn serialize(records: &[Record]) -> String {
                     )),
                 }
             }
-            Record::Cycle(c) => s.push_str(&format!(
-                "CYCLE {} X {} Y {} Z {} R {} ENTRY {} Q {} P {} AT {}\n",
-                cycle_name(c.kind),
-                q(c.x),
-                q(c.y),
-                q(c.bottom_z),
-                q(c.r_z),
-                q(c.entry_z),
-                q(c.peck),
-                (c.dwell * 1000.0).round() as i64,
-                c.first_move,
-            )),
+            Record::Cycle(c) => {
+                let f = c
+                    .feed
+                    .map(|f| format!(" F {}", (f * 1000.0).round() as i64))
+                    .unwrap_or_default();
+                s.push_str(&format!(
+                    "CYCLE {} X {} Y {} Z {} R {} ENTRY {} Q {} P {}{} AT {}\n",
+                    cycle_name(c.kind),
+                    q(c.x),
+                    q(c.y),
+                    q(c.bottom_z),
+                    q(c.r_z),
+                    q(c.entry_z),
+                    q(c.peck),
+                    (c.dwell * 1000.0).round() as i64,
+                    f,
+                    c.first_move,
+                ))
+            }
         }
     }
     s
@@ -344,6 +357,7 @@ fn parse_cycle_rec(
         peck: 0.0,
         dwell: 0.0,
         first_move: default_move,
+        feed: None,
     };
     while let Some(w) = it.next() {
         // A pure-alphabetic token is a spaced key; its value follows.
@@ -362,13 +376,14 @@ fn parse_cycle_rec(
             return Err(format!("cycle value {vtok:?}"));
         };
         match k.to_ascii_uppercase().as_str() {
-            "X" => r.x = n / 1e6,
-            "Y" => r.y = n / 1e6,
-            "Z" | "BZ" => r.bottom_z = n / 1e6,
-            "R" | "RZ" => r.r_z = n / 1e6,
-            "Q" | "PECK" => r.peck = n / 1e6,
+            "X" => r.x = n / 1000.0,
+            "Y" => r.y = n / 1000.0,
+            "Z" | "BZ" => r.bottom_z = n / 1000.0,
+            "R" | "RZ" => r.r_z = n / 1000.0,
+            "Q" | "PECK" => r.peck = n / 1000.0,
             "P" | "DWELL" => r.dwell = n / 1000.0,
-            "ENTRY" => r.entry_z = n / 1e6,
+            "F" => r.feed = Some(n / 1000.0),
+            "ENTRY" => r.entry_z = n / 1000.0,
             "AT" => r.first_move = n.max(0.0) as usize,
             k => return Err(format!("unknown cycle word {k:?}")),
         }
@@ -470,7 +485,7 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     Ok(v) => v,
                     Err(_) => return Err(fail("START needs numbers".into())),
                 };
-                last_z = nums.last().map_or(0.0, |v| v / 1e6);
+                last_z = nums.last().map_or(0.0, |v| v / 1000.0);
             }
             "Rapid" | "Feed" | "Plunge" | "Arc" => {
                 let mut ccw = false;
@@ -495,20 +510,20 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     match w {
                         MotionWord::Value(v) => {
                             match pos {
-                                0 => x = Some(v / 1e6),
-                                1 => y = Some(v / 1e6),
-                                2 => z = Some(v / 1e6),
+                                0 => x = Some(v / 1000.0),
+                                1 => y = Some(v / 1000.0),
+                                2 => z = Some(v / 1000.0),
                                 _ => return Err(fail("too many positional values".into())),
                             }
                             pos += 1;
                         }
                         MotionWord::Keyed(k, v) => match k {
-                            "X" => x = Some(v / 1e6),
-                            "Y" => y = Some(v / 1e6),
-                            "Z" => z = Some(v / 1e6),
+                            "X" => x = Some(v / 1000.0),
+                            "Y" => y = Some(v / 1000.0),
+                            "Z" => z = Some(v / 1000.0),
                             "F" => feed = Some(v / 1000.0),
-                            "I" => ci = Some(v / 1e6),
-                            "J" => cj = Some(v / 1e6),
+                            "I" => ci = Some(v / 1000.0),
+                            "J" => cj = Some(v / 1000.0),
                             "S" => ccw = v >= 0.0,
                             _ => {}
                         },

@@ -26,7 +26,7 @@ use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
 use hsmworks_app::units::{self, Unit};
-use hsmworks_app::{model, project, world::new_world};
+use hsmworks_app::{model, posting, project, world::new_world};
 
 use crate::viewport::Camera;
 
@@ -39,6 +39,11 @@ pub enum CommandKind {
     OpenProjectFile(PathBuf),
     SaveProjectDialog,
     SaveProjectFile(PathBuf),
+    /// Post NC through the save-dialog law (M1.7b): path via rfd, gate
+    /// via `posting::post_setup`.
+    PostProgramDialog,
+    /// The same post at a known path - what the headless tests run.
+    PostProgramFile(PathBuf),
     Undo,
     Redo,
     DeleteSelected,
@@ -1361,6 +1366,12 @@ impl State {
                     Err(err) => self.status = format!("save failed: {err}"),
                 }
             }
+            CommandKind::PostProgramDialog => {
+                if let Some(path) = post_program_dialog() {
+                    self.post_program_path(path);
+                }
+            }
+            CommandKind::PostProgramFile(path) => self.post_program_path(path),
             CommandKind::Undo => {
                 self.status = if self.history.undo(&self.world) {
                     self.doc_version += 1;
@@ -1840,6 +1851,25 @@ impl State {
             Err(err) => self.status = format!("open failed: {err}"),
         }
     }
+
+    /// The file law's third effect (M1.7b): post, or be refused by name.
+    /// Like save/open, the outcome is a status line, not a pane error -
+    /// and the gate writes nothing on refusal (posting's own law), so a
+    /// refused post leaves both the document and any previous program on
+    /// disk exactly as they were.
+    fn post_program_path(&mut self, path: PathBuf) {
+        match posting::post_setup(&self.world, &path) {
+            Ok(posted) => {
+                self.status = format!(
+                    "posted {} op(s), {} lines to {}",
+                    posted.ops,
+                    posted.lines,
+                    path.display()
+                );
+            }
+            Err(err) => self.status = format!("post refused: {err}"),
+        }
+    }
 }
 
 /// Short human name for a file path, for status text.
@@ -1873,5 +1903,14 @@ fn save_project_dialog() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("HSMWorks Project", &["hsmproj"])
         .set_file_name("untitled.hsmproj")
+        .save_file()
+}
+
+fn post_program_dialog() -> Option<PathBuf> {
+    // The extension law lives with the script (fanuc.cps's `extension`
+    // is "nc"); the dialog just offers it.
+    rfd::FileDialog::new()
+        .add_filter("NC Program", &["nc"])
+        .set_file_name("program.nc")
         .save_file()
 }

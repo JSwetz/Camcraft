@@ -14,6 +14,7 @@ pub mod model;
 pub mod operation;
 pub mod pick;
 pub mod post;
+pub mod posting;
 pub mod project;
 pub mod schema;
 pub mod stock;

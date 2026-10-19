@@ -2,5 +2,5 @@
 /graphify-out
 *.exe
 *.dll
-*.cps
+/*.cps
 *.hsmproj
