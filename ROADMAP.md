@@ -709,8 +709,19 @@ before touching metal.
 **Goal: high-efficiency roughing that keeps the tool loaded and cool.**
 
 - **Adaptive clearing**: constant-engagement paths derived from published HEM literature (tool centerline offset construction, trochoidal-style slots), specced from public sources only
-- **3D Pocket**: multi-level with islands from any closed region, ramp and helical entries
-- **Rest material**: toolpath computed against the stock left by the previous tool, as a difference of voxelized tool sweeps
+- ✅ **3D Pocket** (M2.1a): mesh-driven, not sketch-driven — the *level law*
+      makes each Z-plane's target the silhouette footprint minus the columns
+      the solid still fills at that plane (`machining3d::material_above`), so
+      islands are computed from the model at every level and part geometry
+      standing between two levels floors its columns at its own surface (at
+      most one stepdown of stair, reported, never hidden). Entries: plunge,
+      ramp and helix, each dive-point legality proved against the previous
+      cut level (superset law: deeper planes' islands contain shallower
+      ones, so a descent never enters live wall); an entry that cannot be
+      proved falls back to a slower vertical dive rather than a gouge.
+      Waterline rings (concentric-offset spirals) and zigzag scans share the
+      level generator; zigzag can serve as Waterline under `Auto`.
+- **Rest material**: toolpath computed against the stock left by the previous tool, as a difference of voxelized tool sweeps — *and* the pocket's staircase floors: a rest-material pass over the level law's output is the honest closing of its one acknowledged approximation (M2.1b)
 - **Roughing simulation**: verify material removal, never crash
 - **Feed-rate optimization**: engagement-based feed modulation within tool limits
 
@@ -835,7 +846,7 @@ programming department.
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
-| **M2.1** | Rough 3D at constant load | Adaptive clearing, rest material, roughing sim | 📋 |
+| **M2.1** | Rough 3D at constant load | 3D Pocket done (level law, computed islands, plunge/ramp/helix entries); adaptive clearing, rest material, roughing sim open | ⚠️ |
 | **M2.2** | Finish 3D to tolerance | Parallel, waterline, scallop, contour family | 📋 |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |

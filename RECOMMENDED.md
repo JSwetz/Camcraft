@@ -9,6 +9,103 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.1a - Mesh-driven 3D pocket (commit `7672c06`)
+
+- **The level law is the whole design: the model is the FINAL part, and
+  each level cuts `footprint ∖ material_above(z)`.** A level's target
+  region is the silhouette minus the columns of solid still standing at
+  that plane, so islands are computed from the mesh at every Z, never
+  picked; a boss floors its own columns at its own surface (at most one
+  stepdown of stair), and the last level snaps to `bottom_z` so a flat
+  floor comes out exact. The slice is probed at z+ε with a 3-try nudge
+  because the half-open chord law would otherwise count a plane exactly
+  through a vertex as filled. Why: any other rule (section-at-z,
+  picked islands, fixed ZMax ladder) either re-derives geometry the
+  mesh already states or cuts into what the part still needs. Cost to
+  change: it is the generator's backbone; rest-material passes (M2.1b)
+  compose with it rather than replace it.
+- **Descent legality is asked of the PREVIOUS cut level's center, not
+  the current one** (the superset/nesting law: deeper plane ⇒ larger
+  island ⇒ smaller target, so the tightest region a dive can traverse
+  is the one above it). Skipped (empty) levels keep the older, deeper
+  state. Why: a ramp/helix chord from prev_z down crosses only regions
+  the ladder already proved open; asking the looser current level would
+  dive through live wall. Cost to change: none — it's one `Option<(f64,
+  Region)>`; loosening it would be the bug.
+- **The ring-close is strategy-given, not inferred from the points.**
+  A waterline pass is one SPIRAL of concentric rings (first point is
+  the outer ring's start, last is the inner ring's), so it must be
+  closed by a feed back to its first — that chord runs the 45° corner
+  line and touches every ring only at corners, which no law counts as a
+  crossing. A zigzag pass is an open scan: closing it would drag a
+  diagonal across every row. Nothing about the point list tells the two
+  apart (both end first≠last), so `walk_pass` takes `close_rings` from
+  the strategy itself. Why: the original `if a != last` inference was
+  wrong in both directions — zigzag diagonals spammed Crossing, and
+  deleting it broke waterline's XY start/end multiset law. Cost to
+  change: none; keep it a law of the strategy.
+- **Verify's crossing law now separates planar from non-planar chord
+  pairs**: two flat chords cross only at a shared plane (bit-identical
+  to the old test, so 2.5-D goldens don't move); a pair where one
+  descends flags only when their Z-intervals share positive length —
+  a single-plane touch is a GRAZE of already-cut floor at the dive's
+  own start/end depth, which the superset law above is what makes
+  safe. Why: every 3-D entry crosses the previous level's rows at
+  exactly that endpoint plane; the old closed-interval test flagged
+  all 67 of them. Cost to change: the graze's safety proof would have
+  to move into the generator; keep the two laws paired.
+- **Helix dive point: midpoint of the longest straight run of the plan,
+  membership-proved in both the previous and this level's centers
+  eroded by (helix_radius + tol)**, and the swept-disc link checked to
+  the entry point; any failure falls back to a plunge ("a slower dive,
+  never a gouge"). The first level can only ever plunge — there is no
+  shallower plane to start the descent from. Waterline + Helix
+  effectively always falls back (the spiral's runs are short arcs):
+  honest but worth a UI note someday. Why: "first zigzag midpoint" was
+  the old shape; longest-run picks the spot the widest disc fits.
+- **`material_above` is pub in machining3d and verify caches it
+  (`islands_at`)**: one law, three readers (generator, gouge/shank
+  island walls, M2.1b's simulation) can never drift. Cost to change:
+  if the law ever parameterizes, the cache key is the (mesh, z) bits —
+  revisit then.
+- **An ε-grazing shelf cuts tangentially and returns `Ok`, not a
+  refusal** — a block exactly filling the footprint gets its top face
+  as one real path; the levels under it are all island and skip. The
+  degenerate test pins it. Why: refusing would be honest-but-noisy for
+  a shape that is a legal skim.
+- **Ribbon went from fixed imgui pitch to a FLOW row: cells share the
+  strip width, `CELL_W = 56` stands as the cap.** The 7th Create cell
+  silently pushed the Simulate button off-screen at the 1280 default —
+  a real product bug the kittest caught as a failed click, not a
+  coordinate-math miss. Floor is 40 px, below which the row overflows
+  on purpose rather than render illegible. Why: M2 adds more operation
+  kinds; a fixed pitch re-discovers this cliff at 22 cells. Cost to
+  change: both snapshots churn (they already churned once for the new
+  cell); the layout law is `ribbon_cells` alone.
+- **`OpType::Pocket3D` reuses `Icon::Pocket`** — no new asset; the 3-D
+  kind is the pocket idea with computed floors, and inventing a
+  near-identical glyph costs a PNG and a mental distinction nobody
+  asked for. Cost to change: one asset + one `icon_of` arm when M2.1's
+  siblings (adaptive, rest-rough) need their own row anyway.
+- **Persistence v11 with a pure-stamp step-up** (the `pocket3d`
+  ParamsDto tag rides the new enum arm; no field migration), and the
+  law made explicit in `wrong_version_is_refused`: the too-new probe is
+  always PROJECT_VERSION+1, so the test never rots on a bump. The v10→
+  v11 round-trip test covers the grammar.
+- **Test-fixture law discovered the hard way: the box's ±x walls are
+  `quad(1,3,7,5)`/`quad(2,0,4,6)`** (bit0→x, bit1→y, bit2→z corner
+  convention) — the diagonal-looking alternatives are diagonal PLANES
+  through the cube, and a non-watertight shell slices into two lens
+  chords with hollow centers, which poisoned three tests as a phantom
+  "island emptiness" bug. Watertightness of hand-built facets is now
+  worth checking edge-by-edge when a slice result looks wrong.
+- **FTO note** (the open-questions section asks for it before M2.1):
+  M2.1a ships multi-level Z machining with mesh-derived islands —
+  published-literature general knowledge, nothing HEM/trochoidal in
+  it. The patent-sensitive bullet is adaptive clearing (M2.1c); the
+  formal review belongs there, before that code lands, not retro-fitted
+  onto the pocket.
+
 ## M1.7e - CI matrix, release packaging, v0.1.0 (commit `3305468`)
 
 - **The CI matrix is one axis: `windows-latest`, structured to widen.**
