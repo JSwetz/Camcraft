@@ -9,6 +9,57 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M1.7c — move simulation: transport bar, timeline laws, tool marker (commit `feat(app,ui): move simulation - transport bar, timeline laws, and tool marker (M1.7c)`)
+
+- **The chain is truth; cycles contribute only dwell seconds.** `sim::script`
+  walks the *expanded* move list the generators already produced - the same
+  geometry verify and the `.cl` goldens speak - and lets each `Cycle` add its
+  dwell to the move that reaches its bottom. No second, parallel move chain
+  exists to disagree with. The agreement law between the `Toolpath.cycles`
+  record (the post's source of truth, M1.6) and the walk is pinned in the
+  app tests: per cycle, the deepest plunge of its group equals its
+  `bottom_z`, and the dwell sum rides `total` exactly. Why: a rehearsal that
+  drifts from the posted program is worse than no rehearsal. Cost to change:
+  the whole dwell pass lives in one function.
+- **Rapids are simultaneous-axis, paced by the machine file.** Time for a
+  rapid is 60 * max(|dx|/rate_x, |dy|/rate_y, |dz|/rate_z) with the rates
+  read from the `.mch` kinematics tree (the X/Y pair shares the XY rapid;
+  Z owns its traverse rate) - never axis-traveled and summed, never a
+  hardcoded speed. The post and the timeline answer to the same setup file.
+  Cost to change: one `rapid_secs`; a 4-axis machine model (M3+) would add
+  feed-per-axis table lookup there.
+- **The simulation rehearses the machine's program, not the picture.** The
+  sim op walk mirrors the post walk exactly - every operation, hidden ones
+  included; the eye-off toggle is display, not suppression. (Revises an
+  earlier draft note that would have excluded hidden paths; the display
+  overlay keeps its own hidden-path skip - the two lists are allowed to
+  differ *because* they mean different things.) Cost to change: `sim_script`
+  in `shell.rs` gains a filter the post gate would then have to duplicate.
+- **The timeline is rebuilt from the world every frame, and the playhead is
+  immediate-mode view state.** `Script` construction is a pure world read,
+  so a document switch, a regrow or an op delete changes the program under a
+  playhead that never resets - same `t`, next frame. Arming, pausing and
+  scrubbing queue no command (AGENTS.md's explicit exemption for playback
+  position); undo is untouched by anything the transport does. Cost to
+  change: caching the `Script` by doc digest would need invalidation
+  plumbing for exactly the churn this design deletes.
+- **Two honesty guards, drawn not phrased**: a stalled frame's dt is clamped
+  to 0.1 s so the tool never teleports through material, and past 2^20
+  segments the timeline truncates with a flag the bar shows - the same
+  budget law the overlay uses. Arc timing interpolates the exact sweep
+  (display and verify may flatten; the clock should not).
+- **Transport UI law**: the bar draws only while the ribbon cell is armed
+  (snapshot churn confined to the new Inspect cell itself, both images
+  updated once with that diff as the whole story); Play at the end rewinds,
+  Stop leaves simulation rather than pausing at a parked end; speeds are
+  1/2/4/8x multipliers on dt, never a fake clock rate; the readout verb
+  (RAPID / F-value through the units lens / DWELL / END / STANDBY) is a
+  pure function pinned by test. The glyph (`assets/ui/sim.png`) is original
+  artwork - no Tabler motion-path glyph fit the 20 px ribbon - and the
+  LICENSES.md originals section was fixed to cover `post.png` (listed as
+  original in code, missing from the notice file) alongside `drill.png` and
+  the new `sim.png`.
+
 ## M1.7b — in-app Post, the validation gate, Fanuc CPS assets (commit `feat(app,ui): in-app Post with the validation gate + Fanuc CPS assets (M1.7b)`)
 
 - **Span ownership decides cycle seating in a merged stream.**

@@ -629,7 +629,11 @@ degrades by rule, none guesses silently:
 ### M1.7 - Simulation & Post (Release 0.1.0)
 **Goal: verified output - first public release.**
 
-- **Move simulation**: rapid vs feed differentiation, feedrate readout, play/pause/scrub
+- ✅ **Move simulation**: rapid vs feed differentiation, feedrate readout, play/pause/scrub -
+      one timed `Script` per document (chain-is-truth; cycles contribute dwell
+      seconds only), transport bar with play/pause/scrub and 1-8x speed, live
+      op/feed readout and a projected tool marker; machine-file traverse rates
+      pace the rapids
 - **Validation warnings**: rapid-move violations and holder-vs-stock contact, blocking the post
 - **Post engine + CPS posts**: not a hard-coded writer - the Fusion 360
       post architecture adopted as file-format conventions, specced
