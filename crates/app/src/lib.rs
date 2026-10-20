@@ -7,6 +7,7 @@
 pub mod cl;
 pub mod commands;
 pub mod drilling;
+pub mod finishing3d;
 pub mod geo2d;
 pub mod geometry;
 pub mod machining2d;

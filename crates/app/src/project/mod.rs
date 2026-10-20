@@ -76,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 14;
+pub const PROJECT_VERSION: u32 = 15;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -416,6 +416,25 @@ pub enum ParamsDto {
         /// means for them.
         #[serde(default)]
         feed_opt: bool,
+    },
+    /// Declared at v15 with the waterline. The rename states the tag
+    /// for the same reason `pocket3d` does - the automatic snake_case
+    /// of `Finish3D` would be `finish3_d`, and a file contract
+    /// deserves the cleaner word. No stepdown key: the scallop law
+    /// derives it from tolerance and tool, so storing one could only
+    /// disagree with the two numbers that author it.
+    #[serde(rename = "finish3d")]
+    Finish3D {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// Absent means hop-to-clearance, the pocket family's law.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
     },
 }
 
@@ -770,6 +789,25 @@ impl ParamsDto {
                 max_engagement: *max_engagement,
                 feed_opt: *feed_opt,
             },
+            OpParams::Finish3D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+            } => ParamsDto::Finish3D {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                retract_z: (*retract_z).map(Into::into),
+            },
             OpParams::Slot {
                 a,
                 b,
@@ -984,6 +1022,25 @@ impl ParamsDto {
                 rest_rough: *rest_rough,
                 max_engagement: *max_engagement,
                 feed_opt: *feed_opt,
+            },
+            ParamsDto::Finish3D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+            } => OpParams::Finish3D {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
             },
             ParamsDto::Slot {
                 a,
@@ -1525,6 +1582,13 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // the programmed feed). No content change; step-up is the stamp
         // itself, like every bump since v6.
         file.version = 14;
+    }
+    if file.version == 14 {
+        // v14 -> v15: the 3-D finish arrives as one new params variant
+        // (`finish3d`), which no v14 file can contain - the tag did not
+        // exist. Nothing existing changed shape; step-up is the stamp
+        // itself, like every bump since v6.
+        file.version = 15;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

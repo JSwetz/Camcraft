@@ -37,8 +37,16 @@ use super::theme::Palette;
 /// The operation kinds in panel order (mirrors operations.rs's TYPES).
 /// Shared with pages.rs: the Type combo there and the ribbon tips here
 /// quote the same table.
-pub(crate) const TYPES: [&str; 7] =
-    ["Face", "2D Contour", "2D Pocket", "Slot", "Trace", "Drill", "3D Pocket"];
+pub(crate) const TYPES: [&str; 8] = [
+    "Face",
+    "2D Contour",
+    "2D Pocket",
+    "Slot",
+    "Trace",
+    "Drill",
+    "3D Pocket",
+    "3D Finish",
+];
 
 // ---------------------------------------------------------------- shortcuts
 
@@ -146,6 +154,7 @@ const GROUPS: [(&str, &[Cmd]); 5] = [
             Cmd::Create(4),
             Cmd::Create(5),
             Cmd::Create(6),
+            Cmd::Create(7),
         ],
     ),
     ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]),
@@ -191,7 +200,8 @@ fn text_of(c: Cmd) -> String {
             3 => "Slot",
             4 => "Trace",
             5 => "Drill",
-            _ => "3D Pocket",
+            6 => "3D Pocket",
+            _ => "3D Finish",
         }
         .to_owned(),
         other => label_of(other).to_owned(),
@@ -274,8 +284,11 @@ fn icon_of(c: Cmd) -> Icon {
             // The 3-D pocket wears the pocket's glyph - same family,
             // captioned apart by text_of (RECOMMENDED.md: no new asset
             // for a kind whose 2-D sibling already says "pocket").
+            // The finish has no such sibling: its rings are the model's
+            // own contours, so it carries an original waterline glyph.
             5 => Icon::Drill,
-            _ => Icon::Pocket,
+            6 => Icon::Pocket,
+            _ => Icon::Finish3D,
         },
         Cmd::Undo => Icon::Undo,
         Cmd::Redo => Icon::Redo,
@@ -299,6 +312,7 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Trace => Icon::Trace,
         OpType::Drill => Icon::Drill,
         OpType::Pocket3D => Icon::Pocket,
+        OpType::Finish3D => Icon::Finish3D,
     }
 }
 

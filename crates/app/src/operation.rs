@@ -50,6 +50,7 @@ use flecs_ecs::prelude::World;
 
 use crate::cl::Toolpath;
 use crate::drilling::{self, CycleChoice, Hole};
+use crate::finishing3d::{self, Finish3DParams};
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Triangle;
 use crate::geometry::feature::{self, LoopKind};
@@ -128,6 +129,9 @@ pub enum OpType {
     /// Mesh-driven Z-level pocketing: the model is the final part, every
     /// level's islands are computed from it (see [`crate::machining3d`]).
     Pocket3D,
+    /// Mesh-driven 3D finishing: ball-nose waterline rings at the scallop
+    /// stepdown (see [`crate::finishing3d`]).
+    Finish3D,
 }
 
 impl core::fmt::Display for OpType {
@@ -140,6 +144,7 @@ impl core::fmt::Display for OpType {
             OpType::Trace => "Trace",
             OpType::Drill => "Drill",
             OpType::Pocket3D => "3D Pocket",
+            OpType::Finish3D => "3D Finish",
         };
         f.write_str(s)
     }
@@ -336,7 +341,8 @@ pub fn region_z(world: &flecs_ecs::prelude::World, params: &OpParams) -> Option<
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
         | OpParams::Drill { top_z, .. }
-        | OpParams::Pocket3D { top_z, .. } => resolve_height(world, *top_z),
+        | OpParams::Pocket3D { top_z, .. }
+        | OpParams::Finish3D { top_z, .. } => resolve_height(world, *top_z),
     }
 }
 
@@ -400,7 +406,8 @@ pub fn resolve_params(
         OpParams::Pocket { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Slot { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. }
-        | OpParams::Pocket3D { clearance_z, retract_z, top_z, bottom_z, .. } => (
+        | OpParams::Pocket3D { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Finish3D { clearance_z, retract_z, top_z, bottom_z, .. } => (
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),
@@ -615,6 +622,33 @@ pub enum OpParams {
         /// M2.1d). Geometry is untouched; only feed words move.
         feed_opt: bool,
     },
+    /// Ball-nose waterline finishing. The model is the finished
+    /// surface: each ring is the ball-center tangent locus of the
+    /// forbidden region at its center plane, levels stepped by the
+    /// scallop law - `Δz = 2√(r·tol)` - so there is no stepdown field:
+    /// the tolerance IS the depth increment's author (see
+    /// [`crate::finishing3d`]). Region, heights and refusals follow the
+    /// 3-D pocket's laws exactly: silhouette footprint, resolved
+    /// top/bottom, mesh-computed everything.
+    Finish3D {
+        /// Surface deviation budget, mm, both directions: it sets the
+        /// stepdown, the ring's scan resolution and the arc-fit chord
+        /// together, and it is what the envelope verdict measures
+        /// against.
+        tolerance: f64,
+        clearance_z: Height,
+        /// Hop plane between rings of one level; `None` hops to
+        /// clearance, like the pocket family.
+        retract_z: Option<Height>,
+        /// Tip-Z of the first (highest) ring.
+        top_z: Height,
+        /// Tip-Z of the last ring - the model's lowest point the ball
+        /// can touch (the generator's levels snap here).
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+    },
 }
 
 impl OpParams {
@@ -628,6 +662,7 @@ impl OpParams {
             OpParams::Trace { .. } => OpType::Trace,
             OpParams::Drill { .. } => OpType::Drill,
             OpParams::Pocket3D { .. } => OpType::Pocket3D,
+            OpParams::Finish3D { .. } => OpType::Finish3D,
         }
     }
 
@@ -641,7 +676,8 @@ impl OpParams {
             | OpParams::Slot { clearance_z, .. }
             | OpParams::Trace { clearance_z, .. }
             | OpParams::Drill { clearance_z, .. }
-            | OpParams::Pocket3D { clearance_z, .. } => *clearance_z,
+            | OpParams::Pocket3D { clearance_z, .. }
+            | OpParams::Finish3D { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -658,7 +694,8 @@ impl OpParams {
             | OpParams::Slot { top_z, .. }
             | OpParams::Trace { top_z, .. }
             | OpParams::Drill { top_z, .. }
-            | OpParams::Pocket3D { top_z, .. } => *top_z,
+            | OpParams::Pocket3D { top_z, .. }
+            | OpParams::Finish3D { top_z, .. } => *top_z,
         }
     }
 
@@ -778,6 +815,28 @@ impl OpParams {
                     && (max_engagement.is_finite()
                         && (!matches!(strategy, PocketStrategy::Adaptive)
                             || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
+            }
+            OpParams::Finish3D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                ..
+            } => {
+                // No stepdown to check: the scallop law derives it from
+                // tolerance and the tool radius, and the generator's
+                // level cap refuses a tolerance that would need more
+                // rings than the machine of record may hold.
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
             }
             OpParams::Slot {
                 a,
@@ -1065,6 +1124,27 @@ impl OpParams {
                 // Same law for the v14 feed modulation: flipping it
                 // changes every F word, so it changes the stamp.
                 h.write_u8(u8::from(*feed_opt));
+            }
+            OpParams::Finish3D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+            } => {
+                h.write_u8(7);
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*feed, *plunge_feed] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                wh_opt(h, *retract_z);
             }
             OpParams::Slot {
                 a,
@@ -1492,7 +1572,10 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
     if let SrcRef::Selection(items) = &op.src
         && !matches!(
             op.params,
-            OpParams::Slot { .. } | OpParams::Drill { .. } | OpParams::Pocket3D { .. }
+            OpParams::Slot { .. }
+                | OpParams::Drill { .. }
+                | OpParams::Pocket3D { .. }
+                | OpParams::Finish3D { .. }
         )
     {
         return selection_region(world, items, &op.params).ok();
@@ -1536,7 +1619,10 @@ fn region_for_src(
         SrcRef::Selection(items)
             if !matches!(
                 params,
-                OpParams::Slot { .. } | OpParams::Drill { .. } | OpParams::Pocket3D { .. }
+                OpParams::Slot { .. }
+                    | OpParams::Drill { .. }
+                    | OpParams::Pocket3D { .. }
+                    | OpParams::Finish3D { .. }
             ) =>
         {
             selection_region(world, items, params)
@@ -1562,6 +1648,11 @@ fn region_for(world: &World, material: &Material, params: &OpParams) -> Result<R
         // per-level islands come from the mesh, in the generator and in
         // the verify pass, never from this region.
         OpParams::Pocket3D { .. } => {
+            slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
+        }
+        // Same silhouette law for the finish: the rings chase the mesh
+        // at every plane, the region only says where the model shadows.
+        OpParams::Finish3D { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }
@@ -2678,6 +2769,10 @@ pub fn generate(
         // per-level islands come from the facets.
         OpType::Pocket | OpType::Slot | OpType::Pocket3D => Mode::Area,
         OpType::Trace => Mode::Engrave,
+        // The waterline's verdict is measured, not deduced from
+        // tangency: law (f) of `verify` scans the swept ball against
+        // the mesh (the `finish_tol` field below carries the budget).
+        OpType::Finish3D => Mode::Envelope,
     };
 
     // The height seam: the params' From+offset expressions become the
@@ -2874,6 +2969,35 @@ pub fn generate(
             };
             (region, path)
         }
+        OpParams::Finish3D { tolerance, feed, plunge_feed, climb, .. } => {
+            // Ball jurisdiction: the rings are the tangent locus of a
+            // sphere. A flat-bottomed or torus-bottomed cutter's
+            // forbidden set is not this facetwise support scan (the
+            // Minkowski sum differs), so an end mill here refuses by
+            // name - never a ball path dressed as something else.
+            if tool.kind != crate::tools::ToolKind::BallNose {
+                return Err(GenError::Invalid(format!(
+                    "3D Finish needs a ball-nose tool, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let path = finishing3d::waterline(
+                &material.facets,
+                &Finish3DParams {
+                    tool_diameter: d,
+                    tolerance: *tolerance,
+                    clearance_z: hs.clearance,
+                    retract_z: hs.retract,
+                    top_z: req_z(hs.top, "Top of Part Z")?,
+                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                },
+            )?;
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -2952,15 +3076,23 @@ pub fn generate(
         &VerifyContext {
             region: &region,
             stock: stock_region.as_ref(),
-            // Only the 3-D pocket's laws are depth-dependent; every
-            // other op verifies against its static region, untouched.
-            model: matches!(&op.params, OpParams::Pocket3D { .. }).then_some(&material.facets[..]),
+            // Only the mesh-driven kinds' laws are depth-dependent;
+            // every other op verifies against its static region,
+            // untouched.
+            model: matches!(
+                &op.params,
+                OpParams::Pocket3D { .. } | OpParams::Finish3D { .. }
+            )
+            .then_some(&material.facets[..]),
             tool: &geom,
             mode,
             stock_top_z,
             clearance_z: hs.clearance,
             stock_to_leave: match &op.params {
-                OpParams::Face { .. } | OpParams::Trace { .. } | OpParams::Drill { .. } => 0.0,
+                OpParams::Face { .. }
+                | OpParams::Trace { .. }
+                | OpParams::Drill { .. }
+                | OpParams::Finish3D { .. } => 0.0,
                 OpParams::Contour { stock_to_leave, .. }
                 | OpParams::Pocket { stock_to_leave, .. }
                 | OpParams::Slot { stock_to_leave, .. }
@@ -2968,6 +3100,12 @@ pub fn generate(
             },
             gouge_tol: GOUGE_TOL,
             z_tol: Z_TOL,
+            // The finish op's envelope budget is its own tolerance; no
+            // other kind runs the envelope law.
+            finish_tol: match &op.params {
+                OpParams::Finish3D { tolerance, .. } => Some(*tolerance),
+                _ => None,
+            },
         },
     );
     Ok((path, warns))

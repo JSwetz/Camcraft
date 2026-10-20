@@ -72,6 +72,7 @@ fn ctx<'a>(region: &'a Region, stock: Option<&'a Region>, tool: &'a ToolGeom, mo
         // 500 um deep.
         gouge_tol: 0.01,
         z_tol: 1e-6,
+        finish_tol: None,
     }
 }
 
@@ -366,4 +367,164 @@ fn a_hole_within_reach_verifies_silent() {
     let tool = deep_tool();
     let t = hole_in_the_middle(-115.0);
     assert_eq!(verify(&t, &ctx(&r, None, &tool, Mode::Boundary)), Vec::new());
+}
+
+// ---------------------------------------------------------------------------
+// Mode::Envelope - the M2.2 law: MEASURE the swept ball against the mesh.
+// The verdict must follow the stated tolerance, name the nearest move,
+// and refuse to call silence a proof when the measurement cannot run.
+// ---------------------------------------------------------------------------
+
+use hsmworks_app::finishing3d::{self, Finish3DParams};
+use hsmworks_app::geometry::Triangle;
+
+fn cone_facets(n_lon: usize) -> Vec<Triangle> {
+    let mut facets = Vec::new();
+    let apex = p(0.0, 0.0, 20.0);
+    let base: Vec<_> = (0..n_lon)
+        .map(|j| {
+            let th = std::f64::consts::TAU * j as f64 / n_lon as f64;
+            p(20.0 * th.cos(), 20.0 * th.sin(), 0.0)
+        })
+        .collect();
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, base[j], base[(j + 1) % n_lon]));
+    }
+    let center = p(0.0, 0.0, 0.0);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(center, base[(j + 1) % n_lon], base[j]));
+    }
+    facets
+}
+
+fn ball() -> ToolGeom {
+    ToolGeom {
+        radius: 3.0,
+        ..deep_tool()
+    }
+}
+
+fn env_ctx<'a>(
+    region: &'a Region,
+    model: Option<&'a [Triangle]>,
+    tool: &'a ToolGeom,
+    finish_tol: Option<f64>,
+) -> VerifyContext<'a> {
+    VerifyContext {
+        region,
+        stock: None,
+        model,
+        tool,
+        mode: Mode::Envelope,
+        // At the planted feeds' rapid plane: law (d)'s rest-material
+        // heuristic must not invent stock above where the rapids run
+        // (the cone's own rapids sit at clearance, unaffected).
+        stock_top_z: 15.0,
+        clearance_z: 25.0,
+        stock_to_leave: 0.0,
+        gouge_tol: 0.01,
+        z_tol: 1e-6,
+        finish_tol,
+    }
+}
+
+fn cone_waterline() -> Toolpath {
+    finishing3d::waterline(
+        &cone_facets(96),
+        &Finish3DParams {
+            tool_diameter: 6.0,
+            tolerance: 0.1,
+            clearance_z: 25.0,
+            retract_z: None,
+            top_z: 16.0,
+            bottom_z: 0.5,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        },
+    )
+    .expect("cone waterline")
+}
+
+#[test]
+fn envelope_clean_path_verifies_silent() {
+    // The 45-degree cone at its scallop budget: measured rest sits AT
+    // the tolerance the stepdown was derived from, inside the
+    // measurement's own quantization gate - the law's promise, kept.
+    let f = cone_facets(96);
+    let t = cone_waterline();
+    let r = rect(-20.0, -20.0, 20.0, 20.0);
+    let tool = ball();
+    assert_eq!(verify(&t, &env_ctx(&r, Some(&f), &tool, Some(0.1))), Vec::new());
+}
+
+#[test]
+fn envelope_verdict_follows_the_stated_tol() {
+    // The SAME path judged against 0.01: what stands exposed is the
+    // generator's own chord error - the rings are promised within the
+    // 0.1 they were fit at, measured 0.1155 below the surface (the
+    // tol-0.1 gate absorbs it as quantization; the tol-0.01 gate,
+    // ~0.033, cannot). The cusp is the smaller promise here (0.0088
+    // measured): on this cone the ring fit, not the stepdown, is the
+    // loosest law. The verifier judges against the user's budget, not
+    // the generator's mood.
+    let f = cone_facets(96);
+    let t = cone_waterline();
+    let r = rect(-20.0, -20.0, 20.0, 20.0);
+    let tool = ball();
+    let warns = verify(&t, &env_ctx(&r, Some(&f), &tool, Some(0.01)));
+    let [Warning::Envelope { at, gouge_mm, rest_mm }] = warns.as_slice() else {
+        panic!("expected one envelope verdict, got {warns:?}");
+    };
+    assert!(*gouge_mm > 0.03, "the 0.1 chord error breaches the 0.01 gate: {warns:?}");
+    assert!(*gouge_mm <= 0.16, "the old budget's error, no structural gouge: {warns:?}");
+    assert!(*rest_mm <= 0.16, "the cusp stays a bystander here: {warns:?}");
+    assert!(*at >= 2, "the nearest cut, not a rapid: {warns:?}");
+}
+
+#[test]
+fn envelope_gouge_names_the_nearest_move() {
+    // A planted offender: a feed run straight THROUGH the solid at tip
+    // z 5. The trench a ball leaves in an overhead column is its own
+    // tip plane, so the wanted surface at 10 is cut down to 5 - a 5 mm
+    // gouge on exactly the move that made it.
+    let f: Vec<Triangle> = hsmworks_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
+    let t = Toolpath::new(vec![
+        Move::new(MoveKind::Rapid, p(0.0, 0.0, 15.0), p(-15.0, 0.0, 15.0), None),
+        Move::new(MoveKind::Plunge, p(-15.0, 0.0, 15.0), p(-15.0, 0.0, 5.0), Some(100.0)),
+        Move::new(MoveKind::Feed, p(-15.0, 0.0, 5.0), p(15.0, 0.0, 5.0), Some(500.0)),
+        Move::new(MoveKind::Rapid, p(15.0, 0.0, 5.0), p(15.0, 0.0, 15.0), None),
+    ]);
+    let r = rect(-10.0, -10.0, 10.0, 10.0);
+    let tool = ball();
+    let warns = verify(&t, &env_ctx(&r, Some(&f), &tool, Some(0.1)));
+    let [Warning::Envelope { at, gouge_mm, .. }] = warns.as_slice() else {
+        panic!("expected one envelope verdict, got {warns:?}");
+    };
+    assert_eq!(*at, 2, "the through-feed owns the gouge");
+    assert!((gouge_mm - 5.0).abs() <= 0.05, "surface 10, trench floor 5: {gouge_mm}");
+}
+
+#[test]
+fn an_envelope_that_cannot_measure_proves_nothing() {
+    // No mesh or no budget: the scan cannot run, so nothing is proven -
+    // and proves-not reports as a gouge at the first cut, never as
+    // silence (the law (b) slice-proof precedent).
+    let t = Toolpath::new(vec![
+        Move::new(MoveKind::Rapid, p(20.0, 0.0, 15.0), p(25.0, 0.0, 15.0), None),
+        Move::new(MoveKind::Feed, p(25.0, 0.0, 15.0), p(30.0, 0.0, 15.0), Some(500.0)),
+    ]);
+    let r = rect(-10.0, -10.0, 10.0, 10.0);
+    let tool = ball();
+    let f: Vec<Triangle> = hsmworks_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
+    assert_eq!(
+        verify(&t, &env_ctx(&r, None, &tool, Some(0.1))),
+        vec![Warning::Gouge { at: 1 }],
+        "no mesh to measure"
+    );
+    assert_eq!(
+        verify(&t, &env_ctx(&r, Some(&f), &tool, None)),
+        vec![Warning::Gouge { at: 1 }],
+        "no budget to measure against"
+    );
 }

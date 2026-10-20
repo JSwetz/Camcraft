@@ -127,6 +127,7 @@ fn verify_against(facets: &[Triangle], region: &Region, path: &Toolpath) -> Vec<
         stock_to_leave: 0.0,
         gouge_tol: 0.01,
         z_tol: 1e-6,
+        finish_tol: None,
     };
     verify(path, &cx)
 }

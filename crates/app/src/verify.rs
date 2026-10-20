@@ -9,7 +9,7 @@
 //! approximation, stated in full where it is used. No vendor source was
 //! consulted.
 //!
-//! Five checks, each with the exact condition that raises it:
+//! Six checks, each with the exact condition that raises it:
 //!
 //! - [`Warning::Crossing`] - two Feed moves whose Z ranges overlap cross
 //!   in XY. Proper crossings only: touching at a shared vertex (a closed
@@ -38,6 +38,12 @@
 //!   plunge sweeps exactly its own disc, so the hole's rim samples
 //!   fall inside the flute radius where law (c)'s annulus is empty -
 //!   which is why the reach law reads the cycles, not the moves.
+//! - [`Warning::Envelope`] - the measured verdict of a 3-D finish
+//!   (`Mode::Envelope`, law (f) below): the swept ball envelope cuts
+//!   below, or leaves above, the model surface by more than
+//!   `finish_tol` plus the scan's quantization floor. It replaces
+//!   [`Warning::Gouge`] for ball paths, whose tangency the distance
+//!   law would misjudge.
 //!
 //! With [`VerifyContext::model`] set (the 3-D pocket, M2.1a) the
 //! boundary is depth-dependent: the gouge law adds the model's
@@ -48,7 +54,7 @@
 //!
 //! Conservative by design: it may warn where nothing is wrong (a wall
 //! thinner than the sampling, an exotic holder shape), it must never
-//! stay silent about the five classes above. The hard post-gate that
+//! stay silent about the six classes above. The hard post-gate that
 //! blocks on these lands with the post processor (M2.3); until then the
 //! operation layer attaches them to the operation for display.
 //!
@@ -88,6 +94,12 @@ pub enum Mode {
     /// Trace: the cutter center runs on the boundary itself; laws that
     /// assume tangency do not apply.
     Engrave,
+    /// Ball-rolling 3-D finish (waterline): the centers sit exactly r
+    /// off the model at each tangent point and nearer than r to the
+    /// section silhouettes elsewhere, so the tangency gouge law would
+    /// flag every ring. It stands down in favor of the measured sweep
+    /// envelope below, gated by `finish_tol`.
+    Envelope,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -116,12 +128,20 @@ pub struct VerifyContext<'a> {
     pub gouge_tol: f64,
     /// Margin for "below the clearance plane" and "moved in XY".
     pub z_tol: f64,
+    /// The deviation budget the measured envelope of `Mode::Envelope`
+    /// is judged against. `None` everywhere the envelope law never
+    /// runs - which keeps every existing op's verdict byte-identical,
+    /// the same discipline as `model`.
+    pub finish_tol: Option<f64>,
 }
 
 /// Serde derives: the operation layer persists warnings with the cached
 /// path (project v3 `OperationDto.cache`), so the enum is also a file
 /// format - variant names are that contract, keep them stable.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// (`Eq` is deliberately absent - the envelope variant carries
+/// measurements, and nothing in this codebase needs warnings to be
+/// hashable; `PartialEq` is all the dedup and assert sites use.)
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Warning {
     /// Feed moves `moves[0]` and `moves[1]` cross in XY at shared depth.
@@ -136,6 +156,14 @@ pub enum Warning {
     RapidInStock { at: usize },
     /// Defensive: a non-finite coordinate (generators gate this out).
     NonFinite { at: usize },
+    /// A 3-D finish's measured ball envelope misses the model:
+    /// `gouge_mm` below it (worst), `rest_mm` above it (worst),
+    /// reported at the cutting move nearest the deviation's XY.
+    Envelope {
+        at: usize,
+        gouge_mm: f64,
+        rest_mm: f64,
+    },
 }
 
 impl core::fmt::Display for Warning {
@@ -158,6 +186,14 @@ impl core::fmt::Display for Warning {
                 write!(f, "rapid move {at} travels below the clearance plane inside stock")
             }
             Warning::NonFinite { at } => write!(f, "move {at} has a non-finite coordinate"),
+            Warning::Envelope {
+                at,
+                gouge_mm,
+                rest_mm,
+            } => write!(
+                f,
+                "finish envelope near move {at}: {gouge_mm:.4} mm gouge, {rest_mm:.4} mm rest"
+            ),
         }
     }
 }
@@ -351,7 +387,12 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // island deeper is not a hole here, and one the ladder must never
     // enter is. A center inside the section is a full collision, not
     // a near miss, so containment joins the distance test.
-    if cx.mode != Mode::Engrave {
+    // Mode::Envelope stands this law down by design: a waterline ring
+    // is tangent - its centers hold exactly r to the model at the
+    // tangent line while sitting nearer than r to the level silhouette
+    // elsewhere - and tangency is not gouging. Law (f) measures the
+    // swept ball instead.
+    if cx.mode != Mode::Engrave && cx.mode != Mode::Envelope {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;
@@ -554,6 +595,67 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                 warns.push(hit);
             }
         }
+    }
+
+    // (f) Finish envelope - the measured verdict that replaces law (b)
+    // for ball-rolling paths (`stock_sim::envelope_scan`): `gouge` is
+    // Dexel truth, material cut below the model wherever a ball's
+    // floor ran under the surface; `rest` is distance truth, model
+    // standing outside every ball at ridge points - surface points
+    // the center path passed twice inside the promise band, where
+    // the stepdown law promised tolerance. The band is `tol` wide,
+    // so the tolerance is handed to the scan as well as to the gate.
+    // Both are
+    // judged against `finish_tol` plus the scan's own quantization
+    // floor, `cell^2 / (2r)` - the ball's sagitta across one cell,
+    // the smallest deviation this measurement can honestly resolve.
+    // A verdict tighter than the measurement is a lie in the other
+    // direction; the rest this law does NOT report - untouched
+    // columns, shelves and crowns and missing-pass gaps - is another
+    // op's jurisdiction (rest machining, M2.3), law documented in
+    // finishing3d.rs. An Envelope context that cannot measure - no
+    // model, no tolerance, an unscanable lattice - has proven
+    // nothing, and proves-not reports as a gouge at the first cut,
+    // never as silence (the law (b) slice-proof precedent).
+    if cx.mode == Mode::Envelope {
+        let first_cut = path
+            .moves
+            .iter()
+            .position(|m| m.kind != MoveKind::Rapid)
+            .unwrap_or(0);
+        let verdict = match cx.model.zip(cx.finish_tol) {
+            Some((facets, tol)) => match crate::stock_sim::envelope_scan(facets, &path.moves, r, tol) {
+                Ok(rep) => {
+                    let gate = tol + rep.cell * rep.cell / (2.0 * r) + 1e-9;
+                    if rep.gouge_mm > gate || rep.rest_mm > gate {
+                        let mut at = 0usize;
+                        let mut best = f64::INFINITY;
+                        for (i, m) in path.moves.iter().enumerate() {
+                            if m.kind == MoveKind::Rapid {
+                                continue;
+                            }
+                            for (a, b) in m.chords(chord_tol) {
+                                let d = dist2_seg(rep.at, a, b);
+                                if d < best {
+                                    best = d;
+                                    at = i;
+                                }
+                            }
+                        }
+                        Some(Warning::Envelope {
+                            at,
+                            gouge_mm: rep.gouge_mm.clamp(0.0, 1e9),
+                            rest_mm: rep.rest_mm.clamp(0.0, 1e9),
+                        })
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => Some(Warning::Gouge { at: first_cut }),
+            },
+            None => Some(Warning::Gouge { at: first_cut }),
+        };
+        warns.extend(verdict);
     }
 
     warns

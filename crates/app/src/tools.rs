@@ -31,6 +31,20 @@ pub enum ToolKind {
     Bore,
 }
 
+impl core::fmt::Display for ToolKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let s = match self {
+            ToolKind::EndMill => "flat end mill",
+            ToolKind::BallNose => "ball-nose",
+            ToolKind::BullNose => "bull-nose",
+            ToolKind::Drill => "drill",
+            ToolKind::Tap => "tap",
+            ToolKind::Bore => "boring bar",
+        };
+        f.write_str(s)
+    }
+}
+
 /// One rotating cutter, coaxial with the spindle: a cutting body of
 /// `diameter`/`flute_len` (corner rounded by `corner_r`), a plain shank,
 /// and whatever holder the setup assumes above it. Radii live as

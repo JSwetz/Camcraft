@@ -35,6 +35,7 @@ pub(crate) enum Icon {
     Slot,
     Trace,
     Drill,
+    Finish3D,
     Undo,
     Redo,
     Delete,
@@ -48,7 +49,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 23] = [
+    pub(crate) const ALL: [Icon; 24] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -63,6 +64,7 @@ impl Icon {
         Icon::Slot,
         Icon::Trace,
         Icon::Drill,
+        Icon::Finish3D,
         Icon::Undo,
         Icon::Redo,
         Icon::Delete,
@@ -95,6 +97,10 @@ impl Icon {
             // drill - shank, shouldered body, one helix wrap, cone
             // point - in the set's stroke weight. Ours to give.
             Icon::Drill => include_bytes!("../../../../assets/ui/drill.png"),
+            // Original drawing (no Tabler waterline glyph exists): nested
+            // contour rings tightening toward the high point - the map
+            // reading of a waterline finish. Ours to give.
+            Icon::Finish3D => include_bytes!("../../../../assets/ui/finish3d.png"),
             Icon::Undo => include_bytes!("../../../../assets/ui/arrow-back-up.png"),
             Icon::Redo => include_bytes!("../../../../assets/ui/arrow-forward-up.png"),
             Icon::Delete => include_bytes!("../../../../assets/ui/trash.png"),
@@ -125,6 +131,7 @@ impl Icon {
             Icon::Slot => "icon-slot",
             Icon::Trace => "icon-trace",
             Icon::Drill => "icon-drill",
+            Icon::Finish3D => "icon-finish3d",
             Icon::Undo => "icon-undo",
             Icon::Redo => "icon-redo",
             Icon::Delete => "icon-delete",

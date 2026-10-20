@@ -231,6 +231,21 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             // programmed feed everywhere until the user asks otherwise.
             feed_opt: false,
         },
+        7 => OpParams::Finish3D {
+            // A general 3-D finish budget: half the common 0.1 mm
+            // shop tolerance, coarse enough that the scallop stepdown
+            // on a typical R3 ball stays well under the level cap,
+            // fine enough that the rings read as a finish.
+            tolerance: 0.05,
+            clearance_z: clearance,
+            // None hops rings to clearance - the pocket family's law.
+            retract_z: None,
+            top_z: top,
+            bottom_z: bottom,
+            feed,
+            plunge_feed: plunge,
+            climb,
+        },
         _ => OpParams::Face {
             stepover,
             clearance_z: clearance,
@@ -262,7 +277,8 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Pocket3D { feed, .. }
         | OpParams::Slot { feed, .. }
         | OpParams::Trace { feed, .. }
-        | OpParams::Drill { feed, .. } => *feed,
+        | OpParams::Drill { feed, .. }
+        | OpParams::Finish3D { feed, .. } => *feed,
     }
 }
 
@@ -274,7 +290,8 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Pocket3D { plunge_feed, .. }
         | OpParams::Slot { plunge_feed, .. }
         | OpParams::Trace { plunge_feed, .. }
-        | OpParams::Drill { plunge_feed, .. } => *plunge_feed,
+        | OpParams::Drill { plunge_feed, .. }
+        | OpParams::Finish3D { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -285,7 +302,8 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::Pocket { climb, .. }
         | OpParams::Pocket3D { climb, .. }
         | OpParams::Slot { climb, .. }
-        | OpParams::Trace { climb, .. } => *climb,
+        | OpParams::Trace { climb, .. }
+        | OpParams::Finish3D { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
         OpParams::Drill { .. } => true,
@@ -319,7 +337,8 @@ fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Pocket { bottom_z, .. }
         | OpParams::Pocket3D { bottom_z, .. }
         | OpParams::Slot { bottom_z, .. }
-        | OpParams::Trace { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::Trace { bottom_z, .. }
+        | OpParams::Finish3D { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -334,7 +353,8 @@ fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Pocket3D { top_z, .. }
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
-        | OpParams::Drill { top_z, .. } => Some(*top_z),
+        | OpParams::Drill { top_z, .. }
+        | OpParams::Finish3D { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -348,7 +368,8 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::Pocket3D { retract_z, .. }
         | OpParams::Slot { retract_z, .. }
         | OpParams::Trace { retract_z, .. }
-        | OpParams::Drill { retract_z, .. } => *retract_z,
+        | OpParams::Drill { retract_z, .. }
+        | OpParams::Finish3D { retract_z, .. } => *retract_z,
         OpParams::Face { .. } => None,
     }
 }
@@ -370,6 +391,7 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::ShankHit { part, .. } => (2, *part),
             Warning::RapidInStock { .. } => (3, false),
             Warning::NonFinite { .. } => (4, false),
+            Warning::Envelope { .. } => (5, false),
         }
     }
     fn last_move(w: &Warning) -> usize {
@@ -378,7 +400,8 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::Gouge { at }
             | Warning::ShankHit { at, .. }
             | Warning::RapidInStock { at }
-            | Warning::NonFinite { at } => *at,
+            | Warning::NonFinite { at }
+            | Warning::Envelope { at, .. } => *at,
         }
     }
     let mut lines: Vec<String> = Vec::new();

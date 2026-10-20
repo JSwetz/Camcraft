@@ -450,3 +450,48 @@ fn tap_plate_matches_golden() {
     assert_eq!(t.cycles[0].kind, hsmworks_app::cl::CycleKind::Tap);
     write_golden("tap_plate.cl", &gen_to_cltext(&t));
 }
+
+// ---------------------------------------------------------------------------
+// M2.2a - the 3D waterline. The same rule as the 2D generators: the exact
+// ring set, their arc fits, and the level order must not move unnoticed.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn finish3d_waterline_cone() {
+    use hsmworks_app::finishing3d::{waterline, Finish3DParams};
+    use hsmworks_app::geometry::{Point3, Triangle};
+    let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+    // 45-degree cone, apex (0,0,20), R20 base ring at z 0, closed bottom.
+    let n = 96;
+    let mut facets = Vec::new();
+    for j in 0..n {
+        let a = std::f64::consts::TAU * j as f64 / n as f64;
+        let b = std::f64::consts::TAU * (j + 1) as f64 / n as f64;
+        facets.push(Triangle::new(
+            p3(0.0, 0.0, 20.0),
+            p3(20.0 * a.cos(), 20.0 * a.sin(), 0.0),
+            p3(20.0 * b.cos(), 20.0 * b.sin(), 0.0),
+        ));
+        facets.push(Triangle::new(
+            p3(0.0, 0.0, 0.0),
+            p3(20.0 * b.cos(), 20.0 * b.sin(), 0.0),
+            p3(20.0 * a.cos(), 20.0 * a.sin(), 0.0),
+        ));
+    }
+    let t = waterline(
+        &facets,
+        &Finish3DParams {
+            tool_diameter: 6.0,
+            tolerance: 0.1,
+            clearance_z: 25.0,
+            retract_z: None,
+            top_z: 16.0,
+            bottom_z: 0.5,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        },
+    )
+    .unwrap();
+    write_golden("finish3d_waterline_cone.cl", &gen_to_cltext(&t));
+}

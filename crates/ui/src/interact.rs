@@ -1136,6 +1136,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         operation::OpParams::Contour { retract_z, .. } => Some(*retract_z),
         operation::OpParams::Pocket { retract_z, .. }
         | operation::OpParams::Pocket3D { retract_z, .. }
+        | operation::OpParams::Finish3D { retract_z, .. }
         | operation::OpParams::Slot { retract_z, .. }
         | operation::OpParams::Trace { retract_z, .. }
         | operation::OpParams::Drill { retract_z, .. } => *retract_z,
@@ -1192,9 +1193,13 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // of a ladder the viewport cannot draw here (the model's own
         // sections are the rest); Bottom is the snapped last level, cut
         // exact, so the shared depth-kind drawing is right for both.
+        // The finish's Top is the first ring's tip plane and Bottom the
+        // snapped last one - the same ladder drawing (the rings between
+        // them are the model's own, undrawable here, like the pocket's).
         operation::OpParams::Contour { top_z, bottom_z, .. }
         | operation::OpParams::Pocket { top_z, bottom_z, .. }
         | operation::OpParams::Pocket3D { top_z, bottom_z, .. }
+        | operation::OpParams::Finish3D { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
         | operation::OpParams::Trace { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {

@@ -1,0 +1,615 @@
+//! M2.2a acceptance: the waterline. The construction promises a
+//! gouge-free finish (tangent-locus geometry); these tests MEASURE that
+//! promise with the envelope kernel, and pin the structural laws the
+//! generator states in its module comment - chaining, ring closure, the
+//! ladder's snap, the refusal set.
+//!
+//! Fixtures are analytic: a spherical cap (normals tilt 0..45 deg, the
+//! scallop law's home turf), a 45-degree cone (the law's equality case),
+//! and a box (pure structure - its flat shelves are the parallel
+//! strategy's jurisdiction, so the envelope must stay silent on them).
+
+use hsmworks_app::cl::{MoveKind, Toolpath};
+use hsmworks_app::finishing3d::{scallop_stepdown, waterline, Finish3DParams};
+use hsmworks_app::geometry::{slice, Point3, Triangle};
+use hsmworks_app::geo2d::Region;
+use hsmworks_app::machining2d::GenError;
+use hsmworks_app::stock_sim::envelope_scan;
+use hsmworks_app::verify::{verify, Mode, ToolGeom, VerifyContext};
+
+const PI: f64 = std::f64::consts::PI;
+const TAU: f64 = std::f64::consts::TAU;
+
+/// The tool every fixture is planned with: catalog BN-0600 (r = 3).
+const R: f64 = 3.0;
+/// The tolerance every fixture is planned with.
+const TOL: f64 = 0.1;
+
+fn p3(x: f64, y: f64, z: f64) -> Point3 {
+    Point3::new(x, y, z)
+}
+
+/// A sphere of `radius` centered at the origin, cut at polar angle
+/// `polar_max` and closed with a flat disc (or left closed at the pole
+/// when `polar_max` reaches it). Band facets plus the cap fan.
+fn sphere_cap(radius: f64, polar_max: f64, n_lat: usize, n_lon: usize) -> Vec<Triangle> {
+    let mut facets = Vec::new();
+    let ring = |k: usize| -> Vec<Point3> {
+        let ph = polar_max * k as f64 / n_lat as f64;
+        let (z, rr) = (radius * ph.cos(), radius * ph.sin());
+        (0..n_lon)
+            .map(|j| {
+                let th = TAU * j as f64 / n_lon as f64;
+                p3(rr * th.cos(), rr * th.sin(), z)
+            })
+            .collect()
+    };
+    let apex = p3(0.0, 0.0, radius);
+    let first = ring(1);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, first[j], first[(j + 1) % n_lon]));
+    }
+    for k in 1..n_lat {
+        let ra = ring(k);
+        let rb = ring(k + 1);
+        for j in 0..n_lon {
+            let j2 = (j + 1) % n_lon;
+            facets.push(Triangle::new(ra[j], rb[j], rb[j2]));
+            facets.push(Triangle::new(ra[j], rb[j2], ra[j2]));
+        }
+    }
+    if polar_max < PI - 1e-9 {
+        let rim = ring(n_lat);
+        let zb = radius * polar_max.cos();
+        let center = p3(0.0, 0.0, zb);
+        for j in 0..n_lon {
+            facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
+        }
+    }
+    facets
+}
+
+/// A solid cone, apex at (0, 0, 20), base disc at z = 0 of radius 20:
+/// walls tilted exactly 45 deg - the stepdown law's equality case.
+fn cone(n_lon: usize) -> Vec<Triangle> {
+    let mut facets = Vec::new();
+    let apex = p3(0.0, 0.0, 20.0);
+    let base: Vec<Point3> = (0..n_lon)
+        .map(|j| {
+            let th = TAU * j as f64 / n_lon as f64;
+            p3(20.0 * th.cos(), 20.0 * th.sin(), 0.0)
+        })
+        .collect();
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, base[j], base[(j + 1) % n_lon]));
+    }
+    let center = p3(0.0, 0.0, 0.0);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(center, base[(j + 1) % n_lon], base[j]));
+    }
+    facets
+}
+
+/// A 20 x 20 x 10 box centered on the Z axis, z in 0..10.
+fn box_facets() -> Vec<Triangle> {
+    let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
+    let (a, b, c, d) = (q(-1.0, -1.0, 0.0), q(1.0, -1.0, 0.0), q(1.0, 1.0, 0.0), q(-1.0, 1.0, 0.0));
+    let (e, f, g, h) = (q(-1.0, -1.0, 10.0), q(1.0, -1.0, 10.0), q(1.0, 1.0, 10.0), q(-1.0, 1.0, 10.0));
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let mut facets = Vec::new();
+    facets.extend(quad([e, f, g, h])); // top
+    facets.extend(quad([a, c, b, d])); // bottom (opposite winding)
+    facets.extend(quad([a, b, f, e])); // sides
+    facets.extend(quad([b, c, g, f]));
+    facets.extend(quad([c, d, h, g]));
+    facets.extend(quad([d, a, e, h]));
+    facets
+}
+
+fn params(top_z: f64, bottom_z: f64) -> Finish3DParams {
+    Finish3DParams {
+        tool_diameter: 2.0 * R,
+        tolerance: TOL,
+        clearance_z: 25.0,
+        retract_z: None,
+        top_z,
+        bottom_z,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    }
+}
+
+/// The envelope gate `verify.rs` states: the tolerance plus the scan's
+/// own quantization floor (one cell's sagitta of the ball).
+fn gate(cell: f64) -> f64 {
+    TOL + cell * cell / (2.0 * R) + 1e-9
+}
+
+fn envelope(facets: &[Triangle], t: &Toolpath) -> hsmworks_app::stock_sim::EnvelopeReport {
+    envelope_scan(facets, &t.moves, R, TOL).expect("fixture-sized grid")
+}
+
+/// The full verifier with the envelope law switched on - the shape the
+/// operation layer assembles for a Finish3D op. `stock_top` is the
+/// fixture's own top height: laws (c)/(d) measure the path against
+/// remaining material, and for a finish on a near-net model the
+/// honest stand-in for "not yet cut" is the part surface, not the
+/// clearance plane (clearance there would make every entry rapid
+/// "inside stock").
+fn verify_finish(
+    facets: &[Triangle],
+    t: &Toolpath,
+    stock_top: f64,
+) -> Vec<hsmworks_app::verify::Warning> {
+    let region: Region = slice::project(facets, 64).expect("fixture silhouette");
+    let tool = ToolGeom {
+        radius: R,
+        flute_len: 10.0,
+        shank_radius: 2.9,
+        shank_len: 40.0,
+        holder_radius: 4.9,
+        holder_len: 30.0,
+    };
+    let cx = VerifyContext {
+        region: &region,
+        stock: None,
+        model: Some(facets),
+        tool: &tool,
+        mode: Mode::Envelope,
+        stock_top_z: stock_top,
+        clearance_z: 25.0,
+        stock_to_leave: 0.0,
+        gouge_tol: 0.01,
+        z_tol: 1e-6,
+        finish_tol: Some(TOL),
+    };
+    verify(t, &cx)
+}
+
+// The dome: R = 20, normals tilt 0..45 deg, rim at z = 20/sqrt(2).
+fn dome() -> Vec<Triangle> {
+    sphere_cap(20.0, PI / 4.0, 12, 96)
+}
+const RIM_Z: f64 = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
+
+#[test]
+fn dome_waterline_is_envelope_clean() {
+    // The headline promise: rings from the tangent-locus scan, walked
+    // with the ball, leave the swept envelope within tolerance of the
+    // model - measured on the grid, not assumed from the construction.
+    let f = dome();
+    let t = waterline(&f, &params(18.0, RIM_Z)).expect("dome waterline");
+    assert!(!t.moves.is_empty());
+    let rep = envelope(&f, &t);
+    assert!(
+        rep.gouge_mm <= gate(rep.cell),
+        "gouged {} mm at {:?} (gate {})",
+        rep.gouge_mm,
+        rep.at,
+        gate(rep.cell)
+    );
+    assert!(
+        rep.rest_mm <= gate(rep.cell),
+        "left {} mm of rest at {:?} (gate {})",
+        rep.rest_mm,
+        rep.at,
+        gate(rep.cell)
+    );
+    assert_eq!(
+        verify_finish(&f, &t, 20.0),
+        Vec::new(),
+        "the verifier agrees"
+    );
+}
+
+#[test]
+fn cone_rest_hits_the_scallop_budget_not_past_it() {
+    // The 45-degree wall is where `Delta z = 2 sqrt(r tol)` is exactly
+    // at budget: the measured ridge should be AT the cusp the law
+    // promises (tol), never meaningfully above it.
+    let f = cone(96);
+    let t = waterline(&f, &params(16.0, 0.5)).expect("cone waterline");
+    let rep = envelope(&f, &t);
+    assert!(
+        rep.gouge_mm <= gate(rep.cell),
+        "gouged {} mm at {:?}",
+        rep.gouge_mm,
+        rep.at
+    );
+    assert!(
+        rep.rest_mm <= gate(rep.cell),
+        "left {} mm of rest at {:?}; the law's budget is {TOL}",
+        rep.rest_mm,
+        rep.at
+    );
+    assert_eq!(verify_finish(&f, &t, 20.0), Vec::new());
+}
+
+#[test]
+fn box_walls_are_pure_structure() {
+    // A box has no tangent ring across its flat shelves, and the column
+    // model sees no surface on its vertical walls: the VERDICT must be
+    // silent (the shelves are M2.2b's job), while the path itself is the
+    // offset-ladder structure every other depth-stepping op shares.
+    // The scan, though, is honest: on exactly-fitted rings the top
+    // corner columns carry two near-vertical band contacts (the x-wall
+    // ring and the y-wall ring both graze them), so they read as real
+    // ridges with a real - but sub-gate - cusp standing between the two
+    // offset ladders. Silence is the verifier's; measurement tells the
+    // truth, and the truth here is under budget, not zero.
+    let f = box_facets();
+    let t = waterline(&f, &params(10.0, 0.0)).expect("box waterline");
+    assert!(!t.moves.is_empty());
+    let rep = envelope(&f, &t);
+    assert_eq!(
+        rep.gouge_mm, 0.0,
+        "the tangent ladder cut below the box tops somewhere: {:?}",
+        rep
+    );
+    assert!(
+        rep.rest_mm <= gate(rep.cell),
+        "corner cusp of {} mm at {:?} breaches the gate {}",
+        rep.rest_mm,
+        rep.at,
+        gate(rep.cell)
+    );
+    assert_eq!(verify_finish(&f, &t, 10.0), Vec::new());
+}
+
+#[test]
+fn overhang_is_caught_by_the_measurement() {
+    // The module's entry law: a vertical plunge over an overhang
+    // violates the tangent promise. A sphere run past its equator has
+    // exactly that - and the envelope must REFUSE LOUD, because silent
+    // gouge is the worst failure mode without exception.
+    let f = sphere_cap(20.0, 0.9 * PI, 10, 96);
+    let t = waterline(&f, &params(16.0, -16.0)).expect("sphere waterline");
+    let rep = envelope(&f, &t);
+    assert!(
+        rep.gouge_mm > gate(rep.cell),
+        "the overhang gouge went unmeasured: {:?}",
+        rep
+    );
+    let warns = verify_finish(&f, &t, 20.0);
+    assert!(
+        warns
+            .iter()
+            .any(|w| matches!(w, hsmworks_app::verify::Warning::Envelope { .. })),
+        "the verifier's word is missing: {warns:?}"
+    );
+}
+
+#[test]
+fn rings_close_and_the_chain_is_continuous() {
+    // Every plunge lands on its ring's first point; every ring's last
+    // feed returns to that point; and the whole path chains - no move
+    // starts where the previous one did not end.
+    let t = waterline(&dome(), &params(18.0, RIM_Z)).expect("dome waterline");
+    let mut pl = 0usize;
+    let m = &t.moves;
+    for i in 0..m.len() {
+        if m[i].kind == MoveKind::Plunge {
+            pl += 1;
+            // Walk forward through the ring's feeds: the last must land
+            // on the plunge's XY (the ring closes).
+            let start = m[i].to;
+            let mut j = i + 1;
+            while j < m.len() && m[j].kind == MoveKind::Feed {
+                j += 1;
+            }
+            assert!(j > i + 1, "a plunge with no ring behind it");
+            let last = &m[j - 1];
+            assert!(
+                (last.to.x - start.x).abs() <= 1e-6 && (last.to.y - start.y).abs() <= 1e-6,
+                "ring {pl} at {start:?} did not close: ended at {:?}",
+                last.to
+            );
+        }
+        if i + 1 < m.len() {
+            let (a, b) = (&m[i].to, &m[i + 1].from);
+            assert!(
+                (a.x - b.x).abs() <= 1e-9 && (a.y - b.y).abs() <= 1e-9 && (a.z - b.z).abs() <= 1e-9,
+                "the chain broke at move {i}: {a:?} -> {b:?}"
+            );
+        }
+    }
+    assert!(pl >= 4, "expected several rings, saw {pl}");
+    // Arc-fitted rings: the close may end exactly on the start or carry
+    // a zero-XY closing arc; both chain the same way.
+    assert_eq!(t.moves.first().map(|m| m.kind), Some(MoveKind::Rapid));
+    let last = t.moves.last().expect("non-empty path");
+    assert_eq!(last.kind, MoveKind::Rapid);
+    assert_eq!(last.to.z, 25.0, "the path ends at clearance");
+}
+
+#[test]
+fn levels_snap_to_the_bottom_and_obey_the_stepdown() {
+    // The ladder's last level is exactly `bottom_z` (shared snap law),
+    // and successive plunge planes differ by at most the scallop
+    // stepdown (the snap can only shorten the final gap, never widen
+    // any gap past dz).
+    let (top, bottom) = (18.0, RIM_Z);
+    let t = waterline(&dome(), &params(top, bottom)).expect("dome waterline");
+    let dz = scallop_stepdown(R, TOL);
+    let tip_zs: Vec<f64> = {
+        let mut v: Vec<f64> = t
+            .moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Plunge)
+            .map(|m| m.to.z)
+            .collect();
+        v.sort_by(|a, b| b.total_cmp(a));
+        v.dedup();
+        v
+    };
+    assert_eq!(tip_zs.first(), Some(&top), "first ring is the top");
+    assert!(
+        tip_zs.iter().any(|&z| (z - bottom).abs() <= 1e-9),
+        "no level snapped to the bottom {bottom}: {tip_zs:?}"
+    );
+    for w in tip_zs.windows(2) {
+        assert!(
+            w[0] - w[1] > 1e-9 && w[0] - w[1] <= dz + 1e-9,
+            "gap {} outside (0, stepdown {dz}]: doubled or missing level",
+            w[0] - w[1]
+        );
+    }
+}
+
+#[test]
+fn a_hop_plane_replaces_only_the_inter_ring_rapids() {
+    // The shared ladder law, finish flavor: rings within one level hop
+    // at `retract_z` (clamped to clearance); a level change still
+    // climbs to clearance. A single dome has one loop per level, so no
+    // inter-ring hop ever exists to check - the fixture is two caps,
+    // whose upper levels carry two rings each until the tangent disks
+    // merge near the rims.
+    let f = twin_dome();
+    let plain = waterline(&f, &params(18.0, RIM_Z)).expect("plain");
+    let mut p = params(18.0, RIM_Z);
+    p.retract_z = Some(20.0);
+    let hopped = waterline(&f, &p).expect("hopped");
+    let hi_rapids = |t: &Toolpath| -> Vec<f64> {
+        t.moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Rapid)
+            .map(|m| m.to.z)
+            .collect::<Vec<_>>()
+    };
+    let zs = hi_rapids(&hopped);
+    assert!(zs.contains(&20.0), "no hop at the retract plane: {zs:?}");
+    assert!(
+        zs.contains(&25.0),
+        "the level change stopped climbing to clearance: {zs:?}"
+    );
+    assert!(
+        hi_rapids(&plain).iter().all(|&z| z == 25.0),
+        "without retract_z every rapid goes to clearance"
+    );
+    assert_eq!(hopped.moves.len(), plain.moves.len(), "same law, same moves");
+}
+
+/// Two caps, 30 mm apart: levels where the forbidden disks stay disjoint
+/// carry two rings, which is what gives the hop law something to hop
+/// between (a single dome has one loop per level - no inter-ring move
+/// exists there at all).
+fn twin_dome() -> Vec<Triangle> {
+    let mut f = dome();
+    f.extend(dome().into_iter().map(|t| {
+        Triangle::new(
+            p3(t.a.x + 30.0, t.a.y, t.a.z),
+            p3(t.b.x + 30.0, t.b.y, t.b.z),
+            p3(t.c.x + 30.0, t.c.y, t.c.z),
+        )
+    }));
+    f
+}
+
+#[test]
+fn climb_and_conventional_are_mirror_walks() {
+    // The law is the SAME rings walked OPPOSITE ways - not identical
+    // move lists. fit_arcs segments a ring from its start vertex, and
+    // on the exact circles the region fixes now produce it collapses
+    // each ring to a couple of 180-degree arcs (zero sagitta - the arc
+    // IS the ring), so a reversed walk legitimately cuts different
+    // chords and total move counts need not match (an earlier version
+    // of this test asserted they did, and the arc fitter honestly
+    // disagreed). What must match: the ring count, the levels, and the
+    // footprint; what must flip: the sign of each ring's XY traversal.
+    // The footprint is measured over an ARC-AWARE trace - an
+    // endpoint-only shoelace of a two-semicircle ring is a sliver
+    // between antipodal vertices, not the circle it walks.
+    let f = dome();
+    let climb = waterline(&f, &params(18.0, RIM_Z)).expect("climb");
+    let mut p = params(18.0, RIM_Z);
+    p.climb = false;
+    let conv = waterline(&f, &p).expect("conventional");
+    let ring_trace = |t: &Toolpath| -> Vec<Vec<(f64, f64)>> {
+        // One XY polyline per ring, plunge to plunge, arcs sampled at
+        // <= 15 degrees so the polyline's area is the ring's footprint
+        // to well within a part per thousand.
+        let mut out: Vec<Vec<(f64, f64)>> = Vec::new();
+        for m in &t.moves {
+            match m.kind {
+                MoveKind::Plunge => out.push(vec![(m.to.x, m.to.y)]),
+                MoveKind::Feed => {
+                    let Some(ring) = out.last_mut() else { continue };
+                    match m.arc {
+                        None => ring.push((m.to.x, m.to.y)),
+                        Some(_)
+                            if m.from.x == m.to.x && m.from.y == m.to.y =>
+                        {
+                            ring.push((m.to.x, m.to.y)) // no sweep to sample
+                        }
+                        Some(arc) => {
+                            let (cx, cy) = (arc.center.x, arc.center.y);
+                            let a0 = (m.from.y - cy).atan2(m.from.x - cx);
+                            let mut da =
+                                (m.to.y - cy).atan2(m.to.x - cx) - a0;
+                            if arc.ccw {
+                                while da <= 0.0 {
+                                    da += TAU;
+                                }
+                            } else {
+                                while da >= 0.0 {
+                                    da -= TAU;
+                                }
+                            }
+                            let rr = (m.from.x - cx).hypot(m.from.y - cy);
+                            let n = (da.abs() / 0.2618).ceil() as usize;
+                            for i in 1..=n.max(1) {
+                                let a = a0 + da * i as f64 / n.max(1) as f64;
+                                ring.push((cx + rr * a.cos(), cy + rr * a.sin()));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    };
+    let areas = |rings: Vec<Vec<(f64, f64)>>| -> Vec<f64> {
+        rings
+            .iter()
+            .map(|pts| {
+                let mut a = 0.0;
+                for i in 0..pts.len() {
+                    let (x0, y0) = pts[i];
+                    let (x1, y1) = pts[(i + 1) % pts.len()];
+                    a += x0 * y1 - x1 * y0;
+                }
+                a * 0.5
+            })
+            .collect()
+    };
+    let ca = areas(ring_trace(&climb));
+    let va = areas(ring_trace(&conv));
+    assert!(ca.len() >= 4, "expected several rings, saw {}", ca.len());
+    assert_eq!(ca.len(), va.len(), "same rings");
+    for (a, b) in ca.iter().zip(va.iter()) {
+        assert!(a.abs() > 1.0, "a ring traced a sliver, not a footprint: {a}");
+        assert!(a * b < 0.0, "walks not opposed: {a} vs {b}");
+        let rel = (a.abs() - b.abs()).abs() / a.abs().max(1.0);
+        assert!(rel < 0.01, "different footprints: {a} vs {b}");
+    }
+    let differs = climb
+        .moves
+        .iter()
+        .zip(conv.moves.iter())
+        .any(|(a, b)| a.to != b.to);
+    assert!(differs, "the XOR did nothing");
+}
+
+#[test]
+fn the_generator_is_deterministic() {
+    let f = dome();
+    let p = params(18.0, RIM_Z);
+    assert_eq!(
+        waterline(&f, &p).expect("first").moves,
+        waterline(&f, &p).expect("second").moves,
+        "two calls, two paths - a stamp would churn forever"
+    );
+}
+
+#[test]
+fn refusals_are_clean_errors_never_a_panic() {
+    // The empty model.
+    let e = waterline(&[], &params(1.0, 0.0)).expect_err("nothing to contour");
+    assert!(matches!(e, GenError::Empty(_)), "{e:?}");
+    // A non-finite vertex, named as the model's, not as a crash.
+    let mut f = dome();
+    f[0].b = p3(f64::NAN, 0.0, 0.0);
+    let e = waterline(&f, &params(18.0, RIM_Z)).expect_err("corrupt model");
+    assert!(matches!(e, GenError::Invalid(_)), "{e:?}");
+    assert!(e.to_string().contains("non-finite"), "{e}");
+    // Bottom above top.
+    let e = waterline(&dome(), &params(RIM_Z, 18.0)).expect_err("inverted ladder");
+    assert!(e.to_string().contains("above its top"), "{e}");
+    // The level cap: a tolerance so fine the rings number in the
+    // hundreds of thousands is REFUSED, never quietly coarsened.
+    let mut p = params(100.0, 0.0);
+    p.tolerance = 1e-6; // dz = 2 sqrt(3e-6) = 0.0035, span 100 -> 29000 > 8192
+    let e = waterline(&cone(96), &p).expect_err("tolerance overruns the cap");
+    assert!(e.to_string().contains("8192"), "{e}");
+    // No surface anywhere near the requested depths.
+    let e = waterline(&box_facets(), &params(-50.0, -51.0)).expect_err("air only");
+    assert!(matches!(e, GenError::Empty(_)), "{e:?}");
+    assert!(e.to_string().contains("ball radius"), "{e}");
+    // Unvalidated parameters refuse at the gate, naming nothing false.
+    let mut p = params(18.0, RIM_Z);
+    p.tool_diameter = 0.0;
+    assert!(matches!(
+        waterline(&dome(), &p),
+        Err(GenError::Invalid(_))
+    ));
+    let mut p = params(18.0, RIM_Z);
+    p.tolerance = f64::NAN;
+    assert!(matches!(
+        waterline(&dome(), &p),
+        Err(GenError::Invalid(_))
+    ));
+}
+
+#[test]
+fn degenerate_meshes_never_panic() {
+    // Zero-area facets, collinear bands, a single dust-mote triangle:
+    // the generator answers Ok-or-Err, never a hang or a crash.
+    let mote = vec![Triangle::new(
+        p3(0.0, 0.0, 1.0),
+        p3(0.0, 0.0, 1.0),
+        p3(0.0, 0.0, 1.0),
+    )];
+    let r = waterline(&mote, &params(1.0, 0.9));
+    assert!(r.is_ok() || r.is_err());
+    let line = vec![Triangle::new(
+        p3(-5.0, 0.0, 1.0),
+        p3(5.0, 0.0, 1.0),
+        p3(0.0, 0.0, 1.0),
+    )];
+    let r = waterline(&line, &params(1.0, 0.9));
+    assert!(r.is_ok() || r.is_err());
+    // A grid of points scattered over the band - hulls collapse,
+    // region may empty, nothing unwraps.
+    let scatter: Vec<Triangle> = (-8..8)
+        .flat_map(|i| (-8..8).map(move |j| (i, j)))
+        .map(|(i, j)| {
+            let x = i as f64;
+            let y = j as f64;
+            Triangle::new(p3(x, y, 1.0), p3(x, y, 1.0), p3(x, y, 1.0))
+        })
+        .collect();
+    let _ = waterline(&scatter, &params(1.0, 0.0));
+}
+
+#[test]
+fn scallop_stepdown_law_is_exact_and_total() {
+    assert!((scallop_stepdown(3.0, 0.1) - 2.0 * 0.3f64.sqrt()).abs() <= 1e-12);
+    for (r, tol) in [(0.0, 0.1), (3.0, 0.0), (-1.0, 0.1), (3.0, -0.1)] {
+        assert_eq!(scallop_stepdown(r, tol), 0.0);
+    }
+    assert_eq!(scallop_stepdown(f64::NAN, 0.1), 0.0);
+    assert_eq!(scallop_stepdown(3.0, f64::INFINITY), 0.0);
+}
+
+#[test]
+fn the_ball_radius_is_the_diameters_half_in_every_law() {
+    // A guard against a silent factor-of-two: the path planned with Ø6
+    // measures envelope-clean as the radius-3 ball that planned it -
+    // and read back as a radius-6 ball (centers that stand 3 mm off
+    // the surface, sweeping 6), it buries ~3 mm under where the plan
+    // swore to graze. Either half of that law missing would make the
+    // other assertion vacuous.
+    let f = dome();
+    let t = waterline(&f, &params(18.0, RIM_Z)).expect("Ø6 waterline");
+    let clean = envelope(&f, &t);
+    assert!(clean.gouge_mm <= gate(clean.cell), "{clean:?}");
+    let rep = envelope_scan(&f, &t.moves, 2.0 * R, TOL).expect("measured with r=6");
+    assert!(rep.gouge_mm > TOL, "the r/2 mixup went unnoticed");
+}

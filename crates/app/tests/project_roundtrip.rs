@@ -78,7 +78,7 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v13
+    // Anything newer than this build's format stays refused; v1..v14
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
@@ -87,11 +87,13 @@ fn wrong_version_is_refused() {
     // v8_file_steps_to_v9 v8 -> v9, v9_file_steps_to_v10 v9 -> v10,
     // v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips v10 ->
     // v11, v11_file_steps_to_v12 v11 -> v12, v12_file_steps_to_v13
-    // v12 -> v13, and v13_file_steps_to_v14 v13 -> v14).
-    let text = r#"{"version": 15, "entities": []}"#;
+    // v12 -> v13, v13_file_steps_to_v14 v13 -> v14, and
+    // v14_file_steps_to_v15_and_the_finish3d_grammar_round_trips
+    // v14 -> v15).
+    let text = r#"{"version": 16, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(15)) => {}
+        Err(ProjectError::UnsupportedVersion(16)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1447,6 +1449,105 @@ fn v13_file_steps_to_v14() {
     // The learned key is written in its false state: a fixed point, so
     // a second open cannot drift it.
     assert!(saved.contains("\"feed_opt\": false"), "{saved}");
+}
+
+#[test]
+fn v14_file_steps_to_v15_and_the_finish3d_grammar_round_trips() {
+    // A literal v14 project: the waterline arrives as one new params
+    // variant (`finish3d`), which no v14 file can contain - the tag did
+    // not exist. Nothing existing changed shape; step-up is the stamp
+    // itself, like every bump since v6.
+    let text = r#"{
+        "version": 14,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "end_mill", "diameter": 4.0, "corner_r": 0.0,
+                      "flute_len": 12.0, "shank_d": 6.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 10000.0, "feed": 1200.0}},
+            {"name": "P3", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"pocket3d": {
+                 "stepover": 2.5, "stock_to_leave": 0.0,
+                 "clearance_z": {"reference": "fixed", "offset": 10.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "stepdown": 1.5, "feed": 900.0, "plunge_feed": 150.0, "climb": true,
+                 "strategy": "waterline", "entry": "plunge", "helix_radius": 1.0,
+                 "rest_rough": false, "max_engagement": 45.0, "feed_opt": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v14 file must migrate");
+    let path = tmp_path("v15a");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v15 stamp: {saved}"
+    );
+    assert!(saved.contains("\"feed_opt\": true"), "the stated key rides through: {saved}");
+
+    // The v15 wire grammar, hand-written so the tags are pinned:
+    // "finish3d", no stepdown key (the scallop law derives it from
+    // tolerance and tool - storing one could only disagree), and an
+    // absent retract_z means hop-to-clearance.
+    let text = r#"{
+        "version": 15,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "F1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"finish3d": {
+                 "tolerance": 0.1,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v15 finish3d grammar must read");
+    let e = model::find_by_name(&world, "F1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Finish3D {
+        tolerance,
+        retract_z,
+        climb,
+        feed,
+        ..
+    } = &o.params
+    else {
+        panic!("finish3d params expected, got {:?}", o.params);
+    };
+    assert_eq!(*tolerance, 0.1);
+    assert!(*climb);
+    assert_eq!(*feed, 500.0);
+    assert!(retract_z.is_none(), "absent retract means hop-to-clearance");
+
+    // Write-parse-write is a fixed point, and the variant tag is clean.
+    let path = tmp_path("v15b");
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &path).expect("reload");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the finish3d shape round-trips byte-identically");
+    assert!(first.contains("\"finish3d\""), "{first}");
+    assert!(!first.contains("retract_z"), "None is absent, not null: {first}");
+
+    // A tolerance of zero is nonsense the loader refuses, not a default.
+    let bad = text.replace("\"tolerance\": 0.1", "\"tolerance\": 0.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v15 file with tolerance 0.0 must not load"
+    );
 }
 
 #[test]

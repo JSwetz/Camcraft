@@ -26,6 +26,12 @@
 //!   the one failure mode; over-reporting rest is honest noise.
 //! - **Rapids touch nothing** (RS-274 G0 practice: no material contacts
 //!   a tool moving at rapid). Feeds and plunges cut.
+//! - **The ball atom is exact, not sampled** (`cut_ball`): a sphere's
+//!   bottom above a cell is a convex function of the chord parameter,
+//!   so its minimum is at a window end or at one stationary point that
+//!   a sign-guarded quadratic finds in closed form. Endpoints alone
+//!   would over-report rest (and could hide a gouge); the full law is
+//!   cheap and never guesses.
 //! - **Part surface is read from the mesh**, facet-plane interpolation
 //!   at cell centers over each facet's XY bounding box: the highest
 //!   surface covering a cell is that column's part top (`-inf` when no
@@ -128,7 +134,6 @@ impl Dexel {
                     // in the callers' validation laws, not mid-sweep
         }
         let (dx, dy) = (b.x - a.x, b.y - a.y);
-        let l2 = dx * dx + dy * dy;
         // Cells whose centers can be within r of the segment: the
         // segment bbox grown by r, clamped to the grid. Clamping is
         // harmless - every candidate still faces the exact reach test.
@@ -144,37 +149,10 @@ impl Dexel {
         for iy in lo_y..=hi_y {
             for ix in lo_x..=hi_x {
                 let q = self.center(ix, iy);
-                // Parameter interval where the disc reaches q:
-                // |q - a - t*d| = r. Degenerate d (a plunge) is t = 0.
-                let (t0, t1) = if l2 <= f64::EPSILON {
-                    let d2 = (q.x - a.x).hypot(q.y - a.y);
-                    if d2 > r {
-                        continue;
-                    }
-                    (0.0, 1.0)
-                } else {
-                    let wx = q.x - a.x;
-                    let wy = q.y - a.y;
-                    let t_c = (wx * dx + wy * dy) / l2;
-                    // Perpendicular offset from the line, for the
-                    // half-width along t.
-                    let cross = wx * dy - wy * dx;
-                    let d_perp2 = (cross * cross) / l2;
-                    if d_perp2 > r * r {
-                        continue;
-                    }
-                    let half = (r * r - d_perp2).sqrt() / l2.sqrt();
-                    // The reach set on the SEGMENT, not the infinite
-                    // line: a cell whose window falls entirely before
-                    // t = 0 or after t = 1 was never touched - an
-                    // endpoint clamp would turn that empty window into
-                    // a phantom cut at the nearest end.
-                    let lo = (t_c - half).max(0.0);
-                    let hi = (t_c + half).min(1.0);
-                    if lo > hi {
-                        continue;
-                    }
-                    (lo, hi)
+                // Parameter interval where the disc reaches q: the
+                // shared reach law (see `reach`), exact on the segment.
+                let Some((t0, t1)) = reach(q.x - a.x, q.y - a.y, dx, dy, r) else {
+                    continue;
                 };
                 // Z is linear along the chord, so its minimum over the
                 // interval is at one of the interval ends.
@@ -184,6 +162,116 @@ impl Dexel {
                 let k = ix + iy * self.nx;
                 if cut < self.top[k] {
                     self.top[k] = cut;
+                }
+            }
+        }
+    }
+
+    /// The ball-nose atom: a sphere of radius `r` whose CENTER travels
+    /// the straight, Z-linear chord `a -> b`. Above a cell center `q`,
+    /// at instant `t`, the sphere's bottom sits at
+    /// `z(t) - sqrt(r^2 - d(t)^2)` with `d` the horizontal distance
+    /// from `q` to the center path; the cut is the minimum of that
+    /// over the reach window. Endpoints do NOT suffice here (unlike
+    /// `cut_chord`, where the bottom is constant along the chord): the
+    /// bottom function is convex in `t`, so its minimum is at a window
+    /// end or at its single interior stationary point - `f'(t) = k +
+    /// (t*D^2 - w.D)/sqrt(r^2 - d^2)`, whose squaring gives the
+    /// quadratic below, and the unsquared law keeps only roots where
+    /// `(w.D - t*D^2)` shares `k`'s sign. The XY-nearest instant `t_c`
+    /// is always evaluated too, so a root lost to rounding degrades
+    /// toward the chord's mid-sagitta, never past an endpoint.
+    pub fn cut_ball(&mut self, a: Point3, b: Point3, r: f64) {
+        if !(a.is_finite() && b.is_finite()) || !(r.is_finite() && r >= 0.0) {
+            return; // the cut_chord gate: validation lives upstream
+        }
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let dd = dx * dx + dy * dy;
+        let k = b.z - a.z;
+        let fx = |v: f64| ((v - self.x0) / self.cell).floor();
+        let fy = |v: f64| ((v - self.y0) / self.cell).floor();
+        let lo_x = fx(a.x.min(b.x) - r).max(0.0) as usize;
+        let hi_x = fx(a.x.max(b.x) + r).clamp(0.0, self.nx as f64 - 1.0) as usize;
+        let lo_y = fy(a.y.min(b.y) - r).max(0.0) as usize;
+        let hi_y = fy(a.y.max(b.y) + r).clamp(0.0, self.ny as f64 - 1.0) as usize;
+        if lo_x >= self.nx || lo_y >= self.ny {
+            return;
+        }
+        let r2 = r * r;
+        for iy in lo_y..=hi_y {
+            for ix in lo_x..=hi_x {
+                let q = self.center(ix, iy);
+                let (wx, wy) = (q.x - a.x, q.y - a.y);
+                let Some((t0, t1)) = reach(wx, wy, dx, dy, r) else {
+                    continue;
+                };
+                let f = |t: f64| {
+                    let ex = wx - dx * t;
+                    let ey = wy - dy * t;
+                    a.z + k * t - (r2 - (ex * ex + ey * ey)).max(0.0).sqrt()
+                };
+                let t_c = if dd > f64::EPSILON {
+                    (wx * dx + wy * dy) / dd
+                } else {
+                    0.0
+                };
+                let mut cut = f(t0).min(f(t1)).min(f(t_c.clamp(t0, t1)));
+                if dd > f64::EPSILON {
+                    let wd = wx * dx + wy * dy;
+                    let s = dd + k * k;
+                    let qa = dd * s;
+                    let qb = -2.0 * wd * s;
+                    let qc = wd * wd + k * k * (wx * wx + wy * wy - r2);
+                    let mut disc = qb * qb - 4.0 * qa * qc;
+                    if disc < 0.0 && disc > -qb * qb * 1e-12 {
+                        disc = 0.0; // a planar double root erased by rounding
+                    }
+                    if disc >= 0.0 && disc.is_finite() {
+                        let sd = disc.sqrt();
+                        for t in [(-qb - sd) / (2.0 * qa), (-qb + sd) / (2.0 * qa)] {
+                            if t > t0 && t < t1 && (wd - t * dd) * k >= 0.0 {
+                                cut = cut.min(f(t));
+                            }
+                        }
+                    }
+                }
+                let col = ix + iy * self.nx;
+                if cut < self.top[col] {
+                    self.top[col] = cut;
+                }
+            }
+        }
+    }
+
+    /// Ball-nose version of `subtract`: moves carry TIP positions (the
+    /// whole codebase stores toolpaths tip-first), so the CENTER path
+    /// is the tip path lifted by `r` in Z and the swept solid is a
+    /// sphere at every instant. Arcs reduce to chords under the same
+    /// uniform-Z helix law as `subtract`.
+    pub fn subtract_ball(&mut self, m: &Move, r: f64, chord_tol: f64) {
+        if m.kind == MoveKind::Rapid || !m.is_finite() {
+            return;
+        }
+        match m.arc {
+            None => self.cut_ball(
+                Point3::new(m.from.x, m.from.y, m.from.z + r),
+                Point3::new(m.to.x, m.to.y, m.to.z + r),
+                r,
+            ),
+            Some(arc) => {
+                let a2 = Point2::new(m.from.x, m.from.y);
+                let b2 = Point2::new(m.to.x, m.to.y);
+                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
+                let n = cs.len().max(1) as f64;
+                let dz = m.to.z - m.from.z;
+                for (j, (ca, cb)) in cs.into_iter().enumerate() {
+                    let za = m.from.z + dz * (j as f64 / n) + r;
+                    let zb = m.from.z + dz * ((j + 1) as f64 / n) + r;
+                    self.cut_ball(
+                        Point3::new(ca.x, ca.y, za),
+                        Point3::new(cb.x, cb.y, zb),
+                        r,
+                    );
                 }
             }
         }
@@ -246,6 +334,40 @@ impl Dexel {
             }
         }
         Ok(acc.unwrap_or_else(Region::empty))
+    }
+}
+
+/// The parameter interval of a chord `0 -> d` whose tool disc of
+/// radius `r` reaches a point offset `w` from the start - the reach
+/// law shared by the flat and ball kernels so both inherit one
+/// phantom rule: the window is on the SEGMENT, not the infinite line,
+/// and an interval that falls entirely outside `[0, 1]` stays empty
+/// (clamping it open would invent a cut at the nearest endpoint - the
+/// exact bug the M2.1b phantom test pins). A degenerate `d` (plunge)
+/// is its own interval, gated by distance.
+fn reach(wx: f64, wy: f64, dx: f64, dy: f64, r: f64) -> Option<(f64, f64)> {
+    let l2 = dx * dx + dy * dy;
+    if l2 <= f64::EPSILON {
+        if wx.hypot(wy) > r {
+            None
+        } else {
+            Some((0.0, 1.0))
+        }
+    } else {
+        let t_c = (wx * dx + wy * dy) / l2;
+        let cross = wx * dy - wy * dx;
+        let d_perp2 = (cross * cross) / l2;
+        if d_perp2 > r * r {
+            return None;
+        }
+        let half = (r * r - d_perp2).sqrt() / l2.sqrt();
+        let lo = (t_c - half).max(0.0);
+        let hi = (t_c + half).min(1.0);
+        if lo > hi {
+            None
+        } else {
+            Some((lo, hi))
+        }
     }
 }
 
@@ -375,4 +497,367 @@ pub fn measure(dex: &Dexel, part: &[f64], footprint: &Region, tol: f64) -> Stock
         }
     }
     rep
+}
+
+/// The envelope verdict for a finishing path (M2.2a), on a stated
+/// lattice, measured not assumed. Two truths, each read by the law
+/// that is exact for it. Gouge is Dexel truth: every ball's lowest
+/// point over a column, and a floor below the model surface is depth
+/// removed that must not be. Rest is distance truth at RIDGES: a
+/// model surface point that stands within the pass's promise band
+/// (`r + tol + floor` of at least two chords the center path ran
+/// over), and how far outside every ball it stood. Two band contacts
+/// is exactly what "this op rolled a stepdown ladder over you"
+/// promises, so what stands outside both is scallop left on the
+/// pass's own word. A point with one graze (a lone ring's annulus,
+/// the box's footprint square) or none (a flat shelf, the crown
+/// above the top ring, untouched walls) was never promised anything
+/// by this pass: its leftover is rest machining's jurisdiction
+/// (M2.3), law there, not a silence here. Gating rest by "this pass
+/// cut this column" instead was tried and is dead code - a ball
+/// reaching a column's surface is the same event as a center standing
+/// within `r + floor` of that point (prove it: `cut <= t + floor`
+/// rearranges to `dist^2 <= (r + floor)^2`), so it can never report
+/// above tolerance. Proved, not observed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EnvelopeReport {
+    /// Worst depth by which the swept envelope cut BELOW the model
+    /// surface (0.0 when nothing was cut too deep).
+    pub gouge_mm: f64,
+    /// Worst distance the model surface stood OUTSIDE the swept
+    /// envelope at a ridge the pass promised to roll over (two band
+    /// contacts; single grazes and untouched columns are law, not
+    /// this number).
+    pub rest_mm: f64,
+    /// The lattice's cell size, so a caller can state the
+    /// quantization floor of these numbers honestly.
+    pub cell: f64,
+    /// XY of the largest single deviation.
+    pub at: Point2,
+}
+
+pub fn envelope_scan(
+    facets: &[Triangle],
+    moves: &[Move],
+    r: f64,
+    tol: f64,
+) -> Result<EnvelopeReport, StockError> {
+    if !(r.is_finite() && r > 0.0) {
+        return Err(StockError::Invalid(format!(
+            "envelope ball radius {r} is not finite-positive"
+        )));
+    }
+    if !tol.is_finite() {
+        return Err(StockError::Invalid(format!(
+            "envelope tolerance {tol} is not finite"
+        )));
+    }
+    let tol = tol.max(0.0);
+    let (mut bx0, mut by0, mut bx1, mut by1) =
+        (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for t in facets {
+        for v in [t.a, t.b, t.c] {
+            if !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite()) {
+                return Err(StockError::Invalid("model has a non-finite vertex".into()));
+            }
+            bx0 = bx0.min(v.x);
+            bx1 = bx1.max(v.x);
+            by0 = by0.min(v.y);
+            by1 = by1.max(v.y);
+        }
+    }
+    if facets.is_empty() || bx1 <= bx0 || by1 <= by0 {
+        return Ok(EnvelopeReport::default()); // no footprint to measure on
+    }
+    // One eighth of the tool radius sees a scallop the tolerance must
+    // keep; the floor and the span growth keep the grid honest on
+    // dust motes and stadiums alike (MAX_CELLS discipline, applied
+    // before allocation, never after).
+    let mut cell = (r * 0.125).max(1e-4);
+    cell = cell.max((bx1 - bx0) / 1023.0).max((by1 - by0) / 1023.0);
+    let margin = r + cell;
+    let (x0, y0) = (bx0 - margin, by0 - margin);
+    let nx = (((bx1 - bx0 + 2.0 * margin) / cell).ceil() as usize).max(1);
+    let ny = (((by1 - by0 + 2.0 * margin) / cell).ceil() as usize).max(1);
+    if nx > MAX_CELLS_PER_AXIS || ny > MAX_CELLS_PER_AXIS {
+        return Err(StockError::Invalid(format!(
+            "envelope grid would be {nx}x{ny} cells; at most {MAX_CELLS_PER_AXIS} per axis"
+        )));
+    }
+    // The grid starts as ALL AIR: the sweep writes every cut it makes
+    // and nothing else, so a finite column top after the sweep is
+    // exactly "the path reached this column". Dexel::block refuses
+    // non-finite tops (a stock surface must be real), hence the
+    // literal - same shape, stated reason.
+    let mut dex = Dexel {
+        x0,
+        y0,
+        cell,
+        nx,
+        ny,
+        stock_z: f64::INFINITY,
+        top: vec![f64::INFINITY; nx * ny],
+    };
+    for m in moves {
+        dex.subtract_ball(m, r, (cell * 0.25).max(1e-9));
+    }
+    let part = part_surface(facets, x0, y0, cell, nx, ny);
+    let floor = cell * cell / (2.0 * r); // the sagitta one cell can hide
+    let mut rep = EnvelopeReport {
+        cell,
+        at: Point2::new(0.0, 0.0),
+        ..Default::default()
+    };
+    let mut worst = 0.0f64;
+    // Gouge: the Dexel truth. A column's floor is the lowest point any
+    // ball held over it; below the surface means below means removed.
+    for iy in 0..ny {
+        for ix in 0..nx {
+            let k = ix + iy * nx;
+            let (cut, t) = (dex.top[k], part[k]);
+            if !cut.is_finite() || !t.is_finite() {
+                continue; // never swept, or nothing there to deviate from
+            }
+            let dev = t - cut;
+            if dev > rep.gouge_mm {
+                rep.gouge_mm = dev;
+                if dev > worst {
+                    worst = dev;
+                    rep.at = dex.center(ix, iy);
+                }
+            }
+        }
+    }
+    // Rest: the distance truth at ridges - surface points the center
+    // path passed by twice inside the promise band. The band is what
+    // the stepdown law swore, so a point outside every ball there is
+    // this path's own failure, while a once-grazed or never-touched
+    // point is another op's job (the law above).
+    let band = r + tol + floor;
+    let segs = center_segments(moves, r, (cell * 0.25).max(1e-9));
+    // A far segment's 3D distance cannot stand inside the band, so
+    // its XY window rejects it before the distance is paid. A
+    // column's dmin only feeds a report when two segments proved
+    // near, and those are never the skipped ones - the filter is
+    // exact, not an approximation.
+    let boxes: Vec<(f64, f64, f64, f64)> = segs
+        .iter()
+        .map(|(a, b)| (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y)))
+        .collect();
+    for iy in 0..ny {
+        for ix in 0..nx {
+            let t = part[ix + iy * nx];
+            if !t.is_finite() {
+                continue; // no model surface at this column
+            }
+            let q = dex.center(ix, iy);
+            let (mut dmin, mut near) = (f64::INFINITY, 0u8);
+            for ((a, b), (x0, x1, y0, y1)) in segs.iter().zip(&boxes) {
+                if q.x < x0 - band
+                    || q.x > x1 + band
+                    || q.y < y0 - band
+                    || q.y > y1 + band
+                {
+                    continue;
+                }
+                let d = dist_pt_seg3(q.x, q.y, t, *a, *b);
+                if d <= band {
+                    near = near.saturating_add(1);
+                }
+                if d < dmin {
+                    dmin = d;
+                }
+            }
+            if near < 2 {
+                continue; // one graze or none: no promise kept or broken here
+            }
+            let rest = dmin - r - floor;
+            if rest > rep.rest_mm {
+                rep.rest_mm = rest;
+                if rest > worst {
+                    worst = rest;
+                    rep.at = q;
+                }
+            }
+        }
+    }
+    Ok(rep)
+}
+
+/// The ball-center polyline the path sweeps: rapids excluded, arcs
+/// reduced to their sagitta chords with Z interpolated, everything
+/// lifted by `r` so the stored tip coordinates read as centers - the
+/// exact discretization `subtract_ball` cuts with, so a chord the
+/// Dexel honoured is a chord the distance law sees.
+fn center_segments(moves: &[Move], r: f64, chord_tol: f64) -> Vec<(Point3, Point3)> {
+    let mut segs = Vec::new();
+    for m in moves {
+        if m.kind == MoveKind::Rapid || !m.is_finite() {
+            continue;
+        }
+        match m.arc {
+            None => segs.push((
+                Point3::new(m.from.x, m.from.y, m.from.z + r),
+                Point3::new(m.to.x, m.to.y, m.to.z + r),
+            )),
+            Some(arc) => {
+                let a2 = Point2::new(m.from.x, m.from.y);
+                let b2 = Point2::new(m.to.x, m.to.y);
+                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
+                let n = cs.len().max(1) as f64;
+                let dz = m.to.z - m.from.z;
+                for (j, (ca, cb)) in cs.into_iter().enumerate() {
+                    segs.push((
+                        Point3::new(ca.x, ca.y, m.from.z + dz * (j as f64 / n) + r),
+                        Point3::new(cb.x, cb.y, m.from.z + dz * ((j + 1) as f64 / n) + r),
+                    ));
+                }
+            }
+        }
+    }
+    segs
+}
+
+/// 3D point-to-segment distance - the honest "did any ball of the
+/// sweep reach this surface point" test a per-column floor cannot
+/// answer on tilted walls.
+fn dist_pt_seg3(px: f64, py: f64, pz: f64, a: Point3, b: Point3) -> f64 {
+    let (ex, ey, ez) = (b.x - a.x, b.y - a.y, b.z - a.z);
+    let len2 = ex * ex + ey * ey + ez * ez;
+    let t = if len2 > 0.0 {
+        ((px - a.x) * ex + (py - a.y) * ey + (pz - a.z) * ez) / len2
+    } else {
+        0.0
+    }
+    .clamp(0.0, 1.0);
+    let (dx, dy, dz) = (px - a.x - ex * t, py - a.y - ey * t, pz - a.z - ez * t);
+    dx.hypot(dy).hypot(dz)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p3(x: f64, y: f64, z: f64) -> Point3 {
+        Point3::new(x, y, z)
+    }
+
+    #[test]
+    fn static_ball_is_the_sphere_section() {
+        // A motionless ball is the exact circle of its section: bottom
+        // at `z_c - sqrt(r^2 - d^2)`, nothing beyond `r`, no sampling
+        // error anywhere - the identity the swept law generalizes.
+        let mut dex = Dexel::block(-4.5, -4.5, 4.5, 4.5, 100.0, 0.5).unwrap();
+        dex.cut_ball(p3(0.0, 0.0, 5.0), p3(0.0, 0.0, 5.0), 2.0);
+        let r = 2.0;
+        for iy in 0..dex.ny {
+            for ix in 0..dex.nx {
+                let q = dex.center(ix, iy);
+                let d = q.x.hypot(q.y);
+                let want = if d <= r {
+                    5.0 - (r * r - d * d).sqrt()
+                } else {
+                    100.0
+                };
+                assert!(
+                    (dex.top[ix + iy * dex.nx] - want).abs() <= 1e-12,
+                    "cell {q:?} d={d}: got {}, want {want}",
+                    dex.top[ix + iy * dex.nx]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn oblique_sweep_finds_the_interior_stationary_point() {
+        // Endpoints and the XY-nearest instant are NOT enough on an
+        // oblique move: the convex bottom's minimum sits before the
+        // midpoint when the center climbs. f(t) = (5 + 7t) -
+        // sqrt(9 - (10 - 20t)^2) bottoms at u = 21/sqrt(449) off the
+        // midpoint, 5.3204 - strictly under f(t_c) = 5.5.
+        let mut dex = Dexel::block(-13.8, -0.2, 13.8, 0.2, 100.0, 0.4).unwrap();
+        dex.cut_ball(p3(-10.0, 0.0, 5.0), p3(10.0, 0.0, 12.0), 3.0);
+        let q = p3(0.0, 0.0, 0.0);
+        let k = dex.col(Point2::new(q.x, q.y)).unwrap();
+        let u = 21.0 / 449.0f64.sqrt();
+        let want = 5.0 + 7.0 * (10.0 - u) / 20.0 - 20.0 * u / 7.0;
+        assert!(
+            (dex.top[k] - want).abs() <= 1e-9,
+            "got {}, want {want} (t_c-only would say 5.5)",
+            dex.top[k]
+        );
+        assert!(dex.top[k] < 5.5 - 0.05, "the quadratic root never ran");
+    }
+
+    #[test]
+    fn planar_sweep_is_a_constant_offset_profile() {
+        // k = 0 (flat feed): the bottom at any column is the section at
+        // the perpendicular distance - the double root collapses onto
+        // t_c and the clamp evaluation owns it.
+        let mut dex = Dexel::block(-0.25, 0.5, 0.25, 1.0, 100.0, 0.5).unwrap();
+        dex.cut_ball(p3(-10.0, 0.0, 5.0), p3(10.0, 0.0, 5.0), 3.0);
+        let k = dex.col(Point2::new(0.0, 0.75)).unwrap();
+        let want = 5.0 - (9.0f64 - 0.75 * 0.75).sqrt();
+        assert!(
+            (dex.top[k] - want).abs() <= 1e-12,
+            "got {}, want {want}",
+            dex.top[k]
+        );
+    }
+
+    #[test]
+    fn out_of_reach_cells_are_never_touched() {
+        // The phantom-window law: a sweep whose disc misses a column
+        // leaves its stock top exactly as it stood - the reach test,
+        // not a margin, decides.
+        let mut dex = Dexel::block(-20.0, -1.0, 20.0, 1.0, 7.0, 0.5).unwrap();
+        dex.cut_ball(p3(-10.0, 0.0, 5.0), p3(10.0, 0.0, 5.0), 3.0);
+        for iy in 0..dex.ny {
+            for ix in 0..dex.nx {
+                let q = dex.center(ix, iy);
+                let touched = q.x.abs() <= 10.0 + 3.0 && q.y.abs() <= 3.0;
+                if !touched {
+                    assert_eq!(dex.top[ix + iy * dex.nx], 7.0, "phantom cut at {q:?}");
+                }
+            }
+        }
+        // And the reach law itself, directly: a perpendicular offset
+        // just under r grazes; just over r gives nothing at all.
+        assert!(reach(0.0, 2.999, 20.0, 0.0, 3.0).is_some());
+        assert!(reach(0.0, 3.001, 20.0, 0.0, 3.0).is_none());
+        // w is an offset from the chord's START, so the middle of the
+        // window is at w = (10, 0): the disc covers the middle 6 of a
+        // 20-long chord, t 0.35..0.65. (At w = (0,0) the point is the
+        // start endpoint itself and the clamped half-window is 0.15.)
+        let (t0, t1) = reach(10.0, 0.0, 20.0, 0.0, 3.0).unwrap();
+        assert!((t1 - t0 - 0.3).abs() <= 1e-12, "window {t0}..{t1}");
+    }
+
+    #[test]
+    fn non_finite_inputs_cut_nothing_and_never_panic() {
+        let mut dex = Dexel::block(-5.0, -5.0, 5.0, 5.0, 9.0, 1.0).unwrap();
+        dex.cut_ball(p3(0.0, 0.0, f64::NAN), p3(1.0, 0.0, 0.0), 2.0);
+        dex.cut_ball(p3(0.0, 0.0, 1.0), p3(1.0, 0.0, 1.0), f64::INFINITY);
+        dex.cut_chord(p3(0.0, 0.0, 1.0), p3(f64::NAN, 0.0, 1.0), 2.0);
+        assert!(dex.top.iter().all(|&v| v == 9.0), "garbage cut something");
+    }
+
+    #[test]
+    fn envelope_scan_states_its_grid_and_refuses_a_bad_ball() {
+        let facets = vec![Triangle::new(
+            p3(-5.0, -5.0, 0.0),
+            p3(5.0, -5.0, 0.0),
+            p3(5.0, 5.0, 0.0),
+        )];
+        assert!(envelope_scan(&facets, &[], 0.0, 0.01).is_err());
+        assert!(envelope_scan(&facets, &[], -1.0, 0.01).is_err());
+        assert!(envelope_scan(&facets, &[], 2.0, f64::NAN).is_err());
+        // A non-finite vertex is an error, not an empty report.
+        let mut bad = facets.clone();
+        bad[0].c = p3(f64::NAN, 5.0, 0.0);
+        assert!(envelope_scan(&bad, &[], 2.0, 0.01).is_err());
+        // An empty model has no footprint to measure on: silence.
+        let rep = envelope_scan(&[], &[], 2.0, 0.01).unwrap();
+        assert_eq!(rep, EnvelopeReport::default());
+    }
 }

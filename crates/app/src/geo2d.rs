@@ -186,7 +186,7 @@ impl Region {
     /// is a hole. Implementation: orient by nesting parity, then fuse with
     /// a non-zero union (see the Clipper2 fill-rule docs).
     pub fn new(loops: Vec<Loop>) -> Result<Region, GeoError> {
-        Self::normalize(loops, false)
+        Self::normalize(loops, false, true)
     }
 
     /// Region from sliced-shell output, where a self-crossing cycle is a
@@ -194,10 +194,28 @@ impl Region {
     /// both) rather than ambiguous user input, so the even-odd decomposition
     /// is kept instead of refused. Everything else is `new`'s contract.
     pub fn from_slices(loops: Vec<Loop>) -> Result<Region, GeoError> {
-        Self::normalize(loops, true)
+        Self::normalize(loops, true, true)
     }
 
-    fn normalize(loops: Vec<Loop>, decompose_crossings: bool) -> Result<Region, GeoError> {
+    /// Region from loops that are all material - a pure union, with no
+    /// nesting-parity hole reading. This is the entry for forbidden-center
+    /// scans (`finishing3d`'s waterline): the contributions of the facets
+    /// of ONE solid legitimately nest (a box's bottom-facet footprint sits
+    /// inside its walls' offset square), and a nested shell there is area
+    /// already covered, never a hole - the law `new`'s shell parity exists
+    /// to read is the law of sketch geometry, not of overlapping
+    /// contributions. Same self-crossing refusal as `new`. Input
+    /// orientation must be CCW (material); `Loop::convex_hull` guarantees
+    /// it, and duplicate loops double-wind without cancelling.
+    pub fn union_all(loops: Vec<Loop>) -> Result<Region, GeoError> {
+        Self::normalize(loops, false, false)
+    }
+
+    fn normalize(
+        loops: Vec<Loop>,
+        decompose_crossings: bool,
+        parity: bool,
+    ) -> Result<Region, GeoError> {
         // 1. A loop that crosses itself is not a boundary of anything a
         //    sketch could mean; its "area" is convention dependent. For
         //    sketch input (`new`) refuse rather than half-compute (Prime
@@ -221,26 +239,32 @@ impl Region {
         //    (hole). Nesting is all-vertices-inside, not one anchor point
         //    inside - a partial overlap must read as two outers (a non-zero
         //    union fuses them), not as a hole punched in the first.
-        let oriented: Vec<Loop> = simple
-            .iter()
-            .enumerate()
-            .map(|(i, l)| {
-                let depth = simple
-                    .iter()
-                    .enumerate()
-                    .filter(|(j, o)| {
-                        *j != i && l.points().iter().all(|p| o.contains_xy(*p))
-                    })
-                    .count();
-                if (depth % 2 == 0) == l.is_ccw() {
-                    l.clone()
-                } else {
-                    Loop {
-                        pts: l.pts.iter().rev().copied().collect(),
+        //    `union_all` skips this step entirely: its loops are all
+        //    material by contract, so nesting is coverage, never a hole.
+        let oriented: Vec<Loop> = if parity {
+            simple
+                .iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    let depth = simple
+                        .iter()
+                        .enumerate()
+                        .filter(|(j, o)| {
+                            *j != i && l.points().iter().all(|p| o.contains_xy(*p))
+                        })
+                        .count();
+                    if (depth % 2 == 0) == l.is_ccw() {
+                        l.clone()
+                    } else {
+                        Loop {
+                            pts: l.pts.iter().rev().copied().collect(),
+                        }
                     }
-                }
-            })
-            .collect();
+                })
+                .collect()
+        } else {
+            simple
+        };
         // 3. Fuse: overlapping outers become one material; nesting stays.
         Ok(Self::from_paths(union_subjects_64(
             &to_paths(&oriented)?,

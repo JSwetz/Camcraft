@@ -2359,3 +2359,157 @@ fn moving_the_part_marks_the_drill_op_stale_until_regen() {
     let cache = cache(&world, "Move1").expect("cached");
     assert_eq!(cache.path.cycles[0].entry_z, 10.0, "stored holes are not re-detected");
 }
+
+// ---------------------------------------------------------------------------
+// M2.2a: the waterline through the command chain - the model in the world,
+// not a Vec<Triangle> handed to a function. Generation, refusal and the
+// tool-kind law must hold at THIS level, where the user actually stands.
+// ---------------------------------------------------------------------------
+
+/// R20 spherical cap to the 45 deg rim - the same solid `finish3d.rs`
+/// walks directly, as an imported model.
+fn dome_mesh() -> hsmworks_app::geometry::Mesh {
+    use hsmworks_app::geometry::{Triangle, Point3};
+    const TAU: f64 = std::f64::consts::TAU;
+    let (radius, polar_max, n_lat, n_lon) = (20.0, std::f64::consts::FRAC_PI_4, 12usize, 96usize);
+    let mut facets = Vec::new();
+    let ring = |k: usize| -> Vec<Point3> {
+        let ph = polar_max * k as f64 / n_lat as f64;
+        let (z, rr) = (radius * ph.cos(), radius * ph.sin());
+        (0..n_lon)
+            .map(|j| {
+                let th = TAU * j as f64 / n_lon as f64;
+                Point3::new(rr * th.cos(), rr * th.sin(), z)
+            })
+            .collect()
+    };
+    let apex = Point3::new(0.0, 0.0, radius);
+    let first = ring(1);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, first[j], first[(j + 1) % n_lon]));
+    }
+    for k in 1..n_lat {
+        let ra = ring(k);
+        let rb = ring(k + 1);
+        for j in 0..n_lon {
+            let j2 = (j + 1) % n_lon;
+            facets.push(Triangle::new(ra[j], rb[j], rb[j2]));
+            facets.push(Triangle::new(ra[j], rb[j2], ra[j2]));
+        }
+    }
+    let rim = ring(n_lat);
+    let zb = radius * polar_max.cos();
+    let center = Point3::new(0.0, 0.0, zb);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
+    }
+    hsmworks_app::geometry::Mesh { facets }
+}
+
+const DOME_RIM_Z: f64 = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
+
+fn finish_params(top_z: f64, bottom_z: f64, tolerance: f64) -> OpParams {
+    OpParams::Finish3D {
+        tolerance,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    }
+}
+
+#[test]
+fn finish3d_waterline_generates_and_verifies_clean() {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Finish1",
+            "BN-0600",
+            SrcRef::Entity("dome".into()),
+            finish_params(18.0, DOME_RIM_Z, 0.1),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Finish1").expect("generate"));
+    // Ok, not Warning: the envelope verdict came back inside the gate,
+    // measured by the same kernel the direct tests drive.
+    assert_eq!(status(&world, "Finish1"), OpStatus::Ok);
+    let t = cache(&world, "Finish1").expect("cached").path;
+    let plunges: Vec<f64> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .map(|m| m.to.z)
+        .collect();
+    // One ring per level from 18 down, snapped at the rim - the scallop
+    // stepdown's ladder, 2*sqrt(3*0.1) = 1.0954 per rung.
+    assert!((4..=6).contains(&plunges.len()), "ladder: {plunges:?}");
+    assert!(plunges.last() == Some(&DOME_RIM_Z), "the bottom ring snaps to the bottom: {plunges:?}");
+    assert!(
+        t.moves.iter().all(|m| m.to.z <= 25.0 + 1e-9 && m.from.z <= 25.0 + 1e-9),
+        "nothing starts above clearance"
+    );
+}
+
+#[test]
+fn finish3d_refuses_a_flat_bottomed_tool() {
+    // The forbidden-center scan is ball geometry; an end mill here must
+    // refuse by name, never generate a ball path dressed as an end mill.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "FinishE",
+            "EM-0600-4FL",
+            SrcRef::Entity("dome".into()),
+            finish_params(18.0, DOME_RIM_Z, 0.1),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "FinishE")
+        .err()
+        .expect("the waterline must refuse a flat tool")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("ball-nose"), "{msg}");
+    assert_eq!(
+        status(&world, "FinishE"),
+        OpStatus::Never,
+        "the refusal leaves no path behind"
+    );
+}
+
+#[test]
+fn finish3d_refuses_bad_tolerance_at_creation() {
+    // Validate early: a zero deviation budget is nonsense the command
+    // layer refuses before any generator sees the mesh.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    assert!(matches!(
+        CreateOperation::new(
+            &world,
+            "Finish0",
+            "BN-0600",
+            SrcRef::Entity("dome".into()),
+            finish_params(18.0, DOME_RIM_Z, 0.0),
+        ),
+        Err(CommandError::Invalid(_))
+    ));
+}

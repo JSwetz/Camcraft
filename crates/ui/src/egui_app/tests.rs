@@ -770,6 +770,27 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
+        (
+            // The finish picks no geometry (the whole model is its
+            // region) and has no stepdown or stepover: tolerance authors
+            // the level spacing itself - the law its Passes tab pins.
+            "3D Finish",
+            vec![
+                ("Geometry", vec!["Click selects:"]),
+                (
+                    "Heights",
+                    vec![
+                        "Clearance Z",
+                        "Retract plane",
+                        "Hop below clearance",
+                        "Top Z",
+                        "Bottom Z",
+                    ],
+                ),
+                ("Passes", vec!["Tolerance"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
     ];
     for (ki, (kind_name, sections)) in table.iter().enumerate() {
         let cur = harness.state().state.op_ui.params.clone();
@@ -1450,6 +1471,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Create(4), "Add a Trace operation"),
         (Cmd::Create(5), "Add a Drill operation"),
         (Cmd::Create(6), "Add a 3D Pocket operation"),
+        (Cmd::Create(7), "Add a 3D Finish operation"),
         (Cmd::Undo, "Undo\tCtrl+Z"),
         (Cmd::Redo, "Redo\tCtrl+Y"),
         (Cmd::Run, "Generate the selected operation"),
@@ -1887,6 +1909,41 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     };
     assert_eq!(*strategy, hsmworks_app::machining2d::PocketStrategy::Auto);
     assert_eq!(*entry, hsmworks_app::machining3d::Entry3D::Plunge);
+}
+
+#[test]
+fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
+    let mut harness = shell_harness();
+    harness.run();
+    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        Vec2::new(1280.0, super::shell::RIBBON_H),
+    ));
+    let finish3d = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Create(7))
+        .expect("the Create group carries an eighth, 3D Finish cell");
+    let at = finish3d.rect.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let op = model::find_by_name(&st.world, "Operation2")
+        .as_ref()
+        .and_then(|e| model::operation_of(&st.world, e))
+        .expect("the 3D Finish cell created its operation through the actions law");
+    // The tolerance is the op's one shaping number (the stepdown law
+    // derives from it and the tool), and no hop is on by default - the
+    // pocket family's clearance law, quoted by the draft's own default.
+    let OpParams::Finish3D { tolerance, retract_z, .. } = &op.params else {
+        panic!(
+            "the eighth cell must create a 3D Finish operation, got {:?}",
+            op.params.kind()
+        )
+    };
+    assert_eq!(*tolerance, 0.05);
+    assert_eq!(*retract_z, None);
 }
 
 #[test]

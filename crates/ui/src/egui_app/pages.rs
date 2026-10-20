@@ -478,6 +478,7 @@ fn kind_index(kind: OpType) -> usize {
         OpType::Trace => 4,
         OpType::Drill => 5,
         OpType::Pocket3D => 6,
+        OpType::Finish3D => 7,
     }
 }
 
@@ -1109,6 +1110,60 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("a closing ladder, half the step, cuts what the levels leave standing");
                 ui.checkbox(feed_opt, "Feed optimization");
                 ui.label("heavier bites slow toward the programmed feed (never faster); the sim measures each move");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
+        OpParams::Finish3D {
+            tolerance,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, clearance_z, "finish3d.clearance");
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, r, "finish3d.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, top_z, "finish3d.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, bottom_z, "finish3d.bottom");
+                ui.label("Top is the first ring's plane, Bottom the last level's");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the finish budget: levels drop by 2 x sqrt(tool radius x tolerance), so the cusp under the ball stays within it");
+                ui.label("stepdown follows from tolerance and tool - it is not a second knob");
             }
             if tab == SEC_FEEDS {
                 field(ui, &format!("Feed ({})", u.feed_suffix()));
