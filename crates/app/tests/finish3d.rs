@@ -11,7 +11,8 @@
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::finishing3d::{
-    parallel, scallop_stepdown, scallop_stepover, waterline, Finish3DParams, FinishPattern,
+    parallel, radial, scallop_stepdown, scallop_stepover, spiral, waterline, Finish3DParams,
+    FinishPattern,
 };
 use hsmworks_app::geometry::{slice, Point3, Triangle};
 use hsmworks_app::geo2d::Region;
@@ -1120,3 +1121,95 @@ fn scallop_shares_the_raster_refusals() {
     assert!(parallel(&wall, &ppattern(5.0, 0.0, FinishPattern::Scallop)).is_ok());
 }
 
+
+// ---- M2.2d stage B: the polar placements ride the same march laws ----
+
+/// A small hill - the dome's kin at a fraction of the facet count, so
+/// the envelope kernel can judge the polar patterns in milliseconds
+/// where the big dome costs minutes (the design's fast-fixture law).
+fn hill() -> Vec<Triangle> {
+    sphere_cap(8.0, PI / 4.0, 5, 24)
+}
+const HILL_TOP: f64 = 8.0;
+const HILL_RIM: f64 = 8.0 * std::f64::consts::FRAC_1_SQRT_2;
+
+#[test]
+fn radial_chords_and_the_spiral_cover_the_center() {
+    // Structural promise of the two placements: every ground line
+    // passes THROUGH the footprint center (chords) or winds in to a
+    // half-step of it (spiral) - so the center of a hill is cut, the
+    // way the raster's middle line cuts it. And the march's chord
+    // budget, told apart from the rings' honest long strokes the way
+    // the two motions themselves differ: a ring rides one tip plane
+    // (iso-z, exact-straight collapse and all), a march sample
+    // climbs - so every Feed that changes Z is a march move, and
+    // none of them may span more XY than the stepdown budget.
+    let f = hill();
+    let delta0 = scallop_stepdown(R, TOL);
+    for (pat, name) in [(FinishPattern::Radial, "radial"), (FinishPattern::Spiral, "spiral")] {
+        let t = parallel_all(&f, &ppattern(HILL_TOP, HILL_RIM, pat)).expect(name);
+        assert!(!t.moves.is_empty());
+        assert_eq!(
+            t.moves,
+            parallel_all(&f, &ppattern(HILL_TOP, HILL_RIM, pat)).expect(name).moves,
+            "{name}: two calls, two paths - a stamp would churn forever"
+        );
+        let near_center = t.moves.iter().filter(|m| m.kind == MoveKind::Feed).any(|m| {
+            m.to.x.hypot(m.to.y) <= 1.5 * delta0
+                && m.from.x.hypot(m.from.y) <= 3.0 * (delta0 + scallop_stepover(R, TOL))
+        });
+        assert!(near_center, "{name} never crossed the middle");
+        let worst = t
+            .moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Feed && (m.to.z - m.from.z).abs() > 1e-9)
+            .map(|m| (m.to.x - m.from.x).hypot(m.to.y - m.from.y))
+            .fold(0.0f64, f64::max);
+        assert!(
+            worst <= 1.5 * delta0,
+            "{name}: a climbing Feed spans {worst} mm of XY, over the chord budget {delta0}"
+        );
+    }
+}
+
+/// The operation-layer dispatch is the only route to radial/spiral
+/// from the enum; the tests call the generators through the same
+/// match shape (kept honest by refusing anything not shallow-ground).
+fn parallel_all(f: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
+    match p.pattern {
+        FinishPattern::Radial => radial(f, p),
+        FinishPattern::Spiral => spiral(f, p),
+        _ => parallel(f, p),
+    }
+}
+
+#[test]
+fn the_hill_under_radial_and_spiral_is_envelope_clean() {
+    // The measured promise, both families: the same cos-law spacing
+    // that keeps the raster's cusp inside `tol` on a tilt `a` keeps
+    // the chords' and the spiral's - the march laws are shared, so
+    // the verdict must be too.
+    let f = hill();
+    for (pat, name) in [(FinishPattern::Radial, "radial"), (FinishPattern::Spiral, "spiral")] {
+        let t = parallel_all(&f, &ppattern(HILL_TOP, HILL_RIM, pat)).expect(name);
+        let rep = envelope(&f, &t);
+        assert!(rep.gouge_mm <= gate(rep.cell), "{name}: gouged {} at {:?}", rep.gouge_mm, rep.at);
+        assert!(rep.rest_mm <= gate(rep.cell), "{name}: left {} of rest at {:?}", rep.rest_mm, rep.at);
+        assert_eq!(verify_finish(&f, &t, HILL_TOP), Vec::new(), "{name}: the verifier agrees");
+    }
+}
+
+#[test]
+fn polar_placements_refuse_without_a_number_or_past_the_cap() {
+    // The raster's step_positive law, spoken in polar words, and the
+    // line-count caps: refusals, never silent skips, never hours.
+    let f = box_facets();
+    for name in ["radial", "spiral"] {
+        for (pat, bad_step) in [(FinishPattern::Radial, 0.0), (FinishPattern::Radial, f64::NAN), (FinishPattern::Spiral, 0.0), (FinishPattern::Spiral, f64::NAN)] {
+            let pp = Finish3DParams { stepover: Some(bad_step), ..ppattern(10.0, 0.5, pat) };
+            assert!(matches!(parallel_all(&f, &pp), Err(GenError::Invalid(_))), "{name} stepover {bad_step} must refuse");
+        }
+        let wide = Finish3DParams { stepover: Some(0.001), ..ppattern(10.0, 0.5, if name == "radial" { FinishPattern::Radial } else { FinishPattern::Spiral }) };
+        assert!(matches!(parallel_all(&f, &wide), Err(GenError::Invalid(_))), "{name} at 0.001 spacing must hit the cap");
+    }
+}

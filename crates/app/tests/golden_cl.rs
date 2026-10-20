@@ -546,3 +546,109 @@ fn finish3d_scallop_plateau() {
     .unwrap();
     write_golden("finish3d_scallop_plateau.cl", &gen_to_cltext(&t));
 }
+
+// M2.2d - the polar placements. Radial rides the dome (curved ground
+// is where chord overlap toward the center actually happens, and the
+// flanks' rings fold into the same dump); spiral rides the plateau
+// (a flat square is the polar law's hardest test: the march crosses
+// it along a single in-winding curve and the walls' rings close).
+
+#[test]
+fn finish3d_radial_dome() {
+    use hsmworks_app::finishing3d::{radial, Finish3DParams, FinishPattern};
+    use hsmworks_app::geometry::{Point3, Triangle};
+    let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+    // Spherical cap, apex (0,0,12), rim at polar 60 deg, closed by a
+    // flat base - the dome fixture's shape at golden-sized tessellation.
+    let (radius, polar_max, n_lat, n_lon) = (12.0, std::f64::consts::FRAC_PI_3, 6usize, 24usize);
+    let mut facets = Vec::new();
+    let ring = |k: usize| -> Vec<Point3> {
+        let ph = polar_max * k as f64 / n_lat as f64;
+        let (z, rr) = (radius * ph.cos(), radius * ph.sin());
+        (0..n_lon)
+            .map(|j| {
+                let th = std::f64::consts::TAU * j as f64 / n_lon as f64;
+                p3(rr * th.cos(), rr * th.sin(), z)
+            })
+            .collect()
+    };
+    let apex = p3(0.0, 0.0, radius);
+    let first = ring(1);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, first[j], first[(j + 1) % n_lon]));
+    }
+    for k in 1..n_lat {
+        let ra = ring(k);
+        let rb = ring(k + 1);
+        for j in 0..n_lon {
+            let j2 = (j + 1) % n_lon;
+            facets.push(Triangle::new(ra[j], rb[j], rb[j2]));
+            facets.push(Triangle::new(ra[j], rb[j2], ra[j2]));
+        }
+    }
+    let rim = ring(n_lat);
+    let zb = radius * polar_max.cos();
+    let center = p3(0.0, 0.0, zb);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
+    }
+    let t = radial(
+        &facets,
+        &Finish3DParams {
+            pattern: FinishPattern::Radial,
+            stepover: None,
+            tool_diameter: 6.0,
+            tolerance: 0.1,
+            clearance_z: 25.0,
+            retract_z: None,
+            top_z: 12.0,
+            bottom_z: 6.0,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        },
+    )
+    .unwrap();
+    write_golden("finish3d_radial_dome.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn finish3d_spiral_plateau() {
+    use hsmworks_app::finishing3d::{spiral, Finish3DParams, FinishPattern};
+    use hsmworks_app::geometry::{Point3, Triangle};
+    let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+    // The scallop golden's block: 20x20x10, top at z 10, no bottom.
+    let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
+    let (a, b, c, d) = (q(-1.0, -1.0, 0.0), q(1.0, -1.0, 0.0), q(1.0, 1.0, 0.0), q(-1.0, 1.0, 0.0));
+    let (e, f, g, h) = (q(-1.0, -1.0, 10.0), q(1.0, -1.0, 10.0), q(1.0, 1.0, 10.0), q(-1.0, 1.0, 10.0));
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let mut facets = Vec::new();
+    facets.extend(quad([e, f, g, h])); // top
+    facets.extend(quad([a, b, f, e])); // sides
+    facets.extend(quad([b, c, g, f]));
+    facets.extend(quad([c, d, h, g]));
+    facets.extend(quad([d, a, e, h]));
+    let t = spiral(
+        &facets,
+        &Finish3DParams {
+            pattern: FinishPattern::Spiral,
+            stepover: None,
+            tool_diameter: 6.0,
+            tolerance: 0.1,
+            clearance_z: 25.0,
+            retract_z: None,
+            top_z: 10.0,
+            bottom_z: 0.0,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        },
+    )
+    .unwrap();
+    write_golden("finish3d_spiral_plateau.cl", &gen_to_cltext(&t));
+}

@@ -460,6 +460,10 @@ pub enum FinishPatternDto {
     /// M2.2c: a new word in an existing grammar - v16 files never
     /// carried it and still read unchanged, so no version step-up.
     Scallop,
+    /// M2.2d, same law: chords through the footprint center.
+    Radial,
+    /// M2.2d, same law: one Archimedean curve in from the rim.
+    Spiral,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -469,6 +473,8 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::Parallel => crate::finishing3d::FinishPattern::Parallel,
             FinishPatternDto::ParallelMulti => crate::finishing3d::FinishPattern::ParallelMulti,
             FinishPatternDto::Scallop => crate::finishing3d::FinishPattern::Scallop,
+            FinishPatternDto::Radial => crate::finishing3d::FinishPattern::Radial,
+            FinishPatternDto::Spiral => crate::finishing3d::FinishPattern::Spiral,
         }
     }
 }
@@ -480,6 +486,8 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::Parallel => FinishPatternDto::Parallel,
             crate::finishing3d::FinishPattern::ParallelMulti => FinishPatternDto::ParallelMulti,
             crate::finishing3d::FinishPattern::Scallop => FinishPatternDto::Scallop,
+            crate::finishing3d::FinishPattern::Radial => FinishPatternDto::Radial,
+            crate::finishing3d::FinishPattern::Spiral => FinishPatternDto::Spiral,
         }
     }
 }

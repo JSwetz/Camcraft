@@ -86,13 +86,21 @@ use crate::machining2d::{cut_levels, fit_arcs, GenError, Seg};
 /// models means none aligned to X or Y) can run parallel to both
 /// families, so no feature's cusp escapes a crossing cut. The flat
 /// cusp of the crossed pair is the single family's - the kernel
-/// measures it, and no analytic sqrt(2) discount is claimed.
+/// measures it, and no analytic sqrt(2) discount is claimed. Radial
+/// (M2.2d) sends chords through the shallow terrain's center, one
+/// per stepover of arc at the rim; Spiral runs ONE Archimedean
+/// curve in from the silhouette - the retract-free continuous cut.
+/// Both ride `march_curve`'s laws verbatim - only the placement of
+/// the ground lines changes, never what a step promises - and both
+/// hand the steep flanks to the same rings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FinishPattern {
     Waterline,
     Parallel,
     ParallelMulti,
     Scallop,
+    Radial,
+    Spiral,
 }
 
 /// Everything the 3D finishers need that the tool and geometry don't
@@ -566,19 +574,213 @@ fn push_run_pt(line: &mut Vec<(Point2, f64)>, q: Point2, c: f64) {
     }
 }
 
-/// One Z-following raster pass, lines perpendicular to `(ux, uy)`
-/// across the shallow facets' padded bounds, stepped by the cos-law
-/// (or an explicit `stepover`), walked by the adaptive march and its
-/// plunge-feed-hop choreography. Three refinements make the march
-/// honest: validity bisection at a run's ends, so a plunge starts
-/// just INSIDE the material's edge rather than a hair outside it,
-/// hanging the ball over the edge to dig; chord bisection, so the
-/// sample string over tessellated ridges sinks at most `tol/4` of
-/// center - the same budget split the ring's scan law makes; and
-/// the discontinuity break, so a line whose next sample stands on
-/// a DIFFERENT surface (the center leapt more than `Δu + tol`)
+/// The march laws, stated once for every Z-following curve family -
+/// raster lines, radial chords, the spiral (M2.2d). Samples ride a
+/// parameterized curve `pos(t)` from `t0` to `t1`; `unit(t)` is the
+/// parameter advance that carries ONE millimeter of XY ground
+/// (1.0 for lines, 1/radius for the spiral); `dist(a, b)` is the
+/// true XY distance between two parameters - the break law and the
+/// step arithmetic speak millimeters, not parameter, so a curve
+/// that parameterizes unevenly still promises what a line does.
+/// The three refinements that make the march honest: validity
+/// bisection at a run's ends, so a plunge starts just INSIDE the
+/// material's edge rather than a hair outside it, hanging the ball
+/// over the edge to dig; chord bisection, so the sample string over
+/// tessellated ridges sinks at most `eps_chord` of center - the
+/// same budget split the ring's scan law makes; and the
+/// discontinuity break, so a curve whose next sample stands on a
+/// DIFFERENT surface (the center leapt more than XY-span + tol)
 /// breaks there instead of dragging one move's chord through the
-/// shelf's edge - no cut move ever spans two surfaces.
+/// shelf's edge - no cut move ever spans two surfaces. Returns the
+/// curve's pieces, in travel order, air stretches gone.
+#[allow(clippy::too_many_arguments)] // the march kernel: one slot per law, all three callers fill all nine
+fn march_curve(
+    t0: f64,
+    t1: f64,
+    pos: &impl Fn(f64) -> Point2,
+    dist: &impl Fn(f64, f64) -> f64,
+    unit: &impl Fn(f64) -> f64,
+    sup: &impl Fn(Point2) -> Option<f64>,
+    delta0: f64,
+    tol: f64,
+    eps_chord: f64,
+) -> Vec<Vec<(Point2, f64)>> {
+    const MAX_BISECT: usize = 24;
+    let delta_min = delta0 / 4096.0;
+    let mut line: Vec<(Point2, f64)> = Vec::new();
+    let mut pieces: Vec<Vec<(Point2, f64)>> = Vec::new();
+    let mut t = t0;
+    let mut cz = sup(pos(t));
+    if let Some(c) = cz {
+        push_run_pt(&mut line, pos(t), c);
+    }
+    'march: while t <= t1 {
+        if cz.is_none() {
+            // Skip phase: coarse search for the next edge of
+            // material, then bisect the start of the run.
+            let tn = (t + 4.0 * delta0 * unit(t)).min(t1);
+            if tn <= t {
+                break;
+            }
+            match sup(pos(tn)) {
+                None => t = tn,
+                Some(c) => {
+                    // The stretch between was not cuttable ground -
+                    // air or occlusion. Whatever stands here is a
+                    // new run, not a continuation of the line:
+                    // append-only would ride one lateral Feed
+                    // across the gap, through whatever wall or
+                    // shelf edge hides the ground. Flush the line.
+                    if !line.is_empty() {
+                        pieces.push(std::mem::take(&mut line));
+                    }
+                    let (mut lo, mut hic, mut hicz) = (t, tn, c); // lo invalid, hic valid
+                    for _ in 0..MAX_BISECT {
+                        let mid = (lo + hic) * 0.5;
+                        match sup(pos(mid)) {
+                            Some(cm) => {
+                                hic = mid;
+                                hicz = cm;
+                            }
+                            None => lo = mid,
+                        }
+                    }
+                    push_run_pt(&mut line, pos(hic), hicz);
+                    t = hic;
+                    cz = Some(hicz);
+                }
+            }
+        } else {
+            // Valid phase: march inside material.
+            let mut delta = delta0;
+            loop {
+                let tn = (t + delta * unit(t)).min(t1);
+                // Two ways the parameter stops advancing: the step
+                // clamps onto t1 (the spiral's inner end sits exactly
+                // there, still valid ground), or float stagnation -
+                // `t` grown so far past `t1` that `delta * unit(t)`
+                // no longer moves it. Either way the march is over;
+                // a plain `break` here would return to the outer
+                // condition, which is still true at t == t1, and the
+                // loop would spin forever re-clamping the same
+                // sample. Break the MARCH, not the step.
+                if tn <= t {
+                    break 'march;
+                }
+                match sup(pos(tn)) {
+                    None => {
+                        // End of the run: bisect to its edge from
+                        // the last known valid point.
+                        let (mut lo, mut loc, mut hic) = (t, cz.unwrap_or(0.0), tn);
+                        for _ in 0..MAX_BISECT {
+                            let mid = (lo + hic) * 0.5;
+                            match sup(pos(mid)) {
+                                Some(cm) => {
+                                    lo = mid;
+                                    loc = cm;
+                                }
+                                None => hic = mid,
+                            }
+                        }
+                        push_run_pt(&mut line, pos(lo), loc);
+                        t = lo;
+                        cz = None;
+                        break;
+                    }
+                    Some(c) if (c - cz.unwrap_or(c)).abs() > dist(t, tn) + tol => {
+                        // Surface discontinuity: the center leapt
+                        // higher than the terrain could climb over
+                        // the same XY span - the next sample stands
+                        // on a different surface (a shelf's edge,
+                        // the mouth above a hidden floor). One move
+                        // across that gap would drag its chord
+                        // through material, so the curve BREAKS
+                        // here: this piece ends behind, a new one
+                        // starts here, and the choreography hands
+                        // over at the hop, the ball clear of both
+                        // surfaces in between.
+                        if !line.is_empty() {
+                            pieces.push(std::mem::take(&mut line));
+                        }
+                        push_run_pt(&mut line, pos(tn), c);
+                        t = tn;
+                        cz = Some(c);
+                    }
+                    Some(c) if delta > delta_min => {
+                        let cur = cz.unwrap_or(c);
+                        let mid = (t + tn) * 0.5;
+                        let dev = match sup(pos(mid)) {
+                            Some(cm) => (cm - (cur + c) * 0.5).abs(),
+                            None => f64::INFINITY, // straddles an edge: refine
+                        };
+                        if dev > eps_chord {
+                            delta *= 0.5;
+                            continue;
+                        }
+                        push_run_pt(&mut line, pos(tn), c);
+                        t = tn;
+                        cz = Some(c);
+                        delta = (delta * 2.0).min(delta0);
+                    }
+                    Some(c) => {
+                        push_run_pt(&mut line, pos(tn), c);
+                        t = tn;
+                        cz = Some(c);
+                    }
+                }
+                if t >= t1 {
+                    break 'march;
+                }
+            }
+        }
+    }
+    if !line.is_empty() {
+        pieces.push(line);
+    }
+    pieces
+}
+
+/// The ladder's own choreography: curve to curve inside one pass
+/// hops at `hop` (the retract FEEDed up, so the envelope sees the
+/// column it vacates); pass to pass climbs to clearance with
+/// rapids, like a level change among rings; the very first entry
+/// just travels over at its own height, like the first ring.
+fn emit_runs(
+    b: &mut PathBuilder,
+    p: &Finish3DParams,
+    r: f64,
+    runs: &[Vec<(Point2, f64)>],
+    continuing: bool,
+) {
+    let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
+    for (i, run) in runs.iter().enumerate() {
+        let (x0, y0) = (run[0].0.x, run[0].0.y);
+        let z0 = run[0].1 - r;
+        let cur = b.at();
+        if i == 0 && !continuing {
+            b.push(MoveKind::Rapid, Point3::new(x0, y0, cur.z.max(z0)), None);
+        } else if i == 0 {
+            let trav = p.clearance_z.max(z0);
+            b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, trav), None);
+            b.push(MoveKind::Rapid, Point3::new(x0, y0, trav), None);
+        } else {
+            let trav = hop.max(z0);
+            b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, trav), Some(p.feed));
+            b.push(MoveKind::Rapid, Point3::new(x0, y0, trav), None);
+        }
+        b.push(MoveKind::Plunge, Point3::new(x0, y0, z0), Some(p.plunge_feed));
+        for (q, czz) in run {
+            b.push(MoveKind::Feed, Point3::new(q.x, q.y, czz - r), Some(p.feed));
+        }
+    }
+}
+
+/// One Z-following raster pass: lines perpendicular to `(ux, uy)`
+/// across the shallow facets' padded bounds, stepped by the cos-law
+/// (or an explicit `stepover`), each walked by `march_curve`'s laws
+/// and delivered by `emit_runs`' choreography. Serpentine within
+/// the pass: every piece of an odd line runs back, so the next
+/// line starts where this one's travel ended.
 /// Returns whether it emitted anything.
 fn raster_pass(
     b: &mut PathBuilder,
@@ -625,9 +827,7 @@ fn raster_pass(
         )));
     }
     let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
-    let delta_min = delta0 / 4096.0;
     let eps_chord = p.tolerance * 0.25;
-    let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
     let at = |t: f64, v: f64| Point2::new(ux * t + vx * v, uy * t + vy * v);
     let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, sups);
 
@@ -635,162 +835,29 @@ fn raster_pass(
     let mut runs: Vec<Vec<(Point2, f64)>> = Vec::new();
     for j in 0..n_lines.max(1) {
         let v = vmin + step * j.min(n_lines - 1) as f64;
-        let mut line: Vec<(Point2, f64)> = Vec::new();
-        let mut pieces: Vec<Vec<(Point2, f64)>> = Vec::new();
-        let mut t = umin;
-        let mut cz = sup(at(t, v)); // None marks air
-        if let Some(c) = cz {
-            push_run_pt(&mut line, at(t, v), c);
-        }
-        while t <= umax {
-            if cz.is_none() {
-                // Skip phase: coarse search for the next edge of
-                // material, then bisect the start of the run.
-                let tn = (t + delta0 * 4.0).min(umax);
-                if tn <= t {
-                    break;
-                }
-                match sup(at(tn, v)) {
-                    None => t = tn,
-                    Some(c) => {
-                        // The stretch between was not cuttable ground -
-                        // air or occlusion. Whatever stands here is a
-                        // new run, not a continuation of the line:
-                        // append-only would ride one lateral Feed
-                        // across the gap, through whatever wall or
-                        // shelf edge hides the ground. Flush the line.
-                        if !line.is_empty() {
-                            pieces.push(std::mem::take(&mut line));
-                        }
-                        let (mut lo, mut hic, mut hicz) = (t, tn, c); // lo invalid, hic valid
-                        for _ in 0..24 {
-                            let mid = (lo + hic) * 0.5;
-                            if let Some(cm) = sup(at(mid, v)) {
-                                hic = mid;
-                                hicz = cm;
-                            } else {
-                                lo = mid;
-                            }
-                        }
-                        push_run_pt(&mut line, at(hic, v), hicz);
-                        t = hic;
-                        cz = Some(hicz);
-                    }
-                }
-            } else {
-                // Valid phase: march inside material.
-                let mut delta = delta0;
-                loop {
-                    let tn = (t + delta).min(umax);
-                    if tn <= t {
-                        break;
-                    }
-                    match sup(at(tn, v)) {
-                        None => {
-                            // End of the run: bisect to its edge from
-                            // the last known valid point.
-                            let (mut lo, mut loc, mut hic) = (t, cz.unwrap_or(0.0), tn);
-                            for _ in 0..24 {
-                                let mid = (lo + hic) * 0.5;
-                                if let Some(cm) = sup(at(mid, v)) {
-                                    lo = mid;
-                                    loc = cm;
-                                } else {
-                                    hic = mid;
-                                }
-                            }
-                            push_run_pt(&mut line, at(lo, v), loc);
-                            t = lo;
-                            cz = None;
-                            break;
-                        }
-                        Some(c) if (c - cz.unwrap_or(c)).abs() > (tn - t) + p.tolerance => {
-                            // Surface discontinuity: the center leapt
-                            // higher than any shallow facet could
-                            // climb over the same span - the next
-                            // sample stands on a different surface (a
-                            // shelf's edge, the mouth above a hidden
-                            // floor). One move across that gap would
-                            // drag its chord through material, so the
-                            // line BREAKS here: this piece ends
-                            // behind, a new one starts here, and the
-                            // choreography hands over at the hop, the
-                            // ball clear of both surfaces in between.
-                            if !line.is_empty() {
-                                pieces.push(std::mem::take(&mut line));
-                            }
-                            push_run_pt(&mut line, at(tn, v), c);
-                            t = tn;
-                            cz = Some(c);
-                        }
-                        Some(c) if delta > delta_min => {
-                            let cur = cz.unwrap_or(c);
-                            let mid = (t + tn) * 0.5;
-                            let dev = match sup(at(mid, v)) {
-                                Some(cm) => (cm - (cur + c) * 0.5).abs(),
-                                None => f64::INFINITY, // straddles an edge: refine
-                            };
-                            if dev > eps_chord {
-                                delta *= 0.5;
-                                continue;
-                            }
-                            push_run_pt(&mut line, at(tn, v), c);
-                            t = tn;
-                            cz = Some(c);
-                            delta = (delta * 2.0).min(delta0);
-                        }
-                        Some(c) => {
-                            push_run_pt(&mut line, at(tn, v), c);
-                            t = tn;
-                            cz = Some(c);
-                        }
-                    }
-                    if t >= umax {
-                        break;
-                    }
-                }
-            }
-        }
-        if !line.is_empty() {
-            pieces.push(line);
-        }
-        for mut pc in pieces {
-            // Serpentine: every piece of an odd line runs back, so
-            // the next line starts where this one's travel ended.
-            if j % 2 == 1 {
+        let pos = |t: f64| at(t, v);
+        let mut pieces = march_curve(
+            umin,
+            umax,
+            &pos,
+            &|a, c| (c - a).abs(),
+            &|_| 1.0,
+            &sup,
+            delta0,
+            p.tolerance,
+            eps_chord,
+        );
+        if j % 2 == 1 {
+            for pc in pieces.iter_mut() {
                 pc.reverse();
             }
-            runs.push(pc);
         }
+        runs.extend(pieces);
     }
     if runs.is_empty() {
         return Ok(false);
     }
-    // The ladder's own choreography: line to line inside one pass
-    // hops at `hop` (the retract FEEDed up, so the envelope sees the
-    // column it vacates); pass to pass climbs to clearance with
-    // rapids, like a level change among rings; the very first entry
-    // just travels over at its own height, like the first ring.
-    for (i, run) in runs.iter().enumerate() {
-        let (x0, y0) = (run[0].0.x, run[0].0.y);
-        let z0 = run[0].1 - r;
-        let cur = b.at();
-        if i == 0 && !continuing {
-            b.push(MoveKind::Rapid, Point3::new(x0, y0, cur.z.max(z0)), None);
-        } else if i == 0 {
-            let trav = p.clearance_z.max(z0);
-            b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, trav), None);
-            b.push(MoveKind::Rapid, Point3::new(x0, y0, trav), None);
-        } else {
-            let trav = hop.max(z0);
-            b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, trav), Some(p.feed));
-            b.push(MoveKind::Rapid, Point3::new(x0, y0, trav), None);
-        }
-        b.push(MoveKind::Plunge, Point3::new(x0, y0, z0), Some(p.plunge_feed));
-        for (q, czz) in run {
-            b.push(MoveKind::Feed, Point3::new(q.x, q.y, czz - r), Some(p.feed));
-        }
-    }
+    emit_runs(b, p, r, &runs, continuing);
     Ok(true)
 }
 
@@ -824,9 +891,25 @@ pub fn parallel(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Gen
     // Then the rings, from wherever the raster left the tool: the
     // Some(clearance) marker makes the first ring's level-change
     // choreography climb up before anything else.
+    rings_and_tail(b, p, r, facets, emitted)
+}
+
+/// The shared close of every raster-family strategy: the steep
+/// flanks ride the waterline rings from wherever the shallow pass
+/// left the tool, then the clearance exit, the emptiness refusal
+/// and the finiteness gate. `parallel`, `radial` and `spiral` all
+/// end here, so no strategy can drift from the ladder.
+fn rings_and_tail(
+    mut b: PathBuilder,
+    p: &Finish3DParams,
+    r: f64,
+    facets: &[Triangle],
+    emitted: bool,
+) -> Result<Toolpath, GenError> {
     let zs = levels(p, r)?;
     let ds = dirs(r, p.tolerance);
     let mut last = Some(p.clearance_z);
+    let mut emitted = emitted;
     emitted |= emit_rings(&mut b, p, r, facets, &zs, &ds, &mut last)?;
     if !emitted {
         return Err(GenError::Empty(
@@ -837,9 +920,165 @@ pub fn parallel(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Gen
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
     let path = b.finish();
     if !path.all_finite() {
-        return Err(GenError::Invalid("parallel path left the finite horizon".into()));
+        return Err(GenError::Invalid("path left the finite horizon".into()));
     }
     Ok(path)
+}
+
+/// The shallow terrain's polar stage: its footprint center, the
+/// circumscribed radius over the bbox corner (one stepover of
+/// margin added by the caller, so the rim's ground is reached),
+/// and the smallest shallow tilt - the cos-law's `m_z`. `None`
+/// when every facet is steep: the rings alone carry the model,
+/// exactly as the raster answers to that case.
+fn shallow_footprint(sups: &[Sup]) -> Option<(Point2, f64, f64)> {
+    let (mut x0, mut x1, mut y0, mut y1) =
+        (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    let mut mz = 1.0f64;
+    for s in sups.iter().filter(|s| s.shallow) {
+        x0 = x0.min(s.xmin);
+        x1 = x1.max(s.xmax);
+        y0 = y0.min(s.ymin);
+        y1 = y1.max(s.ymax);
+        mz = mz.min(s.m.z);
+    }
+    if x0 > x1 {
+        return None;
+    }
+    let c = Point2::new((x0 + x1) * 0.5, (y0 + y1) * 0.5);
+    Some((c, (x1 - c.x).hypot(y1 - c.y), mz))
+}
+
+/// The placement refusals, shared: a spacing without a number is
+/// refusal, never a silent skip (the `step_positive` law of the
+/// raster, spoken in polar words); and a family needing more
+/// ground lines than the cap is the user's stepover asking for
+/// hours of path - widen it, or the tolerance, and try again.
+fn placement_guard(step: f64, lines: f64, family: &str, cap: f64) -> Result<(), GenError> {
+    let step_positive = step > 0.0;
+    if !step_positive || lines > cap {
+        return Err(GenError::Invalid(format!(
+            "{family} needs {} ground lines at stepover {:.4} (cap {cap}): widen the stepover or the tolerance",
+            lines.max(0.0) as i64,
+            step,
+        )));
+    }
+    Ok(())
+}
+
+/// Radial finishing (M2.2d): `N = ceil(PI·R/s)` CHORDS through the
+/// shallow terrain's footprint center, each rotated `PI/N` from the
+/// last - so arc spacing at the rim meets the cos-law stepover, and
+/// toward the center the chords overlap ever more (correct, merely
+/// redundant: the cusp law is a bound, never a quota). Each chord
+/// is one `march_curve` run: validity bisection digs its plunges
+/// inside the material edge, the chord budget keeps the string of
+/// samples under a quarter of `tol`, and the discontinuity break
+/// cuts the chord into pieces at shelf mouths - no cut move spans
+/// two surfaces, radial included. Alternating chords run inward,
+/// the serpentine law with a different topology. Then the rings
+/// take the flanks, as in every raster-family close.
+pub fn radial(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
+    validate(p, facets)?;
+    let r = p.tool_diameter * 0.5;
+    let sups = build_sups(facets, r);
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut emitted = false;
+    if let Some((c, radius, mz)) = shallow_footprint(&sups) {
+        let step = p.stepover.unwrap_or(scallop_stepover(r, p.tolerance) * mz);
+        let rad = radius + step;
+        const MAX_CHORDS: f64 = 8192.0;
+        let n = (std::f64::consts::FRAC_PI_2 * 2.0 * rad / step).ceil().max(1.0);
+        placement_guard(step, n, "radial", MAX_CHORDS)?;
+        let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
+        let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, &sups);
+        let mut runs: Vec<Vec<(Point2, f64)>> = Vec::new();
+        for k in 0..n as i64 {
+            let th = std::f64::consts::PI * k as f64 / n;
+            let (dx, dy) = (th.cos(), th.sin());
+            let pos = |t: f64| Point2::new(c.x + t * dx, c.y + t * dy);
+            let mut pieces = march_curve(
+                -rad,
+                rad,
+                &pos,
+                &|a, z| (z - a).abs(),
+                &|_| 1.0,
+                &sup,
+                delta0,
+                p.tolerance,
+                p.tolerance * 0.25,
+            );
+            if k % 2 == 1 {
+                for pc in pieces.iter_mut() {
+                    pc.reverse();
+                }
+            }
+            runs.extend(pieces);
+        }
+        if !runs.is_empty() {
+            emit_runs(&mut b, p, r, &runs, false);
+            emitted = true;
+        }
+    }
+    rings_and_tail(b, p, r, facets, emitted)
+}
+
+/// Spiral finishing (M2.2d): ONE Archimedean curve,
+/// `r(θ) = R - s·θ/2π`, in from the silhouette to within a half
+/// stepover of the pole - the retract-free continuous cut the
+/// raster families pay for in hops and rapids. The march rides the
+/// ANGLE parameter: `unit(θ) = 1/max(r, 4·delta0)` keeps the XY
+/// chord per sample inside the stepdown budget at every radius
+/// (the apex law - near the pole the angle opens wide while the
+/// chord holds, and `dist` speaks true millimeters so the break
+/// law and the refinement never read the parameter as ground),
+/// and the curve ENDS a half-step from the center: the next turn
+/// would only retrace the last. A spiral piece that breaks at a
+/// shelf mouth re-enters at the hop, like every other ground line.
+/// Then the rings take the flanks.
+pub fn spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
+    validate(p, facets)?;
+    let r = p.tool_diameter * 0.5;
+    let sups = build_sups(facets, r);
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut emitted = false;
+    if let Some((c, radius, mz)) = shallow_footprint(&sups) {
+        let step = p.stepover.unwrap_or(scallop_stepover(r, p.tolerance) * mz);
+        let rad = radius + step;
+        const MAX_TURNS: f64 = 8192.0;
+        let turns = (rad / step).ceil().max(1.0);
+        placement_guard(step, turns, "spiral", MAX_TURNS)?;
+        let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
+        let th_end = std::f64::consts::TAU * (rad - step * 0.5) / step;
+        let r_of = |th: f64| rad - step * th / std::f64::consts::TAU;
+        let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, &sups);
+        let pos = |th: f64| {
+            let rr = r_of(th).max(0.0);
+            let (cs, sn) = th.sin_cos();
+            Point2::new(c.x + rr * cs, c.y + rr * sn)
+        };
+        let dist = |a: f64, z: f64| {
+            let (pa, pb) = (pos(a), pos(z));
+            (pb.x - pa.x).hypot(pb.y - pa.y)
+        };
+        let unit = |th: f64| 1.0 / r_of(th).max(4.0 * delta0);
+        let pieces = march_curve(
+            0.0,
+            th_end,
+            &pos,
+            &dist,
+            &unit,
+            &sup,
+            delta0,
+            p.tolerance,
+            p.tolerance * 0.25,
+        );
+        if !pieces.is_empty() {
+            emit_runs(&mut b, p, r, &pieces, false);
+            emitted = true;
+        }
+    }
+    rings_and_tail(b, p, r, facets, emitted)
 }
 
 /// The ring ladder proper: one pass of the levels loop, appended to

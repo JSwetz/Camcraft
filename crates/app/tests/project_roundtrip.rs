@@ -1667,6 +1667,28 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
     let saved_sc = std::fs::read_to_string(&path_sc).expect("read");
     let _ = std::fs::remove_file(&path_sc);
     assert!(saved_sc.contains("\"pattern\": \"scallop\""), "{saved_sc}");
+
+    // M2.2d, same law twice over: "radial" and "spiral" join the v16
+    // grammar as words, not as a version.
+    for (word, want) in [
+        ("radial", hsmworks_app::finishing3d::FinishPattern::Radial),
+        ("spiral", hsmworks_app::finishing3d::FinishPattern::Spiral),
+    ] {
+        let t = text.replace("\"parallel_multi\"", &format!("\"{word}\""));
+        let w = new_world();
+        project::open(&w, &t).expect("the polar spellings must read");
+        let e = model::find_by_name(&w, "F1").expect("op");
+        let o = model::operation_of(&w, &e).expect("operation");
+        let OpParams::Finish3D { pattern, .. } = &o.params else {
+            panic!("finish3d params expected");
+        };
+        assert_eq!(*pattern, want);
+        let path_p = tmp_path("v16p");
+        project::save(&w, &path_p).expect("save");
+        let saved_p = std::fs::read_to_string(&path_p).expect("read");
+        let _ = std::fs::remove_file(&path_p);
+        assert!(saved_p.contains(&format!("\"pattern\": \"{word}\"")), "{saved_p}");
+    }
     // An unknown pattern word is refused, never defaulted.
     let bogus = text.replace("\"parallel_multi\"", "\"zigzag\"");
     let world5 = new_world();

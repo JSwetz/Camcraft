@@ -3043,6 +3043,12 @@ pub fn generate(
                 | finishing3d::FinishPattern::Scallop => {
                     finishing3d::parallel(&material.facets, &fp)?
                 }
+                finishing3d::FinishPattern::Radial => {
+                    finishing3d::radial(&material.facets, &fp)?
+                }
+                finishing3d::FinishPattern::Spiral => {
+                    finishing3d::spiral(&material.facets, &fp)?
+                }
             };
             (region, path)
         }
