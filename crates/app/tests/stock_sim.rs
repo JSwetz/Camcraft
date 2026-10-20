@@ -283,3 +283,78 @@ fn degenerate_grids_and_cuts_refuse_or_ignore_cleanly() {
     let rep = stock_sim::measure(&d, &part, &rect(0.0, 0.0, 2.0, 2.0), 1e-6);
     assert_eq!(rep.rest_cells, 0, "sub-tol columns are cut, per the lattice law");
 }
+
+// ---- M2.2d: hidden rest, the solid truth behind the height field ----
+
+/// A closed square slab [-6,6]^2 x [z0,z1]: two cap triangles per
+/// face, two per wall. The walls project edge-on - no surface, no
+/// claims - exactly how the kernel already treats them.
+fn closed_slab(z0: f64, z1: f64) -> Vec<Triangle> {
+    let cap = |z: f64| {
+        vec![
+            Triangle::new(p(-6., -6., z), p(6., -6., z), p(6., 6., z)),
+            Triangle::new(p(-6., -6., z), p(6., 6., z), p(-6., 6., z)),
+        ]
+    };
+    let mut f = cap(z0);
+    f.extend(cap(z1));
+    let wall = |q: [Point3; 4]| vec![Triangle::new(q[0], q[1], q[2]), Triangle::new(q[0], q[2], q[3])];
+    f.extend(wall([p(-6., -6., z0), p(6., -6., z0), p(6., -6., z1), p(-6., -6., z1)]));
+    f.extend(wall([p(6., -6., z0), p(6., 6., z0), p(6., 6., z1), p(6., -6., z1)]));
+    f.extend(wall([p(6., 6., z0), p(-6., 6., z0), p(-6., 6., z1), p(6., 6., z1)]));
+    f.extend(wall([p(-6., 6., z0), p(-6., -6., z0), p(-6., -6., z1), p(-6., 6., z1)]));
+    f
+}
+
+/// Nine raster rows at tip height `z`, stepover 1.4 on the r = 3 ball -
+/// fine enough that the height field itself promises near-zero rest.
+fn raster(z: f64) -> Vec<Move> {
+    (0..9)
+        .map(|k| feed(p(-8.0, -5.3 + 1.4 * k as f64, z), p(8.0, -5.3 + 1.4 * k as f64, z)))
+        .collect()
+}
+
+#[test]
+fn hidden_rest_surfaces_under_a_ceiling() {
+    // The M2.2b debt, paid: a floor slab 0..2 under a ceiling plate
+    // 9..10. The path rides the plate top at z = 10, so the height
+    // field sees rest ~ 0 - and the solid truth says 8 mm of slab is
+    // standing untouched in the ceiling's shadow.
+    let mut f = closed_slab(0.0, 2.0);
+    f.extend(closed_slab(9.0, 10.0));
+    let rep = stock_sim::envelope_scan(&f, &raster(10.0), 3.0, 0.1).expect("scan");
+    assert!(rep.gouge_mm < 1e-9, "riding the ceiling cuts nothing deep: {}", rep.gouge_mm);
+    assert!(
+        rep.rest_mm > 7.0 && rep.rest_mm < 8.5,
+        "hidden slab top reads ~8 out of reach: {}",
+        rep.rest_mm
+    );
+    assert!(rep.at.x.abs() <= 6.001 && rep.at.y.abs() <= 6.001, "at the shadow, not thin air");
+}
+
+#[test]
+fn a_flat_model_hides_nothing() {
+    // The no-false-alarm half of the law: the same slab with no
+    // ceiling over it is ordinary milled ground - the height field's
+    // answer stands, the solid scan adds zero.
+    let f = closed_slab(0.0, 2.0);
+    let rep = stock_sim::envelope_scan(&f, &raster(2.0), 3.0, 0.1).expect("scan");
+    assert!(rep.gouge_mm < 1e-9, "flat ride is flush: {}", rep.gouge_mm);
+    assert!(rep.rest_mm <= 0.2, "nothing hides without a ceiling: {}", rep.rest_mm);
+}
+
+#[test]
+fn an_open_shell_reports_unknown_not_material() {
+    // solid_rest law (b) inside the kernel: a lone sheet's columns are
+    // odd crossings - unknown - and the hidden scan must contribute
+    // nothing, not guess a shadow.
+    let f = closed_slab(0.0, 0.0001); // a plate so thin its caps coincide
+    let rep = stock_sim::envelope_scan(&f, &raster(0.0), 3.0, 0.1).expect("scan");
+    assert!(rep.rest_mm <= 0.2, "thin closed plate is flat ground: {}", rep.rest_mm);
+    let sheet = vec![
+        Triangle::new(p(-6., -6., 10.), p(6., -6., 10.), p(6., 6., 10.)),
+        Triangle::new(p(-6., -6., 10.), p(6., 6., 10.), p(-6., 6., 10.)),
+    ];
+    let rep = stock_sim::envelope_scan(&sheet, &raster(10.0), 3.0, 0.1).expect("scan");
+    assert!(rep.rest_mm <= 0.2, "open shells hide nothing: {}", rep.rest_mm);
+}

@@ -19,6 +19,7 @@ pub mod post;
 pub mod posting;
 pub mod project;
 pub mod schema;
+pub mod solid_rest;
 pub mod sim;
 pub mod stock;
 pub mod stock_sim;
