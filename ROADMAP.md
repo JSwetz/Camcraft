@@ -780,7 +780,18 @@ before touching metal.
 ### M2.2 - 3D Finishing
 **Goal: mold-quality surfaces at a stated tolerance.**
 
-- **Parallel**: XY and multi-direction, steep/shallow auto-split
+- ✅ **Parallel** (M2.2b): XY raster with Z-follow and the 45-deg
+      auto-split - shallow terrain (|m_z| ≥ 1/√2, the scallop law's own
+      jurisdiction line) is ridden by tangent ball-center lines at the
+      stepover cos-law spacing `s = √(8·r·tol)·cos α`, every support
+      sample the topmost valid tangent center (floor- and
+      ceiling-outranks laws, ball-clear like the ring's), lines broken
+      at ground discontinuities rather than straddled, and the steep
+      flanks of the same model carried by the waterline ladder's rings
+      at their own levels - one op, one toolpath, both truths measured
+      by the envelope kernel. Multi-direction runs the raster twice
+      (0°/90°) with retract hops between pieces; stepover override
+      rides the params (stored ≠ derived, persistence v16).
 - ✅ **Waterline** (M2.2a): Z-level finishing as the forbidden-center
       tangent locus - each ring is the boundary of (model ⊕ ball) clipped
       at a center plane, so the ball rolls tangent, never into, the
@@ -918,7 +929,7 @@ programming department.
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) | ✅ |
-| **M2.2** | Finish 3D to tolerance | Waterline and the tolerance-verification kernel done (tangent-locus rings, two-truth envelope, measured verdicts); parallel, scallop and the family open | ⚠️ |
+| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel and the parallel raster done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split); scallop and the family open | ⚠️ |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
 | **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |

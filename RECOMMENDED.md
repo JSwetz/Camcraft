@@ -9,6 +9,83 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.2b - Parallel raster, the 45-deg auto-split, and two bug hunts (commit `ac7413c`)
+
+- **The underside "gouge" was our fixture, not the generator - and the
+  reversal matters.** Mid-milestone we believed `facet_polygon`'s
+  symmetric forbidden-center set (a facet ⊕ a ball of zero thickness
+  = valid centers on BOTH sides of the sheet) was an underside bug and
+  had a candidate-offset fix (`q + r·n̂`) designed. It was never
+  written: the tilted test mesh was a single open sheet, and an open
+  sheet has a phantom back side a ring lawfully rests on that no
+  height-field measure can tell from material. Closing the fixture
+  into a wedge made the "gouge" vanish with zero generator change -
+  the symmetric law is correct for closed solids, which is everything
+  we machine. Discussion point: whether the verifier should REJECT
+  open shells at import with a "not a solid" diagnostic, rather than
+  letting a phantom-back-side path through at all; today we generate
+  on them and the envelope measure honestly reports the rest they
+  leave. Cost to change: an orientation/enclosure check in
+  `decompose`, but it would refuse files current tests feed on
+  purpose.
+- **The ring arc-fit budget: `tolerance * 0.25`, not full tolerance.**
+  The region boundary is already tessellated, so its vertices sit a
+  chord-sag INSIDE the true offset locus; letting `fit_arcs` shortcut
+  its own samples at full tolerance stacks a second sag on the first,
+  and it shows at corners where the vertex-sphere radius
+  ρ = √(r² − (cz−q_z)²) changes fastest (measured: a fitted R=6.3
+  circle cut 2.43 from a corner whose true locus is 2.52 - a 0.144 mm
+  gouge at 0.01 tolerance). The raster already fit its boundary chains
+  at tol/4; the ring now matches. Law: any fitter whose input is
+  already tessellated gets the quarter budget. The envelope verifier
+  caught this with its own numbers, no assertion was weakened.
+- **The None-gap flush law.** After a line segment resolves to air
+  (occluded or unsupported), the next supported run must START a new
+  piece, not extend the previous arc chain - straddling the gap let
+  the blind-pocket floor gouge until the fix landed. Same family as
+  the discontinuity-break law: a raster line is a promise of
+  continuous contact; where the contact breaks, the path breaks.
+- **Multi-direction is two raster passes with retract hops, not a
+  rotated toolpath.** 0° then 90° over the same levels, each pass
+  individually continuous. It doubles the plunge count; the posting
+  question (hops vs full retract at M1.7) rides the same answer as
+  the XY pass's hops.
+- **`retype` now defaults Finish3D to Parallel, not Waterline.** A new
+  3D finish op on a flat-topped plateau with Waterline alone would
+  leave every flat shelf standing proud of tolerance - a silent miss,
+  the one answer this app never gives. Parallel covers flats AND
+  steep flanks (via the auto-split); Waterline remains one combo
+  click away. Cost to change: one line, but every "fresh op" golden
+  and UI test follows it.
+- **Stepover override: stored ≠ derived, and Some() is legal under
+  every pattern.** The params carry `Option<f64>`: None means the
+  cos-law derivation, Some means the machinist's call wins even where
+  it is coarser than tolerance demands (that is often the point -
+  cusp aesthetics, cycle time). `is_sane` checks positivity only; the
+  pattern that ignores it (Waterline) says so in its own generate, not
+  in a refusal.
+- **Height-field occlusion means hidden rest is invisible - deferred
+  to M2.2d with eyes open.** Under a ceiling, the envelope's
+  per-column "part" is the topmost surface, so material sheltered
+  below it never appears in the rest measure, and the floor-outranks
+  law keeps the raster on the ceiling where that is the support. The
+  hidden-floor test now asserts exactly what can be KNOWN (path never
+  below bottom, verifier silent, ceiling ridden) and its comment
+  names M2.2d's rest-reporting job: a true hidden-rest answer needs
+  the solid-truth (inside/outside) scan, not the height-field one.
+- **The headless gate was racing: `drain_actions()` is one poll, and
+  imports went async at `e867bea`.** smoke.rs now calls
+  `State::settle()` (blocking drain, 120 s deadline). Every milestone
+  since the async import ran this gate on a race it happened to win -
+  found here because the tilted fixture changed the import's timing,
+  not its geometry. Discussion point: whether `settle()`'s deadline
+  should be shorter so a hung import fails the gate fast instead of
+  after 120 s.
+- **The golden churned honestly:** `finish3d_waterline_cone.cl` went
+  118 → 121 moves from the ring's quarter-budget fit (two rings
+  gained a corner arc - the fix working), reviewed segment by segment
+  before `WRITE_GOLDEN=1`.
+
 ## M2.2a - Waterline contouring and the envelope kernel (commit `c755b12`)
 
 - **The outer-loop-only law: cut what the region encloses from outside.**
