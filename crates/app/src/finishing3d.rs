@@ -1,11 +1,18 @@
-//! finishing3d.rs - 3D finishing: the waterline (Z-level ball path).
+//! finishing3d.rs - 3D finishing: the waterline (Z-level ball path)
+//! and the parallel (Z-following raster) strategies.
 //!
 //! Provenance: Z-level contouring with a ball-nose cutter is textbook
 //! CAM (RS-274-level vocabulary; the rolling-ball/tangent-locus model
-//! is published literature). The construction below - forbidden
-//! centers as a facetwise support-function scan - is our own
-//! derivation, written from geometry, not from any vendor's code,
-//! output forensics, or documentation text.
+//! is published literature). The parallel raster's cusp law - a
+//! Z-following stepover of `√(8·r·tol)·cos α` between ball paths
+//! offset `s·sec α` apart, the Huang-Oliver scallop formula specialised
+//! to a tilted plane - and the point-to-triangle distance test are
+//! published geometry (Ericson, Real-Time Collision Detection, for the
+//! region test). The construction below - forbidden centers as a
+//! facetwise support-function scan, the tangent-support center law
+//! `c = q + r·n̂`, and the adaptive chord march - is our own derivation,
+//! written from geometry, not from any vendor's code, output forensics,
+//! or documentation text.
 //!
 //! ## The laws here
 //!
@@ -69,11 +76,30 @@ use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{cut_levels, fit_arcs, GenError, Seg};
 
-/// Everything the waterline needs that the tool and geometry don't
+/// Which finishing kinematic produces the path. Waterline is the
+/// Z-level ring ladder; Parallel adds the Z-following shallow raster
+/// (walls keep riding the rings - the auto-split, see the module
+/// laws); ParallelMulti runs the raster twice, one pass per XY axis,
+/// so the cusp budget is spent along both directions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FinishPattern {
+    Waterline,
+    Parallel,
+    ParallelMulti,
+}
+
+/// Everything the 3D finishers need that the tool and geometry don't
 /// already say. Heights arrive resolved to millimeters by the
 /// operation layer (same discipline as every other params shape).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Finish3DParams {
+    /// Which kinematic runs; `Waterline` ignores the raster fields,
+    /// exactly as if this enum had never arrived.
+    pub pattern: FinishPattern,
+    /// Raster line spacing override, mm. `None` follows the cos-law
+    /// `√(8·r·tol)·min(m_z)` from the tolerance, like the stepdown
+    /// does for the rings: the tolerance is the author.
+    pub stepover: Option<f64>,
     /// Ball-nose diameter, mm.
     pub tool_diameter: f64,
     /// Surface deviation budget, mm - both directions. It sets the
@@ -105,6 +131,34 @@ pub fn scallop_stepdown(r: f64, tol: f64) -> f64 {
     }
     2.0 * (r * tol).sqrt()
 }
+
+/// The raster stepover the same scallop law prescribes sideways: two
+/// Z-following ball paths whose tangent centers are `s·sec α` apart in
+/// the plane normal to the pass leave a cusp `≈ (s·sec α)²/(8r)` on a
+/// facet tilted `α` from horizontal, so `s = √(8·r·tol)·cos α` holds
+/// the cusp at `tol`. The caller multiplies by the model's smallest
+/// shallow `m_z` - one law, the tilt's worst case. Non-positive or
+/// non-finite inputs collapse to 0.0 like the stepdown's.
+#[must_use]
+pub fn scallop_stepover(r: f64, tol: f64) -> f64 {
+    if !(r.is_finite() && tol.is_finite()) || r <= 0.0 || tol <= 0.0 {
+        return 0.0;
+    }
+    (8.0 * r * tol).sqrt()
+}
+
+/// The steep/shallow jurisdiction line, as a cosine: facets whose
+/// upward normal tilts more than 45° off vertical get no raster
+/// support and belong to the rings. The same 45° the stepdown law
+/// already promises (`|α| ≤ 45°` keeps the ring cusp inside `tol`),
+/// so the two strategies meet exactly at each one's limit - no
+/// territory claimed twice, none dropped.
+const SPLIT_MZ: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+/// The numeric skin of the laws: a center that touches a facet sits
+/// at distance exactly `r` from it, and float says `r ± 1e-9·r`.
+/// Accept contact within this much bite.
+const TOUCH_EPS: f64 = 1e-7;
 
 /// Tip-Z levels for the pass, top down, ending exactly at `bottom_z`
 /// (the shared snap law). The scallop stepdown carries a hard level
@@ -307,14 +361,10 @@ fn push_walk(b: &mut PathBuilder, segs: &[Seg], z: f64, feed: f64) {
     }
 }
 
-/// The waterline. `facets` is the model's triangulation; rings are
-/// cut at tip-Z levels from `top_z` down to `bottom_z` at the scallop
-/// stepdown; every ring is an OUTER loop of the forbidden-center
-/// region (interior wavefronts are unreachable, by the law above),
-/// traversed by the climb XOR with arcs fitted to the stated
-/// tolerance. The result either chains through valid geometry or
-/// refuses - never a half-truth.
-pub fn waterline(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
+/// The shared numeric gate every 3D finish reads before touching
+/// geometry. Messages say "3D finish", not one strategy's name - the
+/// check belongs to both.
+fn validate(p: &Finish3DParams, facets: &[Triangle]) -> Result<(), GenError> {
     if !(p.tool_diameter.is_finite()
         && p.tool_diameter > 0.0
         && p.tolerance.is_finite()
@@ -326,24 +376,471 @@ pub fn waterline(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Ge
         && p.clearance_z.is_finite()
         && p.top_z.is_finite()
         && p.bottom_z.is_finite()
+        && p.stepover.is_none_or(|s| s.is_finite() && s > 0.0)
         && p.retract_z.is_none_or(|rz| rz.is_finite()))
     {
         return Err(GenError::Invalid(
-            "waterline needs finite positive tool, tolerance, feeds and heights".into(),
+            "3D finish needs finite positive tool, tolerance, feeds and heights".into(),
         ));
     }
     if facets.is_empty() {
         return Err(GenError::Empty("model has no facets".into()));
     }
+    for f in facets {
+        if !(f.a.is_finite() && f.b.is_finite() && f.c.is_finite()) {
+            return Err(GenError::Invalid("model has a non-finite facet".into()));
+        }
+    }
+    Ok(())
+}
+
+/// A facet prepared for the raster's support scan. `m` is the unit
+/// normal pointed into the sky (the ball rests on the plane from
+/// above whichever way the winding went); `shallow` marks the facets
+/// the raster may touch; the padded box rejects far facets per
+/// sample without touching their vertices.
+struct Sup {
+    tri: [Point3; 3],
+    m: Point3,
+    shallow: bool,
+    xmin: f64,
+    ymin: f64,
+    xmax: f64,
+    ymax: f64,
+}
+
+fn build_sups(facets: &[Triangle], r: f64) -> Vec<Sup> {
+    facets
+        .iter()
+        .map(|f| {
+            let mut m = f.normal();
+            if m.z < 0.0 {
+                m = Point3::new(-m.x, -m.y, -m.z);
+            }
+            let tri = [f.a, f.b, f.c];
+            Sup {
+                tri,
+                shallow: m.is_finite() && m.z >= SPLIT_MZ,
+                xmin: tri[0].x.min(tri[1].x.min(tri[2].x)) - r,
+                xmax: tri[0].x.max(tri[1].x.max(tri[2].x)) + r,
+                ymin: tri[0].y.min(tri[1].y.min(tri[2].y)) - r,
+                ymax: tri[0].y.max(tri[1].y.max(tri[2].y)) + r,
+                m,
+            }
+        })
+        .collect()
+}
+
+/// Point-to-triangle squared distance by the classic Voronoi-region
+/// decomposition (published closed form - dot products and one
+/// barycentric solve, no iteration).
+fn dist2_pt_tri(p: Point3, t: &[Point3; 3]) -> f64 {
+    let (a, b, c) = (t[0], t[1], t[2]);
+    let (abx, aby, abz) = (b.x - a.x, b.y - a.y, b.z - a.z);
+    let (acx, acy, acz) = (c.x - a.x, c.y - a.y, c.z - a.z);
+    let (apx, apy, apz) = (p.x - a.x, p.y - a.y, p.z - a.z);
+    let d1 = abx * apx + aby * apy + abz * apz;
+    let d2 = acx * apx + acy * apy + acz * apz;
+    let (bpx, bpy, bpz) = (p.x - b.x, p.y - b.y, p.z - b.z);
+    let d3 = abx * bpx + aby * bpy + abz * bpz;
+    let d4 = acx * bpx + acy * bpy + acz * bpz;
+    let (cpx, cpy, cpz) = (p.x - c.x, p.y - c.y, p.z - c.z);
+    let d5 = abx * cpx + aby * cpy + abz * cpz;
+    let d6 = acx * cpx + acy * cpy + acz * cpz;
+    let vc = d1 * d4 - d3 * d2;
+    let vb = d5 * d2 - d1 * d6;
+    let va = d3 * d6 - d5 * d4;
+    // One region per arm; each computes the closest point q, and the
+    // arms are exhaustive by the published case proof.
+    let q = if d1 <= 0.0 && d2 <= 0.0 {
+        a
+    } else if d3 >= 0.0 && d4 <= d3 {
+        b
+    } else if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        let v = d1 / (d1 - d3).max(1e-300);
+        Point3::new(a.x + abx * v, a.y + aby * v, a.z + abz * v)
+    } else if d6 >= 0.0 && d5 <= d6 {
+        c
+    } else if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        let w = d2 / (d2 - d6).max(1e-300);
+        Point3::new(a.x + acx * w, a.y + acy * w, a.z + acz * w)
+    } else if va <= 0.0 && d4 - d3 >= 0.0 && d5 - d6 >= 0.0 {
+        let w = (d4 - d3) / ((d4 - d3) + (d5 - d6)).max(1e-300);
+        Point3::new(b.x + (c.x - b.x) * w, b.y + (c.y - b.y) * w, b.z + (c.z - b.z) * w)
+    } else {
+        let denom = (va + vb + vc).max(1e-300);
+        let (v, w) = (vb / denom, vc / denom);
+        Point3::new(
+            a.x + abx * v + acx * w,
+            a.y + aby * v + acy * w,
+            a.z + abz * v + acz * w,
+        )
+    };
+    let (dx, dy, dz) = (p.x - q.x, p.y - q.y, p.z - q.z);
+    (dx * dx + dy * dy + dz * dz).max(0.0)
+}
+
+/// The center is clear when every facet keeps at least `r` of ball
+/// around it - the same no-gouge law the ring enforces through the
+/// forbidden region, asked of one point at a time.
+fn ball_clear(c: Point3, sups: &[Sup], r: f64) -> bool {
+    for s in sups {
+        if c.x < s.xmin || c.x > s.xmax || c.y < s.ymin || c.y > s.ymax {
+            continue; // outside the padded footprint: the ball cannot reach it
+        }
+        if dist2_pt_tri(c, &s.tri) < (r - TOUCH_EPS) * (r - TOUCH_EPS) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The tangent-center height of a ball resting on one shallow facet
+/// above center XY `(x, y)`: the contact `q = (x, y) − r·m_xy` must
+/// fall inside the facet's XY projection (a shallow facet's
+/// projection is never degenerate), and the center sits at
+/// `q_z + r·m_z`. None when this facet owns no tangent here.
+fn tangent_z(s: &Sup, x: f64, y: f64, r: f64) -> Option<f64> {
+    if !s.shallow {
+        return None;
+    }
+    let (a, b, c) = (s.tri[0], s.tri[1], s.tri[2]);
+    let qx = x - r * s.m.x;
+    let qy = y - r * s.m.y;
+    // Same-sign barycentrics against the XY projection.
+    let det = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if det == 0.0 || !det.is_finite() {
+        return None;
+    }
+    let w0 = ((b.x - a.x) * (qy - a.y) - (b.y - a.y) * (qx - a.x)) / det;
+    let w1 = ((c.x - a.x) * (a.y - qy) - (c.y - a.y) * (a.x - qx)) / det;
+    let w2 = 1.0 - w0 - w1;
+    let tol = 1e-9; // barycentric slack: contact may sit on an edge or a vertex
+    if w0 < -tol || w1 < -tol || w2 < -tol {
+        return None;
+    }
+    // The plane through the triangle, solved for z (m_z >= SPLIT_MZ).
+    let qz = a.z - (s.m.x * (qx - a.x) + s.m.y * (qy - a.y)) / s.m.z;
+    (qz.is_finite() && (qz + r * s.m.z).is_finite()).then_some(qz + r * s.m.z)
+}
+
+/// The raster's whole law in one question: where does the ball sit
+/// above `(x, y)`? The HIGHEST tangent center that keeps the ball
+/// clear of every facet - the topmost surface a descending tool
+/// meets first - and `None` over air, over unreached overhangs, and
+/// over anything whose tangent sits below the programmed floor: the
+/// floor outranks the surface, nothing cuts below `bottom_z`.
+fn support_at(x: f64, y: f64, r: f64, floor_tip: f64, sups: &[Sup]) -> Option<f64> {
+    let mut best: Option<f64> = None;
+    for s in sups {
+        if !s.shallow || x < s.xmin || x > s.xmax || y < s.ymin || y > s.ymax {
+            continue;
+        }
+        let Some(cz) = tangent_z(s, x, y, r) else { continue };
+        if cz - r < floor_tip - TOUCH_EPS {
+            continue;
+        }
+        if best.is_some_and(|b| b >= cz) {
+            continue; // below the current best: clearing it cannot raise the answer
+        }
+        if ball_clear(Point3::new(x, y, cz), sups, r) {
+            best = Some(cz);
+        }
+    }
+    best
+}
+
+/// Append a sample to the piece being marched. Runs are walked once;
+/// only the zero-length duplicate a finished bisection can leave
+/// behind is refused.
+fn push_run_pt(line: &mut Vec<(Point2, f64)>, q: Point2, c: f64) {
+    if line.last().is_none_or(|(lq, _)| lq.x != q.x || lq.y != q.y) {
+        line.push((q, c));
+    }
+}
+
+/// One Z-following raster pass, lines perpendicular to `(ux, uy)`
+/// across the shallow facets' padded bounds, stepped by the cos-law
+/// (or an explicit `stepover`), walked by the adaptive march and its
+/// plunge-feed-hop choreography. Three refinements make the march
+/// honest: validity bisection at a run's ends, so a plunge starts
+/// just INSIDE the material's edge rather than a hair outside it,
+/// hanging the ball over the edge to dig; chord bisection, so the
+/// sample string over tessellated ridges sinks at most `tol/4` of
+/// center - the same budget split the ring's scan law makes; and
+/// the discontinuity break, so a line whose next sample stands on
+/// a DIFFERENT surface (the center leapt more than `Δu + tol`)
+/// breaks there instead of dragging one move's chord through the
+/// shelf's edge - no cut move ever spans two surfaces.
+/// Returns whether it emitted anything.
+fn raster_pass(
+    b: &mut PathBuilder,
+    p: &Finish3DParams,
+    r: f64,
+    sups: &[Sup],
+    ux: f64,
+    uy: f64,
+    continuing: bool,
+) -> Result<bool, GenError> {
+    let (mut umin, mut umax, mut vmin, mut vmax) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    let mut mz_min = 1.0f64;
+    for s in sups.iter().filter(|s| s.shallow) {
+        let (vx0, vy0) = (-uy, ux);
+        for (px, py) in [
+            (s.xmin, s.ymin),
+            (s.xmax, s.ymin),
+            (s.xmax, s.ymax),
+            (s.xmin, s.ymax),
+        ] {
+            umin = umin.min(px * ux + py * uy);
+            umax = umax.max(px * ux + py * uy);
+            vmin = vmin.min(px * vx0 + py * vy0);
+            vmax = vmax.max(px * vx0 + py * vy0);
+        }
+        mz_min = mz_min.min(s.m.z);
+    }
+    if umin > umax {
+        return Ok(false); // all-steep model: the rings alone carry it
+    }
+    let (vx, vy) = (-uy, ux);
+    let step = p.stepover.unwrap_or(scallop_stepover(r, p.tolerance) * mz_min);
+    const MAX_LINES: f64 = 8192.0;
+    // Spelled through a binding so the NaN case reads what it is:
+    // `step > 0.0` is false when step is not a number at all, and a
+    // numberless spacing is refusal, never a silent skip.
+    let step_positive = step > 0.0;
+    if !step_positive || (vmax > vmin && step < (vmax - vmin) / MAX_LINES) {
+        return Err(GenError::Invalid(format!(
+            "raster needs {}+ lines at stepover {:.4} (cap {}): widen the stepover or the tolerance",
+            ((vmax - vmin) / step.max(1e-12)) as i64,
+            step,
+            MAX_LINES as i64,
+        )));
+    }
+    let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
+    let delta_min = delta0 / 4096.0;
+    let eps_chord = p.tolerance * 0.25;
+    let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
+    let at = |t: f64, v: f64| Point2::new(ux * t + vx * v, uy * t + vy * v);
+    let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, sups);
+
+    let n_lines = ((vmax - vmin) / step).floor() as i64 + 1;
+    let mut runs: Vec<Vec<(Point2, f64)>> = Vec::new();
+    for j in 0..n_lines.max(1) {
+        let v = vmin + step * j.min(n_lines - 1) as f64;
+        let mut line: Vec<(Point2, f64)> = Vec::new();
+        let mut pieces: Vec<Vec<(Point2, f64)>> = Vec::new();
+        let mut t = umin;
+        let mut cz = sup(at(t, v)); // None marks air
+        if let Some(c) = cz {
+            push_run_pt(&mut line, at(t, v), c);
+        }
+        while t <= umax {
+            if cz.is_none() {
+                // Skip phase: coarse search for the next edge of
+                // material, then bisect the start of the run.
+                let tn = (t + delta0 * 4.0).min(umax);
+                if tn <= t {
+                    break;
+                }
+                match sup(at(tn, v)) {
+                    None => t = tn,
+                    Some(c) => {
+                        // The stretch between was not cuttable ground -
+                        // air or occlusion. Whatever stands here is a
+                        // new run, not a continuation of the line:
+                        // append-only would ride one lateral Feed
+                        // across the gap, through whatever wall or
+                        // shelf edge hides the ground. Flush the line.
+                        if !line.is_empty() {
+                            pieces.push(std::mem::take(&mut line));
+                        }
+                        let (mut lo, mut hic, mut hicz) = (t, tn, c); // lo invalid, hic valid
+                        for _ in 0..24 {
+                            let mid = (lo + hic) * 0.5;
+                            if let Some(cm) = sup(at(mid, v)) {
+                                hic = mid;
+                                hicz = cm;
+                            } else {
+                                lo = mid;
+                            }
+                        }
+                        push_run_pt(&mut line, at(hic, v), hicz);
+                        t = hic;
+                        cz = Some(hicz);
+                    }
+                }
+            } else {
+                // Valid phase: march inside material.
+                let mut delta = delta0;
+                loop {
+                    let tn = (t + delta).min(umax);
+                    if tn <= t {
+                        break;
+                    }
+                    match sup(at(tn, v)) {
+                        None => {
+                            // End of the run: bisect to its edge from
+                            // the last known valid point.
+                            let (mut lo, mut loc, mut hic) = (t, cz.unwrap_or(0.0), tn);
+                            for _ in 0..24 {
+                                let mid = (lo + hic) * 0.5;
+                                if let Some(cm) = sup(at(mid, v)) {
+                                    lo = mid;
+                                    loc = cm;
+                                } else {
+                                    hic = mid;
+                                }
+                            }
+                            push_run_pt(&mut line, at(lo, v), loc);
+                            t = lo;
+                            cz = None;
+                            break;
+                        }
+                        Some(c) if (c - cz.unwrap_or(c)).abs() > (tn - t) + p.tolerance => {
+                            // Surface discontinuity: the center leapt
+                            // higher than any shallow facet could
+                            // climb over the same span - the next
+                            // sample stands on a different surface (a
+                            // shelf's edge, the mouth above a hidden
+                            // floor). One move across that gap would
+                            // drag its chord through material, so the
+                            // line BREAKS here: this piece ends
+                            // behind, a new one starts here, and the
+                            // choreography hands over at the hop, the
+                            // ball clear of both surfaces in between.
+                            if !line.is_empty() {
+                                pieces.push(std::mem::take(&mut line));
+                            }
+                            push_run_pt(&mut line, at(tn, v), c);
+                            t = tn;
+                            cz = Some(c);
+                        }
+                        Some(c) if delta > delta_min => {
+                            let cur = cz.unwrap_or(c);
+                            let mid = (t + tn) * 0.5;
+                            let dev = match sup(at(mid, v)) {
+                                Some(cm) => (cm - (cur + c) * 0.5).abs(),
+                                None => f64::INFINITY, // straddles an edge: refine
+                            };
+                            if dev > eps_chord {
+                                delta *= 0.5;
+                                continue;
+                            }
+                            push_run_pt(&mut line, at(tn, v), c);
+                            t = tn;
+                            cz = Some(c);
+                            delta = (delta * 2.0).min(delta0);
+                        }
+                        Some(c) => {
+                            push_run_pt(&mut line, at(tn, v), c);
+                            t = tn;
+                            cz = Some(c);
+                        }
+                    }
+                    if t >= umax {
+                        break;
+                    }
+                }
+            }
+        }
+        if !line.is_empty() {
+            pieces.push(line);
+        }
+        for mut pc in pieces {
+            // Serpentine: every piece of an odd line runs back, so
+            // the next line starts where this one's travel ended.
+            if j % 2 == 1 {
+                pc.reverse();
+            }
+            runs.push(pc);
+        }
+    }
+    if runs.is_empty() {
+        return Ok(false);
+    }
+    // The ladder's own choreography: line to line inside one pass
+    // hops at `hop` (the retract FEEDed up, so the envelope sees the
+    // column it vacates); pass to pass climbs to clearance with
+    // rapids, like a level change among rings; the very first entry
+    // just travels over at its own height, like the first ring.
+    for (i, run) in runs.iter().enumerate() {
+        let (x0, y0) = (run[0].0.x, run[0].0.y);
+        let z0 = run[0].1 - r;
+        let cur = b.at();
+        if i == 0 && !continuing {
+            b.push(MoveKind::Rapid, Point3::new(x0, y0, cur.z.max(z0)), None);
+        } else if i == 0 {
+            let trav = p.clearance_z.max(z0);
+            b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, trav), None);
+            b.push(MoveKind::Rapid, Point3::new(x0, y0, trav), None);
+        } else {
+            let trav = hop.max(z0);
+            b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, trav), Some(p.feed));
+            b.push(MoveKind::Rapid, Point3::new(x0, y0, trav), None);
+        }
+        b.push(MoveKind::Plunge, Point3::new(x0, y0, z0), Some(p.plunge_feed));
+        for (q, czz) in run {
+            b.push(MoveKind::Feed, Point3::new(q.x, q.y, czz - r), Some(p.feed));
+        }
+    }
+    Ok(true)
+}
+
+/// The Parallel strategy: the shallow terrain cut once, Z-following,
+/// in each raster direction the pattern asks for; then the waterline
+/// rings run the steep flanks at the same scallop ladder - the
+/// auto-split, in one toolpath, with the two strategies meeting at
+/// the shared 45° jurisdiction line.
+pub fn parallel(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
+    validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
+    let sups = build_sups(facets, r);
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut emitted = raster_pass(&mut b, p, r, &sups, 1.0, 0.0, false)?;
+    if p.pattern == FinishPattern::ParallelMulti {
+        emitted |= raster_pass(&mut b, p, r, &sups, 0.0, 1.0, emitted)?;
+    }
+    // Then the rings, from wherever the raster left the tool: the
+    // Some(clearance) marker makes the first ring's level-change
+    // choreography climb up before anything else.
     let zs = levels(p, r)?;
     let ds = dirs(r, p.tolerance);
-    let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
+    let mut last = Some(p.clearance_z);
+    emitted |= emit_rings(&mut b, p, r, facets, &zs, &ds, &mut last)?;
+    if !emitted {
+        return Err(GenError::Empty(
+            "no surface reaches within one ball radius of the requested depths".into(),
+        ));
+    }
+    let cur = b.at();
+    b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+    let path = b.finish();
+    if !path.all_finite() {
+        return Err(GenError::Invalid("parallel path left the finite horizon".into()));
+    }
+    Ok(path)
+}
 
-    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    let mut last_tip_z: Option<f64> = None;
-    for &z_tip in &zs {
-        let region = level_region(facets, r, z_tip + r, &ds)?;
+/// The ring ladder proper: one pass of the levels loop, appended to
+/// `b`. `last` is the tip-Z of the path's last cut (or `None` when
+/// the builder has never cut) - the choreography reads it exactly
+/// like the waterline's own loop did, so a parallel path can hand
+/// over after its raster with `last = Some(clearance_z)` and climb
+/// in from there.
+fn emit_rings(
+    b: &mut PathBuilder,
+    p: &Finish3DParams,
+    r: f64,
+    facets: &[Triangle],
+    zs: &[f64],
+    ds: &[(f64, f64)],
+    last: &mut Option<f64>,
+) -> Result<bool, GenError> {
+    let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
+    let mut any = false;
+    for &z_tip in zs {
+        let region = level_region(facets, r, z_tip + r, ds)?;
         if region.is_empty() {
             continue; // no surface reaches this plane within a ball
         }
@@ -372,10 +869,19 @@ pub fn waterline(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Ge
                 stored.iter().rev().copied().collect()
             };
             poly.push(poly[0]); // close the ring for the fitter
-            let walk = fit_arcs(&poly, p.tolerance);
+            // The same chord law as the raster's: every XY shortcut of
+            // the plan holds to tolerance/4, not the full tolerance.
+            // The tessellated boundary already sits a chord-sag inside
+            // the true offset locus; a ring fitted at the full budget
+            // stacks its shortcut on top of that sag, and at a corner
+            // - where the vertex-sphere's radius changes fast - the
+            // Z-direction envelope sees more than the XY figure of
+            // speech promised (the tilted wedge's low corner, 0.144 mm
+            // at a full-tolerance fit).
+            let walk = fit_arcs(&poly, p.tolerance * 0.25);
             let entry = poly[0];
             let cur = b.at();
-            match last_tip_z {
+            match *last {
                 None => {
                     b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
                 }
@@ -398,11 +904,25 @@ pub fn waterline(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Ge
                 Point3::new(entry.x, entry.y, z_tip),
                 Some(p.plunge_feed),
             );
-            push_walk(&mut b, &walk, z_tip, p.feed);
-            last_tip_z = Some(z_tip);
+            push_walk(b, &walk, z_tip, p.feed);
+            *last = Some(z_tip);
+            any = true;
         }
     }
-    if last_tip_z.is_none() {
+    Ok(any)
+}
+
+/// The waterline: the ring ladder alone. One closed cut at each level
+/// of the scallop stepdown ladder, wherever a ball of radius `r`
+/// resting tip-deep at that Z touches the surface.
+pub fn waterline(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
+    validate(p, facets)?;
+    let r = p.tool_diameter * 0.5;
+    let zs = levels(p, r)?;
+    let ds = dirs(r, p.tolerance);
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let mut last: Option<f64> = None;
+    if !emit_rings(&mut b, p, r, facets, &zs, &ds, &mut last)? {
         return Err(GenError::Empty(
             "no surface reaches within one ball radius of the requested depths".into(),
         ));

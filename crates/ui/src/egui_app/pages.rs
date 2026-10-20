@@ -78,6 +78,8 @@ const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// Descent combo items - the whole `Entry3D` vocabulary, index order
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
 const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
+/// The 3-D finish kinematics, in the order the combo maps them.
+const FINISH_PATTERNS: [&str; 3] = ["Waterline", "Parallel", "Parallel - multi"];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
 const AMBER: Color32 = Color32::from_rgb(0xB8, 0xB8, 0xC8);
@@ -1120,6 +1122,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             }
         }
         OpParams::Finish3D {
+            pattern,
+            stepover,
             tolerance,
             clearance_z,
             retract_z,
@@ -1160,6 +1164,44 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("Top is the first ring's plane, Bottom the last level's");
             }
             if tab == SEC_PASSES {
+                field(ui, "Pattern");
+                let mut pat_idx = match pattern {
+                    hsmworks_app::finishing3d::FinishPattern::Waterline => 0,
+                    hsmworks_app::finishing3d::FinishPattern::Parallel => 1,
+                    hsmworks_app::finishing3d::FinishPattern::ParallelMulti => 2,
+                };
+                let before = pat_idx;
+                combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
+                if pat_idx != before {
+                    *pattern = match pat_idx {
+                        1 => hsmworks_app::finishing3d::FinishPattern::Parallel,
+                        2 => hsmworks_app::finishing3d::FinishPattern::ParallelMulti,
+                        _ => hsmworks_app::finishing3d::FinishPattern::Waterline,
+                    };
+                }
+                ui.label(
+                    "Waterline: tangent rings only; Parallel adds the raster over flat ground (Multi crosses it twice)",
+                );
+                if !matches!(pattern, hsmworks_app::finishing3d::FinishPattern::Waterline) {
+                    field(ui, "Stepover");
+                    let mut over = stepover.is_some();
+                    if ui.checkbox(&mut over, "Set line spacing").changed() {
+                        *stepover = if over {
+                            // The scallop law on the reference R3
+                            // ball - sqrt(8 r tol) - as a starting
+                            // figure; the field is then free.
+                            Some((24.0 * tolerance.max(1e-9)).sqrt())
+                        } else {
+                            None
+                        };
+                    }
+                    if let Some(s) = stepover {
+                        num(ui, u, s);
+                        ui.label("flat-ground spacing; on a slope it follows the terrain's cosine");
+                    } else {
+                        ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
+                    }
+                }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
                 ui.label("the finish budget: levels drop by 2 x sqrt(tool radius x tolerance), so the cusp under the ball stays within it");

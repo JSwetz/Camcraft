@@ -772,8 +772,11 @@ fn every_field_lives_on_exactly_one_section() {
         ),
         (
             // The finish picks no geometry (the whole model is its
-            // region) and has no stepdown or stepover: tolerance authors
-            // the level spacing itself - the law its Passes tab pins.
+            // region) and has no stepdown: tolerance authors the level
+            // spacing itself, and - under the raster patterns - the line
+            // spacing too (the cos-law, M2.2b). The Stepover row renders
+            // because retype's default pattern is Parallel; its override
+            // checkbox is the field's guard, not a field of its own.
             "3D Finish",
             vec![
                 ("Geometry", vec!["Click selects:"]),
@@ -787,7 +790,12 @@ fn every_field_lives_on_exactly_one_section() {
                         "Bottom Z",
                     ],
                 ),
-                ("Passes", vec!["Tolerance"]),
+                ("Passes", vec![
+                    "Pattern",
+                    "Stepover",
+                    "Set line spacing",
+                    "Tolerance",
+                ]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -1936,7 +1944,17 @@ fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     // The tolerance is the op's one shaping number (the stepdown law
     // derives from it and the tool), and no hop is on by default - the
     // pocket family's clearance law, quoted by the draft's own default.
-    let OpParams::Finish3D { tolerance, retract_z, .. } = &op.params else {
+    // The pattern defaults to the auto-split, never plain Waterline:
+    // waterline alone leaves every flat shelf standing, and a silent
+    // miss is the one answer this app never gives.
+    let OpParams::Finish3D {
+        pattern,
+        stepover,
+        tolerance,
+        retract_z,
+        ..
+    } = &op.params
+    else {
         panic!(
             "the eighth cell must create a 3D Finish operation, got {:?}",
             op.params.kind()
@@ -1944,6 +1962,97 @@ fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     };
     assert_eq!(*tolerance, 0.05);
     assert_eq!(*retract_z, None);
+    assert_eq!(
+        *pattern,
+        hsmworks_app::finishing3d::FinishPattern::Parallel,
+        "the fresh finish op must ride flats and walls alike"
+    );
+    assert_eq!(*stepover, None, "spacing follows the cos-law until asked not to");
+}
+
+/// The M2.2b fields obey the draft law exactly as every other pair of
+/// fields does: a staged change to pattern and stepover reaches the
+/// world only through Apply, only as an EditOperationParams, and undo
+/// brings the auto-split default back. (The combo and the checkbox are
+/// custom-drawn and unreachable to the harness's click law - staging
+/// the draft by hand is this pane's stand-in, the same route
+/// `click_apply_edits_operation_through_commands` documents.)
+#[test]
+fn finish3d_pattern_and_stepover_apply_through_commands() {
+    let mut harness = shell_harness();
+    crate::actions::add_operation(&mut harness.state_mut().state, 7);
+    harness.run_steps(2);
+    let staged = |h: &Harness<'static, ShellUi>| match h.state().state.op_ui.params {
+        OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
+        _ => panic!("the pane must draft a 3D Finish op"),
+    };
+    let (p0, s0) = staged(&harness);
+    assert_eq!(p0, hsmworks_app::finishing3d::FinishPattern::Parallel);
+    assert_eq!(s0, None);
+    {
+        let sh = harness.state_mut();
+        sh.state.op_tab = 2; // Passes
+        sh.state.sync_ops_ui();
+        if let OpParams::Finish3D { pattern, stepover, .. } = &mut sh.state.op_ui.params {
+            *pattern = hsmworks_app::finishing3d::FinishPattern::Waterline;
+            *stepover = Some(1.5);
+        }
+    }
+    harness.run();
+    {
+        let st = &harness.state().state;
+        assert!(
+            !st.pending
+                .iter()
+                .any(|c| matches!(c, CommandKind::EditOperationParams { .. })),
+            "staging must not queue - only Apply speaks"
+        );
+    }
+    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Apply Parameters").click();
+    harness.run();
+    let st = &harness.state().state;
+    let op = model::find_by_name(&st.world, "Operation2")
+        .and_then(|e| model::operation_of(&st.world, &e));
+    let live = op.map(|o| match o.params {
+        OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
+        _ => panic!("kind drift"),
+    });
+    assert_eq!(
+        live,
+        Some((
+            hsmworks_app::finishing3d::FinishPattern::Waterline,
+            Some(1.5),
+        )),
+        "Apply must carry pattern and stepover to the world"
+    );
+    // Undo through the keyboard lane - the same pair the history-key
+    // test injects; there is no Undo button in the pane to click.
+    harness
+        .input_mut()
+        .events
+        .push(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.input_mut().events.push(Event::Key {
+        key: Key::Z,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let back = model::find_by_name(&st.world, "Operation2")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|o| match o.params {
+            OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
+            _ => panic!("kind drift"),
+        });
+    assert_eq!(
+        back,
+        Some((hsmworks_app::finishing3d::FinishPattern::Parallel, None)),
+        "undo must restore the defaults the cell seeded"
+    );
 }
 
 #[test]

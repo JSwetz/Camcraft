@@ -76,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 15;
+pub const PROJECT_VERSION: u32 = 16;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -422,9 +422,19 @@ pub enum ParamsDto {
     /// of `Finish3D` would be `finish3_d`, and a file contract
     /// deserves the cleaner word. No stepdown key: the scallop law
     /// derives it from tolerance and tool, so storing one could only
-    /// disagree with the two numbers that author it.
+    /// disagree with the two numbers that author it. v16 added the
+    /// pattern (absent means `waterline`, what every v15 file ran)
+    /// and the raster stepover - the one number the law does not
+    /// author, because a stored override states a machinist's
+    /// decision, not the tolerance's derivation.
     #[serde(rename = "finish3d")]
     Finish3D {
+        /// Absent means Waterline (the v15 truth).
+        #[serde(default)]
+        pattern: FinishPatternDto,
+        /// Absent follows the stepover cos-law from the tolerance.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stepover: Option<f64>,
         tolerance: f64,
         clearance_z: HeightDto,
         top_z: HeightDto,
@@ -436,6 +446,37 @@ pub enum ParamsDto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retract_z: Option<HeightDto>,
     },
+}
+
+/// The file mirror of `finishing3d::FinishPattern`; `default` is
+/// Waterline, the only pattern a v15 file can have run.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishPatternDto {
+    #[default]
+    Waterline,
+    Parallel,
+    ParallelMulti,
+}
+
+impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
+    fn from(v: FinishPatternDto) -> Self {
+        match v {
+            FinishPatternDto::Waterline => crate::finishing3d::FinishPattern::Waterline,
+            FinishPatternDto::Parallel => crate::finishing3d::FinishPattern::Parallel,
+            FinishPatternDto::ParallelMulti => crate::finishing3d::FinishPattern::ParallelMulti,
+        }
+    }
+}
+
+impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
+    fn from(v: crate::finishing3d::FinishPattern) -> Self {
+        match v {
+            crate::finishing3d::FinishPattern::Waterline => FinishPatternDto::Waterline,
+            crate::finishing3d::FinishPattern::Parallel => FinishPatternDto::Parallel,
+            crate::finishing3d::FinishPattern::ParallelMulti => FinishPatternDto::ParallelMulti,
+        }
+    }
 }
 
 fn default_engagement_deg() -> f64 {
@@ -790,6 +831,8 @@ impl ParamsDto {
                 feed_opt: *feed_opt,
             },
             OpParams::Finish3D {
+                pattern,
+                stepover,
                 tolerance,
                 clearance_z,
                 retract_z,
@@ -799,6 +842,8 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
             } => ParamsDto::Finish3D {
+                pattern: (*pattern).into(),
+                stepover: *stepover,
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
                 top_z: (*top_z).into(),
@@ -1024,6 +1069,8 @@ impl ParamsDto {
                 feed_opt: *feed_opt,
             },
             ParamsDto::Finish3D {
+                pattern,
+                stepover,
                 tolerance,
                 clearance_z,
                 retract_z,
@@ -1033,6 +1080,8 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
             } => OpParams::Finish3D {
+                pattern: (*pattern).into(),
+                stepover: *stepover,
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
                 retract_z: (*retract_z).map(Into::into),
@@ -1589,6 +1638,14 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // exist. Nothing existing changed shape; step-up is the stamp
         // itself, like every bump since v6.
         file.version = 15;
+    }
+    if file.version == 15 {
+        // v15 -> v16: the parallel finish arrives as two new keys
+        // inside `finish3d` (`pattern`, `stepover`), absent from every
+        // v15 file - the serde defaults (`waterline`, derived
+        // stepover) are exactly what v15 ran. No content change;
+        // step-up is the stamp itself, like every bump since v6.
+        file.version = 16;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

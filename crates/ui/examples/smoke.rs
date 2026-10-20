@@ -21,48 +21,48 @@ fn main() {
 
     state.pending.push_back(CommandKind::ImportFile(PathBuf::from("testdata/models/cube.stl")));
     state.pending.push_back(CommandKind::ImportFile(PathBuf::from("testdata/models/box.obj")));
-    state.drain_actions();
+    state.settle();
     check("two imports land", count(&state) == 2, &state);
 
     state.pending.push_back(CommandKind::Select(Some("cube".into())));
-    state.drain_actions();
+    state.settle();
     check("select cube", state.has_selection(), &state);
 
     state.pending.push_back(CommandKind::DeleteSelected);
-    state.drain_actions();
+    state.settle();
     check("delete selected", count(&state) == 1, &state);
 
     state.pending.push_back(CommandKind::Undo);
-    state.drain_actions();
+    state.settle();
     check("undo restore", count(&state) == 2, &state);
 
     state.pending.push_back(CommandKind::Redo);
-    state.drain_actions();
+    state.settle();
     check("redo delete", count(&state) == 1, &state);
 
     state.pending.push_back(CommandKind::Undo);
     state.pending.push_back(CommandKind::ImportFile(PathBuf::from("testdata/models/garbage.stl")));
-    state.drain_actions();
+    state.settle();
     check("corrupt import refused, world intact", count(&state) == 2, &state);
 
     let tmp = std::env::temp_dir().join("hsmworks-smoke.hsmproj");
     state.pending.push_back(CommandKind::SaveProjectFile(tmp.clone()));
-    state.drain_actions();
+    state.settle();
     check("save", state.status.starts_with("saved"), &state);
 
     let mut reopened = State::new();
     reopened.pending.push_back(CommandKind::OpenProjectFile(tmp.clone()));
-    reopened.drain_actions();
+    reopened.settle();
     check("reopen matches", count(&reopened) == count(&state), &reopened);
 
     // Byte-stability: load -> save must reproduce the file exactly.
     let first = std::fs::read(&tmp).unwrap_or_default();
     let mut saver = State::new();
     saver.pending.push_back(CommandKind::OpenProjectFile(tmp.clone()));
-    saver.drain_actions();
+    saver.settle();
     let again = std::env::temp_dir().join("hsmworks-smoke-resave.hsmproj");
     saver.pending.push_back(CommandKind::SaveProjectFile(again.clone()));
-    saver.drain_actions();
+    saver.settle();
     check("save is byte-stable", first == std::fs::read(&again).unwrap_or_default(), &saver);
 
     let _ = std::fs::remove_file(&tmp);

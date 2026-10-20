@@ -87,13 +87,15 @@ fn wrong_version_is_refused() {
     // v8_file_steps_to_v9 v8 -> v9, v9_file_steps_to_v10 v9 -> v10,
     // v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips v10 ->
     // v11, v11_file_steps_to_v12 v11 -> v12, v12_file_steps_to_v13
-    // v12 -> v13, v13_file_steps_to_v14 v13 -> v14, and
+    // v12 -> v13, v13_file_steps_to_v14 v13 -> v14,
     // v14_file_steps_to_v15_and_the_finish3d_grammar_round_trips
-    // v14 -> v15).
-    let text = r#"{"version": 16, "entities": []}"#;
+    // v14 -> v15, and
+    // v15_file_steps_to_v16_and_the_parallel_grammar_round_trips
+    // v15 -> v16).
+    let text = r#"{"version": 17, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(16)) => {}
+        Err(ProjectError::UnsupportedVersion(17)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1547,6 +1549,105 @@ fn v14_file_steps_to_v15_and_the_finish3d_grammar_round_trips() {
     assert!(
         matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
         "a v15 file with tolerance 0.0 must not load"
+    );
+}
+
+#[test]
+fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
+    // A literal v15 project: the parallel finish arrives as two new
+    // keys inside `finish3d` (`pattern`, `stepover`), absent from every
+    // v15 file - the serde defaults (waterline, derived stepover) are
+    // exactly what v15 ran. Nothing existing changed shape; step-up is
+    // the stamp itself, like every bump since v6.
+    let text = r#"{
+        "version": 15,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "F1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"finish3d": {
+                 "tolerance": 0.1,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v15 file must migrate");
+    let e = model::find_by_name(&world, "F1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Finish3D { pattern, stepover, .. } = &o.params else {
+        panic!("finish3d params expected, got {:?}", o.params);
+    };
+    assert_eq!(*pattern, hsmworks_app::finishing3d::FinishPattern::Waterline);
+    assert!(stepover.is_none(), "absent stepover means the cos-law derives it");
+    let path = tmp_path("v16a");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v16 stamp: {saved}"
+    );
+    // The default writes out explicitly now that it is a choice among
+    // three, not the only possibility.
+    assert!(saved.contains("\"pattern\": \"waterline\""), "{saved}");
+
+    // The v16 wire grammar, hand-written so the spellings are pinned:
+    // snake_case pattern words, an explicit stepover override.
+    let text = r#"{
+        "version": 16,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "F1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"finish3d": {
+                 "pattern": "parallel_multi", "stepover": 0.3, "tolerance": 0.1,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v16 parallel grammar must read");
+    let e = model::find_by_name(&world, "F1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Finish3D { pattern, stepover, .. } = &o.params else {
+        panic!("finish3d params expected, got {:?}", o.params);
+    };
+    assert_eq!(
+        *pattern,
+        hsmworks_app::finishing3d::FinishPattern::ParallelMulti
+    );
+    assert_eq!(*stepover, Some(0.3));
+
+    // Write-parse-write is a fixed point, and the new keys ride.
+    let path = tmp_path("v16b");
+    project::save(&world, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &path).expect("reload");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the parallel shape round-trips byte-identically");
+    assert!(first.contains("\"pattern\": \"parallel_multi\""), "{first}");
+    assert!(first.contains("\"stepover\": 0.3"), "{first}");
+
+    // A zero stepover is nonsense the loader refuses, not a default.
+    let bad = text.replace("\"stepover\": 0.3", "\"stepover\": 0.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v16 file with stepover 0.0 must not load"
     );
 }
 

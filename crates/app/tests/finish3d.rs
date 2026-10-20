@@ -10,7 +10,9 @@
 //! strategy's jurisdiction, so the envelope must stay silent on them).
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
-use hsmworks_app::finishing3d::{scallop_stepdown, waterline, Finish3DParams};
+use hsmworks_app::finishing3d::{
+    parallel, scallop_stepdown, scallop_stepover, waterline, Finish3DParams, FinishPattern,
+};
 use hsmworks_app::geometry::{slice, Point3, Triangle};
 use hsmworks_app::geo2d::Region;
 use hsmworks_app::machining2d::GenError;
@@ -111,8 +113,14 @@ fn box_facets() -> Vec<Triangle> {
     facets
 }
 
+fn ppattern(top_z: f64, bottom_z: f64, pattern: FinishPattern) -> Finish3DParams {
+    Finish3DParams { pattern, ..params(top_z, bottom_z) }
+}
+
 fn params(top_z: f64, bottom_z: f64) -> Finish3DParams {
     Finish3DParams {
+        pattern: FinishPattern::Waterline,
+        stepover: None,
         tool_diameter: 2.0 * R,
         tolerance: TOL,
         clearance_z: 25.0,
@@ -613,3 +621,367 @@ fn the_ball_radius_is_the_diameters_half_in_every_law() {
     let rep = envelope_scan(&f, &t.moves, 2.0 * R, TOL).expect("measured with r=6");
     assert!(rep.gouge_mm > TOL, "the r/2 mixup went unnoticed");
 }
+
+// ---------------------------------------------------------------------------
+// M2.2b: the parallel finish. The same envelope measurement judges the
+// raster's laws; the ring's laws are unchanged and ride along beneath.
+
+/// A four-walled prism with NO bottom facet: a flat shelf at z = 10 on
+/// four vertical walls, z 0..10 - the auto-split's two jurisdictions in
+/// one fixture (the shelf is the raster's, the walls the rings').
+fn plateau() -> Vec<Triangle> {
+    let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
+    let (a, b, c, d) = (q(-1.0, -1.0, 0.0), q(1.0, -1.0, 0.0), q(1.0, 1.0, 0.0), q(-1.0, 1.0, 0.0));
+    let (e, f, g, h) = (q(-1.0, -1.0, 10.0), q(1.0, -1.0, 10.0), q(1.0, 1.0, 10.0), q(-1.0, 1.0, 10.0));
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let mut facets = Vec::new();
+    facets.extend(quad([e, f, g, h])); // top
+    facets.extend(quad([a, b, f, e])); // sides
+    facets.extend(quad([b, c, g, f]));
+    facets.extend(quad([c, d, h, g]));
+    facets.extend(quad([d, a, e, h]));
+    facets
+}
+
+/// A closed wedge: one square top tilted `alpha` from horizontal, its
+/// fall along +y (so the x-raster crosses the slope), four walls and a
+/// flat base at z = 4. The stepover cos-law's home turf - closed,
+/// because an open sheet has a phantom back side a ring can lawfully
+/// rest on, and a height-field measure cannot tell that from material.
+fn tilted(alpha: f64, half: f64) -> Vec<Triangle> {
+    let t = alpha.tan();
+    let surf = |_x: f64, y: f64| 10.0 - y * t;
+    let q = |p: [(f64, f64, f64); 4]| {
+        vec![
+            Triangle::new(p3(p[0].0, p[0].1, p[0].2), p3(p[1].0, p[1].1, p[1].2), p3(p[2].0, p[2].1, p[2].2)),
+            Triangle::new(p3(p[0].0, p[0].1, p[0].2), p3(p[2].0, p[2].1, p[2].2), p3(p[3].0, p[3].1, p[3].2)),
+        ]
+    };
+    let h = half;
+    let zb = 4.0;
+    let mut facets = Vec::new();
+    facets.extend(q([
+        (-h, -h, surf(-h, -h)),
+        (h, -h, surf(h, -h)),
+        (h, h, surf(h, h)),
+        (-h, h, surf(-h, h)),
+    ])); // tilted top
+    facets.extend(q([(-h, -h, zb), (h, -h, zb), (h, -h, surf(h, -h)), (-h, -h, surf(-h, -h))])); // walls
+    facets.extend(q([(-h, h, zb), (h, h, zb), (h, h, surf(h, h)), (-h, h, surf(-h, h))]));
+    facets.extend(q([(-h, -h, zb), (-h, h, zb), (-h, h, surf(-h, h)), (-h, -h, surf(-h, -h))]));
+    facets.extend(q([(h, -h, zb), (h, h, zb), (h, h, surf(h, h)), (h, -h, surf(h, -h))]));
+    facets.extend(q([(-h, -h, zb), (h, -h, zb), (h, h, zb), (-h, h, zb)])); // base
+    facets
+}
+
+/// A 24 x 24 block, z 0..10 (no bottom), with a 12 x 12 x 5 blind
+/// pocket centered on its top: floor z = 5, steep walls everywhere
+/// else. The floor-outranks law's fixture: pocket columns answer to
+/// their own floor, not to the surrounding shelf.
+fn step_pocket() -> Vec<Triangle> {
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let (t, f) = (10.0, 5.0); // top, floor
+    let mut facets = Vec::new();
+    // Top annulus, four strips, interior (-6..6)^2 left as the mouth.
+    facets.extend(quad([p3(-12.0, -12.0, t), p3(12.0, -12.0, t), p3(12.0, -6.0, t), p3(-12.0, -6.0, t)]));
+    facets.extend(quad([p3(-12.0, 6.0, t), p3(12.0, 6.0, t), p3(12.0, 12.0, t), p3(-12.0, 12.0, t)]));
+    facets.extend(quad([p3(-12.0, -6.0, t), p3(-6.0, -6.0, t), p3(-6.0, 6.0, t), p3(-12.0, 6.0, t)]));
+    facets.extend(quad([p3(6.0, -6.0, t), p3(12.0, -6.0, t), p3(12.0, 6.0, t), p3(6.0, 6.0, t)]));
+    // Pocket walls, z 5..10.
+    facets.extend(quad([p3(6.0, -6.0, f), p3(-6.0, -6.0, f), p3(-6.0, -6.0, t), p3(6.0, -6.0, t)]));
+    facets.extend(quad([p3(6.0, 6.0, f), p3(6.0, -6.0, f), p3(6.0, -6.0, t), p3(6.0, 6.0, t)]));
+    facets.extend(quad([p3(-6.0, 6.0, f), p3(6.0, 6.0, f), p3(6.0, 6.0, t), p3(-6.0, 6.0, t)]));
+    facets.extend(quad([p3(-6.0, -6.0, f), p3(-6.0, 6.0, f), p3(-6.0, 6.0, t), p3(-6.0, -6.0, t)]));
+    // Pocket floor.
+    facets.extend(quad([p3(-6.0, -6.0, f), p3(6.0, -6.0, f), p3(6.0, 6.0, f), p3(-6.0, 6.0, f)]));
+    // Outer walls, z 0..10.
+    facets.extend(quad([p3(-12.0, -12.0, 0.0), p3(12.0, -12.0, 0.0), p3(12.0, -12.0, t), p3(-12.0, -12.0, t)]));
+    facets.extend(quad([p3(12.0, -12.0, 0.0), p3(12.0, 12.0, 0.0), p3(12.0, 12.0, t), p3(12.0, -12.0, t)]));
+    facets.extend(quad([p3(12.0, 12.0, 0.0), p3(-12.0, 12.0, 0.0), p3(-12.0, 12.0, t), p3(12.0, 12.0, t)]));
+    facets.extend(quad([p3(-12.0, 12.0, 0.0), p3(-12.0, -12.0, 0.0), p3(-12.0, -12.0, t), p3(-12.0, 12.0, t)]));
+    facets
+}
+
+/// A 30 x 30 shelf at z = 10 hiding a 12 x 12 floor at z = 0 wholly
+/// beneath it: no path can reach that floor from above, and the
+/// finisher must say so instead of pretending.
+fn hidden_floor() -> Vec<Triangle> {
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let mut facets = Vec::new();
+    facets.extend(quad([
+        p3(-15.0, -15.0, 10.0),
+        p3(15.0, -15.0, 10.0),
+        p3(15.0, 15.0, 10.0),
+        p3(-15.0, 15.0, 10.0),
+    ]));
+    facets.extend(quad([
+        p3(-6.0, -6.0, 0.0),
+        p3(6.0, -6.0, 0.0),
+        p3(6.0, 6.0, 0.0),
+        p3(-6.0, 6.0, 0.0),
+    ]));
+    facets
+}
+
+/// The discontinuity law, made visible: no LATERAL Feed move may
+/// change Z faster than a 45-degree climb plus the tolerance - a
+/// straddled surface is a broken line, never one move. (Vertical moves,
+/// plunges and retracts, carry no XY, so this law says nothing of
+/// them; the envelope is their judge.)
+fn assert_no_feed_spans_a_step(t: &Toolpath) {
+    for m in &t.moves {
+        if m.kind != MoveKind::Feed {
+            continue;
+        }
+        let run = ((m.to.x - m.from.x).powi(2) + (m.to.y - m.from.y).powi(2)).sqrt();
+        if run < 1e-9 {
+            continue; // a pure retract or in-place hop: vertical, not this law's subject
+        }
+        let rise = (m.to.z - m.from.z).abs();
+        assert!(
+            rise <= run + TOL + 1e-9,
+            "Feed move {:?}->{:?} spans a step: rise {:.4} over run {:.4}",
+            m.from,
+            m.to,
+            rise,
+            run
+        );
+    }
+}
+
+/// The y-values where the path plunges into a line that then runs a
+/// substantial straight cut: the raster's line register.
+fn line_starts(t: &Toolpath) -> Vec<f64> {
+    let mut ys = Vec::new();
+    let m = &t.moves;
+    for i in 0..m.len() {
+        if m[i].kind != MoveKind::Plunge {
+            continue;
+        }
+        let straight = m[i + 1..]
+            .iter()
+            .take_while(|n| n.kind == MoveKind::Feed)
+            .any(|n| n.arc.is_none() && (n.to.x - n.from.x).abs() > 0.3);
+        if straight {
+            ys.push(m[i].to.y);
+        }
+    }
+    ys.sort_by(|a, b| a.total_cmp(b));
+    ys.dedup();
+    ys
+}
+
+#[test]
+fn scallop_stepover_law_is_exact_and_total() {
+    assert!((scallop_stepover(3.0, 0.1) - 2.4f64.sqrt()).abs() <= 1e-12);
+    for (r, tol) in [(0.0, 0.1), (3.0, 0.0), (-1.0, 0.1), (3.0, -0.1)] {
+        assert_eq!(scallop_stepover(r, tol), 0.0);
+    }
+    assert_eq!(scallop_stepover(f64::NAN, 0.1), 0.0);
+    assert_eq!(scallop_stepover(3.0, f64::INFINITY), 0.0);
+}
+
+#[test]
+fn plateau_parallel_cuts_the_shelf_and_the_rings_take_the_walls() {
+    // The auto-split's headline: one path, two strategies, and the
+    // shelf - waterline's known blind spot - comes off clean.
+    let f = plateau();
+    let t = parallel(&f, &ppattern(10.0, 0.0, FinishPattern::Parallel)).expect("plateau parallel");
+    // The shelf really was ridden: a lateral Feed sits on z = 10 well
+    // inside the footprint.
+    let on_shelf = t.moves.iter().any(|m| {
+        m.kind == MoveKind::Feed
+            && (m.to.z - 10.0).abs() < 1e-6
+            && m.to.x.abs() < 6.0
+            && m.to.y.abs() < 6.0
+    });
+    assert!(on_shelf, "the raster never rode the shelf");
+    assert_no_feed_spans_a_step(&t);
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+    assert_eq!(verify_finish(&f, &t, 10.0), Vec::new(), "the verifier agrees");
+}
+
+#[test]
+fn tilted_shelf_lines_are_the_stepover_times_the_cosine() {
+    // The cos-law, measured: the raster's line spacing on a 30-degree
+    // slope is sqrt(8 r tol) * cos(alpha) exactly, and the cusp the
+    // wider-spaced lines would leave stays inside the budget.
+    let alpha = PI / 6.0;
+    let want = scallop_stepover(R, TOL) * alpha.cos();
+    let f = tilted(alpha, 8.0);
+    let t = parallel(&f, &ppattern(14.0, 4.0, FinishPattern::Parallel)).expect("tilted parallel");
+    // The ring ladder may contribute its own contour lines at the
+    // stepdown spacing; the raster's progression must be findable in
+    // the line register regardless - a chain of at least three lines
+    // at exactly the law's spacing.
+    let ys = line_starts(&t);
+    let longest_chain = |want: f64| -> usize {
+        let mut best = 0;
+        for &y0 in &ys {
+            let mut k = 0;
+            while k < 64
+                && ys.iter().any(|y| (y - (y0 + (k + 1) as f64 * want)).abs() < 1e-6)
+            {
+                k += 1;
+            }
+            best = best.max(k);
+        }
+        best
+    };
+    assert!(
+        longest_chain(want) >= 2,
+        "no cos-law progression in the line register: {ys:?}, want {want}"
+    );
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(
+        rep.rest_mm <= gate(rep.cell),
+        "the tilted cusp escaped the budget: {} mm at {:?}",
+        rep.rest_mm,
+        rep.at
+    );
+    assert_no_feed_spans_a_step(&t);
+}
+
+#[test]
+fn blind_pocket_floor_is_cut_and_nothing_sinks_below_it() {
+    // Two laws at once: the topmost-support law gives the floor
+    // (the pocket's columns answer to their own floor at 5, not to
+    // the surrounding shelf at 10), and the floor-outranks law keeps
+    // every cutting tip at or above bottom_z.
+    let f = step_pocket();
+    let t = parallel(&f, &ppattern(10.0, 5.0, FinishPattern::Parallel)).expect("pocket parallel");
+    let on_floor = t.moves.iter().any(|m| {
+        m.kind == MoveKind::Feed
+            && (m.to.z - 5.0).abs() < 1e-6
+            && m.to.x.abs() < 5.0
+            && m.to.y.abs() < 5.0
+    });
+    assert!(on_floor, "the pocket floor was never ridden");
+    let lowest = t
+        .moves
+        .iter()
+        .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
+        .map(|m| m.to.z)
+        .fold(f64::INFINITY, f64::min);
+    assert!(lowest >= 5.0 - 1e-9, "the path sank below the floor: {lowest}");
+    assert_no_feed_spans_a_step(&t);
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+    assert_eq!(verify_finish(&f, &t, 10.0), Vec::new(), "the verifier agrees");
+}
+
+#[test]
+fn multidirection_rasters_cross() {
+    // The second pass runs perpendicular: substantial straight feeds
+    // along BOTH axes, where the single raster runs only along x.
+    let f = dome();
+    let one = parallel(&f, &ppattern(18.0, RIM_Z, FinishPattern::Parallel)).expect("parallel dome");
+    let two = parallel(&f, &ppattern(18.0, RIM_Z, FinishPattern::ParallelMulti)).expect("multi dome");
+    let dirs = |t: &Toolpath| -> (usize, usize) {
+        let (mut x, mut y) = (0, 0);
+        for m in &t.moves {
+            if m.kind != MoveKind::Feed || m.arc.is_some() {
+                continue;
+            }
+            let (dx, dy) = ((m.to.x - m.from.x).abs(), (m.to.y - m.from.y).abs());
+            if dy > 1e-9 && dy > 2.0 * dx {
+                y += 1;
+            } else if dx > 1e-9 && dx > 2.0 * dy {
+                x += 1;
+            }
+        }
+        (x, y)
+    };
+    let (x1, y1) = dirs(&one);
+    let (x2, y2) = dirs(&two);
+    assert!(x1 > 50 && y1 <= x1 / 10, "single raster not unidirectional: {x1} x, {y1} y");
+    assert!(x2 > 50 && y2 > 50, "multi raster not crossing: {x2} x, {y2} y");
+    for t in [&one, &two] {
+        assert_no_feed_spans_a_step(t);
+        let rep = envelope(&f, t);
+        assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+        assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+    }
+}
+
+#[test]
+fn hidden_floor_stays_rest_and_the_path_stays_above_it() {
+    // The visible ceiling's jurisdiction, stated as far as today's
+    // measurement can honestly go: the finisher machines the surface
+    // it can reach from above and never gouges its way elsewhere.
+    // The floor under the shelf is unreachable; the envelope kernel's
+    // part model is a top-down height field, so that floor's rest
+    // stands OUTSIDE what the kernel can see (a column reports its
+    // highest facet). Proving the unreachable material is left as
+    // rest - visible, not merely uncut - is M2.2d's job; what this
+    // test pins is the safety half: nothing gouges, and the path
+    // never plunges below its own bottom plane to chase what it
+    // cannot see.
+    let f = hidden_floor();
+    let t = parallel(&f, &ppattern(10.0, 10.0, FinishPattern::Parallel)).expect("overhang parallel");
+    let on_shelf = t
+        .moves
+        .iter()
+        .any(|m| m.kind == MoveKind::Feed && (m.to.z - 10.0).abs() < 1e-6);
+    assert!(on_shelf, "the visible ceiling went uncut");
+    let lowest = t
+        .moves
+        .iter()
+        .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
+        .map(|m| m.to.z)
+        .fold(f64::INFINITY, f64::min);
+    assert!(lowest >= 10.0 - 1e-6, "the path chased the hidden floor: {lowest}");
+    assert_no_feed_spans_a_step(&t);
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert_eq!(verify_finish(&f, &t, 10.0), Vec::new(), "the verifier agrees");
+}
+
+#[test]
+fn parallel_refusals_are_clean() {
+    // Degenerate inputs error, never crash or hang.
+    let p = ppattern(10.0, 0.0, FinishPattern::Parallel);
+    assert!(parallel(&[], &p).is_err(), "an empty model must not pass");
+    let bad_tol = Finish3DParams { tolerance: 0.0, ..p };
+    assert!(parallel(&plateau(), &bad_tol).is_err(), "zero tolerance is nonsense");
+    let bad_step = Finish3DParams { stepover: Some(0.0), ..p };
+    assert!(parallel(&plateau(), &bad_step).is_err(), "a zero stepover is nonsense");
+    let nan_z = Finish3DParams { top_z: f64::NAN, ..p };
+    assert!(parallel(&plateau(), &nan_z).is_err(), "a NaN height is nonsense");
+    // All-steep: no shallow facet at all - the rings alone carry the
+    // wall, and the path generates.
+    let wall = vec![
+        Triangle::new(p3(-5.0, 0.0, 0.0), p3(5.0, 0.0, 5.0), p3(5.0, 0.0, 0.0)),
+        Triangle::new(p3(-5.0, 0.0, 0.0), p3(-5.0, 0.0, 5.0), p3(5.0, 0.0, 5.0)),
+    ];
+    assert!(parallel(&wall, &ppattern(5.0, 0.0, FinishPattern::Parallel)).is_ok());
+    // A scatter of degenerate facets, marched: nothing unwraps.
+    let scatter: Vec<Triangle> = (-8..8)
+        .flat_map(|i| (-8..8).map(move |j| (i, j)))
+        .map(|(i, j)| {
+            let (x, y) = (i as f64, j as f64);
+            Triangle::new(p3(x, y, 1.0), p3(x, y, 1.0), p3(x, y, 1.0))
+        })
+        .collect();
+    let _ = parallel(&scatter, &ppattern(1.0, 0.0, FinishPattern::ParallelMulti));
+}
+

@@ -2410,6 +2410,8 @@ const DOME_RIM_Z: f64 = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
 
 fn finish_params(top_z: f64, bottom_z: f64, tolerance: f64) -> OpParams {
     OpParams::Finish3D {
+        pattern: hsmworks_app::finishing3d::FinishPattern::Waterline,
+        stepover: None,
         tolerance,
         clearance_z: Height::fixed(25.0),
         retract_z: None,

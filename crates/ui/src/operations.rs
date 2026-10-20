@@ -232,6 +232,13 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             feed_opt: false,
         },
         7 => OpParams::Finish3D {
+            // The auto-split is the default: waterline alone would
+            // leave every flat shelf standing proud, and a silent
+            // miss is the one answer this app never gives.
+            pattern: hsmworks_app::finishing3d::FinishPattern::Parallel,
+            // None = the stepover cos-law derives spacing from the
+            // tolerance; the panel can override it per line set.
+            stepover: None,
             // A general 3-D finish budget: half the common 0.1 mm
             // shop tolerance, coarse enough that the scallop stepdown
             // on a typical R3 ball stays well under the level cap,

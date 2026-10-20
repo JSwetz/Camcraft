@@ -622,15 +622,26 @@ pub enum OpParams {
         /// M2.1d). Geometry is untouched; only feed words move.
         feed_opt: bool,
     },
-    /// Ball-nose waterline finishing. The model is the finished
-    /// surface: each ring is the ball-center tangent locus of the
-    /// forbidden region at its center plane, levels stepped by the
-    /// scallop law - `Δz = 2√(r·tol)` - so there is no stepdown field:
-    /// the tolerance IS the depth increment's author (see
-    /// [`crate::finishing3d`]). Region, heights and refusals follow the
-    /// 3-D pocket's laws exactly: silhouette footprint, resolved
-    /// top/bottom, mesh-computed everything.
+    /// Ball-nose surface finishing. The model is the finished
+    /// surface. `Waterline`: each ring is the ball-center tangent
+    /// locus of the forbidden region at its center plane, levels
+    /// stepped by the scallop law - `Δz = 2√(r·tol)` - so there is no
+    /// stepdown field: the tolerance IS the depth increment's author
+    /// (see [`crate::finishing3d`]). `Parallel`/`ParallelMulti`: a
+    /// Z-following raster over the shallow terrain, then the same
+    /// scallop ladder's rings on the steep flanks - the 45°
+    /// auto-split, one jurisdiction line for both halves. Region,
+    /// heights and refusals follow the 3-D pocket's laws exactly:
+    /// silhouette footprint, resolved top/bottom, mesh-computed
+    /// everything.
     Finish3D {
+        /// Which kinematic generates the path. Waterline is the
+        /// M2.2a default; Parallel adds the raster (M2.2b).
+        pattern: finishing3d::FinishPattern,
+        /// Raster line spacing, mm; `None` (always for Waterline)
+        /// follows the stepover cos-law from the tolerance instead -
+        /// same "the tolerance is the author" law as the stepdown.
+        stepover: Option<f64>,
         /// Surface deviation budget, mm, both directions: it sets the
         /// stepdown, the ring's scan resolution and the arc-fit chord
         /// together, and it is what the envelope verdict measures
@@ -817,6 +828,7 @@ impl OpParams {
                             || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
             }
             OpParams::Finish3D {
+                stepover,
                 tolerance,
                 clearance_z,
                 retract_z,
@@ -831,6 +843,7 @@ impl OpParams {
                 // level cap refuses a tolerance that would need more
                 // rings than the machine of record may hold.
                 pos(*tolerance)
+                    && stepover.is_none_or(pos)
                     && clearance_z.is_sane()
                     && retract_z.is_none_or(|r| r.is_sane())
                     && top_z.is_sane()
@@ -1126,6 +1139,8 @@ impl OpParams {
                 h.write_u8(u8::from(*feed_opt));
             }
             OpParams::Finish3D {
+                pattern,
+                stepover,
                 tolerance,
                 clearance_z,
                 retract_z,
@@ -1136,6 +1151,18 @@ impl OpParams {
                 climb,
             } => {
                 h.write_u8(7);
+                // v16: the pattern chooses a different kinematic (and
+                // the raster fields only answer to Parallel), so they
+                // belong in the digest; the Some/None split keeps a
+                // derived stepover from digesting as the number 0.
+                h.write_u8(*pattern as u8);
+                match stepover {
+                    Some(s) => {
+                        h.write_u8(1);
+                        w(h, *s);
+                    }
+                    None => h.write_u8(0),
+                }
                 w(h, *tolerance);
                 wh(h, *clearance_z);
                 wh(h, *top_z);
@@ -2969,7 +2996,15 @@ pub fn generate(
             };
             (region, path)
         }
-        OpParams::Finish3D { tolerance, feed, plunge_feed, climb, .. } => {
+        OpParams::Finish3D {
+            pattern,
+            stepover,
+            tolerance,
+            feed,
+            plunge_feed,
+            climb,
+            ..
+        } => {
             // Ball jurisdiction: the rings are the tangent locus of a
             // sphere. A flat-bottomed or torus-bottomed cutter's
             // forbidden set is not this facetwise support scan (the
@@ -2982,20 +3017,30 @@ pub fn generate(
                 )));
             }
             let region = region_for_src(world, &op.src, &op.params, &material)?;
-            let path = finishing3d::waterline(
-                &material.facets,
-                &Finish3DParams {
-                    tool_diameter: d,
-                    tolerance: *tolerance,
-                    clearance_z: hs.clearance,
-                    retract_z: hs.retract,
-                    top_z: req_z(hs.top, "Top of Part Z")?,
-                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
-                    feed: *feed,
-                    plunge_feed: *plunge_feed,
-                    climb: *climb,
-                },
-            )?;
+            let fp = Finish3DParams {
+                pattern: *pattern,
+                stepover: *stepover,
+                tool_diameter: d,
+                tolerance: *tolerance,
+                clearance_z: hs.clearance,
+                retract_z: hs.retract,
+                top_z: req_z(hs.top, "Top of Part Z")?,
+                bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+            };
+            // The pattern picks the generator; Waterline never
+            // reaches the raster code at all.
+            let path = match pattern {
+                finishing3d::FinishPattern::Waterline => {
+                    finishing3d::waterline(&material.facets, &fp)?
+                }
+                finishing3d::FinishPattern::Parallel
+                | finishing3d::FinishPattern::ParallelMulti => {
+                    finishing3d::parallel(&material.facets, &fp)?
+                }
+            };
             (region, path)
         }
         OpParams::Slot {

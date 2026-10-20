@@ -458,7 +458,7 @@ fn tap_plate_matches_golden() {
 
 #[test]
 fn finish3d_waterline_cone() {
-    use hsmworks_app::finishing3d::{waterline, Finish3DParams};
+    use hsmworks_app::finishing3d::{waterline, Finish3DParams, FinishPattern};
     use hsmworks_app::geometry::{Point3, Triangle};
     let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     // 45-degree cone, apex (0,0,20), R20 base ring at z 0, closed bottom.
@@ -481,6 +481,8 @@ fn finish3d_waterline_cone() {
     let t = waterline(
         &facets,
         &Finish3DParams {
+            pattern: FinishPattern::Waterline,
+            stepover: None,
             tool_diameter: 6.0,
             tolerance: 0.1,
             clearance_z: 25.0,

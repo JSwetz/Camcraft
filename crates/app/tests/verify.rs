@@ -432,6 +432,8 @@ fn cone_waterline() -> Toolpath {
     finishing3d::waterline(
         &cone_facets(96),
         &Finish3DParams {
+            pattern: finishing3d::FinishPattern::Waterline,
+            stepover: None,
             tool_diameter: 6.0,
             tolerance: 0.1,
             clearance_z: 25.0,
