@@ -79,8 +79,16 @@ const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
 const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
 /// The 3-D finish kinematics, in the order the combo maps them.
-const FINISH_PATTERNS: [&str; 6] =
-    ["Waterline", "Parallel", "Parallel - multi", "Scallop", "Radial", "Spiral"];
+const FINISH_PATTERNS: [&str; 8] = [
+    "Waterline",
+    "Parallel",
+    "Parallel - multi",
+    "Scallop",
+    "Radial",
+    "Spiral",
+    "Contour",
+    "Project",
+];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
 const AMBER: Color32 = Color32::from_rgb(0xB8, 0xB8, 0xC8);
@@ -1173,6 +1181,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     hsmworks_app::finishing3d::FinishPattern::Scallop => 3,
                     hsmworks_app::finishing3d::FinishPattern::Radial => 4,
                     hsmworks_app::finishing3d::FinishPattern::Spiral => 5,
+                    hsmworks_app::finishing3d::FinishPattern::Contour => 6,
+                    hsmworks_app::finishing3d::FinishPattern::Project => 7,
                 };
                 let before = pat_idx;
                 combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
@@ -1183,11 +1193,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         3 => hsmworks_app::finishing3d::FinishPattern::Scallop,
                         4 => hsmworks_app::finishing3d::FinishPattern::Radial,
                         5 => hsmworks_app::finishing3d::FinishPattern::Spiral,
+                        6 => hsmworks_app::finishing3d::FinishPattern::Contour,
+                        7 => hsmworks_app::finishing3d::FinishPattern::Project,
                         _ => hsmworks_app::finishing3d::FinishPattern::Waterline,
                     };
                 }
                 ui.label(
-                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve - then the rings take the flanks.",
+                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette - then the rings take the flanks.",
                 );
                 if !matches!(pattern, hsmworks_app::finishing3d::FinishPattern::Waterline) {
                     field(ui, "Stepover");

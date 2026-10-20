@@ -11,8 +11,8 @@
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::finishing3d::{
-    parallel, radial, scallop_stepdown, scallop_stepover, spiral, waterline, Finish3DParams,
-    FinishPattern,
+    contour, parallel, project, radial, scallop_stepdown, scallop_stepover, spiral, waterline,
+    Finish3DParams, FinishPattern,
 };
 use hsmworks_app::geometry::{slice, Point3, Triangle};
 use hsmworks_app::geo2d::Region;
@@ -1179,6 +1179,8 @@ fn parallel_all(f: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError
     match p.pattern {
         FinishPattern::Radial => radial(f, p),
         FinishPattern::Spiral => spiral(f, p),
+        FinishPattern::Contour => contour(f, p),
+        FinishPattern::Project => project(f, p),
         _ => parallel(f, p),
     }
 }
@@ -1212,4 +1214,117 @@ fn polar_placements_refuse_without_a_number_or_past_the_cap() {
         let wide = Finish3DParams { stepover: Some(0.001), ..ppattern(10.0, 0.5, if name == "radial" { FinishPattern::Radial } else { FinishPattern::Spiral }) };
         assert!(matches!(parallel_all(&f, &wide), Err(GenError::Invalid(_))), "{name} at 0.001 spacing must hit the cap");
     }
+}
+
+// ---------- M2.2e: the around-the-model families ----------
+
+#[test]
+fn contour_closes_its_rings_and_project_walks_the_rim() {
+    // The two laws the shadow families add over the polar ones: a
+    // contour ring on unbroken ground comes back CLOSED (the clamp
+    // sample at arc length L lands on the entry point - the march's
+    // own duplicate law keeps it as the closing move), and project's
+    // silhouette keeps the model's XY exactly (a flat top's shadow
+    // shift is r·m_xy = 0 - the rim is the footprint boundary, lifted).
+    let f = plateau();
+    let t = contour(&f, &ppattern(10.0, 0.0, FinishPattern::Contour)).expect("contour plateau");
+    assert_eq!(
+        t.moves,
+        contour(&f, &ppattern(10.0, 0.0, FinishPattern::Contour))
+            .expect("contour again")
+            .moves,
+        "two calls, two paths - a stamp would churn forever"
+    );
+    // A plunge-run whose feeds return to the entry point: a closed
+    // ring on the plateau's unbroken ground.
+    let mut closed = false;
+    for (i, m) in t.moves.iter().enumerate() {
+        if m.kind != MoveKind::Plunge {
+            continue;
+        }
+        let (ex, ey) = (m.to.x, m.to.y);
+        closed |= t.moves[i + 1..]
+            .iter()
+            .take_while(|n| n.kind == MoveKind::Feed)
+            .any(|n| (n.to.x - ex).abs() < 1e-9 && (n.to.y - ey).abs() < 1e-9);
+    }
+    assert!(closed, "a plateau contour never returned to its entry - the ring did not close");
+    let tp = project(&f, &ppattern(10.0, 0.0, FinishPattern::Project)).expect("project plateau");
+    let on_rim = tp
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Feed)
+        .any(|m| (m.to.x.abs() - 10.0).abs() < 1e-9 && (m.to.z - 10.0).abs() < 1e-9);
+    assert!(on_rim, "project never walked the model's own rim");
+}
+
+#[test]
+fn the_hill_under_contour_and_project_is_envelope_clean() {
+    // The measured promise, both families: the shadow's spacing is
+    // the same cos-law stepover the raster pays, and the lift is the
+    // same tangent law the march rides - so the kernel's verdict on
+    // the hill must be the same clean one.
+    let f = hill();
+    for (pat, name) in [
+        (FinishPattern::Contour, "contour"),
+        (FinishPattern::Project, "project"),
+    ] {
+        let t = parallel_all(&f, &ppattern(HILL_TOP, HILL_RIM, pat)).expect(name);
+        let rep = envelope(&f, &t);
+        assert!(rep.gouge_mm <= gate(rep.cell), "{name}: gouged {} at {:?}", rep.gouge_mm, rep.at);
+        assert!(rep.rest_mm <= gate(rep.cell), "{name}: left {} of rest at {:?}", rep.rest_mm, rep.at);
+        assert_eq!(verify_finish(&f, &t, HILL_TOP), Vec::new(), "{name}: the verifier agrees");
+    }
+}
+
+#[test]
+fn contour_answers_for_its_spacing_and_project_pays_only_the_gate() {
+    // Two doors, and the families walk them differently. The EARLY
+    // gate (`validate`) refuses a spacing without a number from
+    // EVERY pattern, Waterline's "ignores the raster fields" law
+    // included - a nonsense parameter is nonsense unused. The
+    // spacing's COST (the ring-cap guard) only speaks where spacing
+    // marches: contour at a hairline stepover is hours of rings and
+    // must refuse; project's single rim pays nothing for it.
+    let f = plateau();
+    for bad in [0.0, f64::NAN] {
+        for pat in [FinishPattern::Contour, FinishPattern::Project] {
+            let p = Finish3DParams { stepover: Some(bad), ..ppattern(10.0, 0.0, pat) };
+            assert!(
+                matches!(parallel_all(&f, &p), Err(GenError::Invalid(_))),
+                "{pat:?} stepover {bad} must refuse at the gate"
+            );
+        }
+    }
+    let hair = Finish3DParams { stepover: Some(0.001), ..ppattern(10.0, 0.0, FinishPattern::Contour) };
+    assert!(
+        matches!(contour(&f, &hair), Err(GenError::Invalid(_))),
+        "contour at 0.001 spacing must hit the ring cap, not hours"
+    );
+    let hair_p = Finish3DParams { stepover: Some(0.001), ..ppattern(10.0, 0.0, FinishPattern::Project) };
+    assert!(project(&f, &hair_p).is_ok(), "project's one rim costs no spacing budget");
+}
+
+#[test]
+fn all_steep_ground_leaves_the_shadow_families_to_the_rings() {
+    // The raster's all-steep answer, in shadow form: an empty center-
+    // shadow is not an error - the rings carry the wall, and both
+    // families generate.
+    let wall = vec![
+        Triangle::new(p3(-5.0, 0.0, 0.0), p3(5.0, 0.0, 5.0), p3(5.0, 0.0, 0.0)),
+        Triangle::new(p3(-5.0, 0.0, 0.0), p3(-5.0, 0.0, 5.0), p3(5.0, 0.0, 5.0)),
+    ];
+    assert!(contour(&wall, &ppattern(5.0, 0.0, FinishPattern::Contour)).is_ok());
+    assert!(project(&wall, &ppattern(5.0, 0.0, FinishPattern::Project)).is_ok());
+    // Degenerate scatter: zero-area facets cast no shadow, and the
+    // families must neither panic nor hang.
+    let scatter: Vec<Triangle> = (-8..8)
+        .flat_map(|i| (-8..8).map(move |j| (i, j)))
+        .map(|(i, j)| {
+            let (x, y) = (i as f64, j as f64);
+            Triangle::new(p3(x, y, 1.0), p3(x, y, 1.0), p3(x, y, 1.0))
+        })
+        .collect();
+    let _ = contour(&scatter, &ppattern(1.0, 0.0, FinishPattern::Contour));
+    let _ = project(&scatter, &ppattern(1.0, 0.0, FinishPattern::Project));
 }

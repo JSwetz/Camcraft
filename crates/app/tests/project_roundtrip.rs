@@ -1668,11 +1668,14 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
     let _ = std::fs::remove_file(&path_sc);
     assert!(saved_sc.contains("\"pattern\": \"scallop\""), "{saved_sc}");
 
-    // M2.2d, same law twice over: "radial" and "spiral" join the v16
-    // grammar as words, not as a version.
+    // M2.2d and M2.2e, same law four times over: "radial", "spiral",
+    // "contour" and "project" join the v16 grammar as words, not as
+    // a version.
     for (word, want) in [
         ("radial", hsmworks_app::finishing3d::FinishPattern::Radial),
         ("spiral", hsmworks_app::finishing3d::FinishPattern::Spiral),
+        ("contour", hsmworks_app::finishing3d::FinishPattern::Contour),
+        ("project", hsmworks_app::finishing3d::FinishPattern::Project),
     ] {
         let t = text.replace("\"parallel_multi\"", &format!("\"{word}\""));
         let w = new_world();

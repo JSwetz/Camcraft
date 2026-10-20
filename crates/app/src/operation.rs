@@ -3049,6 +3049,12 @@ pub fn generate(
                 finishing3d::FinishPattern::Spiral => {
                     finishing3d::spiral(&material.facets, &fp)?
                 }
+                finishing3d::FinishPattern::Contour => {
+                    finishing3d::contour(&material.facets, &fp)?
+                }
+                finishing3d::FinishPattern::Project => {
+                    finishing3d::project(&material.facets, &fp)?
+                }
             };
             (region, path)
         }

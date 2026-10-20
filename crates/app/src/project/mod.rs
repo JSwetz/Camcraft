@@ -464,6 +464,10 @@ pub enum FinishPatternDto {
     Radial,
     /// M2.2d, same law: one Archimedean curve in from the rim.
     Spiral,
+    /// M2.2e, same law: concentric shadows of the terrain, lifted.
+    Contour,
+    /// M2.2e, same law: the silhouette lifted onto the surface.
+    Project,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -475,6 +479,8 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::Scallop => crate::finishing3d::FinishPattern::Scallop,
             FinishPatternDto::Radial => crate::finishing3d::FinishPattern::Radial,
             FinishPatternDto::Spiral => crate::finishing3d::FinishPattern::Spiral,
+            FinishPatternDto::Contour => crate::finishing3d::FinishPattern::Contour,
+            FinishPatternDto::Project => crate::finishing3d::FinishPattern::Project,
         }
     }
 }
@@ -488,6 +494,8 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::Scallop => FinishPatternDto::Scallop,
             crate::finishing3d::FinishPattern::Radial => FinishPatternDto::Radial,
             crate::finishing3d::FinishPattern::Spiral => FinishPatternDto::Spiral,
+            crate::finishing3d::FinishPattern::Contour => FinishPatternDto::Contour,
+            crate::finishing3d::FinishPattern::Project => FinishPatternDto::Project,
         }
     }
 }
