@@ -9,6 +9,70 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.2a - Waterline contouring and the envelope kernel (commit `c755b12`)
+
+- **The outer-loop-only law: cut what the region encloses from outside.**
+  The forbidden-center region's CW loops are interior wavefronts - the
+  ball cannot reach a hole's forbidden disk by rolling on the model's
+  outside, so those loops are unreachable geometry, not missed rings.
+  Islands are separate CCW components and get walked. Discussion point:
+  a model whose interior cavity opens only through a smaller neck would
+  need a reachability test to be contourable from the inside; we do not
+  attempt inside-out waterlines at all yet (and no test asserts we
+  would notice). Cost to change: a component-reachability pass before
+  the outer filter, ~30 lines, but it re-opens the nesting question
+  with the sketch-parity law that union_all(NONZERO) closed.
+- **Two truths, each by its own law.** Gouge is dexel truth (what the
+  ball's lowest points removed, column by column); rest is distance
+  truth at RIDGES - surface points with at least two band contacts.
+  Why two laws, not one grid: "this pass rolled a ladder over you" is
+  the pass's promise, and the promise is exactly two near-chords - a
+  once-grazed point (a lone annulus) or untouched point (a flat shelf,
+  the crown, a vertical wall) is rest machining's or a later op's
+  jurisdiction, law there, not a silent zero here. The tempting gate
+  "rest only where this pass cut the column" was PROVED dead: a ball
+  reaching a column's surface is the same event as a center standing
+  inside `r + floor` (it rearranges algebraically), so such a gate can
+  never report the scallop it exists to measure. Cost to change: the
+  ridge count is one comparison in `envelope_scan`; a different
+  promise-band law touches nothing else.
+- **The exact-arc collapse - and what it broke in our own tests.** The
+  region fixes (union_all + outer filter) replaced clipper-boolean
+  polygons with exact analytic circles, so `fit_arcs` legitimately
+  collapses each ring to two or four exact arcs (180-degree
+  semicircles on a true circle have zero sagitta - the arc IS the
+  ring). Paths became ~5x shorter (the cone golden: 118 moves, 32
+  arcs; the suite: 54-180 s where it ran 930 s). Two consequences
+  logged: (1) an endpoint shoelace over such a ring is a sliver
+  between antipodal vertices, not its footprint - the mirror-walk
+  test now samples arcs <= 15 degrees before taking the area (and the
+  box test now asserts the measured truth, `gouge == 0, rest <=
+  gate`, where the corner columns honestly read a sub-gate cusp from
+  the two wall rings grazing at right angles - silence was always the
+  VERIFIER's word, not the scan's); (2) semicircular 180-degree arcs
+  post fine under RS-274 single-block IJ format, but the M3.x posts
+  should note multi-block arc splits are not needed for waterlines.
+- **Hop law, finish flavor:** the inter-ring rapid rides
+  `min(retract_z, clearance)` - a level change still climbs to
+  clearance; `retract_z` non-finite refuses at the params check. Same
+  shape the 2D ops established, tested on twin domes (one dome has
+  nothing to hop between - the fixture says so).
+- **The probe-before-assumption lesson, filed:** the "13/13 green"
+  log we trusted predated the region fixes; the first real full-suite
+  run after them failed two tests that had never actually been re-run.
+  The geometry had gotten BETTER (exact circles) and two test metrics
+  had quietly become invalid. A stale green is the same failure class
+  as a silent gouge - re-run the binaries after any law change, even
+  when the theory says "this cannot change the answers".
+- **Walls are column-invisible; shelves are parallel's.** The dexel
+  model sees one z per XY, so a box's vertical faces carry no surface
+  sample: waterline rings graze their rims tangentially and the box
+  finish is structurally left to the parallel strategy (M2.2b) - the
+  test documents the jurisdiction rather than pretending the envelope
+  watched the walls. The module's entry law stands: overhangs (under-
+  cuts the ring can't see coming) refuse LOUD, verified by the same
+  scan.
+
 ## M2.1d - Engagement-based feed modulation (commit `b164c69`)
 
 - **The median-anchor law: the path's own median loaded engagement sets
