@@ -497,3 +497,52 @@ fn finish3d_waterline_cone() {
     .unwrap();
     write_golden("finish3d_waterline_cone.cl", &gen_to_cltext(&t));
 }
+
+// M2.2c - the scallop. The plateau, not the cone: its shelf (m_z = 1,
+// firmly shallow) and walls (m_z = 0, firmly steep) sit nowhere near
+// the 45-deg jurisdiction razor, so the diagonal crossing, the break
+// law and the ring handover are all pinned by this dump without a
+// single facet balanced on the split line.
+
+#[test]
+fn finish3d_scallop_plateau() {
+    use hsmworks_app::finishing3d::{parallel, Finish3DParams, FinishPattern};
+    use hsmworks_app::geometry::{Point3, Triangle};
+    let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+    // 20x20x10 block (the finish3d.rs plateau fixture's proportions):
+    // top at z 10, four walls, no bottom - a finish model, not a
+    // solid; the raster's laws need only the surfaces it rides.
+    let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
+    let (a, b, c, d) = (q(-1.0, -1.0, 0.0), q(1.0, -1.0, 0.0), q(1.0, 1.0, 0.0), q(-1.0, 1.0, 0.0));
+    let (e, f, g, h) = (q(-1.0, -1.0, 10.0), q(1.0, -1.0, 10.0), q(1.0, 1.0, 10.0), q(-1.0, 1.0, 10.0));
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let mut facets = Vec::new();
+    facets.extend(quad([e, f, g, h])); // top
+    facets.extend(quad([a, b, f, e])); // sides
+    facets.extend(quad([b, c, g, f]));
+    facets.extend(quad([c, d, h, g]));
+    facets.extend(quad([d, a, e, h]));
+    let t = parallel(
+        &facets,
+        &Finish3DParams {
+            pattern: FinishPattern::Scallop,
+            stepover: None,
+            tool_diameter: 6.0,
+            tolerance: 0.1,
+            clearance_z: 25.0,
+            retract_z: None,
+            top_z: 10.0,
+            bottom_z: 0.0,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+        },
+    )
+    .unwrap();
+    write_golden("finish3d_scallop_plateau.cl", &gen_to_cltext(&t));
+}

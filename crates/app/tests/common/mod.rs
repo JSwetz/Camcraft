@@ -121,5 +121,11 @@ pub fn write_golden(name: &str, text: &str) {
     let want = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!("cannot read golden {}: {e}; create it with WRITE_GOLDEN=1 cargo test", path.display())
     });
+    // A working copy checked out under git core.autocrlf carries CRLF where
+    // the generator writes LF. The toolpath is compared byte-exactly; the
+    // newline convention is not part of a toolpath, so the file is read to
+    // the generator's convention before comparing. Content regressions still
+    // fail identically - only `\r\n` -> `\n` is absorbed.
+    let want = want.replace("\r\n", "\n");
     assert_eq!(want, text, "golden {} is stale; regenerate with WRITE_GOLDEN=1 cargo test", path.display());
 }

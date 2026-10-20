@@ -79,7 +79,8 @@ const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
 const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
 /// The 3-D finish kinematics, in the order the combo maps them.
-const FINISH_PATTERNS: [&str; 3] = ["Waterline", "Parallel", "Parallel - multi"];
+const FINISH_PATTERNS: [&str; 4] =
+    ["Waterline", "Parallel", "Parallel - multi", "Scallop"];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
 const AMBER: Color32 = Color32::from_rgb(0xB8, 0xB8, 0xC8);
@@ -1169,6 +1170,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     hsmworks_app::finishing3d::FinishPattern::Waterline => 0,
                     hsmworks_app::finishing3d::FinishPattern::Parallel => 1,
                     hsmworks_app::finishing3d::FinishPattern::ParallelMulti => 2,
+                    hsmworks_app::finishing3d::FinishPattern::Scallop => 3,
                 };
                 let before = pat_idx;
                 combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
@@ -1176,11 +1178,12 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *pattern = match pat_idx {
                         1 => hsmworks_app::finishing3d::FinishPattern::Parallel,
                         2 => hsmworks_app::finishing3d::FinishPattern::ParallelMulti,
+                        3 => hsmworks_app::finishing3d::FinishPattern::Scallop,
                         _ => hsmworks_app::finishing3d::FinishPattern::Waterline,
                     };
                 }
                 ui.label(
-                    "Waterline: tangent rings only; Parallel adds the raster over flat ground (Multi crosses it twice)",
+                    "Waterline: tangent rings only; Parallel adds the raster over flat ground (Multi crosses it along the axes, Scallop along the diagonals)",
                 );
                 if !matches!(pattern, hsmworks_app::finishing3d::FinishPattern::Waterline) {
                     field(ui, "Stepover");

@@ -80,12 +80,19 @@ use crate::machining2d::{cut_levels, fit_arcs, GenError, Seg};
 /// Z-level ring ladder; Parallel adds the Z-following shallow raster
 /// (walls keep riding the rings - the auto-split, see the module
 /// laws); ParallelMulti runs the raster twice, one pass per XY axis,
-/// so the cusp budget is spent along both directions.
+/// so the cusp budget is spent along both directions; Scallop runs
+/// it twice along the DIAGONALS - the constant-cusp promise: no
+/// linear terrain feature (which in this codebase's prismatic
+/// models means none aligned to X or Y) can run parallel to both
+/// families, so no feature's cusp escapes a crossing cut. The flat
+/// cusp of the crossed pair is the single family's - the kernel
+/// measures it, and no analytic sqrt(2) discount is claimed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FinishPattern {
     Waterline,
     Parallel,
     ParallelMulti,
+    Scallop,
 }
 
 /// Everything the 3D finishers need that the tool and geometry don't
@@ -787,19 +794,32 @@ fn raster_pass(
     Ok(true)
 }
 
-/// The Parallel strategy: the shallow terrain cut once, Z-following,
-/// in each raster direction the pattern asks for; then the waterline
-/// rings run the steep flanks at the same scallop ladder - the
-/// auto-split, in one toolpath, with the two strategies meeting at
-/// the shared 45° jurisdiction line.
+/// The raster strategies (Parallel, ParallelMulti, Scallop): the
+/// shallow terrain cut Z-following in each direction the pattern
+/// asks for - once (Parallel), across the axes (ParallelMulti), or
+/// across the diagonals (Scallop); then the waterline rings run the
+/// steep flanks at the same scallop ladder - the auto-split, in one
+/// toolpath, with the two strategies meeting at the shared 45°
+/// jurisdiction line.
 pub fn parallel(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    let mut emitted = raster_pass(&mut b, p, r, &sups, 1.0, 0.0, false)?;
-    if p.pattern == FinishPattern::ParallelMulti {
-        emitted |= raster_pass(&mut b, p, r, &sups, 0.0, 1.0, emitted)?;
+    // The crossing pair's directions. Scallop's are ±45 degrees:
+    // the axes are already taken by ParallelMulti, and on prismatic
+    // terrain the diagonals are the only directions no single-axis
+    // raster ever crosses head-on.
+    let d = std::f64::consts::FRAC_1_SQRT_2;
+    let crossed = matches!(p.pattern, FinishPattern::ParallelMulti | FinishPattern::Scallop);
+    let (ax, ay, bx, by) = match p.pattern {
+        FinishPattern::Scallop => (d, d, d, -d),
+        FinishPattern::ParallelMulti => (1.0, 0.0, 0.0, 1.0),
+        _ => (1.0, 0.0, 0.0, 0.0),
+    };
+    let mut emitted = raster_pass(&mut b, p, r, &sups, ax, ay, false)?;
+    if crossed {
+        emitted |= raster_pass(&mut b, p, r, &sups, bx, by, emitted)?;
     }
     // Then the rings, from wherever the raster left the tool: the
     // Some(clearance) marker makes the first ring's level-change

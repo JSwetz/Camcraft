@@ -2053,6 +2053,57 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         Some((hsmworks_app::finishing3d::FinishPattern::Parallel, None)),
         "undo must restore the defaults the cell seeded"
     );
+    // M2.2c: the Scallop word rides the same command lane. Stage it,
+    // apply, and the world reads the crossed diagonals; undo returns
+    // to the auto-split default.
+    {
+        let sh = harness.state_mut();
+        sh.state.sync_ops_ui();
+        if let OpParams::Finish3D { pattern, .. } = &mut sh.state.op_ui.params {
+            *pattern = hsmworks_app::finishing3d::FinishPattern::Scallop;
+        }
+    }
+    harness.run();
+    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Apply Parameters").click();
+    harness.run();
+    let st = &harness.state().state;
+    let op = model::find_by_name(&st.world, "Operation2")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|o| match o.params {
+            OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
+            _ => panic!("kind drift"),
+        });
+    assert_eq!(
+        op,
+        Some((hsmworks_app::finishing3d::FinishPattern::Scallop, None)),
+        "Apply must carry the scallop word to the world"
+    );
+    harness
+        .input_mut()
+        .events
+        .push(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.input_mut().events.push(Event::Key {
+        key: Key::Z,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let back = model::find_by_name(&st.world, "Operation2")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|o| match o.params {
+            OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
+            _ => panic!("kind drift"),
+        });
+    assert_eq!(
+        back,
+        Some((hsmworks_app::finishing3d::FinishPattern::Parallel, None)),
+        "undo must invert the scallop apply like any other"
+    );
 }
 
 #[test]

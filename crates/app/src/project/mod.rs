@@ -457,6 +457,9 @@ pub enum FinishPatternDto {
     Waterline,
     Parallel,
     ParallelMulti,
+    /// M2.2c: a new word in an existing grammar - v16 files never
+    /// carried it and still read unchanged, so no version step-up.
+    Scallop,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -465,6 +468,7 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::Waterline => crate::finishing3d::FinishPattern::Waterline,
             FinishPatternDto::Parallel => crate::finishing3d::FinishPattern::Parallel,
             FinishPatternDto::ParallelMulti => crate::finishing3d::FinishPattern::ParallelMulti,
+            FinishPatternDto::Scallop => crate::finishing3d::FinishPattern::Scallop,
         }
     }
 }
@@ -475,6 +479,7 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::Waterline => FinishPatternDto::Waterline,
             crate::finishing3d::FinishPattern::Parallel => FinishPatternDto::Parallel,
             crate::finishing3d::FinishPattern::ParallelMulti => FinishPatternDto::ParallelMulti,
+            crate::finishing3d::FinishPattern::Scallop => FinishPatternDto::Scallop,
         }
     }
 }

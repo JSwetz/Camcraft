@@ -985,3 +985,138 @@ fn parallel_refusals_are_clean() {
     let _ = parallel(&scatter, &ppattern(1.0, 0.0, FinishPattern::ParallelMulti));
 }
 
+// ---------------------------------------------------------------------------
+// M2.2c - scallop: the same raster family crossed along the diagonals.
+// The constant-cusp promise is MEASURED, per the kernel's law: the
+// crossed pair buys directional coverage (no linear terrain feature is
+// parallel to both families), not an analytic discount on the flat.
+// ---------------------------------------------------------------------------
+
+/// Straight (non-arc) feeds bucketed by XY direction: runs along the
+/// diagonals, either sense, and along the axes.
+fn dir_buckets(t: &Toolpath) -> (usize, usize, usize) {
+    let (mut d1, mut d2, mut ax) = (0, 0, 0);
+    for m in &t.moves {
+        if m.kind != MoveKind::Feed || m.arc.is_some() {
+            continue;
+        }
+        let (dx, dy) = ((m.to.x - m.from.x).abs(), (m.to.y - m.from.y).abs());
+        if dx < 1e-9 || dy < 1e-9 {
+            continue; // vertical or degenerate: says nothing of direction
+        }
+        if (dx - dy).abs() <= 0.2 * (dx + dy) {
+            if (m.to.x - m.from.x) * (m.to.y - m.from.y) > 0.0 {
+                d1 += 1;
+            } else {
+                d2 += 1;
+            }
+        } else {
+            ax += 1;
+        }
+    }
+    (d1, d2, ax)
+}
+
+#[test]
+fn scallop_crosses_the_diagonals_and_measures_clean() {
+    // The headline: both diagonal senses run real feeds, and the
+    // envelope kernel signs off on the whole path - gouge and cusp
+    // both inside the gate, measured on the grid.
+    let f = dome();
+    let t = parallel(&f, &ppattern(18.0, RIM_Z, FinishPattern::Scallop)).expect("scallop dome");
+    let (d1, d2, ax) = dir_buckets(&t);
+    assert!(d1 > 50 && d2 > 50, "scallop not crossing the diagonals: {d1} / {d2}");
+    // The dome's steep flanks belong to the ring ladder (the M2.2b
+    // jurisdiction law), and a circle's chords run near-axis at the
+    // cardinal points - so a few axis-parallel feeds are the LADDER's
+    // signature, not a family's. The law that IS pattern-shape: the
+    // crossed pair carries the bulk of the cut on the shallow ground.
+    assert!(ax * 2 < d1 + d2, "axis feeds {ax} outweigh the cross {}", d1 + d2);
+    assert_no_feed_spans_a_step(&t);
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+    assert_eq!(verify_finish(&f, &t, 18.0), Vec::new(), "the verifier agrees");
+}
+
+#[test]
+fn scallop_plateau_is_constant_cusp_on_the_shelf() {
+    // The prismatic case the diagonals exist for: a flat shelf ringed
+    // by vertical walls. The crossed pair must hold the cusp
+    // everywhere and never drag a feed across a wall.
+    let f = plateau();
+    let t = parallel(&f, &ppattern(10.0, 0.0, FinishPattern::Scallop)).expect("plateau scallop");
+    let (d1, d2, _) = dir_buckets(&t);
+    assert!(d1 > 10 && d2 > 10, "shelf not rastered diagonally: {d1} / {d2}");
+    assert_no_feed_spans_a_step(&t);
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+    assert_eq!(verify_finish(&f, &t, 10.0), Vec::new(), "the verifier agrees");
+}
+
+#[test]
+fn scallop_holds_the_cos_law_on_the_tilted_shelf() {
+    // Same terrain the parallel cos-law test measures, crossed: the
+    // lines run ±45 to the fall, so each family meets the slope at
+    // 45 and the global min(m_z) law still under-promises (spends)
+    // stepover, never over-spends it. Clean envelope is the promise.
+    // half = 8, exactly the cos-law fixture: the plane's full extent
+    // stays inside the op's [4, 14] band - a shelf tilted 30 deg out
+    // of a 60 mm block falls below its own base and far above the
+    // op's top, and a kernel verdict on a self-intersecting model
+    // measures the fixture bug, not the pattern law.
+    let f = tilted(PI / 6.0, 8.0);
+    let t = parallel(&f, &ppattern(14.0, 4.0, FinishPattern::Scallop)).expect("tilted scallop");
+    // Both diagonal senses ride the shelf. The third bucket (axis-
+    // parallel feeds) is the wall ladder's - vertical walls ARE the
+    // steep terrain the M2.2b jurisdiction law hands to the rings -
+    // so no closed fixture is pure-cross and purity is not the claim.
+    let (td1, td2, _) = dir_buckets(&t);
+    assert!(td1 > 0 && td2 > 0, "tilted cross lost a sense: {td1} / {td2}");
+    assert_no_feed_spans_a_step(&t);
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+}
+
+#[test]
+fn scallop_pocket_floor_gets_its_own_cross() {
+    // The step_pocket: floor and shelf both shallow, walls steep.
+    // Both regions must be ridden by diagonal lines and the ring
+    // ladder, with the floor-outranks law keeping each region's
+    // lines on its own ground.
+    let f = step_pocket();
+    let t = parallel(&f, &ppattern(10.0, 5.0, FinishPattern::Scallop)).expect("pocket scallop");
+    let on_floor = t
+        .moves
+        .iter()
+        .any(|m| m.kind == MoveKind::Feed && (m.to.z - 5.0).abs() < 1e-6);
+    let on_shelf = t
+        .moves
+        .iter()
+        .any(|m| m.kind == MoveKind::Feed && (m.to.z - 10.0).abs() < 1e-6);
+    assert!(on_floor && on_shelf, "a shallow region went uncrossed");
+    assert_no_feed_spans_a_step(&t);
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+}
+
+#[test]
+fn scallop_shares_the_raster_refusals() {
+    // Same generator, so the refusal set is the parallel's - and the
+    // all-steep wall still generates on rings alone.
+    let p = ppattern(10.0, 0.0, FinishPattern::Scallop);
+    assert!(parallel(&[], &p).is_err(), "an empty model must not pass");
+    assert!(
+        parallel(&plateau(), &Finish3DParams { stepover: Some(0.0), ..p }).is_err(),
+        "a zero stepover is nonsense"
+    );
+    let wall = vec![
+        Triangle::new(p3(-5.0, 0.0, 0.0), p3(5.0, 0.0, 5.0), p3(5.0, 0.0, 0.0)),
+        Triangle::new(p3(-5.0, 0.0, 0.0), p3(-5.0, 0.0, 5.0), p3(5.0, 0.0, 5.0)),
+    ];
+    assert!(parallel(&wall, &ppattern(5.0, 0.0, FinishPattern::Scallop)).is_ok());
+}
+

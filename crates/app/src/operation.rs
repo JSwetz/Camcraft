@@ -627,16 +627,18 @@ pub enum OpParams {
     /// locus of the forbidden region at its center plane, levels
     /// stepped by the scallop law - `Δz = 2√(r·tol)` - so there is no
     /// stepdown field: the tolerance IS the depth increment's author
-    /// (see [`crate::finishing3d`]). `Parallel`/`ParallelMulti`: a
-    /// Z-following raster over the shallow terrain, then the same
-    /// scallop ladder's rings on the steep flanks - the 45°
-    /// auto-split, one jurisdiction line for both halves. Region,
+    /// (see [`crate::finishing3d`]). `Parallel`/`ParallelMulti`/
+    /// `Scallop`: a Z-following raster over the shallow terrain (once
+    /// along X, crossed along the axes, crossed along the diagonals),
+    /// then the same scallop ladder's rings on the steep flanks - the
+    /// 45° auto-split, one jurisdiction line for both halves. Region,
     /// heights and refusals follow the 3-D pocket's laws exactly:
     /// silhouette footprint, resolved top/bottom, mesh-computed
     /// everything.
     Finish3D {
         /// Which kinematic generates the path. Waterline is the
-        /// M2.2a default; Parallel adds the raster (M2.2b).
+        /// M2.2a default; Parallel adds the raster (M2.2b),
+        /// ParallelMulti and Scallop cross it (M2.2c).
         pattern: finishing3d::FinishPattern,
         /// Raster line spacing, mm; `None` (always for Waterline)
         /// follows the stepover cos-law from the tolerance instead -
@@ -3037,7 +3039,8 @@ pub fn generate(
                     finishing3d::waterline(&material.facets, &fp)?
                 }
                 finishing3d::FinishPattern::Parallel
-                | finishing3d::FinishPattern::ParallelMulti => {
+                | finishing3d::FinishPattern::ParallelMulti
+                | finishing3d::FinishPattern::Scallop => {
                     finishing3d::parallel(&material.facets, &fp)?
                 }
             };

@@ -1649,6 +1649,31 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
         matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
         "a v16 file with stepover 0.0 must not load"
     );
+
+    // M2.2c: "scallop" is a new word in the same v16 grammar - no
+    // version bump, because no v16 file ever carried it and every
+    // v16 file still reads exactly as it did.
+    let sc = text.replace("\"parallel_multi\"", "\"scallop\"");
+    let world4 = new_world();
+    project::open(&world4, &sc).expect("the scallop spelling must read");
+    let e4 = model::find_by_name(&world4, "F1").expect("op");
+    let o4 = model::operation_of(&world4, &e4).expect("operation");
+    let OpParams::Finish3D { pattern, .. } = &o4.params else {
+        panic!("finish3d params expected");
+    };
+    assert_eq!(*pattern, hsmworks_app::finishing3d::FinishPattern::Scallop);
+    let path_sc = tmp_path("v16s");
+    project::save(&world4, &path_sc).expect("save");
+    let saved_sc = std::fs::read_to_string(&path_sc).expect("read");
+    let _ = std::fs::remove_file(&path_sc);
+    assert!(saved_sc.contains("\"pattern\": \"scallop\""), "{saved_sc}");
+    // An unknown pattern word is refused, never defaulted.
+    let bogus = text.replace("\"parallel_multi\"", "\"zigzag\"");
+    let world5 = new_world();
+    assert!(
+        matches!(project::open(&world5, &bogus), Err(ProjectError::Corrupt(_))),
+        "a v16 file with an unknown pattern must not load"
+    );
 }
 
 #[test]
