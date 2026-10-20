@@ -841,7 +841,24 @@ before touching metal.
       (proved on the full release suite). Over the 1.2 M-cell /
       40 M-claim budgets the solid scan answers with the stated zero -
       the field's debt stays on the books.
-- **Contour / Ramp / Project**: finishing family around the model
+- ✅ **Contour and Project** (M2.2e): the around-the-model families -
+      Contour shrinks the terrain's CENTER-SHADOW (every shallow
+      facet's XY triangle translated by `r·m_xy`: the set of XY points
+      where a ball can rest tangent AT SOME HEIGHT) one stepover per
+      pass until it collapses at its medial axis; Project marches
+      only that shadow's boundary - the model's silhouette, XY kept,
+      Z lifted by the march's own tangent-and-clear law. A closed
+      loop marched on unbroken ground COMES BACK CLOSED: the clamp
+      sample at arc length L lands on the entry point, and the
+      duplicate law keeps it as the return move, not a stutter. Both
+      reuse `march_curve` verbatim (two truths, one code), close on
+      the ring ladder like every family, and enter the v16 grammar
+      as append-only ordinals 6 and 7. The stepover COST question
+      (the ring-cap guard) speaks only where spacing marches -
+      Project's one rim pays nothing for it - while `validate`'s
+      early gate still refuses a numberless spacing from every
+      pattern, the Waterline precedent intact.
+- **Ramp entries** for the raster families: diagonal chain law
 - **Surface finish parameters**: tolerance, stepover, minimum step, ramp angle
 - ✅ **Tolerance verification** (M2.2a): the deviation is MEASURED, not
       assumed - `stock_sim::envelope_scan`'s two truths against the
@@ -985,7 +1002,7 @@ to each subcrate to make testing cleaner.
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) | ✅ |
-| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop, the polar placements (radial, spiral) and the solid-truth hidden rest done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair, ray-parity material intervals); contour/ramp/project and surface-finish params open | ⚠️ |
+| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop, the polar placements (radial, spiral), the solid-truth hidden rest and the center-shadow families (contour, project) done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair, ray-parity material intervals, closed-loop march); ramp entries and surface-finish params open | ⚠️ |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
 | **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |

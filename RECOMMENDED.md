@@ -9,6 +9,58 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.2e - Around the model, stage C: the center-shadow families and the two-door spacing law (this commit)
+
+- **The shadow, not a level: one XY domain for a height-free
+  family.** Contour and Project march Z-following loops over ground
+  that has no single center-height - so their placement region is
+  NOT `level_region`'s z-slice but the terrain's CENTER-SHADOW: every
+  shallow facet's XY triangle TRANSLATED by `r·m_xy` (a plane's
+  tangent centers form that plane shifted by its lean; the shadow of
+  that sheet is the shifted triangle), unioned. Steep facets
+  contribute nothing - the same jurisdiction every other family
+  keeps - and holes of the shadow (islands, air under an overhang)
+  answer through `support_at`'s own ball-clear law: a center that
+  cannot rest simply breaks the piece, never a lie. Cost to change:
+  the shadow is one function; making it z-aware later would just
+  mean re-slicing it per level, but then it stops being one truth
+  about the plan view and starts being N truths, one per rung.
+- **A closed loop closed BY the march.** `march_loop` turns a Region
+  loop into an arc-length parameterization (cumulative chords,
+  summed in walk order) and feeds the shared kernel - so the
+  validity bisection, quarter-budget chords and discontinuity break
+  are not re-implemented, they are REUSED, and the ring-close falls
+  out of the sampling laws: the clamp sample at `t = L` lands exactly
+  on the entry point, and `push_run_pt`'s duplicate law (which
+  compares against the PREVIOUS point, not the first) keeps it as
+  the closing move. A test now pins it on the plateau. The other
+  half of the law: a loop that broke at a shelf mouth does NOT close
+  - its piece ends where the ground ended.
+- **Outermost-first, entry-point-second - loop order as a fact about
+  the model.** Clipper's memory is not a deterministic source, and a
+  stamp that churns is a stamp that lies, so `shadow_pass` sorts by
+  |area| descending, then by first point (x, then y). Both orders
+  total under f64::total_cmp. Same law the rings' area-sort serves.
+- **The two-door spacing law (a test-failure that reversed a claim).**
+  Stage C's design note said "Project ignores the stepover" after the
+  Waterline precedent. The first test run proved that claim WRONG in
+  the interesting direction: `validate`'s early gate refuses a
+  zero/NaN stepover from EVERY pattern - even one that never reads
+  it - because AGENTS.md's "validate early" outranks "ignore
+  gracefully", and Waterline already pays that gate today. So the
+  honest split is TWO doors: the GATE (is the number a number) speaks
+  to all patterns; the COST guard (8192-ring cap, the arithmetic
+  message) speaks only where spacing marches - contour at a hairline
+  stepover is hours of rings and must refuse; project's single rim
+  costs no spacing budget and sails past the guard. The shipped test
+  pins both doors separately.
+- **The immortal-sliver belt.** The cap guard rejects a family that
+  would NEED more than 8192 offsets; the while-loop additionally
+  breaks at 8194 rings whatever the guard said, so numerically
+  immortal geometry (a sliver that refuses to collapse) yields a
+  long honest path, never a hang. A CAM kernel must terminate on its
+  own arithmetic, not on its optimizer's.
+
 ## M2.2d - Polar placements, stage B: radial chords, the spiral, and the march that must end (this commit)
 
 - **The polar families are raster families by construction.** Radial
