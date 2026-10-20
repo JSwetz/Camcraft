@@ -9,6 +9,122 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.2d - Polar placements, stage B: radial chords, the spiral, and the march that must end (this commit)
+
+- **The polar families are raster families by construction.** Radial
+  lays `N = ceil(π·R/s)` chords through the shallow footprint's center
+  - arc spacing at the rim meets the cos-law stepover, and toward the
+  center they overlap ever more (the cusp law is a bound, never a
+  quota); the spiral is ONE Archimedean curve in from the silhouette,
+  ending a half-stepover from the pole because the next turn would
+  only retrace. Both share the parallel raster's actual machinery:
+  one adaptive march (`march_curve`: validity bisection, the quarter-
+  budget chord refinement, the discontinuity break), one hop
+  choreography (`emit_runs`), one ring close (`rings_and_tail`).
+  Three ground layouts, one set of laws - and the extraction is
+  byte-identical for the old paths (the float algebra that keeps it
+  so: `4.0 * delta0 == delta0 * 4.0` exactly, `* 1.0` exact), every
+  golden unchanged. Over a cap of 8192 ground lines the placement
+  refuses with its arithmetic in the message - it is a bound on
+  march-hours, not a taste. Cost to change: a fourth layout should
+  join this trio, not fork another march.
+
+- **A parameter march ends by a labeled break, not by fixture luck.**
+  The spiral always reaches the END of its parameter range standing
+  on valid ground (its inner limit is cuttable hill, by the apex
+  law); the two-level loop - `while t <= t1` around an inner `loop` -
+  took the "no progress" break at the inner level, returned to the
+  outer condition, found it still TRUE at t == t1, re-clamped the
+  same sample: a silent infinite spin. Twenty release minutes of it
+  before the suspicion was right. The extracted raster code had the
+  SAME structure, hidden only because a raster march always dies at
+  the bbox edge, in the skip phase whose bare `break` does exit the
+  while. Now both no-progress arms - clamp-landed and float
+  stagnation (`t + delta·unit(t) == t` with t < t1: the parameter has
+  grown too far for the step to move it) - `break 'march` outright.
+  Cost to change: every future parameterized curve (any M2.2e
+  family) must keep BOTH breaks; re-deriving the exit per family is
+  how this bug survived a whole milestone of green gates.
+
+- **Ring strokes and march samples obey different laws, and Z tells
+  them apart.** Building the structural test surfaced it: the rings
+  legitimately emit long lateral Feeds - iso-z tangent loci, and the
+  exact-straight collapse keeps a wall's length chord-free - while
+  the march owes the stepdown budget per move. So the test bounds
+  XY-span on the FEEDS THAT CHANGE Z (rings ride one tip plane; on a
+  curved model every march sample climbs). Related, logged as known
+  behavior rather than a phantom: a lone sheet gets edge-grazing
+  rings at EVERY ladder level - the forbidden-center law is being
+  faithful (tangent = zero material removed), not leaking; on a
+  closed solid those same levels hug the walls.
+
+- **Append-only ordinals slot polar words into the v16 grammar with
+  no bump.** `Radial = 4`, `Spiral = 5` extend FinishPattern, digest
+  into the stamp through the existing `*pattern as u8` (since
+  M2.2b), and write as new words in the same `pattern` field; older
+  files never see them, unknown words still refuse Corrupt, so no
+  cross-version confusion is reachable. Cost to change: reordering
+  the enum invalidates every digest - all finishing ops' stamps go
+  stale at once; the append-only law is a cache law, not aesthetics.
+
+## M2.2d - Hidden rest: solid truth behind the height field, stage A (this commit)
+
+- **Parity membership is decided by CLAIMS, not by half-open edge
+  ownership.** The textbook ray-parity test needs each column to count
+  every coincident sheet once per sheet. The clever O(1) alternative -
+  per-triangle half-open (u,v >= 0, u+v < 1) ownership of shared
+  edges - FAILS twice over: a closed box's center sits ON both caps'
+  shared diagonal, and cancelling the pair (the natural "two claims,
+  one crossing" reflex) erases a real crossing; two flush sheets
+  stacked face-on-face collapse to one crossing and lie about
+  material. The shipped law (solid_rest law (a)): every containing
+  facet claims INTERIOR (strict barycentric beyond 1e-12) or
+  BOUNDARY; at each coincident-z cluster, per plane group (normals
+  equal up to sign - winding-blind, law (c)), crossings = interior
+  count, else 1 for bare boundary claims (adjacent pieces of ONE
+  sheet merge honestly). The knife edge - a column riding two flush
+  sheets' own shared edge - cannot be told apart, and the merge
+  chooses to merge: the result is ODD and reported `Crossings::Open`,
+  an unknown, never asserted material. Doubt biases toward unknown
+  because unknown costs a report, a lie costs a crash. Cost to
+  change: any edge-ownership shortcut re-opens the diagonal hole;
+  the claim lists are what a future BVH pruning feeds on, so the
+  interface survives, the settles do not.
+- **The union is in the FIELD only - hidden rest never touches a
+  predicate.** `EnvelopeReport.rest_mm`/`at` gain the solid truth
+  (material tops occluded by a ceiling, judged by the SAME distance
+  law: nearest center - r - floor); the ridge pass, rest_cells,
+  gouge and the tolerance math are computed exactly as before. Every
+  existing golden is byte-identical (proved: release full-suite
+  regression alongside this commit) because on prismatic fixtures
+  the highest paired interval top IS the height-field top, so the
+  occlusion filter (`hi >= t - floor: continue`) rejects everything.
+  Cost to change: folding hidden rest into rest_cells would make the
+  standing-mask region depend on ray parity - the region and the
+  scalar would stop agreeing, and `measure`'s removal accounting
+  rides the region.
+- **Over budget the hidden scan answers with the STATED ZERO.** The
+  per-column claim bins cost 24 B/cell plus claims; budgets are
+  1.2 M cells (~30 MB of headers) and 40 M claims. Beyond them
+  hidden_rest returns 0.0, i.e. "the height field's debt stays on
+  the books" - the report degrades to exactly M2.2c behavior, and
+  the degrade is structural (a missing number), not a guessed one.
+  Discussion point: a `rest_hidden: bool`-style flag on
+  EnvelopeReport saying "the solid scan skipped" - cheap to add,
+  would make the zero visible instead of inferable; left off this
+  stage because nothing reads it yet.
+- **The hidden scan has NO XY window on the distance loop; the ridge
+  law's soundness argument does not transfer.** Pruning segs to the
+  column's r + band square is valid for the ridge pass ONLY because
+  its near >= 2 predicate masks the case where a far-but-relevant
+  seg exists; with every segment excluded the ridge law's `continue`
+  fires first. A hidden column has no such mask: dmin = infinity
+  would silently report "reachable" for deep material. The full
+  O(columns x segs) distance loop is therefore deliberate; it is the
+  honest half of the cost of the union. Cost to change: a proper
+  XY BVH over segs with an exact lower-bound - the window's
+  failure mode, not its shape.
+
 ## M2.2c - Scallop as the diagonal cross (this commit)
 
 - **Gate speed, measured and then halved: the kernel tests are

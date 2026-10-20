@@ -812,7 +812,36 @@ before touching metal.
       `Mode::Envelope` (crossed feeds at shared depth are the pattern,
       not a defect), 2D verdicts untouched; the pattern word slots into
       the v16 grammar without a version bump.
-- **Contour / Ramp / Spiral / Radial / Project**: finishing family around the model
+- ✅ **Radial and Spiral** (M2.2d): the polar ground layouts ridden by
+      the march's own laws - Radial sends `N = ceil(π·R/s)` chords
+      through the shallow footprint's center, so arc spacing at the rim
+      meets the cos-law stepover (the overlap toward the center is
+      correct, merely redundant: the cusp law is a bound, never a
+      quota); Spiral winds ONE Archimedean curve in from the silhouette
+      and stops a half stepover from the pole, where the next turn
+      would only retrace. Both reuse the raster's machinery verbatim -
+      the adaptive march (validity bisection, quarter-budget chords,
+      the discontinuity break), the hop re-entry, and the rings that
+      take the steep flanks - and slot into the v16 grammar as
+      append-only ordinals, no version bump. The parameterized march
+      ends by a labeled break now: the spiral always arrives at its
+      end-of-range on valid ground, where a bare break returns to a
+      still-true loop condition and spins (the same latent exit the
+      raster's fixtures had only been hiding by always dying at the
+      bbox edge).
+- ✅ **Hidden rest, the solid truth** (M2.2d): the envelope's rest
+      number pays M2.2b's logged debt. A vertical column through the
+      model is a ray: paired crossings bound material intervals - the
+      claims law (coincident-plane groups count interior claims, merge
+      bare-boundary ones into one, and report an odd column as
+      unknown, never as material). Every interval top the swept ball
+      never touched, sheltered under a ceiling, raises `rest_mm` when
+      it exceeds the height-field figure - and only then: ridge
+      predicate, rest_cells, gouge and every golden byte-untouched
+      (proved on the full release suite). Over the 1.2 M-cell /
+      40 M-claim budgets the solid scan answers with the stated zero -
+      the field's debt stays on the books.
+- **Contour / Ramp / Project**: finishing family around the model
 - **Surface finish parameters**: tolerance, stepover, minimum step, ramp angle
 - ✅ **Tolerance verification** (M2.2a): the deviation is MEASURED, not
       assumed - `stock_sim::envelope_scan`'s two truths against the
@@ -854,6 +883,7 @@ own.
 **Goal: multi-setup production jobs with paperwork.**
 
 - **Multiple setups**: flipping strategies, per-setup stock / fixture / WCS, setup-to-setup datum transfer
+- **Seperate workspaces**: Turning, Milling, Millturning. Extras (not critical but for the future): Sinker Electric Discharge Machining, Wire Electric Discharge machining, Laser/Plasma cutting, working with other setup types.
 - **Fixture modeling**: vises, clamps, and tables that collision checking knows about
 - **Setup sheets**: printable setup documentation with tools, offsets, and stock (like the images in the [SolveCraft setup sheet reference](https://github.com/bherbruck/solvecraft/blob/main/Documentation/reference/setup-sheet/README.md) but generated from our CAM data)
 - **Tool list**: per-setup tool inventory with change counts and run time
@@ -923,6 +953,24 @@ programming department.
 
 ---
 
+## Phase 5 - Refactoring and reuseability.
+
+The rust codebase is to complicated and convoluted. All motion types, operations, tool management,
+heights and offsets, movement, simulation.. Etc etc. Should be isolated as smaller subcreates. Code
+files should be no larger than 400 lines of code to keep it maintainable. All tests should be isolated
+to each subcrate to make testing cleaner.
+
+### M5.1 - Seperating the code into crates
+** Goal: Sepearting all components into smaller crates.
+
+- **Identify code blocks**: Identify and map out code for operations, setups, machines etc etc. all the parts that make out the application
+- **Chunk the parts up**: Cut all the parts apart and refactor.
+- **Move tests**: Move tests to their relevant crates.
+- **Run tests**: Make sure each crates test can be run individuall.
+-- **Clean up**: Make sure all tests pass, code compiles and applicatiotn passes a user test.
+
+---
+
 ## Milestone Summary
 
 | Milestone | Goal | Key Features | Status |
@@ -937,7 +985,7 @@ programming department.
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) | ✅ |
-| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair); the finishing family and surface-finish params open | ⚠️ |
+| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop, the polar placements (radial, spiral) and the solid-truth hidden rest done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair, ray-parity material intervals); contour/ramp/project and surface-finish params open | ⚠️ |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
 | **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |
@@ -945,6 +993,7 @@ programming department.
 | **M4.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
 | **M4.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M4.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
+| **M5.1** | Code refactor | Refactor of codebase, test, and code organisation. | 📋 |
 
 ## Open questions & deferred
 
