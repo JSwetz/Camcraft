@@ -803,7 +803,15 @@ before touching metal.
       refused clean on flat-bottomed tools, bad tolerances and an
       empty model. Feed at tip-Z; the center rides `z + r` - one law,
       every altitude in the kernel.
-- **Scallop**: constant cusp height
+- ✅ **Scallop** (M2.2c): the raster family rotated to the diagonals
+      (±45°, the directions no axis-aligned feature runs parallel to)
+      - the constant cusp measured per law (f), never bought with an
+      analytic √2 discount a union-of-removals argument says a crossed
+      pair never had on flat ground. One generator with Parallel, all
+      its refusals; `verify`'s Crossing law stands down in
+      `Mode::Envelope` (crossed feeds at shared depth are the pattern,
+      not a defect), 2D verdicts untouched; the pattern word slots into
+      the v16 grammar without a version bump.
 - **Contour / Ramp / Spiral / Radial / Project**: finishing family around the model
 - **Surface finish parameters**: tolerance, stepover, minimum step, ramp angle
 - ✅ **Tolerance verification** (M2.2a): the deviation is MEASURED, not
@@ -929,7 +937,7 @@ programming department.
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) | ✅ |
-| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel and the parallel raster done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split); scallop and the family open | ⚠️ |
+| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair); the finishing family and surface-finish params open | ⚠️ |
 | **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
 | **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |

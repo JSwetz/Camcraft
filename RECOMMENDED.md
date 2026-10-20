@@ -9,6 +9,96 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M2.2c - Scallop as the diagonal cross (this commit)
+
+- **Gate speed, measured and then halved: the kernel tests are
+  profile-invariant, so the overnight ladder can run them in release.**
+  The scallop dome envelope costs 1073 s single-threaded in debug (the
+  O(moves × facets) sweep is the point of law (f) - brute force, not a
+  formula). Rust's f64 is IEEE and nothing here fast-math-reassociates,
+  so the release profile computes the same bits: `golden_cl` passes
+  15/15 under `--release` against the debug-regenerated goldens,
+  0.29 s wall. Discussion point: whether future milestone gates run
+  the envelope-kernel binaries in release by default and reserve debug
+  for the refusal/round-trip suites.
+
+- **Scallop ships as the ±45-deg crossed raster - NOT as a
+  curvature-adaptive family.** The roadmap's bullet is "constant cusp
+  height", and the industry name carries two readings: (a) the
+  crossed 90-deg pair CAM tools ship, and (b) the research-grade
+  scallop whose step direction follows the surface's principal
+  curvature at every point. We implemented (a), rotated 45-deg from
+  ParallelMulti's axes so the third option genuinely adds coverage:
+  on this codebase's prismatic models every linear feature runs along
+  X or Y, and the diagonals are the only directions no single-family
+  raster crosses head-on. Discussion point: (b) is the honest M2.6
+  candidate (flow-field families, per-point sec-law); if the user
+  expects scallop to run FEWER passes than parallel at the same
+  cusp, that expectation is not met here, deliberately - see next.
+- **No sqrt(2) stepover discount, and why - the union-of-removal
+  argument.** The folklore claim "crossing halves the cusp, so step
+  over sqrt(2) wider" is FALSE for a plane: every point of the grid
+  lies within s/2 of a line in EACH family, and the removed height at
+  a point is the MAX over passes (material falls if any ball uncovers
+  it), so the crossed pattern's worst point - the cell center, s/2
+  from both - is exactly the single family's worst point: s^2/8r.
+  The crossing earns its keep on CURVED and prismatic terrain, where
+  a feature parallel to one family is cut diagonally by the other;
+  the tests measure that verdict instead of assuming either factor.
+  Cost to change: one line in `scallop_stepover`'s use if a future
+  measurement ever shows the discount is real for a specific
+  pattern - we do not ship unearned stepovers.
+- **Persistence: a new WORD is not a new GRAMMAR - v16 stands.** The
+  v16 bump at M2.2b was for two new FIELDS (needed serde defaults on
+  old files); `scallop` is a new spelling in the existing pattern
+  field: no v16 file carries it, every v16 file still reads
+  byte-identically, and an unknown word refuses as Corrupt at load
+  (tested) rather than defaulting. The stamp follows automatically:
+  `pattern as u8` = 3 for Scallop, so switching is Stale-green like
+  every other param move.
+- **The scallop golden rides the plateau, not the cone - the razor
+  rule for goldens.** The cone's flank facets sit at m_z = cos(45)
+  EXACTLY on the SPLIT_MZ jurisdiction line; a float wobble across
+  that equality flips a facet from shallow to steep and churns the
+  golden for non-law reasons. The plateau's shelf (m_z = 1) and walls
+  (m_z = 0) are nowhere near the line, so `finish3d_scallop_plateau.cl`
+  pins the diagonal crossing, the break law and the ring handover
+  with zero razor. (Waterline's cone golden predates the raster and
+  never reads `shallow`, so it stays.)
+- **The scallop test flipped a bug hunt: `verify`'s Crossing law is
+  blind in Envelope mode.** The first scallop battery went red with
+  ~100 `Crossing` warnings on dome, plateau and tilt - while the
+  envelope kernel called all three paths clean. The two verdicts
+  disagree because the law predates crossed rasters: "two feeds
+  cross in XY at shared depth" was written when that phrase could
+  only mean a chord dragged across a pocket, and a scallop makes it
+  mean "the two families did their job." Standing it down in
+  `Mode::Envelope` (law comment at the gate, module doc updated) is
+  the honest shape - the chord that could actually hurt there is a
+  chord biting into or sailing above the surface, and law (f)
+  measures exactly that, move by move. The 2D modes keep the law
+  byte-identical (the verify.rs tests at `Mode::Area` still assert
+  it fires). Side effect worth knowing: the law was quadratic in the
+  move count, and the finish3d battery spent 1866 s - most of it in
+  Envelope-mode verifies that were about to report only by-design
+  crossings. Expect the suite to run dramatically faster.
+- **A fixture bug, not a pattern bug: the tilted scallop's "gouge."**
+  The one failure after the verify fix put 1.09 mm of gouge at a
+  corner of a `tilted(30deg, half = 60)` slab - a mesh whose tilted
+  top falls below its own base and 30 mm above the op's declared
+  band. Tangent balls cannot gouge a plane, so the kernel was
+  correctly measuring a self-intersecting model. Switched to the
+  `half = 8` fixture the cos-law test actually uses (comment states
+  the law). Discussion point: nothing today refuses a non-solid
+  model at import or generation - a validation pass for the
+  M3-era audit list, if the user wants degenerate-mesh refusals
+  priced in.
+- **Scallop reuses `parallel()` end to end** - same raster_pass,
+  cos-law, flush/break laws, ring auto-split, refusals, stepover
+  override. The variant buys its two directions in the match arm;
+  every raster refusal test is a `scallop_shares_the_raster_refusals`
+  call, not a copy of the parallel set.
+
 ## M2.2b - Parallel raster, the 45-deg auto-split, and two bug hunts (commit `ac7413c`)
 
 - **The underside "gouge" was our fixture, not the generator - and the
