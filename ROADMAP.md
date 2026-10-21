@@ -867,7 +867,17 @@ before touching metal.
       the 4096-probe cap - the hop stands. First contacts and the
       ring families never route through the chain, and `ramp: false`
       (every pre-v17 file) is byte-identical to the old behavior.
-- **Surface finish parameters**: tolerance, stepover, minimum step, ramp angle
+- ✅ **Surface finish parameters** (M2.2a–E): tolerance, stepover,
+      minimum step, ramp angle - all four now live and all four
+      MEASURED, not assumed. `tolerance` is the deviation the path
+      promises and the envelope keeps (A); `stepover` the cusp
+      between parallel lines, exact under the scallop law (B);
+      `min_step` a floor under the march's refinement - the chord
+      halving halts AT it while the run edges stay the material's
+      own (E); `ramp_angle` the slope the diagonal chain may
+      descend, 45 deg by default - v17's implicit gift spelled, so
+      every pre-v18 path is byte-identical (E). Wire v18; the
+      corrugated belt and the tilted wedge are the witnesses.
 - ✅ **Tolerance verification** (M2.2a): the deviation is MEASURED, not
       assumed - `stock_sim::envelope_scan`'s two truths against the
       swept ball: gouge as dexel deviation (every ball's lowest point
@@ -992,7 +1002,16 @@ to each subcrate to make testing cleaner.
 - **Chunk the parts up**: Cut all the parts apart and refactor.
 - **Move tests**: Move tests to their relevant crates.
 - **Run tests**: Make sure each crates test can be run individuall.
--- **Clean up**: Make sure all tests pass, code compiles and applicatiotn passes a user test.
+- **Clean up**: Make sure all tests pass, code compiles and applicatiotn passes a user test.
+
+### M5.2 - Multi plattform build targets.
+** Goal: Building the same application, for multiple OS environments. Using docker build
+containers for compiling and artefact output to a mounted volume/folder
+
+- **Windows**: First usecase, its what we got.
+- **Linux**: Prioritized build case, where we will have most adopters.
+- **MacOSX**: Secondary prioritsation.
+- **WASM**: A web version for online use.
 
 ---
 
@@ -1019,6 +1038,7 @@ to each subcrate to make testing cleaner.
 | **M4.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M4.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
 | **M5.1** | Code refactor | Refactor of codebase, test, and code organisation. | 📋 |
+| **M5.2** | Multibuilds | Refactor of codebase is done and application builds for multipls OS and environments. | 📋 |
 
 ## Open questions & deferred
 

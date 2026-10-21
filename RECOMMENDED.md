@@ -1475,6 +1475,56 @@ reads exactly like the law.
   own formula (CELL_H 35, RIBBON_H 61) rather than the spike's squeezed
   49px strip. Cost to change: none - this is how Rerun-scale apps do it.
 
+
+## M2.2e stage E — the two surface-finish numbers (code `bf92a64` + this docs)
+
+- **The staircase halts AT the floor, not past it.** The refinement
+  guard is `delta > delta_min`, with halving `(delta·0.5).max(delta_min)`
+  and growth `(delta·2).min(delta0)`. No chord shorter than the floor
+  is ever emitted; before the clamp, one halving rung could dip under
+  the floor and grow back, making the number a suggestion.
+- **A floor past cruise is inert, and we keep it that way rather than
+  refuse it.** Growth caps at `delta0 = scallop_stepdown(r, tol)`, so
+  every floor past the cruise step plateaus: 1.2 mm and 4.0 mm produce
+  byte-identical paths on the witness. Discussion item: `validate()`
+  could warn that the number is above the march's own coarsest step —
+  it contradicts nothing, so today it just stands unused.
+- **The edges are floored by nobody.** The bisections that find where
+  a run starts and stops answer to the material, never to a spacing
+  parameter — the witness pins the entries equal across every floor.
+  A minimum step is the machinist's number about cutting; piece
+  boundaries are the model's.
+- **Waterline ignores both numbers, byte for byte.** min_step lives in
+  the march (the raster families), ramp_angle in the serpentine
+  connector; the rings never route through either.
+- **ramp_angle default = 45°, v17's gift spelled.** Shallow ground
+  was already exactly the ground whose support climbs no steeper than
+  one in one, so writing the law down changes no behavior — every
+  pre-v18 path is byte-identical. Links that barely traverse
+  (`d_xy ≤ tol`) are the vertical case the ramp law already settles;
+  the gate stays inert there by design.
+- **The corrugated-fold story the drafts told was wrong in
+  mechanism.** A crease on faceted ground is a validity GAP (the
+  tangent centers of the two facets are separated by the fold), not a
+  straddle the chord law bites on: the march refuses past the gap and
+  edge-bisects to the exact crease. What a floor truncates is the
+  staircase of approaches INTO those gap edges — real, measured (136
+  short chords → 70 → 48 as the floor rises), but not the "fold sinks
+  a chord by sag(h)" picture the first drafts asserted. The dome is
+  the other disqualified witness: every center is self-shadowing
+  there (mid-valid, dev≈0), so min_step is provably inert on domes —
+  a property of the law, worth a manual paragraph someday.
+- **Float law for CAM asserts:** the test compares run entries at
+  1e-4 mm, not byte-wise — bisection brackets are seeded from the
+  sample grid, so a floor perturbs an entry's LAST BITS (2e-8 mm)
+  while the boundary it converges on never moves. `assert_eq` on raw
+  floats would have been testing IEEE, not CAM.
+- **Wire v18, both halves honest:** `min_step` is skip-if-None (an
+  option like stepover — None must not mint a key); `ramp_angle` is
+  always written (like the hop plane — a default is a fact about the
+  machine). A v17 file migrates to exactly what v17 ran: no floor,
+  45°.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
