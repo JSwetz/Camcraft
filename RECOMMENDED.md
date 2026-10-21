@@ -1778,6 +1778,33 @@ reads exactly like the law.
   "post refused: {err}" arm untouched. A gate that needs new shell
   plumbing to be obeyed was never a gate.
 
+## M2.3 stage E — Release 0.2.0 close-out (this docs + the tag)
+
+- **One version, one bump.** The workspace root carries it; `hsmworks-ui`
+  and `post.exe` inherit - the release.yml version-from-binary law reads
+  `post.exe --version`, so the zip's name cannot drift from the tree it
+  was built from. 0.1.0→0.2.0 is a Cargo.toml one-liner.
+
+- **Notes are a document, not an archive.** RELEASE_NOTES.md leads with
+  what's new since 0.1.0 and keeps a cumulative "What works" - the old
+  0.1.0 prose is a pointer to the tag, not a second section to maintain.
+  The goal of the rewrite: a reader can decide "can I do my work with
+  this?" in one page.
+
+- **What 0.2.0 does NOT claim.** Phase 2 is not fully green: M2.2's
+  surface-finish parameters are still open (that row stays ⚠️), and the
+  release story is "trust before cutting", not "3D complete". The M2.3
+  row is ✅ because all five of ITS bullets shipped; fixtures-vs-collision
+  was deferred to M3.2 by stage B's law, not silently dropped.
+  Discussion item: a short 0.2.x maintenance pass to close the M2.2 tail
+  before M3.1 starts, since associativity touches the same ops.
+
+- **The publish path is still unproven.** There is no git remote yet
+  (carried from the 0.1.0 era): the `v*`-tag trigger in release.yml has
+  never run on a runner. The tag is cut locally; the first push will be
+  the actual test of the packaging script. Discussion item: create the
+  GitHub repo and push `main` + `v0.2.0` when the user is back.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

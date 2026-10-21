@@ -890,7 +890,7 @@ before touching metal.
       never silence (color map + post gate remain M2.3's).
 
 ### M2.3 - Verification (Release 0.2.0)
-**Goal: the toolpath is trusted before the machine sees it.**
+**Goal: the toolpath is trusted before the machine sees it.** — ✅
 
 - ✅ **Material simulation** (M2.3 A-B): the machined block maintained as an
       adaptive voxel / dexel stock grid, subtracted per cutting move, with
@@ -1078,7 +1078,7 @@ to each subcrate to make testing cleaner.
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) | ✅ |
 | **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop, the polar placements (radial, spiral), the solid-truth hidden rest and the center-shadow families (contour, project) done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair, ray-parity material intervals, closed-loop march, the certified diagonal chain between raster lines); surface-finish params open | ⚠️ |
-| **M2.3** | Trust before cutting | Material sim, gouge/collision, stock compare, post gate, 0.2.0 | 📋 |
+| **M2.3** | Trust before cutting | Done: program material sim (chained cached ops), deviation color map with located verdicts, machine-definition checker (.mch travel/feed/spindle), verification made the post gate, 0.2.0 | ✅ |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
 | **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |
 | **M3.3** | Every control covered | Post engine, 5 posts, machine definitions (mill/lathe kinds, axis limits, speeds and feeds, coolant), RTCP, 0.3.0 | 📋 |
