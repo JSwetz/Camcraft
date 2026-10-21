@@ -358,3 +358,226 @@ fn an_open_shell_reports_unknown_not_material() {
     let rep = stock_sim::envelope_scan(&sheet, &raster(10.0), 3.0, 0.1).expect("scan");
     assert!(rep.rest_mm <= 0.2, "open shells hide nothing: {}", rep.rest_mm);
 }
+
+// ---- M2.3 stage A: the program-level sim ------------------------------
+
+fn flat_top(z: f64, hw: f64) -> Vec<Triangle> {
+    vec![
+        Triangle::new(p(-hw, -hw, z), p(hw, -hw, z), p(hw, hw, z)),
+        Triangle::new(p(-hw, -hw, z), p(hw, hw, z), p(-hw, hw, z)),
+    ]
+}
+
+fn plunge(x: f64, y: f64, to_z: f64, top_z: f64) -> Move {
+    feed(p(x, y, top_z), p(x, y, to_z))
+}
+
+#[test]
+fn program_chains_ops_in_order() {
+    // A face traverse that stops short of its own right margin, and
+    // a plunge that goes one millimeter past the model on the left:
+    // rest is what the program never reached (subtraction is
+    // monotonic - nothing can leave a plateau by cutting HIGH, only
+    // by not arriving), and a gouge is what it reached too deep. A
+    // third op that finishes the margin erases the rest, and no op
+    // ever erases a gouge. Rapids touch nothing anywhere.
+    let cell = stock_sim::auto_cell(2.0, 10.0, 10.0);
+    let box_stock = hsmworks_app::stock::StockShape::Box { dx: 10.0, dy: 10.0, dz: 5.0 };
+    let mut d = Dexel::from_shape(&box_stock, cell).expect("box stock grid");
+    let o1 = [feed(p(-3.0, 0.0, 2.0), p(2.0, 0.0, 2.0))];
+    let o2 = [
+        Move {
+            kind: MoveKind::Rapid,
+            from: p(4.5, 4.5, 10.0),
+            to: p(4.5, 4.5, 0.5),
+            feed: None,
+            arc: None,
+        },
+        plunge(-2.5, -2.5, 1.0, 5.0),
+    ];
+    let ops = [
+        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false },
+        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false },
+    ];
+    stock_sim::simulate(&mut d, &ops).expect("chain");
+    let model = flat_top(2.0, 3.2);
+    let dev = stock_sim::deviate(&d, &model, 0.01).expect("deviate");
+    assert!(!dev.is_clean());
+    assert!(dev.rest_cells > 0 && dev.gouge_cells > 0, "both truths missing");
+    // The locations ARE the point. Rest stands at a column of full
+    // height - the sim's Z of 5.0 says "never reached" in numbers,
+    // which is the whole content of a short traverse; the gouge
+    // stands at the XY the plunge occupied, at its own Z of 1.0.
+    let r_at = dev.max_rest_at.expect("rest located");
+    let g_at = dev.max_gouge_at.expect("gouge located");
+    // Any column of the too-deep disc is an honest location - name it
+    // by what the viewer will ask: the grid there reads the plunge's
+    // bottom, and it is inside the swept circle.
+    let gc = d.col(Point2::new(g_at.x, g_at.y)).expect("gouge in grid");
+    assert!(near(d.top[gc], 1.0), "gouge located at a column reading {}", d.top[gc]);
+    assert!(
+        (g_at.x + 2.5).hypot(g_at.y + 2.5) <= 2.0 + d.cell,
+        "gouge located outside the plunge: {g_at:?}"
+    );
+    assert!(near(r_at.z, 5.0) && near(g_at.z, 1.0), "located at the wrong depth");
+    // And the rapid's column: the path crossed it all the way down,
+    // and the grid still reads full height.
+    let kc = d.col(Point2::new(4.5, 4.5)).expect("in grid");
+    assert!(near(d.top[kc], 5.0), "a rapid cut stock");
+    // Op 3 is the pass that covers the plate end to end: rest gone,
+    // the gouge still stands.
+    let o3 = [feed(p(-3.2, 0.0, 2.0), p(3.2, 0.0, 2.0))];
+    let ops3 = [
+        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false },
+        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false },
+        stock_sim::SimOp { moves: &o3, radius: 3.2, ball: false },
+    ];
+    let mut d2 = Dexel::from_shape(&box_stock, cell).unwrap();
+    stock_sim::simulate(&mut d2, &ops3).expect("chain 3");
+    let dev2 = stock_sim::deviate(&d2, &model, 0.01).expect("deviate 2");
+    assert_eq!(dev2.rest_cells, 0, "the fixer op left rest");
+    assert!(dev2.gouge_cells > 0 && !dev2.is_clean(), "a gouge never un-happens");
+    // A program that meets the model everywhere the model EXISTS is
+    // clean: a traverse wide enough to sweep the whole part face, and
+    // columns of pure air outside the model carry no verdict - the
+    // 3 mm shelf of stock beside a small part is the machine's
+    // world, not this program's debt.
+    let mut d3 = Dexel::from_shape(&box_stock, cell).unwrap();
+    let band = [feed(p(-3.0, 0.0, 2.0), p(3.0, 0.0, 2.0))];
+    stock_sim::simulate(
+        &mut d3,
+        &[stock_sim::SimOp { moves: &band, radius: 3.5, ball: false }],
+    )
+    .expect("sweep");
+    let dev3 = stock_sim::deviate(&d3, &flat_top(2.0, 3.2), 0.01).expect("deviate 3");
+    assert!(dev3.is_clean(), "{} {}", dev3.max_rest, dev3.max_gouge);
+}
+
+#[test]
+fn the_cylinders_world_is_air_beside_the_round() {
+    // A sweep that leaves the circle cuts the round's flank and finds
+    // phantom material nowhere: outside columns never existed, and
+    // deviation over them is NaN - no verdict, never a zero.
+    let mut d = Dexel::from_shape(
+        &hsmworks_app::stock::StockShape::Cylinder { diameter: 10.0, height: 5.0 },
+        0.5,
+    )
+    .unwrap();
+    let moves = [feed(p(0.0, 0.0, 1.0), p(8.0, 0.0, 1.0))];
+    stock_sim::simulate(
+        &mut d,
+        &[stock_sim::SimOp { moves: &moves, radius: 2.0, ball: false }],
+    )
+    .expect("sweep");
+    // The witness column the first drafts missed: it must stand in
+    // the MODEL's material while outside the stock's round - air in
+    // the stock, real in the part, and the only honest answer there
+    // is no answer.
+    let far = d.col(Point2::new(4.2, 4.2)).expect("in bbox"); // center (4.25,4.25): 6.01 off-axis
+    assert!(d.top[far] == f64::NEG_INFINITY, "air beside the round was cut");
+    let on = d.col(Point2::new(3.0, 0.0)).expect("in grid");
+    assert!(near(d.top[on], 1.0), "in reach and in material: cut");
+    let dev = stock_sim::deviate(&d, &flat_top(2.0, 4.7), 0.01).expect("deviate");
+    assert!(dev.dev[far].is_nan(), "a verdict where no stock stood");
+}
+
+#[test]
+fn model_stock_stocks_the_model_itself() {
+    // FromModel is facets, not the enum's numbers: the grid starts at
+    // the mesh's own top, and degenerate meshes refuse at build.
+    let mut d = Dexel::from_facets(&flat_top(5.0, 3.0), 0.5).unwrap();
+    let inside = d.col(Point2::new(0.0, 0.0)).unwrap();
+    assert!(near(d.top[inside], 5.0));
+    let outside = d.col(Point2::new(4.0, 0.0));
+    assert!(outside.is_none() || d.top[outside.unwrap()] == f64::NEG_INFINITY, "the bbox corner was material");
+    let moves = [plunge(0.0, 0.0, 1.0, 5.0)];
+    stock_sim::simulate(
+        &mut d,
+        &[stock_sim::SimOp { moves: &moves, radius: 1.0, ball: false }],
+    )
+    .expect("cut");
+    assert!(near(d.top[inside], 1.0));
+    // Refusals, before any subtraction: empty, flat in XY, non-finite.
+    assert!(Dexel::from_facets(&[], 0.5).is_err());
+    let pin = vec![Triangle::new(p(1.0, 1.0, 0.0), p(1.0, 1.0, 5.0), p(1.0, 1.0, 2.0))];
+    assert!(Dexel::from_facets(&pin, 0.5).is_err());
+    let bad = vec![Triangle::new(p(0.0, 0.0, 0.0), p(f64::NAN, 1.0, 0.0), p(0.0, 1.0, 0.0))];
+    assert!(Dexel::from_facets(&bad, 0.5).is_err());
+    assert!(matches!(
+        Dexel::from_shape(&hsmworks_app::stock::StockShape::FromModel { source: "m".into() }, 0.5),
+        Err(StockError::Invalid(_))
+    ));
+    // And the shape's own degeneracies refuse like the block's do.
+    assert!(Dexel::from_shape(
+        &hsmworks_app::stock::StockShape::Box { dx: 0.0, dy: 4.0, dz: 4.0 },
+        0.5
+    )
+    .is_err());
+}
+
+#[test]
+fn simulate_refuses_before_touching_anything() {
+    // A half-run grid that looks like a sim is the silent wrong
+    // answer wearing a lab coat: validation happens op by op, first.
+    let box_stock = hsmworks_app::stock::StockShape::Box { dx: 10.0, dy: 10.0, dz: 5.0 };
+    let mut d = Dexel::from_shape(&box_stock, 0.5).unwrap();
+    let before = d.clone();
+    let bad_moves = [plunge(0.0, 0.0, f64::NAN, 5.0)];
+    let ops = [stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false }];
+    assert!(stock_sim::simulate(&mut d, &ops).is_err());
+    assert_eq!(d, before, "the refusal cut anyway");
+    let good = [plunge(0.0, 0.0, 1.0, 5.0)];
+    let ops = [
+        stock_sim::SimOp { moves: &good, radius: 2.0, ball: false },
+        stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false },
+    ];
+    assert!(stock_sim::simulate(&mut d, &ops).is_err(), "op 2's poison ran the program");
+    assert_eq!(d, before, "a refused program left its first op cut into the stock");
+    let ops = [stock_sim::SimOp { moves: &good, radius: 0.0, ball: false }];
+    assert!(stock_sim::simulate(&mut d, &ops).is_err());
+}
+
+#[test]
+fn the_lattice_law_is_one_law() {
+    // auto_cell IS envelope_scan's lattice: r/8 of the smallest tool,
+    // a 100 um floor, grown to keep any span under 1024 columns.
+    assert!(near(stock_sim::auto_cell(2.0, 10.0, 10.0), 0.25));
+    assert!(near(stock_sim::auto_cell(8192.0, 1.0, 1.0), 1024.0));
+    assert!(stock_sim::auto_cell(1e-9, 1e-6, 1e-6) >= 1e-4, "dust sank below the floor");
+    assert!(
+        stock_sim::auto_cell(2.0, 2046.0, 1.0) >= 2.0,
+        "a stadium kept a tool-sized grid"
+    );
+}
+
+#[test]
+fn the_sim_is_deterministic_including_its_nans() {
+    // The color map redraws this field every frame; two runs of one
+    // program must agree to the bit, NaN patterns included.
+    let run = || {
+        let mut d = Dexel::from_shape(
+            &hsmworks_app::stock::StockShape::Cylinder { diameter: 10.0, height: 5.0 },
+            0.4,
+        )
+        .unwrap();
+        let m1 = [feed(p(-4.0, 0.0, 2.0), p(4.0, 0.0, 2.0))];
+        let m2 = [plunge(0.0, 2.0, 1.0, 2.0)];
+        stock_sim::simulate(
+            &mut d,
+            &[
+                stock_sim::SimOp { moves: &m1, radius: 1.5, ball: false },
+                stock_sim::SimOp { moves: &m2, radius: 1.0, ball: true },
+            ],
+        )
+        .unwrap();
+        stock_sim::deviate(&d, &flat_top(2.0, 4.5), 0.02).unwrap()
+    };
+    let (a, b) = (run(), run());
+    assert_eq!(a.dev.len(), b.dev.len());
+    for (x, y) in a.dev.iter().zip(&b.dev) {
+        assert_eq!(x.to_bits(), y.to_bits(), "a NaN differed from a NaN");
+    }
+    let loc = |p: Option<Point3>| p.map(|q| (q.x.to_bits(), q.y.to_bits()));
+    assert_eq!(loc(a.max_rest_at), loc(b.max_rest_at));
+    assert_eq!(loc(a.max_gouge_at), loc(b.max_gouge_at));
+}

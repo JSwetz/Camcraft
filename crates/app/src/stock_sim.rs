@@ -38,6 +38,18 @@
 //!   facet covers it - air everywhere along the column). Rest material
 //!   and gouges are both measured against this, so the sim's verdict
 //!   uses the model, not a second hand-entered surface.
+//! - **The program sim chains ops, never re-plans them** (M2.3): the
+//!   same conservative atoms, fed the cached paths in program order,
+//!   so the grid answers "what does this whole NC program leave
+//!   standing" - the stock-comparison deviation and its color map read
+//!   that answer, and the post gate judges it once at the end.
+//! - **Deviation is located, not just counted** (M2.3): the program
+//!   report carries the XY and the sim's own Z of its worst rest and
+//!   worst gouge cells, because "the toolpath is trusted before the
+//!   machine sees it" means a human can point at where the program is
+//!   trusted to be right, or wrong. Columns that answer no verdict
+//!   (air in the stock, or air in the model) carry NaN, never a zero
+//!   dressed up as a clean bill of health.
 
 use crate::cl::{Move, MoveKind};
 use crate::geo2d::{GeoError, Loop, Point2, Region};
@@ -846,6 +858,247 @@ fn dist_pt_seg3(px: f64, py: f64, pz: f64, a: Point3, b: Point3) -> f64 {
     .clamp(0.0, 1.0);
     let (dx, dy, dz) = (px - a.x - ex * t, py - a.y - ey * t, pz - a.z - ez * t);
     dx.hypot(dy).hypot(dz)
+}
+
+// ---- M2.3 stage A: the program-level sim ------------------------------
+
+/// One operation's claim on the stock: its cached moves and the tool
+/// that cut them. `ball` picks the exact sphere atom for a ball nose
+/// and leaves the flat-disc atom for everything whose final hole or
+/// groove IS its cylinder (end mills, drills, taps); a bull nose's
+/// corner fillet is swept here as if it were flat-bottomed at the
+/// corner's lowest point, which over-reports removal beside a fillet
+/// wall - the law above's one known-biased atom, stated at the type
+/// so no caller mistakes a fillet's clean grid for a proven fillet.
+#[derive(Clone, Copy, Debug)]
+pub struct SimOp<'a> {
+    pub moves: &'a [Move],
+    pub radius: f64,
+    pub ball: bool,
+}
+
+/// The lattice law, stated once (and the same numbers `envelope_scan`
+/// has always used): an eighth of the smallest tool radius sees every
+/// scallop the tolerance must keep, and the span growth keeps the
+/// grid honest on dust motes and stadiums alike.
+#[must_use]
+pub fn auto_cell(min_radius: f64, span_x: f64, span_y: f64) -> f64 {
+    (min_radius * 0.125)
+        .max(1e-4)
+        .max(span_x / 1023.0)
+        .max(span_y / 1023.0)
+}
+
+impl Dexel {
+    /// The stock solid as a grid. Box and cylinder are analytic - the
+    /// cylinder's columns outside its own circle start as air, so a
+    /// sweep never finds material in the machine's world beside the
+    /// round. `FromModel` carries its facets in the world, not the
+    /// enum, so it builds through `from_facets` - a refusal with the
+    /// right answer in its words, never a silent box.
+    pub fn from_shape(shape: &crate::stock::StockShape, cell: f64) -> Result<Self, StockError> {
+        use crate::stock::StockShape as S;
+        match shape {
+            S::Box { dx, dy, dz } => {
+                if !(dx.is_finite() && dy.is_finite() && dz.is_finite() && *dx > 0.0 && *dy > 0.0 && *dz > 0.0)
+                {
+                    return Err(StockError::Invalid("box stock needs finite positive dx, dy, dz".into()));
+                }
+                Self::block(-dx / 2.0, -dy / 2.0, dx / 2.0, dy / 2.0, *dz, cell)
+            }
+            S::Cylinder { diameter, height } => {
+                if !(diameter.is_finite() && height.is_finite() && *diameter > 0.0 && *height > 0.0)
+                {
+                    return Err(StockError::Invalid("cylinder stock needs finite positive diameter, height".into()));
+                }
+                let mut dex = Self::block(
+                    -diameter / 2.0,
+                    -diameter / 2.0,
+                    diameter / 2.0,
+                    diameter / 2.0,
+                    *height,
+                    cell,
+                )?;
+                for iy in 0..dex.ny {
+                    for ix in 0..dex.nx {
+                        let c = dex.center(ix, iy);
+                        if c.x.hypot(c.y) > *diameter / 2.0 {
+                            dex.top[ix + iy * dex.nx] = f64::NEG_INFINITY;
+                        }
+                    }
+                }
+                Ok(dex)
+            }
+            S::FromModel { .. } => Err(StockError::Invalid(
+                "model stock builds from its facets: Dexel::from_facets".into(),
+            )),
+        }
+    }
+
+    /// Stock that IS a mesh (stock-from-model): every column starts at
+    /// the mesh's own top, air where no facet covers - `part_surface`
+    /// read once as an initial state instead of a verdict. The one
+    /// cell of margin keeps a sweep that starts exactly on the bbox
+    /// edge inside the grid that must judge it.
+    pub fn from_facets(facets: &[Triangle], cell: f64) -> Result<Self, StockError> {
+        if !(cell.is_finite() && cell > 0.0) {
+            return Err(StockError::Invalid(format!("cell {cell} is not finite-positive")));
+        }
+        let (mut bx0, mut by0, mut bz1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        let (mut bx1, mut by1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for t in facets {
+            for v in [t.a, t.b, t.c] {
+                if !(v.x.is_finite() && v.y.is_finite() && v.z.is_finite()) {
+                    return Err(StockError::Invalid("stock mesh has a non-finite vertex".into()));
+                }
+                bx0 = bx0.min(v.x);
+                bx1 = bx1.max(v.x);
+                by0 = by0.min(v.y);
+                by1 = by1.max(v.y);
+                bz1 = bz1.max(v.z);
+            }
+        }
+        if facets.is_empty() || bx1 <= bx0 || by1 <= by0 {
+            return Err(StockError::Invalid(
+                "stock mesh is empty or flat in XY: nothing to simulate against".into(),
+            ));
+        }
+        let (x0, y0) = (bx0 - cell, by0 - cell);
+        let nx = (((bx1 - bx0) / cell).ceil() as usize + 2).max(1);
+        let ny = (((by1 - by0) / cell).ceil() as usize + 2).max(1);
+        if nx > MAX_CELLS_PER_AXIS || ny > MAX_CELLS_PER_AXIS {
+            return Err(StockError::Invalid(format!(
+                "grid would be {nx}x{ny} cells; at most {MAX_CELLS_PER_AXIS} per axis"
+            )));
+        }
+        Ok(Dexel {
+            x0,
+            y0,
+            cell,
+            nx,
+            ny,
+            stock_z: if bz1.is_finite() { bz1 } else { 0.0 },
+            top: part_surface(facets, x0, y0, cell, nx, ny),
+        })
+    }
+}
+
+/// Run the program: each op's moves, in order, through the same grid.
+/// Refusals happen BEFORE any subtraction, so a bad op cannot leave a
+/// half-run grid that looks like a sim.
+pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
+    for (i, op) in ops.iter().enumerate() {
+        if !(op.radius.is_finite() && op.radius > 0.0) {
+            return Err(StockError::Invalid(format!(
+                "op {i} tool radius {} is not finite-positive",
+                op.radius
+            )));
+        }
+        if !op.moves.iter().all(|m| m.is_finite()) {
+            return Err(StockError::Invalid(format!(
+                "op {i} carries a non-finite move - the sim refuses instead of cutting nothing silently"
+            )));
+        }
+    }
+    let chord_tol = (dex.cell * 0.25).max(1e-9); // envelope_scan's law
+    for op in ops {
+        for m in op.moves {
+            if op.ball {
+                dex.subtract_ball(m, op.radius, chord_tol);
+            } else {
+                dex.subtract(m, op.radius, chord_tol);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What the finished program leaves, per column, against the model's
+/// own surface: `top - part` where both stand (positive is rest,
+/// negative is gouge), NaN where either is air. The aggregates locate
+/// themselves - a worst value with no XY cannot be shown, jumped to,
+/// or argued with, and "trusted before the machine sees it" is a
+/// claim about a WHERE.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Deviation {
+    pub cells_x: usize,
+    pub cells_y: usize,
+    pub cell: f64,
+    pub tol: f64,
+    pub dev: Vec<f64>,
+    pub rest_cells: usize,
+    pub gouge_cells: usize,
+    pub rest_volume: f64,
+    pub gouge_volume: f64,
+    pub max_rest: f64,
+    pub max_gouge: f64,
+    /// The sim's own surface at the worst cell - the material that
+    /// stands, or the dent that was cut.
+    pub max_rest_at: Option<Point3>,
+    pub max_gouge_at: Option<Point3>,
+}
+
+impl Deviation {
+    /// The program-level verdict: nothing stands over tolerance and
+    /// nothing is cut below it. The color map's classes (NaN
+    /// unjudged, |v| <= tol clean, positive rest, negative gouge)
+    /// are this law read one column at a time by the viewer.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.max_rest <= self.tol && self.max_gouge <= self.tol
+    }
+}
+
+/// Measure the grid against the model on the grid's own lattice.
+pub fn deviate(dex: &Dexel, facets: &[Triangle], tol: f64) -> Result<Deviation, StockError> {
+    if !tol.is_finite() {
+        return Err(StockError::Invalid(format!("tolerance {tol} is not finite")));
+    }
+    let tol = tol.max(0.0);
+    let part = part_surface(facets, dex.x0, dex.y0, dex.cell, dex.nx, dex.ny);
+    let a2 = dex.cell * dex.cell;
+    let mut d = Deviation {
+        cells_x: dex.nx,
+        cells_y: dex.ny,
+        cell: dex.cell,
+        tol,
+        dev: vec![f64::NAN; dex.nx * dex.ny],
+        rest_cells: 0,
+        gouge_cells: 0,
+        rest_volume: 0.0,
+        gouge_volume: 0.0,
+        max_rest: 0.0,
+        max_gouge: 0.0,
+        max_rest_at: None,
+        max_gouge_at: None,
+    };
+    for iy in 0..dex.ny {
+        for ix in 0..dex.nx {
+            let k = ix + iy * dex.nx;
+            let (sim, p) = (dex.top[k], part[k]);
+            if !(sim.is_finite() && p.is_finite()) {
+                continue; // NaN stays: no material, or nothing to judge against
+            }
+            let v = sim - p;
+            d.dev[k] = v;
+            if v > tol {
+                d.rest_cells += 1;
+                d.rest_volume += v * a2;
+                if v > d.max_rest {
+                    d.max_rest = v;
+                    d.max_rest_at = Some(Point3::new(dex.center(ix, iy).x, dex.center(ix, iy).y, sim));
+                }
+            } else if v < -tol {
+                d.gouge_cells += 1;
+                d.gouge_volume += -v * a2;
+                if -v > d.max_gouge {
+                    d.max_gouge = -v;
+                    d.max_gouge_at = Some(Point3::new(dex.center(ix, iy).x, dex.center(ix, iy).y, sim));
+                }
+            }
+        }
+    }
+    Ok(d)
 }
 
 #[cfg(test)]

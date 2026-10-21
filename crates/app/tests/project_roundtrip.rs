@@ -78,7 +78,7 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v14
+    // Anything newer than this build's format stays refused; v1..v17
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
@@ -92,11 +92,13 @@ fn wrong_version_is_refused() {
     // v14 -> v15, and
     // v15_file_steps_to_v16_and_the_parallel_grammar_round_trips
     // v15 -> v16, and
-    // v16_file_steps_to_v17_and_the_ramp_grammar_round_trips v16 -> v17.
-    let text = r#"{"version": 18, "entities": []}"#;
+    // v16_file_steps_to_v17_and_the_ramp_grammar_round_trips v16 -> v17,
+    // and v17_file_steps_to_v18_and_the_surface_finish_grammar_round_trips
+    // v17 -> v18.
+    let text = r#"{"version": 19, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(18)) => {}
+        Err(ProjectError::UnsupportedVersion(19)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
