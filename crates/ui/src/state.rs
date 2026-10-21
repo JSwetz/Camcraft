@@ -646,6 +646,12 @@ pub struct State {
     /// M1.7d G-code viewer: None after any document switch or refused
     /// post, `Some` while a posted program is being reviewed.
     pub post_view: Option<PostView>,
+    /// M2.3 program material sim: None while the Deviate cell is dark,
+    /// `Some` while its sheet paints the stock's place. Frozen evidence
+    /// of one program state, exactly like [`PostView`]'s text - never a
+    /// command, never saved, retired by a document switch; an edit does
+    /// not silently re-run it, re-arming re-judges.
+    pub program_sim: Option<hsmworks_app::stock_sim::ProgramSim>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -790,6 +796,7 @@ impl State {
             display: DisplayMode::default(),
             sim: None,
             post_view: None,
+            program_sim: None,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,
@@ -1426,6 +1433,7 @@ impl State {
                 self.history.clear();
                 // Frozen evidence of the old document retires with it.
                 self.post_view = None;
+                self.program_sim = None;
                 self.doc_version += 1;
                 self.status = String::from("new document");
             }
@@ -1942,6 +1950,7 @@ impl State {
         model::clear_named(&self.world);
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's
+        self.program_sim = None; // and neither is its stock verdict
         match project::load(&self.world, &path) {
             Ok(()) => {
                 self.doc_version += 1;

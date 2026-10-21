@@ -61,6 +61,12 @@ impl Scene {
                     eat(u64::from(f.to_bits()));
                 }
             }
+            // The deviation classes are part of what the buffer holds -
+            // a re-color must re-upload exactly like a re-mesh.
+            eat(p.classes.len() as u64);
+            for f in &p.classes {
+                eat(u64::from(f.to_bits()));
+            }
         }
         eat(!0);
         eat(self.overlay.len() as u64);
@@ -198,17 +204,38 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             selected: model::is_selected(&state.world, &entity),
             stock: false,
             fill: false,
+            classes: Vec::new(),
         })
         .collect();
-    if let Some(entity) = model::find_by_name(&state.world, STOCK_NAME)
-        && model::is_stock(&state.world, &entity)
-    {
-        parts.push(GpuPart {
-            verts: world_verts(state, &entity),
-            selected: model::is_selected(&state.world, &entity),
+    match &state.program_sim {
+        // The Deviate sheet takes the stock's slot in the draw order:
+        // it IS the stock's surface after the program, judged - same
+        // blend law, and the solid it replaces would only veil it.
+        Some(ps) => parts.push(GpuPart {
+            verts: ps
+                .surface
+                .verts
+                .iter()
+                .map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])
+                .collect(),
+            selected: false,
             stock: true,
             fill: false,
-        });
+            classes: ps.surface.vcls.clone(),
+        }),
+        None => {
+            if let Some(entity) = model::find_by_name(&state.world, STOCK_NAME)
+                && model::is_stock(&state.world, &entity)
+            {
+                parts.push(GpuPart {
+                    verts: world_verts(state, &entity),
+                    selected: model::is_selected(&state.world, &entity),
+                    stock: true,
+                    fill: false,
+                    classes: Vec::new(),
+                });
+            }
+        }
     }
     for (z, region) in crate::interact::shown_regions(state) {
         let Some(region) = region else { continue };
@@ -222,7 +249,7 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
                 verts.push([ftoz(p.x), ftoz(p.y), ftoz(z)]);
             }
         }
-        parts.push(GpuPart { verts, selected: false, stock: false, fill: true });
+        parts.push(GpuPart { verts, selected: false, stock: false, fill: true, classes: Vec::new() });
     }
     parts
 }

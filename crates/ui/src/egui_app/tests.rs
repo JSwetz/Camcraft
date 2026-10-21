@@ -1490,6 +1490,7 @@ fn tips_match_the_imgui_table() {
         (Cmd::Frame, "Frame all\tF"),
         (Cmd::Paths, "Show every cached toolpath"),
         (Cmd::Simulate, "Simulate tool moves (transport bar)"),
+        (Cmd::Deviate, "Judge the program's stock against the model (deviation map)"),
     ];
     for (c, want) in rows {
         assert_eq!(&panes::tip_of(*c, &with_tool), want, "tip drifted for {c:?}");
@@ -2374,6 +2375,113 @@ fn simulate_cell_arms_transport_and_stop_disarms() {
     let st = &harness.state().state;
     assert!(st.sim.is_none());
     assert!(!panes::toggled(Cmd::Simulate, st));
+}
+
+/// The Deviate readout's sentence law, pinned pure (M2.3 stage B): the
+/// clean program says exactly one thing; an unclean one names each
+/// truth it found - count, volume, worst depth and the WHERE - and a
+/// located verdict that somehow lost its location admits it with "?"
+/// rather than printing a lie. The bar under the viewport is this
+/// string and nothing else, so the string carries the whole verdict.
+#[test]
+fn deviate_readout_sentences_each_truth() {
+    use hsmworks_app::geometry::Point3;
+    let d = |rest_cells, gouge_cells, max_rest, max_gouge, tol| {
+        hsmworks_app::stock_sim::Deviation {
+            cells_x: 8,
+            cells_y: 8,
+            cell: 1.0,
+            tol,
+            dev: Vec::new(),
+            rest_cells,
+            gouge_cells,
+            rest_volume: rest_cells as f64 * max_rest,
+            gouge_volume: gouge_cells as f64 * max_gouge,
+            max_rest,
+            max_gouge,
+            max_rest_at: (rest_cells > 0).then(|| Point3::new(1.25, -0.75, 18.0)),
+            max_gouge_at: (gouge_cells > 0).then(|| Point3::new(-20.0, 5.5, 16.0)),
+        }
+    };
+    let clean = crate::actions::deviate_readout(&d(0, 0, 0.0, 0.005, 0.01));
+    assert_eq!(clean, "deviate: clean - the program meets the model everywhere");
+    // A within-tolerance worst is still the clean sentence - the
+    // display tolerance IS the verdict, per DEV_TOL's law.
+    assert_eq!(
+        crate::actions::deviate_readout(&d(3, 0, 0.004, 0.0, 0.01)),
+        clean,
+        "rest thinner than tolerance must not shout"
+    );
+    let rest = crate::actions::deviate_readout(&d(40, 0, 2.0, 0.0, 0.01));
+    assert!(
+        rest.starts_with("deviate: REST 40 cells (80.00")
+            && rest.contains("worst 2.00 mm at (1.25, -0.75, z 18.00)"),
+        "the rest sentence: {rest}"
+    );
+    assert!(!rest.contains("GOUGE"), "no gouge, no gouge clause: {rest}");
+    let both = crate::actions::deviate_readout(&d(1, 7, 0.5, 1.25, 0.01));
+    assert!(both.contains("REST") && both.contains("GOUGE"), "two truths, one line: {both}");
+    assert!(both.contains("(-20.00, 5.50, z 16.00)"), "the gouge locates too: {both}");
+    // A located aggregate whose point is gone prints "?" - an honest
+    // gap, never fabricated coordinates.
+    let mut lost = d(0, 4, 0.0, 0.9, 0.01);
+    lost.max_gouge_at = None;
+    assert!(
+        crate::actions::deviate_readout(&lost).contains("GOUGE 4 cells") && both_needs_question(&lost),
+        "the missing WHERE must show as '?'"
+    );
+    fn both_needs_question(d: &hsmworks_app::stock_sim::Deviation) -> bool {
+        crate::actions::deviate_readout(d).ends_with("mm?)")
+    }
+}
+
+/// The Deviate ribbon cell is Simulate's sibling under the same laws:
+/// gate = a generated program exists; a click runs the sim over the
+/// live world and stores the verdict as pure view state - no command,
+/// nothing undoable - the second click disarms, and the seeded doc's
+/// verdict is present (its stock leaves skin, so don't assert a clean
+/// sentence here - the shape is the app tests' job).
+#[test]
+fn deviate_cell_stores_the_verdict_as_view_state() {
+    let mut harness = shell_harness();
+    harness.run();
+    assert!(
+        panes::enabled(Cmd::Deviate, &harness.state().state),
+        "the seeded doc has a generated op - the cell must be live"
+    );
+    assert!(
+        !panes::enabled(Cmd::Deviate, &State::new()),
+        "nothing to judge on an empty document"
+    );
+    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        Vec2::new(1280.0, super::shell::RIBBON_H),
+    ));
+    let cell = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Deviate)
+        .expect("the Inspect group carries a Deviate cell");
+    let at = cell.rect.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    {
+        let st = &harness.state().state;
+        let ps = st.program_sim.as_ref().expect("the cell must arm the verdict");
+        assert_eq!(st.status, crate::actions::deviate_readout(&ps.dev));
+        assert!(!st.status.contains("refused"), "the seed judges: {}", st.status);
+        assert!(panes::toggled(Cmd::Deviate, st));
+        // The command law: judging the program writes no world state.
+        assert!(st.pending.is_empty());
+    }
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    assert!(st.program_sim.is_none(), "the second click disarms");
+    assert_eq!(st.status, "deviate off");
+    assert!(!panes::toggled(Cmd::Deviate, st));
 }
 
 /// The readout string is a pure law too - the bar's whole job is this

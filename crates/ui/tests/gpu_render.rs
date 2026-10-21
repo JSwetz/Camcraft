@@ -48,6 +48,7 @@ fn stock_part(shape: &StockShape) -> GpuPart {
         selected: false,
         stock: true,
         fill: false,
+        classes: Vec::new(),
     }
 }
 
@@ -71,6 +72,7 @@ fn model_part_at(shape_d: f64, off: [f32; 3]) -> GpuPart {
         selected: false,
         stock: false,
         fill: false,
+        classes: Vec::new(),
     }
 }
 
@@ -89,6 +91,7 @@ fn fill_square(h: f32, z: f32) -> GpuPart {
         selected: false,
         stock: false,
         fill: true,
+        classes: Vec::new(),
     }
 }
 

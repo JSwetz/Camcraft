@@ -1101,6 +1101,285 @@ pub fn deviate(dex: &Dexel, facets: &[Triangle], tol: f64) -> Result<Deviation, 
     Ok(d)
 }
 
+// ---- M2.3 stage B: the grid as a viewer can show it --------------------
+
+/// Per-column color classes of the deviation field: 0.0 clean (within
+/// tolerance, and the untouched flat top of a program that simply owns
+/// that column), 1.0 rest, 2.0 gouge, 3.0 unjudged - NaN gets its own
+/// class because a verdict the sim cannot make must not render as the
+/// absence of a problem. The four numbers are the kernel's side of a
+/// colormap; the viewer picks the paints (and says what they mean).
+#[must_use]
+pub fn color_classes(dev: &Deviation) -> Vec<f32> {
+    dev.dev
+        .iter()
+        .map(|v| {
+            if v.is_nan() {
+                3.0
+            } else if *v > dev.tol {
+                1.0
+            } else if *v < -dev.tol {
+                2.0
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
+/// A sheet through the material columns of the grid: one top quad per
+/// standing column, and a vertical wall across every step to a lower
+/// neighbor. Air neighbors leave the edge open - the grid stores tops,
+/// never bottoms, and a sheet that grew a floor it does not know would
+/// be the grid asserting stock it never saw. A wall stands for its
+/// step, so it carries the class of the upper column: the one that
+/// reads too high, or was cut too deep, is the column the verdict is
+/// about. Positions are world mm on the grid's own lattice.
+#[derive(Debug)]
+pub struct SimSurface {
+    pub verts: Vec<Point3>,
+    /// One class per vertex, from `color_classes`' law - the shader's
+    /// color map reads it exactly like `sel` reads selection.
+    pub vcls: Vec<f32>,
+    /// Triangle indices into `verts`, front face by right-hand rule.
+    pub tris: Vec<[u32; 3]>,
+}
+
+impl Dexel {
+    /// Build the sheet. `classes` is `color_classes(&deviate(..))` (or
+    /// all-zeros for a plain stock surface); a column whose entry is
+    /// missing reads as class 0 - the surface never invents a verdict.
+    #[must_use]
+    pub fn surface(&self, classes: &[f32]) -> SimSurface {
+        let at = |ix: usize, iy: usize| -> f64 { self.top[ix + iy * self.nx] };
+        let cls = |ix: usize, iy: usize| -> f32 {
+            classes.get(ix + iy * self.nx).copied().unwrap_or(0.0)
+        };
+        let mut s = SimSurface { verts: Vec::new(), vcls: Vec::new(), tris: Vec::new() };
+        let quad = |s: &mut SimSurface, a: Point3, b: Point3, c: Point3, ca: f32, cb: f32, cc: f32| {
+            let n = s.verts.len() as u32;
+            s.verts.extend([a, b, c]);
+            s.vcls.extend([ca, cb, cc]);
+            s.tris.push([n, n + 1, n + 2]);
+        };
+        for iy in 0..self.ny {
+            for ix in 0..self.nx {
+                let z = at(ix, iy);
+                if !z.is_finite() {
+                    continue; // no material stood here: no sheet
+                }
+                let c = cls(ix, iy);
+                let x0 = self.x0 + ix as f64 * self.cell;
+                let y0 = self.y0 + iy as f64 * self.cell;
+                let (x1, y1) = (x0 + self.cell, y0 + self.cell);
+                // Top: two CCW triangles seen from +Z, one cell.
+                quad(
+                    &mut s,
+                    Point3::new(x0, y0, z),
+                    Point3::new(x1, y0, z),
+                    Point3::new(x1, y1, z),
+                    c,
+                    c,
+                    c,
+                );
+                quad(
+                    &mut s,
+                    Point3::new(x0, y0, z),
+                    Point3::new(x1, y1, z),
+                    Point3::new(x0, y1, z),
+                    c,
+                    c,
+                    c,
+                );
+                // East wall: this column stands above a finite lower one.
+                if ix + 1 < self.nx {
+                    let zn = at(ix + 1, iy);
+                    if zn.is_finite() && zn < z - 1e-12 {
+                        let (a, b) = (Point3::new(x1, y0, z), Point3::new(x1, y1, z));
+                        let (d, e) = (Point3::new(x1, y0, zn), Point3::new(x1, y1, zn));
+                        quad(&mut s, a, d, b, c, c, c);
+                        quad(&mut s, b, d, e, c, c, c);
+                    }
+                }
+                // South wall.
+                if iy > 0 {
+                    let zn = at(ix, iy - 1);
+                    if zn.is_finite() && zn < z - 1e-12 {
+                        let (a, b) = (Point3::new(x0, y0, z), Point3::new(x1, y0, z));
+                        let (d, e) = (Point3::new(x0, y0, zn), Point3::new(x1, y0, zn));
+                        quad(&mut s, a, d, b, c, c, c);
+                        quad(&mut s, b, d, e, c, c, c);
+                    }
+                }
+            }
+        }
+        s
+    }
+}
+
+// ---- M2.3 stage B: the document's program, simulated -------------------
+
+/// The deviation verdict tolerance: a column reading within this of the
+/// model is clean for the color map. Deliberately a display law, not a
+/// re-use of any operation's authoring tolerance - the op's tolerance is
+/// what its generator promised to hold; the map answers "what stands
+/// after the WHOLE program", and per-op tolerances would make one
+/// tolerance field edit re-color columns another op authored. 10 um is
+/// the finest scallop the shipped lattice can resolve visually.
+pub const DEV_TOL: f64 = 0.01;
+
+/// One run of the program sim: the per-column verdict and the sheet
+/// that paints it. Held by the UI as view state (the `Sim`/`PostView`
+/// exemption in AGENTS.md) - it is frozen evidence of one specific
+/// program state, like `PostView`'s program text, so an edit that
+/// makes it stale never silently re-runs: re-arming re-judges.
+#[derive(Debug)]
+pub struct ProgramSim {
+    pub dev: Deviation,
+    pub surface: SimSurface,
+}
+
+/// Simulate the whole document's program: the operations in posting
+/// order (through [`crate::posting::program_ops`] - so what the sim
+/// judges IS what would post, one law shared, not two agreeing), each
+/// op's CACHED moves through its tool's atom, against the stock as the
+/// setup defines it. Move coordinates are pre-origin-shift world
+/// millimeters, the same numbers the viewport draws and the post
+/// shifts; the stock grid is built on that same frame. Refusals name
+/// their reason (an op that never generated, a rotated stock, a grid
+/// too fine) and change nothing.
+pub fn simulate_document(
+    world: &flecs_ecs::prelude::World,
+) -> Result<ProgramSim, String> {
+    use crate::cl::Move;
+    use crate::geometry::{IDENTITY_Q, transform_point};
+    use crate::stock::StockShape;
+    use crate::{model, posting};
+
+    let ops = posting::program_ops(world)?;
+
+    // Tools and cached paths, resolved once, in program order. The
+    // atom follows the tool kind (stage A's law): a ball nose sweeps
+    // the exact sphere; everything whose cut IS its cylinder - end
+    // mills, drills, taps, bores - and the bull nose with its stated
+    // corner bias sweep the disc.
+    struct Planned {
+        moves: Vec<Move>,
+        radius: f64,
+        ball: bool,
+    }
+    let mut planned: Vec<Planned> = Vec::with_capacity(ops.len());
+    for (name, e) in &ops {
+        let op = model::operation_of(world, e)
+            .ok_or_else(|| format!("{name}: lost its operation"))?;
+        let tool = model::find_by_name(world, &op.tool)
+            .and_then(|t| model::tool_of(world, &t))
+            .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        let cache = model::toolpath_of(world, e)
+            .ok_or_else(|| format!("{name}: lost its toolpath"))?;
+        planned.push(Planned {
+            moves: cache.path.moves,
+            radius: tool.diameter / 2.0,
+            ball: tool.kind == crate::tools::ToolKind::BallNose,
+        });
+    }
+
+    // The stock, as the setup defines it. Box and cylinder are the
+    // analytic grids of stage A translated to the stock entity's
+    // place; a rotated stock would need the grid in the stock's
+    // frame, and this kernel's law is one axis-aligned lattice - the
+    // refusal says so instead of silently ignoring the rotation.
+    // Model stock builds from its own world facets, the same mesh
+    // the viewport draws.
+    let stock_e = model::find_by_name(world, crate::schema::STOCK_NAME)
+        .ok_or("no stock defined - the program sim judges material, not air")?;
+    let shape = model::stock_def_of(world, &stock_e)
+        .ok_or("the stock entity lost its shape")?;
+    let loc = model::transform_of(world, &stock_e).unwrap_or_default();
+    if loc.rot != IDENTITY_Q {
+        return Err("the program sim models an axis-aligned stock; this stock carries a rotation".into());
+    }
+    let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
+    // The stock mesh, world-placed: only model stock reads it, but a
+    // shape that IS a mesh has no other honest answer (stage A's
+    // refusal pointed here).
+    let stock_facets: Vec<Triangle> = match &shape {
+        StockShape::FromModel { .. } => model::facets_of(world, &stock_e)
+            .unwrap_or_default()
+            .iter()
+            .map(|t| Triangle::new(
+                transform_point(t.a, loc.pos, loc.rot),
+                transform_point(t.b, loc.pos, loc.rot),
+                transform_point(t.c, loc.pos, loc.rot),
+            ))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let (span_x, span_y) = match &shape {
+        StockShape::Box { dx, dy, .. } => (*dx, *dy),
+        StockShape::Cylinder { diameter, .. } => (*diameter, *diameter),
+        StockShape::FromModel { .. } => {
+            let (mut x0, mut x1, mut y0, mut y1) =
+                (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+            for t in &stock_facets {
+                for v in [t.a, t.b, t.c] {
+                    x0 = x0.min(v.x);
+                    x1 = x1.max(v.x);
+                    y0 = y0.min(v.y);
+                    y1 = y1.max(v.y);
+                }
+            }
+            ((x1 - x0).max(0.0), (y1 - y0).max(0.0))
+        }
+    };
+    let cell = auto_cell(min_r, span_x, span_y);
+    let mut dex = match &shape {
+        StockShape::FromModel { .. } => {
+            Dexel::from_facets(&stock_facets, cell).map_err(|e| e.to_string())?
+        }
+        s => {
+            let mut d = Dexel::from_shape(s, cell).map_err(|e| e.to_string())?;
+            // The analytic grids are built origin-centered; the stock
+            // entity's place moves the lattice itself, so the moves
+            // stay in the world frame the viewport and post read.
+            d.x0 += loc.pos.x;
+            d.y0 += loc.pos.y;
+            d.stock_z += loc.pos.z;
+            for t in &mut d.top {
+                if t.is_finite() {
+                    *t += loc.pos.z;
+                }
+            }
+            d
+        }
+    };
+
+    let sim_ops: Vec<SimOp> = planned
+        .iter()
+        .map(|p| SimOp { moves: &p.moves, radius: p.radius, ball: p.ball })
+        .collect();
+    simulate(&mut dex, &sim_ops).map_err(|e| e.to_string())?;
+
+    // The part as the machine must leave it: every model's facets in
+    // world, minus the stock (setup furniture, not design intent).
+    // Visibility is a display choice; the verdict judges all of it.
+    let mut model_facets: Vec<Triangle> = Vec::new();
+    for (_, e) in model::model_entities(world) {
+        let tris = model::facets_of(world, &e).unwrap_or_default();
+        let l = model::transform_of(world, &e).unwrap_or_default();
+        model_facets.extend(tris.iter().map(|t| Triangle::new(
+            transform_point(t.a, l.pos, l.rot),
+            transform_point(t.b, l.pos, l.rot),
+            transform_point(t.c, l.pos, l.rot),
+        )));
+    }
+
+    let dev = deviate(&dex, &model_facets, DEV_TOL).map_err(|e| e.to_string())?;
+    let classes = color_classes(&dev);
+    let surface = dex.surface(&classes);
+    Ok(ProgramSim { dev, surface })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

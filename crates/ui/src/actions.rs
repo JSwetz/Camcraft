@@ -66,6 +66,79 @@ pub(crate) fn frame_all(state: &mut State) {
     state.pending.push_back(CommandKind::FrameAll);
 }
 
+/// View: look at one world point, keeping orientation and zoom (the
+/// Deviate bar's jump - a located verdict you cannot fly to is only
+/// half located; ephemeral like every other camera move, no command).
+pub(crate) fn frame_at(state: &mut State, p: [f64; 3]) {
+    state.cam.target = p;
+}
+
+/// Ribbon Inspect > Deviate (M2.3 stage B): arm or disarm the program
+/// material sim. Arming runs the whole program - ops in posting order,
+/// `stock_sim::simulate_document` walking `posting::program_ops`, so
+/// what gets judged is exactly what would post - and stores the
+/// verdict as view state (AGENTS.md's exemption, like `Sim`'s playhead:
+/// never a command, never saved, retired by a document switch). The
+/// simulation reads the world and writes nothing to it; a refusal
+/// leaves the cell dark and the status line says why.
+pub(crate) fn toggle_deviate(state: &mut State) {
+    if state.program_sim.is_some() {
+        state.program_sim = None;
+        state.status = String::from("deviate off");
+        return;
+    }
+    match hsmworks_app::stock_sim::simulate_document(&state.world) {
+        Ok(sim) => {
+            state.status = deviate_readout(&sim.dev);
+            state.program_sim = Some(sim);
+            state.doc_version += 1; // the sheet is a new GPU part
+        }
+        Err(err) => {
+            state.program_sim = None;
+            state.status = format!("deviate refused: {err}");
+        }
+    }
+}
+
+/// The Deviate verdict in one line: the clean program says so; a
+/// judged-worse program names both truths with their counts, volumes,
+/// worst depth and located XY + sim Z - the sentence a user acts on,
+/// and the test-pinned string law (`sim_readout`'s sibling). Pure, so
+/// the ui tests keep its shape without a window.
+#[must_use]
+pub fn deviate_readout(dev: &hsmworks_app::stock_sim::Deviation) -> String {
+    use hsmworks_app::geometry::Point3;
+    if dev.is_clean() {
+        return String::from("deviate: clean - the program meets the model everywhere");
+    }
+    let at = |p: Option<Point3>| -> String {
+        p.map_or_else(
+            || "?".to_owned(),
+            |q| format!(" at ({:.2}, {:.2}, z {:.2})", q.x, q.y, q.z),
+        )
+    };
+    let mut s = String::from("deviate:");
+    if dev.rest_cells > 0 {
+        s += &format!(
+            " REST {} cells ({:.2} mm³, worst {:.2} mm{})",
+            dev.rest_cells,
+            dev.rest_volume,
+            dev.max_rest,
+            at(dev.max_rest_at)
+        );
+    }
+    if dev.gouge_cells > 0 {
+        s += &format!(
+            " GOUGE {} cells ({:.2} mm³, worst {:.2} mm{})",
+            dev.gouge_cells,
+            dev.gouge_volume,
+            dev.max_gouge,
+            at(dev.max_gouge_at)
+        );
+    }
+    s
+}
+
 /// View: look at the current target along a world direction - the
 /// view cube's face/edge/corner law resolving to `Camera::toward`
 /// (ephemeral, like the camera itself - no command; `target` and `dist`

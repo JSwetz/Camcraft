@@ -737,6 +737,37 @@ fn viewport_panel(
         }
         ui.separator();
     }
+    // M2.3 stage B: the Deviate verdict bar, parallel to the transport -
+    // it takes its strip before the image, and draws only while the
+    // sheet is armed (a snapshot with no verdict sees zero churn). The
+    // sentence is re-derived from the frozen verdict every frame through
+    // the one pure string (actions::deviate_readout - the status line
+    // says the same thing at arming time, from the same function). The
+    // buttons fly the camera to the worst rest and gouge cells: a
+    // located verdict you cannot look at is only half located. Ephemeral
+    // like every other camera move - no command.
+    if let Some(ps) = &state.program_sim {
+        let mut fly: Option<[f64; 3]> = None;
+        ui.horizontal(|ui| {
+            ui.label(crate::actions::deviate_readout(&ps.dev));
+            if ps.dev.rest_cells > 0
+                && let Some(q) = ps.dev.max_rest_at
+                && ui.button("Frame rest").on_hover_text("Look at the worst uncut cell").clicked()
+            {
+                fly = Some([q.x, q.y, q.z]);
+            }
+            if ps.dev.gouge_cells > 0
+                && let Some(q) = ps.dev.max_gouge_at
+                && ui.button("Frame gouge").on_hover_text("Look at the deepest overcut cell").clicked()
+            {
+                fly = Some([q.x, q.y, q.z]);
+            }
+        });
+        if let Some(p) = fly {
+            crate::actions::frame_at(state, p);
+        }
+        ui.separator();
+    }
     let avail = ui.available_size();
     if avail.x > 1.0 && avail.y > 1.0 {
         // The 3D extent deferral (last frame's layout sizes next frame's
@@ -961,6 +992,27 @@ fn viewport_panel(
             }
             if let Some(pb) = pb {
                 ui.painter().circle_stroke(pb, 4.0, egui::Stroke::new(1.5, amber));
+            }
+        }
+        // The Deviate verdict, located: a ring at the worst rest cell
+        // (the sheet's amber) and the worst gouge (its red) - the two
+        // numbers that carry the sentence in the verdict bar, drawn
+        // where they happened. Same display law as every other overlay:
+        // reads the frozen verdict, never the world, and drops points
+        // that project behind the camera.
+        if let Some(ps) = &state.program_sim {
+            let mvp = state.cam.mvp(aspect);
+            for (q, rgb) in [
+                (ps.dev.max_rest_at, (250u8, 184, 51)),
+                (ps.dev.max_gouge_at, (230, 46, 36)),
+            ] {
+                let Some(q) = q else { continue };
+                if let Some(u) = interact::project_uv(&mvp, [q.x, q.y, q.z]) {
+                    let c = egui::pos2(rx0 + u[0] * rw, ry0 + u[1] * rh);
+                    let col = egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2);
+                    ui.painter().circle_stroke(c, 6.0, egui::Stroke::new(2.0, col));
+                    ui.painter().circle_filled(c, 1.5, col);
+                }
             }
         }
         // Corner hint: the control legend, or the live mode while dragging.

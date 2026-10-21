@@ -139,6 +139,7 @@ pub(super) enum Cmd {
     Frame,
     Paths,
     Simulate,
+    Deviate,
 }
 
 const GROUPS: [(&str, &[Cmd]); 5] = [
@@ -158,7 +159,7 @@ const GROUPS: [(&str, &[Cmd]); 5] = [
         ],
     ),
     ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]),
-    ("Inspect", &[Cmd::Frame, Cmd::Paths, Cmd::Simulate]),
+    ("Inspect", &[Cmd::Frame, Cmd::Paths, Cmd::Simulate, Cmd::Deviate]),
 ];
 
 const CELL_W: f32 = 56.0;
@@ -188,6 +189,7 @@ fn label_of(c: Cmd) -> &'static str {
         Cmd::Frame => "Frame",
         Cmd::Paths => "Paths",
         Cmd::Simulate => "Simulate",
+        Cmd::Deviate => "Deviate",
     }
 }
 
@@ -239,6 +241,9 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Frame => "Frame all\tF".into(),
         Cmd::Paths => "Show every cached toolpath".into(),
         Cmd::Simulate => "Simulate tool moves (transport bar)".into(),
+        Cmd::Deviate => {
+            "Judge the program's stock against the model (deviation map)".into()
+        }
     }
 }
 
@@ -250,6 +255,9 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
         Cmd::Delete => state.has_selection(),
         Cmd::Create(_) => !state.tool_names().is_empty(),
         Cmd::Simulate => state.has_toolpaths(),
+        // The same gate as Simulate: a program with no generated move
+        // has nothing to judge - the cell stays dark until there is.
+        Cmd::Deviate => state.has_toolpaths(),
         _ => true,
     }
 }
@@ -258,6 +266,7 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
     match c {
         Cmd::Paths => state.show_all_paths,
         Cmd::Simulate => state.sim.is_some(),
+        Cmd::Deviate => state.program_sim.is_some(),
         _ => false,
     }
 }
@@ -297,6 +306,9 @@ fn icon_of(c: Cmd) -> Icon {
         Cmd::Frame => Icon::FrameAll,
         Cmd::Paths => Icon::Toolpaths,
         Cmd::Simulate => Icon::Simulate,
+        // The stock glyph, reused (RECOMMENDED.md's no-new-asset law):
+        // what the cell shows IS the judged stock.
+        Cmd::Deviate => Icon::Stock,
     }
 }
 
@@ -346,6 +358,12 @@ fn run_cmd(c: Cmd, state: &mut State) {
             // transport. The playhead inside is immediate-mode by
             // AGENTS.md's explicit exemption - no command to route.
             state.sim = if state.sim.is_some() { None } else { Some(Sim::new()) };
+        }
+        Cmd::Deviate => {
+            // View state like Simulate, with one difference the actions
+            // layer holds: arming RUNS the program sim (a world read,
+            // never a world write), so the effect lives in actions.
+            actions::toggle_deviate(state);
         }
     }
 }

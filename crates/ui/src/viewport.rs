@@ -13,8 +13,34 @@
 
 use egui_wgpu::wgpu;
 
-/// vec3 position + f32 selection flag.
-const VERTEX_STRIDE: u64 = 16;
+/// vec3 position + f32 selection flag + f32 deviation class. Like `sel`,
+/// the class rides baked in the vertex stream (same submit-time law as
+/// above) and every `vs_main` pipeline reads all three attributes - the
+/// layouts are one const, so a pipeline can never forget the third.
+const VERTEX_STRIDE: u64 = 20;
+
+/// The one vertex-buffer law, shared by every solid pipeline.
+const VERTEX_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+    array_stride: VERTEX_STRIDE,
+    step_mode: wgpu::VertexStepMode::Vertex,
+    attributes: &[
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 0,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32,
+            offset: 12,
+            shader_location: 1,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32,
+            offset: 16,
+            shader_location: 2,
+        },
+    ],
+};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -26,14 +52,17 @@ struct VSOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) sel: f32,
     @location(1) world: vec3<f32>,
+    @location(2) cls: f32,
 };
 
 @vertex
-fn vs_main(@location(0) pos: vec3<f32>, @location(1) sel: f32) -> VSOut {
+fn vs_main(@location(0) pos: vec3<f32>, @location(1) sel: f32,
+           @location(2) cls: f32) -> VSOut {
     var out: VSOut;
     out.clip = u.mvp * vec4<f32>(pos, 1.0);
     out.sel = sel;
     out.world = pos;
+    out.cls = cls;
     return out;
 }
 
@@ -76,6 +105,14 @@ fn fs_edge(in: VSOut) -> @location(0) vec4<f32> {
 
 // Stock: same flat shading, cool steel tint, translucent - the model must
 // read through the raw material. Selected stock is warmer and denser.
+// The `cls` channel carries the deviation verdict (stock_sim's law: 0
+// clean, 1 rest, 2 gouge, 3 unjudged) and paints it (our own display
+// colors, the same reasoning as REGION_RGB's note): amber material left
+// behind, loud red material cut too deep, flat gray where the kernel
+// rendered no verdict - NaN is never green, never a clean bill. Plain
+// stock parts upload cls = 0 everywhere and look exactly as before.
+// Verdict columns keep their color even when selected (the amber lift is
+// only for steel), and judged columns sit denser so the color reads.
 @fragment
 fn fs_stock(in: VSOut) -> @location(0) vec4<f32> {
     let cr = cross(dpdx(in.world), dpdy(in.world));
@@ -84,9 +121,19 @@ fn fs_stock(in: VSOut) -> @location(0) vec4<f32> {
     let key_dir = normalize(vec3<f32>(0.45, 0.60, 0.66));
     let key = abs(dot(n, key_dir));
     let light = 0.55 + 0.45 * key;
-    let base = vec3<f32>(0.42, 0.50, 0.62) * light;
-    let hot = vec3<f32>(0.98, 0.72, 0.20) * light;
-    return vec4<f32>(mix(base, hot, in.sel), mix(0.30, 0.55, in.sel));
+    var tint = vec3<f32>(0.42, 0.50, 0.62);
+    var alpha = mix(0.30, 0.55, in.sel);
+    switch (i32(in.cls + 0.5)) {
+        case 1: { tint = vec3<f32>(0.98, 0.72, 0.20); alpha = 0.75; }  // rest
+        case 2: { tint = vec3<f32>(0.90, 0.18, 0.14); alpha = 0.85; }  // gouge
+        case 3: { tint = vec3<f32>(0.45, 0.46, 0.48); alpha = 0.25; }  // no verdict
+        default: {}
+    }
+    let judged = step(0.5, in.cls);
+    let steel = vec3<f32>(0.42, 0.50, 0.62);
+    let hot = vec3<f32>(0.98, 0.72, 0.20);
+    let base = mix(steel, hot, in.sel * (1.0 - judged));
+    return vec4<f32>(mix(base, tint, judged) * light, alpha);
 }
 
 // Cut-region fill: the selected operation's material area painted, not just
@@ -132,6 +179,11 @@ pub struct GpuPart {
     pub selected: bool,
     pub stock: bool,
     pub fill: bool,
+    /// Per-vertex deviation class (stock_sim's `color_classes` law: 0
+    /// clean, 1 rest, 2 gouge, 3 unjudged), read only by `fs_stock`.
+    /// Empty means "no verdict rendered" - the part uploads class 0
+    /// everywhere and paints exactly as an ordinary stock part.
+    pub classes: Vec<f32>,
 }
 
 pub struct View3D {
@@ -224,22 +276,7 @@ impl View3D {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: VERTEX_STRIDE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32,
-                            offset: 12,
-                            shader_location: 1,
-                        },
-                    ],
-                })],
+                buffers: &[Some(VERTEX_LAYOUT)],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -280,22 +317,7 @@ impl View3D {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: VERTEX_STRIDE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32,
-                            offset: 12,
-                            shader_location: 1,
-                        },
-                    ],
-                })],
+                buffers: &[Some(VERTEX_LAYOUT)],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -335,22 +357,7 @@ impl View3D {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: VERTEX_STRIDE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32,
-                            offset: 12,
-                            shader_location: 1,
-                        },
-                    ],
-                })],
+                buffers: &[Some(VERTEX_LAYOUT)],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::LineList,
@@ -390,22 +397,7 @@ impl View3D {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: VERTEX_STRIDE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32,
-                            offset: 12,
-                            shader_location: 1,
-                        },
-                    ],
-                })],
+                buffers: &[Some(VERTEX_LAYOUT)],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -456,22 +448,7 @@ impl View3D {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: VERTEX_STRIDE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32,
-                            offset: 12,
-                            shader_location: 1,
-                        },
-                    ],
-                })],
+                buffers: &[Some(VERTEX_LAYOUT)],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -652,11 +629,16 @@ impl View3D {
         let mut model_edges = 0u32;
         for part in &order {
             let sel: f32 = if part.selected { 1.0 } else { 0.0 };
-            for v in &part.verts {
+            for (vi, v) in part.verts.iter().enumerate() {
                 for c in v {
                     verts.extend_from_slice(&c.to_le_bytes());
                 }
                 verts.extend_from_slice(&sel.to_le_bytes());
+                // Absent class = clean, per the field's law; a class list
+                // shorter than the vertex list is a caller bug we paint
+                // over as steel, not a crash.
+                let cls = part.classes.get(vi).copied().unwrap_or(0.0);
+                verts.extend_from_slice(&cls.to_le_bytes());
             }
             let n = part.verts.len() as u32;
             idx.extend(vertex_count..vertex_count + n);

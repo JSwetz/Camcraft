@@ -116,11 +116,13 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
     line_pos
 }
 
-/// The stream we would feed the engine: every operation's records,
-/// in document order, validated first. Split from the write so the
-/// gate's evidence (WARN records, cycle anchors) is testable without
-/// touching the filesystem or the script.
-fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
+/// The program in posting order: every operation entity, document
+/// order, validated the way posting validates - all generated, all
+/// fresh, or a refusal naming the op. `stream_records` walks on it;
+/// the M2.3 program sim walks on it too, so *what the sim judges is
+/// what would post* holds by construction, not by two copies of the
+/// law agreeing (stage D makes the agreement load-bearing).
+pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
     let ops: Vec<(String, Entity)> = model::named_entities(world)
         .into_iter()
         .filter(|(_, e)| model::is_operation(world, e))
@@ -145,6 +147,15 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             OpStatus::Ok => {}
         }
     }
+    Ok(ops)
+}
+
+/// The stream we would feed the engine: every operation's records,
+/// in document order, validated first. Split from the write so the
+/// gate's evidence (WARN records, cycle anchors) is testable without
+/// touching the filesystem or the script.
+fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
+    let ops = program_ops(world)?;
 
     // Tool library rank, the T../H.. law: 1-based position among the
     // named tools in document order.
