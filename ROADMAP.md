@@ -1109,7 +1109,13 @@ registry home before Phase 4's multi-axis and turning families arrive.
 **Goal: a model revision no longer means rebuilding the job.**
 
 - **Geometry association**: operations reference model features and curves, not stale copies
-- **Model update detection**: diff a new model revision and mark affected operations
+- ✅ **Model update detection**: a same-named re-import lands as `UpdateModel` on
+      the one entity the name keys (revision counter, undo restores the previous
+      geometry exactly); the diff is a set difference over stable content-hashed
+      feature ids - faces, welded faces, edge chains - and staleness of dependent
+      operations falls out of the stamp's revision signature, so unchanged
+      re-imports churn nothing and same-count-different-solid updates cannot pass
+      in silence (M3.1 stage A)
 - **Re-MACHining**: automatic rest-rough against areas machined by previous operations, minimizing redundant air-cutting
 - **Parameter propagation**: changed stock, tool, or WCS flows correctly through dependents
 

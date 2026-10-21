@@ -9,6 +9,55 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M3.1 A - Model revisions and stable feature identity (this commit)
+
+**A model revision is a content event, and content already has ids.** Stage
+A set out to detect "the CAD changed, which faces moved" the way the
+pre-compaction plan sketched: per-revision geometric signatures plus a
+greedy successor matcher (0.5 mm centers, 25 % area slack). Building it
+turned the plan inside out: `feature.rs` face/patch/chain ids ARE content
+hashes - exact-integer plane signatures, welded corner positions, quantized
+areas - so diffing two revisions is a set difference over stable ids. No
+matcher was needed, and none was written.
+
+- **Ids-as-signatures replace the geometric matcher.** A face that survives
+  a re-mesh keeps its id byte for byte; one that moved lands in
+  `missing`/`added`. Pairing a missing id with an added one ("the same face,
+  moved") is deliberately NOT guessed anywhere in Stage A - successor
+  pairing is Stage C's decision, made visible to the user through re-pick
+  affordances, never assumed by a tolerance. The cost to revisit: a matcher
+  would be additive (a `candidates()` beside `IdDiff`), nothing in the diff
+  law has to change first.
+- **The stamp's Entity arm digests the signature, not count + AABB.** The
+  old arm let a diamond prism swap in under a contour operation and keep
+  the stamp - twelve facets, same box, silent gouge fuel. `revision::
+  signature` is the multiset of face ids plus counts: order-free,
+  winding-free, diagonal-flip-free (each invariance is a test), and it
+  moves exactly when the material moves. Consequence, said plainly:
+  existing saved documents re-open with their Entity-sourced operations
+  Stale once - the stored stamps were computed under the old digest. Same
+  one-time churn as the `b3eaebc` stamp move; the mechanism working, not
+  broken.
+- **Re-import by name is an update, not a conflict.** The worker thread
+  stays world-blind (it cannot know the name exists); `finish_import` on
+  the main thread routes: no entity - `ImportModel` (spawn, rev 1); an
+  entity - `UpdateModel::new`, which refuses to overwrite setup furniture
+  and refuses empty geometry at construction. Undo trades geometry back
+  exactly - it never deletes a model the user only updated. `ImportModel`
+  itself keeps its early-return-if-exists as the redo/idempotence guard
+  only.
+- **`Revision` is bookkeeping, never a staleness input.** The u64 counter
+  says "geometry landed here N times" for the tree and the save file; the
+  stamp rehashes the facets themselves, so a save-load round-trip can
+  never inherit staleness from a counter that drifted. v20 persistence is
+  the pure step-up: absent key means 0 means "pre-M3.1, nothing
+  remembered"; a model first updated after loading such a file lands rev 1.
+- **FromModel stock propagation is Stage B, not here.** The stock's stamp
+  arm still digests the source model's NAME, so re-importing under that
+  name leaves a FromModel stock silently Ok. It is the same silent-gap
+  class the Entity arm just closed, and it gets the same treatment in
+  Stage B (stamp inputs) - noted here so the gap is owned, not forgotten.
+
 ## M2.2e - Ramp entries, stage D: the certified diagonal chain (this commit)
 
 **Ramp is a law about the space BETWEEN cuts.** Stage D adds one bool to
