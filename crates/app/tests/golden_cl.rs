@@ -492,6 +492,7 @@ fn finish3d_waterline_cone() {
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
+            ramp: false,
         },
     )
     .unwrap();
@@ -541,10 +542,59 @@ fn finish3d_scallop_plateau() {
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
+            ramp: false,
         },
     )
     .unwrap();
     write_golden("finish3d_scallop_plateau.cl", &gen_to_cltext(&t));
+}
+
+// M2.2e stage D - the ramp. The plateau's plain parallel raster is the
+// chain's home fixture: flat ground certifies every line-to-line
+// diagonal, so this dump pins WHICH links became Feeds and where the
+// surviving plunge (first contact) sits - the whole between-lines
+// change, on the record.
+
+#[test]
+fn finish3d_ramp_parallel_plateau() {
+    use hsmworks_app::finishing3d::{parallel, Finish3DParams, FinishPattern};
+    use hsmworks_app::geometry::{Point3, Triangle};
+    let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+    // The scallop golden's block again: 20x20x10, top at z 10, no bottom.
+    let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
+    let (a, b, c, d) = (q(-1.0, -1.0, 0.0), q(1.0, -1.0, 0.0), q(1.0, 1.0, 0.0), q(-1.0, 1.0, 0.0));
+    let (e, f, g, h) = (q(-1.0, -1.0, 10.0), q(1.0, -1.0, 10.0), q(1.0, 1.0, 10.0), q(-1.0, 1.0, 10.0));
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let mut facets = Vec::new();
+    facets.extend(quad([e, f, g, h])); // top
+    facets.extend(quad([a, b, f, e])); // sides
+    facets.extend(quad([b, c, g, f]));
+    facets.extend(quad([c, d, h, g]));
+    facets.extend(quad([d, a, e, h]));
+    let t = parallel(
+        &facets,
+        &Finish3DParams {
+            pattern: FinishPattern::Parallel,
+            stepover: None,
+            tool_diameter: 6.0,
+            tolerance: 0.1,
+            clearance_z: 25.0,
+            retract_z: None,
+            top_z: 10.0,
+            bottom_z: 0.0,
+            feed: 500.0,
+            plunge_feed: 100.0,
+            climb: true,
+            ramp: true,
+        },
+    )
+    .unwrap();
+    write_golden("finish3d_ramp_parallel_plateau.cl", &gen_to_cltext(&t));
 }
 
 // M2.2d - the polar placements. Radial rides the dome (curved ground
@@ -606,6 +656,7 @@ fn finish3d_radial_dome() {
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
+            ramp: false,
         },
     )
     .unwrap();
@@ -647,6 +698,7 @@ fn finish3d_spiral_plateau() {
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
+            ramp: false,
         },
     )
     .unwrap();
@@ -688,6 +740,7 @@ fn finish3d_contour_plateau() {
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
+            ramp: false,
         },
     )
     .unwrap();
@@ -747,6 +800,7 @@ fn finish3d_project_dome() {
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
+            ramp: false,
         },
     )
     .unwrap();

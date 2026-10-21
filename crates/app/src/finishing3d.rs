@@ -139,6 +139,15 @@ pub struct Finish3DParams {
     /// on the left), conventional reverses - the same XOR contour
     /// applies to planar loops.
     pub climb: bool,
+    /// Ramp the entries (M2.2e): between two runs of the SAME family,
+    /// one straight diagonal Feed replaces the hop-to-clearance
+    /// wherever [`diagonal_ok`] can certify it - the ball never sinks
+    /// below its promised surface en route and never leaves the
+    /// region. Where it can't certify (a hill between the lines, open
+    /// air, a flank crossing), the hop stands, unchanged. First
+    /// contacts and between-family transits are never ramped: the
+    /// diagonal is a chain between cuts, not a way into a new one.
+    pub ramp: bool,
 }
 
 /// The stepdown the scallop law prescribes: cusp height
@@ -751,10 +760,53 @@ fn march_curve(
 /// column it vacates); pass to pass climbs to clearance with
 /// rapids, like a level change among rings; the very first entry
 /// just travels over at its own height, like the first ring.
+/// The probe cap for [`diagonal_ok`]: a diagonal whose XY span needs
+/// more samples than this is not certified - it takes the hop
+/// instead. Same honesty law as the solid-rest budgets: a claim too
+/// wide to check is declined, never approximated.
+const RAMP_PROBE_MAX: i64 = 4096;
+
+/// The ramp law in one question: may the tool feed in a straight line
+/// from where it stands (`from`, tip) to the next run's start (`to`,
+/// tip) without ever cutting deeper than the terrain promises? At
+/// each probe the center height is `z_lin + r`; it must meet
+/// `support_at`'s own floor - resting within `tol` of tangent is the
+/// finish's whole promise - and the support must exist at all (open
+/// air or a flank outside the region ends the diagonal). Endpoints
+/// need no probe: both are run samples, legal by the march's own
+/// construction. A zero-XY diagonal is a vertical feed between two
+/// legal centers - linear z between them can only ride ABOVE a
+/// constant support, so the loop proves it and no special case is
+/// needed. Too long to certify within the probe cap: refused, hop.
+fn diagonal_ok(from: Point3, to: Point3, r: f64, p: &Finish3DParams, sups: &[Sup]) -> bool {
+    let d = (to.x - from.x).hypot(to.y - from.y);
+    if !(d.is_finite() && to.x.is_finite() && to.y.is_finite() && to.z.is_finite()) {
+        return false;
+    }
+    let eps = p.tolerance * 0.25;
+    let n = (d / eps).ceil();
+    if n.is_nan() || n > RAMP_PROBE_MAX as f64 {
+        return false; // NaN and over-cap both land here, honestly
+    }
+    let n = n as i64;
+    for k in 1..n {
+        let t = k as f64 / n as f64;
+        let qx = from.x + (to.x - from.x) * t;
+        let qy = from.y + (to.y - from.y) * t;
+        let cz = from.z + (to.z - from.z) * t + r;
+        match support_at(qx, qy, r, p.bottom_z, sups) {
+            Some(s) if cz >= s - p.tolerance => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
 fn emit_runs(
     b: &mut PathBuilder,
     p: &Finish3DParams,
     r: f64,
+    sups: &[Sup],
     runs: &[Vec<(Point2, f64)>],
     continuing: bool,
 ) {
@@ -769,6 +821,11 @@ fn emit_runs(
             let trav = p.clearance_z.max(z0);
             b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, trav), None);
             b.push(MoveKind::Rapid, Point3::new(x0, y0, trav), None);
+        } else if p.ramp && diagonal_ok(cur, Point3::new(x0, y0, z0), r, p, sups) {
+            // One diagonal Feed IS the entry: it lands exactly on the
+            // run's first point, so the plunge below collapses to
+            // nothing by push's own zero-length law.
+            b.push(MoveKind::Feed, Point3::new(x0, y0, z0), Some(p.feed));
         } else {
             let trav = hop.max(z0);
             b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, trav), Some(p.feed));
@@ -863,7 +920,7 @@ fn raster_pass(
     if runs.is_empty() {
         return Ok(false);
     }
-    emit_runs(b, p, r, &runs, continuing);
+    emit_runs(b, p, r, sups, &runs, continuing);
     Ok(true)
 }
 
@@ -1022,7 +1079,7 @@ pub fn radial(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
             runs.extend(pieces);
         }
         if !runs.is_empty() {
-            emit_runs(&mut b, p, r, &runs, false);
+            emit_runs(&mut b, p, r, &sups, &runs, false);
             emitted = true;
         }
     }
@@ -1080,7 +1137,7 @@ pub fn spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
             p.tolerance * 0.25,
         );
         if !pieces.is_empty() {
-            emit_runs(&mut b, p, r, &pieces, false);
+            emit_runs(&mut b, p, r, &sups, &pieces, false);
             emitted = true;
         }
     }
@@ -1279,7 +1336,7 @@ fn shadow_pass(
     if runs.is_empty() {
         return Ok(false);
     }
-    emit_runs(b, p, r, &runs, false);
+    emit_runs(b, p, r, sups, &runs, false);
     Ok(true)
 }
 

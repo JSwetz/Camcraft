@@ -252,6 +252,10 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             feed,
             plunge_feed: plunge,
             climb,
+            // Fresh finishes hop: the ramp is opt-in, like the pocket's
+            // between-ring entry - the certified diagonal is a claim
+            // about the ground, and a new op has none on record yet.
+            ramp: false,
         },
         _ => OpParams::Face {
             stepover,

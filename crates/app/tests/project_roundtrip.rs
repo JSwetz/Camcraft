@@ -91,11 +91,12 @@ fn wrong_version_is_refused() {
     // v14_file_steps_to_v15_and_the_finish3d_grammar_round_trips
     // v14 -> v15, and
     // v15_file_steps_to_v16_and_the_parallel_grammar_round_trips
-    // v15 -> v16).
-    let text = r#"{"version": 17, "entities": []}"#;
+    // v15 -> v16, and
+    // v16_file_steps_to_v17_and_the_ramp_grammar_round_trips v16 -> v17.
+    let text = r#"{"version": 18, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(17)) => {}
+        Err(ProjectError::UnsupportedVersion(18)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1620,7 +1621,7 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
     project::open(&world, text).expect("the v16 parallel grammar must read");
     let e = model::find_by_name(&world, "F1").expect("op");
     let o = model::operation_of(&world, &e).expect("operation");
-    let OpParams::Finish3D { pattern, stepover, .. } = &o.params else {
+    let OpParams::Finish3D { pattern, stepover, ramp, .. } = &o.params else {
         panic!("finish3d params expected, got {:?}", o.params);
     };
     assert_eq!(
@@ -1628,6 +1629,7 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
         hsmworks_app::finishing3d::FinishPattern::ParallelMulti
     );
     assert_eq!(*stepover, Some(0.3));
+    assert!(!*ramp, "a v16 file has no `ramp` word: the hop, exactly what v16 ran");
 
     // Write-parse-write is a fixed point, and the new keys ride.
     let path = tmp_path("v16b");
@@ -1698,6 +1700,82 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
     assert!(
         matches!(project::open(&world5, &bogus), Err(ProjectError::Corrupt(_))),
         "a v16 file with an unknown pattern must not load"
+    );
+}
+
+#[test]
+fn v16_file_steps_to_v17_and_the_ramp_grammar_round_trips() {
+    // v16 -> v17: one more new key inside `finish3d` - `ramp` - absent
+    // from every v16 file, whose serde default (false: the hop) is
+    // exactly what v16 ran. Nothing existing changed shape; step-up is
+    // the stamp itself, like every bump since v6.
+    let text = r#"{
+        "version": 16,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "F1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"finish3d": {
+                 "pattern": "parallel", "tolerance": 0.1,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v16 file must migrate");
+    let e = model::find_by_name(&world, "F1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Finish3D { ramp, .. } = &o.params else {
+        panic!("finish3d params expected, got {:?}", o.params);
+    };
+    assert!(!*ramp, "absent ramp means the hop - what every pre-v17 file ran");
+    let path = tmp_path("v17a");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v17 stamp: {saved}"
+    );
+    // Written always, like `climb`: the choice is a fact about the file,
+    // not a default to lean on.
+    assert!(saved.contains("\"ramp\": false"), "{saved}");
+
+    // The v17 wire grammar, hand-written so the spelling is pinned:
+    // `"ramp": true` rides, and the write-parse-write fixed point keeps it.
+    let rt = text
+        .replace("\"version\": 16", "\"version\": 17")
+        .replace("\"climb\": true", "\"climb\": true, \"ramp\": true");
+    let world2 = new_world();
+    project::open(&world2, &rt).expect("the v17 ramp spelling must read");
+    let e2 = model::find_by_name(&world2, "F1").expect("op");
+    let o2 = model::operation_of(&world2, &e2).expect("operation");
+    let OpParams::Finish3D { ramp, .. } = &o2.params else {
+        panic!("finish3d params expected");
+    };
+    assert!(*ramp);
+    let path = tmp_path("v17b");
+    project::save(&world2, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let world3 = new_world();
+    project::load(&world3, &path).expect("reload");
+    project::save(&world3, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the ramp shape round-trips byte-identically");
+    assert!(first.contains("\"ramp\": true"), "{first}");
+
+    // A ramp that is not a bool is corruption, not a default.
+    let bad = rt.replace("\"ramp\": true", "\"ramp\": \"yes\"");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &bad), Err(ProjectError::Corrupt(_))),
+        "a non-bool ramp must not load"
     );
 }
 

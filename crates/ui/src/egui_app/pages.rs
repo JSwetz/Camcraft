@@ -1141,6 +1141,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             feed,
             plunge_feed,
             climb,
+            ramp,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1220,6 +1221,10 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     } else {
                         ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
                     }
+                    ui.checkbox(ramp, "Ramp between lines");
+                    ui.label(
+                        "one diagonal feed chains each line's end to the next where the ground allows; where it doesn't, the hop stands",
+                    );
                 }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);

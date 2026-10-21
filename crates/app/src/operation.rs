@@ -661,6 +661,10 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// Chain the lines of one family with diagonal feeds instead
+        /// of hops where the ground allows (M2.2e). `false` is every
+        /// pre-ramp file: hop-to-clearance, unchanged.
+        ramp: bool,
     },
 }
 
@@ -1151,6 +1155,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 climb,
+                ramp,
             } => {
                 h.write_u8(7);
                 // v16: the pattern chooses a different kinematic (and
@@ -1174,6 +1179,10 @@ impl OpParams {
                 }
                 h.write_u8(u8::from(*climb));
                 wh_opt(h, *retract_z);
+                // v17 (M2.2e): ramp changes the chain between lines,
+                // so it belongs in the digest; the one-time staleness
+                // it hands old ops is the step-up law, same as ever.
+                h.write_u8(u8::from(*ramp));
             }
             OpParams::Slot {
                 a,
@@ -3005,6 +3014,7 @@ pub fn generate(
             feed,
             plunge_feed,
             climb,
+            ramp,
             ..
         } => {
             // Ball jurisdiction: the rings are the tangent locus of a
@@ -3031,6 +3041,7 @@ pub fn generate(
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                ramp: *ramp,
             };
             // The pattern picks the generator; Waterline never
             // reaches the raster code at all.

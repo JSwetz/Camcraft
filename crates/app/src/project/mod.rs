@@ -76,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 16;
+pub const PROJECT_VERSION: u32 = 17;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -445,6 +445,10 @@ pub enum ParamsDto {
         /// Absent means hop-to-clearance, the pocket family's law.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retract_z: Option<HeightDto>,
+        /// Absent means no ramping - the hop, what every pre-v17 file
+        /// ran (M2.2e). Written always, like `climb`.
+        #[serde(default)]
+        ramp: bool,
     },
 }
 
@@ -862,6 +866,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                ramp,
             } => ParamsDto::Finish3D {
                 pattern: (*pattern).into(),
                 stepover: *stepover,
@@ -873,6 +878,7 @@ impl ParamsDto {
                 plunge_feed: *plunge_feed,
                 climb: *climb,
                 retract_z: (*retract_z).map(Into::into),
+                ramp: *ramp,
             },
             OpParams::Slot {
                 a,
@@ -1100,6 +1106,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                ramp,
             } => OpParams::Finish3D {
                 pattern: (*pattern).into(),
                 stepover: *stepover,
@@ -1111,6 +1118,7 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                ramp: *ramp,
             },
             ParamsDto::Slot {
                 a,
@@ -1667,6 +1675,12 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // stepover) are exactly what v15 ran. No content change;
         // step-up is the stamp itself, like every bump since v6.
         file.version = 16;
+    }
+    if file.version == 16 {
+        // v16 -> v17: one more new key inside `finish3d` - `ramp`,
+        // absent from every v16 file, whose serde default (false: the
+        // hop) is exactly what v16 ran. Same pure step-up, same law.
+        file.version = 17;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));

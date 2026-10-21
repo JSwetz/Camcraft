@@ -794,6 +794,7 @@ fn every_field_lives_on_exactly_one_section() {
                     "Pattern",
                     "Stepover",
                     "Set line spacing",
+                    "Ramp between lines",
                     "Tolerance",
                 ]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
@@ -2104,6 +2105,47 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         Some((hsmworks_app::finishing3d::FinishPattern::Parallel, None)),
         "undo must invert the scallop apply like any other"
     );
+    // M2.2e stage D: the ramp checkbox rides the same command lane, on
+    // the same tab (the draft is back on Parallel, so the widget is
+    // shown - Waterline would hide it). Stage by click, apply, undo.
+    harness.state_mut().state.sync_ops_ui();
+    harness.run();
+    harness.get_by_label("Ramp between lines").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Ramp between lines").click();
+    harness.run();
+    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Apply Parameters").click();
+    harness.run();
+    let st = &harness.state().state;
+    let ramped = model::find_by_name(&st.world, "Operation2")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|o| match o.params {
+            OpParams::Finish3D { ramp, .. } => ramp,
+            _ => panic!("kind drift"),
+        });
+    assert_eq!(ramped, Some(true), "Apply must carry the ramp checkbox to the world");
+    harness
+        .input_mut()
+        .events
+        .push(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.input_mut().events.push(Event::Key {
+        key: Key::Z,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let back = model::find_by_name(&st.world, "Operation2")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|o| match o.params {
+            OpParams::Finish3D { ramp, .. } => ramp,
+            _ => panic!("kind drift"),
+        });
+    assert_eq!(back, Some(false), "undo restores the seeded no-ramp default");
 }
 
 #[test]

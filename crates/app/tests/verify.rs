@@ -443,6 +443,7 @@ fn cone_waterline() -> Toolpath {
             feed: 500.0,
             plunge_feed: 100.0,
             climb: true,
+            ramp: false,
         },
     )
     .expect("cone waterline")

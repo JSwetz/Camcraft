@@ -131,6 +131,7 @@ fn params(top_z: f64, bottom_z: f64) -> Finish3DParams {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        ramp: false,
     }
 }
 
@@ -1327,4 +1328,173 @@ fn all_steep_ground_leaves_the_shadow_families_to_the_rings() {
         .collect();
     let _ = contour(&scatter, &ppattern(1.0, 0.0, FinishPattern::Contour));
     let _ = project(&scatter, &ppattern(1.0, 0.0, FinishPattern::Project));
+}
+
+// ---- M2.2e stage D: ramp entries, the diagonal chain ----
+
+/// The hop's fingerprint. A ramp may only ever take counts DOWN -
+/// rapids and plunges it leaves are the refusals it earned.
+fn n_kind(t: &Toolpath, k: MoveKind) -> usize {
+    t.moves.iter().filter(|m| m.kind == k).count()
+}
+
+#[test]
+fn ramp_chains_the_plateau_raster() {
+    // Flat ground is the chain's best case: every line-to-line
+    // diagonal rides above its own support, so the hop's
+    // up-rapid-plunge collapses into one Feed at cutting height. The
+    // first contact stays a plunge - a ramp chains BETWEEN cuts,
+    // never INTO the first one.
+    let f = plateau();
+    let hop = Finish3DParams { ramp: false, ..ppattern(10.0, 0.0, FinishPattern::Parallel) };
+    let rng = Finish3DParams { ramp: true, ..ppattern(10.0, 0.0, FinishPattern::Parallel) };
+    let h = parallel(&f, &hop).expect("hop");
+    let r = parallel(&f, &rng).expect("ramp");
+    assert_eq!(
+        r.moves,
+        parallel(&f, &rng).expect("ramp again").moves,
+        "two calls, two paths - a stamp would churn forever"
+    );
+    let first_cut = r
+        .moves
+        .iter()
+        .find(|m| m.kind != MoveKind::Rapid)
+        .expect("a path with no cut at all");
+    assert_eq!(
+        first_cut.kind,
+        MoveKind::Plunge,
+        "the first contact arrived as a chained Feed - the law says plunge"
+    );
+    assert!(
+        n_kind(&r, MoveKind::Rapid) < n_kind(&h, MoveKind::Rapid),
+        "the chain replaced nothing on flat ground"
+    );
+    assert!(n_kind(&r, MoveKind::Plunge) < n_kind(&h, MoveKind::Plunge));
+    // The chained link, structurally: the serpentine raster's
+    // line-to-line connector is a lateral one-stepover move, and the
+    // ramp feeds it at cutting height instead of lifting for it -
+    // one constant-Z Feed with a zero X-delta, where the hop path
+    // has its up-rapid-plunge triple.
+    let step = scallop_stepover(R, TOL);
+    let chained = r.moves.iter().any(|m| {
+        m.kind == MoveKind::Feed
+            && (m.to.z - m.from.z).abs() < 1e-12
+            && (m.to.x - m.from.x).abs() < 1e-9
+            && ((m.to.y - m.from.y).abs() - step).abs() <= 1e-6
+    });
+    assert!(chained, "no lateral chain Feed at cutting height in the ramp path");
+    let lifted = h.moves.iter().any(|m| {
+        m.kind == MoveKind::Rapid
+            && (m.to.x - m.from.x).abs() < 1e-9
+            && ((m.to.y - m.from.y).abs() - step).abs() <= 1e-6
+            && m.to.z > 20.0
+    });
+    assert!(lifted, "the hop path never lifted over a stepover - wrong fixture");
+    assert_no_feed_spans_a_step(&r);
+    let rep = envelope(&f, &r);
+    assert!(rep.gouge_mm <= gate(rep.cell), "ramp gouged {} at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "ramp left {} at {:?}", rep.rest_mm, rep.at);
+    assert_eq!(verify_finish(&f, &r, 10.0), Vec::new(), "the verifier agrees");
+}
+
+#[test]
+fn ramp_never_gouges_the_ground_it_certs() {
+    // The dome is where a straight chord sinks below the arc's
+    // support - whether each hill diagonal lands or refuses is
+    // `support_at`'s answer, not the design's guess. What IS the law,
+    // measured: fewer hops at worst, no gouge at best, and the same
+    // clean verdict from the kernel either way.
+    let f = hill();
+    let hop = Finish3DParams { ramp: false, ..ppattern(HILL_TOP, HILL_RIM, FinishPattern::Parallel) };
+    let rng = Finish3DParams { ramp: true, ..ppattern(HILL_TOP, HILL_RIM, FinishPattern::Parallel) };
+    let h = parallel_all(&f, &hop).expect("hop hill");
+    let r = parallel_all(&f, &rng).expect("ramp hill");
+    assert!(n_kind(&r, MoveKind::Rapid) <= n_kind(&h, MoveKind::Rapid), "a ramp ADDED a hop");
+    let rep = envelope(&f, &r);
+    assert!(
+        rep.gouge_mm <= gate(rep.cell),
+        "a certified diagonal gouged: {} at {:?}",
+        rep.gouge_mm,
+        rep.at
+    );
+    assert!(rep.rest_mm <= gate(rep.cell), "ramp hill left {} of rest", rep.rest_mm);
+    assert_eq!(verify_finish(&f, &r, HILL_TOP), Vec::new(), "the verifier agrees");
+}
+
+#[test]
+fn a_chain_too_long_to_certify_declines_itself() {
+    // The probe cap in test form: an explicit spacing of 0.5 mm under
+    // a tolerance of 1e-4 puts the serpentine's lateral connector at
+    // 0.5 / (2.5e-5) = 20000 probes - past the cap - so certification
+    // declines every one and the path comes back byte-identical to
+    // the hop. A claim too wide to check is refused, not
+    // approximated: the budget-stated-zero law. (The flat ground
+    // keeps the dump small: the march's exact-straight collapse puts
+    // few samples on each line.)
+    let f = plateau();
+    let mk = |ramp| Finish3DParams {
+        tolerance: 1e-4,
+        stepover: Some(0.5),
+        ramp,
+        ..ppattern(10.0, 0.0, FinishPattern::Parallel)
+    };
+    let h = parallel(&f, &mk(false)).expect("hop");
+    let r = parallel(&f, &mk(true)).expect("ramp");
+    assert_eq!(h.moves, r.moves, "an uncertifiable diagonal was attempted anyway");
+}
+
+#[test]
+fn the_ring_families_ignore_the_chain() {
+    // Ramp lives in the runs emitter's between-lines branch alone;
+    // rings are their own emitter and never route through it. On
+    // all-steep ground a contour is rings only, so the flag must be
+    // byte-inert there - and every ground-line family still
+    // generates, deterministically and envelope-clean, with it on.
+    let wall = vec![
+        Triangle::new(p3(-5.0, 0.0, 0.0), p3(5.0, 0.0, 5.0), p3(5.0, 0.0, 0.0)),
+        Triangle::new(p3(-5.0, 0.0, 0.0), p3(-5.0, 0.0, 5.0), p3(5.0, 0.0, 5.0)),
+    ];
+    let h = contour(
+        &wall,
+        &Finish3DParams { ramp: false, ..ppattern(5.0, 0.0, FinishPattern::Contour) },
+    )
+    .expect("hop wall");
+    let r = contour(
+        &wall,
+        &Finish3DParams { ramp: true, ..ppattern(5.0, 0.0, FinishPattern::Contour) },
+    )
+    .expect("ramp wall");
+    assert_eq!(h.moves, r.moves, "a ramp reached the rings");
+    let f = hill();
+    for pat in [
+        FinishPattern::Radial,
+        FinishPattern::Spiral,
+        FinishPattern::Contour,
+        FinishPattern::Project,
+    ] {
+        let p = Finish3DParams { ramp: true, ..ppattern(HILL_TOP, HILL_RIM, pat) };
+        let t = parallel_all(&f, &p).expect("family");
+        assert_eq!(
+            t.moves,
+            parallel_all(&f, &p).expect("again").moves,
+            "{pat:?} with ramp: two calls, two paths"
+        );
+        let rep = envelope(&f, &t);
+        assert!(
+            rep.gouge_mm <= gate(rep.cell) && rep.rest_mm <= gate(rep.cell),
+            "{pat:?} with ramp: gouge {} rest {}",
+            rep.gouge_mm,
+            rep.rest_mm
+        );
+    }
+    // Degenerate scatter under ramp: no panic, no hang, no promise.
+    let scatter: Vec<Triangle> = (-8..8)
+        .flat_map(|i| (-8..8).map(move |j| (i, j)))
+        .map(|(i, j)| {
+            let (x, y) = (i as f64, j as f64);
+            Triangle::new(p3(x, y, 1.0), p3(x, y, 1.0), p3(x, y, 1.0))
+        })
+        .collect();
+    let _ = contour(&scatter, &Finish3DParams { ramp: true, ..ppattern(1.0, 0.0, FinishPattern::Contour) });
+    let _ = project(&scatter, &Finish3DParams { ramp: true, ..ppattern(1.0, 0.0, FinishPattern::Project) });
 }
