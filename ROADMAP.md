@@ -913,7 +913,19 @@ before touching metal.
       sentence the verdict bar shows: counts, mm³, worst depth, WHERE.
       Within DEV_TOL (10 um, a display law, not an op's authoring
       tolerance) reads clean; NaN reads unjudged, never a false zero.
-- **Machine limits**: axis travel, feed, and spindle validation from a machine definition
+- ✅ **Machine limits** (M2.3 C): axis travel, feed, and spindle validation
+      from a machine definition - a `.mch` file mounted as the document's
+      setup furniture (the LoadMachine command; v18→v19 persistence, an
+      unstated machine writes no key). An unstated limit checks nothing:
+      the zeros files carry for rates nobody configured are not a refusal
+      to let the machine rapids. Stroke is our own `"travel"` extension on
+      linear parts, read in PROGRAM coordinates through the post's own
+      origin law, so a G54 slide shifts what passes exactly as it shifts
+      the G-code; feeds bill against the slowest stated axis they drive,
+      and rapids pay the stroke bill too. `check_document` walks
+      `posting::program_ops` - the judgment is over exactly what would
+      post. Stage C reports (the Deviate clause, located lines capped at
+      40 + an honest more); stage D makes it block.
 - **Post gating**: the verification result is the gate that releases the NC program (Never Gouge, made structural)
 
 ---
@@ -1014,7 +1026,7 @@ files should be no larger than 400 lines of code to keep it maintainable. All te
 to each subcrate to make testing cleaner.
 
 ### M5.1 - Seperating the code into crates
-** Goal: Sepearting all components into smaller crates.
+**Goal: Sepearting all components into smaller crates.**
 
 - **Identify code blocks**: Identify and map out code for operations, setups, machines etc etc. all the parts that make out the application
 - **Chunk the parts up**: Cut all the parts apart and refactor.
@@ -1023,13 +1035,19 @@ to each subcrate to make testing cleaner.
 - **Clean up**: Make sure all tests pass, code compiles and applicatiotn passes a user test.
 
 ### M5.2 - Multi plattform build targets.
-** Goal: Building the same application, for multiple OS environments. Using docker build
-containers for compiling and artefact output to a mounted volume/folder
+**Goal: Building the same application, for multiple OS environments.**
 
 - **Windows**: First usecase, its what we got.
 - **Linux**: Prioritized build case, where we will have most adopters.
 - **MacOSX**: Secondary prioritsation.
 - **WASM**: A web version for online use.
+- **Docker**: Using docker builds for every target.
+
+### M%.3 - Defer HSMWorks label thru out the code.
+**Goal: Removing the HSMWorks branding as its conflicting**
+
+- **Debrand**: Find every instance of where "hsmworks" been used.
+- **Rename**: New name is "camcraft"
 
 ---
 
@@ -1057,6 +1075,7 @@ containers for compiling and artefact output to a mounted volume/folder
 | **M4.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
 | **M5.1** | Code refactor | Refactor of codebase, test, and code organisation. | 📋 |
 | **M5.2** | Multibuilds | Refactor of codebase is done and application builds for multipls OS and environments. | 📋 |
+| **M5.3** | Defer Code | All references to "hsmworks" in the code needs to be renamed and re-referenced to camcraft | 📋 |
 
 ## Open questions & deferred
 

@@ -1658,6 +1658,79 @@ reads exactly like the law.
   wants a design pass, not a rush job); the stock icon is exactly the
   noun the cell judges.
 
+## M2.3 stage C — the machine speaks (code `b8114b9` + this docs)
+
+- **The unstated-limit law, and why zeros are not limits.** Vendor
+  `.mch` files carry `0` for every rate nobody configured; a zero
+  rapid speed does not mean the machine cannot rapids - it means the
+  file doesn't say. So 0/absent/non-finite reads `None` and checks
+  nothing; only stated numbers can be violated. The alternative -
+  treating a blank as a ban - would refuse every real file on earth.
+  Travel bounds are the exception with a reason: a `NaN` or inverted
+  stroke is nonsense, so it reads as corruption (is_sane), not as
+  freedom.
+
+- **Format reuse is what the user authorized; values stay ours.** The
+  `.mch` JSON layout is parsed as HSMWorks writes it (general,
+  kinematics, synced_configuration) - the CPS/MCH re-spec named the
+  formats, not the numbers. Every fixture value here is invented
+  (TestMill 1, Hsmworks Testbench), per the clean-room protocol; the
+  module's provenance line says so.
+
+- **Stroke lives in a `"travel"` object we add to linear parts.** The
+  real format states velocities but no travel anywhere we could find
+  in the public behavior notes - a machine without a stroke makes
+  travel checking impossible, so the layout grows one extension
+  (our own key, ignored by anyone else's reader). Axis numbers are
+  PROGRAM coordinates: the check subtracts `posting::wcs_context`'s
+  origin - the post's own origin law, one copy - so a G54 slide
+  shifts what passes exactly as it shifts the G-code.
+
+- **Axes are looked up BY NAME.** The table is ordered by the
+  controller's `coordinate` field for display, but a positional
+  index would silently check the wrong stroke the moment a file
+  names a subset or leads with a U. Names make a limit mean
+  something.
+
+- **The feed bill is per-move and directional.** Only a move that
+  actually drives an axis pays that axis's `max_normal_speed`; the
+  ceiling is the SLOWEST stated among the driven ones, unnamed when
+  none states one. Rapids: programs never ask for a rapid rate, so
+  `max_rapid_speed` is carried but unbilled today - and rapids
+  still pay the travel bill, which is the one that crashes
+  machines. Arcs are judged at endpoints + the four XY quarter
+  points; that can over-report a real stroke on a back-sweep arc,
+  never hide a violation - over-reporting is the honest direction.
+
+- **Tool length means gauge length.** The magazine's
+  `max_tool_length` measures spindle nose to tip: flute + shank +
+  holder, not the cutter alone - the number a tool table really
+  gates. Spindle: today every op posts its tool's rpm, so the tool
+  IS the program's spindle word; when per-op speeds arrive the
+  checker reads them there.
+
+- **Report, not block - yet.** Stage C's verdict joins the Deviate
+  sentence ("; machine: within limits" / "N limit problem(s)") and
+  refuses nothing at the post; the unstated-limit law's sentence
+  half: no machine mounted, no claim printed. Stage D moves the same
+  `check_document` into `post_setup`'s path, where the shared-gate
+  law says it judges exactly what would post.
+
+- **v18→v19 is the step-up pattern again**: pure serde-default on the
+  `machine` key, so an old file loads byte-comfortably and a new save
+  mints no key until a machine is actually loaded. A corrupt travel
+  statement makes the WHOLE load a Corrupt refusal that mounts
+  nothing - refuse-before-world-write, proven by test.
+
+- **Discussion item - the scallop test's debug-profile cost.**
+  `scallop_crosses_the_diagonals_and_measures_clean` runs ~1.9 s in
+  release but 1853 s (31 min!) unoptimized - it passes either way,
+  but a debug `cargo test` on the whole suite becomes impractical.
+  Candidates: a `#[cfg(debug_assertions)]` coarser resolution for
+  that one fixture, or an `#[ignore]`d slow group. Decided: ship C
+  untouched (the law it pins is release-verified); fix in the 0.2.x
+  maintenance window.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
