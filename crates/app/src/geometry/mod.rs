@@ -12,6 +12,7 @@
 pub mod feature;
 pub mod import;
 mod primitives;
+pub mod revision;
 pub mod slice;
 
 pub use import::{ImportError, load_model};

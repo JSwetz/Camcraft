@@ -12,6 +12,7 @@ pub mod set_stock;
 pub mod set_units;
 pub mod set_wcs;
 pub mod tool;
+pub mod update_model;
 
 use flecs_ecs::prelude::World;
 
@@ -27,6 +28,7 @@ pub use set_stock::SetStock;
 pub use set_units::SetUnits;
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
+pub use update_model::UpdateModel;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {

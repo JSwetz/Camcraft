@@ -54,6 +54,7 @@ use crate::finishing3d::{self, Finish3DParams};
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Triangle;
 use crate::geometry::feature::{self, LoopKind};
+use crate::geometry::revision;
 use crate::geometry::slice::{self, SliceError};
 use crate::geometry::{Point3, transform_point};
 use crate::machining2d::{
@@ -1428,13 +1429,14 @@ pub fn current_stamp(
             {
                 w(&mut h, v);
             }
+            // M3.1 A: the revision signature, not count + bounds. Facet
+            // count and AABB are coincidences waiting to happen - a solid
+            // that keeps both while moving material (the diamond where the
+            // cube was) must read Stale, and a re-tessellation of the same
+            // faces must not. Face ids are local-frame content hashes, so
+            // the transform hashed above carries all the placement.
             let tris = model::facets_of(world, &entity)?;
-            h.write_usize(tris.len());
-            if let Some(b) = model::entity_world_aabb(world, &entity) {
-                for v in [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z] {
-                    w(&mut h, v);
-                }
-            }
+            h.write_u64(revision::signature(&model::features_of_local(&tris)));
         }
         SrcRef::Selection(items) => {
             // b'L', not b'S': the Stock arm already owns that byte, and a

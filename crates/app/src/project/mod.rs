@@ -1,4 +1,4 @@
-//! Project save/load: `.hsmproj`, JSON, version 10.
+//! Project save/load: `.hsmproj`, JSON, version 20.
 //!
 //! Serialization goes through plain DTO structs (deliberately not flecs
 //! reflection): the file format is our public persistence contract and must
@@ -52,8 +52,15 @@
 //! a serde default on every new key (`retract_z` absent is
 //! hop-to-clearance, `entry` absent is Plunge), and no pre-v11 file could
 //! contain a 3-D pocket operation at all - the tag did not exist - so the
-//! step-up is the stamp itself. v1-v10 files migrate on load, one version
-//! step at a time.
+//! step-up is the stamp itself. v12-v18 added the later operation-family
+//! grammars (corner/flow profiles, surface finish, ramp), each the same
+//! pure step-up, one default per new key; v19 added the top-level `machine`
+//! key (absent means no machine, the mute checker). v20 is M3.1: the model
+//! `rev` key (the geometry-revision counter, see `schema::Revision`) - no
+//! pre-v20 file could carry it, and absent means 0, which is exactly what
+//! every pre-v20 document was. The signatures that make staleness work
+//! recompute from the persisted facets; nothing else moved. v1-v19 files
+//! migrate on load, one version step at a time.
 
 use std::path::Path;
 
@@ -76,7 +83,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 19;
+pub const PROJECT_VERSION: u32 = 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -1449,6 +1456,13 @@ pub struct EntityDto {
     pub rotation: [f64; 4],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facets: Option<Vec<[[f64; 3]; 3]>>, // a, b, c per triangle
+    /// Geometry-revision counter (M3.1, `schema::Revision`). Absent means 0,
+    /// which is what every pre-v20 file held; a model always carries >= 1
+    /// (import stamps the first landing), so this key never appears on
+    /// setup furniture and a v20 save of a pre-M3.1 document is byte-shape
+    /// identical to its v19 save.
+    #[serde(default, skip_serializing_if = "is_unrevised")]
+    pub rev: u64,
     /// Absent means Model; only non-model entities carry the tag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<EntityKind>,
@@ -1466,6 +1480,10 @@ pub struct EntityDto {
 
 fn identity_rotation() -> [f64; 4] {
     IDENTITY_Q
+}
+
+fn is_unrevised(rev: &u64) -> bool {
+    *rev == 0
 }
 
 fn corrupt(msg: impl Into<String>) -> ProjectError {
@@ -1559,6 +1577,9 @@ pub fn collect(world: &World) -> ProjectFile {
                 translation: [loc.pos.x, loc.pos.y, loc.pos.z],
                 rotation: loc.rot,
                 facets,
+                // The counter is only ever set on models (import/update
+                // commands); everywhere else it reads 0 and omits itself.
+                rev: model::rev_of(world, &entity),
                 kind,
                 stock,
                 tool,
@@ -1749,6 +1770,16 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // empty machine. Step-up is the stamp itself, like v7 -> v8.
         file.version = 19;
     }
+    if file.version == 19 {
+        // v19 -> v20: the model `rev` key (M3.1's revision counter). No
+        // v19 file can contain it - the component did not exist - and the
+        // field's default, absent means 0, is exactly what every v19
+        // document was: geometry with no remembered landings. The
+        // staleness machinery needs nothing migrated - it recomputes the
+        // signature from the persisted facets. Step-up is the stamp
+        // itself, like v7 -> v8 and v18 -> v19.
+        file.version = 20;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -1794,6 +1825,16 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
             EntityKind::Model => {
                 if let Some(tris) = dto.facets {
                     model::set_facets(world, &entity, dto_to_facets(tris));
+                }
+                // 0 means the key was absent, i.e. a pre-v20 document: no
+                // counter component is the world a v19 loader would have
+                // built, and `rev_of` reads it as 0 anyway. A model first
+                // updated after such a load lands rev 1 - the counter
+                // counts landings this document remembers, not the file's
+                // whole history. Staleness never reads it; the stamp's
+                // signature does the work.
+                if dto.rev > 0 {
+                    model::set_rev(world, &entity, dto.rev);
                 }
             }
             EntityKind::Stock => {

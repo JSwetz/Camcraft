@@ -54,6 +54,52 @@ fn import_completes_on_the_worker_thread() {
 }
 
 #[test]
+fn reimporting_the_same_name_updates_the_model_without_duplicating_or_dropping_it() {
+    // M3.1 A's UI law: a same-named import lands as UpdateModel on the one
+    // entity the name keys - never a silent no-op, never a second model,
+    // and undo restores the previous geometry instead of deleting it.
+    use hsmworks_ui::state::{CommandKind, State};
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/models/cube.stl");
+    let mut state = State::new();
+    state.pending.push_back(CommandKind::ImportFile(path.clone()));
+    state.settle();
+    assert!(state.status.starts_with("imported cube"), "{:?}", state.status);
+
+    state.pending.push_back(CommandKind::ImportFile(path));
+    state.settle();
+    // The same file over the same name: the update lands, and the honest
+    // summary is that nothing moved.
+    assert_eq!(state.status, "updated cube (geometry unchanged)", "{:?}", state.status);
+    let entity = hsmworks_app::model::find_by_name(&state.world, "cube").expect("one model");
+    assert_eq!(hsmworks_app::model::rev_of(&state.world, &entity), 2, "revision two");
+    assert_eq!(hsmworks_app::model::facets_of(&state.world, &entity).map(|f| f.len()), Some(12));
+
+    // Undo trades back, not away: the entity stands with revision 1.
+    state.pending.push_back(CommandKind::Undo);
+    state.settle();
+    let entity = hsmworks_app::model::find_by_name(&state.world, "cube").expect("not deleted");
+    assert_eq!(hsmworks_app::model::rev_of(&state.world, &entity), 1);
+    assert_eq!(
+        hsmworks_app::model::facets_of(&state.world, &entity).map(|f| f.len()),
+        Some(12),
+        "geometry restored, not gone"
+    );
+
+    state.pending.push_back(CommandKind::Redo);
+    state.settle();
+    let entity = hsmworks_app::model::find_by_name(&state.world, "cube").expect("still one");
+    assert_eq!(hsmworks_app::model::rev_of(&state.world, &entity), 2, "redo counts again");
+    // One entity, ever: the tree has no second "cube" to show.
+    let named: Vec<String> = hsmworks_app::model::model_entities(&state.world)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(named.iter().filter(|n| n.as_str() == "cube").count(), 1, "{named:?}");
+}
+
+#[test]
 fn corrupt_import_errors_on_the_worker_never_panics() {
     use hsmworks_ui::state::{CommandKind, State};
 

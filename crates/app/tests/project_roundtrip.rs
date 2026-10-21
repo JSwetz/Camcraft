@@ -79,7 +79,7 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v17
+    // Anything newer than this build's format stays refused; v1..v19
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
@@ -96,11 +96,12 @@ fn wrong_version_is_refused() {
     // v16_file_steps_to_v17_and_the_ramp_grammar_round_trips v16 -> v17,
     // v17_file_steps_to_v18_and_the_surface_finish_grammar_round_trips
     // v17 -> v18, and v18_file_steps_to_v19_and_the_machine_grammar_round_trips
-    // v18 -> v19.
-    let text = r#"{"version": 20, "entities": []}"#;
+    // v18 -> v19, and v19_file_steps_to_v20_and_the_rev_counter_round_trips
+    // v19 -> v20.
+    let text = r#"{"version": 21, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(20)) => {}
+        Err(ProjectError::UnsupportedVersion(21)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1956,6 +1957,60 @@ fn v18_file_steps_to_v19_and_the_machine_grammar_round_trips() {
     );
     let (_, m3) = machine::of(&world3);
     assert!(m3.is_none(), "a refused load mounts nothing");
+}
+
+#[test]
+fn v19_file_steps_to_v20_and_the_rev_counter_round_trips() {
+    // v19 -> v20 (M3.1 A): one new per-entity key, `rev` - the geometry
+    // revision counter. The step-up is the serde default itself: a v19
+    // file carries no key, loads no counter, and `rev_of` reads it as 0,
+    // exactly what a pre-M3.1 document was. Staleness recomputes from the
+    // facets, so nothing else moves.
+    let quad = r#"[[[0.0,0.0,0.0],[10.0,0.0,0.0],[10.0,10.0,0.0]],[[0.0,0.0,0.0],[10.0,10.0,0.0],[0.0,10.0,0.0]]]"#;
+    let text = format!(
+        r#"{{"version": 19, "entities": [{{"name": "legacy", "translation": [0.0, 0.0, 0.0], "facets": {quad}}}]}}"#
+    );
+    let world = new_world();
+    project::open(&world, &text).expect("a v19 file must still open");
+    let e = model::find_by_name(&world, "legacy").expect("loaded");
+    assert_eq!(model::rev_of(&world, &e), 0, "no key means no remembered landings");
+    let p = tmp_path("v20a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    let _ = std::fs::remove_file(&p);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v20 stamp: {saved}"
+    );
+    assert!(
+        !saved.contains("\"rev\""),
+        "a 0-revision model must not mint a key (skip-if-zero): {saved}"
+    );
+
+    // The v20 grammar, hand-written so the spelling is pinned: a model
+    // that has been updated lands its counter.
+    let rt = format!(
+        r#"{{"version": 20, "entities": [{{"name": "grown", "translation": [0.0, 0.0, 0.0], "facets": {quad}, "rev": 3}}]}}"#
+    );
+    let world = new_world();
+    project::open(&world, &rt).expect("the v20 rev grammar must read");
+    let e = model::find_by_name(&world, "grown").expect("loaded");
+    assert_eq!(model::rev_of(&world, &e), 3, "the counter reads back");
+
+    // Write-parse-write fixed point (the machine test's law): a saved
+    // counter is stable text, and the fresh 0-model stays key-free.
+    let p = tmp_path("v20b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    let e2 = model::find_by_name(&world2, "grown").expect("reloaded");
+    assert_eq!(model::rev_of(&world2, &e2), 3, "reload keeps the count");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert!(first.contains("\"rev\": 3"), "a counted model mints its key: {first}");
+    assert_eq!(first, second, "the rev shape round-trips byte-identically");
 }
 
 #[test]

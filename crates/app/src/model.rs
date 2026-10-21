@@ -152,10 +152,36 @@ pub fn named_entities(world: &World) -> Vec<(String, Entity)> {
 pub fn model_entities(world: &World) -> Vec<(String, Entity)> {
     named_entities(world)
         .into_iter()
-        .filter(|(_, e)| {
-            !is_stock(world, e) && !is_wcs(world, e) && !is_tool(world, e) && !is_operation(world, e)
-        })
+        .filter(|(_, e)| is_model(world, e))
         .collect()
+}
+
+/// Is this named entity one of the user's parts - not stock, not a WCS
+/// slot, not a tool, not an operation. The kind test behind [`model_entities`]
+/// and the re-import routing in the UI (a name that lands on setup
+/// furniture is a conflict, never an overwrite).
+#[must_use]
+pub fn is_model(world: &World, entity: &Entity) -> bool {
+    !is_stock(world, entity)
+        && !is_wcs(world, entity)
+        && !is_tool(world, entity)
+        && !is_operation(world, entity)
+}
+
+/// The model's geometry revision counter (M3.1): `0` for an entity that
+/// never had the component (a spawned-empty model, a pre-v20 project file).
+#[must_use]
+pub fn rev_of(world: &World, entity: &Entity) -> u64 {
+    entity
+        .entity_view(world)
+        .try_get::<&crate::schema::Revision>(|r| r.0)
+        .unwrap_or(0)
+}
+
+/// Land a geometry revision counter (commands only, per AGENTS.md: the UI
+/// and systems never write fields ad hoc).
+pub fn set_rev(world: &World, entity: &Entity, rev: u64) {
+    entity.entity_view(world).set(crate::schema::Revision(rev));
 }
 
 #[must_use]

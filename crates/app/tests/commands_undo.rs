@@ -4,10 +4,10 @@
 use std::path::{Path, PathBuf};
 
 use hsmworks_app::commands::{
-    CommandError, DeleteEntity, History, ImportModel, SetStock, SetUnits, SetWcsOrigin,
+    CommandError, DeleteEntity, History, ImportModel, SetStock, SetUnits, SetWcsOrigin, UpdateModel,
 };
 use hsmworks_app::units::{self, Unit};
-use hsmworks_app::geometry::{cube, Mesh, Point3};
+use hsmworks_app::geometry::{cube, Mesh, Point3, Triangle};
 use hsmworks_app::model;
 use hsmworks_app::schema::{Location, STOCK_NAME};
 use hsmworks_app::stock::{CYLINDER_SEGMENTS, StockShape};
@@ -563,4 +563,161 @@ fn units_set_undo_redo_is_exact_and_no_op_refused() {
     assert!(matches!(err, CommandError::Invalid(_)), "{err:?}");
     assert!(history.undo(&world));
     assert_eq!(units::of(&world), Unit::Millimeters);
+}
+
+// ---- M3.1 A: the model update command -------------------------------------
+
+/// Same facet count and same AABB as the 0..1 cube, entirely different
+/// walls - the exact case the old count+bounds stamp let pass in silence.
+fn prism_mesh() -> Mesh {
+    let (a, b, c, d) = (
+        Point3::new(0.5, 0.0, 0.0),
+        Point3::new(1.0, 0.5, 0.0),
+        Point3::new(0.5, 1.0, 0.0),
+        Point3::new(0.0, 0.5, 0.0),
+    );
+    let (a1, b1, c1, d1) = (
+        Point3::new(0.5, 0.0, 1.0),
+        Point3::new(1.0, 0.5, 1.0),
+        Point3::new(0.5, 1.0, 1.0),
+        Point3::new(0.0, 0.5, 1.0),
+    );
+    Mesh {
+        facets: vec![
+            Triangle::new(a, b, c),
+            Triangle::new(a, c, d), // bottom
+            Triangle::new(a1, c1, b1),
+            Triangle::new(a1, d1, c1), // top
+            Triangle::new(a, b, b1),
+            Triangle::new(a, b1, a1), // walls
+            Triangle::new(b, c, c1),
+            Triangle::new(b, c1, b1),
+            Triangle::new(c, d, d1),
+            Triangle::new(c, d1, c1),
+            Triangle::new(d, a, a1),
+            Triangle::new(d, a1, d1),
+        ],
+    }
+}
+
+fn facets(world: &flecs_ecs::prelude::World, name: &str) -> Option<Vec<Triangle>> {
+    model::find_by_name(world, name).and_then(|e| model::facets_of(world, &e))
+}
+
+#[test]
+fn update_undo_redo_restores_geometry_and_count_exactly() {
+    let world = new_world();
+    let mut history = History::default();
+    let v1 = cube_mesh().facets;
+
+    history.execute(&world, ImportModel::from_mesh("m", cube_mesh()));
+    assert_eq!(
+        model::find_by_name(&world, "m").map(|e| model::rev_of(&world, &e)),
+        Some(1),
+        "the first landing is revision 1"
+    );
+
+    history.execute(
+        &world,
+        UpdateModel::new(&world, "m", prism_mesh()).expect("model exists"),
+    );
+    assert_eq!(
+        model::find_by_name(&world, "m").map(|e| model::rev_of(&world, &e)),
+        Some(2),
+        "geometry landing two counts"
+    );
+    assert_ne!(facets(&world, "m").unwrap(), v1, "the walls moved");
+    assert_eq!(facet_count(&world, "m"), Some(12), "same count, different solid");
+
+    assert!(history.undo(&world));
+    assert_eq!(facets(&world, "m").unwrap(), v1, "undo restores revision 1 verbatim");
+    assert_eq!(
+        model::find_by_name(&world, "m").map(|e| model::rev_of(&world, &e)),
+        Some(1),
+        "and the counter with it"
+    );
+
+    assert!(history.redo(&world));
+    assert_eq!(facets(&world, "m").unwrap(), prism_mesh().facets);
+    assert_eq!(
+        model::find_by_name(&world, "m").map(|e| model::rev_of(&world, &e)),
+        Some(2)
+    );
+}
+
+#[test]
+fn update_redoes_gracefully_across_a_deleted_entity() {
+    // import, update, undo, undo (the import's invert deletes the entity),
+    // redo, redo: the name-keyed apply laws must land the full state -
+    // the import re-spawns, the update re-finds and writes revision 2.
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, ImportModel::from_mesh("m", cube_mesh()));
+    history.execute(
+        &world,
+        UpdateModel::new(&world, "m", prism_mesh()).expect("model exists"),
+    );
+    assert!(history.undo(&world));
+    assert!(history.undo(&world));
+    assert_eq!(model::find_by_name(&world, "m"), None, "import inverted: gone");
+    assert!(history.redo(&world));
+    assert!(history.redo(&world));
+    assert_eq!(facets(&world, "m").unwrap(), prism_mesh().facets, "full state, not half");
+    assert_eq!(
+        model::find_by_name(&world, "m").map(|e| model::rev_of(&world, &e)),
+        Some(2),
+        "prev_rev + 1 held across the interleaving"
+    );
+}
+
+#[test]
+fn update_validates_at_construction() {
+    let world = new_world();
+    // Missing name: NotFound, like every other entity-keyed command.
+    assert!(matches!(
+        UpdateModel::new(&world, "ghost", cube_mesh()),
+        Err(CommandError::NotFound(_))
+    ));
+    // Setup furniture is never an update target, whatever it is named.
+    let stock = SetStock::new(
+        &world,
+        StockShape::Box { dx: 10.0, dy: 10.0, dz: 5.0 },
+        Location::default(),
+    );
+    History::default().execute(&world, stock.expect("box stock"));
+    assert!(matches!(
+        UpdateModel::new(&world, STOCK_NAME, cube_mesh()),
+        Err(CommandError::Invalid(_))
+    ));
+    // Empty geometry cannot land.
+    history_import(&world);
+    assert!(matches!(
+        UpdateModel::new(&world, "m", Mesh { facets: vec![] }),
+        Err(CommandError::Invalid(_))
+    ));
+}
+
+fn history_import(world: &flecs_ecs::prelude::World) {
+    History::default().execute(world, ImportModel::from_mesh("m", cube_mesh()));
+}
+
+#[test]
+fn update_reports_what_moved() {
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, ImportModel::from_mesh("m", cube_mesh()));
+
+    // The same geometry re-imported: nothing moved, and the command says
+    // so in plain words the status bar can print.
+    let same = UpdateModel::new(&world, "m", cube_mesh()).expect("exists");
+    assert!(same.changes().is_empty());
+    assert_eq!(same.changes().describe(), "geometry unchanged");
+
+    // Cube to prism: walls change, so faces and chains both report.
+    let moved = UpdateModel::new(&world, "m", prism_mesh()).expect("exists");
+    let diff = moved.changes();
+    assert!(!diff.is_empty());
+    assert!(!diff.faces.added.is_empty() && !diff.faces.missing.is_empty());
+    let text = diff.describe();
+    assert!(text.ends_with(" changed") && !text.contains("0 "), "honest counts: {text}");
 }

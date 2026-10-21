@@ -49,6 +49,14 @@ pub struct Facets {
     pub tris: Vec<Triangle>,
 }
 
+/// How many times geometry has landed on this model (M3.1): `1` at import,
+/// `+1` per `UpdateModel`. Display and save bookkeeping only - staleness is
+/// derived from the stamp against the live facets, never from this counter
+/// (AGENTS.md: no stored stale flags). Entities without the component read
+/// as revision 0, which is exactly what pre-v20 project files meant.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Revision(pub u64);
+
 /// Selection marker (tag). Only `SelectEntity` writes it (AGENTS.md: changes
 /// go through commands); the tree and viewport read it to highlight.
 #[derive(Component, Debug)]
@@ -133,6 +141,7 @@ pub fn register_schema(world: &World) {
     world.component::<Name>();
     world.component::<Location>();
     world.component::<Facets>();
+    world.component::<Revision>();
     world.component::<Selected>();
     world.component::<StockDef>();
     world.component::<Wcs>();

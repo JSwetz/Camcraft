@@ -18,7 +18,7 @@ use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
-    SelectEntity, SetOperationGeometry, SetStock, SetUnits, SetWcsOrigin,
+    SelectEntity, SetOperationGeometry, SetStock, SetUnits, SetWcsOrigin, UpdateModel,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
@@ -1904,13 +1904,35 @@ impl State {
         match result {
             Ok(command) => {
                 let name = command.name.clone();
-                self.history.execute(&self.world, command);
-                self.doc_version += 1;
-                self.status = if secs >= 2.0 {
-                    format!("imported {name} in {secs:.1}s")
-                } else {
-                    format!("imported {name}")
+                let timed = |verb: &str, note: &str| {
+                    if secs >= 2.0 {
+                        format!("{verb} {name}{note} in {secs:.1}s")
+                    } else {
+                        format!("{verb} {name}{note}")
+                    }
                 };
+                // M3.1: a name that already carries a model is an UPDATE,
+                // not a silently-dropped re-import. The decision lives here,
+                // on the main thread, because only the world can say whether
+                // the name exists; the worker stayed world-blind on purpose.
+                // UpdateModel::new classifies further: setup furniture
+                // under this name is refused as Invalid, never overwritten.
+                if model::find_by_name(&self.world, &name).is_some() {
+                    match UpdateModel::new(&self.world, &name, command.mesh) {
+                        Ok(upd) => {
+                            let summary = upd.changes().describe();
+                            self.history.execute(&self.world, upd);
+                            self.doc_version += 1;
+                            self.status = timed("updated", &format!(" ({summary})"));
+                        }
+                        Err(err) => self.status = format!("import refused: {err}"),
+                    }
+                } else {
+                    // Fresh model: the spawn path, unchanged.
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = timed("imported", "");
+                }
             }
             Err(err) => self.status = format!("import refused: {err}"),
         }

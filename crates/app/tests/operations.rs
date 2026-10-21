@@ -8,9 +8,9 @@ use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, SetStock,
-    SetWcsOrigin,
+    SetWcsOrigin, UpdateModel,
 };
-use hsmworks_app::geometry::{cube, IDENTITY_Q, Point3};
+use hsmworks_app::geometry::{Mesh, IDENTITY_Q, Point3, cube};
 use hsmworks_app::machining2d::{Lead, Side};
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
@@ -396,6 +396,113 @@ fn generation_failure_refuses_the_command_and_writes_nothing() {
     let op = model::operation_of(&world, &model::find_by_name(&world, "Contour1").expect("op")).expect("op");
     assert_eq!(op.stamp, stored_stamp, "the stored stamp is untouched");
     assert_eq!(status(&world, "Contour1"), OpStatus::Stale, "the moved source reads stale");
+}
+
+/// The cube's silent twin at the same footprint: twelve facets, the same
+/// 10 x 10 x 5 AABB, every wall a different plane. This is what the old
+/// count+bounds stamp could not see.
+fn prism_10x10x5() -> Mesh {
+    let (a, b, c, d) = (
+        Point3::new(5.0, 0.0, 0.0),
+        Point3::new(10.0, 5.0, 0.0),
+        Point3::new(5.0, 10.0, 0.0),
+        Point3::new(0.0, 5.0, 0.0),
+    );
+    let (a1, b1, c1, d1) = (
+        Point3::new(5.0, 0.0, 5.0),
+        Point3::new(10.0, 5.0, 5.0),
+        Point3::new(5.0, 10.0, 5.0),
+        Point3::new(0.0, 5.0, 5.0),
+    );
+    Mesh {
+        facets: vec![
+            Triangle::new(a, b, c),
+            Triangle::new(a, c, d),
+            Triangle::new(a1, c1, b1),
+            Triangle::new(a1, d1, c1),
+            Triangle::new(a, b, b1),
+            Triangle::new(a, b1, a1),
+            Triangle::new(b, c, c1),
+            Triangle::new(b, c1, b1),
+            Triangle::new(c, d, d1),
+            Triangle::new(c, d1, c1),
+            Triangle::new(d, a, a1),
+            Triangle::new(d, a1, d1),
+        ],
+    }
+}
+
+#[test]
+fn a_model_update_marks_entity_sourced_operations_stale() {
+    // M3.1 A, the milestone's whole point in one assertion: geometry
+    // landing on a model's name must invalidate the operations that read
+    // that model - even geometry with the same facet count and the same
+    // box, which the pre-M3.1 stamp saw as nothing happening at all.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    let cmd = CreateOperation::new(
+        &world,
+        "Contour1",
+        "EM-0600-4FL",
+        SrcRef::Entity("part".into()),
+        contour_params(),
+    );
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
+
+    let cmd = UpdateModel::new(&world, "part", prism_10x10x5()).expect("model exists");
+    history.execute(&world, cmd);
+    assert_eq!(
+        status(&world, "Contour1"),
+        OpStatus::Stale,
+        "different walls under the same count and box is a different model"
+    );
+
+    // The undo law of the whole milestone: revision 1 restores the stamp,
+    // so the operation reads Ok without a regenerate - staleness is
+    // derived, and derivation is exact in both directions.
+    assert!(history.undo(&world));
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok, "the cube is back");
+    assert!(history.redo(&world));
+    assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
+}
+
+#[test]
+fn a_reimport_with_unchanged_geometry_keeps_operations_ok() {
+    // The other half of the promise: re-running the same file over a model
+    // must not churn the job. The signature is content, not a counter, so
+    // identical geometry keeps every dependent operation Ok even as rev
+    // ticks.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    let cube_v1 = cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0));
+    history.execute(&world, ImportModel::from_mesh("part", cube_v1.clone()));
+    let cmd = CreateOperation::new(
+        &world,
+        "Contour1",
+        "EM-0600-4FL",
+        SrcRef::Entity("part".into()),
+        contour_params(),
+    );
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+
+    history.execute(
+        &world,
+        UpdateModel::new(&world, "part", cube_v1).expect("model exists"),
+    );
+    assert_eq!(
+        status(&world, "Contour1"),
+        OpStatus::Ok,
+        "same content, same stamp - no churn from a re-import that changed nothing"
+    );
 }
 
 #[test]

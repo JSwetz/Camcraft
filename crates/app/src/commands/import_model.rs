@@ -55,6 +55,10 @@ impl Command for ImportModel {
         }
         let entity = model::spawn(world, &self.name);
         model::set_facets(world, &entity, self.mesh.facets.clone());
+        // The first geometry landing is revision 1 (M3.1); UpdateModel
+        // counts from there. ImportModel only ever spawns - a same-named
+        // re-import is routed to UpdateModel by the caller, never here.
+        model::set_rev(world, &entity, 1);
     }
 
     fn invert(&self, world: &World) {
