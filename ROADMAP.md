@@ -42,6 +42,112 @@ the contract; the Goal line is what the feature list adds up to.
 
 ---
 
+## Operation Catalog — the source of truth
+
+The complete list of operations the product must offer, grouped the way the
+ribbon shows them (M1.4.3). Status is what shipped by 0.2.0; Home is the
+milestone that owns each name. A new operation is added here first — if it
+isn't on this list it isn't on the roadmap, and if it is, it has a ribbon
+home.
+
+### Milling — 2D
+
+| Operation | Status | Home |
+|-----------|--------|------|
+| Face | ✅ | M1.3 |
+| 2D Contour | ✅ | M1.3, M1.5 |
+| Slot | ✅ | M1.3 |
+| Trace | ✅ | M1.3 |
+| 2D Pocket (zig / winding) | ✅ | M1.3 |
+| 2D Adaptive roughing | 📋 | M2.4 |
+| 2D Offset pocket roughing | 📋 | M2.4 |
+| Engrave | 📋 | M2.4 |
+| 2D Chamfer | 📋 | M2.4 |
+| Circular (pocket / vault) | 📋 | M2.4 |
+| Thread (helical milling; tapping is M1.6) | 📋 | M2.4 |
+| Bore (standalone op; the cycle is M1.6) | ⚠️ cycle only | M2.4 |
+
+### Milling — 3D
+
+| Operation | Status | Home |
+|-----------|--------|------|
+| 3D Adaptive roughing | ✅ | M2.1 |
+| 3D Offset pocket roughing | ⚠️ level staircase today, not offsets | M2.4 |
+| 3D Contour | ✅ | M2.2 |
+| Horizontal (waterline) | ✅ | M2.2 |
+| Parallel | ✅ | M2.2 |
+| Scallop | ✅ | M2.2 |
+| Spiral | ✅ | M2.2 |
+| Radial | ✅ | M2.2 |
+| Project | ✅ | M2.2 |
+| Steep and shallow | 📋 | M2.5 |
+| Flat (flat-area finishing) | 📋 | M2.5 |
+| Pencil | 📋 | M2.5 |
+| Ramp | 📋 | M2.5 |
+| Morphed spiral | 📋 | M2.5 |
+| Geodesic | 📋 | M2.5 |
+| Blend | 📋 | M2.5 |
+| Morph | 📋 | M2.5 |
+| Corner | 📋 | M2.5 |
+| Flow (flowline; ruled-surface flow waits for M4.1) | 📋 | M2.5 |
+| Deburr | 📋 | M2.5 |
+| 3+2 roughing (tilted plane, indexed) | 📋 | M4.1 |
+
+### Milling — Drilling
+
+| Operation | Status | Home |
+|-----------|--------|------|
+| Drill (spot / drill / peck / deep / tap / bore cycles) | ✅ | M1.6 |
+| Hole recognition | ✅ | M1.6 |
+
+### Milling — Multi-axis
+
+| Operation | Status | Home |
+|-----------|--------|------|
+| Rotary offset roughing | 📋 | M4.1 |
+| Multi-axis roughing | 📋 | M4.1 |
+| Swarf | 📋 | M4.1 |
+| Advanced swarf | 📋 | M4.1 |
+| Multi-axis contour | 📋 | M4.1 |
+| Rotary parallel | 📋 | M4.1 |
+| Rotary contour | 📋 | M4.1 |
+| Multi-axis finishing | 📋 | M4.1 |
+
+### Turning — Operations
+
+| Operation | Status | Home |
+|-----------|--------|------|
+| Facing | 📋 | M4.2 |
+| Profile roughing | 📋 | M4.2 |
+| Profile finishing | 📋 | M4.2 |
+| Roughing groove | 📋 | M4.2 |
+| Finishing groove | 📋 | M4.2 |
+| Adaptive roughing (turning) | 📋 | M4.2 |
+| Turning groove | 📋 | M4.2 |
+| Turning single groove | 📋 | M4.2 |
+| Turning threading | 📋 | M4.2 |
+| Turning boring | 📋 | M4.2 |
+| Turning parting | 📋 | M4.2 |
+| Turning chamfering | 📋 | M4.2 |
+| Taper turning | 📋 | M4.2 |
+| Form turning | 📋 | M4.2 |
+| Multi-pass turning | 📋 | M4.2 |
+| Drill (radial/axial, live tooling) | 📋 | M4.2 |
+| Hole recognition (on the turned solid) | 📋 | M4.2 |
+
+### Turning — Part handling
+
+| Operation | Status | Home |
+|-----------|--------|------|
+| Part orientation | 📋 | M3.2 (setups, datums) |
+| Part clamping | 📋 | M3.2 (fixtures) |
+| Part loading | 📋 | M4.2 (bar feeder) |
+| Part unloading | 📋 | M4.2 (bar feeder) |
+| Part transfer | 📋 | M4.3 (automation) |
+| Part inspection | 📋 | M4.3 (automation) |
+
+---
+
 ## Phase 1 — MVP: a CAM that opens a model and posts a real program
 
 Everything a machinist needs to cut a 2.5D part on a vertical mill today:
@@ -380,6 +486,24 @@ the whole migration, snapshot diffs caught every paint change.
 Honest risks (from the spike, now measured): focus/IME edge cases stayed
 Latin-first fine; no built-in animation easing; egui-minor churn is
 bounded by the kittest snapshots.
+
+### M1.4.3 - Structured Ribbon - a home for every operation
+**Goal: the whole catalog is reachable without drowning the ribbon.** — 📋
+
+- **Sections by family**: the ribbon divides into labeled sections - Milling
+      2D, Milling 3D, Drilling, Multi-axis, Turning - mirroring the
+      Operation Catalog; a setup's machine kind (M3.3's mill/lathe/mill-turn)
+      decides which sections it offers, so a lathe setup never shows waterline.
+- **Overflow dropdowns**: operations beyond a section's width fold into a
+      dropdown that carries the section's label - nothing is ever hidden
+      behind an iconless chevron.
+- **Pin to ribbon**: any catalog item can be pinned (and unpinned) by the
+      user; pins are a document setting - persisted with the project like
+      panel docking, not an undoable command (undo replays cuts, not layout).
+- **The home law**: M1.4.3 lands before the first operation of any new
+      family (the M2.5 strategies, the M4.1 multi-axis ops, the M4.2
+      turning ops) - an operation with no ribbon home is a bug, not
+      a backlog item.
 
 ### M1.5 - Feature Selection
 **Goal: pick a face or an edge chain and machine that - not just whole
@@ -940,13 +1064,46 @@ before touching metal.
       `posting::program_ops`, so *what is judged is what would post*
       holds by construction.
 
+### M2.4 - 2D Completeness
+**Goal: every 2D name in the catalog exists.** — 📋
+
+- **2D Adaptive roughing**: the M2.1 engagement discipline brought to the
+      plane - trochoidal step-in and constant-load passes specced from
+      published roughing literature, rest judged by the M2.3 dexel sim
+- **2D Offset pocket roughing** (style-A): concentric offsets from the
+      boundary inward; islands and tool-radius clearance by the same
+      computation M2.1 uses for its staircase, and the 3D offset-pocket
+      ⚠️ in the catalog clears here too
+- **Engrave**, **2D Chamfer** (chamfer mill along selected edges),
+      **Circular** (circular pocket / vault), **Bore** as a standalone op
+      beside M1.6's boring cycles
+- **Thread (2D)**: helical thread milling - the move chain is 3-axis
+      interpolation; the spindle-sync word the post needs rides M3.3's
+      machine definitions (a C-axis-less machine gets the honest refusal
+      M1.6 established for tap without sync)
+
+### M2.5 - 3D Strategy Completeness
+**Goal: 3-axis finishing answers every surface type.** — 📋
+
+- **Steep-and-shallow**: flat regions to the parallel/waterline law, steep
+      to scallop - M2.2's 45-deg auto-split becomes the partition, not
+      just a scallop switch; carries M2.2's open surface-finish parameters
+- **Flat-area finishing** and **Pencil**: the floors, and the corner locus
+      a big ball can never reach, found by the hidden-rest machinery
+- **Ramp**, **Morphed spiral**, **Geodesic**: sloped paths and two new
+      placements on M2.2's polar law
+- **Blend / Morph / Corner / Project-generalization**, **Flow** (flowline
+      on freeform; ruled-surface flow waits for M4.1's axis control),
+      **Deburr** (edge-break toolpaths; pairs with M2.4's chamfer)
+
 ---
 
 ## Phase 3 — Associative CAM & Production Workflow
 
 The workflow that justified HSMWorks' name: the model changes, and the toolpaths
 update. Re-MACHining, multi-setup jobs, posts for the machines people actually
-own.
+own. The operations catalog completes here too - every 2D/3D name gets a
+registry home before Phase 4's multi-axis and turning families arrive.
 
 ### M3.1 - Associativity & Regeneration
 **Goal: a model revision no longer means rebuilding the job.**
@@ -1001,8 +1158,15 @@ programming department.
 ### M4.1 - 5-Axis Milling
 **Goal: simultaneous-axis and tilted machining done safely.**
 
-- **Swarf**: bladed and ruled-surface finishing
+- **Swarf and advanced swarf**: bladed and ruled-surface finishing,
+      tolerance-aware multi-pass (the catalog's swarf pair)
 - **5-axis contour and parallel** with tool axis control: lead/lag, tilt step, max tilt
+- **The rotary family**: rotary offset roughing, multi-axis roughing,
+      multi-axis contour, rotary parallel, rotary contour, multi-axis
+      finishing - the catalog's multi-axis block lands here, each riding
+      the orientation and machine-sim laws below
+- **3+2 roughing**: the planar law of Phases 1-2 on a tilted, indexed work
+      plane; position commands between cuts, no simultaneous-axis motion
 - **Collision-aware orientation**: auto-tilt to avoid shank contact, with shortest-travel smoothing
 - **Drive curves**: machine to a curve on a surface with orientation rules
 - **Machine simulation**: full kinematic simulation of the post's A/B/C motion model, not just the toolpath
@@ -1014,8 +1178,14 @@ programming department.
       lathe-kind machine offers turning operations on its own axis model
       (X/Z, spindle as the cutting axis), so the mill-centric plumbing
       finally branches; mill-turn machines offer both families
-- **2D turning**: face, OD/ID rough and finish with inserts from the tool library
-- **Grooving, part-off, single-point threading**
+- **The turning operation set** (the catalog's list, made checkable):
+      facing, profile roughing and finishing, roughing/finishing groove,
+      turning groove and single groove, adaptive roughing, threading,
+      boring, parting, chamfering, taper turning, form turning,
+      multi-pass turning - inserts from the tool library, passes judged
+      against the M2.3-style material sim on the revolved axis model
+- **Turning holes**: radial and axial drilling through live tooling -
+      M1.6's cycles and hole recognition reused on the turned solid
 - **Bar feeder patterns**: catch/transfer support for production turning
 - **Mill-turn**: live tooling operations indexed and continuous (C-axis)
 
@@ -1025,6 +1195,12 @@ programming department.
 - **Large models**: GPU-resident sparse voxel / SDF stock simulation, streaming mesh and B-rep handling, 10M+ triangle models
 - **Generation performance**: threaded toolpath generation, incremental recompute after model changes
 - **Scripting API**: Lua bindings for batch ops - generate, verify, post, report
+- **Part handling**: loading, unloading, and transfer choreography as
+      post-emittable motion intents (the catalog's part-handling block;
+      orientation and clamping are already M3.2's setups and fixtures) -
+      M4.2's bar feeders get their general form here
+- **In-process inspection**: probe-style measurement hooks after ops,
+      feeding the deviation verdict a re-run decision, not a report tail
 - **CLI**: headless project processing and regression runs
 - **Regression suite**: golden-model CI (import → generate → verify → post) with numerical tolerances
 
@@ -1055,7 +1231,7 @@ to each subcrate to make testing cleaner.
 - **WASM**: A web version for online use.
 - **Docker**: Using docker builds for every target.
 
-### M%.3 - Defer HSMWorks label thru out the code.
+### M5.3 - Defer HSMWorks label thru out the code.
 **Goal: Removing the HSMWorks branding as its conflicting**
 
 - **Debrand**: Find every instance of where "hsmworks" been used.
@@ -1073,12 +1249,15 @@ to each subcrate to make testing cleaner.
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; display modes, the tabbed-panels overhaul and the graphical tool editor window all done - riding the graduated egui stack | ⚠️ |
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
+| **M1.4.3** | A home for every operation | Family-sectioned ribbon per the Operation Catalog, overflow dropdowns, user pinning (a document setting); lands before any new-family op - the home law | 📋 |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) | ✅ |
 | **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop, the polar placements (radial, spiral), the solid-truth hidden rest and the center-shadow families (contour, project) done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair, ray-parity material intervals, closed-loop march, the certified diagonal chain between raster lines); surface-finish params open | ⚠️ |
 | **M2.3** | Trust before cutting | Done: program material sim (chained cached ops), deviation color map with located verdicts, machine-definition checker (.mch travel/feed/spindle), verification made the post gate, 0.2.0 | ✅ |
+| **M2.4** | 2D, complete | 2D adaptive + offset pocket roughing, engrave, 2D chamfer, circular, standalone bore, helical thread milling | 📋 |
+| **M2.5** | 3-axis, complete | Steep-and-shallow, flat-area, pencil, ramp, morphed spiral, geodesic, blend/morph/corner, flow (freeform), deburr; M2.2's surface-finish params | 📋 |
 | **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
 | **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |
 | **M3.3** | Every control covered | Post engine, 5 posts, machine definitions (mill/lathe kinds, axis limits, speeds and feeds, coolant), RTCP, 0.3.0 | 📋 |
