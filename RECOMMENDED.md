@@ -1584,6 +1584,80 @@ reads exactly like the law.
   its binary). Moved to v19; the migration list in its comment now names
   v17→v18.
 
+## M2.3 stage B — the viewer judges the program (code `8fb7aaa` + this docs)
+
+- **The sim's gate IS the post's gate, by construction.**
+  `simulate_document` validates through `posting::program_ops` - not a
+  copy of its rules - so the error a user sees under the Deviate cell
+  is byte-for-byte the error the Post would give (`missing_pieces_
+  refuse_by_name` asserts `err == same`, not a paraphrase). Two gates
+  that must agree is a drift bug waiting to be merged; one gate read
+  twice is a law. This is also the shape stage D's blocking gate
+  inherits.
+
+- **Refusal ordering is load-bearing, and the tests encode it.** The
+  planned-ops gate runs BEFORE the sim's own stock laws, so a rotated
+  or moved stock first reads "inputs moved since generation -
+  regenerate" (staleness, a setup truth) and only a FRESH rotated
+  stock earns "the program sim models an axis-aligned stock". Writing
+  these tests backwards (rotate, don't regenerate, expect the axis
+  refusal) would have asserted the wrong refusal - the test suite now
+  documents which law speaks first.
+
+- **"no stock defined" is reachable only through an op that never
+  reads the stock.** Any stock-sourced op goes stale at stock removal
+  and the gate refuses first - so the witness is a model-sourced
+  contour with fixed heights. A refusal with an unreachable trigger
+  would rot unnoticed; the test keeps the code path honest.
+
+- **Box stock is XY-centered, and the fixture law fell out of a
+  failing test.** `Dexel::from_shape(Box)` spans `-dx/2..dx/2` (the
+  mesh agrees), so a model box at `0..60` next to a stock at the
+  origin judges HALF NaN columns - not a bug in either, a fixture
+  lying about the world. `faced_doc` now centers the model on the
+  stock's placement; the lattice shift moves with `Location.pos` and
+  the twins test (`the_lattice_moves_with_the_stock`) pins that moves
+  stay world millimeters - the same numbers the viewport draws -
+  while the GRID is what translates.
+
+- **DEV_TOL is a display law, not an authoring tolerance.** 10 um: the
+  finest scallop the shipped lattice resolves visually. An op's own
+  tolerance is what its generator promised; the map answers "what
+  stands after the WHOLE program". Re-using op tolerances would let a
+  tolerance edit recolor columns another op generated. Discussion
+  item: whether the Release 0.2.0 story wants DEV_TOL surfaced as a
+  user-settable "display sensitivity" or stays a constant.
+
+- **The verdict bar is one pure string.** `actions::deviate_readout`
+  builds the sentence (counts, mm³, worst depth, the located XY and
+  the SIM's z there - `at.z` is the dent floor or the standing
+  layer's top, never the model's nominal); the status line, the bar,
+  and the tests all read the SAME function, and the ui test pins its
+  shape without a GPU. A missing WHERE prints "?" - an honest gap,
+  never a fabricated coordinate.
+
+- **The sheet takes the stock's slot in draw order.** While Deviate is
+  armed, the judged surface IS the stock's appearance (same translucent
+  blend law, class-colored: steel / amber rest / red gouge / gray
+  never-judged) - drawing both would only let the untouched solid veil
+  the verdict. Retirement is the PostView law: `program_sim` is frozen
+  evidence, view state, never a command, never saved, retired by any
+  document switch - a verdict about the old world must not survive
+  into a new one.
+
+- **Hidden models still judge.** The deviation field compares against
+  every model entity's facets; the browser eye only hides geometry
+  from the viewport, not from the program's contract. Silently
+  excluding hidden parts would let one click make a gouge vanish from
+  the verdict. Discussion item: an explicit "include in verification"
+  checkbox per model, if users ever want geometry that's reference
+  only.
+
+- **Icon reuse: Deviate draws the Stock glyph until a dedicated one
+  is chosen.** No asset was invented mid-stage (original-glyph rule
+  wants a design pass, not a rush job); the stock icon is exactly the
+  noun the cell judges.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

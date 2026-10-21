@@ -892,9 +892,27 @@ before touching metal.
 ### M2.3 - Verification (Release 0.2.0)
 **Goal: the toolpath is trusted before the machine sees it.**
 
-- **Material simulation**: the machined block maintained as an adaptive voxel / dexel stock grid, subtracted per cutting move, with color-mapped deviation against the final model
-- **Gouge and collision checking**: tool, holder, and collar vs stock and fixtures, with locations pinpointed in the viewer
-- **Stock comparison**: color map of over/under-cut against the final geometry
+- ✅ **Material simulation** (M2.3 A-B): the machined block maintained as an
+      adaptive voxel / dexel stock grid, subtracted per cutting move, with
+      color-mapped deviation against the final model. The program chains
+      the CACHED ops in posting order (the sim's gate is the post's gate,
+      `posting::program_ops`, verbatim); the lattice shifts with the
+      stock's placement, never the moves, and a rotated stock is refused
+      instead of resampled. The viewer paints the judged sheet in the
+      stock's slot: steel clean, amber rest, red gouge, gray never-judged.
+- ✅ **Gouge and collision checking** (M2.3 A-B, vs fixtures deferred to
+      fixture modeling in M3.2): tool vs stock judged with LOCATIONS pinpointed - the
+      worst rest and gouge cells carry XY and the sim's own z, ringed in
+      the viewport and one click (Frame rest / Frame gouge) flies the
+      camera there. The per-op verifier's holder/collar bands stand
+      beside this program-level truth; fixture-aware checking waits for
+      fixture modeling (M3.2).
+- ✅ **Stock comparison** (M2.3 A-B): color map of over/under-cut against
+      the final geometry - the deviation field IS the program's contract
+      (sim top minus model surface per column), aggregated into the one
+      sentence the verdict bar shows: counts, mm³, worst depth, WHERE.
+      Within DEV_TOL (10 um, a display law, not an op's authoring
+      tolerance) reads clean; NaN reads unjudged, never a false zero.
 - **Machine limits**: axis travel, feed, and spindle validation from a machine definition
 - **Post gating**: the verification result is the gate that releases the NC program (Never Gouge, made structural)
 
