@@ -1525,6 +1525,65 @@ reads exactly like the law.
   machine). A v17 file migrates to exactly what v17 ran: no floor,
   45°.
 
+## M2.3 stage A — the program material sim and its two truths (code `8199322` + this docs)
+
+- **The program sim chains cached ops in order; it never re-plans them.**
+  The truth of what the machine will do is the posted toolpath, not a fresh
+  re-derivation from parameters - a sim that re-planned could disagree with
+  the .cl that ships. One judgment, at the end, over the ops as cached: that
+  is the post gate's input shape (stage D) and the viewer's (stage B).
+- **Deviation is located, not just counted.** The worst rest cell and the
+  worst gouge cell carry an XY *and the sim's Z at that column* - the
+  warning a user jumps to must name the place, and the place includes the
+  depth the sim actually reached. Counting-only would send the viewer to a
+  cell that averages nothing.
+- **NaN is the no-verdict column, never a zero.** Where the stock never
+  stood (outside a cylinder's round) or where the model has no surface (air
+  in the part), the deviation field reads NaN and carries no verdict; a
+  dressed-up zero would color-map as a clean bill of health on columns that
+  were never in play. Determinism includes the NaN pattern - the color map
+  redraws this field every frame and two runs must agree to the bit.
+- **One atom law per tool shape.** Ball ops take the exact sphere sweep;
+  flat ops take the exact disc at every station, which is exact for end
+  mills and for drills and taps - the final hole IS the cylinder. The
+  bull-nose corner is the one known-biased atom: the disc reads at the
+  corner's lowest point, so beside a fillet wall the sim over-reports
+  removal (under-reports rest). It is stated at the `SimOp` type, not
+  hidden; when it matters the viewer says so. Discussion item: whether
+  stage B paints fillet-adjacent rest as "unknown" rather than trusting
+  the optimistic zero.
+- **`simulate` validates everything before touching anything.** Two
+  passes: op radii finite-positive and every move coordinate finite first,
+  subtraction second. A half-run grid that looks like a sim is the silent
+  wrong answer wearing a lab coat - the Prime Directive in this kernel's
+  own clothes. A refusal leaves the stock exactly as it stood; op 2's
+  poison cannot run the program.
+- **Subtraction is monotonic, so rest has one meaning: "never reached."**
+  Nothing leaves a plateau by cutting HIGH; rest can only be the program
+  not arriving. This law nearly went untested: the first witness tried to
+  show rest with a disc plunge that "left a plateau" - physically
+  impossible, the plunge ties the untouched slab top and the located max
+  landed on a far corner instead. The honest witness is a face traverse
+  that stops short of its own margin; the fixer op then erases the rest
+  while the gouge stands - rest and gouge have opposite time-arrow
+  semantics and the test says so.
+- **`auto_cell` IS envelope_scan's lattice, one law in one place** (an
+  eighth of the smallest tool radius, a 100 um floor, grown to keep any
+  span under 1024 columns) - a second "reasonable voxel size" function
+  would drift by the next refactor.
+- **`from_shape(FromModel)` refuses at build with the right answer in its
+  words** ("model stock builds from its facets: Dexel::from_facets") - the
+  facets live in the world, not in the enum's numbers; quietly boxing the
+  model would add stock the user never chose. Degenerate meshes (empty,
+  XY-flat, non-finite vertex) refuse too, and `from_facets` carries one
+  cell of margin so the model's own bbox corners read air, never mystery
+  material.
+- **Caught on the ladder, not by the bump:** the v17→v18 wire bump left
+  `wrong_version_is_refused` asserting v18 as a FUTURE format - a lying
+  fixture HEAD carried unnoticed (the stage E suite log truncated before
+  its binary). Moved to v19; the migration list in its comment now names
+  v17→v18.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
