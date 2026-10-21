@@ -7,11 +7,13 @@
 //! documentation, behavior only, per the Clean-Room Protocol.
 //!
 //! The law here is the validation gate: a program is written only
-//! when every operation is generated, fresh, and warning-free (or
-//! nothing is written at all - the Prime Directive's blocking
-//! rule). Context resolution mirrors generation exactly - the same
-//! `resolve_params`, the same stock box, the tool library's own rank
-//! for `T..`/`H..` - so the posted numbers are the machined ones.
+//! when every operation is generated, fresh, and warning-free, AND
+//! the program-level verification passes - no gouge in the material
+//! sim, no limit violated on the mounted machine (M2.3 D; or nothing
+//! is written at all - the Prime Directive's blocking rule). Context
+//! resolution mirrors generation exactly - the same `resolve_params`,
+//! the same stock box, the tool library's own rank for `T..`/`H..` -
+//! so the posted numbers are the machined ones.
 
 use crate::model;
 use crate::operation::{self, Height, HeightReference, OpStatus, OpParams};
@@ -55,6 +57,15 @@ pub struct Posted {
 /// records, so the engine's own warning count is the gate.
 pub fn post_setup(world: &World, out_path: &Path) -> Result<Posted, String> {
     let records = stream_records(world)?;
+    // The verification gate (M2.3 D): the same two program-level
+    // judgments the Deviate cell shows, made binding. Evidence is
+    // computed here and now - never a cached verdict carried in from
+    // the viewer (the PostView law: a verdict about an older world
+    // must not release this one's metal).
+    let problems = verification_gate(world);
+    if !problems.is_empty() {
+        return Err(format!("post blocked - {}", problems.join("; ")));
+    }
     let stream = cnc::serialize(&records);
     let out = engine::run(FANUC_CPS, &default_machine(), &stream)
         .map_err(|e| format!("post engine: {e}"))?;
@@ -148,6 +159,59 @@ pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
         }
     }
     Ok(ops)
+}
+
+/// The program-level verification, made binding (M2.3 D): the two
+/// judgments the Deviate cell informs about, read again here as the
+/// release gate over exactly the op list `program_ops` just blessed -
+/// the shared-gate law, so the verdict and the gate can never disagree
+/// about WHICH program they judged. Every line already names its op;
+/// a refusal that cannot say where is trivia, not a warning.
+///
+/// What blocks: a GOUGE (the program cuts below the model's final
+/// geometry - the Prime Directive's "never", located); a stated machine
+/// limit the program outruns. What does not: REST material (a roughing
+/// program posts with its promise of a later finish op - Deviate shows
+/// the shortfall, the gate respects the intent), and a sim that cannot
+/// run at all (no stock, rotated stock - nothing was judged, so nothing
+/// is claimed; the per-op WARN gate is still the net under it, and the
+/// Deviate cell states the reason on demand).
+#[must_use]
+pub fn verification_gate(world: &World) -> Vec<String> {
+    let mut problems = Vec::new();
+
+    match crate::stock_sim::simulate_document(world) {
+        Ok(sim) if sim.dev.gouge_cells > 0 => {
+            let at = sim.dev.max_gouge_at.map_or_else(
+                || "?".to_owned(),
+                |q| format!(" at ({:.2}, {:.2}, z {:.2})", q.x, q.y, q.z),
+            );
+            problems.push(format!(
+                "gouge: program cuts below the model in {} cell(s), worst {:.2} mm{}",
+                sim.dev.gouge_cells, sim.dev.max_gouge, at
+            ));
+        }
+        Ok(_) | Err(_) => {}
+    }
+
+    if let Some(m) = crate::machine::of(world).1 {
+        match crate::machine::check_document(world, &m) {
+            Ok(c) if !c.is_ok() => {
+                let more = if c.more > 0 { format!(" (+{} more)", c.more) } else { String::new() };
+                problems.push(format!(
+                    "machine {}: {} limit problem(s): {}{more}",
+                    m.model,
+                    c.problems.len(),
+                    c.problems.join("; ")
+                ));
+            }
+            Ok(_) => {}
+            // Unreachable in one thread - program_ops just walked the
+            // same ops - but silence is the forbidden arm, not this one.
+            Err(err) => problems.push(format!("machine: {err}")),
+        }
+    }
+    problems
 }
 
 /// The stream we would feed the engine: every operation's records,

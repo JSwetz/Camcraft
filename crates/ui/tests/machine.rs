@@ -212,3 +212,66 @@ fn the_machine_vote_joins_the_deviate_clause() {
     let _ = std::fs::remove_file(&ok);
     let _ = std::fs::remove_file(&tight);
 }
+
+#[test]
+fn the_machine_gate_refuses_the_post_by_name() {
+    // Stage D through the ui's door: the same mounted ceiling that
+    // earned its Deviate clause now blocks the write, in the one
+    // status sentence the shell prints. Nothing is on disk to read
+    // back - a refusal never posts.
+    let mut state = State::new();
+    state.pending.push_back(CommandKind::SetStock {
+        shape: StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 },
+        pos: [0.0, 0.0, 0.0],
+        yaw_deg: 0.0,
+    });
+    state.pending.push_back(CommandKind::AddTool {
+        name: "EM-0400-2FL".into(),
+        tool: catalog_tool("EM-0400-2FL"),
+    });
+    state.pending.push_back(CommandKind::CreateOperation {
+        name: "Face1".into(),
+        tool: "EM-0400-2FL".into(),
+        src: SrcRef::Stock,
+        params: OpParams::Face {
+            stepover: 3.0,
+            clearance_z: Height::fixed(25.0),
+            cut_z: Height::fixed(19.5),
+            top_z: None,
+            stepdown: None,
+            feed: 1200.0,
+            plunge_feed: 300.0,
+            climb: true,
+        },
+    });
+    state.pending.push_back(CommandKind::GenerateOperation("Face1".into()));
+    state.drain_actions();
+
+    let tight = tmp_mch("gate", &mch_text("10000"));
+    state.pending.push_back(CommandKind::LoadMachineFile(tight.clone()));
+    state.drain_actions();
+
+    let nc = std::env::temp_dir().join(format!("hsmworks_ui_gate_{}.nc", std::process::id()));
+    let _ = std::fs::remove_file(&nc);
+    state.pending.push_back(CommandKind::PostProgramFile(nc.clone()));
+    state.drain_actions();
+    assert!(
+        state.status.contains("post refused: post blocked - machine TestMill 1: 1 limit problem(s)"),
+        "the refusal names the machine and the count: {}",
+        state.status
+    );
+    assert!(!nc.exists(), "the gate wrote nothing");
+
+    // Within limits the same click posts - the gate opens without
+    // re-planning anything.
+    let ok = tmp_mch("gate-ok", &mch_text("12000"));
+    state.pending.push_back(CommandKind::LoadMachineFile(ok.clone()));
+    state.drain_actions();
+    state.pending.push_back(CommandKind::PostProgramFile(nc.clone()));
+    state.drain_actions();
+    assert!(state.status.starts_with("posted "), "{}", state.status);
+    assert!(nc.exists());
+    let _ = std::fs::remove_file(&nc);
+    let _ = std::fs::remove_file(&ok);
+    let _ = std::fs::remove_file(&tight);
+}

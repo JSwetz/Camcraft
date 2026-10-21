@@ -12,7 +12,8 @@
 use flecs_ecs::prelude::World;
 
 use hsmworks_app::commands::{
-    AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, SetWcsOrigin,
+    AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SetStock,
+    SetWcsOrigin,
 };
 use hsmworks_app::drilling::CycleChoice;
 use hsmworks_app::geo2d::Point2;
@@ -235,6 +236,134 @@ fn a_warned_path_blocks_even_though_it_generated() {
     let err = posting::post_setup(&world, &path).expect_err("a warning blocks the gate");
     assert!(err.contains("post blocked") && err.contains("shank"), "{err}");
     assert!(!path.exists(), "blocked output is never written");
+}
+
+#[test]
+fn a_gouging_program_is_refused_by_the_verification_gate() {
+    // Stage D's own law: the program-level sim is no longer just an
+    // informed verdict - it is the gate. The fixture is Deviate's
+    // stage-B sentence made into a world: a face 0.5 mm below the top
+    // of a model that fills the stock. Generation is SILENT (the face
+    // verifies against the stock, not the model - that net is this
+    // gate's job), so the refusal below can only come from the sim.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh(
+            "part",
+            cube(Point3::new(-30.0, -30.0, 0.0), Point3::new(30.0, 30.0, 20.0)),
+        ),
+    );
+    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    let e = model::find_by_name(&world, "Face1").expect("op");
+    assert!(
+        model::toolpath_of(&world, &e).expect("cache").warnings.is_empty(),
+        "the fixture must generate silent - the sim is the only net here"
+    );
+
+    let path = tmp_nc("gouge");
+    let err = posting::post_setup(&world, &path).expect_err("a gouged program must not post");
+    assert!(
+        err.contains("post blocked") && err.contains("gouge:") && err.contains("below the model"),
+        "{err}"
+    );
+    assert!(!path.exists(), "the gate writes nothing on refusal");
+
+    // The gate's evidence is the Deviate cell's evidence: the same
+    // walk, so the count in the sentence is the sim's own.
+    let sim = hsmworks_app::stock_sim::simulate_document(&world).expect("sim runs");
+    let lines = posting::verification_gate(&world);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].contains(&format!("{} cell(s)", sim.dev.gouge_cells)),
+        "{}",
+        lines[0]
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn machine_limits_block_the_post_and_within_limits_does_not() {
+    // The mounted machine joins the gate with the same walk stage C
+    // informs with. No model in this world: the sim judges nothing, so
+    // any refusal here can only be the machine's sentence.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+
+    let tight = hsmworks_app::machine::Machine {
+        model: "TestMill 1".into(),
+        vendor: "Hsmworks Testbench".into(),
+        spindle_min: Some(50.0),
+        spindle_max: Some(10000.0), // EM-0400-2FL runs 12000
+        ..Default::default()
+    };
+    history
+        .execute(&world, LoadMachine::new(&world, "tight.mch".into(), Some(tight.clone())).expect("sane"));
+    let path = tmp_nc("limits");
+    let err = posting::post_setup(&world, &path).expect_err("the ceiling blocks");
+    assert!(
+        err.contains("machine TestMill 1: 1 limit problem(s)") && err.contains("above the machine's 10000"),
+        "{err}"
+    );
+    assert!(!path.exists(), "a limit refusal writes nothing");
+
+    // The same program under a machine that can give it: the gate
+    // opens without touching the program - it never re-plans.
+    let roomy = hsmworks_app::machine::Machine { spindle_max: Some(12000.0), ..tight };
+    history
+        .execute(&world, LoadMachine::new(&world, "roomy.mch".into(), Some(roomy)).expect("sane"));
+    assert!(posting::verification_gate(&world).is_empty());
+    posting::post_setup(&world, &path).expect("within limits posts");
+    assert!(path.exists(), "and writes");
+    let _ = std::fs::remove_file(&path);
+
+    // No machine mounted, nothing claimed (the unstated-limit law's
+    // gate half): clearing the machine cannot make this program illegal.
+    history.execute(&world, LoadMachine::new(&world, String::new(), None).expect("clear"));
+    posting::post_setup(&world, &path).expect("an unmounted checker blocks nothing");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_program_the_sim_cannot_judge_still_posts() {
+    // The refusal-to-judge is not a judgment: a model-sourced contour
+    // with fixed heights and NO stock gives the program sim nothing to
+    // chew, so the gate holds no verdict and must not borrow one. The
+    // per-op WARN gate is the net under this world, and it is silent.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    let cmd = CreateOperation::new(
+        &world,
+        "Contour1",
+        "EM-0600-4FL",
+        SrcRef::Entity("part".into()),
+        contour_params(),
+    );
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    let e = model::find_by_name(&world, "Contour1").expect("op");
+    assert!(
+        model::toolpath_of(&world, &e).expect("cache").warnings.is_empty(),
+        "generation must be silent - the sim's silence here is the tested thing"
+    );
+    assert!(hsmworks_app::stock_sim::simulate_document(&world).is_err(), "fixture: no stock, no judge");
+    assert!(posting::verification_gate(&world).is_empty(), "no verdict, no veto");
+    posting::post_setup(&world, &tmp_nc("nostock")).expect("unjudged is not unsafe");
 }
 
 #[test]
