@@ -224,8 +224,10 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
 
 /// The work offset this operation posts to: the first WCS slot its
 /// height grammar references, else the default `G54` - and that
-/// slot's origin as the machine would measure it.
-fn wcs_context<'a>(world: &World, params: &'a OpParams) -> (&'a str, [f64; 3]) {
+/// slot's origin as the machine would measure it. `pub(crate)` so the
+/// machine-limit travel check (M2.3 C) reads program coordinates by
+/// exactly this law, not by a second copy of it.
+pub(crate) fn wcs_context<'a>(world: &World, params: &'a OpParams) -> (&'a str, [f64; 3]) {
     let slot = params
         .heights()
         .into_iter()

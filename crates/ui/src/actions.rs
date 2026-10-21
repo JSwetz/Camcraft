@@ -90,6 +90,11 @@ pub(crate) fn toggle_deviate(state: &mut State) {
     match hsmworks_app::stock_sim::simulate_document(&state.world) {
         Ok(sim) => {
             state.status = deviate_readout(&sim.dev);
+            // The machine's vote joins the verdict when a machine is
+            // mounted (stage C) - the clause law lives in `machine_vote`.
+            if let Some(vote) = machine_vote(&state.world) {
+                state.status += &vote;
+            }
             state.program_sim = Some(sim);
             state.doc_version += 1; // the sheet is a new GPU part
         }
@@ -98,6 +103,30 @@ pub(crate) fn toggle_deviate(state: &mut State) {
             state.status = format!("deviate refused: {err}");
         }
     }
+}
+
+/// The machine's vote as a status clause (M2.3 C): `None` when no
+/// machine is mounted - the unstated-limit law in document form, so the
+/// line never claims a judgment that was made. `check_document` walks
+/// the same `program_ops` gate the sim just walked, so the vote is
+/// always about exactly what was deviated. It informs; stage D is what
+/// makes it gate. Pure, so the ui tests keep its shape without a window.
+#[must_use]
+pub fn machine_vote(world: &flecs_ecs::prelude::World) -> Option<String> {
+    let m = hsmworks_app::machine::of(world).1?;
+    Some(match hsmworks_app::machine::check_document(world, &m) {
+        Ok(c) if c.is_ok() => String::from("; machine: within limits"),
+        Ok(c) => format!(
+            "; machine: {} limit problem(s){}",
+            c.problems.len(),
+            if c.more > 0 {
+                format!(" (+{})", c.more)
+            } else {
+                String::new()
+            }
+        ),
+        Err(err) => format!("; machine: {err}"),
+    })
 }
 
 /// The Deviate verdict in one line: the clean program says so; a

@@ -5,6 +5,7 @@
 
 pub mod delete_entity;
 pub mod import_model;
+pub mod load_machine;
 pub mod operation;
 pub mod select_entity;
 pub mod set_stock;
@@ -16,6 +17,7 @@ use flecs_ecs::prelude::World;
 
 pub use delete_entity::DeleteEntity;
 pub use import_model::ImportModel;
+pub use load_machine::LoadMachine;
 pub use operation::{
     CreateOperation, DeleteOperation, EditOperationLinks, EditOperationParams, GenerateOperation,
     SetOperationGeometry,

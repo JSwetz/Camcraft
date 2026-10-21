@@ -76,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 18;
+pub const PROJECT_VERSION: u32 = 19;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -97,7 +97,22 @@ pub struct ProjectFile {
     /// omits the field (byte-shape of the pre-v8 files, plus the stamp).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub units: Option<String>,
+    /// The document's machine (M2.3 C), v19+. An absent key means no
+    /// machine was ever loaded - exactly what every v18 file meant,
+    /// since the checker did not exist to read one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<MachineDto>,
     pub entities: Vec<EntityDto>,
+}
+
+/// The file mirror of the `MachineDef` singleton: the parsed machine
+/// and the `.mch` path it came from, kept for display so opening a
+/// project restates where the setup's numbers live. `Machine` is
+/// serde-transparent (our own struct, our own field semantics).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct MachineDto {
+    pub path: String,
+    pub machine: crate::machine::Machine,
 }
 
 /// What an entity is, in file terms. Absent means `Model` (the only kind
@@ -1559,6 +1574,13 @@ pub fn collect(world: &World) -> ProjectFile {
             Unit::Millimeters => None,
             Unit::Inches => Some("in".into()),
         },
+        // The mute singleton (no path, no machine) omits the field -
+        // the mm/units law again: only a loaded machine pays for
+        // saying so, and an absent key is the mute state verbatim.
+        machine: {
+            let (path, m) = crate::machine::of(world);
+            m.map(|machine| MachineDto { path, machine })
+        },
         entities,
     }
 }
@@ -1718,6 +1740,15 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // law.
         file.version = 18;
     }
+    if file.version == 18 {
+        // v18 -> v19: the machine arrives as a top-level `machine` key.
+        // No v18 file can contain it - the checker did not exist - and
+        // the field's default, absent means no machine, is exactly what
+        // every v18 document was: a program judged against nothing,
+        // which is what the unstated-limit law already does with an
+        // empty machine. Step-up is the stamp itself, like v7 -> v8.
+        file.version = 19;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -1735,7 +1766,19 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
     for dto in &file.entities {
         validate_kind(dto, dto.kind.unwrap_or(EntityKind::Model))?;
     }
+    if let Some(m) = &file.machine
+        && !m.machine.is_sane()
+    {
+        return Err(corrupt("machine definition states a limit that cannot be meant"));
+    }
     units::set(world, doc_units);
+    // Opening lands the machine too - including the mute state, so a
+    // stale singleton from the previous document can never leak in
+    // (the units law, restated for the checker's input).
+    match file.machine.as_ref() {
+        Some(m) => crate::machine::set(world, &m.path, Some(&m.machine)),
+        None => crate::machine::set(world, "", None),
+    }
     for dto in file.entities {
         let kind = dto.kind.unwrap_or(EntityKind::Model);
         let entity = model::spawn(world, &dto.name);

@@ -7,6 +7,7 @@ use hsmworks_app::commands::{
     AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, SetWcsOrigin,
 };
 use hsmworks_app::geometry::feature;
+use hsmworks_app::machine;
 use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::Location;
@@ -93,12 +94,13 @@ fn wrong_version_is_refused() {
     // v15_file_steps_to_v16_and_the_parallel_grammar_round_trips
     // v15 -> v16, and
     // v16_file_steps_to_v17_and_the_ramp_grammar_round_trips v16 -> v17,
-    // and v17_file_steps_to_v18_and_the_surface_finish_grammar_round_trips
-    // v17 -> v18.
-    let text = r#"{"version": 19, "entities": []}"#;
+    // v17_file_steps_to_v18_and_the_surface_finish_grammar_round_trips
+    // v17 -> v18, and v18_file_steps_to_v19_and_the_machine_grammar_round_trips
+    // v18 -> v19.
+    let text = r#"{"version": 20, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(19)) => {}
+        Err(ProjectError::UnsupportedVersion(20)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -1871,6 +1873,89 @@ fn v17_file_steps_to_v18_and_the_surface_finish_grammar_round_trips() {
         matches!(project::open(&world5, &bad), Err(ProjectError::Corrupt(_))),
         "a non-number ramp_angle must not load"
     );
+}
+
+#[test]
+fn v18_file_steps_to_v19_and_the_machine_grammar_round_trips() {
+    // v18 -> v19 (M2.3 C): one new top-level key, `machine` - {path,
+    // machine} - read into a world singleton exactly like Units. The
+    // step-up is the serde default itself: a v18 file carries no key,
+    // loads no machine, and behaves exactly as it did at v18 - an
+    // unstated limit checks nothing, in document form.
+    let text = r#"{"version": 18, "entities": []}"#;
+    let world = new_world();
+    project::open(&world, text).expect("a v18 file must still open");
+    let (path, m) = machine::of(&world);
+    assert_eq!(path, "", "a v18 file names no machine file");
+    assert!(m.is_none(), "a v18 file mounts no machine");
+    let p = tmp_path("v19a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    let _ = std::fs::remove_file(&p);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v19 stamp: {saved}"
+    );
+    assert!(
+        !saved.contains("\"machine\""),
+        "no machine must not mint a key (skip-if-none): {saved}"
+    );
+
+    // The v19 grammar, hand-written so the spelling is pinned. Numbers
+    // are our own testbench, never a vendor's.
+    let rt = r#"{
+        "version": 19,
+        "entities": [],
+        "machine": {"path": "testbench.mch", "machine": {
+            "model": "Testbench 1", "vendor": "Hsmworks Testbench",
+            "spindle_min": 50.0, "spindle_max": 12000.0,
+            "axes": [
+                {"name": "X", "feed": 5000.0, "rapid": 15000.0, "travel": [-100.0, 100.0]},
+                {"name": "Z", "feed": 3000.0, "travel": [-50.0, 100.0]}
+            ],
+            "max_tool_length": 150.0, "max_tool_diameter": 20.0
+        }}
+    }"#;
+    let world = new_world();
+    project::open(&world, rt).expect("the v19 machine grammar must read");
+    let (path, Some(m)) = machine::of(&world) else {
+        panic!("the machine must be mounted by name");
+    };
+    assert_eq!(path, "testbench.mch");
+    assert_eq!(m.model, "Testbench 1");
+    assert_eq!(m.spindle_max, Some(12000.0));
+    assert_eq!(m.axes.len(), 2);
+    assert_eq!(m.axes[0].name, "X");
+    assert_eq!(m.axes[0].feed, Some(5000.0));
+    assert_eq!(m.axes[0].travel, Some((-100.0, 100.0)));
+    assert_eq!(m.axes[1].rapid, None, "the file did not say, so nothing checks");
+
+    // Write-parse-write fixed point, file style (the template's law).
+    let p = tmp_path("v19b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    let (_, m2) = machine::of(&world2);
+    assert_eq!(m2, Some(m), "the machine must round-trip intact");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert!(first.contains("\"machine\""), "a mounted machine mints its key: {first}");
+    assert_eq!(first, second, "the machine shape round-trips byte-identically");
+
+    // Corruption, not permissive defaults: a stroke that runs backwards
+    // states a limit that cannot be meant, and the file refuses it
+    // BEFORE the world moves (validate-early at the file boundary).
+    let bad = rt.replace("\"travel\": [-100.0, 100.0]", "\"travel\": [100.0, -100.0]");
+    assert_ne!(bad, rt, "the test must reach the travel spelling");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "an insane machine must refuse the file"
+    );
+    let (_, m3) = machine::of(&world3);
+    assert!(m3.is_none(), "a refused load mounts nothing");
 }
 
 #[test]

@@ -12,6 +12,7 @@ pub mod geo2d;
 pub mod geometry;
 pub mod machining2d;
 pub mod machining3d;
+pub mod machine;
 pub mod model;
 pub mod operation;
 pub mod pick;

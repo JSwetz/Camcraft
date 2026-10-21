@@ -49,6 +49,7 @@ use egui::{
 };
 
 use hsmworks_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
+use hsmworks_app::machine;
 use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef};
@@ -1500,6 +1501,41 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::DeleteByName(STOCK_NAME.to_owned()));
         }
     });
+    ui.add_space(10.0);
+    ui.separator();
+    machine_section(ui, state);
+}
+
+/// The document's machine (M2.3 C): setup furniture, read live off the
+/// world singleton like the units row above - no mirror to go stale.
+/// The summary is exactly what the file stated; a blank is a `?`, never
+/// an invented ceiling. Stage D turns "states" into a posting gate;
+/// until then this section informs, it does not block.
+fn machine_section(ui: &mut Ui, state: &mut State) {
+    let (path, m) = machine::of(&state.world);
+    ui.label("Machine");
+    match &m {
+        Some(m) => {
+            ui.label(m.summary());
+            if !path.is_empty() {
+                ui.label(format!("loaded from {path}"));
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Load other").clicked() {
+                    state.pending.push_back(CommandKind::LoadMachineDialog);
+                }
+                if ui.button("Clear").clicked() {
+                    state.pending.push_back(CommandKind::ClearMachine);
+                }
+            });
+        }
+        None => {
+            ui.label("No machine loaded - the checker states, it cannot judge.");
+            if ui.button("Load machine (.mch)").clicked() {
+                state.pending.push_back(CommandKind::LoadMachineDialog);
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------ wcs page

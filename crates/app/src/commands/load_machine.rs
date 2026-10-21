@@ -1,0 +1,65 @@
+//! LoadMachine: set the document's machine definition (M2.3 stage C).
+//!
+//! Setup furniture, like `SetUnits`: no geometry changes, the command
+//! writes only the world singleton and its inverse writes the previous
+//! value back. The `.mch` text is parsed at command construction -
+//! like every other command, a bad file is a refusal at the front
+//! door, never a half-written setup.
+
+use flecs_ecs::prelude::World;
+
+use crate::commands::{Command, CommandError};
+use crate::machine::{self, Machine};
+
+#[derive(Debug)]
+pub struct LoadMachine {
+    prev: (String, Option<Machine>),
+    next: (String, Option<Machine>),
+}
+
+impl LoadMachine {
+    /// Mount a parsed machine, loaded from `path` for display. Passing
+    /// `None` clears the setup - the checker then checks nothing, by
+    /// the unstated-limit law, and that is stated, not silent.
+    pub fn new(world: &World, path: String, machine: Option<Machine>) -> Result<Self, CommandError> {
+        if let Some(m) = &machine
+            && !m.is_sane()
+        {
+            return Err(CommandError::Invalid(
+                "machine states a limit that cannot be meant".to_owned(),
+            ));
+        }
+        let prev = machine::of(world);
+        if prev.0 == path && prev.1 == machine {
+            return Err(CommandError::Invalid(if machine.is_none() {
+                "no machine is loaded".to_owned()
+            } else {
+                "that machine is already loaded".to_owned()
+            }));
+        }
+        Ok(Self {
+            prev,
+            next: (path, machine),
+        })
+    }
+
+    /// Read and parse a `.mch` file, then mount it. The refusal names
+    /// the file: a machine that loads from nowhere is the silent wrong
+    /// answer wearing a setup change.
+    pub fn from_file(world: &World, path: &std::path::Path) -> Result<Self, CommandError> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| CommandError::Invalid(format!("machine file {}: {e}", path.display())))?;
+        let m = crate::machine::parse_mch(&text).map_err(CommandError::Invalid)?;
+        Self::new(world, path.display().to_string(), Some(m))
+    }
+}
+
+impl Command for LoadMachine {
+    fn apply(&self, world: &World) {
+        machine::set(world, &self.next.0, self.next.1.as_ref());
+    }
+
+    fn invert(&self, world: &World) {
+        machine::set(world, &self.prev.0, self.prev.1.as_ref());
+    }
+}

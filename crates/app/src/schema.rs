@@ -108,6 +108,17 @@ pub struct Toolpath {
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Units(pub crate::units::Unit);
 
+/// The machine this document posts to (M2.3 stage C), stored as a flecs
+/// singleton like `Units`: setup furniture, never a browser row, a name
+/// lookup, or a saved entity. `machine: None` means no definition was
+/// loaded and the limit checker checks nothing; `path` names the `.mch`
+/// it was read from (empty when not read from disk) for display only.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+pub struct MachineDef {
+    pub path: String,
+    pub machine: Option<crate::machine::Machine>,
+}
+
 /// The single stock entity's name. Identity by name, like everything else:
 /// tree, undo, and save all reach stock through this.
 pub const STOCK_NAME: &str = "Stock";
@@ -129,4 +140,5 @@ pub fn register_schema(world: &World) {
     world.component::<Operation>();
     world.component::<Toolpath>();
     world.component::<Units>();
+    world.component::<MachineDef>();
 }

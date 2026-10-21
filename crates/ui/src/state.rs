@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation, DeleteTool,
-    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, SelectEntity,
-    SetOperationGeometry, SetStock, SetUnits, SetWcsOrigin,
+    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
+    SelectEntity, SetOperationGeometry, SetStock, SetUnits, SetWcsOrigin,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
@@ -26,7 +26,7 @@ use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
 use hsmworks_app::units::{self, Unit};
-use hsmworks_app::{model, posting, project, world::new_world};
+use hsmworks_app::{machine, model, posting, project, world::new_world};
 
 use crate::viewport::Camera;
 
@@ -67,6 +67,13 @@ pub enum CommandKind {
     /// The document's display unit (M1.1): a lens over numbers that all
     /// stay millimeters in the world. Undo restores the previous lens.
     SetUnits(Unit),
+    /// The document's machine (M2.3 C): setup furniture like the units.
+    /// The dialog arm reads a `.mch` through the file-pick law; the path
+    /// arm is what tests run. Clearing states the absence - undo puts
+    /// the previous machine back.
+    LoadMachineDialog,
+    LoadMachineFile(PathBuf),
+    ClearMachine,
     /// Work offset: slot origin plus full orientation as yaw-pitch-roll
     /// degrees (R = Rz ⊗ Ry ⊗ Rx). The world stores a unit quaternion;
     /// pure-yaw setups use roll = pitch = 0.
@@ -1428,8 +1435,11 @@ impl State {
                 model::clear_named(&self.world);
                 // Units belong to the document, and clear_named cannot
                 // reach a singleton: reset the lens so a fresh blank is
-                // millimeters, never the last document's inches.
+                // millimeters, never the last document's inches. The
+                // machine (M2.3 C) is the same furniture - a blank never
+                // inherits the last document's limits.
                 units::set(&self.world, Unit::default());
+                machine::set(&self.world, "", None);
                 self.history.clear();
                 // Frozen evidence of the old document retires with it.
                 self.post_view = None;
@@ -1537,6 +1547,24 @@ impl State {
                         self.status = format!("units: {}", next.label());
                     }
                     Err(err) => self.refuse(ErrorScope::Setup, format!("units not set: {err}")),
+                }
+            }
+            CommandKind::LoadMachineDialog => {
+                if let Some(path) = pick_machine_file() {
+                    self.load_machine_path(path);
+                }
+            }
+            CommandKind::LoadMachineFile(path) => self.load_machine_path(path),
+            CommandKind::ClearMachine => {
+                match LoadMachine::new(&self.world, String::new(), None) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = String::from("machine cleared");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("machine not cleared: {err}"))
+                    }
                 }
             }
             CommandKind::StockFit { margin, shape: radio } => {
@@ -1945,6 +1973,25 @@ impl State {
         self.import_started = None;
     }
 
+    /// Mount a `.mch` machine definition on the document (M2.3 C). The
+    /// parse lives in `LoadMachine::from_file` - command-construction
+    /// validation, so a bad file is a visible refusal, never a
+    /// half-written setup.
+    fn load_machine_path(&mut self, path: PathBuf) {
+        match LoadMachine::from_file(&self.world, &path) {
+            Ok(command) => {
+                self.history.execute(&self.world, command);
+                self.doc_version += 1;
+                let summary = machine::of(&self.world)
+                    .1
+                    .map(|m| m.summary())
+                    .unwrap_or_default();
+                self.status = format!("machine: {summary}");
+            }
+            Err(err) => self.refuse(ErrorScope::Setup, format!("machine not loaded: {err}")),
+        }
+    }
+
     fn open_project_path(&mut self, path: PathBuf) {
         self.abandon_imports();
         model::clear_named(&self.world);
@@ -2016,6 +2063,14 @@ fn pick_mesh_file() -> Option<PathBuf> {
 fn pick_project_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("HSMWorks Project", &["hsmproj"])
+        .pick_file()
+}
+
+fn pick_machine_file() -> Option<PathBuf> {
+    // The `.mch` layout is the machine-definition JSON format we reuse
+    // by user instruction (M2.3 C); the filter just names it.
+    rfd::FileDialog::new()
+        .add_filter("Machine Definition", &["mch"])
         .pick_file()
 }
 
