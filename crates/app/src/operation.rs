@@ -665,6 +665,15 @@ pub enum OpParams {
         /// of hops where the ground allows (M2.2e). `false` is every
         /// pre-ramp file: hop-to-clearance, unchanged.
         ramp: bool,
+        /// Floor for the march's refinement, mm (M2.2e surface
+        /// finish). `None` rides the march's own floor - what every
+        /// pre-v18 file ran.
+        min_step: Option<f64>,
+        /// The steepest ramp descent, degrees (M2.2e surface
+        /// finish). 45.0 is the law's own gift - shallow ground is
+        /// exactly 1:1 - so the default certifies exactly what
+        /// v17's chain certified. Inert while `ramp` is false.
+        ramp_angle: f64,
     },
 }
 
@@ -842,6 +851,8 @@ impl OpParams {
                 bottom_z,
                 feed,
                 plunge_feed,
+                min_step,
+                ramp_angle,
                 ..
             } => {
                 // No stepdown to check: the scallop law derives it from
@@ -856,6 +867,13 @@ impl OpParams {
                     && bottom_z.is_sane()
                     && pos(*feed)
                     && pos(*plunge_feed)
+                    && min_step.is_none_or(pos)
+                    // (0, 90): a flat ramp never descends - that is
+                    // a traverse with a name it doesn't earn; a
+                    // vertical one is a plunge, and the run's first
+                    // contact already owns those. Both refusals
+                    // happen at the gate, never at the emitter.
+                    && (0.0..90.0).contains(ramp_angle)
             }
             OpParams::Slot {
                 a,
@@ -1156,6 +1174,8 @@ impl OpParams {
                 plunge_feed,
                 climb,
                 ramp,
+                min_step,
+                ramp_angle,
             } => {
                 h.write_u8(7);
                 // v16: the pattern chooses a different kinematic (and
@@ -1183,6 +1203,19 @@ impl OpParams {
                 // so it belongs in the digest; the one-time staleness
                 // it hands old ops is the step-up law, same as ever.
                 h.write_u8(u8::from(*ramp));
+                // v18 (M2.2e): the surface-finish pair. min_step
+                // floors the march's refinement (same Some/None
+                // split as stepover above - None must not digest as
+                // the number 0), ramp_angle caps the chain's slope
+                // - both change moves, both belong in the digest.
+                match min_step {
+                    Some(s) => {
+                        h.write_u8(1);
+                        w(h, *s);
+                    }
+                    None => h.write_u8(0),
+                }
+                w(h, *ramp_angle);
             }
             OpParams::Slot {
                 a,
@@ -3015,6 +3048,8 @@ pub fn generate(
             plunge_feed,
             climb,
             ramp,
+            min_step,
+            ramp_angle,
             ..
         } => {
             // Ball jurisdiction: the rings are the tangent locus of a
@@ -3042,6 +3077,8 @@ pub fn generate(
                 plunge_feed: *plunge_feed,
                 climb: *climb,
                 ramp: *ramp,
+                min_step: *min_step,
+                ramp_angle: *ramp_angle,
             };
             // The pattern picks the generator; Waterline never
             // reaches the raster code at all.

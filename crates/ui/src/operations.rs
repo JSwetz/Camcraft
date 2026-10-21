@@ -256,6 +256,11 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             // between-ring entry - the certified diagonal is a claim
             // about the ground, and a new op has none on record yet.
             ramp: false,
+            // The march refines to its own floor until a machinist
+            // says otherwise; the ramp's slope cap waits for a ramp
+            // to govern, at the law's own 45 degrees.
+            min_step: None,
+            ramp_angle: 45.0,
         },
         _ => OpParams::Face {
             stepover,

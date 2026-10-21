@@ -2421,6 +2421,8 @@ fn finish_params(top_z: f64, bottom_z: f64, tolerance: f64) -> OpParams {
         plunge_feed: 100.0,
         climb: true,
         ramp: false,
+        min_step: None,
+        ramp_angle: 45.0,
     }
 }
 

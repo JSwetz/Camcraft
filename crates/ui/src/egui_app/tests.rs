@@ -794,6 +794,8 @@ fn every_field_lives_on_exactly_one_section() {
                     "Pattern",
                     "Stepover",
                     "Set line spacing",
+                    "Floor the march's refinement",
+                    "Minimum step",
                     "Ramp between lines",
                     "Tolerance",
                 ]),
@@ -2146,6 +2148,54 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
             _ => panic!("kind drift"),
         });
     assert_eq!(back, Some(false), "undo restores the seeded no-ramp default");
+    // M2.2e stage E: the refinement floor rides the same lane, and
+    // like the stepover override it is a checkbox that manufactures
+    // its own number - the click alone stages Some(scalar), so the
+    // Apply after a bare click carries the seeded floor, and undo
+    // returns the march to its own 1/4096 right.
+    harness.state_mut().state.sync_ops_ui();
+    harness.run();
+    harness.get_by_label("Floor the march's refinement").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Floor the march's refinement").click();
+    harness.run();
+    let staged = match &harness.state().state.op_ui.params {
+        OpParams::Finish3D { min_step, .. } => *min_step,
+        _ => panic!("kind drift"),
+    };
+    assert!(staged.is_some(), "the floor checkbox staged no number");
+    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Apply Parameters").click();
+    harness.run();
+    let st = &harness.state().state;
+    let floored = model::find_by_name(&st.world, "Operation2")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|o| match o.params {
+            OpParams::Finish3D { min_step, .. } => min_step.is_some(),
+            _ => panic!("kind drift"),
+        });
+    assert_eq!(floored, Some(true), "Apply must carry the floor to the world");
+    harness
+        .input_mut()
+        .events
+        .push(Event::ModifiersChanged(Modifiers::COMMAND));
+    harness.input_mut().events.push(Event::Key {
+        key: Key::Z,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    });
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let back = model::find_by_name(&st.world, "Operation2")
+        .and_then(|e| model::operation_of(&st.world, &e))
+        .map(|o| match o.params {
+            OpParams::Finish3D { min_step, .. } => min_step,
+            _ => panic!("kind drift"),
+        });
+    assert_eq!(back, Some(None), "undo restores the march's own floor");
 }
 
 #[test]

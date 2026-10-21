@@ -132,6 +132,11 @@ fn params(top_z: f64, bottom_z: f64) -> Finish3DParams {
         plunge_feed: 100.0,
         climb: true,
         ramp: false,
+        // The surface-finish defaults state v17's law: the march's
+        // own floor, and the 45° the raster's jurisdiction already
+        // grants. Every existing test rides these untouched.
+        min_step: None,
+        ramp_angle: 45.0,
     }
 }
 
@@ -803,7 +808,7 @@ fn plateau_parallel_cuts_the_shelf_and_the_rings_take_the_walls() {
     // The auto-split's headline: one path, two strategies, and the
     // shelf - waterline's known blind spot - comes off clean.
     let f = plateau();
-    let t = parallel(&f, &ppattern(10.0, 0.0, FinishPattern::Parallel)).expect("plateau parallel");
+    let t = parallel_all(&f, &ppattern(10.0, 0.0, FinishPattern::Parallel)).expect("plateau parallel");
     // The shelf really was ridden: a lateral Feed sits on z = 10 well
     // inside the footprint.
     let on_shelf = t.moves.iter().any(|m| {
@@ -828,7 +833,7 @@ fn tilted_shelf_lines_are_the_stepover_times_the_cosine() {
     let alpha = PI / 6.0;
     let want = scallop_stepover(R, TOL) * alpha.cos();
     let f = tilted(alpha, 8.0);
-    let t = parallel(&f, &ppattern(14.0, 4.0, FinishPattern::Parallel)).expect("tilted parallel");
+    let t = parallel_all(&f, &ppattern(14.0, 4.0, FinishPattern::Parallel)).expect("tilted parallel");
     // The ring ladder may contribute its own contour lines at the
     // stepdown spacing; the raster's progression must be findable in
     // the line register regardless - a chain of at least three lines
@@ -869,7 +874,7 @@ fn blind_pocket_floor_is_cut_and_nothing_sinks_below_it() {
     // the surrounding shelf at 10), and the floor-outranks law keeps
     // every cutting tip at or above bottom_z.
     let f = step_pocket();
-    let t = parallel(&f, &ppattern(10.0, 5.0, FinishPattern::Parallel)).expect("pocket parallel");
+    let t = parallel_all(&f, &ppattern(10.0, 5.0, FinishPattern::Parallel)).expect("pocket parallel");
     let on_floor = t.moves.iter().any(|m| {
         m.kind == MoveKind::Feed
             && (m.to.z - 5.0).abs() < 1e-6
@@ -939,7 +944,7 @@ fn hidden_floor_stays_rest_and_the_path_stays_above_it() {
     // never plunges below its own bottom plane to chase what it
     // cannot see.
     let f = hidden_floor();
-    let t = parallel(&f, &ppattern(10.0, 10.0, FinishPattern::Parallel)).expect("overhang parallel");
+    let t = parallel_all(&f, &ppattern(10.0, 10.0, FinishPattern::Parallel)).expect("overhang parallel");
     let on_shelf = t
         .moves
         .iter()
@@ -1025,7 +1030,7 @@ fn scallop_crosses_the_diagonals_and_measures_clean() {
     // envelope kernel signs off on the whole path - gouge and cusp
     // both inside the gate, measured on the grid.
     let f = dome();
-    let t = parallel(&f, &ppattern(18.0, RIM_Z, FinishPattern::Scallop)).expect("scallop dome");
+    let t = parallel_all(&f, &ppattern(18.0, RIM_Z, FinishPattern::Scallop)).expect("scallop dome");
     let (d1, d2, ax) = dir_buckets(&t);
     assert!(d1 > 50 && d2 > 50, "scallop not crossing the diagonals: {d1} / {d2}");
     // The dome's steep flanks belong to the ring ladder (the M2.2b
@@ -1047,7 +1052,7 @@ fn scallop_plateau_is_constant_cusp_on_the_shelf() {
     // by vertical walls. The crossed pair must hold the cusp
     // everywhere and never drag a feed across a wall.
     let f = plateau();
-    let t = parallel(&f, &ppattern(10.0, 0.0, FinishPattern::Scallop)).expect("plateau scallop");
+    let t = parallel_all(&f, &ppattern(10.0, 0.0, FinishPattern::Scallop)).expect("plateau scallop");
     let (d1, d2, _) = dir_buckets(&t);
     assert!(d1 > 10 && d2 > 10, "shelf not rastered diagonally: {d1} / {d2}");
     assert_no_feed_spans_a_step(&t);
@@ -1069,7 +1074,7 @@ fn scallop_holds_the_cos_law_on_the_tilted_shelf() {
     // op's top, and a kernel verdict on a self-intersecting model
     // measures the fixture bug, not the pattern law.
     let f = tilted(PI / 6.0, 8.0);
-    let t = parallel(&f, &ppattern(14.0, 4.0, FinishPattern::Scallop)).expect("tilted scallop");
+    let t = parallel_all(&f, &ppattern(14.0, 4.0, FinishPattern::Scallop)).expect("tilted scallop");
     // Both diagonal senses ride the shelf. The third bucket (axis-
     // parallel feeds) is the wall ladder's - vertical walls ARE the
     // steep terrain the M2.2b jurisdiction law hands to the rings -
@@ -1089,7 +1094,7 @@ fn scallop_pocket_floor_gets_its_own_cross() {
     // ladder, with the floor-outranks law keeping each region's
     // lines on its own ground.
     let f = step_pocket();
-    let t = parallel(&f, &ppattern(10.0, 5.0, FinishPattern::Scallop)).expect("pocket scallop");
+    let t = parallel_all(&f, &ppattern(10.0, 5.0, FinishPattern::Scallop)).expect("pocket scallop");
     let on_floor = t
         .moves
         .iter()
@@ -1497,4 +1502,245 @@ fn the_ring_families_ignore_the_chain() {
         .collect();
     let _ = contour(&scatter, &Finish3DParams { ramp: true, ..ppattern(1.0, 0.0, FinishPattern::Contour) });
     let _ = project(&scatter, &Finish3DParams { ramp: true, ..ppattern(1.0, 0.0, FinishPattern::Project) });
+}
+
+// ---------------------------------------------------------------------------
+// M2.2e stage E - the surface-finish parameters: minimum step and ramp angle.
+// Tolerance and stepover were spoken long ago; these two close the bullet.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_ramp_angle_default_certifies_what_v17_certified() {
+    // Stage D's certified diagonal chain, same ground as its cos-law
+    // test: the tilted wedge, where every serpentine connector hops
+    // one stepover down a 1-in-2 slope - a 26.57-degree diagonal,
+    // short enough to certify and inside the 45 the law already
+    // granted in v17. (A gable was the wrong witness for this law:
+    // its connectors go the long way around the fold gap, every one
+    // refused at every angle, and the flag looked inert for reasons
+    // that had nothing to do with the number under test.)
+    let f = tilted((0.5f64).atan(), 8.0);
+    let hop = parallel(
+        &f,
+        &Finish3DParams { ramp: false, ..ppattern(14.0, 4.0, FinishPattern::Parallel) },
+    )
+    .expect("hop");
+    let ramp = parallel(
+        &f,
+        &Finish3DParams { ramp: true, ..ppattern(14.0, 4.0, FinishPattern::Parallel) },
+    )
+    .expect("ramp at the default angle");
+    assert_ne!(hop.moves, ramp.moves, "the default angle refused a chain v17 certified");
+    assert!(
+        n_kind(&ramp, MoveKind::Rapid) < n_kind(&hop, MoveKind::Rapid),
+        "the chained path kept the hop's rapids"
+    );
+    // And the chains it lays really do descend - the slope this
+    // fixture is built to carry: dz = dy / 2, exactly.
+    let sloped = ramp.moves.iter().any(|m| {
+        let dy = (m.to.y - m.from.y).abs();
+        m.kind == MoveKind::Feed
+            && (m.to.x - m.from.x).abs() < 1e-9
+            && dy > 1e-6
+            && (m.to.z - m.from.z).abs() - dy / 2.0 <= 1e-6 * dy
+    });
+    assert!(sloped, "no descending lateral chain in the ramp path");
+    let rep = envelope(&f, &ramp);
+    assert!(
+        rep.gouge_mm <= gate(rep.cell) && rep.rest_mm <= gate(rep.cell),
+        "tilted ramp envelope {} {}",
+        rep.gouge_mm,
+        rep.rest_mm
+    );
+    assert_eq!(verify_finish(&f, &ramp, 14.0), Vec::new(), "the verifier agrees");
+}
+
+#[test]
+fn a_shallower_angle_gives_the_chain_back_to_the_hop() {
+    // The gate is honest at both ends: 45 chains what the ground
+    // offers (1:2 < 1:1), 20 refuses all of it (1:2 > 1:tan 20 =
+    // 1:2.75). A link either descends within the promise or the hop
+    // stands, move for move, byte for byte. The list stops short of
+    // the fixture's own boundary, atan(1/2) = 26.57 degrees - a
+    // number there sits on the float-noise cliff, not on ground the
+    // law claims to hold.
+    let f = tilted((0.5f64).atan(), 8.0);
+    let hop = parallel(
+        &f,
+        &Finish3DParams { ramp: false, ..ppattern(14.0, 4.0, FinishPattern::Parallel) },
+    )
+    .expect("hop");
+    for angle in [1.0, 20.0] {
+        let t = parallel(
+            &f,
+            &Finish3DParams {
+                ramp: true,
+                ramp_angle: angle,
+                ..ppattern(14.0, 4.0, FinishPattern::Parallel)
+            },
+        )
+        .expect("steep-angled ramp");
+        assert_eq!(t.moves, hop.moves, "angle {angle}: the chain slipped past its cap");
+    }
+    // The angle is inert while the ramp is off: a plunge-coated
+    // number changes nothing on a hopped path.
+    let inert = parallel(
+        &f,
+        &Finish3DParams {
+            ramp: false,
+            ramp_angle: 1.0,
+            ..ppattern(14.0, 4.0, FinishPattern::Parallel)
+        },
+    )
+    .expect("inert angle");
+    assert_eq!(inert.moves, hop.moves, "an angle moved a path with no ramp");
+}
+
+
+/// The corrugated belt: five closed-width facets at 22.5 degrees,
+/// alternately rising and falling across the x-raster. The fold
+/// peaks are validity gaps - a ball center within 3 sin(22.5) of a
+/// crease has its contact on the far facet, so the march never
+/// chords a crease; the folds bound the runs, not the refinement.
+/// What does answer to a refinement floor here is the staircase
+/// the march walks INTO each gap edge: the None path keeps halving
+/// toward its own 1/4096 right, and every floor from 0.3 to the
+/// cruise step truncates that descent at a different rung. The
+/// flanks ride a closed solid - walls down to z = 9 and a floor -
+/// because the verifier's silhouette needs one and rings need not
+/// to march phantom air off the sheet's free edges.
+fn folds() -> Vec<Triangle> {
+    let (a, run, hw, zb, zf) = (0.6628f64, 3.2f64, 8.0, 10.0, 9.0); // 22.5-deg flanks
+    let z = |k: i32| zb + a * if k % 2 == 0 { -1.0 } else { 1.0 };
+    let x = |k: i32| -8.0 + run * k as f64;
+    let q = |pp: [(f64, f64, f64); 4]| {
+        vec![
+            Triangle::new(p3(pp[0].0, pp[0].1, pp[0].2), p3(pp[1].0, pp[1].1, pp[1].2), p3(pp[2].0, pp[2].1, pp[2].2)),
+            Triangle::new(p3(pp[0].0, pp[0].1, pp[0].2), p3(pp[2].0, pp[2].1, pp[2].2), p3(pp[3].0, pp[3].1, pp[3].2)),
+        ]
+    };
+    let mut f = Vec::new();
+    for k in 0..5 {
+        let (x0, x1, z0, z1) = (x(k), x(k + 1), z(k), z(k + 1));
+        // Top band, and the walls under its edges. Windings are
+        // the ones the tilted wedge already proves honest:
+        // outward-up on the band, -y and +y on the walls.
+        f.extend(q([(x0, -hw, z0), (x1, -hw, z1), (x1, hw, z1), (x0, hw, z0)]));
+        f.extend(q([(x0, -hw, zf), (x1, -hw, zf), (x1, -hw, z1), (x0, -hw, z0)]));
+        f.extend(q([(x0, hw, z0), (x1, hw, z1), (x1, hw, zf), (x0, hw, zf)]));
+    }
+    // The x-end walls and the floor close the box.
+    f.extend(q([(-8.0, -hw, z(0)), (-8.0, hw, z(0)), (-8.0, hw, zf), (-8.0, -hw, zf)]));
+    f.extend(q([(8.0, hw, z(5)), (8.0, -hw, z(5)), (8.0, -hw, zf), (8.0, hw, zf)]));
+    f.extend(q([(-8.0, hw, zf), (8.0, hw, zf), (8.0, -hw, zf), (-8.0, -hw, zf)]));
+    f
+}
+
+#[test]
+fn minimum_step_floors_the_refinement_not_the_edges() {
+    // The corrugated belt: five 22.5-degree facets across the raster.
+    // Its fold PEAKS are validity gaps - a ball center within
+    // 3 sin(22.5) of a crease has its contact on the far facet - so
+    // no chord ever crosses a crease (the creases bound the runs,
+    // floored by nobody); what a floor truncates is the staircase
+    // the march walks into each gap edge. The raster band is the
+    // gap between the flanks' heights: every floor lives inside one
+    // envelope-clean promise, and the parameter's whole effect is
+    // in how the march spends its chords.
+    let f = folds();
+    let at = |ms: Option<f64>| {
+        parallel(
+            &f,
+            &Finish3DParams { min_step: ms, ..ppattern(11.0, 8.0, FinishPattern::Parallel) },
+        )
+        .expect("belt raster")
+    };
+    let n = |ms: Option<f64>| n_kind(&at(ms), MoveKind::Feed);
+    // Strictly coarser rung by rung...
+    assert!(n(None) > n(Some(0.3)), "0.3 did not truncate the staircase");
+    assert!(n(Some(0.3)) > n(Some(0.7)), "0.7 did not truncate the staircase");
+    assert!(n(Some(0.7)) > n(Some(1.2)), "1.2 did not truncate the staircase");
+    // ...until it reaches cruise: a floor at or past delta0 can
+    // make the march skip its own test, but never march coarser
+    // than one step per chord.
+    assert_eq!(n(Some(1.2)), n(Some(4.0)), "a floor past cruise kept cutting");
+    // Chords below 0.3: the None path chooses them by the score
+    // (its staircase runs to 0.068); every floor takes some away,
+    // and from a floor at the rung right below cruise (0.7) up,
+    // the short chords left are exactly the piece tails and edge
+    // bisections - material's own boundaries, which no spacing
+    // parameter owns. A finer floor can even ADD sub-floor chords
+    // by landing more grids near an edge (the closed solid's
+    // counts: 136 none, 70 at 0.3, 48 at 0.7 and 1.2 alike);
+    // that is the floor trading chord length for piece count,
+    // not refining. The edges stand untouched at every rung.
+    let below = |t: &Toolpath, q: f64| -> usize {
+        t.moves
+            .iter()
+            .filter(|m| {
+                m.kind == MoveKind::Feed
+                    && (m.to.x - m.from.x).hypot(m.to.y - m.from.y) < q * (1.0 - 1e-9)
+            })
+            .count()
+    };
+    let (t_none, t3, t7, t12) = (at(None), at(Some(0.3)), at(Some(0.7)), at(Some(1.2)));
+    assert!(below(&t_none, 0.3) > below(&t3, 0.3), "the floor left the whole descent in");
+    assert!(below(&t3, 0.3) >= below(&t7, 0.3), "the 0.7 floor refined where 0.3 had stopped");
+    assert_eq!(below(&t7, 0.3), below(&t12, 0.3), "0.7 and 1.2 disagreed about the edges");
+    // The piece edges are the same millimeters on every path.
+    // "Same millimeters" to the float tail, that is: bisection
+    // brackets are seeded from the sample grid, so a floor can
+    // perturb an edge in its last digits (2e-8 mm) while the
+    // material boundary it converges on never moves. The
+    // tolerance is the honest reading of the law - one hundred-
+    // thousandth of a millimeter, four orders below anything the
+    // machine could hear, and an assert_eq on raw floats here
+    // would be testing IEEE, not CAM.
+    let ends = |t: &Toolpath| -> Vec<(f64, f64, f64)> {
+        t.moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Plunge)
+            .map(|m| (m.to.x, m.to.y, m.to.z))
+            .collect()
+    };
+    let same_ends = |a: &[(f64, f64, f64)], b: &[(f64, f64, f64)]| -> bool {
+        a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(p, q)| (p.0 - q.0).abs() <= 1e-4 && (p.1 - q.1).abs() <= 1e-4 && (p.2 - q.2).abs() <= 1e-4)
+    };
+    let (e_none, e3, e12) = (ends(&t_none), ends(&t3), ends(&t12));
+    assert!(same_ends(&e_none, &e3), "the floor moved a run's entry");
+    assert!(same_ends(&e3, &e12), "the floor moved a run's entry (2)");
+    // A floor under the march's own right is not a second floor:
+    // 1e-9 changes nothing, byte for byte.
+    assert_eq!(at(Some(1e-9)).moves, t_none.moves, "a floor below the march's own raised it");
+    // Coarser by the machinist's order, still inside the promise,
+    // on every rung - and the verifier never reads the floor as
+    // permission; it keeps its own score on each path.
+    for (ms, t) in [(None, &t_none), (Some(0.3), &t3), (Some(4.0), &at(Some(4.0)))] {
+        let rep = envelope(&f, t);
+        assert!(
+            rep.gouge_mm <= gate(rep.cell) && rep.rest_mm <= gate(rep.cell),
+            "floor {ms:?} envelope {} {}",
+            rep.gouge_mm,
+            rep.rest_mm
+        );
+        assert_eq!(verify_finish(&f, t, 11.0), Vec::new(), "verifier spoke at {ms:?}");
+    }
+    // And the rings - their own emitter, never routed through the
+    // chain or the march - answer to neither stage-E number:
+    // exactly as if they had never arrived.
+    let w1 = waterline(&f, &ppattern(11.0, 8.0, FinishPattern::Waterline)).expect("w1");
+    let w2 = waterline(
+        &f,
+        &Finish3DParams {
+            ramp: true,
+            ramp_angle: 1.0,
+            min_step: Some(4.0),
+            ..ppattern(11.0, 8.0, FinishPattern::Waterline)
+        },
+    )
+    .expect("w2");
+    assert_eq!(w1.moves, w2.moves, "stage-E numbers spoke to the rings");
 }

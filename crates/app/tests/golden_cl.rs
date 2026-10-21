@@ -493,6 +493,8 @@ fn finish3d_waterline_cone() {
             plunge_feed: 100.0,
             climb: true,
             ramp: false,
+            min_step: None,
+            ramp_angle: 45.0,
         },
     )
     .unwrap();
@@ -543,6 +545,8 @@ fn finish3d_scallop_plateau() {
             plunge_feed: 100.0,
             climb: true,
             ramp: false,
+            min_step: None,
+            ramp_angle: 45.0,
         },
     )
     .unwrap();
@@ -591,6 +595,8 @@ fn finish3d_ramp_parallel_plateau() {
             plunge_feed: 100.0,
             climb: true,
             ramp: true,
+            min_step: None,
+            ramp_angle: 45.0,
         },
     )
     .unwrap();
@@ -657,6 +663,8 @@ fn finish3d_radial_dome() {
             plunge_feed: 100.0,
             climb: true,
             ramp: false,
+            min_step: None,
+            ramp_angle: 45.0,
         },
     )
     .unwrap();
@@ -699,6 +707,8 @@ fn finish3d_spiral_plateau() {
             plunge_feed: 100.0,
             climb: true,
             ramp: false,
+            min_step: None,
+            ramp_angle: 45.0,
         },
     )
     .unwrap();
@@ -741,6 +751,8 @@ fn finish3d_contour_plateau() {
             plunge_feed: 100.0,
             climb: true,
             ramp: false,
+            min_step: None,
+            ramp_angle: 45.0,
         },
     )
     .unwrap();
@@ -801,6 +813,8 @@ fn finish3d_project_dome() {
             plunge_feed: 100.0,
             climb: true,
             ramp: false,
+            min_step: None,
+            ramp_angle: 45.0,
         },
     )
     .unwrap();

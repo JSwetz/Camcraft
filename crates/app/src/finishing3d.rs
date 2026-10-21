@@ -148,6 +148,28 @@ pub struct Finish3DParams {
     /// contacts and between-family transits are never ramped: the
     /// diagonal is a chain between cuts, not a way into a new one.
     pub ramp: bool,
+    /// Floor for the adaptive march's refinement, mm (M2.2e): the
+    /// march bisects a chord whenever its middle sinks past the
+    /// quarter budget, down to `delta0/4096` by its own right. Set
+    /// this to say NO cut segment shorter than `s` - coarse ground
+    /// you chose, not ground the chord law found. The run-edge
+    /// bisections are NOT floored: where a cut starts and stops is
+    /// the material's business. `None` rides the march's own floor;
+    /// Waterline ignores it, exactly as if it had never arrived
+    /// (the same jurisdiction the raster fields keep).
+    pub min_step: Option<f64>,
+    /// The steepest descent a ramp link may carry, degrees (M2.2e):
+    /// between two runs, the chain's TRAVERSE is a straight line,
+    /// and a drop steeper than `dz = d_xy·tan(angle)` is not a ramp:
+    /// it is a plunge in a diagonal coat, and plunges belong to
+    /// the run's own first contact. 45° is the default and the
+    /// law's own gift: shallow ground is exactly the ground whose
+    /// support climbs no more than one in one, so an angle of 45
+    /// certifies every traverse the raster's jurisdiction can
+    /// present - the default is v17's behavior, spelled. Links
+    /// that barely traverse (`d_xy` below the tolerance) are the
+    /// vertical case the ramp law already settled, gate untouched.
+    pub ramp_angle: f64,
 }
 
 /// The stepdown the scallop law prescribes: cusp height
@@ -175,6 +197,21 @@ pub fn scallop_stepover(r: f64, tol: f64) -> f64 {
         return 0.0;
     }
     (8.0 * r * tol).sqrt()
+}
+
+/// The adaptive march's refinement floor, mm: `delta0/4096` by its
+/// own right (the quarter-chord bisection has to stop SOMEWHERE),
+/// raised - never lowered - by an explicit `min_step`. A NaN floor
+/// loses to the auto floor by `f64::max`'s own law, so a nonsense
+/// number can never freeze the march; an over-tall floor simply
+/// turns refinement off, which is legal coarse ground.
+#[must_use]
+fn refinement_floor(delta0: f64, min_step: Option<f64>) -> f64 {
+    let auto = delta0 / 4096.0;
+    match min_step {
+        Some(s) => auto.max(s),
+        None => auto,
+    }
 }
 
 /// The steep/shallow jurisdiction line, as a cosine: facets whose
@@ -407,10 +444,15 @@ fn validate(p: &Finish3DParams, facets: &[Triangle]) -> Result<(), GenError> {
         && p.top_z.is_finite()
         && p.bottom_z.is_finite()
         && p.stepover.is_none_or(|s| s.is_finite() && s > 0.0)
-        && p.retract_z.is_none_or(|rz| rz.is_finite()))
+        && p.retract_z.is_none_or(|rz| rz.is_finite())
+        && p.min_step.is_none_or(|s| s.is_finite() && s > 0.0)
+        // The ramp angle is refused OUTSIDE (0, 90) even while
+        // `ramp` is off - an unreachable promise is not an inert
+        // number, it is a lie waiting for the checkbox.
+        && (0.0..90.0).contains(&p.ramp_angle))
     {
         return Err(GenError::Invalid(
-            "3D finish needs finite positive tool, tolerance, feeds and heights".into(),
+            "3D finish needs finite positive tool, tolerance, feeds, heights and surface-finish numbers".into(),
         ));
     }
     if facets.is_empty() {
@@ -608,7 +650,7 @@ fn push_run_pt(line: &mut Vec<(Point2, f64)>, q: Point2, c: f64) {
 /// breaks there instead of dragging one move's chord through the
 /// shelf's edge - no cut move ever spans two surfaces. Returns the
 /// curve's pieces, in travel order, air stretches gone.
-#[allow(clippy::too_many_arguments)] // the march kernel: one slot per law, all three callers fill all nine
+#[allow(clippy::too_many_arguments)] // the march kernel: one slot per law, every caller fills all ten
 fn march_curve(
     t0: f64,
     t1: f64,
@@ -619,9 +661,15 @@ fn march_curve(
     delta0: f64,
     tol: f64,
     eps_chord: f64,
+    floor_mm: f64,
 ) -> Vec<Vec<(Point2, f64)>> {
     const MAX_BISECT: usize = 24;
-    let delta_min = delta0 / 4096.0;
+    // The refinement floor (M2.2e): the march's own right to stop
+    // bisecting, raised by an explicit minimum step. This floors
+    // REFINEMENT only - the run-edge bisections below find where
+    // material starts and stops, and that is the model's answer,
+    // never the spacing parameter's.
+    let delta_min = (delta0 / 4096.0).max(floor_mm);
     let mut line: Vec<(Point2, f64)> = Vec::new();
     let mut pieces: Vec<Vec<(Point2, f64)>> = Vec::new();
     let mut t = t0;
@@ -729,7 +777,13 @@ fn march_curve(
                             None => f64::INFINITY, // straddles an edge: refine
                         };
                         if dev > eps_chord {
-                            delta *= 0.5;
+                            // The staircase halts AT the floor, not
+                            // below it: a floor of 0.3 means no cut
+                            // chord shorter than 0.3, even though
+                            // the halving sequence would land on
+                            // 0.274. Clamping (not skipping) keeps
+                            // the march advancing.
+                            delta = (delta * 0.5).max(delta_min);
                             continue;
                         }
                         push_run_pt(&mut line, pos(tn), c);
@@ -738,9 +792,18 @@ fn march_curve(
                         delta = (delta * 2.0).min(delta0);
                     }
                     Some(c) => {
+                        // Accepted at or below the floor (or below
+                        // the march's own right): the chord stands,
+                        // and the step grows back toward cruise -
+                        // one halving away from the test's reach -
+                        // so a floor never freezes the march at its
+                        // own depth across ground that needs none
+                        // of it. Growth is capped at delta0, and
+                        // any fold ahead re-triggers the test arm.
                         push_run_pt(&mut line, pos(tn), c);
                         t = tn;
                         cz = Some(c);
+                        delta = (delta * 2.0).min(delta0);
                     }
                 }
                 if t >= t1 {
@@ -781,6 +844,21 @@ const RAMP_PROBE_MAX: i64 = 4096;
 fn diagonal_ok(from: Point3, to: Point3, r: f64, p: &Finish3DParams, sups: &[Sup]) -> bool {
     let d = (to.x - from.x).hypot(to.y - from.y);
     if !(d.is_finite() && to.x.is_finite() && to.y.is_finite() && to.z.is_finite()) {
+        return false;
+    }
+    // The angle law (M2.2e): the chain's TRAVERSE descends no
+    // steeper than the ramp angle - one in tan(angle) of drop per
+    // mm of ground. A steeper link is a plunge wearing a diagonal
+    // coat, and plunges belong to the run's first contact, not to
+    // this chain. `d` at or under the tolerance barely traverses:
+    // that is the vertical case already settled above (two legal
+    // centers of one column), gate inert there by design. The `+
+    // tol` slack makes the 45° default certify a full 1:1 climb
+    // exactly - shallow ground's own slope limit, so the default
+    // stands for what v17 ran. NaN tan (a nonsense angle) fails
+    // every compare: refused, hop, never a silent pass.
+    let dz = (to.z - from.z).abs();
+    if d > p.tolerance && dz > d * p.ramp_angle.to_radians().tan() + p.tolerance {
         return false;
     }
     let eps = p.tolerance * 0.25;
@@ -909,6 +987,7 @@ fn raster_pass(
             delta0,
             p.tolerance,
             eps_chord,
+            refinement_floor(delta0, p.min_step),
         );
         if j % 2 == 1 {
             for pc in pieces.iter_mut() {
@@ -1070,6 +1149,7 @@ pub fn radial(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
                 delta0,
                 p.tolerance,
                 p.tolerance * 0.25,
+                refinement_floor(delta0, p.min_step),
             );
             if k % 2 == 1 {
                 for pc in pieces.iter_mut() {
@@ -1135,6 +1215,7 @@ pub fn spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
             delta0,
             p.tolerance,
             p.tolerance * 0.25,
+            refinement_floor(delta0, p.min_step),
         );
         if !pieces.is_empty() {
             emit_runs(&mut b, p, r, &sups, &pieces, false);
@@ -1201,6 +1282,7 @@ fn march_loop(
     delta0: f64,
     tol: f64,
     eps_chord: f64,
+    floor_mm: f64,
 ) -> Vec<Vec<(Point2, f64)>> {
     let n = pts.len();
     if n < 3 {
@@ -1249,6 +1331,7 @@ fn march_loop(
         delta0,
         tol,
         eps_chord,
+        floor_mm,
     )
 }
 
@@ -1321,7 +1404,14 @@ fn shadow_pass(
             } else {
                 stored.iter().rev().copied().collect()
             };
-            runs.extend(march_loop(&poly, &sup, delta0, p.tolerance, p.tolerance * 0.25));
+            runs.extend(march_loop(
+                &poly,
+                &sup,
+                delta0,
+                p.tolerance,
+                p.tolerance * 0.25,
+                refinement_floor(delta0, p.min_step),
+            ));
         }
         k += 1;
         // The guard above already refused a family needing more than

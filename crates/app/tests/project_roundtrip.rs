@@ -1780,6 +1780,98 @@ fn v16_file_steps_to_v17_and_the_ramp_grammar_round_trips() {
 }
 
 #[test]
+fn v17_file_steps_to_v18_and_the_surface_finish_grammar_round_trips() {
+    // v17 -> v18: two more keys inside `finish3d` - `min_step` (the
+    // march's refinement floor) and `ramp_angle` (the chain's slope
+    // cap) - absent from every v17 file, whose serde defaults are
+    // exactly what v17 ran: no floor (the march's own 1/4096 right)
+    // and the 45-degree diagonal v17's chain law already certified.
+    // Nothing existing changed shape; step-up is the stamp itself,
+    // like every bump since v6.
+    let text = r#"{
+        "version": 17,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "F1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"finish3d": {
+                 "pattern": "parallel", "tolerance": 0.1, "ramp": true,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("v17 file must migrate");
+    let e = model::find_by_name(&world, "F1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Finish3D { min_step, ramp_angle, .. } = &o.params else {
+        panic!("finish3d params expected, got {:?}", o.params);
+    };
+    assert_eq!(*min_step, None, "absent floor means the march's own right - what every pre-v18 file ran");
+    assert_eq!(*ramp_angle, 45.0, "absent angle means the v17 diagonal");
+    let path = tmp_path("v18a");
+    project::save(&world, &path).expect("save");
+    let saved = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v18 stamp: {saved}"
+    );
+    // The floor is Optional and stays absent while it is None (the
+    // skip-if-none law, like stepover); the angle is always - like
+    // the hop plane, a default is a fact about the machine, not a
+    // key to economize on.
+    assert!(!saved.contains("\"min_step\""), "None must not mint a key: {saved}");
+    assert!(saved.contains("\"ramp_angle\": 45.0"), "{saved}");
+
+    // The v18 wire grammar, hand-written so the spelling is pinned:
+    // floor and angle ride, and the write-parse-write fixed point
+    // keeps them.
+    let rt = text
+        .replace("\"version\": 17", "\"version\": 18")
+        .replace("\"climb\": true", "\"climb\": true, \"min_step\": 0.05, \"ramp_angle\": 30.0");
+    let world2 = new_world();
+    project::open(&world2, &rt).expect("the v18 floor-and-angle spelling must read");
+    let e2 = model::find_by_name(&world2, "F1").expect("op");
+    let o2 = model::operation_of(&world2, &e2).expect("operation");
+    let OpParams::Finish3D { min_step, ramp_angle, .. } = &o2.params else {
+        panic!("finish3d params expected");
+    };
+    assert_eq!(*min_step, Some(0.05));
+    assert_eq!(*ramp_angle, 30.0);
+    let path = tmp_path("v18b");
+    project::save(&world2, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let world3 = new_world();
+    project::load(&world3, &path).expect("reload");
+    project::save(&world3, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the surface-finish shape round-trips byte-identically");
+    assert!(first.contains("\"min_step\": 0.05"), "{first}");
+
+    // Corruptions are corruption, not defaults: a floor that is not
+    // a number, and an angle that is not one either.
+    let bad = rt.replace("\"min_step\": 0.05", "\"min_step\": \"fine\"");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &bad), Err(ProjectError::Corrupt(_))),
+        "a non-number min_step must not load"
+    );
+    let bad = rt.replace("\"ramp_angle\": 30.0", "\"ramp_angle\": \"steep\"");
+    let world5 = new_world();
+    assert!(
+        matches!(project::open(&world5, &bad), Err(ProjectError::Corrupt(_))),
+        "a non-number ramp_angle must not load"
+    );
+}
+
+#[test]
 fn tangential_lead_round_trips() {
     // The new tag in both directions, and by hand-written text so the
     // wire spelling itself is pinned, not just Rust's serde mirror.

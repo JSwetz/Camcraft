@@ -1142,6 +1142,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             plunge_feed,
             climb,
             ramp,
+            min_step,
+            ramp_angle,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1221,10 +1223,37 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     } else {
                         ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
                     }
+                    field(ui, "Minimum step");
+                    let mut floored = min_step.is_some();
+                    if ui
+                        .checkbox(&mut floored, "Floor the march's refinement")
+                        .changed()
+                    {
+                        *min_step = if floored {
+                            // A tenth of the march's own coarse step
+                            // - the scallop law's 2·√(r·tol) on the
+                            // reference R3 ball: the refinement
+                            // stays alive, it just stops here.
+                            Some(0.1 * (12.0 * tolerance.max(1e-9)).sqrt())
+                        } else {
+                            None
+                        };
+                    }
+                    if let Some(s) = min_step {
+                        num(ui, u, s);
+                        ui.label("no cut segment shorter than this; run edges still land where the material says");
+                    } else {
+                        ui.label("the march's own resolution floor");
+                    }
                     ui.checkbox(ramp, "Ramp between lines");
                     ui.label(
                         "one diagonal feed chains each line's end to the next where the ground allows; where it doesn't, the hop stands",
                     );
+                    if *ramp {
+                        field(ui, "Ramp angle");
+                        num_plain(ui, ramp_angle);
+                        ui.label("the steepest descent a chain may carry; past it a link is a plunge in a diagonal coat, and the hop holds the line");
+                    }
                 }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);

@@ -76,7 +76,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 17;
+pub const PROJECT_VERSION: u32 = 18;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -449,7 +449,26 @@ pub enum ParamsDto {
         /// ran (M2.2e). Written always, like `climb`.
         #[serde(default)]
         ramp: bool,
+        /// Absent means the march's own floor (delta0/4096), what
+        /// every pre-v18 file ran (M2.2e surface finish). Absent
+        /// spells None exactly like `stepover`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_step: Option<f64>,
+        /// Absent means 45 degrees - the slope limit the raster's
+        /// shallow jurisdiction already grants, hence exactly what
+        /// v17's chain certified (M2.2e surface finish). Written
+        /// always, like `ramp`.
+        #[serde(default = "default_ramp_angle")]
+        ramp_angle: f64,
     },
+}
+
+/// The angle an absent `ramp_angle` means: 45°, the ground the
+/// raster's own law admits - every certifyable v17 chain already
+/// descended no faster.
+#[must_use]
+pub fn default_ramp_angle() -> f64 {
+    45.0
 }
 
 /// The file mirror of `finishing3d::FinishPattern`; `default` is
@@ -867,6 +886,8 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 ramp,
+                min_step,
+                ramp_angle,
             } => ParamsDto::Finish3D {
                 pattern: (*pattern).into(),
                 stepover: *stepover,
@@ -879,6 +900,8 @@ impl ParamsDto {
                 climb: *climb,
                 retract_z: (*retract_z).map(Into::into),
                 ramp: *ramp,
+                min_step: *min_step,
+                ramp_angle: *ramp_angle,
             },
             OpParams::Slot {
                 a,
@@ -1107,6 +1130,8 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 ramp,
+                min_step,
+                ramp_angle,
             } => OpParams::Finish3D {
                 pattern: (*pattern).into(),
                 stepover: *stepover,
@@ -1119,6 +1144,8 @@ impl ParamsDto {
                 plunge_feed: *plunge_feed,
                 climb: *climb,
                 ramp: *ramp,
+                min_step: *min_step,
+                ramp_angle: *ramp_angle,
             },
             ParamsDto::Slot {
                 a,
@@ -1681,6 +1708,15 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // absent from every v16 file, whose serde default (false: the
         // hop) is exactly what v16 ran. Same pure step-up, same law.
         file.version = 17;
+    }
+    if file.version == 17 {
+        // v17 -> v18: the surface-finish pair inside `finish3d` -
+        // `min_step` (absent: None, the march's own floor) and
+        // `ramp_angle` (absent: 45°, the slope limit the raster's
+        // jurisdiction already granted). Both defaults are exactly
+        // what v17 ran; no content change. Same pure step-up, same
+        // law.
+        file.version = 18;
     }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
