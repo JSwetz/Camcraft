@@ -1731,6 +1731,53 @@ reads exactly like the law.
   untouched (the law it pins is release-verified); fix in the 0.2.x
   maintenance window.
 
+## M2.3 stage D — the verdict holds the door (code `e158b88` + this docs)
+
+- **What blocks is unsafety, not incompleteness.** The gate refuses on
+  GOUGE cells (the program cuts below the model's final geometry - the
+  Prime Directive's "never", located) and on stated machine-limit
+  violations. REST material does NOT: a roughing program posts on its
+  promise of a later finish op, and a gate that blocked rest could not
+  express a multi-op shop workflow at all. The intent-vs-safety split
+  is the whole design: Deviate informs on both truths, the gate guards
+  only the safety one. Discussion item: whether Release 0.3 wants a
+  per-project "no rest at final op" authoring option, if users start
+  treating the sim as a part-completeness check.
+
+- **A refusal-to-judge is never a judgment.** When `simulate_document`
+  cannot run (no stock, rotated stock), the gate contributes no line -
+  absence of evidence is not evidence of danger. The net under this
+  path is the per-op WARN gate, which has always been the load-bearing
+  one; the stage-B law (the sim's gate IS the post's gate) plus this
+  one means the program-level sim is an EXTRA net, honestly silent
+  when it can't speak. The Deviate cell states its reason on demand.
+
+- **Evidence at post time, never cached.** The gate re-runs the checks
+  inside `post_setup` instead of reading `state.program_sim` - the
+  PostView law ("a verdict about an older world must not survive into
+  a new one") applied where it actually matters: metal. The cost is
+  one sim pass per post (seconds on big programs); the alternative is
+  a staleness footgun on the exact thing the release exists to
+  prevent.
+
+- **Order is law again.** `stream_records` (freshness, by name) refuses
+  BEFORE the gate's sim runs - judging stale moves would print
+  located-where over an old world, the one thing located verdicts must
+  never do. The existing stale/post tests pin that ordering; the new
+  gate could not have been appended after the engine run either, since
+  the warnings check already owns "post blocked - ...".
+
+- **The machine clause names the model** ("machine TestMill 1: 1 limit
+  problem(s): ...") - in the refusal you are reading a claim about a
+  specific machine, and people own more than one. The ui's sentence
+  test (`the_machine_gate_refuses_the_post_by_name`) pins the whole
+  status string through the real shell, so the law is checked where
+  the user reads it.
+
+- **No ui code changed in stage D** - the refusal rode the existing
+  "post refused: {err}" arm untouched. A gate that needs new shell
+  plumbing to be obeyed was never a gate.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

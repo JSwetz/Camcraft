@@ -926,7 +926,19 @@ before touching metal.
       `posting::program_ops` - the judgment is over exactly what would
       post. Stage C reports (the Deviate clause, located lines capped at
       40 + an honest more); stage D makes it block.
-- **Post gating**: the verification result is the gate that releases the NC program (Never Gouge, made structural)
+- ✅ **Post gating** (M2.3 D): the verification result IS the gate that
+      releases the NC program (Never Gouge, made structural). At post
+      time `verification_gate` re-runs the two program-level judgments
+      Deviate informs with - gouge cells and stated machine-limit
+      violations refuse the write entirely (file and viewer untouched).
+      Rest material is not unsafe (a roughing program posts on its
+      promise of a finish op - Deviate shows the shortfall), and a sim
+      that cannot run judges nothing rather than vetoing everything -
+      the per-op WARN gate remains the net under it. Evidence is
+      computed now, never carried in from the viewer: the PostView law
+      applied to a gate. All three judgments walk
+      `posting::program_ops`, so *what is judged is what would post*
+      holds by construction.
 
 ---
 
