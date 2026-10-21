@@ -9,7 +9,53 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
-## M2.2e - Around the model, stage C: the center-shadow families and the two-door spacing law (this commit)
+## M2.2e - Ramp entries, stage D: the certified diagonal chain (this commit)
+
+**Ramp is a law about the space BETWEEN cuts.** Stage D adds one bool to
+Finish3DParams and one branch to the runs emitter: with `ramp` on, the
+link from one raster line's end to the next - the serpentine's lateral
+step, or a longer diagonal at a group boundary - is certified against
+the terrain, and where it certifies the hop's up-rapid-plunge triple
+collapses into a single Feed. The discovery that shaped the tests: the
+Parallel raster walks serpentine, so its connectors are one-stepover
+laterals, not across-shelf diagonals. On flat ground the chain is the
+classic no-lift raster: `45 plunges / 52 rapides` becomes `12 / 18`
+while the ring phase's 43 arcs ride on untouched - the golden diff
+reads exactly like the law.
+
+- **The bool, not the enum.** Pocket's Entry3D has Ramp and Helix; the
+  3D finish's between-lines motion has no honest Helix geometry (a helix
+  needs XY room the stepover doesn't offer), and an arm that can only be
+  refused is an arm that must be refused at the gate - validate-early
+  says don't ship a parameter the generator cannot keep. `ramp: bool`
+  states exactly the promise kept.
+- **Certification is the support's answer, not the design's guess.**
+  `diagonal_ok` samples the straight cut and asks `support_at` at each
+  probe (n = d_xy / (tol/4)): center z + r must meet the support within
+  tol. A convex dome sinks its chords and thereby refuses them - the
+  hill test asserts the COUNT never grows and the kernel never
+  complains, but NOT that any particular hop survives; that is the
+  support's business. The envelope verifier remains the real gouge
+  law; this certification is the generator keeping its own promise
+  before the verifier ever runs.
+- **A claim too wide to check is declined.** The 4096-probe cap makes
+  honesty cheap: NaN spans and over-cap spans both land in `false`, and
+  the declined path is BYTE-IDENTICAL to the hop (test 3: explicit
+  0.5 mm spacing under tol 1e-4 puts the lateral connector at 20000
+  probes - every link refuses, the two paths match move for move).
+  Same budget-stated-zero law as the solid-rest work.
+- **Rings and first contacts never route through the chain.** The
+  branch lives in the runs emitter's `i > 0` arm alone; the all-steep
+  wall test pins the law as byte-inertness of the flag where rings are
+  the whole path.
+- **Wire:** PROJECT_VERSION 17, pure serde-default step-up - absent
+  `ramp` is `false` is the hop, what v16 ran; written always, like
+  `climb`. **Stamp:** one byte appended to the Finish3D arm - every
+  existing Finish3D op goes Stale exactly once, "step-up is the stamp
+  itself", like every bump since v6.
+
+
+## M2.2e - Around the model, stage C: the center-shadow families and the two-door spacing law
 
 - **The shadow, not a level: one XY domain for a height-free
   family.** Contour and Project march Z-following loops over ground
@@ -61,7 +107,7 @@ later**. Newest milestone first.
   long honest path, never a hang. A CAM kernel must terminate on its
   own arithmetic, not on its optimizer's.
 
-## M2.2d - Polar placements, stage B: radial chords, the spiral, and the march that must end (this commit)
+## M2.2d - Polar placements, stage B: radial chords, the spiral, and the march that must end
 
 - **The polar families are raster families by construction.** Radial
   lays `N = ceil(π·R/s)` chords through the shallow footprint's center
@@ -119,7 +165,7 @@ later**. Newest milestone first.
   the enum invalidates every digest - all finishing ops' stamps go
   stale at once; the append-only law is a cache law, not aesthetics.
 
-## M2.2d - Hidden rest: solid truth behind the height field, stage A (this commit)
+## M2.2d - Hidden rest: solid truth behind the height field, stage A
 
 - **Parity membership is decided by CLAIMS, not by half-open edge
   ownership.** The textbook ray-parity test needs each column to count
@@ -177,7 +223,7 @@ later**. Newest milestone first.
   XY BVH over segs with an exact lower-bound - the window's
   failure mode, not its shape.
 
-## M2.2c - Scallop as the diagonal cross (this commit)
+## M2.2c - Scallop as the diagonal cross
 
 - **Gate speed, measured and then halved: the kernel tests are
   profile-invariant, so the overnight ladder can run them in release.**
