@@ -1288,7 +1288,7 @@ to each subcrate to make testing cleaner.
 | **M2.3** | Trust before cutting | Done: program material sim (chained cached ops), deviation color map with located verdicts, machine-definition checker (.mch travel/feed/spindle), verification made the post gate, 0.2.0 | ✅ |
 | **M2.4** | 2D, complete | 2D adaptive + offset pocket roughing, engrave, 2D chamfer, circular, standalone bore, helical thread milling | 📋 |
 | **M2.5** | 3-axis, complete | Steep-and-shallow, flat-area, pencil, ramp, morphed spiral, geodesic, blend/morph/corner, flow (freeform), deburr; M2.2's surface-finish params | 📋 |
-| **M3.1** | Model changes, toolpaths update | Associativity, re-MACHining, parameter propagation | 📋 |
+| **M3.1** | Model changes, toolpaths update | Done: stable feature identity + `UpdateModel` revision (A), stamp inputs - tool/WCS/FromModel stock propagate, staleness rides the copy (B), live-question `stale_reason` + one-undo-unit `RegenerateAll` (C), re-MACHining - rest masks from predecessors' recorded paths, converges in two rounds (D) | ✅ |
 | **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |
 | **M3.3** | Every control covered | Post engine, 5 posts, machine definitions (mill/lathe kinds, axis limits, speeds and feeds, coolant), RTCP, 0.3.0 | 📋 |
 | **M4.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
