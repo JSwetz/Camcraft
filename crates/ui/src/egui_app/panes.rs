@@ -474,18 +474,40 @@ pub fn ribbon(
 /// writes them all), while command refusals read twice by design: here for
 /// everyone, and on their own pane through `error_for` (M-c). Startup is a
 /// plain empty document; an untouched status reads "ready".
-pub fn status(ui: &mut Ui, state: &State, pal: &Palette) {
+pub fn status(ui: &mut Ui, state: &mut State, pal: &Palette) {
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
-    let text = if state.status.is_empty() { "ready" } else { state.status.as_str() };
+    // Owned so the button below can reborrow `state` mutably while the
+    // label still shows the text (disjoint fields - cheap either way).
+    let text = if state.status.is_empty() {
+        "ready".to_owned()
+    } else {
+        state.status.clone()
+    };
+    // M3.1 C: the batch fix rides the bar whenever a revision has left
+    // operations Stale - the tree marks them, the page says why, this is
+    // the one click that brings the job current.
+    let stale = model::named_entities(&state.world)
+        .into_iter()
+        .filter(|(_, e)| {
+            model::is_operation(&state.world, e)
+                && operation::status_of(&state.world, e) == operation::OpStatus::Stale
+        })
+        .count();
     ui.horizontal(|ui| {
-        ui.add(Label::new(RichText::new(text).weak()).selectable(false));
+        ui.add(Label::new(RichText::new(text.as_str()).weak()).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 RichText::new("egui shell (M-g) - imgui retired")
                     .color(pal.text_faint)
                     .small(),
             );
+            if stale > 0 {
+                let button = ui.button(format!("Regenerate all stale ({stale})"));
+                if button.clicked() {
+                    state.pending.push_back(CommandKind::RegenerateAll);
+                }
+            }
         });
     });
     ui.allocate_rect(rect, Sense::hover());

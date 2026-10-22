@@ -7,8 +7,8 @@ use flecs_ecs::prelude::World;
 
 use hsmworks_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation,
-    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, SetStock,
-    SetWcsOrigin, UpdateModel,
+    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, RegenerateAll,
+    SetStock, SetWcsOrigin, UpdateModel,
 };
 use hsmworks_app::geometry::{Mesh, IDENTITY_Q, Point3, cube};
 use hsmworks_app::machining2d::{Lead, Side};
@@ -630,6 +630,238 @@ fn a_model_update_does_not_touch_a_box_stock() {
     history.execute(&world, cmd);
     assert_eq!(stock_facets(&world), before, "the box is its own material");
     assert_eq!(status(&world, "Face1"), OpStatus::Ok, "the stock op never read the model");
+}
+
+// ------------------------------------------------------------ M3.1 stage C:
+// why an operation reads Stale (the live questions), and the batch fix
+// that regenerates the whole job in one undo unit.
+
+use hsmworks_app::operation::HeightReference;
+
+fn reason(world: &World, name: &str) -> Option<String> {
+    let e = model::find_by_name(world, name).expect("entity exists");
+    operation::stale_reason(world, &e)
+}
+
+#[test]
+fn stale_reason_is_none_unless_the_operation_is_stale() {
+    let (world, mut history) = face_world();
+    assert_eq!(reason(&world, "Face1"), None, "Ok - there is nothing to explain");
+    // Never is not stale either: the status line already says "never".
+    let cmd = CreateOperation::new(&world, "Face2", "EM-0400-2FL", SrcRef::Stock, face_params());
+    history.execute(&world, cmd.expect("create"));
+    assert_eq!(reason(&world, "Face2"), None);
+}
+
+#[test]
+fn stale_reason_names_the_vanished_tool() {
+    let (world, mut history) = face_world();
+    let cmd = DeleteEntity::new(&world, "EM-0400-2FL").expect("delete");
+    history.execute(&world, cmd);
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
+    assert_eq!(reason(&world, "Face1").as_deref(), Some("its tool 'EM-0400-2FL' no longer exists"));
+}
+
+#[test]
+fn stale_reason_names_a_deleted_geometry_source() {
+    let (world, mut history) = box_part_world();
+    let cmd = CreateOperation::new(
+        &world,
+        "Contour1",
+        "EM-0600-4FL",
+        SrcRef::Entity("part".into()),
+        contour_params(),
+    );
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    history.execute(&world, DeleteEntity::new(&world, "part").expect("delete"));
+    assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
+    assert_eq!(
+        reason(&world, "Contour1").as_deref(),
+        Some("its geometry source 'part' was deleted")
+    );
+}
+
+#[test]
+fn stale_reason_asks_for_a_re_pick_when_the_feature_moved() {
+    // The successor law of "operations reference features, not copies":
+    // the id is a live question, and when it no longer resolves the
+    // message names the action - re-pick, not re-import blindly.
+    let (world, mut history) = box_part_world();
+    let top = FeatureSel::Face(top_face_of(&world, "part"));
+    let cmd = CreateOperation::new(&world, "C1", "EM-0600-4FL", sel("part", top), contour_params());
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "C1").expect("generate"));
+    let cmd = UpdateModel::new(&world, "part", prism_10x10x5()).expect("model exists");
+    history.execute(&world, cmd);
+    assert_eq!(status(&world, "C1"), OpStatus::Stale);
+    assert_eq!(
+        reason(&world, "C1").as_deref(),
+        Some("the picked face of 'part' no longer exists - the geometry moved")
+    );
+}
+
+#[test]
+fn stale_reason_names_a_height_whose_source_is_gone() {
+    // The tool and the geometry source all survive; what moved is the
+    // SETUP - a plane measured from stock that is no longer there.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    history.execute(
+        &world,
+        SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, Location::default())
+            .expect("box stock"),
+    );
+    let params = OpParams::Face {
+        stepover: 3.0,
+        clearance_z: Height::of(HeightReference::TopOfStock, 5.0),
+        cut_z: Height::fixed(4.5),
+        top_z: None,
+        stepdown: None,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    };
+    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Entity("part".into()), params);
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    history.execute(&world, DeleteEntity::new(&world, STOCK_NAME).expect("delete stock"));
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
+    let why = reason(&world, "Face1").expect("stale");
+    assert!(
+        why.starts_with("a height is measured from") && why.contains("no stock yet"),
+        "the message names the missing plane's source: {why}"
+    );
+}
+
+#[test]
+fn stale_reason_falls_back_when_every_input_survives() {
+    // A tool edit moves no entity and no id - the numbers inside the
+    // stamp changed, and the honest answer is the general one.
+    let (world, mut history) = face_world();
+    let mut fatter = catalog_tool("EM-0400-2FL");
+    fatter.diameter = 8.0;
+    history.execute(&world, ChangeTool::new(&world, "EM-0400-2FL", fatter).expect("edit"));
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
+    assert_eq!(
+        reason(&world, "Face1").as_deref(),
+        Some("the geometry or tool inputs changed since it was generated")
+    );
+}
+
+#[test]
+fn regenerate_all_is_empty_when_nothing_is_stale() {
+    let (world, _history) = face_world();
+    let cmd = RegenerateAll::new(&world);
+    assert!(cmd.is_empty() && cmd.regenerated() == 0 && cmd.skipped().is_empty());
+}
+
+#[test]
+fn regenerate_all_fixes_the_whole_job_in_one_undo_unit() {
+    // The M3.1 payoff: one revision, two stale operations, one batch and
+    // one Ctrl+Z back. Never and Ok operations are not the batch's
+    // business - it regenerates what staleness marked, nothing else.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    let cmd = CreateOperation::new(
+        &world,
+        "Face1",
+        "EM-0400-2FL",
+        SrcRef::Entity("part".into()),
+        face_params_5(),
+    );
+    history.execute(&world, cmd.expect("create face"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate face"));
+    let cmd = CreateOperation::new(
+        &world,
+        "Contour1",
+        "EM-0400-2FL",
+        SrcRef::Entity("part".into()),
+        contour_params(),
+    );
+    history.execute(&world, cmd.expect("create contour"));
+    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate contour"));
+
+    history.execute(&world, UpdateModel::new(&world, "part", prism_10x10x5()).expect("update"));
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
+    assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
+
+    let cmd = RegenerateAll::new(&world);
+    assert_eq!(cmd.regenerated(), 2);
+    assert!(cmd.skipped().is_empty());
+    history.execute(&world, cmd);
+    assert_eq!(status(&world, "Face1"), OpStatus::Ok);
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
+
+    // One undo unit - the batch trades back together, both STALE again.
+    assert!(history.undo(&world));
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
+    assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
+    assert!(history.redo(&world));
+    assert_eq!(status(&world, "Face1"), OpStatus::Ok);
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
+}
+
+#[test]
+fn regenerate_all_skips_what_it_cannot_generate() {
+    // Skip, not fatal: one operation whose tool vanished must not block
+    // the rest of the job. The failed op keeps its old cache and its
+    // STALE tag - validate early means a refusal writes nothing - and
+    // the batch lists it by name with the refusal text.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    let cmd = CreateOperation::new(
+        &world,
+        "Face1",
+        "EM-0400-2FL",
+        SrcRef::Entity("part".into()),
+        face_params_5(),
+    );
+    history.execute(&world, cmd.expect("create face"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate face"));
+    let cmd = CreateOperation::new(
+        &world,
+        "Contour1",
+        "EM-0600-4FL",
+        SrcRef::Entity("part".into()),
+        contour_params(),
+    );
+    history.execute(&world, cmd.expect("create contour"));
+    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate contour"));
+
+    let face_cache = cache(&world, "Face1").expect("cache").path;
+    history.execute(&world, UpdateModel::new(&world, "part", prism_10x10x5()).expect("update"));
+    history.execute(&world, DeleteEntity::new(&world, "EM-0400-2FL").expect("delete tool"));
+
+    let cmd = RegenerateAll::new(&world);
+    assert_eq!(cmd.regenerated(), 1, "Contour1 regenerates; Face1's generator refuses");
+    assert_eq!(cmd.skipped().len(), 1);
+    assert_eq!(cmd.skipped()[0].0, "Face1");
+    history.execute(&world, cmd);
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale, "the skip stays honestly marked");
+    assert_eq!(cache(&world, "Face1").expect("cache").path, face_cache, "a refusal wrote nothing");
+
+    // Undo trades back the one thing the batch touched.
+    assert!(history.undo(&world));
+    assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
 }
 
 #[test]

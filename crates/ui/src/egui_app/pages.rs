@@ -287,7 +287,13 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
             Some(operation::OpStatus::Never) | None => "Status: never generated".to_owned(),
             Some(operation::OpStatus::Ok) => format!("Status: OK - {moves} move(s) cached"),
             Some(operation::OpStatus::Stale) => {
-                format!("Status: STALE - inputs moved since generation ({moves} move(s) cached)")
+                // M3.1 C: say which input moved, not just that one did -
+                // the reason is a live question against the world.
+                let reason = ent
+                    .as_ref()
+                    .and_then(|e| operation::stale_reason(&state.world, e))
+                    .unwrap_or_else(|| "inputs moved since generation".to_owned());
+                format!("Status: STALE - {reason} ({moves} move(s) cached)")
             }
         };
         ui.label(status_line);

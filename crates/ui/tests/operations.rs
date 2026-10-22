@@ -1067,3 +1067,51 @@ fn strategy_combo_offers_auto() {
         "the combo offers Auto beside the explicit choices"
     );
 }
+
+// ---------------------------------------------------------------------------
+// M3.1 stage C: the batch fix through the queue - `RegenerateAll` as the
+// user's one click (and one undo) after a revision marked the job stale.
+
+#[test]
+fn regenerate_all_fixes_stale_ops_through_the_queue() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    state.pending.push_back(CommandKind::GenerateOperation("Face1".into()));
+    state.drain_actions();
+    assert_eq!(status(&state, "Face1"), OpStatus::Ok);
+
+    // The setup moves under the job: the stock grows, the stamp says Stale.
+    state.pending.push_back(box_stock(22.0));
+    state.drain_actions();
+    assert_eq!(status(&state, "Face1"), OpStatus::Stale);
+
+    state.pending.push_back(CommandKind::RegenerateAll);
+    state.drain_actions();
+    assert_eq!(state.status, "regenerated 1 operation(s)", "{:?}", state.status);
+    assert_eq!(status(&state, "Face1"), OpStatus::Ok);
+
+    // One user action, one undo: the batch trades back whole and the
+    // operation is Stale again (the stamp, not a stored flag, decides).
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    assert_eq!(status(&state, "Face1"), OpStatus::Stale);
+    assert_eq!(state.status, "undo", "undo's own line reports itself");
+}
+
+#[test]
+fn regenerate_all_on_a_current_job_writes_no_history() {
+    let mut state = State::new();
+    stock_and_tool(&mut state);
+    create_face(&mut state);
+    state.pending.push_back(CommandKind::GenerateOperation("Face1".into()));
+    state.drain_actions();
+    state.pending.push_back(CommandKind::RegenerateAll);
+    state.drain_actions();
+    assert_eq!(state.status, "nothing is stale");
+    // The empty batch skipped the history entirely: the next undo is the
+    // generate itself, proving nothing was pushed between.
+    state.pending.push_back(CommandKind::Undo);
+    state.drain_actions();
+    assert_eq!(status(&state, "Face1"), OpStatus::Never);
+}

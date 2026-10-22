@@ -513,7 +513,7 @@ pub(crate) fn shell_layout(
         .frame(egui::Frame::NONE)
         .exact_size(STATUS_H)
         .show(ui, |ui| {
-            panes::status(ui, &*state, &theme::Palette::DARK);
+            panes::status(ui, &mut *state, &theme::Palette::DARK);
         });
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)

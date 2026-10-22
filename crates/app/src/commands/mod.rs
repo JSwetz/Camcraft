@@ -21,7 +21,7 @@ pub use import_model::ImportModel;
 pub use load_machine::LoadMachine;
 pub use operation::{
     CreateOperation, DeleteOperation, EditOperationLinks, EditOperationParams, GenerateOperation,
-    SetOperationGeometry,
+    RegenerateAll, SetOperationGeometry,
 };
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;

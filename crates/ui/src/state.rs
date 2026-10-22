@@ -18,7 +18,8 @@ use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
-    SelectEntity, SetOperationGeometry, SetStock, SetUnits, SetWcsOrigin, UpdateModel,
+    RegenerateAll, SelectEntity, SetOperationGeometry, SetStock, SetUnits, SetWcsOrigin,
+    UpdateModel,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
@@ -113,6 +114,9 @@ pub enum CommandKind {
     /// Generate and verify the cached path. The command does the work at
     /// construction, synchronously; status arrives with the result.
     GenerateOperation(String),
+    /// The batch fix (M3.1 C): regenerate every Stale operation in one
+    /// undo unit. What it finds stale at dispatch is what it fixes.
+    RegenerateAll,
 }
 
 /// Editable fields of the Setup pane's stock group. Transient UI state,
@@ -1771,6 +1775,35 @@ impl State {
                         };
                     }
                     Err(err) => self.refuse(ErrorScope::Operation, format!("generate failed: {err}")),
+                }
+            }
+            CommandKind::RegenerateAll => {
+                // Construction decides everything (validate early: each
+                // stale op's generator runs before anything is written),
+                // so an empty batch touches no history at all.
+                let command = RegenerateAll::new(&self.world);
+                let skipped: Vec<String> = command
+                    .skipped()
+                    .iter()
+                    .map(|(name, err)| format!("{name}: {err}"))
+                    .collect();
+                if command.is_empty() {
+                    match command.skipped().first() {
+                        Some((name, err)) => self.refuse(
+                            ErrorScope::Operation,
+                            format!("nothing regenerated - {name}: {err}"),
+                        ),
+                        None => self.status = "nothing is stale".to_owned(),
+                    }
+                } else {
+                    let n = command.regenerated();
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = if skipped.is_empty() {
+                        format!("regenerated {n} operation(s)")
+                    } else {
+                        format!("regenerated {n} operation(s); {} skipped - {}", skipped.len(), skipped.join("; "))
+                    };
                 }
             }
         }

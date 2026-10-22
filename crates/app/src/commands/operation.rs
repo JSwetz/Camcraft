@@ -494,3 +494,70 @@ impl Command for GenerateOperation {
         }
     }
 }
+
+/// The M3.1 payoff command: one click brings the job current after a
+/// model revision, instead of rebuilding it op by op. Construction
+/// decides everything - it finds the Stale operations in tree order and
+/// runs each generator exactly as `GenerateOperation` would (validate
+/// early, errors still land here) - so `apply` and `invert` are the
+/// batch's pure writes. An operation whose regeneration fails is
+/// SKIPPED, not fatal: one broken pick must not block the rest of the
+/// job (never crash, never gouge - the failed op keeps its old cache and
+/// its STALE tag, honestly). Undo inverts the whole batch in reverse,
+/// one undo unit for one user action, and operations that were only
+/// skipped were never touched, so nothing needs restoring for them.
+pub struct RegenerateAll {
+    parts: Vec<GenerateOperation>,
+    skipped: Vec<(String, String)>,
+}
+
+impl RegenerateAll {
+    /// Runs every stale operation's generator against the current world.
+    /// `Never` and `Ok` operations are left alone - this command is for
+    /// what a revision invalidated, not for first-time generation.
+    pub fn new(world: &World) -> Self {
+        let mut parts = Vec::new();
+        let mut skipped = Vec::new();
+        for (name, entity) in model::named_entities(world) {
+            if !model::is_operation(world, &entity) {
+                continue;
+            }
+            if operation::status_of(world, &entity) != operation::OpStatus::Stale {
+                continue;
+            }
+            match GenerateOperation::new(world, &name) {
+                Ok(part) => parts.push(part),
+                Err(err) => skipped.push((name, err.to_string())),
+            }
+        }
+        RegenerateAll { parts, skipped }
+    }
+
+    /// Nothing will be written: the UI skips the history entirely then.
+    pub fn is_empty(&self) -> bool {
+        self.parts.is_empty()
+    }
+
+    pub fn regenerated(&self) -> usize {
+        self.parts.len()
+    }
+
+    /// The names whose generators refused, with the refusal text.
+    pub fn skipped(&self) -> &[(String, String)] {
+        &self.skipped
+    }
+}
+
+impl Command for RegenerateAll {
+    fn apply(&self, world: &World) {
+        for part in &self.parts {
+            part.apply(world);
+        }
+    }
+
+    fn invert(&self, world: &World) {
+        for part in self.parts.iter().rev() {
+            part.invert(world);
+        }
+    }
+}

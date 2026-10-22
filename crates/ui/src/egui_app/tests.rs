@@ -540,6 +540,45 @@ fn click_apply_edits_operation_through_commands() {
     );
 }
 
+/// M3.1 C: the batch fix lives in the status strip, and appears exactly
+/// when it means something - the moment a stale row exists to fix. The
+/// click is one queue, one undo unit, and the button retires with the
+/// staleness.
+#[test]
+fn status_bar_offers_regenerate_all_when_something_is_stale() {
+    let mut harness = shell_harness();
+    let edited = {
+        let st = &harness.state().state;
+        let e = model::find_by_name(&st.world, "Contour1").expect("the seed's op");
+        let mut p = model::operation_of(&st.world, &e).expect("op").params;
+        if let OpParams::Contour { plunge_feed, .. } = &mut p {
+            *plunge_feed = 150.0;
+        }
+        p
+    };
+    harness
+        .state_mut().state.pending
+        .push_back(CommandKind::EditOperationParams { name: "Contour1".into(), params: edited });
+    harness.run();
+    {
+        let st = &harness.state().state;
+        let e = model::find_by_name(&st.world, "Contour1").expect("op");
+        assert_eq!(hsmworks_app::operation::status_of(&st.world, &e), hsmworks_app::operation::OpStatus::Stale);
+    }
+
+    harness.get_by_label("Regenerate all stale (1)").click();
+    harness.run();
+    assert_eq!(harness.state().state.status, "regenerated 1 operation(s)");
+    let st = &harness.state().state;
+    let e = model::find_by_name(&st.world, "Contour1").expect("op");
+    assert_eq!(hsmworks_app::operation::status_of(&st.world, &e), hsmworks_app::operation::OpStatus::Ok);
+    // The affordance follows the state: no stale rows, no button.
+    assert!(
+        harness.query_by_label("Regenerate all stale (1)").is_none(),
+        "the button outlived its staleness"
+    );
+}
+
 /// The first SpinButton node's center: the Contour page's "Stock to
 /// leave" DragValue. Tree order is submission order; the only
 /// role-SpinButton nodes anywhere are DragValues (the painted strips

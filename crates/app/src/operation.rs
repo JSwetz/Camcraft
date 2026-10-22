@@ -955,6 +955,69 @@ impl OpParams {
         }
     }
 
+    /// Every height expression these parameters carry, in field order.
+    /// The same set `stamp_with` feeds through `wh`/`wh_opt` - the two
+    /// soup lists must agree, and the compiler enforces it here because
+    /// every Height-typed field is visited exactly once (M3.1 C, the
+    /// `stale_reason` height questions; a missed field is a silent
+    /// blind spot, so keep new Height params in both lists).
+    pub fn for_each_height<F: FnMut(Height)>(&self, mut f: F) {
+        fn opt<F: FnMut(Height)>(h: &Option<Height>, f: &mut F) {
+            if let Some(h) = h {
+                f(*h);
+            }
+        }
+        match self {
+            OpParams::Face { clearance_z, cut_z, top_z, .. } => {
+                f(*clearance_z);
+                f(*cut_z);
+                opt(top_z, &mut f);
+            }
+            OpParams::Contour { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                f(*retract_z);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            OpParams::Pocket { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            OpParams::Slot { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            OpParams::Drill { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+                opt(bottom_z, &mut f);
+            }
+            OpParams::Pocket3D { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            OpParams::Finish3D { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+        }
+    }
+
     /// The digest-relevant scalars, written to a hasher in a fixed
     /// order. A height contributes its reference (tag, plus slot for a
     /// work offset) and its offset bits; a non-Fixed reference ALSO
@@ -1515,6 +1578,90 @@ pub fn status_of(world: &World, entity: &flecs_ecs::prelude::Entity) -> OpStatus
         (Some(stored), Some(now)) if stored == now => OpStatus::Ok,
         _ => OpStatus::Stale,
     }
+}
+
+/// Why an operation reads Stale, phrased for a user who can act on it
+/// (M3.1 C). The stamp is a single digest, so it cannot itself say what
+/// moved; this asks the world the cheap live questions instead - the
+/// ones whose answer is true independent of history: is the tool still
+/// there, does each referenced entity still exist, does each picked
+/// feature id still exist in its entity's live geometry, can every
+/// height still resolve. When none of them fires, the honest answer is
+/// the general one: something the generation read has changed. None
+/// when the operation is not Stale.
+#[must_use]
+pub fn stale_reason(
+    world: &flecs_ecs::prelude::World,
+    entity: &flecs_ecs::prelude::Entity,
+) -> Option<String> {
+    if status_of(world, entity) != OpStatus::Stale {
+        return None;
+    }
+    let op = model::operation_of(world, entity)?;
+    match model::find_by_name(world, &op.tool) {
+        None => return Some(format!("its tool '{}' no longer exists", op.tool)),
+        Some(t) if !model::is_tool(world, &t) => {
+            return Some(format!("'{}' is no longer a tool", op.tool));
+        }
+        _ => {}
+    }
+    match &op.src {
+        SrcRef::Stock => {
+            if model::find_by_name(world, crate::schema::STOCK_NAME).is_none() {
+                return Some("the stock no longer exists - set it up again".into());
+            }
+        }
+        SrcRef::Entity(name) => {
+            if model::find_by_name(world, name).is_none() {
+                return Some(format!("its geometry source '{name}' was deleted"));
+            }
+        }
+        SrcRef::Selection(items) => {
+            for g in items {
+                let Some(e) = model::find_by_name(world, &g.entity) else {
+                    return Some(format!("'{}' was deleted", g.entity));
+                };
+                let Some(tris) = model::facets_of(world, &e) else {
+                    return Some(format!("'{}' no longer carries geometry", g.entity));
+                };
+                let features = model::features_of_local(&tris);
+                let (present, what) = match g.feature {
+                    FeatureSel::Face(id) => (
+                        revision::face_ids(&features).binary_search(&id).is_ok(),
+                        "face",
+                    ),
+                    FeatureSel::Patch(id) => (
+                        revision::patch_ids(&features).binary_search(&id).is_ok(),
+                        "welded face",
+                    ),
+                    FeatureSel::Chain(id) => (
+                        revision::chain_ids(&features).binary_search(&id).is_ok(),
+                        "edge chain",
+                    ),
+                };
+                if !present {
+                    return Some(format!(
+                        "the picked {what} of '{}' no longer exists - the geometry moved",
+                        g.entity
+                    ));
+                }
+            }
+        }
+    }
+    for h in collect_heights(&op.params) {
+        if let Some(missing) = missing_source(world, h.reference) {
+            return Some(format!("a height is measured from {missing}"));
+        }
+    }
+    Some("the geometry or tool inputs changed since it was generated".into())
+}
+
+/// The height expressions of a params set (the `for_each_height` soup
+/// collected once, for scanning).
+fn collect_heights(params: &OpParams) -> Vec<Height> {
+    let mut out = Vec::new();
+    params.for_each_height(|h| out.push(h));
+    out
 }
 
 /// Gouge law's radial slack: half the geo2d round-join chord error plus
