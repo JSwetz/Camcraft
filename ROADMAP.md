@@ -1179,9 +1179,12 @@ registry home before Phase 5's multi-axis and turning families arrive.
 ### M3.3 - Post System & Machine Library (Release 0.3.0)
 **Goal: real G-code for real controls, written by the user, not by us guessing.**
 
-- **Post template engine**: generalizes M1.7's CPS engine so users own
+- ✅ **Post template engine**: generalizes M1.7's CPS engine so users own
       their posts in the app (same clean-room line: our format, our
-      text, no adaptation of any vendor's post files)
+      text, no adaptation of any vendor's post files) - the document's
+      mounted `.mch` now shapes the output, a `SelectPost` command picks
+      a user `.cps` through the undo history, and a missing or broken
+      script refuses by name instead of falling back (M3.3 stage A)
 - **Built-in posts**: Fanuc, Haas, Siemens 840D, Heidenhain, Mazak - each with conformance tests against a golden G-code suite
 - **Machine definitions**: a machine group in the Setup pane - select or edit a
       machine, its name shown in the setup, driving simulation limits and post

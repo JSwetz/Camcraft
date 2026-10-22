@@ -9,6 +9,62 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M3.3 A - Post selection, mounted-machine output, user .cps posts (this commit)
+
+**The mounted machine reaches the post as a mirror, not as raw JSON.**
+The plan carried a "raw rides the mount" design (store the `.mch` file's
+JSON verbatim beside the parsed `Machine` and hand it to the post). What
+shipped instead is `post::machine::mirror(&Machine) -> Value`: the
+checker grammar (`parts`, `controller`, travel `ext`) is bridged to the
+static post grammar (`kinematics.static.axes[].speeds`,
+`head.spindle.max`, `coolants`) at the one call site. *Why:* one source
+of truth — the parsed machine every other consumer (collision, traverse
+timing) already reads, so the post can never disagree with the sim; and
+mirror states only what the file stated — an unstated limit is absent,
+never a zero that lies (a mounted machine naming no coolants posts no
+M8, proven in `posting.rs`). Raw storage would have doubled the machine
+representation and the persistence surface for no behavior the mirror
+doesn't give. *Cost to change:* additive — a `raw` field on `Machine`
+(serde-skipped) plus a DTO key, if a future post ever needs a grammar
+the checker drops.
+
+**`PostRef::Builtin` carries no index; built-ins are named, chosen by
+position.** The enum is `Builtin | File(path)` — Builtin means
+`BUILTINS[0]`. *Why:* stage A ships one built-in, and persisting an
+index into an array that stage B grows to five would make every v23
+file's meaning shift under a re-order. Stage B must either keep index
+0 == Fanuc forever or add the index variant at the same version bump —
+flagging this now is the cheap part. *Cost to change:* one migration
+arm if the variant comes late.
+
+**Project format v23: one additive top-level `post` key.** No machine
+DTO change (the mirror decision above made the planned `raw` key
+unnecessary), so the only new fact is the post choice: `None` =
+built-in, `Some(path)` = user file; a v22 file steps up unchanged and
+means the built-in. `open()` lands the singleton either way — the
+leak-guard law (every field is reset on open, so a stale choice can't
+ride into a fresh document). *Cost to change:* none, it's the pattern.
+
+**The picker lives in the Setup pane, not the toolbar.** The toolbar is
+a static command enum (no dynamic menus by design), so the post row
+sits beside the machine row: label + "Load post (.cps)" + "Built-in".
+The toolbar's single Post button still posts with whatever the document
+names — one truth, no hidden choice.
+
+**onComment is honored only where the stream carries data.** `Record::Warn`
+now calls the hook; `onRadiusCompensation` stays silent because no CL
+record carries comp — that waits for G41/G42 path support (M1.3's open
+flag). The Warn echo can only ever appear in a REFUSED program: the
+same warning count that grows the list blocks the write, so the 13 .nc
+goldens are byte-identical (gate-verified) and no released program
+gained a comment.
+
+**Rotary axes are excluded from the mirror in stage A.** The checker's
+`AxisLimits` carries no direction vector to map, so a rotary axis would
+mirror as a lie; stage D (RTCP) brings the real geometry and the mirror
+grows then. Trunnion/tilting definitions arrive with M3.3 C's machine
+kinds.
+
 ## M3.2 B-E - Fixtures, tool lists, sheets, workspaces (this commit)
 
 **A fixture is a model wearing a marker, and the marker is the whole
