@@ -2805,3 +2805,62 @@ fn a_fixture_model_reads_as_a_vise_in_the_tree() {
     assert!(painted::has_eye(painted::Kind::Model));
     assert!(!painted::has_eye(painted::Kind::Section));
 }
+
+#[test]
+fn selecting_a_post_script_is_a_command_with_the_pane_labels() {
+    // M3.3 A's UI half, headless: the file arm lands a user script in
+    // the world singleton and says so on the status line; the
+    // built-in arm resets; undo puts the previous choice back; and a
+    // script that does not exist is a visible refusal, never a quiet
+    // keep-the-old choice.
+    use hsmworks_app::posting;
+    use hsmworks_app::schema::PostRef;
+
+    let dir = std::env::temp_dir().join(format!("hsmw-ui-post-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let cps = dir.join("userpost.cps");
+    std::fs::write(&cps, "function onOpen() { writeln(\"(UIPOST-3)\"); }").expect("write cps");
+
+    let mut harness = shell_harness();
+    harness.run();
+    assert_eq!(posting::post_of(&harness.state().state.world), PostRef::Builtin);
+
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::SelectPostFile(cps.clone()));
+    harness.run();
+    {
+        let st = &harness.state().state;
+        assert!(st.status.contains("post:"), "{}", st.status);
+        assert!(matches!(posting::post_of(&st.world), PostRef::File(_)));
+    }
+
+    // Undo the selection - the built-in is back, by the history law.
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    assert_eq!(posting::post_of(&harness.state().state.world), PostRef::Builtin);
+
+    // The built-in arm on an already-built-in document refuses visibly
+    // (the "already selected" law), and a missing file names itself.
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::SelectPostBuiltin);
+    harness.run();
+    assert!(
+        harness.state().state.status.contains("post not selected"),
+        "a no-op choice is a stated refusal: {}",
+        harness.state().state.status
+    );
+    harness.state_mut().state.pending.push_back(CommandKind::SelectPostFile(
+        dir.join("gone.cps"),
+    ));
+    harness.run();
+    let st = &harness.state().state;
+    assert!(st.status.contains("post not selected") && st.status.contains("gone.cps"), "{:?}", st.status);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

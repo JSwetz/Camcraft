@@ -74,7 +74,12 @@
 //! marker - the component did not exist - and the default (absent means
 //! no fixture) is exactly the pre-B world: collision checked against
 //! stock and model alone. Step-up is the stamp itself, like every bump
-//! since v6. v1-v21 files migrate on load, one version step at a time.
+//! since v6. v23 is M3.3 stage A: the top-level `post` key (the user
+//! `.cps` path; absent means the built-in post - exactly what every
+//! pre-v23 file ran, since the built-in was the only post). No
+//! pre-v23 file can contain the key and its default is the shipping
+//! behavior verbatim. Step-up is the stamp itself, like every bump
+//! since v6. v1-v22 files migrate on load, one version step at a time.
 
 use std::path::Path;
 
@@ -99,7 +104,7 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 22;
+pub const PROJECT_VERSION: u32 = 23;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -133,6 +138,14 @@ pub struct ProjectFile {
     /// also protects an undo of `DeleteSetup` mid-history).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_setup: Option<String>,
+    /// The document's post script (M3.3 A), v23+. An absent key means
+    /// the built-in post - exactly what every v22 file ran, since the
+    /// built-in was then the only post. A path is stored as chosen:
+    /// opening does not re-validate it (the `SelectPost` constructor
+    /// did), and a post that went missing refuses by name at post
+    /// time, never silently falling back (`script_source`'s law).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<String>,
     pub entities: Vec<EntityDto>,
 }
 
@@ -1706,6 +1719,12 @@ pub fn collect(world: &World) -> ProjectFile {
         // deleted setup saves as it reads (the fallback is the law, not
         // a defect to hide).
         active_setup: crate::setup::stored_active(world),
+        // The built-in posts like every pre-v23 document, so it writes
+        // no key (the mute-machine law, worn in the post's clothes).
+        post: match crate::posting::post_of(world) {
+            crate::schema::PostRef::Builtin => None,
+            crate::schema::PostRef::File(path) => Some(path),
+        },
         entities,
     }
 }
@@ -1904,6 +1923,15 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // the stamp itself, like every bump since v6.
         file.version = 22;
     }
+    if file.version == 22 {
+        // v22 -> v23: the post choice arrives as one optional top-level
+        // `post` key (M3.3 stage A). No v22 file can contain it - the
+        // component did not exist, and its default (absent, the
+        // built-in) is exactly the v22 posting world: one embedded
+        // script, no choices. Step-up is the stamp itself, like every
+        // bump since v6.
+        file.version = 23;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -1943,6 +1971,17 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
     // legal: `setup::active`'s existence fallback is the same law the
     // live world uses mid-history, so the file reads as it was saved.
     crate::setup::set_active(world, file.active_setup);
+    // Opening lands the post choice too - including the built-in, so a
+    // stale singleton from the previous document can never leak in (the
+    // units law again). A path is landed as written, unvalidated: it
+    // names a file, not a limit, and the post-time refusal is the net.
+    crate::posting::post_set(
+        world,
+        &match file.post {
+            Some(path) => crate::schema::PostRef::File(path),
+            None => crate::schema::PostRef::Builtin,
+        },
+    );
     for dto in file.entities {
         let kind = dto.kind.unwrap_or(EntityKind::Model);
         let entity = model::spawn(world, &dto.name);

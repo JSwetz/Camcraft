@@ -12,15 +12,15 @@
 use flecs_ecs::prelude::World;
 
 use hsmworks_app::commands::{
-    AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SetStock,
-    SetWcsOrigin,
+    AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SelectPost,
+    SetStock, SetWcsOrigin,
 };
 use hsmworks_app::drilling::CycleChoice;
 use hsmworks_app::geo2d::Point2;
 use hsmworks_app::geometry::{cube, IDENTITY_Q, Point3};
 use hsmworks_app::machining2d::{Lead, Side};
 use hsmworks_app::model;
-use hsmworks_app::schema::Location;
+use hsmworks_app::schema::{Location, PostRef};
 use hsmworks_app::operation::{Height, HeightReference, OpParams, SrcRef};
 use hsmworks_app::posting;
 use hsmworks_app::stock::StockShape;
@@ -490,4 +490,150 @@ fn posted_carries_line_positions_matching_the_move_chain() {
             "position {p:?} is posted by no move - the viewer would highlight a lie"
         );
     }
+}
+
+// ------------------------------------------------------------------- M3.3 A
+
+/// A scratch `.cps` with the given text, named for this process.
+fn tmp_cps(tag: &str, text: &str) -> std::path::PathBuf {
+    let mut p = std::env::temp_dir();
+    p.push(format!("hsmw-posting-{}-{}.cps", tag, std::process::id()));
+    let _ = std::fs::remove_file(&p);
+    std::fs::write(&p, text).expect("write temp cps");
+    p
+}
+
+#[test]
+fn the_built_in_is_the_default_post_and_needs_no_choice() {
+    // The unchosen document posts exactly what it posted before the
+    // picker existed - the built-in is a default, not a dialog.
+    let (world, _h) = contour_and_drill();
+    assert_eq!(posting::post_of(&world), PostRef::Builtin);
+    assert!(posting::post_label(&world).contains("Fanuc"), "{}", posting::post_label(&world));
+    let (label, cps) = posting::script_source(&world).expect("the built-in always resolves");
+    assert_eq!(cps, posting::BUILTINS[0].1, "the built-in is the shipped script text");
+    assert!(label.contains("built-in"));
+}
+
+#[test]
+fn a_mounted_machine_names_the_program_and_speaks_only_its_own_coolant() {
+    // M3.3 A's whole claim in one program: the document's `.mch` - not
+    // the built-in default - is what the SCRIPT sees. The header names
+    // the mounted model, and the coolant word disappears with the
+    // coolant the file never states (honest absence, the
+    // unstated-limit law in coolant clothes). The limit gate already
+    // judged this machine in M2.3; this proves the same fact reaches
+    // the output, not just the veto.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+
+    let path = tmp_nc("mount-name");
+    posting::post_setup(&world, &path).expect("the unmounted default posts");
+    let plain = std::fs::read_to_string(&path).expect("written");
+    assert!(plain.contains("(VMC 3-AXIS)"), "the shipped machine names the header: {plain}");
+    assert!(plain.contains("M8"), "the shipped VMC states flood coolant");
+
+    let mounted = hsmworks_app::machine::Machine {
+        model: "TestMill 2".into(),
+        vendor: "Hsmworks Testbench".into(),
+        spindle_min: Some(100.0),
+        spindle_max: Some(24000.0), // the 12000 rpm tool is inside it
+        axes: vec![
+            hsmworks_app::machine::AxisLimits {
+                name: "X".into(),
+                feed: Some(5000.0),
+                rapid: Some(9000.0),
+                travel: None,
+            },
+            hsmworks_app::machine::AxisLimits {
+                name: "Y".into(),
+                feed: Some(5000.0),
+                rapid: Some(9000.0),
+                travel: None,
+            },
+            hsmworks_app::machine::AxisLimits {
+                name: "Z".into(),
+                feed: Some(3000.0),
+                rapid: Some(4000.0),
+                travel: None,
+            },
+        ],
+        ..Default::default()
+    };
+    history.execute(
+        &world,
+        LoadMachine::new(&world, "test2.mch".into(), Some(mounted)).expect("sane"),
+    );
+    posting::post_setup(&world, &path).expect("the mounted machine posts the same program");
+    let text = std::fs::read_to_string(&path).expect("written");
+    let _ = std::fs::remove_file(&path);
+    assert!(text.contains("(TestMill 2)"), "the mounted identity reaches the script: {text}");
+    assert!(
+        !text.contains("M8"),
+        "a machine that states no coolant gets no coolant words: {text}"
+    );
+
+    // The mirror is the whole bridge; the sim clock walks the same one.
+    let v = posting::machine_value(&world);
+    assert_eq!(v["name"], "TestMill 2");
+    let axes = v["kinematics"]["static"]["axes"].as_array().expect("three axes");
+    assert_eq!(axes.len(), 3);
+    assert_eq!(hsmworks_app::sim::Traverse::from_machine(&v).z, 4000.0);
+}
+
+#[test]
+fn a_user_script_is_validated_on_choice_undone_cleanly_and_missed_loudly() {
+    // The picker's three laws in one walk: a chosen file REPLACES the
+    // built-in in the program's text; the choice is a command (undo
+    // puts the built-in back); and a script that cannot run - broken
+    // at the pick, vanished at the post - is a refusal that names it,
+    // never a silent return to the shipped default.
+    let (world, mut history) = contour_and_drill();
+    let cps = tmp_cps("ok", "function onOpen() { writeln(\"(USERPOST-7)\"); }");
+    let cps_name = cps.display().to_string();
+    history.execute(
+        &world,
+        SelectPost::new(&world, PostRef::File(cps_name.clone())).expect("the script runs"),
+    );
+    assert!(matches!(posting::post_of(&world), PostRef::File(_)));
+
+    let path = tmp_nc("user");
+    posting::post_setup(&world, &path).expect("the user script posts");
+    let text = std::fs::read_to_string(&path).expect("written");
+    assert!(text.contains("USERPOST-7"), "the user's own words in the program: {text}");
+    assert!(!text.contains("O0001"), "the built-in's header is gone, not mixed in: {text}");
+
+    assert!(history.undo(&world), "the choice is in the history");
+    assert_eq!(posting::post_of(&world), PostRef::Builtin, "undo restores the built-in");
+    assert!(history.redo(&world));
+    assert!(matches!(posting::post_of(&world), PostRef::File(_)));
+
+    // Re-selecting the same post is a nothing, refused visibly (the
+    // LoadMachine "already loaded" law).
+    assert!(SelectPost::new(&world, PostRef::File(cps_name.clone())).is_err());
+
+    let bad = tmp_cps("bad", "function onOpen() { throw new Error(\"nope\"); }");
+    let err = SelectPost::new(&world, PostRef::File(bad.display().to_string()))
+        .expect_err("a script that throws must not enter the history");
+    assert!(err.to_string().contains("does not run"), "{err}");
+    let _ = std::fs::remove_file(&bad);
+
+    let missing = std::env::temp_dir().join(format!("hsmw-gone-{}.cps", std::process::id()));
+    let _ = std::fs::remove_file(&missing);
+    let err = SelectPost::new(&world, PostRef::File(missing.display().to_string()))
+        .expect_err("an unreadable path is refused at the pick");
+    assert!(err.to_string().contains("post script"), "{err}");
+
+    // Chosen, then the file vanishes: post time refuses by name.
+    std::fs::remove_file(&cps).expect("chosen post disappears");
+    let gone_path = tmp_nc("user-gone");
+    let err = posting::post_setup(&world, &gone_path).expect_err("a vanished post is a refusal");
+    assert!(err.contains("post script") && err.contains(&cps_name), "{err}");
+    assert!(!gone_path.exists(), "the refusal writes nothing, ever");
+    let _ = std::fs::remove_file(&path);
 }

@@ -13,6 +13,56 @@ pub fn from_json(text: &str) -> Result<Value, serde_json::Error> {
     serde_json::from_str(text)
 }
 
+/// The static-grammar mirror of a checker-parsed machine (M3.3 A).
+/// [`crate::machine::Machine`] is what a vendor `.mch` parses to -
+/// limits the checker judges; the script's `machine` global and the
+/// sim's traverse timer walk `kinematics.static` instead. This says
+/// the same numbers in that grammar, stating only what the file
+/// stated: an unstated limit is absent, never a zero that lies (the
+/// posts' `> 0` guards keep silence faithful). Coolants: a parsed
+/// `.mch` carries no coolant list, so the mirror states none and the
+/// post omits the M-code (honest absence, the unstated-limit law in
+/// coolant clothes; stage C grows the checker grammar to carry it).
+/// Rotary axes are not mirrored - no 3-axis post reads them, and the
+/// traverse paces only prismatic motion (stage D, RTCP).
+#[must_use]
+pub fn mirror(m: &crate::machine::Machine) -> Value {
+    let mut axes: Vec<Value> = Vec::new();
+    for a in &m.axes {
+        let direction = match a.name.as_str() {
+            "X" => [1.0, 0.0, 0.0],
+            "Y" => [0.0, 1.0, 0.0],
+            "Z" => [0.0, 0.0, 1.0],
+            _ => continue,
+        };
+        let mut speeds = serde_json::Map::new();
+        if let Some(r) = a.rapid {
+            speeds.insert("rapid".to_owned(), json!(r));
+        }
+        if let Some(f) = a.feed {
+            speeds.insert("normal".to_owned(), json!(f));
+        }
+        axes.push(json!({
+            "letter": a.name,
+            "direction": direction,
+            "speeds": Value::Object(speeds),
+        }));
+    }
+    // Rates the script reads as ceilings: the fastest stated axis.
+    let rapid = m.axes.iter().filter_map(|a| a.rapid).fold(0.0_f64, f64::max);
+    let feed = m.axes.iter().filter_map(|a| a.feed).fold(0.0_f64, f64::max);
+    let mut head = serde_json::Map::new();
+    if let Some(s) = m.spindle_max {
+        head.insert("spindle".to_owned(), json!({"max": s}));
+    }
+    json!({
+        "name": m.model,
+        "kinematics": { "static": { "axes": axes, "head": Value::Object(head) } },
+        "rapidRate": rapid,
+        "feedRateMax": feed,
+    })
+}
+
 /// Walk a path of object keys; `None` on any missing or mismatched hop.
 fn get<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
     let mut cur = v;

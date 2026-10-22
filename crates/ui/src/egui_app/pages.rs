@@ -52,8 +52,9 @@ use hsmworks_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, qu
 use hsmworks_app::machine;
 use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
 use hsmworks_app::model;
+use hsmworks_app::posting;
 use hsmworks_app::operation::{self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef};
-use hsmworks_app::schema::{Operation, WCS_SLOTS};
+use hsmworks_app::schema::{Operation, PostRef, WCS_SLOTS};
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools;
 use hsmworks_app::units::{self, Unit};
@@ -1592,6 +1593,31 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     ui.add_space(10.0);
     ui.separator();
     machine_section(ui, state);
+    ui.add_space(10.0);
+    ui.separator();
+    post_section(ui, state);
+}
+
+/// The document's post script (M3.3 A): setup furniture, read live off
+/// the world singleton like the machine section above. The label is
+/// exactly what the post resolves - one truth, so a pane can never
+/// advertise a script the gate did not run. Loading a `.cps` of your
+/// own is a command; undo puts the built-in back.
+fn post_section(ui: &mut Ui, state: &mut State) {
+    let current = posting::post_of(&state.world);
+    ui.label("Post");
+    ui.label(match &current {
+        PostRef::Builtin => posting::post_label(&state.world),
+        PostRef::File(path) => path.clone(),
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Load post (.cps)").clicked() {
+            state.pending.push_back(CommandKind::SelectPostDialog);
+        }
+        if matches!(current, PostRef::File(_)) && ui.button("Built-in").clicked() {
+            state.pending.push_back(CommandKind::SelectPostBuiltin);
+        }
+    });
 }
 
 /// The document's machine (M2.3 C): setup furniture, read live off the

@@ -72,7 +72,20 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                     s.call("onSpindleSpeed", "")?;
                 }
             }
-            Record::Warn { text } => warnings.push(text.clone()),
+            Record::Warn { text } => {
+                warnings.push(text.clone());
+                // The comment contract (M3.3 A): a warning is also
+                // commentary the script may want to voice. The
+                // PRELUDE's `onComment` default echoes it verbatim -
+                // and the echo only ever lands in a REFUSED output,
+                // because the warning count that blocks the write
+                // (`posting::post_setup`) reads the same list this
+                // arm grows. So the released program is byte-for-byte
+                // what it was; a script that overrides `onComment`
+                // can restyle or silence its comments, but the data
+                // is never withheld from it.
+                s.call("onComment", &json!(text).to_string())?;
+            }
             Record::Tool { number, name } => {
                 base.insert("ToolNumber".into(), json!(*number));
                 base.insert("ToolName".into(), json!(name));

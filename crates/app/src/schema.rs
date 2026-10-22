@@ -172,6 +172,19 @@ pub struct MachineDef {
     pub machine: Option<crate::machine::Machine>,
 }
 
+/// Which post script the document runs (M3.3 A), a flecs singleton
+/// like `MachineDef`: setup furniture, never a browser row.
+/// `Builtin` is the app's own shipped script; `File` names the user's
+/// `.cps` by path - validated when selected (the `SelectPost`
+/// constructor compiles it), re-read at post time and refused by name
+/// if it went missing, never silently swapped back to the built-in.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+pub enum PostRef {
+    #[default]
+    Builtin,
+    File(String),
+}
+
 /// The single stock entity's name. Identity by name, like everything else:
 /// tree, undo, and save all reach stock through this.
 pub const STOCK_NAME: &str = "Stock";
@@ -195,6 +208,7 @@ pub fn register_schema(world: &World) {
     world.component::<Toolpath>();
     world.component::<Units>();
     world.component::<MachineDef>();
+    world.component::<PostRef>();
     world.component::<SetupDef>();
     world.component::<ActiveSetup>();
     world.component::<FixtureDef>();

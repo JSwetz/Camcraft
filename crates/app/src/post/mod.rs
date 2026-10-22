@@ -7,6 +7,21 @@
 //! consumed by this Rust engine (a from-scratch boa_engine host; no
 //! vendor binary or code is involved). Formats:
 //! `docs/CNC-INTERMEDIATE.md`.
+//!
+//! Hook coverage, honestly stated (M3.3 A): the driver calls
+//! `onParameter`+`onSpindleSpeed` for `PARAM`s (the spindle word is
+//! itself one), `onToolChange` for `TOOL`, `onSection`/`onSectionEnd`
+//! for `SECTION`, `onCommand` then the matching motion hook for every
+//! `MOVE` (an `onCommand` returning false swallows the move - the
+//! `swallowed` counter in `PostOutput` keeps that visible, never
+//! silent), the cycle family for `CYCLE` points, and `onComment` for
+//! every `WARN` (the default echoes; a script may restyle it - and
+//! only refused outputs ever carry an echo, since warnings block the
+//! write upstream). `onRadiusCompensation` is the one contract kept
+//! silent for a real reason: no record in the intermediate carries
+//! compensation data until G41/G42 path support lands (M1.3's open
+//! flag), and inventing a call site from an empty one is how posts
+//! start lying.
 
 pub mod cnc;
 pub mod engine;

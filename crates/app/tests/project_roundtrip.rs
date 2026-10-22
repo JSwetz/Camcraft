@@ -81,7 +81,7 @@ fn transforms_survive() {
 
 #[test]
 fn wrong_version_is_refused() {
-    // Anything newer than this build's format stays refused; v1..v19
+    // Anything newer than this build's format stays refused; v1..v22
     // migrate (see v1_file_migrates / v2_file_migrates_to_v3 /
     // v3_file_migrates_to_v4 / v4_file_migrates_to_v5; heights.rs covers
     // the v5 numeric heights -> v6 Fixed migration,
@@ -101,11 +101,12 @@ fn wrong_version_is_refused() {
     // v18 -> v19, and v19_file_steps_to_v20_and_the_rev_counter_round_trips
     // v19 -> v20, and v20_file_steps_to_v21_and_the_setups_grammar_round_trips
     // v20 -> v21, and v21_file_steps_to_v22_and_the_fixture_tag_round_trips
-    // v21 -> v22.
-    let text = r#"{"version": 23, "entities": []}"#;
+    // v21 -> v22, and the_post_choice_round_trips_and_a_v22_file_means_
+    // the_built_in v22 -> v23 (the additive top-level `post` key).
+    let text = r#"{"version": 24, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(23)) => {}
+        Err(ProjectError::UnsupportedVersion(24)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -2489,4 +2490,52 @@ fn units_round_trip_and_a_v7_file_means_millimeters() {
         other => panic!("expected Corrupt, got {other:?}"),
     }
     assert_eq!(units::of(&world), Unit::Millimeters, "refusal wrote nothing");
+}
+
+#[test]
+fn the_post_choice_round_trips_and_a_v22_file_means_the_built_in() {
+    // M3.3 A's persistence law: a chosen file post rides the save as
+    // the top-level `post` key, opening lands exactly what was chosen,
+    // a v22-shaped file (no key) means the built-in - the pure
+    // step-up, same as every bump since v6 - and opening a file
+    // without the key CLEARS a stale choice, the units-law leak guard.
+    use hsmworks_app::commands::SelectPost;
+    use hsmworks_app::posting;
+    use hsmworks_app::schema::PostRef;
+
+    let cps = std::env::temp_dir().join(format!("hsmw_rtpost_{}.cps", std::process::id()));
+    std::fs::write(&cps, "function onOpen() { writeln(\"(RT)\"); }").expect("write temp cps");
+    let cps_name = cps.display().to_string();
+
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        SelectPost::new(&world, PostRef::File(cps_name.clone())).expect("the script runs"),
+    );
+    let p = tmp_path("postrt");
+    project::save(&world, &p).expect("save");
+    let text = std::fs::read_to_string(&p).expect("written");
+    assert!(text.contains("\"post\""), "the chosen file rides the file: no key found");
+
+    let world2 = new_world();
+    project::load(&world2, &p).expect("load");
+    assert_eq!(posting::post_of(&world2), PostRef::File(cps_name.clone()));
+
+    // A bare v22 document migrates to "the built-in", verbatim.
+    let world3 = new_world();
+    project::open(&world3, r#"{"version": 22, "entities": []}"#).expect("v22 steps up");
+    assert_eq!(posting::post_of(&world3), PostRef::Builtin);
+
+    // The leak guard: opening a no-post file onto a world with a
+    // choice lands BUILT-IN, not the stale singleton.
+    let plain = tmp_path("postplain");
+    let clean = new_world();
+    project::save(&clean, &plain).expect("save clean");
+    project::load(&world2, &plain).expect("load onto the chosen world");
+    assert_eq!(posting::post_of(&world2), PostRef::Builtin, "opening never leaks a stale post");
+
+    let _ = std::fs::remove_file(&cps);
+    let _ = std::fs::remove_file(&p);
+    let _ = std::fs::remove_file(&plain);
 }

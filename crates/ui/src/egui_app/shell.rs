@@ -1080,7 +1080,7 @@ pub(crate) fn sim_readout(
 /// so the transport clock and the posted program count the same moves.
 pub(crate) fn sim_script(state: &State) -> hsmworks_app::sim::Script {
     use hsmworks_app::{model, posting, sim};
-    let tr = sim::Traverse::from_machine(&posting::default_machine());
+    let tr = sim::Traverse::from_machine(&posting::machine_value(&state.world));
     let paths: Vec<(String, hsmworks_app::cl::Toolpath)> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_operation(&state.world, e))

@@ -19,12 +19,12 @@ use hsmworks_app::commands::{
     ActivateSetup, AddTool, ChangeTool, CommandError, CreateOperation, CreateSetup, DeleteEntity,
     DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks,
     EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine, MoveFixture,
-    RegenerateAll, SelectEntity, SetOperationGeometry, SetOperationSetup, SetStock, SetUnits,
-    SetWcsOrigin, TagFixture, UntagFixture, UpdateModel,
+    RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry, SetOperationSetup, SetStock,
+    SetUnits, SetWcsOrigin, TagFixture, UntagFixture, UpdateModel,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
-use hsmworks_app::schema::{Location, Operation as OperationDef, WCS_SLOTS};
+use hsmworks_app::schema::{Location, Operation as OperationDef, PostRef, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
 use hsmworks_app::units::{self, Unit};
@@ -76,6 +76,15 @@ pub enum CommandKind {
     LoadMachineDialog,
     LoadMachineFile(PathBuf),
     ClearMachine,
+    /// The post script (M3.3 A): the built-in arm ships, the dialog arm
+    /// picks a user `.cps` through the file-pick law, and the path arm
+    /// is what the headless tests run. Selection is a command like
+    /// every other piece of setup furniture - undo puts the previous
+    /// script back, and the file is compiled at selection, refused by
+    /// name if it does not run.
+    SelectPostBuiltin,
+    SelectPostDialog,
+    SelectPostFile(PathBuf),
     /// Work offset: slot origin plus full orientation as yaw-pitch-roll
     /// degrees (R = Rz ⊗ Ry ⊗ Rx). The world stores a unit quaternion;
     /// pure-yaw setups use roll = pitch = 0.
@@ -1667,6 +1676,15 @@ impl State {
                     }
                 }
             }
+            CommandKind::SelectPostBuiltin => self.select_post(PostRef::Builtin),
+            CommandKind::SelectPostDialog => {
+                if let Some(path) = pick_post_file() {
+                    self.select_post(PostRef::File(path.display().to_string()));
+                }
+            }
+            CommandKind::SelectPostFile(path) => {
+                self.select_post(PostRef::File(path.display().to_string()));
+            }
             CommandKind::StockFit { margin, shape: radio } => {
                 if radio == 2 {
                     // From-model stock IS its source's shape; there is
@@ -2303,6 +2321,21 @@ impl State {
         }
     }
 
+    /// Choose the post script (M3.3 A). The validation - read and
+    /// compile - lives in `SelectPost::new`, command-construction time,
+    /// so a script that cannot run is a visible refusal at the pick,
+    /// never a surprise at the post.
+    fn select_post(&mut self, next: PostRef) {
+        match SelectPost::new(&self.world, next) {
+            Ok(command) => {
+                self.history.execute(&self.world, command);
+                self.doc_version += 1;
+                self.status = format!("post: {}", posting::post_label(&self.world));
+            }
+            Err(err) => self.refuse(ErrorScope::Setup, format!("post not selected: {err}")),
+        }
+    }
+
     fn open_project_path(&mut self, path: PathBuf) {
         self.abandon_imports();
         model::clear_named(&self.world);
@@ -2406,6 +2439,12 @@ fn pick_machine_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("Machine Definition", &["mch"])
         .pick_file()
+}
+
+fn pick_post_file() -> Option<PathBuf> {
+    // The `.cps` script format is the one we reuse by user instruction
+    // (M3.3 A) - plain JavaScript, the user's own; the filter names it.
+    rfd::FileDialog::new().add_filter("Post Script", &["cps"]).pick_file()
 }
 
 fn save_project_dialog() -> Option<PathBuf> {

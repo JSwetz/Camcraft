@@ -411,3 +411,51 @@ fn a_flood_of_violations_reports_forty_and_counts_the_rest() {
     assert_eq!(c.problems.len(), 40, "the list caps at its bound");
     assert!(c.more > 0, "a 60 mm face crosses a 1 um column more than 40 times");
 }
+
+#[test]
+fn the_post_mirror_states_only_what_the_machine_stated() {
+    // M3.3 A's bridge: a checker-parsed `Machine` reaches the script
+    // through `post::machine::mirror` - the static grammar, stated
+    // numbers only. An unstated spindle limit is ABSENT (the posts'
+    // `> 0` guard keeps the silence honest), rotary axes are not
+    // mirrored (no 3-axis post reads them yet), and coolant never
+    // appears: a parsed `.mch` carries no coolant list.
+    let m = Machine {
+        model: "MirrorMill".into(),
+        vendor: "Hsmworks Testbench".into(),
+        spindle_max: Some(8000.0),
+        axes: vec![
+            AxisLimits {
+                name: "X".into(),
+                feed: Some(4000.0),
+                rapid: Some(7000.0),
+                travel: None,
+            },
+            AxisLimits { name: "C".into(), ..Default::default() },
+        ],
+        ..Default::default()
+    };
+    let v = hsmworks_app::post::machine::mirror(&m);
+    assert_eq!(v["name"], "MirrorMill");
+    let axes = v["kinematics"]["static"]["axes"].as_array().expect("axes array");
+    assert_eq!(axes.len(), 1, "the rotary C is not mirrored in stage A");
+    assert_eq!(axes[0]["letter"], "X");
+    assert_eq!(axes[0]["speeds"]["rapid"], 7000.0);
+    assert_eq!(axes[0]["speeds"]["normal"], 4000.0);
+    assert_eq!(axes[0]["direction"], serde_json::json!([1.0, 0.0, 0.0]));
+    assert_eq!(v["kinematics"]["static"]["head"]["spindle"]["max"], 8000.0);
+    assert_eq!(v["rapidRate"], 7000.0, "the ceiling is the fastest stated axis");
+
+    let props = hsmworks_app::post::machine::script_props(&v);
+    assert_eq!(props["name"], "MirrorMill");
+    assert_eq!(props["spindleMax"], 8000.0);
+    assert_eq!(props["coolants"].as_array().map(Vec::len), Some(0), "silent coolant, stated");
+
+    // The mute machine mirrors to silence, not to zeros that lie.
+    let mute = hsmworks_app::post::machine::script_props(
+        &hsmworks_app::post::machine::mirror(&Machine::default()),
+    );
+    assert_eq!(mute["name"], "");
+    assert_eq!(mute["spindleMax"], 0.0, "absent reads 0: the `> 0` guards keep it silent");
+    assert_eq!(mute["rapidRate"], 0.0);
+}

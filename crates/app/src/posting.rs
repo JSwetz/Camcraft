@@ -18,23 +18,84 @@
 use crate::model;
 use crate::operation::{self, Height, HeightReference, OpStatus, OpParams};
 use crate::post::{self, cnc, engine, Dump};
-use crate::schema::WCS_SLOTS;
+use crate::schema::{PostRef, WCS_SLOTS};
 use flecs_ecs::prelude::*;
 use serde_json::Value;
 use std::path::Path;
 
-/// The post script product-shipped with the app: Fanuc, our first
-/// `.cps` (embedded so an install never depends on a loose path).
-pub const FANUC_CPS: &str = include_str!("../../../assets/posts/fanuc.cps");
+/// The post scripts that ship with the app (name, text), embedded so
+/// an install never depends on a loose path. `PostRef::Builtin` means
+/// the first entry; stage B grows the list and the picker with it.
+pub const BUILTINS: &[(&str, &str)] = &[("Fanuc", include_str!("../../../assets/posts/fanuc.cps"))];
+
+/// The default machine as text: a plain 3-axis VMC with flood coolant.
+pub const DEFAULT_MCH: &str = include_str!("../../../assets/machines/3axis-vmc.mch");
 
 /// The default machine: a plain 3-axis VMC with flood coolant.
 pub fn default_machine() -> Value {
     static M: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    M.get_or_init(|| {
-        serde_json::from_str(include_str!("../../../assets/machines/3axis-vmc.mch"))
-            .unwrap_or(Value::Null)
-    })
-    .clone()
+    M.get_or_init(|| serde_json::from_str(DEFAULT_MCH).unwrap_or(Value::Null)).clone()
+}
+
+/// The machine this document posts to (M3.3 A): the mounted `.mch`
+/// restated in the static post grammar, or the default VMC where the
+/// document says no machine. The same fact the limit gate judges, now
+/// also shaping the script's `machine` global and the sim's traverse
+/// clock - post, gate and timeline cannot disagree about the machine.
+#[must_use]
+pub fn machine_value(world: &World) -> Value {
+    match crate::machine::of(world).1 {
+        Some(m) => post::machine::mirror(&m),
+        None => default_machine(),
+    }
+}
+
+/// The post this document runs, from the `PostRef` singleton. Setup
+/// furniture moved through commands or a document load, never ad hoc
+/// - the `machine::set` law wearing the post's own clothes.
+#[must_use]
+pub fn post_of(world: &World) -> PostRef {
+    world.try_get::<&PostRef>(|p| p.clone()).unwrap_or_default()
+}
+
+/// Write the singleton. For the `SelectPost` command and the project
+/// reader only.
+pub fn post_set(world: &World, next: &PostRef) {
+    world.set(next.clone());
+}
+
+/// The document's post for display: built-in name, or the file path
+/// as chosen. Never touches disk - a pane may draw this every frame,
+/// and it names exactly what `script_source` resolves. One truth,
+/// read two ways.
+#[must_use]
+pub fn post_label(world: &World) -> String {
+    match post_of(world) {
+        PostRef::Builtin => match BUILTINS.first() {
+            Some((name, _)) => format!("{name} (built-in)"),
+            None => "built-in".to_owned(),
+        },
+        PostRef::File(path) => path,
+    }
+}
+
+/// The script source this document posts with: (label, text). A
+/// `File` post whose text cannot be read is a refusal naming the
+/// path - never a silent run with the built-in instead (a
+/// substituted post is exactly the silent wrong answer this whole
+/// codebase exists to prevent; the Prime Directive).
+pub fn script_source(world: &World) -> Result<(String, String), String> {
+    match post_of(world) {
+        PostRef::Builtin => BUILTINS
+            .first()
+            .map(|(name, cps)| (format!("{name} (built-in)"), (*cps).to_owned()))
+            .ok_or_else(|| "the built-in post registry is empty".to_owned()),
+        PostRef::File(path) => {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("post script {path}: {e}"))?;
+            Ok((path, text))
+        }
+    }
 }
 
 /// What a successful post says back.
@@ -56,6 +117,15 @@ pub struct Posted {
 /// written. Cached generation warnings ride the stream as `WARN`
 /// records, so the engine's own warning count is the gate.
 pub fn post_setup(world: &World, out_path: &Path) -> Result<Posted, String> {
+    let (_label, cps) = script_source(world)?;
+    post_script(world, out_path, &cps)
+}
+
+/// The gate's post at a given script (M3.3 A): the stream and the
+/// verification are the document's own; only the translation is
+/// parameterized - what a caller holding a script text runs, and
+/// what the tests use to exercise the script seam directly.
+pub fn post_script(world: &World, out_path: &Path, cps: &str) -> Result<Posted, String> {
     let records = stream_records(world)?;
     // The verification gate (M2.3 D): the same two program-level
     // judgments the Deviate cell shows, made binding. Evidence is
@@ -67,7 +137,7 @@ pub fn post_setup(world: &World, out_path: &Path) -> Result<Posted, String> {
         return Err(format!("post blocked - {}", problems.join("; ")));
     }
     let stream = cnc::serialize(&records);
-    let out = engine::run(FANUC_CPS, &default_machine(), &stream)
+    let out = engine::run(cps, &machine_value(world), &stream)
         .map_err(|e| format!("post engine: {e}"))?;
     if !out.warnings.is_empty() {
         return Err(format!(

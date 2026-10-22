@@ -8,6 +8,7 @@ pub mod fixture;
 pub mod import_model;
 pub mod load_machine;
 pub mod operation;
+pub mod post;
 pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
@@ -28,6 +29,7 @@ pub use operation::{
     CreateOperation, DeleteOperation, EditOperationLinks, EditOperationParams, GenerateOperation,
     RegenerateAll, SetOperationGeometry,
 };
+pub use post::SelectPost;
 pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
 pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};
