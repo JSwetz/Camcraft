@@ -436,13 +436,14 @@ impl GenerateOperation {
         let prev_operation = model::operation_of(world, &entity)
             .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))?;
         let prev_cache = model::toolpath_of(world, &entity);
-        let (path, warnings) = operation::generate(world, &prev_operation)
+        let (path, warnings) = operation::generate(world, &prev_operation, name)
             .map_err(|e| CommandError::Machining(format!("{name}: {e}")))?;
         let stamp = operation::current_stamp(
             world,
             &prev_operation.tool,
             &prev_operation.src,
             &prev_operation.params,
+            name,
         )
         .ok_or_else(|| {
             CommandError::Machining(format!(

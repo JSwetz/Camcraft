@@ -1408,12 +1408,19 @@ pub enum OpStatus {
 /// and the source's placement and shape. `None` when a referenced entity
 /// is gone - an unresolvable digest is never equal to a stored one, which
 /// is exactly the "Stale" reading a deleted tool should give.
+/// The digest of an operation's inputs as they stand right now.
+/// `op_name` is the operation's own name: re-machining digests the
+/// program AHEAD of it (M3.1 D), and program order is name order, so
+/// the name is part of the question. Callers that build a stamp for an
+/// operation that has no entity yet (or none that matters) pass `""`,
+/// which reads as "no predecessors" and writes no rest term.
 #[must_use]
 pub fn current_stamp(
     world: &World,
     tool_name: &str,
     src: &SrcRef,
     params: &OpParams,
+    op_name: &str,
 ) -> Option<GenStamp> {
     let mut h = std::hash::DefaultHasher::new();
     // v2: heights became From+Offset expressions and their resolved
@@ -1558,6 +1565,18 @@ pub fn current_stamp(
             }
         }
     }
+    // M3.1 D re-machining: the program AHEAD is an input too - a 3D
+    // pocket consumes what earlier operations leave standing, so when
+    // their recorded PATHS or their order move, its cached path no
+    // longer describes the same cut. With nothing ahead of it nothing
+    // is written: first operations' and other kinds' stamps are
+    // bit-for-bit what they were before stage D (the inert-data law).
+    if params.kind() == OpType::Pocket3D
+        && let Some(digest) = crate::rest::prior_digest(world, op_name)
+    {
+        h.write_u8(b'R');
+        h.write_u64(digest);
+    }
     Some(GenStamp(h.finish()))
 }
 
@@ -1574,7 +1593,11 @@ pub fn status_of(world: &World, entity: &flecs_ecs::prelude::Entity) -> OpStatus
     if cache.path.is_empty() {
         return OpStatus::Never; // a cache with no moves is no cache
     }
-    match (op.stamp, current_stamp(world, &op.tool, &op.src, &op.params)) {
+    let name = model::name_of(world, entity).unwrap_or_default();
+    match (
+        op.stamp,
+        current_stamp(world, &op.tool, &op.src, &op.params, &name),
+    ) {
         (Some(stored), Some(now)) if stored == now => OpStatus::Ok,
         _ => OpStatus::Stale,
     }
@@ -1652,6 +1675,17 @@ pub fn stale_reason(
         if let Some(missing) = missing_source(world, h.reference) {
             return Some(format!("a height is measured from {missing}"));
         }
+    }
+    // M3.1 D: the program ahead is the LAST question, and reaching it
+    // forces the answer: every own-input question above came back
+    // clean while the stamp still mismatches, so a cutting
+    // predecessor's recorded path is what moved - whatever its own
+    // status reads.
+    if op.params.kind() == OpType::Pocket3D
+        && let Some(name) = model::name_of(world, entity)
+        && let Some(why) = crate::rest::prior_stale(world, &name)
+    {
+        return Some(why);
     }
     Some("the geometry or tool inputs changed since it was generated".into())
 }
@@ -2957,9 +2991,14 @@ fn stitch(mut a: Toolpath, mut b: Toolpath) -> Toolpath {
 /// is `GenError` for both setup problems (missing tool/stock, unusable
 /// geometry) and generator refusals - commands surface them at
 /// construction, so nothing half-generated reaches the world.
+/// `op_name` is the operation's own name, needed by re-machining to find
+/// the program ahead of it (M3.1 D); callers generating a params preview
+/// for an operation that has no entity (or none that matters) pass `""`,
+/// which reads as "nothing ahead" and generates against the bare stock.
 pub fn generate(
     world: &World,
     op: &Operation,
+    op_name: &str,
 ) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // Tool: the diameter drives the path, the body drives the reach law.
     let Some(tool_entity) = model::find_by_name(world, &op.tool) else {
@@ -3181,14 +3220,38 @@ pub fn generate(
                 helix_radius: *helix_radius,
                 max_engagement: *max_engagement,
             };
+            // Re-machining (M3.1 D): what the program ahead of this
+            // pocket left standing bounds the coarse run, so it cuts
+            // the shelves its predecessors already cleared only if the
+            // mask says material still stands there. Nothing ahead (or
+            // nothing cut) is `None`, and the path is what it was.
+            let prior = crate::rest::prior_state(world, op_name, d * 0.5)?;
+            let mask = prior.grid.as_ref();
             // The rest pass's verdict rides the path: what the sim
             // still reports after the closing ladder is the closing
             // report's business (the simulation view), not a silent
             // extra here.
-            let path = if *rest_rough {
-                machining3d::pocket3d_with_rest(&material.facets, &region, &pp)?.0
+            let generated = if *rest_rough {
+                machining3d::pocket3d_with_rest_prev(&material.facets, &region, &pp, mask)
+                    .map(|(p, _)| p)
             } else {
-                machining3d::pocket3d(&material.facets, &region, &pp)?
+                machining3d::pocket3d_prev(&material.facets, &region, &pp, mask)
+            };
+            let path = match generated {
+                Ok(path) => path,
+                // The ladder's words are "the model fills the pocket"
+                // - true of an unmasked nothing-to-cut. With a mask
+                // the truer sentence is this one: the program already
+                // machined here, and the mask law only ever removes
+                // cuts, so the whole path is air.
+                Err(GenError::Empty(_)) if mask.is_some() => {
+                    return Err(GenError::Empty(
+                        "nothing left to cut - the operations ahead in the program already \
+                         machined this area"
+                            .into(),
+                    ));
+                }
+                Err(e) => return Err(e),
             };
             // The feed modulation is a re-read of the finished path
             // against the sim (M2.1d): same moves, new F words - it

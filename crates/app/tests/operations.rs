@@ -1147,7 +1147,7 @@ fn a_vertical_or_tilted_pick_refuses_with_the_fix_in_the_message() {
     // Facing a wall: refused, and the message says what to pick instead.
     let face = op(face_sel_params());
     assert_eq!(operation::region_of(&world, &face), None);
-    let e = operation::generate(&world, &face).expect_err("wall cannot be faced");
+    let e = operation::generate(&world, &face, "").expect_err("wall cannot be faced");
     assert!(matches!(e, hsmworks_app::machining2d::GenError::Invalid(_)));
     assert!(e.to_string().contains("not horizontal"), "{e}");
 
@@ -1156,7 +1156,7 @@ fn a_vertical_or_tilted_pick_refuses_with_the_fix_in_the_message() {
     // says so.
     let contour = op(contour_params());
     assert_eq!(operation::region_of(&world, &contour), None);
-    let e = operation::generate(&world, &contour)
+    let e = operation::generate(&world, &contour, "")
         .expect_err("a wall face bounds no area in XY");
     assert!(e.to_string().contains("projects to a line"), "{e}");
 }
@@ -1251,7 +1251,7 @@ fn pocket_refuses_an_open_run() {
         stamp: None,
     };
     assert_eq!(operation::region_of(&world, &op), None, "nothing to draw");
-    let err = operation::generate(&world, &op).expect_err("pocket refuses");
+    let err = operation::generate(&world, &op, "").expect_err("pocket refuses");
     assert!(err.to_string().contains("closed chain"), "{err}");
 }
 
@@ -1271,8 +1271,8 @@ fn selection_staleness_tracks_content_not_counts() {
     // the digest. A stamp keyed on counts would miss exactly this.
     let wall = wall_face_of(&world, "part");
     let src_b = sel("part", FeatureSel::Face(wall));
-    let sa = operation::current_stamp(&world, "EM-0600-4FL", &src_a, &params);
-    let sb = operation::current_stamp(&world, "EM-0600-4FL", &src_b, &params);
+    let sa = operation::current_stamp(&world, "EM-0600-4FL", &src_a, &params, "S1");
+    let sb = operation::current_stamp(&world, "EM-0600-4FL", &src_b, &params, "S1");
     assert_ne!(sa, sb, "a different face is different geometry");
 
     // Moving the part moves it too (the region swings out from under
@@ -1286,7 +1286,7 @@ fn selection_staleness_tracks_content_not_counts() {
     // Face vs Chain on one entity are distinguishable, and so is item
     // order (the pick list is the user's, not a bag).
     let chain = FeatureSel::Chain(any_chain_of(&world, "part"));
-    let sc = operation::current_stamp(&world, "EM-0600-4FL", &sel("part", chain), &params);
+    let sc = operation::current_stamp(&world, "EM-0600-4FL", &sel("part", chain), &params, "S1");
     assert_ne!(sa, sc);
     let ab = SrcRef::Selection(vec![
         GeoSel { entity: "part".into(), feature: FeatureSel::Face(top_a) },
@@ -1297,8 +1297,8 @@ fn selection_staleness_tracks_content_not_counts() {
         GeoSel { entity: "part".into(), feature: FeatureSel::Face(top_a) },
     ]);
     assert_ne!(
-        operation::current_stamp(&world, "EM-0600-4FL", &ab, &params),
-        operation::current_stamp(&world, "EM-0600-4FL", &ba, &params),
+        operation::current_stamp(&world, "EM-0600-4FL", &ab, &params, "S1"),
+        operation::current_stamp(&world, "EM-0600-4FL", &ba, &params, "S1"),
     );
 }
 

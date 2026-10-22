@@ -222,6 +222,14 @@ pub fn operation_of(world: &World, entity: &Entity) -> Option<Operation> {
     entity.entity_view(world).try_get::<&Operation>(|o| o.clone())
 }
 
+/// The entity's name, if it wears one. The cheap inverse of
+/// `find_by_name`, for code holding an entity that needs to speak of
+/// it the way commands do.
+#[must_use]
+pub fn name_of(world: &World, entity: &Entity) -> Option<String> {
+    entity.entity_view(world).try_get::<&Name>(|n| n.0.clone())
+}
+
 /// The cached path and its warnings, if this operation has been generated.
 #[must_use]
 pub fn toolpath_of(world: &World, entity: &Entity) -> Option<Toolpath> {

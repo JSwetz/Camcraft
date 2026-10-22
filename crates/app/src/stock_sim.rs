@@ -1239,6 +1239,84 @@ pub struct ProgramSim {
     pub surface: SimSurface,
 }
 
+/// The document's stock, as an axis-aligned grid in world. Box and
+/// cylinder are stage A's analytic grids translated to the `Stock`
+/// entity's place; a rotated stock would need the grid in the stock's
+/// frame, and this kernel's law is one axis-aligned lattice - the
+/// refusal says so instead of silently ignoring the rotation. Model
+/// stock builds from its own world facets, the same mesh the viewport
+/// draws. `simulate_document` and re-machining (M3.1 D) read the stock
+/// through this law - one builder, two consumers, so a rest mask and
+/// the deviation verdict always describe the same solid.
+pub fn stock_grid(
+    world: &flecs_ecs::prelude::World,
+    tool_r: f64,
+) -> Result<Dexel, String> {
+    use crate::geometry::{IDENTITY_Q, transform_point};
+    use crate::stock::StockShape;
+    use crate::model;
+
+    let stock_e = model::find_by_name(world, crate::schema::STOCK_NAME)
+        .ok_or("no stock defined - the program sim judges material, not air")?;
+    let shape = model::stock_def_of(world, &stock_e)
+        .ok_or("the stock entity lost its shape")?;
+    let loc = model::transform_of(world, &stock_e).unwrap_or_default();
+    if loc.rot != IDENTITY_Q {
+        return Err("the program sim models an axis-aligned stock; this stock carries a rotation".into());
+    }
+    let stock_facets: Vec<Triangle> = match &shape {
+        StockShape::FromModel { .. } => model::facets_of(world, &stock_e)
+            .unwrap_or_default()
+            .iter()
+            .map(|t| Triangle::new(
+                transform_point(t.a, loc.pos, loc.rot),
+                transform_point(t.b, loc.pos, loc.rot),
+                transform_point(t.c, loc.pos, loc.rot),
+            ))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let (span_x, span_y) = match &shape {
+        StockShape::Box { dx, dy, .. } => (*dx, *dy),
+        StockShape::Cylinder { diameter, .. } => (*diameter, *diameter),
+        StockShape::FromModel { .. } => {
+            let (mut x0, mut x1, mut y0, mut y1) =
+                (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+            for t in &stock_facets {
+                for v in [t.a, t.b, t.c] {
+                    x0 = x0.min(v.x);
+                    x1 = x1.max(v.x);
+                    y0 = y0.min(v.y);
+                    y1 = y1.max(v.y);
+                }
+            }
+            ((x1 - x0).max(0.0), (y1 - y0).max(0.0))
+        }
+    };
+    let cell = auto_cell(tool_r, span_x, span_y);
+    let dex = match &shape {
+        StockShape::FromModel { .. } => {
+            Dexel::from_facets(&stock_facets, cell).map_err(|e| e.to_string())?
+        }
+        s => {
+            let mut d = Dexel::from_shape(s, cell).map_err(|e| e.to_string())?;
+            // The analytic grids are built origin-centered; the stock
+            // entity's place moves the lattice itself, so the moves
+            // stay in the world frame the viewport and post read.
+            d.x0 += loc.pos.x;
+            d.y0 += loc.pos.y;
+            d.stock_z += loc.pos.z;
+            for t in &mut d.top {
+                if t.is_finite() {
+                    *t += loc.pos.z;
+                }
+            }
+            d
+        }
+    };
+    Ok(dex)
+}
+
 /// Simulate the whole document's program: the operations in posting
 /// order (through [`crate::posting::program_ops`] - so what the sim
 /// judges IS what would post, one law shared, not two agreeing), each
@@ -1252,8 +1330,7 @@ pub fn simulate_document(
     world: &flecs_ecs::prelude::World,
 ) -> Result<ProgramSim, String> {
     use crate::cl::Move;
-    use crate::geometry::{IDENTITY_Q, transform_point};
-    use crate::stock::StockShape;
+    use crate::geometry::transform_point;
     use crate::{model, posting};
 
     let ops = posting::program_ops(world)?;
@@ -1284,75 +1361,8 @@ pub fn simulate_document(
         });
     }
 
-    // The stock, as the setup defines it. Box and cylinder are the
-    // analytic grids of stage A translated to the stock entity's
-    // place; a rotated stock would need the grid in the stock's
-    // frame, and this kernel's law is one axis-aligned lattice - the
-    // refusal says so instead of silently ignoring the rotation.
-    // Model stock builds from its own world facets, the same mesh
-    // the viewport draws.
-    let stock_e = model::find_by_name(world, crate::schema::STOCK_NAME)
-        .ok_or("no stock defined - the program sim judges material, not air")?;
-    let shape = model::stock_def_of(world, &stock_e)
-        .ok_or("the stock entity lost its shape")?;
-    let loc = model::transform_of(world, &stock_e).unwrap_or_default();
-    if loc.rot != IDENTITY_Q {
-        return Err("the program sim models an axis-aligned stock; this stock carries a rotation".into());
-    }
     let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
-    // The stock mesh, world-placed: only model stock reads it, but a
-    // shape that IS a mesh has no other honest answer (stage A's
-    // refusal pointed here).
-    let stock_facets: Vec<Triangle> = match &shape {
-        StockShape::FromModel { .. } => model::facets_of(world, &stock_e)
-            .unwrap_or_default()
-            .iter()
-            .map(|t| Triangle::new(
-                transform_point(t.a, loc.pos, loc.rot),
-                transform_point(t.b, loc.pos, loc.rot),
-                transform_point(t.c, loc.pos, loc.rot),
-            ))
-            .collect(),
-        _ => Vec::new(),
-    };
-    let (span_x, span_y) = match &shape {
-        StockShape::Box { dx, dy, .. } => (*dx, *dy),
-        StockShape::Cylinder { diameter, .. } => (*diameter, *diameter),
-        StockShape::FromModel { .. } => {
-            let (mut x0, mut x1, mut y0, mut y1) =
-                (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
-            for t in &stock_facets {
-                for v in [t.a, t.b, t.c] {
-                    x0 = x0.min(v.x);
-                    x1 = x1.max(v.x);
-                    y0 = y0.min(v.y);
-                    y1 = y1.max(v.y);
-                }
-            }
-            ((x1 - x0).max(0.0), (y1 - y0).max(0.0))
-        }
-    };
-    let cell = auto_cell(min_r, span_x, span_y);
-    let mut dex = match &shape {
-        StockShape::FromModel { .. } => {
-            Dexel::from_facets(&stock_facets, cell).map_err(|e| e.to_string())?
-        }
-        s => {
-            let mut d = Dexel::from_shape(s, cell).map_err(|e| e.to_string())?;
-            // The analytic grids are built origin-centered; the stock
-            // entity's place moves the lattice itself, so the moves
-            // stay in the world frame the viewport and post read.
-            d.x0 += loc.pos.x;
-            d.y0 += loc.pos.y;
-            d.stock_z += loc.pos.z;
-            for t in &mut d.top {
-                if t.is_finite() {
-                    *t += loc.pos.z;
-                }
-            }
-            d
-        }
-    };
+    let mut dex = stock_grid(world, min_r)?;
 
     let sim_ops: Vec<SimOp> = planned
         .iter()

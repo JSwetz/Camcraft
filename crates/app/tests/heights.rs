@@ -296,8 +296,8 @@ fn the_digest_sees_the_reference_not_just_the_number() {
         riding.clearance().z(&world),
         "identical until the stock moves",
     );
-    let sa = operation::current_stamp(&world, "EM-0400-2FL", &SrcRef::Stock, &pinned);
-    let sb = operation::current_stamp(&world, "EM-0400-2FL", &SrcRef::Stock, &riding);
+    let sa = operation::current_stamp(&world, "EM-0400-2FL", &SrcRef::Stock, &pinned, "");
+    let sb = operation::current_stamp(&world, "EM-0400-2FL", &SrcRef::Stock, &riding, "");
     assert_ne!(sa, sb, "the reference is part of the definition");
 }
 

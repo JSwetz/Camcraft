@@ -318,9 +318,23 @@ pub fn pocket3d(
     footprint: &Region,
     p: &Pocket3DParams,
 ) -> Result<Toolpath, GenError> {
+    pocket3d_prev(facets, footprint, p, None)
+}
+
+/// The re-machining sibling (M3.1 D): the same ladder, run against the
+/// stock state the previous operations left (`mask: Some`, see
+/// [`crate::rest`]). Every masked level target is a subset of the
+/// unmasked one, so a first operation - or a program with nothing cut
+/// before it - generates the identical path.
+pub fn pocket3d_prev(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    mask: Option<&Dexel>,
+) -> Result<Toolpath, GenError> {
     guard_input(facets, footprint, p)?;
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
-    ladder(facets, footprint, p, &zs, None, home(p))
+    ladder(facets, footprint, p, &zs, None, mask, home(p))
 }
 
 /// The rest-material sibling (M2.1b): the same level ladder, then a
@@ -338,22 +352,51 @@ pub fn pocket3d_with_rest(
     footprint: &Region,
     p: &Pocket3DParams,
 ) -> Result<(Toolpath, StockReport), GenError> {
+    pocket3d_with_rest_prev(facets, footprint, p, None)
+}
+
+/// The re-machining sibling of [`pocket3d_with_rest`] (M3.1 D): the
+/// coarse ladder already skips what the program ahead machined, the
+/// rest leg chases what even that left standing, and the closing
+/// report reads the whole program's stock, not this operation's
+/// private copy of it.
+pub fn pocket3d_with_rest_prev(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    mask: Option<&Dexel>,
+) -> Result<(Toolpath, StockReport), GenError> {
     guard_input(facets, footprint, p)?;
     let r = p.tool_diameter * 0.5;
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
-    let coarse = ladder(facets, footprint, p, &zs, None, home(p))?;
+    let coarse = ladder(facets, footprint, p, &zs, None, mask, home(p))?;
 
-    // What the coarse ladder leaves standing, column by column.
-    let (mut dex, _) = sim_of(facets, footprint, p)?;
-    for m in &coarse.moves {
-        dex.subtract(m, r, CHORD_TOL);
-    }
+    // What the coarse ladder leaves standing, column by column: the
+    // op-frame grid simulated from raw stock, or - when the program
+    // cut before us - the document grid with our moves added to its
+    // history (one grid, one story; M3.1 D).
+    let dex = match mask {
+        Some(prev) => {
+            let mut d = prev.clone();
+            for m in &coarse.moves {
+                d.subtract(m, r, CHORD_TOL);
+            }
+            d
+        }
+        None => {
+            let (mut d, _) = sim_of(facets, footprint, p)?;
+            for m in &coarse.moves {
+                d.subtract(m, r, CHORD_TOL);
+            }
+            d
+        }
+    };
 
     // The rest ladder: same laws, half the step, rest-shaped targets.
     let zs_r = cut_levels(p.top_z, p.bottom_z, p.stepdown * 0.5);
     let start = coarse.moves.last().map_or_else(|| home(p), |m| m.to);
     let mut moves = coarse.moves;
-    match ladder(facets, footprint, p, &zs_r, Some(&dex), start) {
+    match ladder(facets, footprint, p, &zs_r, Some(&dex), None, start) {
         Ok(rp) => moves.extend(rp.moves),
         // Nothing stood above any rest plane: the coarse path was
         // already clean at lattice scale. A success, not a refusal.
@@ -368,10 +411,15 @@ pub fn pocket3d_with_rest(
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }
 
-    // The verdict on the whole job: re-run the sim from raw stock over
-    // the combined path, so the report describes the machining, not
-    // one of its legs.
-    let (mut dex, part) = sim_of(facets, footprint, p)?;
+    // The verdict on the whole job: re-run the sim from where this
+    // operation started - raw stock, or the program's standing state
+    // - over the combined path, so the report describes the machining,
+    // not one of its legs.
+    let mut dex = match mask {
+        Some(prev) => prev.clone(),
+        None => sim_of(facets, footprint, p)?.0,
+    };
+    let part = stock_sim::part_surface(facets, dex.x0, dex.y0, dex.cell, dex.nx, dex.ny);
     for m in &path.moves {
         dex.subtract(m, r, CHORD_TOL);
     }
@@ -561,16 +609,28 @@ fn sim_of(
 
 /// One ladder run: the level loop shared by both entry points. `zs` is
 /// the plane list, `rest` the post-coarse state whose still-standing
-/// columns the pass is aimed at (None: the pure level law), and
-/// `start` where the builder begins - the home position for the coarse
-/// run, the coarse path's end for the rest run, so the two legs chain
-/// into one path.
+/// columns the pass is aimed at (None: the pure level law), `mask` the
+/// state LEFT BY PREVIOUS OPERATIONS that bounds the coarse run
+/// itself (M3.1 D: rest machining - a column already machined at or
+/// below this plane is cut by nobody twice), and `start` where the
+/// builder begins - the home position for the coarse run, the coarse
+/// path's end for the rest run, so the two legs chain into one path.
+///
+/// Why the mask cannot endanger an entry motion: a ramp's legality is
+/// the islands superset - a chord legal in the deepest (most crowded)
+/// center is legal at every plane above it. The mask term shrinks
+/// upward too, but a chord point the mask removes at an intermediate
+/// plane is a column whose standing top sits below that plane, and a
+/// cutter whose bottom travels at or above a column's top touches
+/// nothing there. Air, never a wall: the island term is the only one
+/// with walls to prove against, and the island superset is untouched.
 fn ladder(
     facets: &[Triangle],
     footprint: &Region,
     p: &Pocket3DParams,
     zs: &[f64],
     rest: Option<&Dexel>,
+    mask: Option<&Dexel>,
     start: Point3,
 ) -> Result<Toolpath, GenError> {
     let r = p.tool_diameter * 0.5;
@@ -594,6 +654,16 @@ fn ladder(
             // intersection honest: a part column above z is an island,
             // so the sim's coarser top cannot smuggle part material
             // into a rest target.
+            None => target,
+            Some(dex) => target.intersect(&dex.above(z)?)?,
+        };
+        let target = match mask {
+            // The same intersection for what EARLIER operations left
+            // standing (M3.1 D): a column they machined to at or below
+            // this plane must not be tiled again. Pure subtraction -
+            // the masked target is a subset of the unmasked one, and
+            // skipping a column with nothing standing above the plane
+            // cannot cut anything.
             None => target,
             Some(dex) => target.intersect(&dex.above(z)?)?,
         };
@@ -852,4 +922,5 @@ mod tests {
         let ae = engagement(&dex, Point2::new(2.0, 2.0), Point2::new(2.0, 2.0), 5.0, 1.0);
         assert!((ae - 1.0).abs() < 1e-12, "got {ae}");
     }
+
 }

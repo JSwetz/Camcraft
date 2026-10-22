@@ -14,8 +14,9 @@ use hsmworks_app::geometry::{Point3, Triangle};
 use hsmworks_app::machining2d::{GenError, PocketStrategy};
 use hsmworks_app::machining3d::{
     Entry3D, FFO_FLOOR, Pocket3DParams, engagement_step, material_above, optimize_feed, pocket3d,
-    pocket3d_with_rest,
+    pocket3d_prev, pocket3d_with_rest, pocket3d_with_rest_prev,
 };
+use hsmworks_app::stock_sim::Dexel;
 use hsmworks_app::verify::{Mode, ToolGeom, VerifyContext, verify};
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
@@ -816,4 +817,76 @@ fn ffo_is_deterministic_and_hands_a_rapid_only_path_back_untouched() {
     let rapids = b.finish();
     let out = optimize_feed(&rapids, &f, &region, &prm).unwrap();
     assert_eq!(out.moves, rapids.moves, "a path that cuts nothing modulates nothing");
+}
+
+#[test]
+fn a_prev_mask_only_ever_removes_cuts() {
+    // M3.1 D's mask law at the generator: the left half of the slab
+    // stands machined to its floor (-10, what an operation ahead in
+    // the program left), the right half stands full. The masked
+    // ladder must cut the right half and never the left - fewer
+    // moves, and no cut move enters the machined side. A `None`
+    // mask reproduces `pocket3d` move for move: the first operation
+    // of a program is exactly the old behavior.
+    let f = slab();
+    let region = silhouette(&f);
+    let pp = params(Entry3D::Plunge, 0.0);
+    let full = pocket3d(&f, &region, &pp).expect("the slab cuts");
+    let none = pocket3d_prev(&f, &region, &pp, None).expect("None is the plain run");
+    assert_eq!(none.moves, full.moves, "no mask, no change");
+    assert!(
+        full.moves
+            .iter()
+            .any(|m| { m.kind != MoveKind::Rapid && m.to.x < -6.0 && m.to.z < 0.0 }),
+        "the unmasked run tiles the left half"
+    );
+    let mut mask = Dexel::block(-20.0, -20.0, 20.0, 20.0, 0.0, 1.0).unwrap();
+    for iy in 0..mask.ny {
+        for ix in 0..mask.nx {
+            let x = mask.x0 + (ix as f64 + 0.5) * mask.cell;
+            if x < 0.0 {
+                mask.top[iy * mask.nx + ix] = -10.0;
+            }
+        }
+    }
+    let masked = pocket3d_prev(&f, &region, &pp, Some(&mask)).expect("the right half cuts");
+    assert!(
+        masked.moves.len() < full.moves.len(),
+        "masked {} vs full {}",
+        masked.moves.len(),
+        full.moves.len()
+    );
+    for m in &masked.moves {
+        // Every non-rapid move stands on the untouched side; rapids
+        // fly over whatever they like, above the standing material.
+        if m.kind != MoveKind::Rapid {
+            assert!(
+                m.to.x >= -6.0,
+                "cut move at x {} crossed the mask",
+                m.to.x
+            );
+        }
+    }
+}
+
+#[test]
+fn a_fully_machined_mask_refuses_rather_than_cutting_air() {
+    // The redundant-operation law: where the program ahead left the
+    // whole footprint at or below every plane, every masked target
+    // is empty and the ladder says so as `Empty` - the refusal that
+    // keeps an air-cutting operation out of a posted program.
+    let f = slab();
+    let region = silhouette(&f);
+    let pp = params(Entry3D::Plunge, 0.0);
+    let mask = Dexel::block(-20.0, -20.0, 20.0, 20.0, -10.0, 1.0).unwrap();
+    assert!(matches!(
+        pocket3d_prev(&f, &region, &pp, Some(&mask)),
+        Err(GenError::Empty(_))
+    ));
+    // The rest-rough variant refuses from its coarse leg too, before
+    // spending a single rest-ladder step.
+    assert!(matches!(
+        pocket3d_with_rest_prev(&f, &region, &pp, Some(&mask)),
+        Err(GenError::Empty(_))
+    ));
 }
