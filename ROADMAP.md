@@ -1123,7 +1123,17 @@ registry home before Phase 4's multi-axis and turning families arrive.
       operations falls out of the stamp's revision signature, so unchanged
       re-imports churn nothing and same-count-different-solid updates cannot pass
       in silence (M3.1 stage A)
-- **Re-MACHining**: automatic rest-rough against areas machined by previous operations, minimizing redundant air-cutting
+- ✅ **Re-MACHining**: automatic rest against the areas previous operations
+      machined - `rest::prior_state` replays every predecessor's CACHED moves
+      through the stock_sim dexel grid and hands the 3D pocket's level ladder a
+      mask that only ever removes cuts (a masked run is a subset of the
+      unmasked one, so air-cutting shelves vanish and the islands law still
+      guards the part). The predecessor's term in a dependent's stamp is the
+      hash of its recorded path, not of its intentions: an edited,
+      unregenerated operation moves nobody, and a program converges within two
+      `RegenerateAll` rounds. A fully-cut duplicate refuses as Empty with the
+      "already machined" word; program order is the post's order - names sorted,
+      the same sequence `posting::program_ops` walks (M3.1 stage D)
 - ✅ **Parameter propagation**: changed stock, tool, or WCS flows correctly
       through dependents - the tool and height arms already digest live world
       state, and the copy that could go stale was `FromModel` stock:

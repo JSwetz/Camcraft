@@ -9,7 +9,82 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
-## M3.1 C - Geometry association workflow (this commit)
+## M3.1 D - Re-machining (this commit)
+
+**The program ahead of an operation is an input, and the honest digest
+of it is the PATH ON RECORD.** Stage D made `Pocket3D` read the rest
+material its predecessors left: `rest::prior_state` replays every
+earlier operation's cached moves through the `stock_sim` dexel grid and
+hands the generator a mask that only ever REMOVES cuts (a masked run is
+always a subset of the unmasked one - skipping columns whose material
+already stands low cuts air, never gouges). The decisions inside that
+one sentence:
+
+- **The predecessor's digest term is a hash of its cached moves, not
+  its recorded stamp.** The first design hashed stamps; the survey of
+  the command layer showed why that cannot work: `EditOperationParams`
+  drops an operation's stamp to `None` (the "staleness on the copy"
+  convention from M3.1 B/C), so a mere parameter edit - which changes
+  NOTHING the machine would post today, because the cache still holds
+  the old path - would have marked every dependent operation Stale.
+  The path-hash term keeps the law the rest module documents: a
+  dependent regenerates when what would post moves, and a program of
+  edited-but-unregenerated predecessors converges in two
+  `RegenerateAll` rounds (round 1 regenerates the edited predecessors
+  - the dependent was Ok when the batch was built, so it is not in it;
+  the new caches then mark the dependent Stale; round 2 re-machines
+  it). Cost to revisit: the digest walk clones and hashes every
+  predecessor's cached moves on every `status_of` - the same order of
+  work the world-read (`toolpath_of` returns an owned clone) already
+  forces, but O(path) per frame per dependent is more than stage C's
+  cheap-live-questions budget intends. A memoized `path_digest` u64 on
+  the cached-Toolpath component, written at generation, would make it
+  O(1); it needs a `#[serde(default)]` field addition (0 means
+  "compute once"), not a version bump - a good M3.x tune-up.
+- **`prior_stale` is the LAST question in `stale_reason`, and reaching
+  it forces the answer.** Every own-input question (tool, source,
+  picks, heights) came back clean while the stamp still mismatches -
+  so the rest digest is what moved, and only a cutting predecessor can
+  move it: the reason names the first cutting predecessor and says
+  "regenerate the program in order". In the compound case (this
+  operation's parameters WERE edited, and a predecessor also cuts) the
+  advice is still exactly right - regenerating the program fixes both
+  - but the attribution may name the predecessor when part of the
+  story is its own edit. The single-digest stamp cannot split that;
+  saying so would need the per-term baselines that stage C declined.
+- **The mask applies to every `Pocket3D`, not only `rest_rough`
+  ones.** The flag's job is the closing rest pass; the level ladder's
+  "don't recut what stands lower" law is independent of it. This makes
+  a redundant duplicate operation refuse as Empty ("the operations
+  ahead in the program already machined this area") instead of
+  silently air-cutting - the Prime Directive at the program level.
+- **A never-generated predecessor contributes only its name to the
+  digest**; the first operation of a program has no rest term at all,
+  so existing stamps are bit-for-bit what they were before stage D
+  (the inert-data law), and nothing in persistence changed (v20
+  stands).
+- **Rotated stock refuses by name, not by guesswork.** The program
+  sim needs an axis-aligned grid; a job whose stock carries a rotation
+  gets `rest from previous operations: the program sim models an
+  axis-aligned stock; this stock carries a rotation` out of generate -
+  honest, and fixable by re-seating the stock.
+- **Program order is the post's order - the name-sort wart included.**
+  `rest::ahead_of` walks `named_entities` in the same order
+  `posting::program_ops` does, so an operation named `Operation10`
+  sorts ahead of `Operation2` for re-machining exactly as it does for
+  the machine. Fixing the sort (creation-order or explicit sequence
+  numbers) is a roadmap question; forking it here would make
+  re-machining disagree with the post, which is the one disagreement
+  this feature must never have.
+- **The fixture law the tests encode:** a `Pocket3D` footprint is the
+  model's projected silhouette minus the columns the solid still fills
+  - so a through-cavity model has its void OUTSIDE the region a pocket
+  will ever enter, and re-machining tests must model a SOLID plate
+  with a BLIND pocket. (Found the hard way: a through-hole plate made
+  every masked level read empty. The law itself is M2.1's and correct;
+  the test geometry was lying.)
+
+## M3.1 C - Geometry association workflow
 
 **"References, not copies" was already true; stage C made it felt.** The
 survey's finding: picks store feature IDS (content hashes), resolved
