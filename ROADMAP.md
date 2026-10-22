@@ -1117,7 +1117,14 @@ registry home before Phase 4's multi-axis and turning families arrive.
       re-imports churn nothing and same-count-different-solid updates cannot pass
       in silence (M3.1 stage A)
 - **Re-MACHining**: automatic rest-rough against areas machined by previous operations, minimizing redundant air-cutting
-- **Parameter propagation**: changed stock, tool, or WCS flows correctly through dependents
+- ✅ **Parameter propagation**: changed stock, tool, or WCS flows correctly
+      through dependents - the tool and height arms already digest live world
+      state, and the copy that could go stale was `FromModel` stock:
+      `UpdateModel` now re-derives the stock's material inside the same undo
+      unit, and the stock stamp digests the copy's facet signature, so a
+      source-model update reaches stock-based operations through the metal
+      and a stock whose source was deleted stays honestly fresh
+      (M3.1 stage B)
 
 ### M3.2 - Setups & Documentation
 **Goal: multi-setup production jobs with paperwork.**

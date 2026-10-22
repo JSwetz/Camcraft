@@ -9,6 +9,47 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M3.1 B - Parameter propagation (this commit)
+
+**The stamp should read what the path reads.** Stage B's survey found the
+"stock, tool or WCS" bullet was two-thirds done by architecture: the tool
+arm already digests the named tool entity's live numbers (a `ChangeTool`
+edits the entity every stamp reads through), and `stamp_with` folds each
+`Height`'s *resolved* Z - which asks the world for stock/model bounds and
+the WCS slot's placement. `heights.rs` and `operations.rs` already lock
+that behavior with tests; nothing was added, it was verified. The real gap
+was one arm: `FromModel` stock, whose geometry is a materialized copy, was
+digesting only the copy's NAME.
+
+- **Propagation happens inside the update command, not lazily at read
+  time.** `UpdateModel` snapshots any derived stock's facets at
+  construction and writes the new ones at apply, so model and material
+  trade back together on undo - one user action, one undo unit. The
+  alternative (stock geometry re-derived on every read) threads a
+  special-case layer through viewer, simulator, and post; the codebase's
+  law is that the world holds the truth, and `SetStock` already
+  materializes copies. Cost to revisit: the guard is a single
+  `stock_of()` predicate; a lazy scheme would delete its two write sites
+  and add a derivation to each consumer instead.
+- **The stock stamp digests the copy, not the source.** The generator
+  mills the stock's facets, so the stock's facets are what staleness
+  tracks - the source's name stays in the digest as provenance only.
+  Deliberate consequence: delete the source model and stock-based
+  operations stay Ok, because the material they describe has not moved
+  (a test pins it). Placement is never re-adopted either: an update
+  changes the metal, not the setup - the stock's own `Location` stays as
+  the user put it.
+- **The Selection arm joined the ids-as-signatures law.** It digested
+  `feature::digest_of` (per-facet positions), which churns a pick on a
+  pure re-tessellation whose faces all survive. It now digests
+  `revision::signature`, same as the Entity arm; chain and patch ids are
+  derived from face content, so a surviving face set cannot hide a moved
+  pick. `digest_of` stays as the Features cache key (model.rs) - there it
+  is exactly right, a content address for memoization.
+- **No persistence change.** Propagation is a command-time write; the
+  stock's facets are already persisted in v20, so load never needs to
+  re-derive anything and the version stays put.
+
 ## M3.1 A - Model revisions and stable feature identity (this commit)
 
 **A model revision is a content event, and content already has ids.** Stage
