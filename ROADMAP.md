@@ -89,9 +89,9 @@ home.
 | Blend | 📋 | M2.5 |
 | Morph | 📋 | M2.5 |
 | Corner | 📋 | M2.5 |
-| Flow (flowline; ruled-surface flow waits for M4.1) | 📋 | M2.5 |
+| Flow (flowline; ruled-surface flow waits for M5.1) | 📋 | M2.5 |
 | Deburr | 📋 | M2.5 |
-| 3+2 roughing (tilted plane, indexed) | 📋 | M4.1 |
+| 3+2 roughing (tilted plane, indexed) | 📋 | M5.1 |
 
 ### Milling — Drilling
 
@@ -104,47 +104,47 @@ home.
 
 | Operation | Status | Home |
 |-----------|--------|------|
-| Rotary offset roughing | 📋 | M4.1 |
-| Multi-axis roughing | 📋 | M4.1 |
-| Swarf | 📋 | M4.1 |
-| Advanced swarf | 📋 | M4.1 |
-| Multi-axis contour | 📋 | M4.1 |
-| Rotary parallel | 📋 | M4.1 |
-| Rotary contour | 📋 | M4.1 |
-| Multi-axis finishing | 📋 | M4.1 |
+| Rotary offset roughing | 📋 | M5.1 |
+| Multi-axis roughing | 📋 | M5.1 |
+| Swarf | 📋 | M5.1 |
+| Advanced swarf | 📋 | M5.1 |
+| Multi-axis contour | 📋 | M5.1 |
+| Rotary parallel | 📋 | M5.1 |
+| Rotary contour | 📋 | M5.1 |
+| Multi-axis finishing | 📋 | M5.1 |
 
 ### Turning — Operations
 
 | Operation | Status | Home |
 |-----------|--------|------|
-| Facing | 📋 | M4.2 |
-| Profile roughing | 📋 | M4.2 |
-| Profile finishing | 📋 | M4.2 |
-| Roughing groove | 📋 | M4.2 |
-| Finishing groove | 📋 | M4.2 |
-| Adaptive roughing (turning) | 📋 | M4.2 |
-| Turning groove | 📋 | M4.2 |
-| Turning single groove | 📋 | M4.2 |
-| Turning threading | 📋 | M4.2 |
-| Turning boring | 📋 | M4.2 |
-| Turning parting | 📋 | M4.2 |
-| Turning chamfering | 📋 | M4.2 |
-| Taper turning | 📋 | M4.2 |
-| Form turning | 📋 | M4.2 |
-| Multi-pass turning | 📋 | M4.2 |
-| Drill (radial/axial, live tooling) | 📋 | M4.2 |
-| Hole recognition (on the turned solid) | 📋 | M4.2 |
+| Facing | 📋 | M5.2 |
+| Profile roughing | 📋 | M5.2 |
+| Profile finishing | 📋 | M5.2 |
+| Roughing groove | 📋 | M5.2 |
+| Finishing groove | 📋 | M5.2 |
+| Adaptive roughing (turning) | 📋 | M5.2 |
+| Turning groove | 📋 | M5.2 |
+| Turning single groove | 📋 | M5.2 |
+| Turning threading | 📋 | M5.2 |
+| Turning boring | 📋 | M5.2 |
+| Turning parting | 📋 | M5.2 |
+| Turning chamfering | 📋 | M5.2 |
+| Taper turning | 📋 | M5.2 |
+| Form turning | 📋 | M5.2 |
+| Multi-pass turning | 📋 | M5.2 |
+| Drill (radial/axial, live tooling) | 📋 | M5.2 |
+| Hole recognition (on the turned solid) | 📋 | M5.2 |
 
 ### Turning — Part handling
 
 | Operation | Status | Home |
 |-----------|--------|------|
-| Part orientation | 📋 | M3.2 (setups, datums) |
-| Part clamping | 📋 | M3.2 (fixtures) |
-| Part loading | 📋 | M4.2 (bar feeder) |
-| Part unloading | 📋 | M4.2 (bar feeder) |
-| Part transfer | 📋 | M4.3 (automation) |
-| Part inspection | 📋 | M4.3 (automation) |
+| Part orientation | 📋 | M3.2 placement flip; full rotation M5.2 |
+| Part clamping | ✅ | M3.2 (fixtures) |
+| Part loading | 📋 | M5.2 (bar feeder) |
+| Part unloading | 📋 | M5.2 (bar feeder) |
+| Part transfer | 📋 | M5.3 (automation) |
+| Part inspection | 📋 | M5.3 (automation) |
 
 ---
 
@@ -501,7 +501,7 @@ bounded by the kittest snapshots.
       user; pins are a document setting - persisted with the project like
       panel docking, not an undoable command (undo replays cuts, not layout).
 - **The home law**: M1.4.3 lands before the first operation of any new
-      family (the M2.5 strategies, the M4.1 multi-axis ops, the M4.2
+      family (the M2.5 strategies, the M5.1 multi-axis ops, the M5.2
       turning ops) - an operation with no ribbon home is a bug, not
       a backlog item.
 
@@ -1093,7 +1093,7 @@ before touching metal.
 - **Ramp**, **Morphed spiral**, **Geodesic**: sloped paths and two new
       placements on M2.2's polar law
 - **Blend / Morph / Corner / Project-generalization**, **Flow** (flowline
-      on freeform; ruled-surface flow waits for M4.1's axis control),
+      on freeform; ruled-surface flow waits for M5.1's axis control),
       **Deburr** (edge-break toolpaths; pairs with M2.4's chamfer)
 
 ---
@@ -1103,7 +1103,7 @@ before touching metal.
 The workflow that justified HSMWorks' name: the model changes, and the toolpaths
 update. Re-MACHining, multi-setup jobs, posts for the machines people actually
 own. The operations catalog completes here too - every 2D/3D name gets a
-registry home before Phase 4's multi-axis and turning families arrive.
+registry home before Phase 5's multi-axis and turning families arrive.
 
 ### M3.1 - Associativity & Regeneration
 **Goal: a model revision no longer means rebuilding the job.**
@@ -1153,10 +1153,28 @@ registry home before Phase 4's multi-axis and turning families arrive.
       clones a setup's stock and placed WCS into its own names, `datum_from` kept as
       provenance; program order is setup rank then name, rest masks same-setup only
       (M3.2 stage A)
-- **Seperate workspaces**: Turning, Milling, Millturning. Extras (not critical but for the future): Sinker Electric Discharge Machining, Wire Electric Discharge machining, Laser/Plasma cutting, working with other setup types.
-- **Fixture modeling**: vises, clamps, and tables that collision checking knows about
-- **Setup sheets**: printable setup documentation with tools, offsets, and stock (like the images in the [SolveCraft setup sheet reference](https://github.com/bherbruck/solvecraft/blob/main/Documentation/reference/setup-sheet/README.md) but generated from our CAM data)
-- **Tool list**: per-setup tool inventory with change counts and run time
+- ✅ **Seperate workspaces**: the workspace follows the machine's kind, inferred from
+      the `.mch` axis inventory it already declares (X/Y/Z → milling, +rotary →
+      mill-turning, X/Z without Y → turning, undecidable → milling - the assumption
+      every other line of code already makes); a turning document darkens the milling
+      `Create` cells with a tip, because generating an invented turning workspace
+      would be the silent wrong answer - the real turning family lands with M5.2,
+      and M3.3's "machine declares its kind" replaces this inference with a stated
+      field (M3.2 stage E)
+- ✅ **Fixture modeling**: a fixture is a model wearing a marker - the user loads the
+      shop's real workholding as STEP and marks it for a setup; collision checking
+      knows the solids (shank/holder/spindle bands + rapid-air law), the spindle band
+      and the table come from the machine file, and nothing about a fixture silently
+      changes toolpaths - workholding rides the post's live gate, never the stamp,
+      so moved steel blocks the post by name without ever staling a fresh path
+      (the M2.3 law, extended; M3.2 stage B)
+- ✅ **Setup sheets**: printable text sheets generated from the CAM data itself -
+      one page per setup, form feeds between them, everything resolved live (tools,
+      offsets, stock, fixtures, the tool list); no timestamps, so the same document
+      renders byte-identical (M3.2 stage D)
+- ✅ **Tool list**: per-setup inventory in tool-change order with change counts,
+      cut/rapid travel and estimated run time - a read of what the spindle will
+      actually hold, never an editable list (M3.2 stage C)
 
 ### M3.3 - Post System & Machine Library (Release 0.3.0)
 **Goal: real G-code for real controls, written by the user, not by us guessing.**
@@ -1185,13 +1203,85 @@ registry home before Phase 4's multi-axis and turning families arrive.
 
 ---
 
-## Phase 4 — Power: Multi-Axis, Turning, Scale
+## Phase 4 - Refactoring and reuseability.
+
+The rust codebase is to complicated and convoluted. All motion types, operations, tool management,
+heights and offsets, movement, simulation. Should be isolated as smaller subcreates. Code
+files should be no larger than 400 lines of code to keep it maintainable. All tests should be isolated
+to each subcrate to make testing cleaner.
+
+### M4.1 - Seperating the code into crates
+**Goal: Sepearting all components into smaller crates.**
+
+- **Identify code blocks**: Identify and map out code for operations, setups, machines etc etc. all the parts that make out the application
+- **Chunk the parts up**: Cut all the parts apart and refactor.
+- **Move tests**: Move tests to their relevant crates.
+- **Run tests**: Make sure each crates test can be run individuall.
+- **Clean up**: Make sure all tests pass, code compiles and applicatiotn passes a user test.
+
+### M4.2 - Multi plattform build targets.
+**Goal: Building the same application, for multiple OS environments.**
+
+- **Windows**: First usecase, its what we got.
+- **Linux**: Prioritized build case, where we will have most adopters.
+- **MacOSX**: Secondary prioritsation.
+- **WASM**: A web version for online use.
+- **Docker**: Using docker builds for every target.
+
+### M4.3 - Defer HSMWorks label thru out the code.
+**Goal: Removing the HSMWorks branding as its conflicting**
+
+- **Debrand**: Find every instance of where "hsmworks" been used.
+- **Rename**: New name is "camcraft"
+
+### M4.4 - Test cost shape: fast, targeted gates
+**Goal: a gate run costs what the diff cost — no 30-minute suite tail**
+
+The dev-time tax, measured: `crates/app/tests/finish3d.rs` alone runs
+~30 min single-threaded in the debug gate, and it holds up every ladder
+regardless of what changed. The cost is concentrated in the
+envelope-VERDICT tests (`scallop_crosses_the_diagonals_and_measures_clean`,
+`the_hill_under_radial_and_spiral_is_envelope_clean`,
+`the_hill_under_contour_and_project_is_envelope_clean`) — each one is a
+grid `envelope_scan` over a 12×96 dome plus a full `verify()` in
+Envelope mode with its own `slice::project(facets, 64)`, at debug speed.
+
+- **Split LAW from VERDICT.** Law tests assert generation shape —
+  bucket membership, refusal strings, move and link counts — and must
+  run in milliseconds: generate one small path, assert the structure,
+  done. Verdict tests assert the geometry *machines clean* (scan,
+  project, envelope-verify) and are minutes each. Every suite gets this
+  cut, finish3d first: the law half stays in the default binary, the
+  verdict half moves to its own `#[test] #[ignore]` lane or a separate
+  `--test` binary so `cargo test -p hsmworks-app --test finish3d` is
+  seconds, not the tail that decides the milestone.
+- **The heavy lane runs on release, opt-in.** `#[ignore]`d verdicts
+  execute under `cargo test --release -- --ignored` — an hour of debug
+  grind is minutes optimized — scheduled at milestone closes and
+  pre-push, never per-edit. The split must not lose coverage: the count
+  of law + verdict tests before and after must match, and the verdict
+  lane keeps its own golden asserts.
+- **Targeted gate selection.** The gate ladder learns to run only the
+  test binaries the diff touches (`cargo test -p <crate> --test <name>`
+  per changed file; suites are already one binary each, so selection is
+  free), with the full ladder reserved for milestone commits. Document
+  the map in the test file headers: which binary covers which module.
+- **Budget.** Default debug ladder target: under ~5 min wall on this
+  32-core box — the finish3d split is the single biggest lever (it is
+  the current longest pole), so it lands first; then sweep the other
+  suites for the same verdict-in-the-law-lane shape (`machining3d`,
+  `rest`, `verify` envelope tests carry the same `project`+`verify`
+  pattern in smaller doses).
+
+---
+
+## Phase 5 — Power: Multi-Axis, Turning, Scale
 
 The Ultimate-edition feature set on top of a mature product: continuous
 multi-axis, mill-turn, and the performance and automation to run a shop
 programming department.
 
-### M4.1 - 5-Axis Milling
+### M5.1 - 5-Axis Milling
 **Goal: simultaneous-axis and tilted machining done safely.**
 
 - **Swarf and advanced swarf**: bladed and ruled-surface finishing,
@@ -1207,7 +1297,7 @@ programming department.
 - **Drive curves**: machine to a curve on a surface with orientation rules
 - **Machine simulation**: full kinematic simulation of the post's A/B/C motion model, not just the toolpath
 
-### M4.2 - Turning & Mill-Turn
+### M5.2 - Turning & Mill-Turn
 **Goal: lathe parts and C-axis parts from the same system.**
 
 - **Lathe machine model**: the turning side of M3.3's machine kinds - a
@@ -1225,16 +1315,16 @@ programming department.
 - **Bar feeder patterns**: catch/transfer support for production turning
 - **Mill-turn**: live tooling operations indexed and continuous (C-axis)
 
-### M4.3 - Performance & Automation (Release 0.4.0)
+### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**
 
 - **Large models**: GPU-resident sparse voxel / SDF stock simulation, streaming mesh and B-rep handling, 10M+ triangle models
 - **Generation performance**: threaded toolpath generation, incremental recompute after model changes
-- **Scripting API**: Lua bindings for batch ops - generate, verify, post, report
+- **Scripting API**: Typescript bindings for batch ops - generate, verify, post, report
 - **Part handling**: loading, unloading, and transfer choreography as
       post-emittable motion intents (the catalog's part-handling block;
       orientation and clamping are already M3.2's setups and fixtures) -
-      M4.2's bar feeders get their general form here
+      M5.2's bar feeders get their general form here
 - **In-process inspection**: probe-style measurement hooks after ops,
       feeding the deviation verdict a re-run decision, not a report tail
 - **CLI**: headless project processing and regression runs
@@ -1242,38 +1332,16 @@ programming department.
 
 ---
 
-## Phase 5 - Refactoring and reuseability.
+## Phase 6 — GPU acceleration.
 
-The rust codebase is to complicated and convoluted. All motion types, operations, tool management,
-heights and offsets, movement, simulation.. Etc etc. Should be isolated as smaller subcreates. Code
-files should be no larger than 400 lines of code to keep it maintainable. All tests should be isolated
-to each subcrate to make testing cleaner.
+The whole appplication are starting to having serious issues with graphical performance running ontop of EGUI. And we most likely
+need to figure out how to offload simulation, voxel body calculation and tool preview etc onto the GPU.
 
-### M5.1 - Seperating the code into crates
-**Goal: Sepearting all components into smaller crates.**
+### M6.1 - Explore the validity of Adding GPU acceleration support.
+**Goal: Explore the options for GPU acceleration, Vulcan is prob the best option as its properly cross platform.**
 
-- **Identify code blocks**: Identify and map out code for operations, setups, machines etc etc. all the parts that make out the application
-- **Chunk the parts up**: Cut all the parts apart and refactor.
-- **Move tests**: Move tests to their relevant crates.
-- **Run tests**: Make sure each crates test can be run individuall.
-- **Clean up**: Make sure all tests pass, code compiles and applicatiotn passes a user test.
-
-### M5.2 - Multi plattform build targets.
-**Goal: Building the same application, for multiple OS environments.**
-
-- **Windows**: First usecase, its what we got.
-- **Linux**: Prioritized build case, where we will have most adopters.
-- **MacOSX**: Secondary prioritsation.
-- **WASM**: A web version for online use.
-- **Docker**: Using docker builds for every target.
-
-### M5.3 - Defer HSMWorks label thru out the code.
-**Goal: Removing the HSMWorks branding as its conflicting**
-
-- **Debrand**: Find every instance of where "hsmworks" been used.
-- **Rename**: New name is "camcraft"
-
----
+- **Which runtime works?**: We have touched on GPU acceleration earlier, but need to revisits optimization.
+- **Cross-platform.**: It needs to work on windows, linux - first of all. MacOSX should work if linux does.
 
 ## Milestone Summary
 
@@ -1295,14 +1363,16 @@ to each subcrate to make testing cleaner.
 | **M2.4** | 2D, complete | 2D adaptive + offset pocket roughing, engrave, 2D chamfer, circular, standalone bore, helical thread milling | 📋 |
 | **M2.5** | 3-axis, complete | Steep-and-shallow, flat-area, pencil, ramp, morphed spiral, geodesic, blend/morph/corner, flow (freeform), deburr; M2.2's surface-finish params | 📋 |
 | **M3.1** | Model changes, toolpaths update | Done: stable feature identity + `UpdateModel` revision (A), stamp inputs - tool/WCS/FromModel stock propagate, staleness rides the copy (B), live-question `stale_reason` + one-undo-unit `RegenerateAll` (C), re-MACHining - rest masks from predecessors' recorded paths, converges in two rounds (D) | ✅ |
-| **M3.2** | Production setups | Multi-setup, fixtures, setup sheets, tool lists | 📋 |
+| **M3.2** | Production setups | Done: multi-setup with implicit-setup law + datum transfer (A); fixtures - user STEP solids wearing a marker, spindle/table bands from the `.mch`, live-gate collision law (B); per-setup tool list in change order (C); setup sheets, one form-fed page per setup, no timestamps (D); workspaces by machine kind, axis-inventory inference (E) | ✅ |
 | **M3.3** | Every control covered | Post engine, 5 posts, machine definitions (mill/lathe kinds, axis limits, speeds and feeds, coolant), RTCP, 0.3.0 | 📋 |
-| **M4.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
-| **M4.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
-| **M4.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
-| **M5.1** | Code refactor | Refactor of codebase, test, and code organisation. | 📋 |
-| **M5.2** | Multibuilds | Refactor of codebase is done and application builds for multipls OS and environments. | 📋 |
-| **M5.3** | Defer Code | All references to "hsmworks" in the code needs to be renamed and re-referenced to camcraft | 📋 |
+| **M4.1** | Code refactor | Refactor of codebase, test, and code organisation. | 📋 |
+| **M4.2** | Multibuilds | Refactor of codebase is done and application builds for multipls OS and environments. | 📋 |
+| **M4.3** | Defer Code | All references to "hsmworks" in the code needs to be renamed and re-referenced to camcraft | 📋 |
+| **M4.4** | Test cost shape | Law/verdict test split, `#[ignore]`+release heavy lane, diff-targeted gate selection - finish3d's 30-min tail first | 📋 |
+| **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
+| **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
+| **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
+| **M6.1** | GPU acceleration | Simulation, preview, SDF, Voxel, B-Rep - acceleration | 📋 |
 
 ## Open questions & deferred
 
@@ -1322,7 +1392,7 @@ to each subcrate to make testing cleaner.
 - **Cutting data**: no licensed handbook is affordable long-term - grow a homegrown
   materials/tools database under an open license, seeded from public vendor catalogs
 - **Patent check (FTO)**: high-efficiency milling and some 5-axis orientation techniques
-  were patented in the 2000s-2010s; run a freedom-to-operate review before M2.1 and M4.1
+  were patented in the 2000s-2010s; run a freedom-to-operate review before M2.1 and M5.1
   to confirm the literature we're implementing from is unencumbered
 - **Probing / workpiece verification**: deferred until post Phase 2 (which probing protocol
   sets first - RS238 or Renishaw-style macros?)

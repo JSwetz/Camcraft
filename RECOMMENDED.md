@@ -9,6 +9,146 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M3.2 B-E - Fixtures, tool lists, sheets, workspaces (this commit)
+
+**A fixture is a model wearing a marker, and the marker is the whole
+state.** Stage B's first draft grew a parametric `FixtureKind` enum with
+synthetic vise/chuck geometry. The re-spec during the stage settled it
+the other way: the shop's real workholding is a solid - a STEP file the
+user loads - so a fixture is any model entity wearing
+`FixtureDef { setup: Option<String> }`, positioned by the same
+`Location` a part uses, and the only geometry law is the one the
+collision check always had: facets in world space.
+
+- **The user brings the fixture; the machine file brings the machine.**
+  The preloaded "fixtures" are the spindle band (from the `.mch`'s
+  `spindle body_diameter`/`body_length`, a cylinder past the holder) and
+  the table (`Machine/Table` - a derived prose row, never an entity: it
+  exists while the `.mch` says travel does, and its underside is
+  unbounded by MAX_FIXTURE_DIM). No synthetic vises ship with the app;
+  vises and clamps are the user's solids. Cost to revisit: parametric
+  presets would be a content decision (a bundled fixture library), not
+  a data-model one - the marker already carries the binding.
+- **The collision gate is cheap-by-construction, and workholding never
+  rides the stamp.** Verify takes `fixtures: &[FixtureBox]` +
+  `spindle: Option<(r, len)>` and runs its stack test (shank → holder →
+  spindle, then the flute column itself, first-hit-wins per move, every
+  cylinder SWEPT along the move's xy path rather than sampled at its
+  endpoints, rapids against every box with no
+  vertical exemption) only when the list is non-empty - a document
+  without workholding runs byte-identical pre-M3.2B checks. The laws
+  were first wired into `GenStamp` as a digest term; the UI's own M2.3
+  tests caught the contradiction ("load the roomy machine and the same
+  program posts without re-generating" cannot coexist with a stamp that
+  churns on machine load), and the Prime Directive's other half is
+  served by the fix, not weakened by it: the post's LIVE `verification_
+  gate` re-runs the region-free band laws (`verify::bands_vs_fixtures`,
+  `verify::rapids_vs_fixtures`) against the cached paths and the steel
+  as it stands now. A moved vise cannot silently post - the gate names
+  the op, move, and struck element - and no fixture or machine action
+  can stale a fresh toolpath. Evidence is computed here and now, never
+  a cached verdict: the M2.3 machine-limits law, extended to clamping.
+- **Two laws stage B's own acceptance test fixed, not review.** The
+  moved-vise gate test went red the week the code went in, and it was
+  right twice over - the Prime Directive working as designed, a silent
+  wrong answer caught by a test rather than on the shop floor. (1) The
+  workpiece sim counted fixture-tagged models as PART geometry: a vise
+  box read as material the paths promised to leave standing, so a face
+  near the jaws reported phantom gouging. Fixtures joined the stock
+  exclusion clause - setup furniture, never design intent. (2) The band
+  law sampled each cylinder at a move's law points, so an 8 mm jaw
+  standing between two far endpoints could be read straight past, clean
+  and silent. Bands now sweep the cylinder along the move's xy trace -
+  one segment for a straight, chords for an arc (`fixture::
+  band_hits_box`, z rule from the stack law, xy rule from the rapid
+  law) - a strict superset of the point test, so every verdict made
+  before it stands. Both halves keep the module's err-toward-HIT law,
+  with its one stated err toward silence (flush z contact within
+  FIXTURE_HIT_TOL is contact, not crash) untouched.
+- **The struck element is named for what is at that z.** The flute
+  column fallback reported its hits as "shank" - a shop-facing lie,
+  since the shank stands above the flutes and a flute-in-vise means the
+  endmill itself is milling the clamping steel. `FixturePart::Flute` is
+  a new variant (additive: the existing names stay the file-format
+  contract) and the fallback reports the flute as itself.
+- **The tree marks workholding, and the mark is marker-driven.** A
+  fixture model's browser row carries the vise glyph (original drawing,
+  `assets/ui/fixture.png`, in the icons module's own hand-drawn family)
+  and " (fixture)" in the suffix column ahead of " (hidden)"; it keeps
+  the eye, because a parked vise is still hideable. `panes::
+  model_row_marks` is the pure mapping - no geometry is relabeled by
+  name matching anywhere in the shell.
+
+- **A fixture-bound `DeleteFixture` undoes whole.** Marker, placement,
+  and facets are snapshotted at construction and replayed verbatim,
+  like every other deletion command; `DeleteEntity` learned to keep the
+  marker through undo/redo the same way.
+- **Import-as-fixture is two undo units.** The STEP parse stays on the
+  worker (no command constructor reads disk in the UI); when the model
+  lands, a `TagFixture` bound to the then-active setup executes behind
+  it. Undo trades the marker back first, the solid second. A single
+  fused command would have meant either a world-reading constructor or
+  a headless-only path - the seam is cheaper than either.
+
+**Stage C's tool list is a pure read, in change order, with two stated
+constants.** `tool_list::for_setup` walks the program order of one setup
+context and emits one `ToolRow` per tool the spindle actually holds:
+operations, cut/rapid travel, minutes, change count. `RAPID_MM_S = 100`
+and `TOOL_CHANGE_S = 20` are the shop's defaults, documented in the
+module - not yet machine-file numbers, because the `.mch` rapids are
+per-axis ceilings and converting them to a travel-time law would invent
+acceleration data the file does not carry. Cost to revisit: the machine
+file growing an explicit rapid-rate-for-time (G0 feed) field, then this
+reads it; until then one honest constant.
+
+**Stage D's sheet is a view, not a document.** `setup_sheet::render`
+resolves everything live (heights, stock, offsets, fixtures, the stage-C
+tool list), prints NO timestamps (the same file renders byte-identical
+- the determinism law the goldens already keep), and one setup per
+call; the UI's export writes all setups as one .txt with form feeds
+(`\u{0c}`) between pages - one file per job instead of one per setup,
+because a job's paperwork travels together. The dialog runs no command:
+export changes nothing about the document, so the history must not
+grow a "undo the export" absurdity.
+
+**Stage E gates the ribbon on an axis-inventory inference, not a new
+file format.** `machine::kind` reads the axes the `.mch` already
+declares: Y → mill, Y+rotary → mill-turn, X/Z-without-Y → lathe,
+anything undecided → mill (what every assumption in this codebase
+already is). A lathe document darkens every mill `Create` cell with a
+tip that says why - the honest workspace, not a lathe operation set we
+cannot generate until M4.2. M3.3's "machine declares its kind" can
+replace this inference with a stated field; the ribbon already reads
+through the one function.
+
+**Verification found the stage-A commit's one red test - logged
+honestly.** `stock_sim_document::missing_pieces_refuse_by_name` asserted
+the literal `"no stock defined"`, but 33f5658's own `setup::
+stock_entity_name` rewording had made the refusal name WHICH stock
+(`no stock 'Stock' - ...`). The refusal was correct; only the test's
+earlier literal was stale, and stage A shipped with it red because the
+serial 30-40-minute ladder's aggregate RC buried which check moved. The
+assert now tests the LAW phrase (`no stock` + `judges material`), not
+the setup's name - the name is a fixture, the law is the claim. The
+sim≡post gate equality assert in the same test still proves both voices
+come from one construction.
+
+**The gate method changed mid-milestone, at the user's call: targeted
+parallel binaries, `test result:` lines as truth - not re-ladders.**
+Build once (`cargo test -p ... --no-run`), run the individual
+`target\debug\deps\<name>-<hash>.exe` in parallel (32 cores, direct
+exes take no cargo lock), parse their summary lines. Three hard-won
+rules: (a) only the hashes from the LATEST `--no-run` list are current -
+deps/ keeps stale old-hash binaries that test old code (a false FAILED
+from a pre-edit binary cost a detour); (b) Start-Process ExitCode under
+redirection is unreliable in .NET (WaitForExit(ms) returns before the
+stream closes) - the printed result line is the verdict, never the RC;
+(c) windowed/GPU suites (the ui lib snapshot tests, egui_app, shell,
+gpu_render) must run SERIALLY or they spuriously panic in shared
+window/GPU state - run concurrent, they "failed"; run alone, 108
+passed. Cost to change: none - it is a working method, not a product
+decision; AGENTS.md's testing section now carries it.
+
 ## M3.2 A - Multiple setups (code commit `33f5658`)
 
 **A setup is a name that owns a world frame, and the frame is the flip.**

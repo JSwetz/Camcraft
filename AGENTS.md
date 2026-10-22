@@ -80,7 +80,7 @@ freed by the delete hooks flecs_ecs registers for them. The invariant that
 matters is unchanged: deleting an entity must free ALL associated resources
 (e.g. the cached toolpath and rest-material meshes of a deleted operation).
 Per-type arenas for C-style `raw_data` storage are a deferred performance
-optimization (M4.3-era), not a current requirement; if a type ever adopts
+optimization (M5.3-era), not a current requirement; if a type ever adopts
 `raw_data`, it must use a per-type arena - never a global allocator - and
 must carry a delete hook that frees everything it owns.
 
@@ -117,13 +117,41 @@ query directly (no helper accessors). `decompose` stores facets directly into
 `Part`.
 
 Check only touched files: `cargo check -p hsmworks-ui` / `-p hsmworks-app` (not
-the whole workspace, which rebuilds flecs).
+the whole workspace, which rebuilds flecs). Once M4.1's subcrate split lands,
+the same rule reads `-p` per touched crate.
+
+## Code shape (Phase 4 onward)
+
+Phase 4 refactors the codebase for reuse; work in the shape it is heading to:
+
+- **400-line files.** No source file grows past ~400 LOC; split along the
+  domain seam instead of stacking another section onto a large file.
+- **One concern per subcrate.** Motion types, operations, tool management,
+  heights/offsets, movement and simulation become isolated subcrates (M4.1).
+  Until the split lands, keep those boundaries honest inside `app`: new code
+  goes in the module that will become its crate's seed, and cross-domain
+  calls go through the seams that will become crate APIs - not through
+  private helpers of another domain.
+- **Stays buildable everywhere.** No platform-specific assumptions in core
+  code (M4.2 ships Windows/Linux/macOS builds from the same source).
+- **Neutral naming.** The product label changes from hsmworks to camcraft at
+  M4.3; keep crate names as-is for now, but new user-visible strings, doc
+  comments and identifiers should not spread the old brand.
 
 ## Testing
 
 `crates/app/tests/` (app + commands) and `crates/ui/tests/` (UI/event tests
 which spawn the real app via `test_harness.rs`; helpers in `ui::test_harness`,
-app-level fixtures in `crates/app/tests/common/mod.rs`).
+app-level fixtures in `crates/app/tests/common/mod.rs`). Each future subcrate
+carries its own tests inside its crate (M4.1).
+
+Gate yourself narrowly, not by re-running everything: build once with
+`cargo test -p hsmworks-app -p hsmworks-ui --no-run`, then run the individual
+test binaries for the areas you touched (`target\debug\deps\<name>-<hash>.exe`,
+in parallel - they take no cargo lock). A full-suite pass belongs at milestone
+close-out, not inside a feature loop. The slow tails (finish3d) are exactly
+what M4.4 splits up; until then, a targeted run that skips them and says so is
+an honest gate, a serial 30-40 min re-ladder is not.
 
 `VisualRunner` is auto-enabled: windows show, run fast, and stay open if closed
 early; hidden runs cap at 30s; auto-close after 10s when no test is pending; on
