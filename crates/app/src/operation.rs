@@ -1417,6 +1417,15 @@ pub fn current_stamp(
                 StockShape::FromModel { source } => {
                     h.write_u8(2);
                     h.write(source.as_bytes());
+                    // M3.1 B: the name is provenance; what gets milled is
+                    // the stock's own copy, so the copy is what the digest
+                    // reads. UpdateModel re-derives the copy inside the
+                    // update command (the propagation law), so an update to
+                    // the source lands here as a moved signature - and a
+                    // stock whose source was deleted stays honestly Ok,
+                    // because the material it describes never changed.
+                    let tris = model::facets_of(world, &entity)?;
+                    h.write_u64(revision::signature(&model::features_of_local(&tris)));
                 }
             }
         }
@@ -1458,11 +1467,13 @@ pub fn current_stamp(
                 h.write_u64(id);
                 // The pick resolves against this entity's LOCAL features
                 // (ids are transform-free) and projects through its
-                // transform, so both belong in the digest. The order-free
-                // geometry digest means a re-import that keeps the same
-                // features stays fresh, and any real change goes stale -
-                // including a different mesh that happens to repeat the
-                // facet count.
+                // transform, so both belong in the digest. The face-id
+                // signature - M3.1's ids-as-signatures law, the same one
+                // the Entity arm reads - keeps a re-import whose faces
+                // survive fresh (a re-tessellation cannot move a pick),
+                // and any real change moves ids, so it goes stale. Face
+                // ids are content hashes of their facet positions, so a
+                // different mesh that repeats the facet count cannot hide.
                 let entity = model::find_by_name(world, &g.entity)?;
                 if !digested.contains(&g.entity.as_str()) {
                     digested.push(g.entity.as_str());
@@ -1479,7 +1490,7 @@ pub fn current_stamp(
                         w(&mut h, v);
                     }
                     let tris = model::facets_of(world, &entity)?;
-                    h.write_u64(feature::digest_of(&tris));
+                    h.write_u64(revision::signature(&model::features_of_local(&tris)));
                 }
             }
         }

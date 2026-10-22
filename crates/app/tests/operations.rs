@@ -505,6 +505,133 @@ fn a_reimport_with_unchanged_geometry_keeps_operations_ok() {
     );
 }
 
+/// Face parameters for the 10 x 10 x 5 solid the stock tests below cut.
+fn face_params_5() -> OpParams {
+    OpParams::Face {
+        stepover: 3.0,
+        clearance_z: Height::fixed(10.0),
+        cut_z: Height::fixed(4.5),
+        top_z: None,
+        stepdown: None,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    }
+}
+
+fn stock_facets(world: &World) -> Vec<hsmworks_app::geometry::Triangle> {
+    let stock = model::find_by_name(world, STOCK_NAME).expect("stock exists");
+    model::facets_of(world, &stock).expect("stock carries geometry")
+}
+
+#[test]
+fn a_model_update_flows_through_a_frommodel_stock() {
+    // M3.1 B, the propagation law: stock bought from a model is a copy,
+    // so an update to the model must land on the copy inside the same
+    // command - and the operations that mill that stock must see it.
+    // The path here reads the stock, never the model directly: the only
+    // way the update can reach this operation is through the material.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    let cube_v1 = cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0));
+    history.execute(&world, ImportModel::from_mesh("block", cube_v1.clone()));
+    let cmd = SetStock::new(
+        &world,
+        StockShape::FromModel { source: "block".into() },
+        Location::default(),
+    );
+    history.execute(&world, cmd.expect("from-model stock"));
+    assert_eq!(stock_facets(&world), cube_v1.facets, "the copy starts honest");
+    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params_5());
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    assert_eq!(status(&world, "Face1"), OpStatus::Ok);
+
+    // Same facet count, same box, different walls - the pre-M3.1 blind
+    // spot, arriving this time through the stock.
+    let cmd = UpdateModel::new(&world, "block", prism_10x10x5()).expect("model exists");
+    history.execute(&world, cmd);
+    assert_eq!(
+        stock_facets(&world),
+        prism_10x10x5().facets,
+        "the material was re-derived with the model"
+    );
+    assert_eq!(
+        status(&world, "Face1"),
+        OpStatus::Stale,
+        "the stock the operation mills is different metal now"
+    );
+
+    // One undo unit: model and material trade back together, and the
+    // operation is Ok again without a regenerate - propagation is exact
+    // in both directions.
+    assert!(history.undo(&world));
+    assert_eq!(stock_facets(&world), cube_v1.facets, "the old copy is back");
+    assert_eq!(status(&world, "Face1"), OpStatus::Ok);
+    assert!(history.redo(&world));
+    assert_eq!(stock_facets(&world), prism_10x10x5().facets);
+    assert_eq!(status(&world, "Face1"), OpStatus::Stale);
+}
+
+#[test]
+fn a_frommodel_stock_survives_its_source_being_deleted() {
+    // The copy is the material, so the stamp digests the copy (M3.1 B):
+    // with the source model gone the stock's facets have not moved, the
+    // path would mill identically, and the operation is honestly Ok.
+    let (world, mut history) = {
+        let world = new_world();
+        let mut history = History::default();
+        add_tool(&world, &mut history, "EM-0400-2FL");
+        history.execute(
+            &world,
+            ImportModel::from_mesh("block", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+        );
+        history.execute(
+            &world,
+            SetStock::new(
+                &world,
+                StockShape::FromModel { source: "block".into() },
+                Location::default(),
+            )
+            .expect("from-model stock"),
+        );
+        let cmd =
+            CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params_5());
+        history.execute(&world, cmd.expect("create"));
+        history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+        (world, history)
+    };
+    let before = stock_facets(&world);
+    let cmd = DeleteEntity::new(&world, "block").expect("delete");
+    history.execute(&world, cmd);
+    assert_eq!(stock_facets(&world), before, "the material kept its geometry");
+    assert_eq!(
+        status(&world, "Face1"),
+        OpStatus::Ok,
+        "nothing a stock-based path reads has changed"
+    );
+    assert!(history.undo(&world));
+    assert_eq!(status(&world, "Face1"), OpStatus::Ok);
+}
+
+#[test]
+fn a_model_update_does_not_touch_a_box_stock() {
+    // The gate on the other side: propagation is only for stock that was
+    // bought from the model being updated. A parametric box is no one's
+    // copy, and an import must never rewrite it.
+    let (world, mut history) = face_world();
+    let before = stock_facets(&world);
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    let cmd = UpdateModel::new(&world, "part", prism_10x10x5()).expect("model exists");
+    history.execute(&world, cmd);
+    assert_eq!(stock_facets(&world), before, "the box is its own material");
+    assert_eq!(status(&world, "Face1"), OpStatus::Ok, "the stock op never read the model");
+}
+
 #[test]
 fn delete_operation_round_trips_with_its_cache() {
     let (world, mut history) = face_world();
