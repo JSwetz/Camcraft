@@ -1108,7 +1108,14 @@ registry home before Phase 4's multi-axis and turning families arrive.
 ### M3.1 - Associativity & Regeneration
 **Goal: a model revision no longer means rebuilding the job.**
 
-- **Geometry association**: operations reference model features and curves, not stale copies
+- ✅ **Geometry association**: operations reference model features and curves, not
+      stale copies - the law already held structurally (picks are live feature ids,
+      re-validated by `SetOperationGeometry`/`valid_pick`, never stored geometry), and
+      stage C adds the workflow on top of it: `stale_reason` answers WHY an operation
+      reads Stale by asking the world the live questions (vanished tool, deleted
+      source, moved pick, unreachable height plane), the properties page prints it,
+      and `RegenerateAll` fixes the whole stale job in one undo unit, skip-not-fatal
+      for anything whose generator refuses (M3.1 stage C)
 - ✅ **Model update detection**: a same-named re-import lands as `UpdateModel` on
       the one entity the name keys (revision counter, undo restores the previous
       geometry exactly); the diff is a set difference over stable content-hashed

@@ -9,6 +9,51 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M3.1 C - Geometry association workflow (this commit)
+
+**"References, not copies" was already true; stage C made it felt.** The
+survey's finding: picks store feature IDS (content hashes), resolved
+against the live world at every read, re-validated at pick time by
+`valid_pick` - no operation holds a frozen geometry copy. Drill holes
+stay params-data by the M1.6 decision (they are the pattern's geometry,
+and the model-change → Stale path already catches drift). What a user
+could not do was find out WHY a row reads STALE or fix a whole revision
+at once. Two additions:
+
+- **`stale_reason` asks the world live questions, not a stored
+  baseline.** The stamp is one digest and cannot itself say what moved.
+  The chosen design asks, in order: is the tool still there and still a
+  tool; does the stock/source entity still exist; does every picked
+  feature id still exist in its entity's live geometry; can every height
+  still resolve. When all pass, the honest answer is the general one.
+  The alternative design - storing a per-operation features baseline
+  (parts inventory) in the doc - would give exact set-differences ("two
+  faces moved, one added") at the price of a v21 persistence bump and a
+  new digest per generation. The live-questions version is ~80% as
+  precise, needs no persistence, and can never disagree with the world.
+  Cost to revisit: the baseline design layers ON this one - the question
+  order stays, the membership check just compares a stored set instead
+  of re-deriving `features_of_local`.
+- **`RegenerateAll` is skip-not-fatal, and one undo unit.** A stale
+  operation whose generator refuses (its tool vanished) must not block
+  the rest of the job - it keeps its old cache and its STALE tag
+  honestly, and the batch lists it by name. This follows validate-early:
+  construction runs every generator, so `apply`/`invert` are pure writes
+  and the compound inverts in reverse. Deliberate scope: NEVER and OK
+  operations are untouched - this is the revision-fix, not a build-all
+  (first-time generation stays a per-op choice).
+- **The affordance lives in the status strip, and only exists when
+  stale > 0.** The tree marks rows individually and the properties page
+  explains individually; the batch belongs to no entity, so it rides
+  the bar - and retires with the staleness, so the fresh-document
+  snapshot churns zero (verified: both snapshots unchanged).
+- **`for_each_height` joins `stamp_with` as the second Height-soup list**
+  - one fn enumerates every Height field per variant for the reason
+  scan. New Height params must go in BOTH lists; the doc comment says
+  so, and a missed field is a silent blind spot (the compiler cannot
+  catch it - flagged for discussion, along with whether the two soups
+  should later merge into one generated list).
+
 ## M3.1 B - Parameter propagation (this commit)
 
 **The stamp should read what the path reads.** Stage B's survey found the
