@@ -1146,7 +1146,13 @@ registry home before Phase 4's multi-axis and turning families arrive.
 ### M3.2 - Setups & Documentation
 **Goal: multi-setup production jobs with paperwork.**
 
-- **Multiple setups**: flipping strategies, per-setup stock / fixture / WCS, setup-to-setup datum transfer
+- ✅ **Multiple setups**: per-setup stock / WCS resolved through each operation's
+      declared setup (the implicit-setup law: none == the legacy globals, the first
+      CreateSetup materializes and never renames, private furniture is spawned on
+      first use); the flip is placement (rotation arrives with M3.3); datum transfer
+      clones a setup's stock and placed WCS into its own names, `datum_from` kept as
+      provenance; program order is setup rank then name, rest masks same-setup only
+      (M3.2 stage A)
 - **Seperate workspaces**: Turning, Milling, Millturning. Extras (not critical but for the future): Sinker Electric Discharge Machining, Wire Electric Discharge machining, Laser/Plasma cutting, working with other setup types.
 - **Fixture modeling**: vises, clamps, and tables that collision checking knows about
 - **Setup sheets**: printable setup documentation with tools, offsets, and stock (like the images in the [SolveCraft setup sheet reference](https://github.com/bherbruck/solvecraft/blob/main/Documentation/reference/setup-sheet/README.md) but generated from our CAM data)

@@ -9,6 +9,75 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M3.2 A - Multiple setups (code commit `33f5658`)
+
+**A setup is a name that owns a world frame, and the frame is the flip.**
+Stage A gives a document a list of setups - `SetupDef {stock, wcs,
+datum_from}` components plus one `ActiveSetup` singleton - and routes
+every stock/WCS/height read through the *operation's declared* setup,
+not through a cursor. The decisions inside that:
+
+- **The implicit-setup law: zero setups is the old world, verbatim.** An
+  operation's `setup` field is `Option<String>`; `None` and a setup named
+  by no entity both resolve - through `setup::effective` - to the legacy
+  globals `STOCK_NAME`/`WCS_SLOTS`. A pre-M3.2 document round-trips
+  through v21 unchanged and every old test passes untouched (the one
+  legitimate churn: calls that now take a setup argument).
+- **The first `CreateSetup` MATERIALIZES; it never renames.** The new
+  setup points its stock/WCS fields at the entities that already exist.
+  Renaming them would move geometry under the toolpath's feet and make
+  every stamp of every existing op read Stale for a bookkeeping event.
+  SECOND and later setups own private furniture (`"Setup2/Stock"`,
+  `"Setup2/G54"`) that is spawned LAZILY on first use - so a setup that
+  is only ever a label for a flipped second face costs zero entities.
+  Cost to revisit: eager furniture makes "does this setup own a block
+  yet?" a schema question instead of a world read; nothing else changes.
+- **Membership is declared, not cursor-derived.** `CreateOperation`
+  writes the then-active setup into the new op; moving an op later is
+  `SetOperationSetup`, which KEEPS the stamp - "Ok when the two setups
+  place their stock identically, Stale when they do not" falls out of
+  the digest machinery (stamps digest RESOLVED values - per-setup
+  height Zs, the setup-resolved stock's loc+shape - not entity names),
+  so no membership term in the stamp is needed and activation stays
+  pure inert data. The UI cursor is a display context only.
+- **One order law, rest masks same-setup-only.** `posting::program_ops`
+  calls `setup::operation_order` (setup rank by name, then name), and
+  `rest::prior_digest`/`prior_state` skip operations of other setups -
+  the program-ahead is what THIS frame machines against. Multi-setup
+  ordering is therefore rank-then-name, not browser drag order.
+- **Placement is the flip; the transform is M3.3.** A new op's world
+  frame comes from where its setup's stock block and WCS origins sit.
+  `datum_from` is inert provenance (a string); datum TRANSFER clones
+  the source's stock snap (shape+loc+facets) and placed WCS Locations
+  into the new setup's OWN names - undo removes only the clones.
+  Rotation/flip matrices deliberately do not exist yet: the roadmap
+  files "Part orientation" under M3.2's setups/datums row, and stage E
+  or M3.3's post work will attach a rotation Location to the clone.
+  Cost to revisit: none - the fields are already Locations.
+- **The program sim CLIPS between setups (documented conservative
+  law).** `stock_sim::simulate_document` walks ops in program order and
+  at each setup change folds in the new block by lowering columns to at
+  most the new stock's top, never moving what the previous setup cut -
+  a re-clamped face reads as leftover (rest, visible) rather than as
+  air (a gouge). A rotated or from-model stock in a LATER setup refuses
+  the sim outright: the frame cannot be judged, so it is not guessed.
+- **G-code words never followed the setup; entities did.** Posting
+  still writes the `WCS_SLOTS[slot]` literals - the machine's offset
+  register is the machine's, and the setup's private G54 entity is a
+  *value* posted into that word. Furniture names are RESERVED
+  (`AddTool` refuses `is_furniture_shape` names; setup-name validation
+  refuses `Stock`/`G54..G59`/`Setup1/G54`/blank).
+- **Delete refuses while any op belongs, naming it**; `ActivateSetup`
+  of a deleted setup is legal but dangling (reads fall to the first
+  existing setup), and undo replays furniture restores BY NAME, which
+  is how the lazily-spawned entities stay consistent across the
+  history walk.
+
+v20 -> v21 step-up is pure serde-default: `setup` kind, per-entity
+`stock`/`wcs`/`datum_from`, op-level `setup`, top-level `active_setup`.
+A v21 save of a setup-free document is byte-equivalent in meaning to
+its v20 (the step-up test pins it).
+
 ## M3.1 D - Re-machining (this commit)
 
 **The program ahead of an operation is an input, and the honest digest
