@@ -17,18 +17,21 @@ use crate::commands::{Command, CommandError};
 use crate::geometry::feature;
 use crate::model;
 use crate::operation::{self, FeatureSel, GeoSel, OpParams, SrcRef};
-use crate::schema::{Location, Operation, STOCK_NAME, Toolpath};
+use crate::schema::{Location, Operation, Toolpath};
 use crate::verify::Warning;
 
-fn valid_src(world: &World, src: &SrcRef) -> Result<(), CommandError> {
+fn valid_src(world: &World, setup: Option<&str>, src: &SrcRef) -> Result<(), CommandError> {
     match src {
-        SrcRef::Stock => match model::find_by_name(world, STOCK_NAME) {
-            Some(e) if model::is_stock(world, &e) => Ok(()),
-            Some(_) => Err(CommandError::Invalid(format!(
-                "'{STOCK_NAME}' exists but is not stock"
-            ))),
-            None => Err(CommandError::Invalid("no stock: set up stock first".into())),
-        },
+        SrcRef::Stock => {
+            let name = crate::setup::stock_entity_name(world, setup);
+            match model::find_by_name(world, &name) {
+                Some(e) if model::is_stock(world, &e) => Ok(()),
+                Some(_) => {
+                    Err(CommandError::Invalid(format!("'{name}' exists but is not stock")))
+                }
+                None => Err(CommandError::Invalid("no stock: set up stock first".into())),
+            }
+        }
         SrcRef::Entity(name) => {
             if name.is_empty() {
                 return Err(CommandError::Invalid("empty geometry source name".into()));
@@ -103,7 +106,12 @@ impl CreateOperation {
             return Err(CommandError::NameConflict(name.to_string()));
         }
         check_tool(world, tool)?;
-        valid_src(world, &src)?;
+        // The new operation JOINS the active setup (M3.2 A) - declared at
+        // creation, never inferred later, so undo replays membership
+        // exactly. With no setups the name is `None`: the implicit-setup
+        // law makes that the first/legacy context byte-identically.
+        let setup = crate::setup::active(world);
+        valid_src(world, setup.as_deref(), &src)?;
         if !params.is_sane() {
             return Err(CommandError::Invalid(format!(
                 "operation parameters are not usable for a {} operation",
@@ -113,7 +121,7 @@ impl CreateOperation {
         // Ordering needs resolved heights, and the world is in hand right
         // here: an operation that would cut upward is refused at creation
         // (AGENTS.md: validate early), not deep in the generator.
-        if !crate::operation::depth_sane(world, &params) {
+        if !crate::operation::depth_sane(world, setup.as_deref(), &params) {
             return Err(CommandError::Invalid(format!(
                 "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
                 params.kind()
@@ -129,6 +137,7 @@ impl CreateOperation {
                 src,
                 params,
                 stamp: None,
+                setup,
             },
         })
     }
@@ -183,7 +192,7 @@ impl EditOperationParams {
                 params.kind()
             )));
         }
-        if !crate::operation::depth_sane(world, &params) {
+        if !crate::operation::depth_sane(world, prev.setup.as_deref(), &params) {
             return Err(CommandError::Invalid(format!(
                 "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
                 params.kind()
@@ -244,7 +253,7 @@ impl EditOperationLinks {
             next.tool = tool.to_string();
         }
         if let Some(src) = src {
-            valid_src(world, &src)?;
+            valid_src(world, prev.setup.as_deref(), &src)?;
             // Retargeting onto a whole-model source under Inside would
             // arm the mirror law; refused here, and backstopped at
             // generate for commands that arrive via file load.
@@ -444,6 +453,7 @@ impl GenerateOperation {
             &prev_operation.src,
             &prev_operation.params,
             name,
+            prev_operation.setup.as_deref(),
         )
         .ok_or_else(|| {
             CommandError::Machining(format!(
@@ -519,10 +529,10 @@ impl RegenerateAll {
     pub fn new(world: &World) -> Self {
         let mut parts = Vec::new();
         let mut skipped = Vec::new();
-        for (name, entity) in model::named_entities(world) {
-            if !model::is_operation(world, &entity) {
-                continue;
-            }
+        // THE program order (M3.2 A): a rest-aware op regenerates AFTER
+        // what it re-machines, so one round converges - the same walk
+        // the post makes.
+        for (name, entity) in crate::setup::operation_order(world) {
             if operation::status_of(world, &entity) != operation::OpStatus::Stale {
                 continue;
             }

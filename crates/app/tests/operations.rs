@@ -963,8 +963,9 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
             climb: true,
         },
         stamp: None,
+        setup: None,
     };
-    assert_eq!(operation::region_z(&world, &trace.params), Some(10.0));
+    assert_eq!(operation::region_z(&world, None, &trace.params), Some(10.0));
     let region = operation::region_of(&world, &trace).expect("a box sections cleanly at 10 mm");
     assert_eq!(region.loops().len(), 1);
     // The section keeps the mesh's per-face triangle splits, so the ring
@@ -995,8 +996,9 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
             climb: true,
         },
         stamp: None,
+        setup: None,
     };
-    assert_eq!(operation::region_z(&world, &face.params), Some(19.5));
+    assert_eq!(operation::region_z(&world, None, &face.params), Some(19.5));
     assert!(!operation::region_of(&world, &face).expect("footprint").is_empty());
 
     // A vanished source previews NOTHING, not a stale outline.
@@ -1005,6 +1007,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         src: SrcRef::Entity("gone".into()),
         params: trace.params.clone(),
         stamp: None,
+        setup: None,
     };
     assert_eq!(operation::region_of(&world, &ghost), None);
 }
@@ -1143,6 +1146,7 @@ fn a_vertical_or_tilted_pick_refuses_with_the_fix_in_the_message() {
         src: sel("part", wall),
         params,
         stamp: None,
+        setup: None,
     };
     // Facing a wall: refused, and the message says what to pick instead.
     let face = op(face_sel_params());
@@ -1174,6 +1178,7 @@ fn closed_chain_rims_bound_and_double_picks_collapse_to_one_loop() {
         src: sel("disc", rim),
         params: contour_params(),
         stamp: None,
+        setup: None,
     };
     let region = operation::region_of(&world, &op).expect("the rim chain bounds the disc");
     assert_eq!(region.loops().len(), 1);
@@ -1249,6 +1254,7 @@ fn pocket_refuses_an_open_run() {
             strategy: hsmworks_app::machining2d::PocketStrategy::Zigzag,
         },
         stamp: None,
+        setup: None,
     };
     assert_eq!(operation::region_of(&world, &op), None, "nothing to draw");
     let err = operation::generate(&world, &op, "").expect_err("pocket refuses");
@@ -1271,8 +1277,8 @@ fn selection_staleness_tracks_content_not_counts() {
     // the digest. A stamp keyed on counts would miss exactly this.
     let wall = wall_face_of(&world, "part");
     let src_b = sel("part", FeatureSel::Face(wall));
-    let sa = operation::current_stamp(&world, "EM-0600-4FL", &src_a, &params, "S1");
-    let sb = operation::current_stamp(&world, "EM-0600-4FL", &src_b, &params, "S1");
+    let sa = operation::current_stamp(&world, "EM-0600-4FL", &src_a, &params, "S1", None);
+    let sb = operation::current_stamp(&world, "EM-0600-4FL", &src_b, &params, "S1", None);
     assert_ne!(sa, sb, "a different face is different geometry");
 
     // Moving the part moves it too (the region swings out from under
@@ -1286,7 +1292,7 @@ fn selection_staleness_tracks_content_not_counts() {
     // Face vs Chain on one entity are distinguishable, and so is item
     // order (the pick list is the user's, not a bag).
     let chain = FeatureSel::Chain(any_chain_of(&world, "part"));
-    let sc = operation::current_stamp(&world, "EM-0600-4FL", &sel("part", chain), &params, "S1");
+    let sc = operation::current_stamp(&world, "EM-0600-4FL", &sel("part", chain), &params, "S1", None);
     assert_ne!(sa, sc);
     let ab = SrcRef::Selection(vec![
         GeoSel { entity: "part".into(), feature: FeatureSel::Face(top_a) },
@@ -1297,8 +1303,8 @@ fn selection_staleness_tracks_content_not_counts() {
         GeoSel { entity: "part".into(), feature: FeatureSel::Face(top_a) },
     ]);
     assert_ne!(
-        operation::current_stamp(&world, "EM-0600-4FL", &ab, &params, "S1"),
-        operation::current_stamp(&world, "EM-0600-4FL", &ba, &params, "S1"),
+        operation::current_stamp(&world, "EM-0600-4FL", &ab, &params, "S1", None),
+        operation::current_stamp(&world, "EM-0600-4FL", &ba, &params, "S1", None),
     );
 }
 
@@ -1482,6 +1488,7 @@ fn two_open_runs_stitch_into_one_boundary() {
         ),
         params: face_sel_params(),
         stamp: None,
+        setup: None,
     };
     // The hand-test's exact failure ("nothing in the selection bounds an
     // area") is gone: two picked runs that spell one loop bound one area.
@@ -1522,6 +1529,7 @@ fn stitching_is_order_independent() {
             ),
             params: face_sel_params(),
             stamp: None,
+            setup: None,
         }
     };
     let ab = operation::region_of(&world, &pick([0, 1])).expect("first, then second");
@@ -1552,6 +1560,7 @@ fn a_single_arc_stays_open() {
         src: sel("disc", FeatureSel::Chain(runs[0])),
         params: contour_params(),
         stamp: None,
+        setup: None,
     };
     assert!(
         operation::region_of(&world, &op).is_none(),
@@ -1592,6 +1601,7 @@ fn duplicate_seam_points_do_not_break_push_loop() {
         ]),
         params: face_sel_params(),
         stamp: None,
+        setup: None,
     };
     let region = operation::region_of(&world, &op).expect("the ring survives the doubled seam");
     assert_eq!(region.loops().len(), 1, "one ring, whatever the pick repeats");
@@ -1917,6 +1927,7 @@ fn sel_op(world: &World, items: Vec<GeoSel>, params: OpParams) -> Operation {
         src: SrcRef::Selection(items),
         params,
         stamp: None,
+        setup: None,
     }
 }
 
@@ -2087,7 +2098,7 @@ fn face_on_one_bore_run_machines_outside_to_stock() {
     let got = region.area().abs();
     assert!(got > 400.0 && got < 1600.0, "a band of the plate, not all of it: {got}");
 
-    let notes = operation::selection_notes(&world, &items, &face_sel_params());
+    let notes = operation::selection_notes(&world, None,&items, &face_sel_params());
     assert!(
         notes.iter().any(|s| s.contains("1 open run extended to the stock boundary")),
         "the list says what the run-out did: {notes:?}"
@@ -2124,7 +2135,7 @@ fn one_open_run_on_a_boss_faces_the_whole_boss() {
     assert!(region.contains(Point2::new(0.0, 0.0)));
     assert!(region.contains(Point2::new(2.0, 2.0)), "the interior is the answer");
 
-    let notes = operation::selection_notes(&world, &items, &face_sel_params());
+    let notes = operation::selection_notes(&world, None,&items, &face_sel_params());
     assert!(
         notes.iter().any(|s| s.contains("1 open run extended to the stock boundary")),
         "{notes:?}"
@@ -2273,7 +2284,7 @@ fn selection_notes_report_stitching_and_extension() {
     history.execute(&world, ImportModel::from_mesh("plate", bored_plate()));
     let runs = bore_runs_of(&world, "plate");
     let items = chain_picks("plate", &runs);
-    let notes = operation::selection_notes(&world, &items, &face_sel_params());
+    let notes = operation::selection_notes(&world, None,&items, &face_sel_params());
     assert!(
         notes.iter().any(|s| s.contains("2 open runs stitched into 1 ring")),
         "{notes:?}"
@@ -2299,7 +2310,7 @@ fn selection_notes_report_stitching_and_extension() {
         tab_width: 0.0,
         tab_height: 0.0,
     };
-    let notes = operation::selection_notes(&world, &items, &contour);
+    let notes = operation::selection_notes(&world, None,&items, &contour);
     assert!(
         notes.iter().any(|s| s.contains("2 open runs stitched into 1 ring")),
         "{notes:?}"
@@ -2392,7 +2403,7 @@ fn contour_bore_wall_pick_defaults_inside() {
         region.loops()[0].points(),
     );
 
-    let notes = operation::selection_notes(&world, &items, &contour_at(Side::Auto, 4.0));
+    let notes = operation::selection_notes(&world, None,&items, &contour_at(Side::Auto, 4.0));
     assert!(
         notes.iter().any(|s| s.contains("machining inside the ring")),
         "{notes:?}"
@@ -2427,7 +2438,7 @@ fn contour_boss_pick_defaults_outside() {
     add_tool(&world, &mut history, "EM-0600-4FL");
     history.execute(&world, ImportModel::from_mesh("disc", disc_mesh(12.0)));
     let items = chain_picks("disc", &[rim_chain_of(&world, "disc")]);
-    let notes = operation::selection_notes(&world, &items, &contour_at(Side::Auto, 0.0));
+    let notes = operation::selection_notes(&world, None,&items, &contour_at(Side::Auto, 0.0));
     assert!(
         !notes.iter().any(|s| s.contains("machining inside the ring")),
         "a boss's ring bounds material: {notes:?}"
@@ -2458,7 +2469,7 @@ fn contour_outside_forces_outside_on_bore() {
     // path and stays silent (the note belongs to Auto's verdict).
     let (world, mut history) = world_with_bore();
     let items = bore_patch_pick(&world, "plate");
-    let notes = operation::selection_notes(&world, &items, &contour_at(Side::Outside, 4.0));
+    let notes = operation::selection_notes(&world, None,&items, &contour_at(Side::Outside, 4.0));
     assert!(
         !notes.iter().any(|s| s.contains("inside the ring")),
         "{notes:?}"
@@ -2491,7 +2502,7 @@ fn contour_inside_forces_inside_on_boss() {
     add_tool(&world, &mut history, "EM-0600-4FL");
     history.execute(&world, ImportModel::from_mesh("disc", disc_mesh(12.0)));
     let items = chain_picks("disc", &[rim_chain_of(&world, "disc")]);
-    let notes = operation::selection_notes(&world, &items, &contour_at(Side::Inside, 0.0));
+    let notes = operation::selection_notes(&world, None,&items, &contour_at(Side::Inside, 0.0));
     assert!(!notes.iter().any(|s| s.contains("inside the ring")), "{notes:?}");
     history.execute(
         &world,

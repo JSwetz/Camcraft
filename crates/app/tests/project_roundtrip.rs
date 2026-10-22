@@ -4,10 +4,12 @@
 use std::path::PathBuf;
 
 use hsmworks_app::commands::{
-    AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, SetWcsOrigin,
+    AddTool, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel, SetStock,
+    SetWcsOrigin,
 };
 use hsmworks_app::geometry::feature;
 use hsmworks_app::machine;
+use hsmworks_app::setup;
 use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, OpStatus, SrcRef};
 use hsmworks_app::schema::Location;
@@ -97,11 +99,12 @@ fn wrong_version_is_refused() {
     // v17_file_steps_to_v18_and_the_surface_finish_grammar_round_trips
     // v17 -> v18, and v18_file_steps_to_v19_and_the_machine_grammar_round_trips
     // v18 -> v19, and v19_file_steps_to_v20_and_the_rev_counter_round_trips
-    // v19 -> v20.
-    let text = r#"{"version": 21, "entities": []}"#;
+    // v19 -> v20, and v20_file_steps_to_v21_and_the_setups_grammar_round_trips
+    // v20 -> v21.
+    let text = r#"{"version": 22, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(21)) => {}
+        Err(ProjectError::UnsupportedVersion(22)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -2011,6 +2014,144 @@ fn v19_file_steps_to_v20_and_the_rev_counter_round_trips() {
     let _ = std::fs::remove_file(&p);
     assert!(first.contains("\"rev\": 3"), "a counted model mints its key: {first}");
     assert_eq!(first, second, "the rev shape round-trips byte-identically");
+}
+
+#[test]
+fn v20_file_steps_to_v21_and_the_setups_grammar_round_trips() {
+    // v20 -> v21 (M3.2 A): setups. No v20 file can carry a setup row (the
+    // kind tag did not exist), an operation membership, or an active-setup
+    // cursor - and every serde default (none, none, none) is exactly the
+    // legacy global the implicit-setup law already reproduces. Step-up is
+    // the stamp itself; check_and_apply rewrites nothing.
+    let quad = r#"[[[0.0,0.0,0.0],[40.0,0.0,0.0],[40.0,40.0,0.0]],[[0.0,0.0,0.0],[40.0,40.0,0.0],[0.0,40.0,0.0]]]"#;
+    let text = format!(
+        r#"{{"version": 20, "entities": [
+            {{"name": "plate", "translation": [0.0, 0.0, 0.0], "facets": {quad}}},
+            {{"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock",
+              "stock": {{"box": {{"dx": 40.0, "dy": 40.0, "dz": 20.0}}}}}},
+            {{"name": "G54", "translation": [1.0, 2.0, 3.0], "kind": "wcs"}}
+        ]}}"#
+    );
+    let world = new_world();
+    project::open(&world, &text).expect("a v20 file must still open");
+    assert!(setup::names(&world).is_empty(), "the step-up mints no rows");
+    assert_eq!(setup::active(&world), None, "no setups: no cursor");
+    assert_eq!(
+        setup::stock_entity_name(&world, None),
+        "Stock",
+        "the globals read through the implicit-setup law"
+    );
+    let p = tmp_path("v21a");
+    project::save(&world, &p).expect("save");
+    let v21 = std::fs::read_to_string(&p).expect("read");
+    let _ = std::fs::remove_file(&p);
+    assert!(
+        v21.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v21 stamp: {v21}"
+    );
+    assert!(
+        !v21.contains("\"setup\"") && !v21.contains("active_setup"),
+        "a save of the migrated legacy document keeps the legacy byte shape: {v21}"
+    );
+
+    // Materializing the legacy document adds rows, not data: the setup
+    // points at the entities that were always there, and the grammar that
+    // appears round-trips from here on.
+    let mut history = History::default();
+    let cmd = CreateSetup::new(&world, None, None).expect("materialize");
+    history.execute(&world, cmd);
+    assert_eq!(setup::names(&world), ["Setup1"]);
+    assert_eq!(setup::active(&world).as_deref(), Some("Setup1"));
+    let def = setup::def_of(&world, "Setup1").expect("definition");
+    assert_eq!(def.stock, "Stock", "materialization points, never copies");
+    assert!(def.wcs.contains(&"G54".to_owned()));
+    assert_eq!(def.datum_from, "");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    assert_eq!(setup::names(&world2), ["Setup1"]);
+    assert_eq!(setup::active(&world2).as_deref(), Some("Setup1"));
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert!(
+        first.contains("\"kind\": \"setup\"") && first.contains("\"active_setup\": \"Setup1\""),
+        "a materialized document mints the setup grammar: {first}"
+    );
+    assert_eq!(first, second, "the setups grammar round-trips byte-identically");
+
+    // The hand-written v21 grammar itself: a setup naming private furniture
+    // (an entry naming nothing is an unplaced slot, not a missing entity),
+    // and the raw cursor saved as stored, dangling included.
+    let text = r#"{
+        "version": 21,
+        "active_setup": "Setup2",
+        "entities": [
+            {"name": "Setup1", "translation": [0.0, 0.0, 0.0], "kind": "setup",
+             "setup": {"stock": "Stock", "wcs": ["G54"]}},
+            {"name": "Setup2", "translation": [0.0, 0.0, 0.0], "kind": "setup",
+             "setup": {"stock": "Setup2/Stock", "wcs": ["Setup2/G54", "Setup2/G55"],
+                       "datum_from": "Setup1"}},
+            {"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock",
+             "stock": {"box": {"dx": 40.0, "dy": 40.0, "dz": 20.0}}},
+            {"name": "Setup2/Stock", "translation": [10.0, 0.0, 0.0], "kind": "stock",
+             "stock": {"box": {"dx": 20.0, "dy": 20.0, "dz": 5.0}}},
+            {"name": "Setup2/G54", "translation": [5.0, 0.0, 0.0], "kind": "wcs"}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v21 setups grammar must read");
+    assert_eq!(setup::names(&world), ["Setup1", "Setup2"]);
+    assert_eq!(setup::active(&world).as_deref(), Some("Setup2"));
+    assert_eq!(setup::stock_entity_name(&world, Some("Setup2")), "Setup2/Stock");
+    assert!(
+        setup::wcs_entity(&world, Some("Setup2"), 0).is_some(),
+        "the placed slot names a real entity"
+    );
+    assert!(
+        setup::wcs_entity(&world, Some("Setup2"), 1).is_none(),
+        "G55 names nothing in the file: an unplaced slot, not corrupt"
+    );
+    assert_eq!(
+        setup::def_of(&world, "Setup2").expect("def").datum_from,
+        "Setup1",
+        "clone provenance rides along for the reader"
+    );
+    let p = tmp_path("v21b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    assert_eq!(first, second, "hand-written and saved agree on the spelling");
+
+    // A cursor naming a deleted setup is legal - the same existence
+    // fallback that protects an undone DeleteSetup - and saves raw.
+    let dangling = text.replace("\"active_setup\": \"Setup2\"", "\"active_setup\": \"Nope\"");
+    let world = new_world();
+    project::open(&world, &dangling).expect("a dangling cursor must read");
+    assert_eq!(
+        setup::active(&world).as_deref(),
+        Some("Setup1"),
+        "stored dangling, effective falls back to the first"
+    );
+    project::save(&world, &p).expect("save");
+    let raw = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        raw.contains("\"active_setup\": \"Nope\""),
+        "the singleton saves raw, not resolved: {raw}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // Some("") is the one cursor state with no meaning: corrupt.
+    let empty = text.replace("\"active_setup\": \"Setup2\"", "\"active_setup\": \"\"");
+    let world = new_world();
+    assert!(
+        matches!(project::open(&world, &empty), Err(ProjectError::Corrupt(_))),
+        "an empty cursor name must refuse, not guess"
+    );
 }
 
 #[test]

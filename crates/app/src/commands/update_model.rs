@@ -21,17 +21,25 @@ use flecs_ecs::prelude::{Entity, World};
 use crate::commands::{Command, CommandError};
 use crate::geometry::{Mesh, revision};
 use crate::model;
-use crate::schema::{Facets, STOCK_NAME};
+use crate::schema::Facets;
 use crate::stock::StockShape;
 
-/// The stock entity when - and only when - it is a `FromModel` copy of
-/// `name` (M3.1 B's gate: an update never writes into a box stock or into
-/// a copy of some other model).
-fn stock_of(world: &World, name: &str) -> Option<Entity> {
-    let entity = model::find_by_name(world, STOCK_NAME)?;
-    matches!(model::stock_def_of(world, &entity),
-        Some(StockShape::FromModel { source }) if source == name)
-        .then_some(entity)
+/// Every stock entity that is a `FromModel` copy of `name` (M3.1 B's
+/// gate: an update never writes into a box stock or into a copy of some
+/// other model). M3.2 A widens this from "the stock" to "every setup's
+/// stock" - two setups may re-place copies of the same model, and a
+/// re-import must refresh both, the propagation law being about the
+/// material, not about one setup's furniture.
+fn stock_copies(world: &World, name: &str) -> Vec<Entity> {
+    model::named_entities(world)
+        .into_iter()
+        .filter(|(_, e)| model::is_stock(world, e))
+        .filter(|(_, e)| {
+            matches!(model::stock_def_of(world, e),
+                Some(StockShape::FromModel { source }) if source == name)
+        })
+        .map(|(_, e)| e)
+        .collect()
 }
 
 pub struct UpdateModel {
@@ -68,7 +76,10 @@ impl UpdateModel {
                 "'{name}' is setup furniture, not a model"
             )));
         }
-        let prev_stock = stock_of(world, name).and_then(|s| model::facets_of(world, &s));
+        // Every copy of this model holds the same local facets, so one
+        // snapshot serves them all (divergence is what this command
+        // prevents, not a state it must describe).
+        let prev_stock = stock_copies(world, name).first().and_then(|s| model::facets_of(world, s));
         Ok(UpdateModel {
             name: name.to_string(),
             mesh,
@@ -105,8 +116,10 @@ impl Command for UpdateModel {
         // updates the material it was cut from, it does not move the
         // setup. The re-check at apply time is for redo after a
         // DeleteEntity interleaving, exactly as the model re-spawn above.
-        if self.prev_stock.is_some() && let Some(stock) = stock_of(world, &self.name) {
-            model::set_facets(world, &stock, self.mesh.facets.clone());
+        if self.prev_stock.is_some() {
+            for stock in stock_copies(world, &self.name) {
+                model::set_facets(world, &stock, self.mesh.facets.clone());
+            }
         }
     }
 
@@ -122,8 +135,10 @@ impl Command for UpdateModel {
             }
             model::set_rev(world, &entity, self.prev_rev);
         }
-        if let Some(tris) = &self.prev_stock && let Some(stock) = stock_of(world, &self.name) {
-            model::set_facets(world, &stock, tris.clone());
+        if let Some(tris) = &self.prev_stock {
+            for stock in stock_copies(world, &self.name) {
+                model::set_facets(world, &stock, tris.clone());
+            }
         }
     }
 }

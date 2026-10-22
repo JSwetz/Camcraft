@@ -11,10 +11,17 @@ use flecs_ecs::prelude::World;
 use crate::commands::{Command, CommandError};
 use crate::geometry::{Triangle, normalize_quat};
 use crate::model;
-use crate::schema::{Location, STOCK_NAME, StockDef};
+use crate::schema::{Location, StockDef};
 use crate::stock::{self, MAX_STOCK_DIM, StockShape};
 
 pub struct SetStock {
+    /// The stock ENTITY this command targets - resolved from the active
+    /// setup at construction (M3.2 A): `Stock` while setups are implicit,
+    /// `Setup2/Stock` (or the setup's own name) once the user declares
+    /// them. Undo replays against this name, not against a re-read of
+    /// the active-setup singleton, so activating another setup mid-
+    /// history cannot move an undo's target.
+    stock_name: String,
     shape: StockShape,
     location: Location,
     facets: Vec<Triangle>,
@@ -28,6 +35,8 @@ impl SetStock {
     /// `FromModel`, an identity `location` means "adopt the source's
     /// placement" so the copy sits exactly on the model it came from.
     pub fn new(world: &World, shape: StockShape, location: Location) -> Result<Self, CommandError> {
+        let active = crate::setup::active(world);
+        let stock_name = crate::setup::stock_entity_name(world, active.as_deref());
         if !shape.is_sane() {
             return Err(CommandError::Invalid(format!(
                 "stock parameters must be finite and positive: {shape:?}"
@@ -47,7 +56,7 @@ impl SetStock {
 
         let facets = match &shape {
             StockShape::FromModel { source } => {
-                if source == STOCK_NAME {
+                if *source == stock_name {
                     return Err(CommandError::Invalid(
                         "stock cannot be made from itself".into(),
                     ));
@@ -75,11 +84,11 @@ impl SetStock {
                 .ok_or_else(|| CommandError::Invalid("stock meshing failed".into()))?,
         };
 
-        let prev = match model::find_by_name(world, STOCK_NAME) {
+        let prev = match model::find_by_name(world, &stock_name) {
             Some(entity) => {
                 let prev_shape = model::stock_def_of(world, &entity).ok_or_else(|| {
                     CommandError::Invalid(format!(
-                        "an entity named '{STOCK_NAME}' exists but is not stock"
+                        "an entity named '{stock_name}' exists but is not stock"
                     ))
                 })?;
                 Some((
@@ -91,6 +100,7 @@ impl SetStock {
             None => None,
         };
         Ok(SetStock {
+            stock_name,
             shape,
             location,
             facets,
@@ -102,9 +112,9 @@ impl SetStock {
 impl Command for SetStock {
     fn apply(&self, world: &World) {
         // Pure world write from stored fields: idempotent under redo.
-        let entity = match model::find_by_name(world, STOCK_NAME) {
+        let entity = match model::find_by_name(world, &self.stock_name) {
             Some(entity) => entity,
-            None => model::spawn(world, STOCK_NAME),
+            None => model::spawn(world, &self.stock_name),
         };
         model::set_transform(world, &entity, self.location);
         model::set_facets(world, &entity, self.facets.clone());
@@ -114,7 +124,7 @@ impl Command for SetStock {
     }
 
     fn invert(&self, world: &World) {
-        let Some(entity) = model::find_by_name(world, STOCK_NAME) else {
+        let Some(entity) = model::find_by_name(world, &self.stock_name) else {
             return; // already undone (idempotent undo path)
         };
         match &self.prev {

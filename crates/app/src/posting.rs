@@ -134,10 +134,9 @@ fn viewer_map(records: &[cnc::Record], out: &engine::PostOutput) -> Vec<Option<[
 /// what would post* holds by construction, not by two copies of the
 /// law agreeing (stage D makes the agreement load-bearing).
 pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
-    let ops: Vec<(String, Entity)> = model::named_entities(world)
-        .into_iter()
-        .filter(|(_, e)| model::is_operation(world, e))
-        .collect();
+    // THE order law by call (M3.2 A): setup rank, then name - the same
+    // walk re-machining, the sim and the machine-limit check make.
+    let ops: Vec<(String, Entity)> = crate::setup::operation_order(world);
     if ops.is_empty() {
         return Err("no operations to post".into());
     }
@@ -229,13 +228,6 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         .map(|(n, _)| n)
         .collect();
 
-    // The stock box is setup context, resolved once.
-    let boxz = model::stock_world_aabb(world);
-    let (stock, stock_top_z) = match &boxz {
-        Some(a) => ([a.min.x, a.max.x, a.min.y, a.max.y], a.max.z),
-        None => ([0.0; 4], 0.0),
-    };
-
     let mut records: Vec<cnc::Record> = Vec::new();
     let mut moved = 0usize; // cycle AT anchors are stream-global
     for (name, e) in &ops {
@@ -246,13 +238,21 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t))
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
-        let hs = operation::resolve_params(world, &op.params)
+        let setup = op.setup.as_deref();
+        let hs = operation::resolve_params(world, setup, &op.params)
             .map_err(|err| format!("{name}: {err}"))?;
         let tool_number = tool_ranks
             .iter()
             .position(|n| *n == op.tool)
             .map_or(0, |i| i as u32 + 1);
-        let (wcs, origin) = wcs_context(world, &op.params);
+        let (wcs, origin) = wcs_context(world, setup, &op.params);
+        // The stock box is THIS operation's setup context (M3.2 A): a
+        // later setup's block is where and how tall its own stock says.
+        let boxz = model::stock_world_aabb_for(world, setup);
+        let (stock, stock_top_z) = match &boxz {
+            Some(a) => ([a.min.x, a.max.x, a.min.y, a.max.y], a.max.z),
+            None => ([0.0; 4], 0.0),
+        };
         let d = Dump {
             op_name: name,
             tool_number,
@@ -291,7 +291,16 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
 /// slot's origin as the machine would measure it. `pub(crate)` so the
 /// machine-limit travel check (M2.3 C) reads program coordinates by
 /// exactly this law, not by a second copy of it.
-pub(crate) fn wcs_context<'a>(world: &World, params: &'a OpParams) -> (&'a str, [f64; 3]) {
+///
+/// The G-code WORD is always `WCS_SLOTS[slot]` - the machine's register
+/// names do not take setup suffixes. The ENTITY the origin is measured
+/// from follows the setup (M3.2 A): `Setup2/G54` is the same machine
+/// offset word, re-placed for that setup's clamping.
+pub(crate) fn wcs_context<'a>(
+    world: &World,
+    setup: Option<&str>,
+    params: &'a OpParams,
+) -> (&'a str, [f64; 3]) {
     let slot = params
         .heights()
         .into_iter()
@@ -301,7 +310,7 @@ pub(crate) fn wcs_context<'a>(world: &World, params: &'a OpParams) -> (&'a str, 
         })
         .unwrap_or(0);
     let name = WCS_SLOTS[slot];
-    let origin = model::find_by_name(world, name)
+    let origin = crate::setup::wcs_entity(world, setup, slot)
         .and_then(|e| model::transform_of(world, &e))
         .map_or([0.0; 3], |t| [t.pos.x, t.pos.y, t.pos.z]);
     (name, origin)

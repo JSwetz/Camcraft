@@ -13,7 +13,13 @@ use crate::model;
 use crate::schema::{Location, WCS_SLOTS, Wcs};
 
 pub struct SetWcsOrigin {
-    slot: String,
+    /// The entity this command places - the active setup's name for this
+    /// slot at construction time (M3.2 A): `G54` in a legacy document,
+    /// `Setup2/G54` when the active setup owns its furniture. The G-code
+    /// word is never stored: it comes from the slot index in the
+    /// operation's params at post time, and only the LOOKUP follows the
+    /// setup (the one G-word law).
+    entity_name: String,
     location: Location,
     /// Where the slot pointed before; `None` means the entity did not exist
     /// yet, so the inverse removes it.
@@ -43,17 +49,24 @@ impl SetWcsOrigin {
         if !location.pos.is_finite() {
             return Err(CommandError::Invalid("work offset placement must be finite".into()));
         }
-        let prev = match model::find_by_name(world, slot) {
+        let active = crate::setup::active(world);
+        let slot_ix = WCS_SLOTS
+            .iter()
+            .position(|s| *s == slot)
+            .ok_or_else(|| CommandError::Invalid(format!("'{slot}' is not a work offset slot")))?;
+        let entity_name = crate::setup::wcs_entity_name(world, active.as_deref(), slot_ix)
+            .unwrap_or_else(|| slot.to_string());
+        let prev = match model::find_by_name(world, &entity_name) {
             Some(entity) => {
                 if !model::is_wcs(world, &entity) {
-                    return Err(CommandError::NameConflict(slot.to_string()));
+                    return Err(CommandError::NameConflict(entity_name));
                 }
                 model::transform_of(world, &entity)
             }
             None => None,
         };
         Ok(SetWcsOrigin {
-            slot: slot.to_string(),
+            entity_name,
             location,
             prev,
         })
@@ -63,16 +76,16 @@ impl SetWcsOrigin {
 impl Command for SetWcsOrigin {
     fn apply(&self, world: &World) {
         // Pure world write from stored fields: idempotent under redo.
-        let entity = match model::find_by_name(world, &self.slot) {
+        let entity = match model::find_by_name(world, &self.entity_name) {
             Some(entity) => entity,
-            None => model::spawn(world, &self.slot),
+            None => model::spawn(world, &self.entity_name),
         };
         entity.entity_view(world).add(Wcs); // tags add, not set (zero-sized)
         model::set_transform(world, &entity, self.location);
     }
 
     fn invert(&self, world: &World) {
-        let Some(entity) = model::find_by_name(world, &self.slot) else {
+        let Some(entity) = model::find_by_name(world, &self.entity_name) else {
             return; // already undone (idempotent undo path)
         };
         match self.prev {

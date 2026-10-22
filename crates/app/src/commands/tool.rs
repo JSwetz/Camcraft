@@ -12,11 +12,24 @@ use crate::model;
 use crate::schema::{Location, STOCK_NAME, WCS_SLOTS, ToolDef};
 use crate::tools::Tool;
 
-fn reserved(name: &str) -> Option<CommandError> {
+fn reserved(world: &World, name: &str) -> Option<CommandError> {
     if name.is_empty() {
         return Some(CommandError::Invalid("tool name must not be empty".into()));
     }
-    if name == STOCK_NAME || WCS_SLOTS.contains(&name) {
+    // Setup furniture names (M3.2 A): the legacy `Stock`/`G54`..`G59`,
+    // every declared setup's own names, and the `SetupN/...` convention
+    // so a tool cannot squat on the entity a future setup will lazily
+    // spawn.
+    let taken = name == STOCK_NAME
+        || WCS_SLOTS.contains(&name)
+        || crate::setup::is_furniture_shape(name)
+        || crate::setup::names(world).iter().any(|s| {
+                crate::setup::stock_entity_name(world, Some(s)) == name
+                    || (0..WCS_SLOTS.len()).any(|i| {
+                        crate::setup::wcs_entity_name(world, Some(s), i).is_some_and(|n| n == name)
+                    })
+            });
+    if taken {
         return Some(CommandError::Invalid(format!(
             "'{name}' is reserved for setup furniture"
         )));
@@ -32,7 +45,7 @@ pub struct AddTool {
 
 impl AddTool {
     pub fn new(world: &World, name: &str, tool: Tool) -> Result<Self, CommandError> {
-        if let Some(err) = reserved(name) {
+        if let Some(err) = reserved(world, name) {
             return Err(err);
         }
         if !tool.is_sane() {

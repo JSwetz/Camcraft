@@ -24,7 +24,7 @@ use egui::{Key, Label, Rect, RichText, Sense, Ui, Vec2};
 
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, OpParams, OpType};
-use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
+use hsmworks_app::schema::WCS_SLOTS;
 use hsmworks_app::tools::ToolKind;
 
 use crate::actions;
@@ -519,6 +519,9 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Palette) {
 #[derive(Clone)]
 enum Leaf {
     Section,
+    /// The Setups page row (M3.2 A): one row over the document's whole
+    /// setups list, like Tool rows - target-only, never arms Del.
+    Setups,
     Stock,
     Wcs(usize),
     Model(String),
@@ -569,10 +572,29 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     let t = state.pane_target();
 
     push_row(&mut rows, &mut leaves, "Setup".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
+    // Setups (M3.2 A): the row appears once the document has any, and
+    // the Stock and WCS rows below resolve through the ACTIVE one - the
+    // tree shows the context you are standing in, never a global ghost.
+    let active = hsmworks_app::setup::active(&state.world);
+    if !hsmworks_app::setup::names(&state.world).is_empty() {
+        push_row(
+            &mut rows,
+            &mut leaves,
+            "Setups".to_owned(),
+            active.clone().unwrap_or_default(),
+            painted::Kind::Section,
+            Some(Icon::WorkOffset),
+            matches!(t, UiTarget::Setups),
+            false,
+            1,
+            Leaf::Setups,
+        );
+    }
+    let stock_name = hsmworks_app::setup::stock_entity_name(&state.world, active.as_deref());
     push_row(
         &mut rows,
         &mut leaves,
-        STOCK_NAME.to_owned(),
+        stock_name,
         String::new(),
         painted::Kind::Stock,
         Some(Icon::Stock),
@@ -582,7 +604,8 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
         Leaf::Stock,
     );
     for (i, slot) in WCS_SLOTS.iter().enumerate() {
-        let placed = model::find_by_name(&state.world, slot).is_some();
+        let placed =
+            hsmworks_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
         push_row(
             &mut rows,
             &mut leaves,
@@ -731,10 +754,17 @@ pub fn browser(
     if let Some(ix) = hit.row {
         match leaves[ix].clone() {
             Leaf::Section => {}
+            // Target-only, like the Tool rows: browsing setups never
+            // arms Del, and one page lists them all.
+            Leaf::Setups => actions::target(state, UiTarget::Setups),
             Leaf::Stock => {
                 actions::target(state, UiTarget::Stock);
-                if model::find_by_name(&state.world, STOCK_NAME).is_some() {
-                    state.pending.push_back(CommandKind::Select(Some(STOCK_NAME.to_owned())));
+                let stock_name = hsmworks_app::setup::stock_entity_name(
+                    &state.world,
+                    hsmworks_app::setup::active(&state.world).as_deref(),
+                );
+                if model::find_by_name(&state.world, &stock_name).is_some() {
+                    state.pending.push_back(CommandKind::Select(Some(stock_name)));
                 }
             }
             Leaf::Wcs(i) => {

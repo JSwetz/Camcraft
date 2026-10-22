@@ -12,7 +12,7 @@ use flecs_ecs::prelude::{Entity, World};
 use crate::geometry::feature::{self, Features};
 use crate::geometry::{Aabb, IDENTITY_Q, Point3, Triangle, normalize_quat, transform_point};
 use crate::schema::{
-    Facets, Location, Name, Operation, Selected, StockDef, ToolDef, Toolpath, Wcs, STOCK_NAME,
+    Facets, Location, Name, Operation, Selected, StockDef, ToolDef, Toolpath, Wcs,
 };
 use crate::stock::StockShape;
 use crate::tools::Tool;
@@ -166,6 +166,7 @@ pub fn is_model(world: &World, entity: &Entity) -> bool {
         && !is_wcs(world, entity)
         && !is_tool(world, entity)
         && !is_operation(world, entity)
+        && !is_setup(world, entity)
 }
 
 /// The model's geometry revision counter (M3.1): `0` for an entity that
@@ -208,6 +209,16 @@ pub fn is_tool(world: &World, entity: &Entity) -> bool {
 #[must_use]
 pub fn is_operation(world: &World, entity: &Entity) -> bool {
     entity.entity_view(world).try_get::<&Operation>(|_| ()).is_some()
+}
+
+/// A setup entity (M3.2 stage A): the third kind of CAM data - setup
+/// furniture, never a model, never a browser geometry row.
+#[must_use]
+pub fn is_setup(world: &World, entity: &Entity) -> bool {
+    entity
+        .entity_view(world)
+        .try_get::<&crate::schema::SetupDef>(|_| ())
+        .is_some()
 }
 
 /// The tool definition, if this entity is a tool.
@@ -324,9 +335,20 @@ pub fn solid_world_aabb(world: &World) -> Option<Aabb> {
 /// World-space bounding box of the Stock solid, if any. The WCS origin
 /// anchor grid places on this box when stock exists, else on the model
 /// bounds - the "pick a point on the model or the stock box" rule.
+/// The default setup's stock; a caller standing in another setup (an
+/// operation's height resolution, the active Setup page) asks for it
+/// explicitly through [`stock_world_aabb_for`] (M3.2 stage A).
 #[must_use]
 pub fn stock_world_aabb(world: &World) -> Option<Aabb> {
-    let entity = find_by_name(world, STOCK_NAME)?;
+    stock_world_aabb_for(world, None)
+}
+
+/// The same box for one declared setup context ([`crate::setup`]'s
+/// implicit-setup law makes `None` byte-identical to the function above).
+#[must_use]
+pub fn stock_world_aabb_for(world: &World, setup: Option<&str>) -> Option<Aabb> {
+    let name = crate::setup::stock_entity_name(world, setup);
+    let entity = find_by_name(world, &name)?;
     if !is_stock(world, &entity) {
         return None;
     }

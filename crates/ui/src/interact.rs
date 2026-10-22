@@ -25,7 +25,7 @@ use hsmworks_app::geometry::feature;
 use hsmworks_app::geometry::{Aabb, Point3, transform_point};
 use hsmworks_app::geo2d::Region;
 use hsmworks_app::operation::{FeatureSel, GeoSel, Height};
-use hsmworks_app::schema::{STOCK_NAME, WCS_SLOTS};
+use hsmworks_app::schema::WCS_SLOTS;
 use hsmworks_app::units;
 use hsmworks_app::{model, operation, pick};
 use winit::keyboard::ModifiersState;
@@ -331,8 +331,14 @@ pub(crate) fn edge_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<(S
         .into_iter()
         .filter(|(name, _)| !state.hidden_models.iter().any(|hid| hid == name))
         .collect();
-    if let Some(stock) = model::find_by_name(&state.world, STOCK_NAME) {
-        entities.push((STOCK_NAME.to_string(), stock));
+    // The stock that stands in the viewport is the ACTIVE setup's - the
+    // pick law follows the one-order law's context, not a global name.
+    let stock_name = hsmworks_app::setup::stock_entity_name(
+        &state.world,
+        hsmworks_app::setup::active(&state.world).as_deref(),
+    );
+    if let Some(stock) = model::find_by_name(&state.world, &stock_name) {
+        entities.push((stock_name, stock));
     }
     let to_px = |uv: [f32; 2]| [x0 + uv[0] * w, y0 + uv[1] * h];
     let mut best: Option<(f32, String, u32)> = None;
@@ -995,7 +1001,7 @@ pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
         let Some(op) = model::operation_of(&state.world, &entity) else {
             continue;
         };
-        let Some(z) = operation::region_z(&state.world, &op.params) else {
+        let Some(z) = operation::region_z(&state.world, op.setup.as_deref(), &op.params) else {
             continue; // the region plane's source is gone - draw nothing
                       // rather than an outline at a guessed level
         };
@@ -1050,7 +1056,7 @@ pub(crate) fn shown_regions(state: &State) -> Vec<(f64, Option<Region>)> {
             continue;
         };
         let region = operation::region_of(&state.world, &op);
-        if let Some(z) = operation::region_z(&state.world, &op.params)
+        if let Some(z) = operation::region_z(&state.world, op.setup.as_deref(), &op.params)
             && (region.is_some() || !operation::chains_of(&state.world, &op).is_empty())
         {
             out.push((z, region));

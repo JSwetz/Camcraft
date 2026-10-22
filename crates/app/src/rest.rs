@@ -8,13 +8,19 @@
 //!
 //! ## The laws
 //!
-//! - **Program order is the post's order.** [`crate::model::named_entities`]
-//!   in name-sorted order, the same sequence `posting::program_ops`
-//!   walks - what the machine will do first IS what was cut first. The
-//!   one law's known wart (an operation named `Operation10` sorts
-//!   before `Operation2`) is the post's wart too; fixing the sort is a
-//!   roadmap question, forking it here would make re-machining disagree
-//!   with the machine.
+//! - **Program order is the post's order - by CALL, not by reference.**
+//!   [`crate::setup::operation_order`]: setup rank first, name order
+//!   within a setup - the very function `posting::program_ops` calls.
+//!   What the machine will do first IS what was cut first; the sort's
+//!   known wart (an operation named `Operation10` sorts before
+//!   `Operation2` inside one setup) is shared so re-machining and the
+//!   machine can never disagree.
+//! - **Rest is same-setup.** A predecessor machines in the CONSUMER's
+//!   setup or it cut a differently-placed block: cross-setup masks
+//!   would need the flip transform (M3.3's orientation law), so an
+//!   operation from another setup is simply not ahead here. Within one
+//!   setup this is physically exact; across setups a later setup
+//!   re-cuts conservatively - air, never a gouge (the mask law).
 //! - **The mask only removes cuts, never adds them.** The rest state is
 //!   the stock grid with every earlier operation's CACHED moves
 //!   subtracted; a consumer's level targets are intersected with it, so
@@ -115,23 +121,30 @@ fn path_hash(moves: &[Move]) -> u64 {
     h.finish()
 }
 
-/// The operations in program order ahead of `name`. The ordering law
-/// is shared with `posting::program_ops` by reference, not by call:
-/// that function refuses whole programs over a `Never` operation, and
-/// an operation later in the program is nobody's business here.
-fn ahead_of(world: &World, name: &str) -> Vec<Ahead> {
-    let ops = model::named_entities(world);
+/// The operations in program order ahead of `name` in the consumer's
+/// setup. The ordering law is shared with the post BY CALL - both walk
+/// [`crate::setup::operation_order`] - and the sequence is cut at the
+/// consumer, same-setup filtered (module header). `posting::program_ops`
+/// itself is not called: it refuses whole programs over a `Never`
+/// operation, and an operation later in the program is nobody's
+/// business here.
+fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahead> {
+    let ops = crate::setup::operation_order(world);
+    let consumer = crate::setup::effective(world, consumer_setup);
     let Some(self_ix) = ops
         .iter()
-        .position(|(n, e)| n == name && model::is_operation(world, e))
+        .position(|(n, _)| n == name)
     else {
         return Vec::new();
     };
     let mut out = Vec::with_capacity(self_ix);
     for (n, e) in &ops[..self_ix] {
         let Some(op) = model::operation_of(world, e) else {
-            continue; // named and is_operation said operation; lost a beat later
+            continue; // in the operation list; lost a beat later
         };
+        if crate::setup::effective(world, op.setup.as_deref()) != consumer {
+            continue; // another setup's cut is not this block's rest
+        }
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t));
         let cache = model::toolpath_of(world, e);
@@ -184,8 +197,8 @@ fn digest_of(ahead: &[Ahead]) -> u64 {
 /// Reads names, stamps and tool diameters - no grid, no mesh, so
 /// `status_of` can ask every frame (M3.1 C's live-questions law).
 #[must_use]
-pub fn prior_digest(world: &World, name: &str) -> Option<u64> {
-    let ahead = ahead_of(world, name);
+pub fn prior_digest(world: &World, name: &str, setup: Option<&str>) -> Option<u64> {
+    let ahead = ahead_of(world, name, setup);
     (!ahead.is_empty()).then(|| digest_of(&ahead))
 }
 
@@ -198,9 +211,10 @@ pub fn prior_digest(world: &World, name: &str) -> Option<u64> {
 pub fn prior_state(
     world: &World,
     name: &str,
+    setup: Option<&str>,
     tool_r: f64,
 ) -> Result<PriorState, GenError> {
-    let ahead = ahead_of(world, name);
+    let ahead = ahead_of(world, name, setup);
     if ahead.is_empty() {
         return Ok(PriorState {
             grid: None,
@@ -221,7 +235,7 @@ pub fn prior_state(
         .filter(|a| a.cut && a.radius > 0.0)
         .map(|a| a.radius)
         .fold(tool_r, f64::min);
-    let mut dex = stock_sim::stock_grid(world, min_r)
+    let mut dex = stock_sim::stock_grid(world, setup, min_r)
         .map_err(|e| GenError::Invalid(format!("rest from previous operations: {e}")))?;
     let ops: Vec<SimOp> = ahead
         .iter()
@@ -251,8 +265,8 @@ pub fn prior_state(
 /// was) or Stale (something ahead moved it, or the batch simply has
 /// not run). The order law above is what makes "ahead" mean what the
 /// machine means.
-pub fn prior_stale(world: &World, name: &str) -> Option<String> {
-    ahead_of(world, name)
+pub fn prior_stale(world: &World, name: &str, setup: Option<&str>) -> Option<String> {
+    ahead_of(world, name, setup)
         .into_iter()
         .find(|a| a.cut)
         .map(|a| {

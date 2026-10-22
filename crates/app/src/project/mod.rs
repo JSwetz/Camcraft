@@ -59,11 +59,19 @@
 //! `rev` key (the geometry-revision counter, see `schema::Revision`) - no
 //! pre-v20 file could carry it, and absent means 0, which is exactly what
 //! every pre-v20 document was. The signatures that make staleness work
-//! recompute from the persisted facets; nothing else moved. v1-v19 files
-//! migrate on load, one version step at a time.
+//! recompute from the persisted facets; nothing else moved. v21 is
+//! M3.2 stage A: setups arrive as a `setup` kind with its `SetupDto`
+//! payload, an optional `setup` name inside `OperationDto`, and a
+//! top-level `active_setup` key. No pre-v21 file can contain any of them:
+//! the kind tag did not exist, and every default (no setup rows, no
+//! setup names, no explicit active choice) is exactly the legacy global
+//! behavior the implicit-setup law already guarantees. Step-up is the
+//! stamp itself, like every bump since v6. v1-v20 files migrate on load,
+//! one version step at a time.
 
 use std::path::Path;
 
+use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::World;
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -76,14 +84,15 @@ use crate::machining3d::Entry3D;
 use crate::model;
 use crate::operation::{FeatureSel, GenStamp, GeoSel, OpParams, SrcRef};
 use crate::schema::{
-    Location, Operation, StockDef, ToolDef, Toolpath as ToolpathCache, Wcs, STOCK_NAME, WCS_SLOTS,
+    Location, Operation, SetupDef, StockDef, ToolDef, Toolpath as ToolpathCache, Wcs, STOCK_NAME,
+    WCS_SLOTS,
 };
 use crate::stock::{self, StockShape};
 use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 20;
+pub const PROJECT_VERSION: u32 = 21;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -109,6 +118,14 @@ pub struct ProjectFile {
     /// since the checker did not exist to read one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<MachineDto>,
+    /// The document's explicit active-setup choice (M3.2 A), v21+. An
+    /// absent key means no choice was ever made, which resolves to the
+    /// first setup by name - what every v20 document did. A name that
+    /// matches no setup row is legal, not corrupt: it reads through the
+    /// same existence fallback the live singleton does (the fallback that
+    /// also protects an undo of `DeleteSetup` mid-history).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_setup: Option<String>,
     pub entities: Vec<EntityDto>,
 }
 
@@ -132,6 +149,7 @@ pub enum EntityKind {
     Wcs,
     Tool,
     Operation,
+    Setup,
 }
 
 /// The file mirror of `StockShape`, kept separate so the domain enum can
@@ -1368,6 +1386,21 @@ impl CycleDto {
     }
 }
 
+/// A setup as files hold it (M3.2 A): the furniture it owns, by name.
+/// `wcs` is indexed by [`WCS_SLOTS`]; an entry may name an entity the
+/// file does not contain - that slot is simply not placed in this setup,
+/// exactly what a missing `G55` entity has always meant. `datum_from` is
+/// clone provenance for the setup sheet (stage D); every stamp ignores
+/// it, so it defaults and rides along for the reader, not the machinery.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct SetupDto {
+    pub stock: String,
+    #[serde(default)]
+    pub wcs: Vec<String>,
+    #[serde(default)]
+    pub datum_from: String,
+}
+
 /// An operation as files hold it: definition, the stamp the last generate
 /// saw (raw digest; its meaning lives in `operation::current_stamp`), and
 /// the cache that stamp was taken for. `stamp` present without a cache (or
@@ -1382,6 +1415,12 @@ pub struct OperationDto {
     pub stamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache: Option<PathDto>,
+    /// The setup this operation machines in (M3.2 A). Absent means the
+    /// first setup by name - exactly what every pre-v21 operation was
+    /// (the implicit-setup law), so a v21 save of a setup-free document
+    /// is byte-identical to its v20 save.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<String>,
 }
 
 impl MoveDto {
@@ -1476,6 +1515,10 @@ pub struct EntityDto {
     /// `kind == Some(Operation)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<OperationDto>,
+    /// Setup definition; present exactly when `kind == Some(Setup)`
+    /// (M3.2 A).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<SetupDto>,
 }
 
 fn identity_rotation() -> [f64; 4] {
@@ -1527,11 +1570,26 @@ pub fn collect(world: &World) -> ProjectFile {
                 Some(EntityKind::Tool)
             } else if model::is_operation(world, &entity) {
                 Some(EntityKind::Operation)
+            } else if model::is_setup(world, &entity) {
+                Some(EntityKind::Setup)
             } else {
                 None
             };
             let stock = model::stock_def_of(world, &entity).map(|s| StockDto::from_shape(&s));
             let tool = model::tool_of(world, &entity).map(|t| ToolDto::from_tool(&t));
+            // The setup payload only ever rides a setup row (the kind test
+            // above and the component below are the same SetupDef).
+            let setup = if matches!(kind, Some(EntityKind::Setup)) {
+                entity
+                    .entity_view(world)
+                    .try_get::<&SetupDef>(|d| SetupDto {
+                        stock: d.stock.clone(),
+                        wcs: d.wcs.clone(),
+                        datum_from: d.datum_from.clone(),
+                    })
+            } else {
+                None
+            };
             let operation = model::operation_of(world, &entity).map(|op| OperationDto {
                 tool: op.tool,
                 src: match &op.src {
@@ -1556,12 +1614,16 @@ pub fn collect(world: &World) -> ProjectFile {
                 params: ParamsDto::from_params(&op.params),
                 stamp: op.stamp.map(|g| g.0),
                 cache: model::toolpath_of(world, &entity).map(|c| PathDto::from_cache(&c)),
+                setup: op.setup,
             });
-            // Parametric stock regenerates its facets on load; offsets, tools
-            // and operations never have geometry, so none writes a facet
-            // array.
+            // Parametric stock regenerates its facets on load; offsets, tools,
+            // operations and setups never have geometry, so none writes a
+            // facet array.
             let facets = match &kind {
-                Some(EntityKind::Wcs) | Some(EntityKind::Tool) | Some(EntityKind::Operation) => None,
+                Some(EntityKind::Wcs)
+                | Some(EntityKind::Tool)
+                | Some(EntityKind::Operation)
+                | Some(EntityKind::Setup) => None,
                 Some(EntityKind::Stock)
                     if matches!(
                         stock,
@@ -1584,6 +1646,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 stock,
                 tool,
                 operation,
+                setup,
             }
         })
         .collect();
@@ -1602,6 +1665,12 @@ pub fn collect(world: &World) -> ProjectFile {
             let (path, m) = crate::machine::of(world);
             m.map(|machine| MachineDto { path, machine })
         },
+        // The raw singleton, not the resolved one: a document where the
+        // user never chose a setup writes no key, exactly like the mm
+        // units and mute machine laws - and a name left dangling by a
+        // deleted setup saves as it reads (the fallback is the law, not
+        // a defect to hide).
+        active_setup: crate::setup::stored_active(world),
         entities,
     }
 }
@@ -1780,6 +1849,17 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // itself, like v7 -> v8 and v18 -> v19.
         file.version = 20;
     }
+    if file.version == 20 {
+        // v20 -> v21: setups arrive (M3.2 stage A) as a `setup` kind, a
+        // `setup` name inside each operation, and a top-level
+        // `active_setup` key. No v20 file can contain any of them - the
+        // kind tag did not exist - and the defaults read as exactly the
+        // v20 world: no setup rows and no setup names is the implicit-
+        // setup law's legacy mode verbatim, and an absent active choice
+        // resolves to the first setup by name (nothing). No content
+        // change; step-up is the stamp itself, like every bump since v6.
+        file.version = 21;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -1802,6 +1882,9 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
     {
         return Err(corrupt("machine definition states a limit that cannot be meant"));
     }
+    if file.active_setup.as_deref().is_some_and(str::is_empty) {
+        return Err(corrupt("the active setup names nothing - an empty setup name"));
+    }
     units::set(world, doc_units);
     // Opening lands the machine too - including the mute state, so a
     // stale singleton from the previous document can never leak in
@@ -1810,6 +1893,12 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         Some(m) => crate::machine::set(world, &m.path, Some(&m.machine)),
         None => crate::machine::set(world, "", None),
     }
+    // Opening lands the active-setup choice too - including None, so a
+    // stale singleton from the previous document can never leak in (the
+    // units law, restated for setups). A name matching no setup row is
+    // legal: `setup::active`'s existence fallback is the same law the
+    // live world uses mid-history, so the file reads as it was saved.
+    crate::setup::set_active(world, file.active_setup);
     for dto in file.entities {
         let kind = dto.kind.unwrap_or(EntityKind::Model);
         let entity = model::spawn(world, &dto.name);
@@ -1895,10 +1984,22 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
                     src,
                     params: odto.params.to_params(),
                     stamp: odto.stamp.map(GenStamp),
+                    setup: odto.setup,
                 });
                 if let Some(cache) = &odto.cache {
                     entity.entity_view(world).set(cache.to_cache());
                 }
+            }
+            EntityKind::Setup => {
+                // validate_kind already refused a missing one.
+                let sdto = dto
+                    .setup
+                    .ok_or_else(|| corrupt("setup entity without a definition"))?;
+                entity.entity_view(world).set(SetupDef {
+                    stock: sdto.stock,
+                    wcs: sdto.wcs,
+                    datum_from: sdto.datum_from,
+                });
             }
         }
     }
@@ -1911,7 +2012,8 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
 fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> {
     match kind {
         EntityKind::Model => {
-            if dto.stock.is_some() || dto.tool.is_some() || dto.operation.is_some() {
+            if dto.stock.is_some() || dto.tool.is_some() || dto.operation.is_some() || dto.setup.is_some()
+            {
                 return Err(corrupt(format!(
                     "'{}' is a model carrying setup or CAM parameters",
                     dto.name
@@ -1919,15 +2021,19 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
             }
         }
         EntityKind::Stock => {
-            if dto.tool.is_some() || dto.operation.is_some() {
+            if dto.tool.is_some() || dto.operation.is_some() || dto.setup.is_some() {
                 return Err(corrupt(format!(
-                    "'{}' is stock carrying tool or operation parameters",
+                    "'{}' is stock carrying tool, operation or setup parameters",
                     dto.name
                 )));
             }
-            if dto.name != STOCK_NAME {
+            // v21: setup furniture may live under a private name - the
+            // two shapes are exactly what `setup::stock_entity_name`
+            // resolves (the implicit-setup law's legacy name, or the
+            // "{SetupN}/Stock" a declared setup points at by default).
+            if dto.name != STOCK_NAME && !dto.name.ends_with("/Stock") {
                 return Err(corrupt(format!(
-                    "a stock entity must be named '{STOCK_NAME}', found '{}'",
+                    "a stock entity must be named '{STOCK_NAME}' or a setup's \"<setup>/Stock\", found '{}'",
                     dto.name
                 )));
             }
@@ -1954,9 +2060,16 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
             }
         }
         EntityKind::Wcs => {
-            if !WCS_SLOTS.contains(&dto.name.as_str()) {
+            // v21: the slot may live under a setup's private name; the
+            // word it posts is still the G-number in the last segment.
+            let slot_ok = WCS_SLOTS.contains(&dto.name.as_str())
+                || dto
+                    .name
+                    .rsplit_once('/')
+                    .is_some_and(|(_, slot)| WCS_SLOTS.contains(&slot));
+            if !slot_ok {
                 return Err(corrupt(format!(
-                    "'{}' is not a work offset slot (expected one of {})",
+                    "'{}' is not a work offset slot (expected one of {}, or a setup's \"<setup>/<slot>\")",
                     dto.name,
                     WCS_SLOTS.join(", ")
                 )));
@@ -1965,12 +2078,13 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
                 || dto.stock.is_some()
                 || dto.tool.is_some()
                 || dto.operation.is_some()
+                || dto.setup.is_some()
             {
                 return Err(corrupt(format!("'{}' is an offset, not a solid", dto.name)));
             }
         }
         EntityKind::Tool => {
-            if dto.name == STOCK_NAME || WCS_SLOTS.contains(&dto.name.as_str()) {
+            if is_furniture_name(&dto.name) {
                 return Err(corrupt(format!(
                     "'{}' is reserved for setup furniture, not a tool",
                     dto.name
@@ -1979,7 +2093,11 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
             if dto.name.is_empty() {
                 return Err(corrupt("a tool entity must be named"));
             }
-            if dto.facets.is_some() || dto.stock.is_some() || dto.operation.is_some() {
+            if dto.facets.is_some()
+                || dto.stock.is_some()
+                || dto.operation.is_some()
+                || dto.setup.is_some()
+            {
                 return Err(corrupt(format!("'{}' is a tool, not a solid", dto.name)));
             }
             let Some(tool) = &dto.tool else {
@@ -1993,9 +2111,10 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
             if dto.name.is_empty() {
                 return Err(corrupt("an operation entity must be named"));
             }
-            if dto.facets.is_some() || dto.stock.is_some() || dto.tool.is_some() {
+            if dto.facets.is_some() || dto.stock.is_some() || dto.tool.is_some() || dto.setup.is_some()
+            {
                 return Err(corrupt(format!(
-                    "'{}' is an operation, not a solid or a tool",
+                    "'{}' is an operation, not a solid, tool or setup",
                     dto.name
                 )));
             }
@@ -2004,6 +2123,9 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
             };
             if op.tool.is_empty() {
                 return Err(corrupt(format!("'{}' names no tool", dto.name)));
+            }
+            if op.setup.as_deref().is_some_and(str::is_empty) {
+                return Err(corrupt(format!("'{}' names an empty setup", dto.name)));
             }
             if let SrcDto::Entity { name } = &op.src
                 && name.is_empty()
@@ -2048,8 +2170,41 @@ fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> 
                 }
             }
         }
+        EntityKind::Setup => {
+            if dto.name.is_empty() {
+                return Err(corrupt("a setup entity must be named"));
+            }
+            if dto.facets.is_some()
+                || dto.stock.is_some()
+                || dto.tool.is_some()
+                || dto.operation.is_some()
+            {
+                return Err(corrupt(format!(
+                    "'{}' is a setup, not a solid, tool or operation",
+                    dto.name
+                )));
+            }
+            let Some(s) = &dto.setup else {
+                return Err(corrupt("setup entity without a definition"));
+            };
+            // A setup always owns a stock name; WCS entries may name
+            // entities the file does not hold - that slot is simply not
+            // placed in this setup (the schema's own law) - but an empty
+            // string names nothing at all.
+            if s.stock.is_empty() || s.wcs.iter().any(String::is_empty) {
+                return Err(corrupt(format!("'{}' has an empty furniture name", dto.name)));
+            }
+        }
     }
     Ok(())
+}
+
+/// Does this name follow a setup-furniture shape - the legacy global
+/// names, or a private "<setup>/Stock" / "<setup>/<slot>" (M3.2 A)? The
+/// Tool arm's reserved-name test: a tool wearing a furniture name would
+/// poison the by-name lookups in `setup::stock_entity` and friends.
+fn is_furniture_name(name: &str) -> bool {
+    name == STOCK_NAME || WCS_SLOTS.contains(&name) || crate::setup::is_furniture_shape(name)
 }
 
 /// Moves and cycles, for the cache's structural checks (the warnings ride

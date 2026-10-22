@@ -326,7 +326,7 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
         // cached moves are world millimeters. This is the post's own
         // origin law (one copy, in posting), so a G54 slide shifts
         // what passes exactly as it shifts the G-code.
-        let (_, origin) = posting::wcs_context(world, &op.params);
+        let (_, origin) = posting::wcs_context(world, op.setup.as_deref(), &op.params);
 
         // Spindle: the tool's suggested speed is what the op runs -
         // today every op posts its tool's rpm, so the tool IS the

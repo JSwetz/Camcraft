@@ -1037,7 +1037,7 @@ fn geometry_notes_report_through_the_panel_seam() {
     state.drain_actions();
     state.sync_ops_ui();
     assert_eq!(state.op_ui.src_kind, 2, "the pick reached the draft");
-    let notes = operation::selection_notes(&state.world, &state.op_ui.geo, &state.op_ui.params);
+    let notes = operation::selection_notes(&state.world, None, &state.op_ui.geo, &state.op_ui.params);
     assert!(
         notes.iter().any(|n| n.contains("extended to the stock boundary")),
         "the pane would draw: {notes:?}"
@@ -1052,7 +1052,7 @@ fn geometry_notes_report_through_the_panel_seam() {
     state.pending.push_back(CommandKind::DeleteByName("part".into()));
     state.drain_actions();
     state.sync_ops_ui();
-    let notes = operation::selection_notes(&state.world, &state.op_ui.geo, &state.op_ui.params);
+    let notes = operation::selection_notes(&state.world, None, &state.op_ui.geo, &state.op_ui.params);
     assert!(notes.is_empty(), "stale picks say nothing: {notes:?}");
 }
 

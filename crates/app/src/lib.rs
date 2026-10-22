@@ -21,6 +21,7 @@ pub mod posting;
 pub mod project;
 pub mod rest;
 pub mod schema;
+pub mod setup;
 pub mod solid_rest;
 pub mod sim;
 pub mod stock;

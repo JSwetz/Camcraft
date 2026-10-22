@@ -1250,14 +1250,16 @@ pub struct ProgramSim {
 /// the deviation verdict always describe the same solid.
 pub fn stock_grid(
     world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
     tool_r: f64,
 ) -> Result<Dexel, String> {
     use crate::geometry::{IDENTITY_Q, transform_point};
     use crate::stock::StockShape;
     use crate::model;
 
-    let stock_e = model::find_by_name(world, crate::schema::STOCK_NAME)
-        .ok_or("no stock defined - the program sim judges material, not air")?;
+    let stock_name = crate::setup::stock_entity_name(world, setup);
+    let stock_e = model::find_by_name(world, &stock_name)
+        .ok_or_else(|| format!("no stock '{stock_name}' - the program sim judges material, not air"))?;
     let shape = model::stock_def_of(world, &stock_e)
         .ok_or("the stock entity lost its shape")?;
     let loc = model::transform_of(world, &stock_e).unwrap_or_default();
@@ -1344,6 +1346,7 @@ pub fn simulate_document(
         moves: Vec<Move>,
         radius: f64,
         ball: bool,
+        setup: Option<String>,
     }
     let mut planned: Vec<Planned> = Vec::with_capacity(ops.len());
     for (name, e) in &ops {
@@ -1358,17 +1361,43 @@ pub fn simulate_document(
             moves: cache.path.moves,
             radius: tool.diameter / 2.0,
             ball: tool.kind == crate::tools::ToolKind::BallNose,
+            setup: op.setup,
         });
     }
 
     let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
-    let mut dex = stock_grid(world, min_r)?;
+    // The block the program starts on is the FIRST setup's stock - the
+    // implicit-setup law makes that the legacy `Stock` entity exactly,
+    // so a single-setup document walks this identical to before.
+    let mut dex = stock_grid(
+        world,
+        planned.first().and_then(|p| p.setup.as_deref()),
+        min_r,
+    )?;
 
-    let sim_ops: Vec<SimOp> = planned
-        .iter()
-        .map(|p| SimOp { moves: &p.moves, radius: p.radius, ball: p.ball })
-        .collect();
-    simulate(&mut dex, &sim_ops).map_err(|e| e.to_string())?;
+    // M3.2 A, multi-setup: the flip transform between setups is M3.3's
+    // engine, so until then a new setup's stock can only ADD material
+    // where its own block stands - never move what the previous setup
+    // already cut. That reads as a CLIP: inside the new block every
+    // column drops to at most the new stock's top, outside it material
+    // stands as left. The verdict then over-estimates leftover (a
+    // re-clamped face reads as uncut) - visible as rest, never as a
+    // gouge, the mask law's conservative direction. A later stock that
+    // is rotated or from-model cannot be judged in this frame at all:
+    // refusal, not a guess.
+    let mut prev_setup = crate::setup::effective(
+        world,
+        planned.first().and_then(|p| p.setup.as_deref()),
+    );
+    for p in &planned {
+        let eff = crate::setup::effective(world, p.setup.as_deref());
+        if eff != prev_setup {
+            clip_to_setup_stock(&mut dex, world, eff.as_deref(), min_r)?;
+            prev_setup = eff;
+        }
+        let sim_ops = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball }];
+        simulate(&mut dex, &sim_ops).map_err(|e| e.to_string())?;
+    }
 
     // The part as the machine must leave it: every model's facets in
     // world, minus the stock (setup furniture, not design intent).
@@ -1388,6 +1417,44 @@ pub fn simulate_document(
     let classes = color_classes(&dev);
     let surface = dex.surface(&classes);
     Ok(ProgramSim { dev, surface })
+}
+
+/// Fold a newly-entered setup's stock into the standing grid: inside
+/// the new block, no column may stand above that block's top; outside,
+/// what the previous setup left stands untouched. See the law comment
+/// in [`simulate_document`] - this is the conservative clip, not the
+/// flip transform (M3.3). A setup with no stock entity yet clips
+/// nothing; a rotated or from-model stock refuses, per the same law.
+fn clip_to_setup_stock(
+    dex: &mut Dexel,
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    tool_r: f64,
+) -> Result<(), String> {
+    use crate::model;
+    use crate::stock::StockShape;
+    let Some(entity) = crate::setup::stock_entity(world, setup) else {
+        return Ok(());
+    };
+    if matches!(model::stock_def_of(world, &entity), Some(StockShape::FromModel { .. })) {
+        return Err(
+            "the program sim cannot judge a later setup's from-model stock - the flip transform arrives with M3.3"
+                .into(),
+        );
+    }
+    let nd = stock_grid(world, setup, tool_r)?;
+    for iy in 0..dex.ny {
+        for ix in 0..dex.nx {
+            let q = dex.center(ix, iy);
+            let Some(k) = nd.col(q) else { continue };
+            let t = nd.top[k];
+            let i = ix + iy * dex.nx;
+            if t.is_finite() && t < dex.top[i] {
+                dex.top[i] = t;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

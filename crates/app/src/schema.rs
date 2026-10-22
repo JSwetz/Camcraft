@@ -85,6 +85,31 @@ pub struct ToolDef {
     pub tool: Tool,
 }
 
+/// One machine setup (M3.2 stage A): the named context that says WHICH
+/// raw material and WHICH work offsets an operation is machined against.
+/// The strings are entity NAMES, resolved through [`crate::setup`] - the
+/// first setup of a pre-M3.2 document points at the legacy global names
+/// (`STOCK_NAME`, `WCS_SLOTS`) so nothing is renamed when setups arrive.
+/// `wcs` is indexed by [`WCS_SLOTS`]; an entry naming an entity that does
+/// not exist yet means "this slot is not placed in this setup", exactly
+/// as a missing `G55` entity means today. `datum_from` records the setup
+/// whose stock and G54 a new setup was cloned from - provenance for the
+/// sheet, inert for every stamp (the clones themselves carry the data).
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct SetupDef {
+    pub stock: String,
+    pub wcs: Vec<String>,
+    pub datum_from: String,
+}
+
+/// The document's active setup, stored as a flecs singleton like `Units`:
+/// the context NEW furniture and NEW operations join, never a browser
+/// row and never a saved entity. `None` means no explicit choice, which
+/// reads as the first setup by name (the implicit-setup law, M3.2 A) -
+/// so a document that never touches setups behaves exactly as it did.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct ActiveSetup(pub Option<String>);
+
 /// A machining operation's definition: which tool, which geometry source
 /// (by name), the parameters, and the stamp of the world state the last
 /// successful generation saw (`None` until `GenerateOperation` runs).
@@ -97,6 +122,11 @@ pub struct Operation {
     pub src: SrcRef,
     pub params: OpParams,
     pub stamp: Option<GenStamp>,
+    /// The setup this operation machines against (M3.2 stage A). `None`
+    /// is not "no setup" - it means "the first setup by name", which in
+    /// a document with no setups at all is exactly the old global
+    /// behavior (the implicit-setup law).
+    pub setup: Option<String>,
 }
 
 /// The cached result of generating an operation: the path plus the
@@ -150,4 +180,6 @@ pub fn register_schema(world: &World) {
     world.component::<Toolpath>();
     world.component::<Units>();
     world.component::<MachineDef>();
+    world.component::<SetupDef>();
+    world.component::<ActiveSetup>();
 }

@@ -257,10 +257,22 @@ impl Height {
     }
 
     /// Resolve against the current world; None when the source is not
-    /// available (no stock or model yet, no entity in the slot).
+    /// available (no stock or model yet, no entity in the slot). The
+    /// default setup's world - a caller standing in another setup uses
+    /// [`Self::z_for`] (M3.2 stage A).
     #[must_use]
     pub fn z(&self, world: &flecs_ecs::prelude::World) -> Option<f64> {
-        resolve_height(world, *self)
+        self.z_for(world, None)
+    }
+
+    /// The same resolve in a declared setup context ([`crate::setup`]).
+    #[must_use]
+    pub fn z_for(
+        &self,
+        world: &flecs_ecs::prelude::World,
+        setup: Option<&str>,
+    ) -> Option<f64> {
+        resolve_height(world, setup, *self)
     }
 
     /// Structural sanity, no world: a Fixed height must be finite, and
@@ -285,17 +297,25 @@ impl Height {
 /// stock and WCS by `solid_world_aabb`'s rule; a slot entity that exists
 /// but was never moved reads at the origin, matching `transform_of`'s
 /// own default-everything semantics).
+/// `setup` is the declared setup of the asking operation (`None` = the
+/// first setup, which in a document without setups is the old global
+/// lookup exactly - the implicit-setup law of [`crate::setup`]). The
+/// model bounds are document-wide: the part is the part whatever setup
+/// holds it; only the stock box and the offset planes follow the setup.
 #[must_use]
-pub fn resolve_height(world: &flecs_ecs::prelude::World, h: Height) -> Option<f64> {
+pub fn resolve_height(
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    h: Height,
+) -> Option<f64> {
     let base = match h.reference {
         HeightReference::Fixed => return (h.offset.is_finite()).then_some(h.offset),
-        HeightReference::TopOfStock => model::stock_world_aabb(world)?.max.z,
-        HeightReference::BottomOfStock => model::stock_world_aabb(world)?.min.z,
+        HeightReference::TopOfStock => model::stock_world_aabb_for(world, setup)?.max.z,
+        HeightReference::BottomOfStock => model::stock_world_aabb_for(world, setup)?.min.z,
         HeightReference::TopOfModel => model::solid_world_aabb(world)?.max.z,
         HeightReference::BottomOfModel => model::solid_world_aabb(world)?.min.z,
         HeightReference::WorkOffset(i) => {
-            let slot = *crate::schema::WCS_SLOTS.get(i)?;
-            let entity = model::find_by_name(world, slot)?;
+            let entity = crate::setup::wcs_entity(world, setup, i)?;
             model::transform_of(world, &entity).unwrap_or_default().pos.z
         }
     };
@@ -307,21 +327,22 @@ pub fn resolve_height(world: &flecs_ecs::prelude::World, h: Height) -> Option<f6
 #[must_use]
 pub fn missing_source(
     world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
     r: HeightReference,
 ) -> Option<&'static str> {
     match r {
         HeightReference::Fixed => None,
-        HeightReference::TopOfStock | HeightReference::BottomOfStock => model::stock_world_aabb(
-            world,
-        )
-        .is_none()
-        .then_some("no stock yet - set it up in Setup > Stock"),
+        HeightReference::TopOfStock | HeightReference::BottomOfStock => {
+            model::stock_world_aabb_for(world, setup)
+                .is_none()
+                .then_some("no stock yet - set it up in Setup > Stock")
+        }
         HeightReference::TopOfModel | HeightReference::BottomOfModel => {
             model::solid_world_aabb(world).is_none().then_some("no model loaded")
         }
-        HeightReference::WorkOffset(i) => match crate::schema::WCS_SLOTS.get(i) {
+        HeightReference::WorkOffset(i) => match crate::setup::wcs_entity_name(world, setup, i) {
             None => Some("work offset slot out of range (G54..G59)"),
-            Some(name) => model::find_by_name(world, name)
+            Some(name) => model::find_by_name(world, &name)
                 .is_none()
                 .then_some("that work offset has no origin yet - place it in Setup"),
         },
@@ -332,18 +353,22 @@ pub fn missing_source(
 /// plane for the depth kinds, the skim (or first stage) plane for Face.
 /// None when that height's reference has no source.
 #[must_use]
-pub fn region_z(world: &flecs_ecs::prelude::World, params: &OpParams) -> Option<f64> {
+pub fn region_z(
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    params: &OpParams,
+) -> Option<f64> {
     match params {
         OpParams::Face { top_z, cut_z, .. } => top_z
-            .map(|t| resolve_height(world, t))
-            .unwrap_or_else(|| resolve_height(world, *cut_z)),
+            .map(|t| resolve_height(world, setup, t))
+            .unwrap_or_else(|| resolve_height(world, setup, *cut_z)),
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
         | OpParams::Drill { top_z, .. }
         | OpParams::Pocket3D { top_z, .. }
-        | OpParams::Finish3D { top_z, .. } => resolve_height(world, *top_z),
+        | OpParams::Finish3D { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -381,10 +406,11 @@ impl ResolvedHeights {
 /// <why>" - each refusal names the height and its source.
 pub fn resolve_params(
     world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
     params: &OpParams,
 ) -> Result<ResolvedHeights, String> {
     let req = |what: &str, h: Height| -> Result<f64, String> {
-        resolve_height(world, h).ok_or_else(|| unresolved_msg(what, h, world))
+        resolve_height(world, setup, h).ok_or_else(|| unresolved_msg(what, h, world, setup))
     };
     let opt = |what: &str, h: Option<Height>| -> Result<Option<f64>, String> {
         h.map(|v| req(what, v)).transpose()
@@ -435,9 +461,10 @@ pub fn resolve_params(
 #[must_use]
 pub fn resolve_map(
     world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
     params: &OpParams,
 ) -> (Option<f64>, Option<f64>) {
-    match resolve_params(world, params) {
+    match resolve_params(world, setup, params) {
         Ok(r) => {
             if matches!(params, OpParams::Face { .. }) {
                 let cut = r.bottom;
@@ -455,8 +482,12 @@ pub fn resolve_map(
 /// is refused at command creation. A height that cannot resolve is not
 /// here's business: `resolve_params` refuses it at generation, by name.
 #[must_use]
-pub fn depth_sane(world: &flecs_ecs::prelude::World, params: &OpParams) -> bool {
-    let Ok(r) = resolve_params(world, params) else {
+pub fn depth_sane(
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    params: &OpParams,
+) -> bool {
+    let Ok(r) = resolve_params(world, setup, params) else {
         return true; // unresolved is refused elsewhere, never a false lie here
     };
     match params {
@@ -1027,7 +1058,12 @@ impl OpParams {
     /// go Stale when a model moves, and nothing else feeds that world in.
     /// Resolved Zs are not double-counted for Fixed heights: their
     /// offset bits are the whole truth.
-    fn stamp_with(&self, world: &World, h: &mut std::hash::DefaultHasher) {
+    fn stamp_with(
+        &self,
+        world: &World,
+        setup: Option<&str>,
+        h: &mut std::hash::DefaultHasher,
+    ) {
         let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
         let wh = |h: &mut std::hash::DefaultHasher, v: Height| {
             let (tag, slot) = match v.reference {
@@ -1042,7 +1078,7 @@ impl OpParams {
             h.write_u8(slot);
             w(h, v.offset);
             if tag != 0 {
-                match resolve_height(world, v) {
+                match resolve_height(world, setup, v) {
                     Some(z) => {
                         h.write_u8(1);
                         w(h, z);
@@ -1415,12 +1451,18 @@ pub enum OpStatus {
 /// operation that has no entity yet (or none that matters) pass `""`,
 /// which reads as "no predecessors" and writes no rest term.
 #[must_use]
+/// `setup` is the operation's declared setup (M3.2 A): the stock entity,
+/// the resolved heights and the re-machining mask all read it, so an
+/// operation that switches setups stamps like the world it would
+/// machine. `None` is the first setup - bit-for-bit the old stamp in a
+/// document without setups (the implicit-setup law).
 pub fn current_stamp(
     world: &World,
     tool_name: &str,
     src: &SrcRef,
     params: &OpParams,
     op_name: &str,
+    setup: Option<&str>,
 ) -> Option<GenStamp> {
     let mut h = std::hash::DefaultHasher::new();
     // v2: heights became From+Offset expressions and their resolved
@@ -1462,11 +1504,12 @@ pub fn current_stamp(
         crate::tools::ToolKind::Tap => w(&mut h, tool.pitch),
         _ => {}
     }
-    params.stamp_with(world, &mut h);
+    params.stamp_with(world, setup, &mut h);
     match src {
         SrcRef::Stock => {
             h.write_u8(b'S');
-            let entity = model::find_by_name(world, crate::schema::STOCK_NAME)?;
+            let stock_name = crate::setup::stock_entity_name(world, setup);
+            let entity = model::find_by_name(world, &stock_name)?;
             let loc = model::transform_of(world, &entity).unwrap_or_default();
             for v in [loc.pos.x, loc.pos.y, loc.pos.z, loc.rot[0], loc.rot[1], loc.rot[2], loc.rot[3]]
             {
@@ -1572,7 +1615,7 @@ pub fn current_stamp(
     // is written: first operations' and other kinds' stamps are
     // bit-for-bit what they were before stage D (the inert-data law).
     if params.kind() == OpType::Pocket3D
-        && let Some(digest) = crate::rest::prior_digest(world, op_name)
+        && let Some(digest) = crate::rest::prior_digest(world, op_name, setup)
     {
         h.write_u8(b'R');
         h.write_u64(digest);
@@ -1596,7 +1639,14 @@ pub fn status_of(world: &World, entity: &flecs_ecs::prelude::Entity) -> OpStatus
     let name = model::name_of(world, entity).unwrap_or_default();
     match (
         op.stamp,
-        current_stamp(world, &op.tool, &op.src, &op.params, &name),
+        current_stamp(
+            world,
+            &op.tool,
+            &op.src,
+            &op.params,
+            &name,
+            op.setup.as_deref(),
+        ),
     ) {
         (Some(stored), Some(now)) if stored == now => OpStatus::Ok,
         _ => OpStatus::Stale,
@@ -1630,7 +1680,8 @@ pub fn stale_reason(
     }
     match &op.src {
         SrcRef::Stock => {
-            if model::find_by_name(world, crate::schema::STOCK_NAME).is_none() {
+            let stock_name = crate::setup::stock_entity_name(world, op.setup.as_deref());
+            if model::find_by_name(world, &stock_name).is_none() {
                 return Some("the stock no longer exists - set it up again".into());
             }
         }
@@ -1672,7 +1723,7 @@ pub fn stale_reason(
         }
     }
     for h in collect_heights(&op.params) {
-        if let Some(missing) = missing_source(world, h.reference) {
+        if let Some(missing) = missing_source(world, op.setup.as_deref(), h.reference) {
             return Some(format!("a height is measured from {missing}"));
         }
     }
@@ -1683,7 +1734,7 @@ pub fn stale_reason(
     // status reads.
     if op.params.kind() == OpType::Pocket3D
         && let Some(name) = model::name_of(world, entity)
-        && let Some(why) = crate::rest::prior_stale(world, &name)
+        && let Some(why) = crate::rest::prior_stale(world, &name, op.setup.as_deref())
     {
         return Some(why);
     }
@@ -1717,9 +1768,12 @@ struct Material {
     top: f64,
 }
 
-fn material_of(world: &World, src: &SrcRef) -> Result<Material, GenError> {
+fn material_of(world: &World, setup: Option<&str>, src: &SrcRef) -> Result<Material, GenError> {
     match src {
-        SrcRef::Stock => named_material(world, crate::schema::STOCK_NAME, "no stock: set up stock first"),
+        SrcRef::Stock => {
+            let name = crate::setup::stock_entity_name(world, setup);
+            named_material(world, &name, "no stock: set it up in Setup first")
+        }
         SrcRef::Entity(name) => {
             named_material(world, name, &format!("no entity named '{name}'"))
         }
@@ -1753,8 +1807,12 @@ fn material_of(world: &World, src: &SrcRef) -> Result<Material, GenError> {
 /// detected is what will be drilled - a local-frame list would drift
 /// from a moved part. A pure read; the caller (the UI, through a
 /// command) decides what to do with the list.
-pub fn holes_of(world: &World, src: &SrcRef) -> Result<Vec<crate::drilling::Hole>, GenError> {
-    let m = material_of(world, src)?;
+pub fn holes_of(
+    world: &World,
+    setup: Option<&str>,
+    src: &SrcRef,
+) -> Result<Vec<crate::drilling::Hole>, GenError> {
+    let m = material_of(world, setup, src)?;
     Ok(crate::drilling::recognize(&m.facets))
 }
 
@@ -1843,10 +1901,10 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
                 | OpParams::Finish3D { .. }
         )
     {
-        return selection_region(world, items, &op.params).ok();
+        return selection_region(world, op.setup.as_deref(), items, &op.params).ok();
     }
-    let material = material_of(world, &op.src).ok()?;
-    region_for(world, &material, &op.params).ok()
+    let material = material_of(world, op.setup.as_deref(), &op.src).ok()?;
+    region_for(world, op.setup.as_deref(), &material, &op.params).ok()
 }
 
 /// The centerline runs `generate` would add to `region_of`'s outline for
@@ -1860,7 +1918,7 @@ pub fn chains_of(world: &World, op: &Operation) -> Vec<Vec<Point2>> {
     let SrcRef::Selection(items) = &op.src else {
         return Vec::new();
     };
-    match selection_geometry(world, items, &op.params) {
+    match selection_geometry(world, op.setup.as_deref(), items, &op.params) {
         Ok((_, chains)) => chains,
         Err(_) => Vec::new(),
     }
@@ -1876,6 +1934,7 @@ pub fn chains_of(world: &World, op: &Operation) -> Vec<Vec<Point2>> {
 /// mesh at every Z, so a picked loop could only disagree with it.
 fn region_for_src(
     world: &World,
+    setup: Option<&str>,
     src: &SrcRef,
     params: &OpParams,
     material: &Material,
@@ -1890,9 +1949,9 @@ fn region_for_src(
                     | OpParams::Finish3D { .. }
             ) =>
         {
-            selection_region(world, items, params)
+            selection_region(world, setup, items, params)
         }
-        _ => region_for(world, material, params),
+        _ => region_for(world, setup, material, params),
     }
 }
 
@@ -1902,7 +1961,12 @@ fn region_for_src(
 /// the params: a preview with an unresolvable `top_z` shows nothing (the
 /// `Err` folds to `None` in `region_of`), and a generation refuses by
 /// name.
-fn region_for(world: &World, material: &Material, params: &OpParams) -> Result<Region, GenError> {
+fn region_for(
+    world: &World,
+    setup: Option<&str>,
+    material: &Material,
+    params: &OpParams,
+) -> Result<Region, GenError> {
     match params {
         OpParams::Face { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
@@ -1923,7 +1987,8 @@ fn region_for(world: &World, material: &Material, params: &OpParams) -> Result<R
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
         | OpParams::Trace { top_z, .. } => {
-            let z = resolve_height(world, *top_z).ok_or_else(|| unresolved_err("Top of Part Z", *top_z, world))?;
+            let z = resolve_height(world, setup, *top_z)
+                .ok_or_else(|| unresolved_err("Top of Part Z", *top_z, world, setup))?;
             section(&material.facets, z)
         }
         OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
@@ -2004,17 +2069,23 @@ fn rim_is(l: &Loop, h: Hole) -> bool {
 /// The shared refusal phrasing for an unresolved height, named by field.
 /// One source so `resolve_params`, the region builders and every command
 /// error read identically.
-pub fn unresolved_msg(what: &str, h: Height, world: &World) -> String {
+pub fn unresolved_msg(
+    what: &str,
+    h: Height,
+    world: &World,
+    setup: Option<&str>,
+) -> String {
     format!(
         "{what} (From: {ref}, offset {off}) is unresolved: {why}",
         ref = h.reference,
         off = h.offset,
-        why = missing_source(world, h.reference).unwrap_or("the source has no finite height"),
+        why = missing_source(world, setup, h.reference)
+            .unwrap_or("the source has no finite height"),
     )
 }
 
-fn unresolved_err(what: &str, h: Height, world: &World) -> GenError {
-    GenError::Invalid(unresolved_msg(what, h, world))
+fn unresolved_err(what: &str, h: Height, world: &World, setup: Option<&str>) -> GenError {
+    GenError::Invalid(unresolved_msg(what, h, world, setup))
 }
 
 /// A required height slot of an already-`Ok` `ResolvedHeights` is `Some`
@@ -2070,10 +2141,11 @@ type SelectionGeometry = (Vec<Loop>, Vec<Vec<Point2>>, bool);
 /// hands out only the halves the region-shaped kinds want.
 fn selection_geometry(
     world: &World,
+    setup: Option<&str>,
     items: &[GeoSel],
     params: &OpParams,
 ) -> Result<(Vec<Loop>, Vec<Vec<Point2>>), GenError> {
-    let (loops, chains, _) = selection_geometry_impl(world, items, params, None)?;
+    let (loops, chains, _) = selection_geometry_impl(world, setup, items, params, None)?;
     Ok((loops, chains))
 }
 
@@ -2101,11 +2173,17 @@ pub(crate) fn side_sane(params: &OpParams, src: &SrcRef) -> Option<String> {
 /// refuses. A whole-section source always answers Outside - its `+` law
 /// is already parity-correct over holes, and Inside there is a named
 /// refusal, never an Auto verdict.
-pub fn contour_auto_side(world: &World, src: &SrcRef, params: &OpParams) -> Option<bool> {
+pub fn contour_auto_side(
+    world: &World,
+    setup: Option<&str>,
+    src: &SrcRef,
+    params: &OpParams,
+) -> Option<bool> {
     match src {
         SrcRef::Stock | SrcRef::Entity(_) => Some(false),
         SrcRef::Selection(items) => {
-            let (loops, _runs, inside) = selection_geometry_impl(world, items, params, None).ok()?;
+            let (loops, _runs, inside) =
+                selection_geometry_impl(world, setup, items, params, None).ok()?;
             (!loops.is_empty()).then_some(inside)
         }
     }
@@ -2119,6 +2197,7 @@ pub fn contour_auto_side(world: &World, src: &SrcRef, params: &OpParams) -> Opti
 /// contour whose side the user already named.
 fn selection_geometry_impl(
     world: &World,
+    setup: Option<&str>,
     items: &[GeoSel],
     params: &OpParams,
     mut notes: Option<&mut Vec<String>>,
@@ -2139,10 +2218,11 @@ fn selection_geometry_impl(
     let mut envelope = None;
     let mut chain_only = false;
     if facing {
-        let material = material_of(world, &SrcRef::Selection(items.to_vec()))?;
+        let material = material_of(world, setup, &SrcRef::Selection(items.to_vec()))?;
         chain_only = items.iter().all(|g| !matches!(g.feature, FeatureSel::Face(_)));
         let sil = silhouette(&material.facets);
-        envelope = model::find_by_name(world, crate::schema::STOCK_NAME)
+        let stock_name = crate::setup::stock_entity_name(world, setup);
+        envelope = model::find_by_name(world, &stock_name)
             .and_then(|e| model::world_facets(world, &e))
             .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
             .filter(|r| !r.is_empty())
@@ -2383,7 +2463,7 @@ fn selection_geometry_impl(
         if whole > 0.0 {
             let sil = match &material_sil {
                 Some(s) => Some(s.clone()),
-                None => material_of(world, &SrcRef::Selection(items.to_vec()))
+                None => material_of(world, setup, &SrcRef::Selection(items.to_vec()))
                     .ok()
                     .and_then(|m| silhouette(&m.facets)),
             };
@@ -2415,10 +2495,11 @@ fn selection_geometry_impl(
 /// skips this and reads `selection_geometry` directly.
 fn selection_region(
     world: &World,
+    setup: Option<&str>,
     items: &[GeoSel],
     params: &OpParams,
 ) -> Result<Region, GenError> {
-    let (loops, _) = selection_geometry(world, items, params)?;
+    let (loops, _) = selection_geometry(world, setup, items, params)?;
     if loops.is_empty() {
         return Err(GenError::Empty(
             "nothing in the selection bounds an area".into(),
@@ -2455,9 +2536,14 @@ pub fn stitched_rings(world: &World, items: &[GeoSel]) -> Vec<Option<usize>> {
 /// are the v4 project-file contract, and this is derived state, not a
 /// verification finding.
 #[must_use]
-pub fn selection_notes(world: &World, items: &[GeoSel], params: &OpParams) -> Vec<String> {
+pub fn selection_notes(
+    world: &World,
+    setup: Option<&str>,
+    items: &[GeoSel],
+    params: &OpParams,
+) -> Vec<String> {
     let mut notes = Vec::new();
-    match selection_geometry_impl(world, items, params, Some(&mut notes)) {
+    match selection_geometry_impl(world, setup, items, params, Some(&mut notes)) {
         Ok(_) => notes,
         // The refusal itself is `region_of`'s and generation's to make,
         // with detail; notes stay empty rather than contradict it.
@@ -3011,20 +3097,28 @@ pub fn generate(
 
     // Source material (the slot reads its own endpoints instead, but the
     // verification still wants to know what stands around it).
-    let material = material_of(world, &op.src)?;
+    let setup = op.setup.as_deref();
+    let material = material_of(world, setup, &op.src)?;
     // Setup stock, when it is not the source itself: the swarf column
     // around a smaller model. Island-vs-swarf in the reach law keys on
-    // `region.contains`, so this only widens what counts as material.
+    // `region.contains`, so this only widens what counts as material -
+    // and it is THIS operation's setup's stock (M3.2 A), never a
+    // neighbor setup's block.
     let stock_region = match &op.src {
         SrcRef::Stock => None,
-        SrcRef::Entity(_) | SrcRef::Selection(_) => model::find_by_name(world, crate::schema::STOCK_NAME)
-            .and_then(|e| model::world_facets(world, &e))
-            .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
-            .filter(|r| !r.is_empty()),
+        SrcRef::Entity(_) | SrcRef::Selection(_) => {
+            model::find_by_name(world, &crate::setup::stock_entity_name(world, setup))
+                .and_then(|e| model::world_facets(world, &e))
+                .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
+                .filter(|r| !r.is_empty())
+        }
     };
-    let stock_top_z = material
-        .top
-        .max(model::stock_world_aabb(world).map(|b| b.max.z).unwrap_or(f64::NEG_INFINITY));
+    let stock_top_z = material.top
+       .max(
+            model::stock_world_aabb_for(world, setup)
+                .map(|b| b.max.z)
+                .unwrap_or(f64::NEG_INFINITY),
+        );
 
     let mode = match op.params.kind() {
         // Drill verifies as Boundary on purpose: its region's rim loops
@@ -3050,12 +3144,12 @@ pub fn generate(
     // refused by name before a single move is computed - never a
     // guessed z. `machining2d`'s params keep taking resolved values, so
     // the generators (and the goldens) know nothing of references.
-    let hs = resolve_params(world, &op.params).map_err(GenError::Invalid)?;
+    let hs = resolve_params(world, setup, &op.params).map_err(GenError::Invalid)?;
 
     // Region + path per kind.
     let (region, path) = match &op.params {
         OpParams::Face { stepover, stepdown, feed, plunge_feed, climb, .. } => {
-            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
             let path = machining2d::face(
                 &region,
                 &FaceParams {
@@ -3117,7 +3211,7 @@ pub fn generate(
                     // along its own points. Either half alone is enough;
                     // together they machine the whole pick list.
                     let (loops, runs, auto_inside) =
-                        selection_geometry_impl(world, items, &op.params, None)?;
+                        selection_geometry_impl(world, setup, items, &op.params, None)?;
                     if loops.is_empty() && runs.is_empty() {
                         return Err(GenError::Empty(
                             "nothing in the selection bounds an area or a run".into(),
@@ -3145,7 +3239,7 @@ pub fn generate(
                     (region, path)
                 }
                 _ => {
-                    let region = region_for_src(world, &op.src, &op.params, &material)?;
+                    let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
                     let path = machining2d::contour(&region, &cp)?;
                     (region, path)
                 }
@@ -3162,7 +3256,7 @@ pub fn generate(
             strategy,
             ..
         } => {
-            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
             let path = machining2d::pocket(
                 &region,
                 &PocketParams {
@@ -3202,7 +3296,7 @@ pub fn generate(
             // themselves at every plane, so there is nothing here for a
             // picked loop to add - and nothing to erode by hand either:
             // one erosion per level, from that level's target.
-            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
             let pp = Pocket3DParams {
                 tool_diameter: d,
                 stepover: *stepover,
@@ -3225,7 +3319,7 @@ pub fn generate(
             // the shelves its predecessors already cleared only if the
             // mask says material still stands there. Nothing ahead (or
             // nothing cut) is `None`, and the path is what it was.
-            let prior = crate::rest::prior_state(world, op_name, d * 0.5)?;
+            let prior = crate::rest::prior_state(world, op_name, setup, d * 0.5)?;
             let mask = prior.grid.as_ref();
             // The rest pass's verdict rides the path: what the sim
             // still reports after the closing ladder is the closing
@@ -3286,7 +3380,7 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
             let fp = Finish3DParams {
                 pattern: *pattern,
                 stepover: *stepover,
@@ -3359,11 +3453,11 @@ pub fn generate(
                     climb: *climb,
                 },
             )?;
-            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
             (region, path)
         }
         OpParams::Trace { stepdown, feed, plunge_feed, climb, .. } => {
-            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
             let path = machining2d::trace(
                 &region,
                 &TraceParams {
@@ -3383,7 +3477,7 @@ pub fn generate(
             // No region feeds the generator - the hole list is the
             // geometry - but the verify pass below needs one, and it is
             // built the same shared way as every other kind's.
-            let region = region_for_src(world, &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
             let path = drilling::drill(&drilling::CycleParams {
                 clearance_z: hs.clearance,
                 r_z: req_z(hs.top, "Top of Part Z")?,
@@ -3487,7 +3581,7 @@ mod tests {
             plunge_feed: 100.0,
             climb: true,
         };
-        assert!(ok.is_sane() && depth_sane(&world, &ok));
+        assert!(ok.is_sane() && depth_sane(&world, None, &ok));
         // Staged facing is sane when it descends: a top below the
         // finished height, or a zero stepdown, is not.
         let staged = OpParams::Face {
@@ -3500,7 +3594,7 @@ mod tests {
             plunge_feed: 100.0,
             climb: true,
         };
-        assert!(staged.is_sane() && depth_sane(&world, &staged));
+        assert!(staged.is_sane() && depth_sane(&world, None, &staged));
         let low = OpParams::Face {
             stepover: 8.0,
             clearance_z: Height::fixed(5.0),
@@ -3512,7 +3606,10 @@ mod tests {
             climb: true,
         };
         assert!(low.is_sane(), "structurally fine - the order is the flaw");
-        assert!(!depth_sane(&world, &low), "staged top below the finished height");
+        assert!(
+            !depth_sane(&world, None, &low),
+            "staged top below the finished height"
+        );
         let no_step = OpParams::Face {
             stepover: 8.0,
             clearance_z: Height::fixed(5.0),
@@ -3551,7 +3648,7 @@ mod tests {
             climb: true,
         };
         assert!(up.is_sane());
-        assert!(!depth_sane(&world, &up));
+        assert!(!depth_sane(&world, None, &up));
         // An out-of-range slot is structural: there is no seventh offset.
         let ghost = OpParams::Trace {
             clearance_z: Height::fixed(5.0),
@@ -3607,9 +3704,9 @@ mod tests {
         let mut ha = std::hash::DefaultHasher::new();
         let mut hb = std::hash::DefaultHasher::new();
         let mut hc = std::hash::DefaultHasher::new();
-        a.stamp_with(&world, &mut ha);
-        b.stamp_with(&world, &mut hb);
-        c.stamp_with(&world, &mut hc);
+        a.stamp_with(&world, None, &mut ha);
+        b.stamp_with(&world, None, &mut hb);
+        c.stamp_with(&world, None, &mut hc);
         assert_ne!(ha.finish(), hb.finish());
         assert_ne!(ha.finish(), hc.finish(), "staging moves the stamp");
     }
@@ -3632,7 +3729,7 @@ mod tests {
         };
         let digest = |p: &OpParams| {
             let mut h = std::hash::DefaultHasher::new();
-            p.stamp_with(&world, &mut h);
+            p.stamp_with(&world, None, &mut h);
             h.finish()
         };
         let legacy = face_with(None, None);

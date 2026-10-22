@@ -209,8 +209,8 @@ fn a_never_generated_prior_contributes_only_its_marker() {
     let src = SrcRef::Entity("plate".into());
     let a_params = pocket(12.0);
     assert_eq!(
-        operation::current_stamp(&world, "EM-0800-4FL", &src, &a_params, ""),
-        operation::current_stamp(&world, "EM-0800-4FL", &src, &a_params, "A"),
+        operation::current_stamp(&world, "EM-0800-4FL", &src, &a_params, "", None),
+        operation::current_stamp(&world, "EM-0800-4FL", &src, &a_params, "A", None),
         "nothing ahead and no entity at all are the same stamp"
     );
     generate(&world, &mut history, "A");

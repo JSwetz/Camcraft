@@ -85,12 +85,12 @@ pub(crate) fn offset_label(reference: HeightReference) -> &'static str {
 /// What a height row echoes after its offset box: the plane it resolves
 /// to, or - never a stale or guessed number - what is missing. Pure so
 /// the tests can pin the exact wording; the draw code only labels it.
-pub(crate) fn height_echo(world: &World, h: &Height) -> String {
-    match h.z(world) {
+pub(crate) fn height_echo(world: &World, setup: Option<&str>, h: &Height) -> String {
+    match h.z_for(world, setup) {
         Some(z) => format!("(= Z {})", units::len(z, units::of(world), 3)),
         None => format!(
             "(unresolved: {})",
-            operation::missing_source(world, h.reference).unwrap_or("source missing")
+            operation::missing_source(world, setup, h.reference).unwrap_or("source missing")
         ),
     }
 }
@@ -100,8 +100,12 @@ pub(crate) fn height_echo(world: &World, h: &Height) -> String {
 /// plane and Generate will refuse, naming the field and the reason (the
 /// app's `resolve_params` error). `None` when everything resolves, so a
 /// healthy panel shows no alarm.
-pub(crate) fn unresolved_note(world: &World, params: &OpParams) -> Option<String> {
-    operation::resolve_params(world, params)
+pub(crate) fn unresolved_note(
+    world: &World,
+    setup: Option<&str>,
+    params: &OpParams,
+) -> Option<String> {
+    operation::resolve_params(world, setup, params)
         .err()
         .map(|why| format!("{why}; set the source up or switch the reference"))
 }
@@ -456,8 +460,8 @@ mod height_row_tests {
     #[test]
     fn a_resolved_height_echoes_the_plane_it_lands_on() {
         let world = new_world();
-        assert_eq!(height_echo(&world, &Height::fixed(-7.0)), "(= Z -7.000)");
-        assert_eq!(height_echo(&world, &Height::fixed(25.0)), "(= Z 25.000)");
+        assert_eq!(height_echo(&world, None, &Height::fixed(-7.0)), "(= Z -7.000)");
+        assert_eq!(height_echo(&world, None, &Height::fixed(25.0)), "(= Z 25.000)");
     }
 
     #[test]
@@ -480,15 +484,15 @@ mod height_row_tests {
     fn a_missing_source_names_itself_and_where_to_fix_it() {
         let world = new_world();
         assert_eq!(
-            height_echo(&world, &Height::of(HeightReference::TopOfStock, 25.0)),
+            height_echo(&world, None, &Height::of(HeightReference::TopOfStock, 25.0)),
             "(unresolved: no stock yet - set it up in Setup > Stock)"
         );
         assert_eq!(
-            height_echo(&world, &Height::of(HeightReference::BottomOfModel, 0.0)),
+            height_echo(&world, None, &Height::of(HeightReference::BottomOfModel, 0.0)),
             "(unresolved: no model loaded)"
         );
         assert_eq!(
-            height_echo(&world, &Height::of(HeightReference::WorkOffset(0), 0.0)),
+            height_echo(&world, None, &Height::of(HeightReference::WorkOffset(0), 0.0)),
             "(unresolved: that work offset has no origin yet - place it in Setup)"
         );
     }
@@ -506,7 +510,7 @@ mod height_row_tests {
             plunge_feed: 300.0,
             climb: true,
         };
-        assert_eq!(unresolved_note(&world, &ok), None, "all fixed - no alarm");
+        assert_eq!(unresolved_note(&world, None, &ok), None, "all fixed - no alarm");
         let broken = OpParams::Face {
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
@@ -517,7 +521,7 @@ mod height_row_tests {
             plunge_feed: 300.0,
             climb: true,
         };
-        let note = unresolved_note(&world, &broken).expect("the stock is gone");
+        let note = unresolved_note(&world, None, &broken).expect("the stock is gone");
         assert!(note.contains("Cut Z"), "{note}");
         assert!(note.contains("no stock yet"), "{note}");
         assert!(note.ends_with("switch the reference"), "{note}");

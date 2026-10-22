@@ -53,7 +53,7 @@ use hsmworks_app::machine;
 use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef};
-use hsmworks_app::schema::{Operation, STOCK_NAME, WCS_SLOTS};
+use hsmworks_app::schema::{Operation, WCS_SLOTS};
 use hsmworks_app::stock::StockShape;
 use hsmworks_app::tools;
 use hsmworks_app::units::{self, Unit};
@@ -154,6 +154,13 @@ pub fn properties(ui: &mut Ui, state: &mut State, _pal: &Palette) {
                     setup_error(ui, state);
                 }
                 UiTarget::Model(n) => model_page(ui, state, n),
+                UiTarget::Setups => {
+                    state.sync_setup_ui();
+                    ui.heading("Setups");
+                    ui.separator();
+                    setups_page(ui, state);
+                    setup_error(ui, state);
+                }
             }
         });
 }
@@ -184,6 +191,11 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
         .filter(|e| model::is_operation(&state.world, e))
         .and_then(|e| model::operation_of(&state.world, e));
     let exists = live.is_some();
+    // The heights' context is the operation's declared setup, never the
+    // active cursor: what the page echoes is what that operation's
+    // generate will see. A not-yet-created operation reads `None` - the
+    // first setup, the implicit-setup law (M3.2 A).
+    let live_setup = live.as_ref().and_then(|o| o.setup.as_deref());
     ui.separator();
 
     // Type.
@@ -271,6 +283,38 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
                 src: Some(state.op_ui.src()),
             });
         }
+    }
+
+    // Setup membership (M3.2 A): which context this operation machines
+    // in. Moving is never a stamp edit - SetOperationSetup keeps the
+    // stamp and lets the resolved-Z digest say whether the op went Stale.
+    ui.label("Setup");
+    let setups = hsmworks_app::setup::names(&state.world);
+    if setups.is_empty() {
+        ui.label("Global stock and offsets - this document has no setups yet.");
+    } else if exists {
+        let cur = live
+            .as_ref()
+            .and_then(|o| o.setup.clone())
+            .or_else(|| setups.first().cloned());
+        let mut s_idx = setups.iter().position(|n| Some(n) == cur.as_ref()).unwrap_or(0);
+        let before = s_idx;
+        combo_owned(ui, "op_setup", &mut s_idx, &setups);
+        if s_idx != before {
+            let n = setups[s_idx.min(setups.len() - 1)].clone();
+            state.pending.push_back(CommandKind::SetOperationSetup {
+                name: target.clone(),
+                setup: Some(n),
+            });
+        }
+    } else {
+        // A draft has no membership until Add declares it: the command
+        // stamps the active setup at construction (the one-order law).
+        let eff = hsmworks_app::setup::active(&state.world);
+        ui.label(format!(
+            "Will machine in {}.",
+            eff.unwrap_or_else(|| "the first setup".to_owned())
+        ));
     }
 
     // Status above the tab bar (it sat below the Geometry block in the
@@ -406,6 +450,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
         }
         let notes: Vec<String> = operation::selection_notes(
             &state.world,
+            live_setup,
             &state.op_ui.geo.clone(),
             &state.op_ui.params.clone(),
         );
@@ -424,7 +469,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     params_fields(ui, state, tab);
     // The whole-panel unresolved line is operations.rs's law, same as the
     // retired imgui page's.
-    if let Some(note) = unresolved_note(&state.world, &state.op_ui.params) {
+    if let Some(note) = unresolved_note(&state.world, live_setup, &state.op_ui.params) {
         ui.label(note);
     }
     ui.separator();
@@ -515,6 +560,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let mut auto_note: Option<String> = None;
     let mut cycle_note: Option<String> = None;
     let nm = state.op_ui.name.clone();
+    // Height echoes resolve in the editing operation's declared setup
+    // context (M3.2 A); an operation that does not exist yet - a draft
+    // name - resolves `None`, the first setup, what CreateOperation will
+    // declare for it if the cursor is untouched.
+    let op_ctx: Option<String> = model::find_by_name(&state.world, &nm)
+        .and_then(|e| model::operation_of(&state.world, &e))
+        .and_then(|o| o.setup);
     if let OpParams::Drill { cycle: hsmworks_app::drilling::CycleChoice::Auto, holes, .. } =
         &state.op_ui.params
     {
@@ -554,7 +606,14 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     if let OpParams::Contour { side: Side::Auto, .. } = &state.op_ui.params {
         let resolved = op
             .as_ref()
-            .and_then(|o| operation::contour_auto_side(&state.world, &o.src, &state.op_ui.params.clone()));
+            .and_then(|o| {
+                operation::contour_auto_side(
+                    &state.world,
+                    o.setup.as_deref(),
+                    &o.src,
+                    &state.op_ui.params.clone(),
+                )
+            });
         side_note = Some(match resolved {
             Some(true) => "Auto -> Inside: the picked rings bound air, so the metal is outside them.".into(),
             Some(false) => "Auto -> Outside: the picked rings bound material.".into(),
@@ -595,9 +654,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         OpParams::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, clearance_z, "face.clearance");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "face.clearance");
                 field(ui, "Cut Z");
-                height_editor(ui, &state.world, cut_z, "face.cut");
+                height_editor(ui, &state.world, op_ctx.as_deref(), cut_z, "face.cut");
                 field(ui, "Depth staging");
                 let mut staged = top_z.is_some();
                 if ui.checkbox(&mut staged, "Stage down to Cut Z").changed() {
@@ -613,7 +672,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if staged {
                     field(ui, "Top Z (first cut level)");
                     let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
-                    height_editor(ui, &state.world, top_z.get_or_insert(seed), "face.top");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), top_z.get_or_insert(seed), "face.top");
                     field(ui, "Stepdown");
                     num(ui, u, stepdown.get_or_insert(1.0));
                 }
@@ -668,9 +727,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, clearance_z, "contour.clearance");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "contour.clearance");
                 field(ui, "Retract Z (between passes)");
-                height_editor(ui, &state.world, retract_z, "contour.retract");
+                height_editor(ui, &state.world, op_ctx.as_deref(), retract_z, "contour.retract");
                 if let (Some(rz), Some(cz)) =
                     (retract_z.z(&state.world), clearance_z.z(&state.world))
                     && rz > cz
@@ -680,9 +739,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     ));
                 }
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, top_z, "contour.top");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "contour.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, bottom_z, "contour.bottom");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "contour.bottom");
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -755,7 +814,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, clearance_z, "pocket.clearance");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "pocket.clearance");
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -767,7 +826,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, r, "pocket.retract");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"pocket.retract");
                     if let (Some(rz), Some(cz)) =
                         (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
@@ -778,9 +837,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     }
                 }
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, top_z, "pocket.top");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "pocket.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, bottom_z, "pocket.bottom");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "pocket.bottom");
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -850,11 +909,11 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, clearance_z, "slot.clearance");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "slot.clearance");
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, top_z, "slot.top");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "slot.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, bottom_z, "slot.bottom");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "slot.bottom");
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -875,7 +934,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, clearance_z, "trace.clearance");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "trace.clearance");
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -887,7 +946,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, r, "trace.retract");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"trace.retract");
                     if let (Some(rz), Some(cz)) =
                         (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
@@ -898,9 +957,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     }
                 }
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, top_z, "trace.top");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "trace.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, bottom_z, "trace.bottom");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "trace.bottom");
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -954,9 +1013,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, clearance_z, "drill.clearance");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "drill.clearance");
                 field(ui, "R plane (feed starts here)");
-                height_editor(ui, &state.world, top_z, "drill.top");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "drill.top");
                 field(ui, "Retract plane (between holes)");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -967,7 +1026,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     };
                 }
                 if let Some(r) = retract_z {
-                    height_editor(ui, &state.world, r, "drill.retract");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"drill.retract");
                     if let (Some(rz), Some(cz)) =
                         (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
@@ -987,7 +1046,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     };
                 }
                 match bottom_z {
-                    Some(b) => height_editor(ui, &state.world, b, "drill.bottom"),
+                    Some(b) => height_editor(ui, &state.world, op_ctx.as_deref(), b, "drill.bottom"),
                     None => {
                         ui.label("every hole stops at its own floor from the model");
                     }
@@ -1046,7 +1105,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, clearance_z, "pocket3d.clearance");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "pocket3d.clearance");
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1058,7 +1117,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, r, "pocket3d.retract");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"pocket3d.retract");
                     if let (Some(rz), Some(cz)) =
                         (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
@@ -1069,9 +1128,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     }
                 }
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, top_z, "pocket3d.top");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "pocket3d.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, bottom_z, "pocket3d.bottom");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "pocket3d.bottom");
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -1154,7 +1213,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, clearance_z, "finish3d.clearance");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "finish3d.clearance");
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1166,7 +1225,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, r, "finish3d.retract");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"finish3d.retract");
                     if let (Some(rz), Some(cz)) =
                         (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
@@ -1177,9 +1236,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     }
                 }
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, top_z, "finish3d.top");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "finish3d.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, bottom_z, "finish3d.bottom");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "finish3d.bottom");
                 ui.label("Top is the first ring's plane, Bottom the last level's");
             }
             if tab == SEC_PASSES {
@@ -1364,13 +1423,24 @@ fn combo_owned(ui: &mut Ui, id: &str, idx: &mut usize, names: &[String]) {
 /// `make_persistent_id`, which ignores position, so five height editors in
 /// one panel would otherwise share one id per combo (the duplicate-id
 /// badges the first S2 dump caught). Each call site passes its section name.
-fn height_editor(ui: &mut Ui, world: &flecs_ecs::prelude::World, h: &mut Height, tag: &str) {
+fn height_editor(
+    ui: &mut Ui,
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    h: &mut Height,
+    tag: &str,
+) {
     ui.push_id(tag, |ui| {
-        height_editor_inner(ui, world, h);
+        height_editor_inner(ui, world, setup, h);
     });
 }
 
-fn height_editor_inner(ui: &mut Ui, world: &flecs_ecs::prelude::World, h: &mut Height) {
+fn height_editor_inner(
+    ui: &mut Ui,
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    h: &mut Height,
+) {
     let u = units::of(world);
     let mut idx = h.reference.kind_index().min(5);
     let before = idx;
@@ -1401,7 +1471,7 @@ fn height_editor_inner(ui: &mut Ui, world: &flecs_ecs::prelude::World, h: &mut H
     ui.horizontal(|ui| {
         ui.label(offset_label(h.reference));
         num(ui, u, &mut h.offset);
-        ui.add(Label::new(egui::RichText::new(height_echo(world, h)).weak()).selectable(false));
+        ui.add(Label::new(egui::RichText::new(height_echo(world, setup, h)).weak()).selectable(false));
     });
 }
 
@@ -1483,8 +1553,18 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     let pos = [state.stock_ui.x, state.stock_ui.y, state.stock_ui.z];
     let yaw = state.stock_ui.yaw_deg;
     let margin = state.stock_ui.fit_margin;
-    let has_stock =
-        model::find_by_name(&state.world, STOCK_NAME).is_some_and(|e| model::is_stock(&state.world, &e));
+    // The stock pane edits the ACTIVE setup's stock entity (M3.2 A):
+    // with no setups in the document this resolves to the old global
+    // "Stock", so the legacy behavior is the degenerate case, not a
+    // branch. sync_setup_ui already mirrored this entity's numbers.
+    let active = hsmworks_app::setup::active(&state.world);
+    let stock_name =
+        hsmworks_app::setup::stock_entity_name(&state.world, active.as_deref());
+    let has_stock = model::find_by_name(&state.world, &stock_name)
+        .is_some_and(|e| model::is_stock(&state.world, &e));
+    if let Some(s) = active.as_deref() {
+        ui.label(format!("Stock of setup {s}."));
+    }
     ui.horizontal(|ui| {
         if ui.button("Apply").clicked() {
             let s = if shape == 1 {
@@ -1504,7 +1584,7 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::StockFit { margin, shape });
         }
         if has_stock && ui.button("Delete").clicked() {
-            state.pending.push_back(CommandKind::DeleteByName(STOCK_NAME.to_owned()));
+            state.pending.push_back(CommandKind::DeleteByName(stock_name.clone()));
         }
     });
     ui.add_space(10.0);
@@ -1661,11 +1741,16 @@ fn wcs_page(ui: &mut Ui, state: &mut State, slot: usize) {
     }
 
     ui.add_space(6.0);
-    ui.label("Placed offsets:");
+    // The slot WORDS are always the RS-274 literals (law f: a posted G55
+    // is a G55); only the entity behind each follows the setup.
+    let wcs_ctx = hsmworks_app::setup::active(&state.world);
+    ui.label(match wcs_ctx.as_deref() {
+        Some(s) => format!("Placed offsets in setup {s}:"),
+        None => "Placed offsets:".to_owned(),
+    });
     for (i, name) in WCS_SLOTS.iter().enumerate() {
-        let line = match model::find_by_name(&state.world, name)
-            .as_ref()
-            .and_then(|e| model::transform_of(&state.world, e))
+        let line = match hsmworks_app::setup::wcs_entity(&state.world, wcs_ctx.as_deref(), i)
+            .and_then(|e| model::transform_of(&state.world, &e))
         {
             Some(loc) => format!(
                 "{name}: {}, {}, {}  yaw {:.1}",
@@ -1677,7 +1762,6 @@ fn wcs_page(ui: &mut Ui, state: &mut State, slot: usize) {
             None => format!("{name}: -"),
         };
         ui.label(line);
-        let _ = i;
     }
 }
 
@@ -1714,6 +1798,79 @@ fn turn_wcs(state: &mut State, axis: usize, sign: f64) {
     state.wcs_ui.pitch_deg = p.to_degrees();
     state.wcs_ui.yaw_deg = y.to_degrees();
     apply_wcs_drafts(state);
+}
+
+// --------------------------------------------------------------- setups page
+
+/// The setups list (M3.2 A): the contexts a clamping creates. Clicking a
+/// row activates it (undoable - it is the ActiveSetup command), New
+/// creates the next named setup, optionally carrying the current one's
+/// stock and placed offsets across (the shop's datum transfer, the
+/// re-clamp law). The Stock and Work-offset pages always edit the ACTIVE
+/// row's furniture, so this page manages context, never geometry.
+fn setups_page(ui: &mut Ui, state: &mut State) {
+    let names = hsmworks_app::setup::names(&state.world);
+    let active = hsmworks_app::setup::active(&state.world);
+    if names.is_empty() {
+        ui.label(
+            "No setups in this document: the one global stock and the \
+             G54-G59 offsets act as the first setup.",
+        );
+        ui.add_space(6.0);
+        if ui.button("Create first setup").clicked() {
+            state.pending.push_back(CommandKind::CreateSetup {
+                name: None,
+                datum_from: None,
+            });
+        }
+        return;
+    }
+    for name in &names {
+        let is_active = active.as_deref() == Some(name.as_str());
+        ui.horizontal(|ui| {
+            if ui.selectable_label(is_active, name).clicked() && !is_active {
+                state.pending.push_back(CommandKind::ActivateSetup(Some(name.clone())));
+            }
+            if is_active {
+                ui.label("(active)");
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Delete").clicked() {
+                    state.pending.push_back(CommandKind::DeleteSetup(name.clone()));
+                }
+            });
+        });
+        if let Some(def) = hsmworks_app::setup::def_of(&state.world, name) {
+            let placed = (0..WCS_SLOTS.len())
+                .filter(|i| {
+                    hsmworks_app::setup::wcs_entity(&state.world, Some(name.as_str()), *i)
+                        .is_some()
+                })
+                .count();
+            let mut line = format!("    stock {}, offsets placed {placed}", def.stock);
+            if !def.datum_from.is_empty() {
+                line.push_str(&format!(", datum from {}", def.datum_from));
+            }
+            ui.label(line);
+        }
+    }
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut state.setups_ui.datum, "Carry stock and offsets over");
+        if ui.button("New setup").clicked() {
+            let datum_from = if state.setups_ui.datum {
+                active.clone()
+            } else {
+                None
+            };
+            state.pending.push_back(CommandKind::CreateSetup {
+                name: None,
+                datum_from,
+            });
+            state.setups_ui.datum = false;
+        }
+    });
+    ui.label("The Stock and Work-offset pages edit the active setup's furniture.");
 }
 
 // ----------------------------------------------------------------- tool page

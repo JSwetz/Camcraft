@@ -16,14 +16,14 @@ use std::time::{Duration, Instant};
 
 use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
-    AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation, DeleteTool,
-    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
-    RegenerateAll, SelectEntity, SetOperationGeometry, SetStock, SetUnits, SetWcsOrigin,
-    UpdateModel,
+    ActivateSetup, AddTool, ChangeTool, CommandError, CreateOperation, CreateSetup, DeleteEntity,
+    DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks, EditOperationParams,
+    GenerateOperation, History, ImportModel, LoadMachine, RegenerateAll, SelectEntity,
+    SetOperationGeometry, SetOperationSetup, SetStock, SetUnits, SetWcsOrigin, UpdateModel,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
-use hsmworks_app::schema::{Location, Operation as OperationDef, STOCK_NAME, WCS_SLOTS};
+use hsmworks_app::schema::{Location, Operation as OperationDef, WCS_SLOTS};
 use hsmworks_app::stock::{self, StockShape};
 use hsmworks_app::tools::{catalog, Tool, ToolKind};
 use hsmworks_app::units::{self, Unit};
@@ -117,6 +117,23 @@ pub enum CommandKind {
     /// The batch fix (M3.1 C): regenerate every Stale operation in one
     /// undo unit. What it finds stale at dispatch is what it fixes.
     RegenerateAll,
+    /// Setups (M3.2 A): the context a clamping creates. `datum_from`
+    /// clones a setup's stock and work offsets into the new one's own
+    /// entities (the transfer law); `None` starts with empty furniture -
+    /// except on a document with no setups at all, where the command is
+    /// by law the MATERIALIZATION of the implicit first setup.
+    CreateSetup {
+        name: Option<String>,
+        datum_from: Option<String>,
+    },
+    DeleteSetup(String),
+    /// Move the active-setup cursor. Inert for every stamp - it decides
+    /// where NEW things join, never what already cuts.
+    ActivateSetup(Option<String>),
+    /// Which setup an operation machines in (the Properties page's Setup
+    /// combo). Keeps the operation's stamp; the resolved-Z digest answers
+    /// Ok-or-Stale from the two setups' placements.
+    SetOperationSetup { name: String, setup: Option<String> },
 }
 
 /// Editable fields of the Setup pane's stock group. Transient UI state,
@@ -191,6 +208,18 @@ pub struct WcsUi {
     /// `sync_setup_ui` zero the readout when an origin is undone without
     /// wiping typing into a never-placed slot.
     pub(crate) placed: bool,
+}
+
+/// Editable fields of the Setups page (M3.2 A). Transient like [`StockUi`]:
+/// the world's SetupDef entities and the active singleton are the truth.
+/// `pick` indexes the page's setup list (clamped at draw, like
+/// `wcs_ui.slot`); `datum` rides the New button's checkbox - transfer the
+/// current setup's stock and offsets into the new one, the shop's
+/// re-clamp law.
+#[derive(Clone, Debug, Default)]
+pub struct SetupsUi {
+    pub pick: usize,
+    pub datum: bool,
 }
 
 /// Editable fields of the Properties pane's operation page. Transient UI
@@ -677,6 +706,8 @@ pub struct State {
     /// Setup pane drafts (ephemeral; see [`StockUi`]).
     pub stock_ui: StockUi,
     pub wcs_ui: WcsUi,
+    /// Setups page draft (ephemeral; see [`SetupsUi`]).
+    pub setups_ui: SetupsUi,
     /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
     pub op_ui: OpUi,
     /// Viewport click routing: whole models vs feature faces vs edge
@@ -756,6 +787,9 @@ pub enum UiTarget {
     Tool(String),
     /// An operation entity: its properties.
     Operation(String),
+    /// The Setups page (M3.2 A): always resolves - it doubles as the
+    /// creation form, like Stock and the empty-name Tool page.
+    Setups,
 }
 
 impl UiTarget {
@@ -779,6 +813,7 @@ impl UiTarget {
             }
             UiTarget::Operation(name) => model::find_by_name(world, name)
                 .is_some_and(|e| model::is_operation(world, &e)),
+            UiTarget::Setups => true,
         }
     }
 }
@@ -821,6 +856,7 @@ impl State {
                 anchor_z: 1,
                 ..WcsUi::default()
             },
+            setups_ui: SetupsUi::default(),
             // First-launch drafts carry plausible names: an empty Name
             // field made the Add buttons look dead (refused silently).
             op_ui: OpUi {
@@ -875,7 +911,12 @@ impl State {
             return;
         }
         self.ui_synced_doc = self.doc_version;
-        if let Some(entity) = model::find_by_name(&self.world, STOCK_NAME)
+        // The drafts mirror the ACTIVE setup's furniture (M3.2 A): with
+        // no setups declared this is the legacy `Stock`/`G54` entities,
+        // byte for byte; with them, the pane edits where the user works.
+        let active = hsmworks_app::setup::active(&self.world);
+        let stock_name = hsmworks_app::setup::stock_entity_name(&self.world, active.as_deref());
+        if let Some(entity) = model::find_by_name(&self.world, &stock_name)
             && model::is_stock(&self.world, &entity)
         {
             if let Some(loc) = model::transform_of(&self.world, &entity) {
@@ -903,10 +944,12 @@ impl State {
                 None => {}
             }
         }
-        let placed = WCS_SLOTS
-            .get(self.wcs_ui.slot)
-            .and_then(|slot| model::find_by_name(&self.world, slot))
-            .and_then(|entity| model::transform_of(&self.world, &entity));
+        let placed = hsmworks_app::setup::wcs_entity(
+            &self.world,
+            active.as_deref(),
+            self.wcs_ui.slot,
+        )
+        .and_then(|entity| model::transform_of(&self.world, &entity));
         match placed {
             Some(loc) => {
                 self.wcs_ui.x = loc.pos.x;
@@ -1068,7 +1111,7 @@ impl State {
             );
             return;
         };
-        match operation::holes_of(&self.world, &op.src) {
+        match operation::holes_of(&self.world, op.setup.as_deref(), &op.src) {
             Ok(found) if found.is_empty() => self.refuse(
                 ErrorScope::Operation,
                 "no drilled holes found in the source model".to_string(),
@@ -1603,7 +1646,14 @@ impl State {
                 };
                 // Fit replaces size and XY/Z placement; a deliberately
                 // oriented stock keeps its rotation.
-                let rot = model::find_by_name(&self.world, STOCK_NAME)
+                // The fit replaces the ACTIVE setup's stock, and keeps
+                // that entity's deliberate rotation (M3.2 A: the name is
+                // resolved here; the command re-resolves at construction).
+                let stock_name = hsmworks_app::setup::stock_entity_name(
+                    &self.world,
+                    hsmworks_app::setup::active(&self.world).as_deref(),
+                );
+                let rot = model::find_by_name(&self.world, &stock_name)
                     .and_then(|entity| model::transform_of(&self.world, &entity))
                     .map_or_else(|| Location::default().rot, |loc| loc.rot);
                 let location = Location { pos, rot };
@@ -1804,6 +1854,67 @@ impl State {
                     } else {
                         format!("regenerated {n} operation(s); {} skipped - {}", skipped.len(), skipped.join("; "))
                     };
+                }
+            }
+            CommandKind::CreateSetup { name, datum_from } => {
+                match CreateSetup::new(&self.world, name.as_deref(), datum_from.as_deref()) {
+                    Ok(command) => {
+                        let made = command.name().to_owned();
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("setup {made} created and active");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("setup not created: {err}"));
+                    }
+                }
+            }
+            CommandKind::DeleteSetup(name) => {
+                match DeleteSetup::new(&self.world, &name) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("deleted setup {name}");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("setup not deleted: {err}"));
+                    }
+                }
+            }
+            CommandKind::ActivateSetup(name) => {
+                match ActivateSetup::new(&self.world, name.as_deref()) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = match &name {
+                            Some(n) => format!("setup {n} active"),
+                            None => "active-setup cursor cleared".to_owned(),
+                        };
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("setup not activated: {err}"));
+                    }
+                }
+            }
+            CommandKind::SetOperationSetup { name, setup } => {
+                match SetOperationSetup::new(&self.world, &name, setup.as_deref()) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!(
+                            "moved {name} to {}",
+                            setup.as_deref().map_or_else(
+                                || "the first setup".to_owned(),
+                                |s| format!("'{s}'"),
+                            )
+                        );
+                    }
+                    Err(err) => {
+                        self.refuse(
+                            ErrorScope::Operation,
+                            format!("setup not moved: {err}"),
+                        );
+                    }
                 }
             }
         }

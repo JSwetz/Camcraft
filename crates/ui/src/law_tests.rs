@@ -1440,7 +1440,7 @@ mod height_plane_tests {
         assert!(zs.contains(&9.0), "the ring geometry walks too: {zs:?}");
         let back = state_with("F2", face_at(Some(Height::fixed(6.0))));
         assert_eq!(
-            operation::region_z(&back.world, &back.op_ui.params),
+            operation::region_z(&back.world, None, &back.op_ui.params),
             Some(6.0),
             "region_z stages with top_z - the draft's 9.0 never reached the document"
         );
