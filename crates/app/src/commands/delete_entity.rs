@@ -6,7 +6,7 @@ use flecs_ecs::prelude::World;
 use crate::commands::{Command, CommandError};
 use crate::geometry::Triangle;
 use crate::model;
-use crate::schema::{Location, Operation, StockDef, ToolDef, Toolpath, Wcs};
+use crate::schema::{FixtureDef, Location, Operation, StockDef, ToolDef, Toolpath, Wcs};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 
@@ -21,6 +21,11 @@ pub struct DeleteEntity {
     wcs: bool,
     tool: Option<Tool>,
     operation: Option<Operation>,
+    /// A model deleted from the tree keeps its fixture marker (M3.2
+    /// stage B) through undo too - the marker is part of the entity's
+    /// identity, and an undo that quietly demoted a vise to a raw
+    /// solid would change what the collision law sees.
+    fixture: Option<FixtureDef>,
     /// The generated path and its warnings, restored with the operation
     /// they belong to (AGENTS.md: deleting frees, undoing must restore
     /// ALL associated resources - in both directions).
@@ -43,6 +48,7 @@ impl DeleteEntity {
             tool: model::tool_of(world, &entity),
             operation: model::operation_of(world, &entity),
             path: model::toolpath_of(world, &entity),
+            fixture: crate::fixture::def_of(world, &entity),
         })
     }
 }
@@ -81,6 +87,9 @@ impl Command for DeleteEntity {
         }
         if let Some(path) = &self.path {
             entity.entity_view(world).set(path.clone());
+        }
+        if let Some(fixture) = &self.fixture {
+            entity.entity_view(world).set(fixture.clone());
         }
     }
 }

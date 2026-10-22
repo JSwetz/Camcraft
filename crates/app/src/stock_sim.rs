@@ -1400,10 +1400,18 @@ pub fn simulate_document(
     }
 
     // The part as the machine must leave it: every model's facets in
-    // world, minus the stock (setup furniture, not design intent).
-    // Visibility is a display choice; the verdict judges all of it.
+    // world, minus the stock (setup furniture, not design intent) -
+    // and minus the workholding, which M3.2 B made models too. A vise
+    // is steel the program must dodge, never a promise it must leave
+    // standing at height: its facets belong to the collision gate,
+    // not to the gouge verdict (counting them here would read a
+    // clamped job as a part with a vise-shaped hole in it).
+    // Visibility is a display choice; the verdict judges all the rest.
     let mut model_facets: Vec<Triangle> = Vec::new();
     for (_, e) in model::model_entities(world) {
+        if model::is_fixture(world, &e) {
+            continue;
+        }
         let tris = model::facets_of(world, &e).unwrap_or_default();
         let l = model::transform_of(world, &e).unwrap_or_default();
         model_facets.extend(tris.iter().map(|t| Triangle::new(

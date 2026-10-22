@@ -139,10 +139,13 @@ pub struct Row {
     pub depth: usize,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Section,
     Model,
+    /// A model wearing the fixture marker (M3.2 B): the vise row, not
+    /// the part row - same hideability, different noun.
+    Fixture,
     Stock,
     Wcs,
     Tool,
@@ -163,8 +166,8 @@ const EYE_RESERVE: f32 = 24.0;
 
 /// Rows whose visibility the user can toggle get the eye (browser.rs's
 /// `eye: true` rows; sections, stock, WCS and tools never do).
-fn has_eye(kind: Kind) -> bool {
-    matches!(kind, Kind::Model | Kind::Op)
+pub(crate) fn has_eye(kind: Kind) -> bool {
+    matches!(kind, Kind::Model | Kind::Fixture | Kind::Op)
 }
 
 /// Hit result for one frame of the tree.
@@ -319,6 +322,21 @@ fn glyph(shapes: &mut Vec<Shape>, c: Pos2, kind: Kind, pal: &Palette) {
         Kind::Model => {
             let r = Rect::from_center_size(c, Vec2::new(9.0, 7.0));
             shapes.push(Shape::rect_stroke(r, 0.0, s, egui::StrokeKind::Middle));
+        }
+        Kind::Fixture => {
+            // The vise: two parallel jaws, the screw shaft running from
+            // the movable one, a solid knob. The PNG twin's geometry at
+            // tree scale, drawn from what it names - original.
+            let jaw = Vec2::Y * 3.5;
+            for dx in [-4.0, -0.5] {
+                let p = c + Vec2::X * dx;
+                shapes.push(Shape::line_segment([p - jaw, p + jaw], s));
+            }
+            shapes.push(Shape::line_segment(
+                [c + Vec2::X * -0.5, c + Vec2::X * 2.8],
+                s,
+            ));
+            shapes.push(Shape::circle_filled(c + Vec2::X * 4.0, 1.3, pal.text_dim));
         }
         Kind::Stock => {
             let r = Rect::from_center_size(c, Vec2::new(9.0, 8.0));

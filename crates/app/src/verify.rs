@@ -9,7 +9,7 @@
 //! approximation, stated in full where it is used. No vendor source was
 //! consulted.
 //!
-//! Six checks, each with the exact condition that raises it:
+//! Seven checks, each with the exact condition that raises it:
 //!
 //! - [`Warning::Crossing`] - two Feed moves whose Z ranges overlap cross
 //!   in XY. Proper crossings only: touching at a shared vertex (a closed
@@ -40,6 +40,17 @@
 //!   plunge sweeps exactly its own disc, so the hole's rim samples
 //!   fall inside the flute radius where law (c)'s annulus is empty -
 //!   which is why the reach law reads the cycles, not the moves.
+//! - [`Warning::FixtureHit`] - the tool assembly passes through a
+//!   fixture box (M3.2 stage B). Workholding steel is never cut and
+//!   never gouge-relevant; it joins exactly two laws: (c2), every
+//!   cutting move's swept cylinder stack - flute column, shank band,
+//!   holder band - against every box, where a jaw in the path is a
+//!   crash like uncut material is, and (d2), the tool body along a
+//!   rapid - with no clearance or kerf exemptions, because steel is
+//!   never removed material. Z contact within
+//!   [`crate::fixture::FIXTURE_HIT_TOL`]
+//!   of a face is silent (mating surfaces touch by design); everything
+//!   else errs toward HIT.
 //! - [`Warning::Envelope`] - the measured verdict of a 3-D finish
 //!   (`Mode::Envelope`, law (f) below): the swept ball envelope cuts
 //!   below, or leaves above, the model surface by more than
@@ -56,7 +67,7 @@
 //!
 //! Conservative by design: it may warn where nothing is wrong (a wall
 //! thinner than the sampling, an exotic holder shape), it must never
-//! stay silent about the six classes above. The hard post-gate that
+//! stay silent about the seven classes above. The hard post-gate that
 //! blocks on these lands with the post processor (M2.3); until then the
 //! operation layer attaches them to the operation for display.
 //!
@@ -135,6 +146,46 @@ pub struct VerifyContext<'a> {
     /// runs - which keeps every existing op's verdict byte-identical,
     /// the same discipline as `model`.
     pub finish_tol: Option<f64>,
+    /// Workholding hardware, in world space (M3.2 stage B). Fixtures
+    /// are NOT cut material and never gouge-relevant; they participate
+    /// in exactly two laws: (1) the shank/holder band-reach laws, where
+    /// a vise jaw in the band's path is a crash just as uncut material
+    /// in it is, and (2) the rapid law, where a rapid whose path dips
+    /// into a fixture box is a crash - steel is never kerf. With the
+    /// slice empty every law is byte-identical to what it always was,
+    /// the same `None` discipline as `model`.
+    pub fixtures: &'a [crate::fixture::FixtureBox],
+    /// The spindle-housing band the machine file derives (M3.2 stage
+    /// B), as `(radius, length)` standing on top of the holder - the
+    /// offset comes from the tool stack, so the caller cannot get out
+    /// of agreement with it. `None` when the `.mch` states no body
+    /// geometry - the unstated-limit law - which keeps every
+    /// pre-stage-B verdict byte-identical. It joins the fixture band
+    /// law only: against stock the housing still stands down by the
+    /// same kerf reasoning as the holder band.
+    pub spindle: Option<(f64, f64)>,
+}
+
+/// Which machine element struck a fixture (M3.2 stage B). Serde on it
+/// for the same reason as on [`Warning`]: the pair is persisted with the
+/// cached path, so the names are a file-format contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FixturePart {
+    /// The shank band of the tool assembly.
+    Shank,
+    /// The holder band.
+    Holder,
+    /// The spindle housing band the machine file's `spindle` geometry
+    /// adds above the holder - present only when the `.mch` states both
+    /// body diameter and length (the unstated-limit law again).
+    Spindle,
+    /// The tool body on a rapid move.
+    Rapid,
+    /// The flute column itself, on a cutting move whose bands cleared:
+    /// the edge milling into clamping steel - the worst thing this law
+    /// can report, and named as itself, never as a "shank".
+    Flute,
 }
 
 /// Serde derives: the operation layer persists warnings with the cached
@@ -156,6 +207,14 @@ pub enum Warning {
     ShankHit { at: usize, part: bool },
     /// Rapid `move` travels under the clearance plane through stock.
     RapidInStock { at: usize },
+    /// Move `move` runs the named `fixture_part` of the machine through
+    /// a fixture (M3.2 stage B): a band collision on a cutting move, or
+    /// the tool body itself on a rapid. At most one per move - the
+    /// first, worst band.
+    FixtureHit {
+        at: usize,
+        fixture_part: FixturePart,
+    },
     /// Defensive: a non-finite coordinate (generators gate this out).
     NonFinite { at: usize },
     /// A 3-D finish's measured ball envelope misses the model:
@@ -187,6 +246,17 @@ impl core::fmt::Display for Warning {
             Warning::RapidInStock { at } => {
                 write!(f, "rapid move {at} travels below the clearance plane inside stock")
             }
+            Warning::FixtureHit { at, fixture_part } => write!(
+                f,
+                "{} at move {at} strikes a fixture",
+                match fixture_part {
+                    FixturePart::Shank => "shank",
+                    FixturePart::Holder => "holder",
+                    FixturePart::Spindle => "spindle housing",
+                    FixturePart::Rapid => "rapid",
+                    FixturePart::Flute => "flute",
+                }
+            ),
             Warning::NonFinite { at } => write!(f, "move {at} has a non-finite coordinate"),
             Warning::Envelope {
                 at,
@@ -288,6 +358,152 @@ fn law_points(m: &Move, chord_tol: f64) -> Vec<Point2> {
             v
         }
     }
+}
+
+/// Bands against fixtures (M3.2 stage B): the shank and holder cylinders,
+/// tested against the fixture box list instead of rest material - a vise
+/// jaw in a band's swept path is a crash exactly the way uncut stock in it
+/// is. The cylinders are SWEPT along each move's xy path (a straight move
+/// is one segment, an arc its chord segments), never sampled at law
+/// points: an 8 mm jaw standing between two far endpoints is exactly the
+/// thing this law exists for, and erring toward HIT means not sampling
+/// past it. The shank band and holder band stand at [min(from,to).z +
+/// above, + band_len]; above the holder, the spindle housing band when
+/// the machine file states its body geometry; below them all, the flute
+/// column at the tool radius over [min(from,to).z, + flute_len].
+///
+/// The law (c) annulus is empty over the flute because the flute cuts its
+/// own kerf in STOCK - but a fixture standing in that window was never
+/// meant to be cut, and nothing else looks at it. Z overlap is strict
+/// beyond tolerance (the swept-cylinder rule, `fixture::band_hits_box`:
+/// a jaw milled flush is contact without penetration, not a crash); a
+/// band reaching within the radius of the box counts, XY touching
+/// included. One report per move, first band struck, worst-case order
+/// flute-free: shank, holder, then the spindle housing. Region-free by
+/// construction - the post's live gate runs it against a cached path
+/// without re-deriving any cut geometry (the M2.3 law: workholding is
+/// checked here and now, never baked into a stamp).
+pub fn bands_vs_fixtures(
+    path: &Toolpath,
+    tool: &ToolGeom,
+    fixtures: &[crate::fixture::FixtureBox],
+    spindle: Option<(f64, f64)>,
+    chord_tol: f64,
+) -> Vec<Warning> {
+    let mut warns = Vec::new();
+    if fixtures.is_empty() {
+        return warns;
+    }
+    // The spindle housing band rides on the holder's top: its bottom
+    // offset is the holder's offset plus the holder length, so the stack
+    // can never double-count a slice of air or gap over the tool. It is a
+    // fixture law only - against stock the housing stands down by the kerf
+    // reasoning that already excuses the holder band there.
+    let spindle = spindle.map(|(sr, sl)| {
+        (
+            FixturePart::Spindle,
+            tool.flute_len + tool.shank_len + tool.holder_len,
+            sr,
+            sl,
+        )
+    });
+    let bands = [
+        (FixturePart::Shank, tool.flute_len, tool.shank_radius, tool.shank_len),
+        (
+            FixturePart::Holder,
+            tool.flute_len + tool.shank_len,
+            tool.holder_radius,
+            tool.holder_len,
+        ),
+    ];
+    for (i, m) in path.moves.iter().enumerate() {
+        if m.kind == MoveKind::Rapid {
+            continue;
+        }
+        let z_deep = m.from.z.min(m.to.z);
+        // The move's xy trace as segments: one for a straight, the
+        // chords for an arc - what the cylinders actually sweep.
+        let segs: Vec<(f64, f64, f64, f64)> = match &m.arc {
+            None => vec![(m.from.x, m.from.y, m.to.x, m.to.y)],
+            Some(_) => m
+                .chords(chord_tol)
+                .into_iter()
+                .map(|(a, b)| (a.x, a.y, b.x, b.y))
+                .collect(),
+        };
+        let mut struck = None;
+        for (part, above, band_r, band_len) in bands.into_iter().chain(spindle) {
+            // Unlike law (c), a band THINNER than the flute still
+            // collides here: (c) skips it because the flute's kerf in
+            // stock covers that radius, and steel has no such kerf.
+            if band_len <= 0.0 {
+                continue;
+            }
+            let (bz0, bz1) = (z_deep + above, z_deep + above + band_len);
+            if fixtures.iter().any(|b| {
+                segs.iter().any(|&(ax, ay, bx, by)| {
+                    crate::fixture::band_hits_box(ax, ay, bx, by, bz0, bz1, band_r, b)
+                })
+            }) {
+                struck = Some(part);
+                break; // once per move, first (worst) element struck
+            }
+        }
+        if struck.is_none() {
+            let (bz0, bz1) = (z_deep, z_deep + tool.flute_len);
+            if fixtures.iter().any(|b| {
+                segs.iter().any(|&(ax, ay, bx, by)| {
+                    crate::fixture::band_hits_box(ax, ay, bx, by, bz0, bz1, tool.radius, b)
+                })
+            }) {
+                struck = Some(FixturePart::Flute);
+            }
+        }
+        if let Some(part) = struck {
+            warns.push(Warning::FixtureHit {
+                at: i,
+                fixture_part: part,
+            });
+        }
+    }
+    warns
+}
+
+/// Rapids against fixtures (M3.2 stage B): the tool disc swept along a
+/// rapid's whole segment against every box of the setup's fixtures. No
+/// clearance gate and no vertical exemption - law (d) stands those down
+/// because the air under the clearance plane and the kerf below a retract
+/// are REMOVED MATERIAL; a fixture is steel that was never meant to move,
+/// and a rapid dipping through a jaw or a clamp arm is a crash wherever it
+/// runs. The z law is the strict-dip rule of `fixture::rapid_hits_box`: a
+/// retract lifting off exactly the mounting surface stays silent (mating
+/// surfaces contact by design); anything deeper than float dust reports.
+/// First hit per move, once. Region-free - see [`bands_vs_fixtures`] for
+/// why that matters.
+pub fn rapids_vs_fixtures(
+    path: &Toolpath,
+    tool: &ToolGeom,
+    fixtures: &[crate::fixture::FixtureBox],
+) -> Vec<Warning> {
+    let mut warns = Vec::new();
+    if fixtures.is_empty() {
+        return warns;
+    }
+    for (i, m) in path.moves.iter().enumerate() {
+        if m.kind != MoveKind::Rapid {
+            continue;
+        }
+        if fixtures
+            .iter()
+            .any(|b| crate::fixture::rapid_hits_box(&m.from, &m.to, tool.radius, b))
+        {
+            warns.push(Warning::FixtureHit {
+                at: i,
+                fixture_part: FixturePart::Rapid,
+            });
+        }
+    }
+    warns
 }
 
 /// Verify a generated path. Quadratic in feed count (crossings), linear
@@ -490,6 +706,18 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         cleared.min(cx.stock_top_z)
     };
 
+    // The band stack, law (c) and its fixture twin (c2) both read -
+    // [ (bottom offset above the cut, radius, length) ] for shank, then
+    // holder.
+    let bands = [
+        (cx.tool.flute_len, cx.tool.shank_radius, cx.tool.shank_len),
+        (
+            cx.tool.flute_len + cx.tool.shank_len,
+            cx.tool.holder_radius,
+            cx.tool.holder_len,
+        ),
+    ];
+
     // (c) Shank/holder reach against rest material.
     if cx.mode != Mode::Engrave {
         // Both boundaries matter: the region's loops carry the part
@@ -522,14 +750,6 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                     islands_at(f, z_deepest).is_some_and(|s| s.contains(q))
                 })
         };
-        let bands = [
-            (cx.tool.flute_len, cx.tool.shank_radius, cx.tool.shank_len),
-            (
-                cx.tool.flute_len + cx.tool.shank_len,
-                cx.tool.holder_radius,
-                cx.tool.holder_len,
-            ),
-        ];
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;
@@ -568,6 +788,19 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         }
     }
 
+    // (c2) Bands against fixtures (M3.2 stage B) - the law lives in
+    // [`bands_vs_fixtures`] so the post gate can run it without a
+    // region. Run for EVERY mode: steel has no tangency courtesy.
+    if !cx.fixtures.is_empty() {
+        warns.extend(bands_vs_fixtures(
+            path,
+            cx.tool,
+            cx.fixtures,
+            cx.spindle,
+            chord_tol,
+        ));
+    }
+
     // (d) Rapids: lateral travel under the clearance plane inside stock.
     for (i, m) in path.moves.iter().enumerate() {
         if m.kind != MoveKind::Rapid {
@@ -587,6 +820,13 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         if bad {
             warns.push(Warning::RapidInStock { at: i });
         }
+    }
+
+    // (d2) Rapids against fixtures (M3.2 stage B) - the law lives in
+    // [`rapids_vs_fixtures`] so the post gate can run it without a
+    // region.
+    if !cx.fixtures.is_empty() {
+        warns.extend(rapids_vs_fixtures(path, cx.tool, cx.fixtures));
     }
 
     // (e) Cycle reach: a hole deeper than the tool assembly reaches is

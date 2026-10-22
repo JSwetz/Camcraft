@@ -88,6 +88,71 @@ pub struct Machine {
     pub axes: Vec<AxisLimits>,
     pub max_tool_length: Option<f64>,
     pub max_tool_diameter: Option<f64>,
+    /// The spindle BODY (M3.2 stage B): diameter, and how far the
+    /// housing stands proud above the tool holder, mm. Not the speed
+    /// range above - the geometry the rotating house occupies, for the
+    /// collision band that runs past the holder. Unstated by the
+    /// unstated-limit law (files that name nothing check nothing);
+    /// when both are stated the band is a cylinder of `spindle_d`
+    /// rising `spindle_len` above the holder top.
+    pub spindle_d: Option<f64>,
+    pub spindle_len: Option<f64>,
+}
+
+/// What a machine is, inferred from its axis inventory (M3.2 stage E -
+/// the workspaces-by-kind law). Provenance: general machine-tool
+/// practice - a mill moves a cutter in X, Y and Z; a lathe turns the
+/// part and moves a tool in X and Z only; a mill-turn does both, which
+/// an ordinary file reveals as a Y axis with a rotary (A/B/C) among
+/// its axes. The inference is deliberately the minimal honest one:
+/// anything the axis list cannot decide - an unnamed file, a file with
+/// no X/Z pair - reads [`Kind::Mill`], because a mill is what every
+/// assumption in this codebase currently is, and an invented lathe
+/// workspace would be the silent wrong answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Mill,
+    Lathe,
+    MillTurn,
+}
+
+impl Kind {
+    /// The word the pages and tips use for the kind.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Mill => "milling",
+            Kind::Lathe => "turning",
+            Kind::MillTurn => "mill-turning",
+        }
+    }
+}
+
+/// The kind a machine definition implies, by the axis-inventory law
+/// above. Rotary axes alone do not make a mill-turn: a turning center
+/// with a C axis still has no Y, and the file says "lathe".
+#[must_use]
+pub fn kind(machine: Option<&Machine>) -> Kind {
+    let Some(m) = machine else {
+        return Kind::Mill; // the unstated machine is today's document
+    };
+    let has = |n: &str| m.axes.iter().any(|a| a.name.eq_ignore_ascii_case(n));
+    let rotary = ["A", "B", "C"].iter().any(|r| has(r));
+    match (has("Y"), has("X"), has("Z"), rotary) {
+        (true, _, _, true) => Kind::MillTurn,
+        (true, _, _, false) => Kind::Mill,
+        (false, true, true, _) => Kind::Lathe,
+        _ => Kind::Mill,
+    }
+}
+
+/// The document's machine kind, read off the singleton without the
+/// clone `of` does - the per-frame accessor for ribbon gating.
+#[must_use]
+pub fn kind_of(world: &World) -> Kind {
+    world
+        .try_get::<&MachineDef>(|d| kind(d.machine.as_ref()))
+        .unwrap_or(Kind::Mill)
 }
 
 /// The number a machine field reads as, with the unstated-limit law:
@@ -177,6 +242,8 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
             let ts = head.get("tool_station");
             m.max_tool_length = scale(rate(ts.and_then(|t| t.get("max_tool_length"))), f);
             m.max_tool_diameter = scale(rate(ts.and_then(|t| t.get("max_tool_diameter"))), f);
+            m.spindle_d = scale(rate(sp.and_then(|s| s.get("body_diameter"))), f);
+            m.spindle_len = scale(rate(sp.and_then(|s| s.get("body_length"))), f);
         }
         let mut linear: Vec<(String, serde_json::Value)> = Vec::new();
         collect_linear(Some(parts), &mut linear);
@@ -237,6 +304,8 @@ impl Machine {
             && rate_ok(self.spindle_max)
             && rate_ok(self.max_tool_length)
             && rate_ok(self.max_tool_diameter)
+            && rate_ok(self.spindle_d)
+            && rate_ok(self.spindle_len)
             && self.axes.iter().all(|a| {
                 rate_ok(a.feed) && rate_ok(a.rapid) && a.travel.is_none_or(|(lo, hi)| lo.is_finite() && hi.is_finite() && hi > lo)
             })

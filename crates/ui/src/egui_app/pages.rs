@@ -66,7 +66,9 @@ use crate::operations::{
     cycle_index, cycle_names, fold_warnings, height_echo, offset_label, side_names,
     strategy3d_names, strategy_names, unresolved_note,
 };
-use crate::state::{CommandKind, ErrorScope, GeoPick, PostView, State, UiTarget, quat_yaw_deg};
+use crate::state::{
+    CommandKind, ErrorScope, FixtureUi, GeoPick, PostView, State, UiTarget, quat_yaw_deg,
+};
 
 use super::panes::{TYPES, kind_name, retype};
 use super::theme::Palette;
@@ -1603,6 +1605,12 @@ fn machine_section(ui: &mut Ui, state: &mut State) {
     match &m {
         Some(m) => {
             ui.label(m.summary());
+            // The workspace the ribbon will offer (M3.2 stage E): the
+            // kind the axis inventory says this machine is.
+            ui.label(format!(
+                "{} workspace",
+                machine::kind(Some(m)).label()
+            ));
             if !path.is_empty() {
                 ui.label(format!("loaded from {path}"));
             }
@@ -1823,6 +1831,14 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
                 datum_from: None,
             });
         }
+        ui.separator();
+        // A document with no setups still machines steel - the
+        // workholding section and the tool list belong to the implicit
+        // context too.
+        fixtures_section(ui, state, None);
+        ui.separator();
+        tool_list_section(ui, state, None);
+        sheet_footer(ui, state);
         return;
     }
     for name in &names {
@@ -1870,7 +1886,162 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
             state.setups_ui.datum = false;
         }
     });
+    ui.separator();
+    fixtures_section(ui, state, active.as_deref());
+    ui.separator();
+    tool_list_section(ui, state, active.as_deref());
+    sheet_footer(ui, state);
     ui.label("The Stock and Work-offset pages edit the active setup's furniture.");
+}
+
+/// The tool list of one setup context (M3.2 stage C): what goes into
+/// the spindle here, in change order, with the shop's time law behind
+/// the estimate. Read-only by law - tools live in the Tool Library and
+/// operations pick them; this page only reports what that wiring
+/// implies, so there is no draft and no command here.
+fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
+    let u = state.units();
+    let rows = hsmworks_app::tool_list::for_setup(&state.world, ctx);
+    if rows.is_empty() {
+        ui.label("Tool list: no generated operation in this setup yet.");
+        return;
+    }
+    ui.label("Tool list for this setup (in change order):");
+    for row in &rows {
+        ui.label(format!(
+            "    {}  {} op{}  {} change{}  cut {}  rapid {}  est {} min",
+            row.tool,
+            row.ops.len(),
+            if row.ops.len() == 1 { "" } else { "s" },
+            row.changes,
+            if row.changes == 1 { "" } else { "s" },
+            units::len(row.cut_mm, u, 2),
+            units::len(row.rapid_mm, u, 2),
+            hsmworks_app::setup_sheet::minutes(row.minutes),
+        ));
+    }
+    ui.label(format!(
+        "    setup total: est {} min",
+        hsmworks_app::setup_sheet::minutes(hsmworks_app::tool_list::setup_minutes(
+            &state.world, ctx,
+        )),
+    ));
+}
+
+/// The setup-sheet export row (M3.2 stage D). Writing a sheet is a
+/// read of the document plus a file write - like posting - so the
+/// button queues the dialog arm and nothing touches the history.
+fn sheet_footer(ui: &mut Ui, state: &mut State) {
+    ui.horizontal(|ui| {
+        if ui.button("Export setup sheets…").clicked() {
+            state.pending.push_back(CommandKind::SetupSheetDialog);
+        }
+        ui.label("(one page per setup, text)");
+    });
+}
+
+/// The workholding section of the Setups page (M3.2 stage B): the
+/// solids the collision law sees in this context. A fixture is a plain
+/// model wearing the marker - the rows are that model, placed by the
+/// same `MoveFixture` any part uses - and the machine table is the one
+/// row nobody can edit: it is derived prose, what the `.mch` says the
+/// table is, never an entity. Import rides the model worker (no parse
+/// in a command constructor) and tags on landing.
+fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
+    let u = state.units();
+    let fixtures = hsmworks_app::fixture::tagged(&state.world, ctx);
+    let table = hsmworks_app::fixture::table_box(&state.world);
+    // A draft whose row vanished (deleted or untagged, here or via
+    // undo) retires with it - the pane never edits a ghost.
+    if !state.fixture_ui.name.is_empty()
+        && !fixtures
+            .iter()
+            .any(|(n, _)| n == &state.fixture_ui.name)
+    {
+        state.fixture_ui = FixtureUi::default();
+    }
+    ui.label(if fixtures.is_empty() && table.is_none() {
+        "No workholding modeled: the collision checks see stock and part only."
+    } else {
+        "Workholding in this setup's collision checks:"
+    });
+    for (name, entity) in fixtures {
+        let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
+        let is_draft = state.fixture_ui.name == name;
+        ui.horizontal(|ui| {
+            if ui.selectable_label(is_draft, &name).clicked() {
+                state.fixture_ui = FixtureUi {
+                    name: name.clone(),
+                    x: loc.pos.x,
+                    y: loc.pos.y,
+                    z: loc.pos.z,
+                    yaw_deg: quat_yaw_deg(loc.rot),
+                };
+            }
+            ui.label(format!(
+                "{}, {}, {}  yaw {:.1}",
+                units::len(loc.pos.x, u, 2),
+                units::len(loc.pos.y, u, 2),
+                units::len(loc.pos.z, u, 2),
+                quat_yaw_deg(loc.rot)
+            ));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Delete").clicked() {
+                    state.pending.push_back(CommandKind::DeleteFixture(name.clone()));
+                }
+                if ui.small_button("Unmark").clicked() {
+                    state.pending.push_back(CommandKind::UntagFixture(name.clone()));
+                }
+            });
+        });
+        if is_draft {
+            ui.horizontal(|ui| {
+                ui.label("    place");
+                num(ui, u, &mut state.fixture_ui.x);
+                num(ui, u, &mut state.fixture_ui.y);
+                num(ui, u, &mut state.fixture_ui.z);
+                ui.label("yaw");
+                num_plain(ui, &mut state.fixture_ui.yaw_deg);
+                if ui.small_button("Apply").clicked() {
+                    state.pending.push_back(CommandKind::MoveFixture {
+                        name: name.clone(),
+                        pos: [state.fixture_ui.x, state.fixture_ui.y, state.fixture_ui.z],
+                        yaw_deg: state.fixture_ui.yaw_deg,
+                    });
+                }
+            });
+        }
+    }
+    if let Some(t) = table {
+        ui.label(format!(
+            "Machine/Table  span {} x {}  top Z {}  (from the machine file)",
+            units::len(t.max.x - t.min.x, u, 1),
+            units::len(t.max.y - t.min.y, u, 1),
+            units::len(t.max.z, u, 2),
+        ));
+    }
+    ui.horizontal(|ui| {
+        if ui.button("Import fixture…").clicked() {
+            state.pending.push_back(CommandKind::ImportFixtureDialog);
+        }
+        // The other way in: a model already imported - select its row
+        // in the browser and mark it. Offered only for exactly one
+        // selected model, so the button never guesses its target.
+        let sel: Vec<String> = model::selected_names(&state.world)
+            .into_iter()
+            .filter(|n| {
+                model::find_by_name(&state.world, n).is_some_and(|e| model::is_model(&state.world, &e))
+            })
+            .collect();
+        if sel.len() == 1
+            && ui.button(format!("Mark {} as fixture", sel[0])).clicked()
+        {
+            state.pending.push_back(CommandKind::TagFixture {
+                name: sel[0].clone(),
+                setup: ctx.map(str::to_owned),
+            });
+        }
+    });
 }
 
 // ----------------------------------------------------------------- tool page

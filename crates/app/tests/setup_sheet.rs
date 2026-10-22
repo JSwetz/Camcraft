@@ -1,0 +1,297 @@
+//! M3.2 stage D acceptance: the setup sheet is documentation generated
+//! from the CAM data itself - deterministic to the byte, program-ordered,
+//! names the stock and offsets, resolves depths through the same
+//! machinery the stamp uses, and degrades to honest "(none)" lines on a
+//! half-built document instead of erroring or guessing.
+//!
+//! Helpers are duplicated from `tests/setups.rs` (cross-test-file imports
+//! are not the idiom here).
+
+use flecs_ecs::prelude::World;
+
+use hsmworks_app::commands::{
+    ActivateSetup, AddTool, CommandError, CreateOperation, CreateSetup, GenerateOperation, History,
+    SetStock, SetWcsOrigin,
+};
+use hsmworks_app::geometry::{IDENTITY_Q, Point3};
+use hsmworks_app::operation::{Height, HeightReference, OpParams, SrcRef};
+use hsmworks_app::schema::Location;
+use hsmworks_app::setup_sheet;
+use hsmworks_app::stock::StockShape;
+use hsmworks_app::tools::{catalog, Tool};
+use hsmworks_app::world::new_world;
+
+fn catalog_tool(name: &str) -> Tool {
+    catalog()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, t)| t)
+        .expect("catalog entry")
+}
+
+fn at(x: f64, y: f64, z: f64) -> Location {
+    Location {
+        pos: Point3::new(x, y, z),
+        rot: IDENTITY_Q,
+    }
+}
+
+/// Face parameters for the 60x60x20 box stock with a 4 mm cutter - the
+/// same fixture the operations tests face on.
+fn face_params() -> OpParams {
+    OpParams::Face {
+        stepover: 3.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.5),
+        top_z: None,
+        stepdown: None,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    }
+}
+
+fn box_stock(world: &World, history: &mut History, dx: f64, dy: f64, dz: f64) {
+    let cmd = SetStock::new(world, StockShape::Box { dx, dy, dz }, Location::default());
+    history.execute(world, cmd.expect("box stock"));
+}
+
+fn add_tool(world: &World, history: &mut History, name: &str) {
+    let cmd = AddTool::new(world, name, catalog_tool(name));
+    history.execute(world, cmd.expect("catalog tool"));
+}
+
+fn create_face(world: &World, history: &mut History, name: &str, cut_z: f64) {
+    let mut params = face_params();
+    if let OpParams::Face { cut_z: c, .. } = &mut params {
+        *c = Height::fixed(cut_z);
+    }
+    let cmd = CreateOperation::new(world, name, "EM-0400-2FL", SrcRef::Stock, params);
+    history.execute(world, cmd.expect("create face op"));
+    let cmd = GenerateOperation::new(world, name).expect("generate face op");
+    history.execute(world, cmd);
+}
+
+fn run(
+    world: &World,
+    history: &mut History,
+    cmd: Result<impl hsmworks_app::commands::Command + 'static, CommandError>,
+    what: &str,
+) {
+    history.execute(world, cmd.unwrap_or_else(|e| panic!("{what}: {e:?}")));
+}
+
+/// Stock, tool, one materialized setup and one private one, the private
+/// stock set to the same 60x60x20 box at the same spot: the pair every
+/// sheet law is judged against (from `tests/setups.rs`).
+fn two_setup_world() -> (World, History) {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    run(
+        &world,
+        &mut history,
+        CreateSetup::new(&world, None, None),
+        "materialize",
+    );
+    run(
+        &world,
+        &mut history,
+        CreateSetup::new(&world, None, None),
+        "second setup",
+    );
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    (world, history)
+}
+
+/// True when no numeric token anywhere in the text is scientific
+/// notation: a token that starts with a digit (after sign/bang trim)
+/// may only continue with digits and dots. The `2D`/`3D` operation-type
+/// prefixes are exempt - they are kind names, not floats.
+fn plain_floats_only(text: &str) -> bool {
+    text.split(|c: char| c.is_whitespace() || c == '(' || c == ')')
+        .map(|tok| tok.trim_start_matches(['-', '+', '!']))
+        .all(|t| {
+            t.is_empty()
+                || !t.starts_with(|c: char| c.is_ascii_digit())
+                || (t.len() == 2 && matches!(t.as_bytes()[0], b'2' | b'3') && t.as_bytes()[1] == b'D')
+                || t.chars().all(|c| c.is_ascii_digit() || c == '.')
+        })
+}
+
+#[test]
+fn sheet_is_deterministic_byte_identical_twice() {
+    let (world, mut history) = two_setup_world();
+    run(
+        &world,
+        &mut history,
+        SetWcsOrigin::new(&world, "G54", at(10.0, 0.0, 5.0)),
+        "place offset",
+    ); // lands in Setup2 (active)
+    run(
+        &world,
+        &mut history,
+        ActivateSetup::new(&world, Some("Setup1")),
+        "Setup1 active",
+    );
+    create_face(&world, &mut history, "F1", 19.5);
+    run(
+        &world,
+        &mut history,
+        ActivateSetup::new(&world, Some("Setup2")),
+        "Setup2 active",
+    );
+    create_face(&world, &mut history, "F2", 19.5);
+
+    let once = setup_sheet::render(&world, Some("Setup2")).expect("Setup2 sheet");
+    let twice = setup_sheet::render(&world, Some("Setup2")).expect("Setup2 sheet again");
+    assert_eq!(once, twice, "byte-identical renders are the law");
+    let none_once = setup_sheet::render(&world, None).expect("first-setup sheet");
+    let none_twice = setup_sheet::render(&world, None).expect("first-setup sheet again");
+    assert_eq!(none_once, none_twice);
+    assert!(once.contains("F2") && none_once.contains("F1"));
+
+    let all_once = setup_sheet::render_all(&world);
+    let all_twice = setup_sheet::render_all(&world);
+    assert_eq!(all_once, all_twice, "the flip chart renders twice the same");
+    assert_eq!(
+        all_once.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+        vec!["Setup1", "Setup2"]
+    );
+    assert_eq!(
+        setup_sheet::simulate_verdict(&world),
+        setup_sheet::simulate_verdict(&world),
+        "the sim verdict is deterministic too"
+    );
+}
+
+#[test]
+fn sheet_names_stock_wcs_and_op_depths() {
+    let (world, mut history) = two_setup_world();
+    run(
+        &world,
+        &mut history,
+        SetWcsOrigin::new(&world, "G54", at(12.5, -3.0, 4.0)),
+        "place G54 in Setup2",
+    );
+    create_face(&world, &mut history, "Face2", 19.5);
+
+    let sheet = setup_sheet::render(&world, Some("Setup2")).expect("Setup2 sheet");
+    assert!(sheet.contains("SETUP SHEET - Setup2"), "{sheet}");
+    assert!(sheet.contains("G54"), "the slot prints its G-word:\n{sheet}");
+    assert!(
+        sheet.contains("X 12.500") && sheet.contains("Y -3.000") && sheet.contains("Z 4.000"),
+        "the origin follows the entity transform:\n{sheet}"
+    );
+    assert!(
+        sheet.contains("X 60.000") && sheet.contains("Y 60.000") && sheet.contains("Z 20.000"),
+        "the stock box dims are on the sheet:\n{sheet}"
+    );
+    assert!(sheet.contains("19.500"), "the resolved cut Z:\n{sheet}");
+    assert!(sheet.contains("Face2") && sheet.contains("EM-0400-2FL"));
+}
+
+#[test]
+fn implicit_document_sheet_labels_it_so() {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    create_face(&world, &mut history, "Face1", 19.5);
+
+    let sheet = setup_sheet::render(&world, None).expect("implicit sheet");
+    assert!(
+        sheet.contains("SETUP SHEET - Implicit"),
+        "no setups means the sheet says so:\n{sheet}"
+    );
+    assert!(sheet.contains("Face1"), "the implicit op rides in:\n{sheet}");
+}
+
+#[test]
+fn sheet_orders_ops_by_the_program_law() {
+    // Created B before A; the program law (setup rank, then name) still
+    // puts A first - the sheet follows the post's order, not history.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    create_face(&world, &mut history, "B_Face", 19.5);
+    create_face(&world, &mut history, "A_Face", 19.5);
+
+    let sheet = setup_sheet::render(&world, None).expect("sheet");
+    let a = sheet.find("A_Face").expect("A on the sheet");
+    let b = sheet.find("B_Face").expect("B on the sheet");
+    assert!(a < b, "program order, not creation order:\n{sheet}");
+}
+
+#[test]
+fn empty_world_renders_header_only_not_error() {
+    let world = new_world();
+    let sheet = setup_sheet::render(&world, None).expect("empty world must render, not error");
+    assert!(sheet.contains("SETUP SHEET - Implicit"));
+    assert!(sheet.contains("(none)"), "sections degrade visibly:\n{sheet}");
+    assert!(sheet.contains("no operations in this setup"));
+    assert!(sheet.contains("END OF SHEET"));
+    // The one thing that IS an error: a name that wears no setup.
+    assert!(
+        setup_sheet::render(&world, Some("Nope")).is_err(),
+        "a declared setup that does not exist is refused"
+    );
+}
+
+#[test]
+fn every_float_uses_the_format_helper() {
+    // Chosen path, documented: a NaN height is REFUSED at command
+    // creation (`is_sane` runs on the expression, so a NaN never reaches
+    // a params set the sheet could render) - so instead of feeding the
+    // sheet a NaN, this feeds it a height that cannot resolve (a work
+    // offset with no origin placed) and checks the visible refusal, and
+    // separately checks the creation-time refusal of the NaN itself.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_tool(&world, &mut history, "EM-0400-2FL");
+
+    assert!(
+        CreateOperation::new(
+            &world,
+            "BadOp",
+            "EM-0400-2FL",
+            SrcRef::Stock,
+            {
+                let mut p = face_params();
+                if let OpParams::Face { cut_z: c, .. } = &mut p {
+                    *c = Height::fixed(f64::NAN);
+                }
+                p
+            },
+        )
+        .is_err(),
+        "a NaN height must be refused at command creation"
+    );
+
+    let mut params = face_params();
+    if let OpParams::Face { cut_z: c, .. } = &mut params {
+        *c = Height::of(HeightReference::WorkOffset(0), 0.0);
+    }
+    // Unresolvable at render time, sane at creation time - the command
+    // gate checks structure, not resolution (depth_sane's rule).
+    let cmd = CreateOperation::new(&world, "OddOp", "EM-0400-2FL", SrcRef::Stock, params);
+    history.execute(&world, cmd.expect("unresolved height is constructible"));
+
+    let sheet = setup_sheet::render(&world, None).expect("sheet");
+    assert!(
+        sheet.contains("! BOT"),
+        "the unresolved depth shows as a dash with an annotation:\n{sheet}"
+    );
+    assert!(
+        sheet.contains("origin"),
+        "and says why in plain words:\n{sheet}"
+    );
+    assert!(plain_floats_only(&sheet), "no scientific notation anywhere:\n{sheet}");
+    assert!(
+        !sheet.contains("NaN") && !sheet.contains("nan") && !sheet.contains("inf"),
+        "no Debug floats ever:\n{sheet}"
+    );
+}

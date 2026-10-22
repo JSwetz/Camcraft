@@ -45,11 +45,12 @@ pub(crate) enum Icon {
     Model,
     EyeOff,
     Simulate,
+    Fixture,
 }
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 24] = [
+    pub(crate) const ALL: [Icon; 25] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -74,6 +75,7 @@ impl Icon {
         Icon::Model,
         Icon::EyeOff,
         Icon::Simulate,
+        Icon::Fixture,
     ];
 
     fn png(self) -> &'static [u8] {
@@ -110,6 +112,10 @@ impl Icon {
             Icon::Model => include_bytes!("../../../../assets/ui/cube.png"),
             Icon::EyeOff => include_bytes!("../../../../assets/ui/eye-off.png"),
             Icon::Simulate => include_bytes!("../../../../assets/ui/sim.png"),
+            // Original drawing (no Tabler vise glyph exists): the two
+            // jaws, screw shaft and round knob of a machine vise, in the
+            // set's stroke weight. Ours to give.
+            Icon::Fixture => include_bytes!("../../../../assets/ui/fixture.png"),
         }
     }
 
@@ -141,6 +147,7 @@ impl Icon {
             Icon::Model => "icon-model",
             Icon::EyeOff => "icon-eye-off",
             Icon::Simulate => "icon-simulate",
+            Icon::Fixture => "icon-fixture",
         }
     }
 }

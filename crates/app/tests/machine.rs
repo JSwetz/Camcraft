@@ -51,6 +51,11 @@ fn reference() -> Machine {
         ],
         max_tool_length: Some(150.0),
         max_tool_diameter: Some(20.0),
+        // No spindle body stated: this reference machine keeps the
+        // pre-M3.2B verdicts byte-identical - the spindle band only
+        // exists when the `.mch` says it does.
+        spindle_d: None,
+        spindle_len: None,
     }
 }
 
@@ -88,6 +93,37 @@ fn faced_doc() -> (World, History) {
     history.execute(&world, cmd.expect("create face"));
     history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate face"));
     (world, history)
+}
+
+// ---- workspaces by kind (M3.2 stage E) ----
+
+#[test]
+fn the_axis_inventory_picks_the_workspace() {
+    use hsmworks_app::machine::{Kind, kind};
+    let axis = |n: &str| AxisLimits {
+        name: n.to_string(),
+        ..Default::default()
+    };
+    let m = |names: &[&str]| Machine {
+        axes: names.iter().copied().map(axis).collect(),
+        ..Default::default()
+    };
+    assert_eq!(kind(None), Kind::Mill, "no machine is today's document");
+    assert_eq!(kind(Some(&m(&["X", "Y", "Z"]))), Kind::Mill);
+    assert_eq!(kind(Some(&m(&["Z", "X"]))), Kind::Lathe, "order-free");
+    assert_eq!(kind(Some(&m(&["x", "z"]))), Kind::Lathe, "names, not cases");
+    assert_eq!(kind(Some(&m(&["X", "Y", "Z", "C"]))), Kind::MillTurn);
+    assert_eq!(
+        kind(Some(&m(&["X", "Z", "C"]))),
+        Kind::Lathe,
+        "a C axis alone is a turning center, not a mill-turn - no Y"
+    );
+    assert_eq!(
+        kind(Some(&m(&[]))),
+        Kind::Mill,
+        "an inventory that cannot decide falls back to the assumption the code already is"
+    );
+    assert_eq!(Kind::Lathe.label(), "turning");
 }
 
 // ---- the reader ----

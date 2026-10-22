@@ -17,9 +17,10 @@ use std::time::{Duration, Instant};
 use flecs_ecs::prelude::World;
 use hsmworks_app::commands::{
     ActivateSetup, AddTool, ChangeTool, CommandError, CreateOperation, CreateSetup, DeleteEntity,
-    DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks, EditOperationParams,
-    GenerateOperation, History, ImportModel, LoadMachine, RegenerateAll, SelectEntity,
-    SetOperationGeometry, SetOperationSetup, SetStock, SetUnits, SetWcsOrigin, UpdateModel,
+    DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks,
+    EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine, MoveFixture,
+    RegenerateAll, SelectEntity, SetOperationGeometry, SetOperationSetup, SetStock, SetUnits,
+    SetWcsOrigin, TagFixture, UntagFixture, UpdateModel,
 };
 use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
 use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
@@ -134,6 +135,33 @@ pub enum CommandKind {
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
     /// Ok-or-Stale from the two setups' placements.
     SetOperationSetup { name: String, setup: Option<String> },
+    /// Fixtures (M3.2 stage B): the marker is the whole fixture, so these
+    /// are the marker and placement verbs a model already knows - tag
+    /// marks one as the setup context's workholding steel, untag demotes
+    /// it (the solid stays put, the collision law stops seeing it),
+    /// `MoveFixture` is the placement every part shares, `DeleteFixture`
+    /// removes the solid. `ImportFixtureDialog` rides the model-import
+    /// worker and tags the landed name on finish - a command constructor
+    /// never reads disk, so the STEP tessellates off-thread as always.
+    TagFixture {
+        name: String,
+        setup: Option<String>,
+    },
+    UntagFixture(String),
+    MoveFixture {
+        name: String,
+        pos: [f64; 3],
+        yaw_deg: f64,
+    },
+    DeleteFixture(String),
+    ImportFixtureDialog,
+    /// Setup sheets (M3.2 stage D): render every setup and write the
+    /// flip chart, one page per setup, form feeds as page breaks. The
+    /// export is a VIEW of the document - no command, no history, no
+    /// world write, exactly like posting a program. The dialog arm is
+    /// the save-dialog law; the path arm is what headless tests run.
+    SetupSheetDialog,
+    SetupSheetFile(PathBuf),
 }
 
 /// Editable fields of the Setup pane's stock group. Transient UI state,
@@ -220,6 +248,19 @@ pub struct WcsUi {
 pub struct SetupsUi {
     pub pick: usize,
     pub datum: bool,
+}
+
+/// The fixtures section's placement draft (M3.2 stage B): one fixture's
+/// pose, editable before Apply queues the `MoveFixture` - the [`StockUi`]
+/// law, and re-synced from the world whenever the row or document moves
+/// under the pane.
+#[derive(Clone, Debug, Default)]
+pub struct FixtureUi {
+    pub name: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub yaw_deg: f64,
 }
 
 /// Editable fields of the Properties pane's operation page. Transient UI
@@ -708,6 +749,16 @@ pub struct State {
     pub wcs_ui: WcsUi,
     /// Setups page draft (ephemeral; see [`SetupsUi`]).
     pub setups_ui: SetupsUi,
+    /// Fixtures section placement draft (ephemeral; see [`FixtureUi`]).
+    pub fixture_ui: FixtureUi,
+    /// The setups-page context (setup binding) the next finished import
+    /// gets tagged with - `Some` only between ImportFixtureDialog and the
+    /// import's finish; discarded with the import itself.
+    /// Set by the import-fixture dialog, consumed by `finish_import`: the
+    /// binding the landed model is tagged with. `Some(None)` is the
+    /// implicit first setup. Public so tests run the dialog hand-off
+    /// without a modal file picker.
+    pub import_as_fixture: Option<Option<String>>,
     /// Properties / Tool Library pane drafts (ephemeral; see [`OpUi`]).
     pub op_ui: OpUi,
     /// Viewport click routing: whole models vs feature faces vs edge
@@ -857,6 +908,8 @@ impl State {
                 ..WcsUi::default()
             },
             setups_ui: SetupsUi::default(),
+            fixture_ui: FixtureUi::default(),
+            import_as_fixture: None,
             // First-launch drafts carry plausible names: an empty Name
             // field made the Add buttons look dead (refused silently).
             op_ui: OpUi {
@@ -1917,6 +1970,76 @@ impl State {
                     }
                 }
             }
+            CommandKind::TagFixture { name, setup } => {
+                match TagFixture::new(&self.world, &name, setup.as_deref()) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = match &setup {
+                            Some(s) => format!("marked {name} as {s}'s fixture"),
+                            None => format!("marked {name} as a fixture"),
+                        };
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("fixture not marked: {err}"));
+                    }
+                }
+            }
+            CommandKind::UntagFixture(name) => {
+                match UntagFixture::new(&self.world, &name) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("unmarked {name} - the solid is a plain model again");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("fixture not unmarked: {err}"));
+                    }
+                }
+            }
+            CommandKind::MoveFixture { name, pos, yaw_deg } => {
+                let location = Location {
+                    pos: Point3::new(pos[0], pos[1], pos[2]),
+                    rot: quat_from_yaw(yaw_deg.to_radians()),
+                };
+                match MoveFixture::new(&self.world, &name, location) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("moved fixture {name}");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("fixture not moved: {err}"));
+                    }
+                }
+            }
+            CommandKind::DeleteFixture(name) => {
+                match DeleteFixture::new(&self.world, &name) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("deleted fixture {name}");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("fixture not deleted: {err}"));
+                    }
+                }
+            }
+            CommandKind::ImportFixtureDialog => {
+                if let Some(path) = pick_mesh_file() {
+                    // Bind to the context the page shows: the active
+                    // setup, or the implicit-first `None` of a document
+                    // with no setups at all.
+                    self.import_as_fixture = Some(hsmworks_app::setup::active(&self.world));
+                    self.import_path(path);
+                }
+            }
+            CommandKind::SetupSheetDialog => {
+                if let Some(path) = save_sheet_dialog() {
+                    self.setup_sheet_path(path);
+                }
+            }
+            CommandKind::SetupSheetFile(path) => self.setup_sheet_path(path),
         }
     }
 
@@ -2077,6 +2200,27 @@ impl State {
                     self.doc_version += 1;
                     self.status = timed("imported", "");
                 }
+                // Stage B: an import-as-fixture tags whatever landed.
+                // Two undo units (the import, then the marker) is the
+                // honest shape - each is invertible on its own, and the
+                // worker never needed a world to begin with.
+                if let Some(binding) = self.import_as_fixture.take() {
+                    match TagFixture::new(&self.world, &name, binding.as_deref()) {
+                        Ok(tag) => {
+                            self.history.execute(&self.world, tag);
+                            self.doc_version += 1;
+                            let note = match &binding {
+                                Some(s) => format!("; marked as {s}'s fixture"),
+                                None => "; marked as a fixture".to_string(),
+                            };
+                            self.status.push_str(&note);
+                        }
+                        Err(err) => self.refuse(
+                            ErrorScope::Setup,
+                            format!("imported, but not marked as a fixture: {err}"),
+                        ),
+                    }
+                }
             }
             Err(err) => self.status = format!("import refused: {err}"),
         }
@@ -2137,6 +2281,7 @@ impl State {
         self.import_queue.clear();
         self.import_file = None;
         self.import_started = None;
+        self.import_as_fixture = None;
     }
 
     /// Mount a `.mch` machine definition on the document (M2.3 C). The
@@ -2203,6 +2348,29 @@ impl State {
             Err(err) => self.status = format!("post refused: {err}"),
         }
     }
+
+    /// Setup sheets (M3.2 stage D): write every setup's sheet as one
+    /// text file, form feeds between pages so any print path paginates
+    /// the same way the screen does. A pure read like posting - the
+    /// sheet is derived from the document, nothing about it goes in
+    /// the history, and the status line is the only effect.
+    fn setup_sheet_path(&mut self, path: PathBuf) {
+        let sheets = hsmworks_app::setup_sheet::render_all(&self.world);
+        let mut out = String::new();
+        for (i, (_title, sheet)) in sheets.iter().enumerate() {
+            if i > 0 {
+                out.push('\u{0c}');
+                out.push('\n');
+            }
+            out.push_str(sheet);
+        }
+        match std::fs::write(&path, out) {
+            Ok(()) => {
+                self.status = format!("{} setup sheet(s) written to {}", sheets.len(), path.display())
+            }
+            Err(err) => self.status = format!("sheet write failed: {err}"),
+        }
+    }
 }
 
 /// Short human name for a file path, for status text.
@@ -2253,5 +2421,14 @@ fn post_program_dialog() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("NC Program", &["nc"])
         .set_file_name("program.nc")
+        .save_file()
+}
+
+fn save_sheet_dialog() -> Option<PathBuf> {
+    // Plain text on purpose: the sheet is meant to be read on paper
+    // next to the machine, so the format is whatever Notepad opens.
+    rfd::FileDialog::new()
+        .add_filter("Text", &["txt"])
+        .set_file_name("setup-sheets.txt")
         .save_file()
 }

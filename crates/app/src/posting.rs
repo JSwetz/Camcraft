@@ -210,7 +210,70 @@ pub fn verification_gate(world: &World) -> Vec<String> {
             Err(err) => problems.push(format!("machine: {err}")),
         }
     }
+
+    // The workholding clause (M3.2 B, live-gate law): the same fixture
+    // bands and rapid laws generation reports early, re-run HERE against
+    // the paths as cached and the steel as it stands now. A vise slid
+    // under a programmed tool after generation - or a machine file that
+    // just grew a table the paths were never checked against - blocks
+    // the post without staling a single stamp (the M2.3 machine-limits
+    // precedent: what the room is made of is verified now, never baked
+    // into a digest).
+    problems.extend(fixture_problems(world));
     problems
+}
+
+/// The gate's fixture walk: one problem string per operation with a
+/// live collision, naming the op, the move, and the struck element.
+/// Ops that lost their tool or path mid-session are skipped here -
+/// `stream_records` refuses those by name before this ever releases
+/// metal; the gate's job is the steel, not the bookkeeping.
+fn fixture_problems(world: &World) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(ops) = program_ops(world) else {
+        return out;
+    };
+    let spindle = crate::machine::of(world)
+        .1
+        .and_then(|m| m.spindle_d.zip(m.spindle_len))
+        .map(|(d, l)| (d * 0.5, l));
+    for (name, e) in ops {
+        let Some(op) = model::operation_of(world, &e) else {
+            continue;
+        };
+        let Some(cache) = model::toolpath_of(world, &e) else {
+            continue;
+        };
+        let Some(tool) = model::find_by_name(world, &op.tool)
+            .and_then(|t| model::tool_of(world, &t))
+        else {
+            continue;
+        };
+        // `boxes_for` already folds in the machine-derived table, so an
+        // empty list means no steel this op could strike at all (the
+        // spindle band is tested against that list, never on its own).
+        let fixtures = crate::fixture::boxes_for(world, op.setup.as_deref());
+        if fixtures.is_empty() {
+            continue;
+        }
+        let geom = tool.geom();
+        let mut hits = crate::verify::bands_vs_fixtures(
+            &cache.path,
+            &geom,
+            &fixtures,
+            spindle,
+            operation::GOUGE_TOL,
+        );
+        hits.extend(crate::verify::rapids_vs_fixtures(
+            &cache.path,
+            &geom,
+            &fixtures,
+        ));
+        for hit in hits {
+            out.push(format!("{name}: {hit}"));
+        }
+    }
+    out
 }
 
 /// The stream we would feed the engine: every operation's records,

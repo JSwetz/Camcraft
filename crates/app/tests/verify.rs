@@ -73,6 +73,11 @@ fn ctx<'a>(region: &'a Region, stock: Option<&'a Region>, tool: &'a ToolGeom, mo
         gouge_tol: 0.01,
         z_tol: 1e-6,
         finish_tol: None,
+        // No workholding in these laws' worlds (M3.2 B): the empty
+        // slice and the absent spindle band keep every verdict exactly
+        // what it was before the stage existed.
+        fixtures: &[],
+        spindle: None,
     }
 }
 
@@ -425,6 +430,8 @@ fn env_ctx<'a>(
         gouge_tol: 0.01,
         z_tol: 1e-6,
         finish_tol,
+        fixtures: &[],
+        spindle: None,
     }
 }
 

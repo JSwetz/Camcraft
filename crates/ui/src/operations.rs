@@ -412,6 +412,10 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::RapidInStock { .. } => (3, false),
             Warning::NonFinite { .. } => (4, false),
             Warning::Envelope { .. } => (5, false),
+            // Fixture hits group by the part that hit (M3.2 stage B): a
+            // shank against a vise reads differently from a rapid into
+            // the table, and the fixes differ too.
+            Warning::FixtureHit { fixture_part, .. } => (6 + *fixture_part as u8, false),
         }
     }
     fn last_move(w: &Warning) -> usize {
@@ -420,6 +424,7 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::Gouge { at }
             | Warning::ShankHit { at, .. }
             | Warning::RapidInStock { at }
+            | Warning::FixtureHit { at, .. }
             | Warning::NonFinite { at }
             | Warning::Envelope { at, .. } => *at,
         }

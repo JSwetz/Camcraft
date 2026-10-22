@@ -226,7 +226,13 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Create(i) => {
             // imgui's swap: the buttons sit disabled over an empty tool
             // list, and the tip says what to do about it (ribbon.rs:138).
-            if state.tool_names().is_empty() {
+            if hsmworks_app::machine::kind_of(&state.world)
+                == hsmworks_app::machine::Kind::Lathe
+            {
+                "The document's machine is a lathe - turning operations \
+                 land with M4.2; these milling cells do not drive it"
+                    .into()
+            } else if state.tool_names().is_empty() {
                 "No tool yet - add one (Setup > Tools)".into()
             } else if i == 0 {
                 "Add a Face mill operation".into()
@@ -253,7 +259,14 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
         Cmd::Redo => state.history.can_redo(),
         Cmd::Run => state.selected_operation().is_some(),
         Cmd::Delete => state.has_selection(),
-        Cmd::Create(_) => !state.tool_names().is_empty(),
+        // Workspaces by machine kind (M3.2 stage E): the mill families
+        // drive a mill and a mill-turn's live tooling, and nothing
+        // else - a lathe document darkens every Create cell honestly
+        // instead of offering mill paths its machine cannot run.
+        Cmd::Create(_) => {
+            hsmworks_app::machine::kind_of(&state.world) != hsmworks_app::machine::Kind::Lathe
+                && !state.tool_names().is_empty()
+        }
         Cmd::Simulate => state.has_toolpaths(),
         // The same gate as Simulate: a program with no generated move
         // has nothing to judge - the cell stays dark until there is.
@@ -549,6 +562,26 @@ fn push_row(
     leaves.push(leaf);
 }
 
+/// What a Models row says about its model (M3.2 B): the fixture marker
+/// rides the suffix column - the row's one status channel, browser.rs's
+/// law - ahead of the hidden marker, and the kind/icon pair picks the
+/// vise glyph for steel the program must dodge. Pure, so the tree's
+/// fixture law is testable without a harness.
+pub(crate) fn model_row_marks(is_fixture: bool, hidden: bool) -> (String, painted::Kind, Icon) {
+    let mut suffix = String::new();
+    if is_fixture {
+        suffix.push_str(" (fixture)");
+    }
+    if hidden {
+        suffix.push_str(" (hidden)");
+    }
+    (
+        suffix,
+        if is_fixture { painted::Kind::Fixture } else { painted::Kind::Model },
+        if is_fixture { Icon::Fixture } else { Icon::Model },
+    )
+}
+
 pub(crate) fn kind_name(k: ToolKind) -> &'static str {
     match k {
         ToolKind::EndMill => "end mill",
@@ -628,13 +661,15 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     for (name, entity) in entities {
         let selected = model::is_selected(&state.world, &entity);
         let hidden = state.hidden_models.contains(&name);
+        let (suffix, kind, icon) =
+            model_row_marks(model::is_fixture(&state.world, &entity), hidden);
         push_row(
             &mut rows,
             &mut leaves,
             name.clone(),
-            if hidden { " (hidden)".into() } else { String::new() },
-            painted::Kind::Model,
-            Some(Icon::Model),
+            suffix,
+            kind,
+            Some(icon),
             matches!(&t, UiTarget::Model(n) if *n == name) || selected,
             hidden,
             1,

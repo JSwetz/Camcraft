@@ -66,8 +66,15 @@
 //! the kind tag did not exist, and every default (no setup rows, no
 //! setup names, no explicit active choice) is exactly the legacy global
 //! behavior the implicit-setup law already guarantees. Step-up is the
-//! stamp itself, like every bump since v6. v1-v20 files migrate on load,
-//! one version step at a time.
+//! stamp itself, like every bump since v6. v22 is M3.2 stage B: a
+//! fixture is a model entity wearing a `fixture` marker (`FixtureDto` -
+//! one key, the setup binding; the solid itself is the model's own
+//! persisted geometry, and the machine's table is never stored, it is
+//! derived from the `machine` key). No pre-v22 file can contain the
+//! marker - the component did not exist - and the default (absent means
+//! no fixture) is exactly the pre-B world: collision checked against
+//! stock and model alone. Step-up is the stamp itself, like every bump
+//! since v6. v1-v21 files migrate on load, one version step at a time.
 
 use std::path::Path;
 
@@ -84,15 +91,15 @@ use crate::machining3d::Entry3D;
 use crate::model;
 use crate::operation::{FeatureSel, GenStamp, GeoSel, OpParams, SrcRef};
 use crate::schema::{
-    Location, Operation, SetupDef, StockDef, ToolDef, Toolpath as ToolpathCache, Wcs, STOCK_NAME,
-    WCS_SLOTS,
+    FixtureDef, Location, Operation, SetupDef, StockDef, ToolDef, Toolpath as ToolpathCache, Wcs,
+    STOCK_NAME, WCS_SLOTS,
 };
 use crate::stock::{self, StockShape};
 use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
-pub const PROJECT_VERSION: u32 = 21;
+pub const PROJECT_VERSION: u32 = 22;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -1401,6 +1408,19 @@ pub struct SetupDto {
     pub datum_from: String,
 }
 
+/// The fixture marker as files hold it (M3.2 stage B): a tag on a model
+/// entity - the solid itself is that model's own `facets`, its placement
+/// the entity's `translation`/`rotation`, and the machine's table is
+/// never stored here (it derives from the `machine` key). `setup` is the
+/// DECLARED binding, same grammar as `OperationDto::setup`: absent
+/// means the first setup by name (the implicit-setup law), so a tagged
+/// model in a setup-free document saves as one key and nothing more.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct FixtureDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<String>,
+}
+
 /// An operation as files hold it: definition, the stamp the last generate
 /// saw (raw digest; its meaning lives in `operation::current_stamp`), and
 /// the cache that stamp was taken for. `stamp` present without a cache (or
@@ -1519,6 +1539,12 @@ pub struct EntityDto {
     /// (M3.2 A).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<SetupDto>,
+    /// Fixture marker (M3.2 B); present exactly on an UNTAGGED-kind
+    /// (Model) entity - a fixture is a model that collision checks
+    /// respect, so it borrows the model row's geometry, never a kind
+    /// of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixture: Option<FixtureDto>,
 }
 
 fn identity_rotation() -> [f64; 4] {
@@ -1590,6 +1616,14 @@ pub fn collect(world: &World) -> ProjectFile {
             } else {
                 None
             };
+            // The fixture marker rides whatever model it tags; the kind
+            // test above deliberately does NOT look at it (a fixture is
+            // a model, not a kind).
+            let fixture = entity
+                .entity_view(world)
+                .try_get::<&FixtureDef>(|d| FixtureDto {
+                    setup: d.setup.clone(),
+                });
             let operation = model::operation_of(world, &entity).map(|op| OperationDto {
                 tool: op.tool,
                 src: match &op.src {
@@ -1647,6 +1681,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 tool,
                 operation,
                 setup,
+                fixture,
             }
         })
         .collect();
@@ -1860,6 +1895,15 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
         // change; step-up is the stamp itself, like every bump since v6.
         file.version = 21;
     }
+    if file.version == 21 {
+        // v21 -> v22: fixtures arrive (M3.2 stage B) as an optional
+        // `fixture` marker on model entities - a tag, not a new kind,
+        // because a fixture IS the model the user loaded. No v21 file
+        // can contain it: the component did not exist, and its default
+        // (no marker) is exactly the v21 collision world. Step-up is
+        // the stamp itself, like every bump since v6.
+        file.version = 22;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -2002,6 +2046,15 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
                 });
             }
         }
+        // v22: the fixture marker rides a finished model row (the kind
+        // match above built the solid; validate_kind refused the tag on
+        // anything else). Setting it after keeps the geometry-first
+        // order of every other load.
+        if let Some(f) = &dto.fixture {
+            entity.entity_view(world).set(FixtureDef {
+                setup: f.setup.clone(),
+            });
+        }
     }
     Ok(())
 }
@@ -2010,12 +2063,28 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
 /// entity reaches the world; a corrupt field never half-loads (Prime
 /// Directive: validate early, fail cleanly).
 fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), ProjectError> {
+    // v22, once for every kind: the fixture marker rides a MODEL row
+    // and nothing else - stock, offsets, tools, operations and setups
+    // wearing it would be a file describing a CAM concept that has no
+    // world representation.
+    if dto.fixture.is_some() && !matches!(kind, EntityKind::Model) {
+        return Err(corrupt(format!(
+            "'{}' wears a fixture tag but is not a model",
+            dto.name
+        )));
+    }
     match kind {
         EntityKind::Model => {
             if dto.stock.is_some() || dto.tool.is_some() || dto.operation.is_some() || dto.setup.is_some()
             {
                 return Err(corrupt(format!(
                     "'{}' is a model carrying setup or CAM parameters",
+                    dto.name
+                )));
+            }
+            if dto.fixture.as_ref().is_some_and(|f| f.setup.as_deref().is_some_and(str::is_empty)) {
+                return Err(corrupt(format!(
+                    "'{}' is tagged a fixture of an empty setup name",
                     dto.name
                 )));
             }

@@ -183,6 +183,8 @@ fn verify_finish(
         gouge_tol: 0.01,
         z_tol: 1e-6,
         finish_tol: Some(TOL),
+        fixtures: &[],
+        spindle: None,
     };
     verify(t, &cx)
 }

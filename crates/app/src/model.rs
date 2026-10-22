@@ -221,6 +221,18 @@ pub fn is_setup(world: &World, entity: &Entity) -> bool {
         .is_some()
 }
 
+/// Is this entity a FIXTURE (M3.2 stage B)? The tag rides a model - a
+/// fixture has no kind of its own, so this is a marker test, not a
+/// `is_*` kind: `is_setup` and friends decide what an entity IS, this
+/// says what a model additionally means to the collision checker.
+#[must_use]
+pub fn is_fixture(world: &World, entity: &Entity) -> bool {
+    entity
+        .entity_view(world)
+        .try_get::<&crate::schema::FixtureDef>(|_| ())
+        .is_some()
+}
+
 /// The tool definition, if this entity is a tool.
 #[must_use]
 pub fn tool_of(world: &World, entity: &Entity) -> Option<Tool> {

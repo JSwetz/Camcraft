@@ -1620,6 +1620,16 @@ pub fn current_stamp(
         h.write_u8(b'R');
         h.write_u64(digest);
     }
+    // M3.2 B what-the-program-clamps-to is deliberately NOT here.
+    // Workholding - user fixtures and the machine-derived table and
+    // spindle bands - rides the post's LIVE verification gate, exactly
+    // like the M2.3 machine limits: "load the roomy one and the same
+    // program still posts" is the user-facing law, and the gate
+    // re-checks the steel here and now, so a moved vise can never post
+    // silently without churning a single stamp. Generation still
+    // reports fixture warnings early (the verify call below reads the
+    // boxes live); staleness from workholding is the failure mode this
+    // keeps out (see RECOMMENDED.md, the M2.3-law extension).
     Some(GenStamp(h.finish()))
 }
 
@@ -1752,7 +1762,7 @@ fn collect_heights(params: &OpParams) -> Vec<Height> {
 /// Gouge law's radial slack: half the geo2d round-join chord error plus
 /// room for float chains; below this, a "bite" is an artifact, above it a
 /// real overrun of the finish surface (see `tests/verify.rs` rationale).
-const GOUGE_TOL: f64 = 0.01;
+pub(crate) const GOUGE_TOL: f64 = 0.01;
 /// "Below the clearance plane" / "moved in XY" margin for the rapid law.
 const Z_TOL: f64 = 1e-6;
 /// Z samples for a silhouette footprint; convergence needs far fewer.
@@ -3495,7 +3505,19 @@ pub fn generate(
         }
     };
 
+    // M3.2 stage B: what the program clamps to. The op's setup context
+    // decides - user fixtures bound to it (tagged models, implicit-
+    // setup resolution on both sides) plus the machine table when the
+    // .mch states a travel the table can sit in.
+    let fixture_boxes = crate::fixture::boxes_for(world, op.setup.as_deref());
     let geom = tool.geom();
+    // The machine's own steel, if it states any (M3.2 stage B): the
+    // unstated-limit law means a file that names no spindle body adds
+    // no band, exactly as it adds no feed or travel check.
+    let spindle = crate::machine::of(world)
+        .1
+        .and_then(|m| m.spindle_d.zip(m.spindle_len))
+        .map(|(d, l)| (d * 0.5, l));
     let warns = verify::verify(
         &path,
         &VerifyContext {
@@ -3531,6 +3553,8 @@ pub fn generate(
                 OpParams::Finish3D { tolerance, .. } => Some(*tolerance),
                 _ => None,
             },
+            fixtures: &fixture_boxes,
+            spindle,
         },
     );
     Ok((path, warns))

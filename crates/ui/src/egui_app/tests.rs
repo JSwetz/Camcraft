@@ -47,8 +47,9 @@ use hsmworks_app::units::{self, Unit};
 use crate::interact;
 use crate::state::{CommandKind, DragMode, GeoPick, PostView, State, UiTarget};
 
-use super::icons::IconSet;
+use super::icons::{Icon, IconSet};
 use super::panes::{self, Cmd};
+use super::painted;
 use super::shell::{Tab, build_dock, headless, shell_layout};
 use super::viewcube;
 use super::{theme, world};
@@ -1927,6 +1928,80 @@ fn ribbon_drill_cell_creates_a_drill_operation() {
     assert_eq!(*cycle, hsmworks_app::drilling::CycleChoice::Auto);
 }
 
+/// M3.2 stage E, the workspaces-by-kind law: the ribbon follows the
+/// machine file's axis inventory. A lathe document darkens every mill
+/// cell - honestly disabled with a tip that says why and when - and a
+/// mill file lights them again. The UI never invents the kind; it reads
+/// `machine::kind_of`, which reads the loaded `.mch`.
+#[test]
+fn a_lathe_machine_darkens_the_mill_cells() {
+    let dir = std::env::temp_dir().join(format!("hsmw_kind_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let write = |name: &str, axes: &str| {
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"general":{{"model":"TestBench","vendor":"Hsmworks Testbench"}},
+                    "kinematics":{{"default":{{"units":{{"length":"mm"}},"parts":[
+                      {axes}
+                    ]}}}}}}"#
+            ),
+        )
+        .expect("write machine file");
+        path
+    };
+    let lathe = write(
+        "lathe.mch",
+        r#"{"type":"linear","name":"X","parts":[{"type":"linear","name":"Z"}]}"#,
+    );
+    let mill = write(
+        "mill.mch",
+        r#"{"type":"linear","name":"X","parts":[{"type":"linear","name":"Y","parts":[{"type":"linear","name":"Z"}]}]}"#,
+    );
+
+    let mut harness = shell_harness();
+    harness.run();
+    assert!(
+        !harness.state().state.tool_names().is_empty(),
+        "the demo document carries tools - the darkening is the machine, not the list"
+    );
+
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::LoadMachineFile(lathe));
+    harness.run();
+    let st = &harness.state().state;
+    assert!(
+        !panes::enabled(Cmd::Create(1), st),
+        "a lathe machine must darken the mill cells"
+    );
+    assert!(
+        !panes::enabled(Cmd::Create(0), st),
+        "every Create cell, not just contour"
+    );
+    assert!(
+        panes::tip_of(Cmd::Create(1), st).contains("lathe"),
+        "the tip says what is dark and why: {:?}",
+        panes::tip_of(Cmd::Create(1), st)
+    );
+
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::LoadMachineFile(mill));
+    harness.run();
+    let st = &harness.state().state;
+    assert!(
+        panes::enabled(Cmd::Create(1), st),
+        "a Y axis in the file is the mill workspace again"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     let mut harness = shell_harness();
@@ -2703,4 +2778,30 @@ fn the_viewer_window_publishes_the_scroll_cursor() {
         super::shell::gcode_segment(&harness.state().state).is_none(),
         "closing the window hides the highlight"
     );
+}
+
+/// M3.2 stage B, the tree's fixture law: a tagged model reads as work-
+/// holding steel - vise glyph, "(fixture)" in the status column - while
+/// keeping the row's hideability (a parked vise still gets an eye). The
+/// mapping is pure so both branches are checked without a world.
+#[test]
+fn a_fixture_model_reads_as_a_vise_in_the_tree() {
+    let (suffix, kind, icon) = panes::model_row_marks(true, false);
+    assert_eq!(suffix, " (fixture)");
+    assert_eq!(kind, painted::Kind::Fixture);
+    assert_eq!(icon, Icon::Fixture);
+    // A plain model row is untouched: the change is marker-driven,
+    // never name-driven.
+    let (suffix, kind, icon) = panes::model_row_marks(false, false);
+    assert_eq!(suffix, "");
+    assert_eq!(kind, painted::Kind::Model);
+    assert_eq!(icon, Icon::Model);
+    // Both markers, in column order: fixture first, then display state.
+    let (suffix, _, _) = panes::model_row_marks(true, true);
+    assert_eq!(suffix, " (fixture) (hidden)");
+    // The eye law: hideable rows own the eye column; fixtures are
+    // hideable models.
+    assert!(painted::has_eye(painted::Kind::Fixture));
+    assert!(painted::has_eye(painted::Kind::Model));
+    assert!(!painted::has_eye(painted::Kind::Section));
 }

@@ -102,6 +102,21 @@ pub struct SetupDef {
     pub datum_from: String,
 }
 
+/// The M3.2 stage B marker turning a model entity into a FIXTURE: the
+/// solid clamps, sits on, or stands beside the stock, and collision-
+/// checks every path in its setup context (M3.2 stage B). There is no
+/// synthetic fixture geometry in this program - a fixture is an
+/// ordinary named model (its facets are whatever STEP the user loaded),
+/// wearing this tag; `setup` follows the declared-vs-effective law of
+/// `Operation::setup`. Moving a fixture IS moving a model (the same
+/// `Location`), so only the binding rides here. The machine's table is
+/// NOT one of these - it is derived from the `.mch` on demand
+/// (`fixture::boxes_for`), which is why this component names no kind.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+pub struct FixtureDef {
+    pub setup: Option<String>,
+}
+
 /// The document's active setup, stored as a flecs singleton like `Units`:
 /// the context NEW furniture and NEW operations join, never a browser
 /// row and never a saved entity. `None` means no explicit choice, which
@@ -182,4 +197,5 @@ pub fn register_schema(world: &World) {
     world.component::<MachineDef>();
     world.component::<SetupDef>();
     world.component::<ActiveSetup>();
+    world.component::<FixtureDef>();
 }

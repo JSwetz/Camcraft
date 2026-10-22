@@ -208,7 +208,10 @@ fn missing_pieces_refuse_by_name() {
     history.execute(&world, cmd.expect("create"));
     history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate without stock"));
     let err = simulate_document(&world).expect_err("air is not stock");
-    assert!(err.contains("no stock defined"), "{err}");
+    // The M3.2 A wording: the refusal names WHICH setup stock is
+    // missing ("no stock 'Stock'") - the law phrase, not the old
+    // literal, so per-setup naming and this gate stay the same text.
+    assert!(err.contains("no stock") && err.contains("judges material"), "{err}");
 }
 
 #[test]

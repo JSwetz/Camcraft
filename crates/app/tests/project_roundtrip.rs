@@ -100,11 +100,12 @@ fn wrong_version_is_refused() {
     // v17 -> v18, and v18_file_steps_to_v19_and_the_machine_grammar_round_trips
     // v18 -> v19, and v19_file_steps_to_v20_and_the_rev_counter_round_trips
     // v19 -> v20, and v20_file_steps_to_v21_and_the_setups_grammar_round_trips
-    // v20 -> v21.
-    let text = r#"{"version": 22, "entities": []}"#;
+    // v20 -> v21, and v21_file_steps_to_v22_and_the_fixture_tag_round_trips
+    // v21 -> v22.
+    let text = r#"{"version": 23, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(22)) => {}
+        Err(ProjectError::UnsupportedVersion(23)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -2151,6 +2152,98 @@ fn v20_file_steps_to_v21_and_the_setups_grammar_round_trips() {
     assert!(
         matches!(project::open(&world, &empty), Err(ProjectError::Corrupt(_))),
         "an empty cursor name must refuse, not guess"
+    );
+}
+
+#[test]
+fn v21_file_steps_to_v22_and_the_fixture_tag_round_trips() {
+    // v21 -> v22 (M3.2 B): fixtures. No v21 file can carry a `fixture`
+    // marker - the component did not exist - and its default (no tag)
+    // is exactly the v21 collision world: checks against stock and
+    // model alone. Step-up is the stamp itself; check_and_apply
+    // rewrites nothing. A fixture is a tagged MODEL (stage B's law),
+    // so no new kind appears in the grammar either.
+    let quad = r#"[[[0.0,0.0,0.0],[40.0,0.0,0.0],[40.0,40.0,0.0]],[[0.0,0.0,0.0],[40.0,40.0,0.0],[0.0,40.0,0.0]]]"#;
+    let text = format!(
+        r#"{{"version": 21, "entities": [
+            {{"name": "plate", "translation": [0.0, 0.0, 0.0], "facets": {quad}}},
+            {{"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock",
+              "stock": {{"box": {{"dx": 40.0, "dy": 40.0, "dz": 20.0}}}}}}
+        ]}}"#
+    );
+    let world = new_world();
+    project::open(&world, &text).expect("a v21 file must still open");
+    let plate = model::find_by_name(&world, "plate").expect("loaded");
+    assert!(
+        !model::is_fixture(&world, &plate),
+        "the step-up mints no tags"
+    );
+    let p = tmp_path("v22a");
+    project::save(&world, &p).expect("save");
+    let v22 = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        v22.contains(&format!("\"version\": {}", project::PROJECT_VERSION))
+            && !v22.contains("\"fixture\""),
+        "a migrated legacy save keeps the legacy byte shape: {v22}"
+    );
+
+    // The v22 grammar itself, hand-written so the WIRE spelling is
+    // pinned: a bare tag (the implicit-setup binding) and a tag naming
+    // a declared setup. Round-trips byte-identically from a world, and
+    // the two spellings agree with what a load-then-save writes.
+    let text = format!(
+        r#"{{"version": 22, "entities": [
+            {{"name": "Setup2", "translation": [0.0, 0.0, 0.0], "kind": "setup",
+              "setup": {{"stock": "Setup2/Stock", "wcs": []}}}},
+            {{"name": "vise", "translation": [7.0, 0.0, 0.0], "facets": {quad},
+              "fixture": {{}}}},
+            {{"name": "clamp", "translation": [0.0, 12.0, 0.0], "facets": {quad},
+              "fixture": {{"setup": "Setup2"}}}},
+            {{"name": "Setup2/Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock",
+              "stock": {{"box": {{"dx": 40.0, "dy": 40.0, "dz": 20.0}}}}}}
+        ]}}"#
+    );
+    let world = new_world();
+    project::open(&world, &text).expect("the v22 fixture grammar must read");
+    for name in ["vise", "clamp"] {
+        let e = model::find_by_name(&world, name).expect("tagged model");
+        assert!(model::is_fixture(&world, &e), "'{name}' loaded tagged");
+        assert!(model::facets_of(&world, &e).is_some(), "and still a solid");
+    }
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    assert_eq!(first, second, "the fixture grammar round-trips byte-identically");
+    // Compare on whitespace-stripped text: the writer pretty-prints, so
+    // a NON-empty map spans lines (serde_json's one quirk: empty maps
+    // stay `{}` inline). The grammar is what's asserted, not its layout.
+    let flat: String = first.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        flat.contains("\"fixture\":{}") && flat.contains("\"fixture\":{\"setup\":\"Setup2\"}"),
+        "the writer spells the bare tag as an empty object: {first}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // A fixture tag on a non-model row describes a CAM concept with no
+    // world representation: corrupt, refused before any world write.
+    let text = r#"{
+        "version": 22,
+        "entities": [
+            {"name": "Stock", "translation": [0.0, 0.0, 0.0], "kind": "stock",
+             "fixture": {}, "stock": {"box": {"dx": 40.0, "dy": 40.0, "dz": 20.0}}}
+        ]
+    }"#;
+    let world = new_world();
+    assert!(
+        matches!(project::open(&world, text), Err(ProjectError::Corrupt(_))),
+        "stock wearing a fixture tag must refuse"
+    );
+    assert!(
+        model::named_entities(&world).is_empty(),
+        "refusal wrote nothing"
     );
 }
 
