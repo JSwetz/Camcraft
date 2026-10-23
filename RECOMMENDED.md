@@ -2629,6 +2629,61 @@ reads exactly like the law.
   the actual test of the packaging script. Discussion item: create the
   GitHub repo and push `main` + `v0.2.0` when the user is back.
 
+## M4.2 — the multi-platform gate and the GPU pick (code `feat(ui): ... (M4.2)` + this docs)
+
+- **The pick is flag-first, env-second, refuse-always.** `--gpu-backend
+  dx12|metal|vulkan|gl` wins over `CAMCRAFT_GPU_BACKEND`; a bad name in
+  either source exits 2 naming what it got, before any window opens —
+  the `--ui` refusal shape, and the Prime Directive's "validate early"
+  applied to startup. The chain then runs preferred → `PRIMARY` auto →
+  `Backends::all()`, each miss logged with the backend it names, so a
+  driver blacklist workaround can be read off the console line. The
+  `wgpu::DownlevelFlags` machinery this bullet originally specced is
+  gone from wgpu 30 — the honest tier signal now IS the backend: a `gl`
+  answer logs "conservative feature set" because GLES is wgpu's own
+  second tier.
+
+- **Headless stays pinned to the fallback adapter on purpose.** The
+  gates' determinism law outranks the new flag there: `--headless`
+  prints one line ("pins the fallback adapter... pick ignored") rather
+  than silently accepting or silently ignoring. Discussion item: whether
+  the pixel-snapshot goldens should ever run against a named backend.
+
+- **Linux: compiles green natively (WSL2, rustc 1.99) and runs the
+  suites — with one honest blemish: `finish3d_project_dome` and
+  `finish3d_radial_dome` emit 2 moves fewer on Linux.** Measured, not
+  guessed: identical file except three near-duplicate points at
+  (-2826..-2660, -8869..-8940, 8714) collapse to one when the dedupe
+  cull runs on glibc's sin/cos instead of the Windows CRT's — a ULP
+  wobble in the dome's angular sampling landing exactly on the cull
+  threshold. Every other golden, posting, fanuc_post, roundtrip and the
+  gpu tests are byte-green on both platforms. Chosen interim law: the
+  CI parity job `--skip`s those two BY NAME (never silently) and
+  `M4.2b` owns the fix — quantize to microns BEFORE the cull decision
+  so platform libm cannot choose how many moves the shop gets.
+  Considered and dropped: per-platform goldens (two truths),
+  vendoring a deterministic libm for the generators (heavy until M6.1
+  makes GPU math the sampling source anyway). The GUI itself is still
+  unproven to RUN on Linux (needs a real display+GPU box); Docker
+  Desktop on this machine died mid-milestone (its program tree
+  vanished — WSL carried the Linux lane instead), so the "Dockerfiles
+  for every target" bullet is M4.2's one open rung. Discussion items:
+  M4.2b now vs at 0.4.0; a fresh Docker setup to retire the last one.
+
+- **macOS is now a CI claim, not a local one.** The build job adds
+  macos-latest (check + goldens + split-crate tests); nothing of ours
+  ever compiled for Darwin here. First green run is the proof; expect
+  one round of fixes at most (the stack — wgpu metal, flecs clang, winit
+  cocoa — is all first-party cross-platform).
+
+- **WASM: the compute core speaks it; the app does not.** geometry/cl/
+  post compile clean for `wasm32-unknown-unknown` (post needed only the
+  getrandom `wasm_js` target-dependency; boa_engine handles the rest).
+  The app/UI half would be a wgpu-via-webgl shim + flecs-on-wasm story
+  — that is the web-sys-mvp rung's work, not M4.2's; the CI wasm job
+  pins what is true today so a regression in the core's portability
+  fails loudly.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

@@ -10,6 +10,25 @@ unaffiliated — it reimplements user-visible behavior (operation types,
 parameters, workflow) from public documentation and general machining
 knowledge, nothing else.
 
+## Autonomous Work Law
+
+The user trusts the recommendations made in their absence and reviews them
+afterwards - the work must not bother them.
+
+- **Autonomous always.** Run the ROADMAP without asking for decisions. When
+  a choice appears, take the recommended option and keep moving; occasional
+  one-line status feedback is fine, a blocking question is not.
+- **Every recommendation is recorded.** Each decision taken unattended gets
+  an entry in `RECOMMENDED.md` - what was chosen, why, what was considered
+  and dropped - as the discussion ledger for after the roadmap is cleared.
+- **Never stop, never recap mid-roadmap.** There is no "wrap up and check
+  in" state: the next ROADMAP item starts when the current gate is green.
+  Session summaries are for compaction, not for the user.
+- **Counter-measure against stalling.** If the work risks stopping before
+  the roadmap is done (idle after a gate, waiting on nothing, end-of-turn
+  with open items), spawn a continuation nudge subagent to remind the
+  session to pick up the next ROADMAP item. A stall is a bug.
+
 ## Clean-Room Protocol
 
 - No reading, decompiling, disassembling, or tracing HSMWorks binaries or
