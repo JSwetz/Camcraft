@@ -1,6 +1,8 @@
 //! Geo2D wrapper tests: the millimeter/region contract around the pinned
 //! Clipper2 port. Goldens are hand-computable; degenerate inputs must
 //! error, never panic (Prime Directive).
+//!
+//! Gate map (M4.4): covers app::geo2d.
 
 use hsmworks_app::geo2d::{GeoError, Loop, Point2, Region};
 

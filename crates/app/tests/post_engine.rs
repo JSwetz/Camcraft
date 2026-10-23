@@ -1,6 +1,8 @@
 //! Post engine core tests (M1.7a): the intermediate's two directions,
 //! the driver's hook contract, and the clean-refusal law on every
 //! malformed path.
+//!
+//! Gate map (M4.4): covers app::cl, app::geo2d, app::geometry, app::post.
 
 use hsmworks_app::cl::{CycleKind, MoveKind, Toolpath};
 use hsmworks_app::post::cnc::{self, CycleRec, MoveRec, Record};

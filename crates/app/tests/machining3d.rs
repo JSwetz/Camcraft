@@ -7,6 +7,8 @@
 //! verdict without inventing a single gouge.
 //! Provenance: our own design, specced from published CAM
 //! behavior, per the Clean-Room Protocol.
+//!
+//! Gate map (M4.4): covers app::cl, app::geo2d, app::geometry, app::machining2d, app::machining3d, app::stock_sim, app::verify.
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};

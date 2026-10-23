@@ -10,6 +10,8 @@
 //! Fanuc's goldens live at the top of `golden/nc/` (M1.7b law, the
 //! suite `fanuc_post.rs` already locks); the four stage-B dialects get
 //! one subdirectory each.
+//!
+//! Gate map (M4.4): covers app::cl, app::post, app::posting.
 
 use hsmworks_app::cl::{CycleKind, MoveKind};
 use hsmworks_app::post::{cnc, engine};

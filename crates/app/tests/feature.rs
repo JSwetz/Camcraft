@@ -4,6 +4,8 @@
 //! Lifted from `crates/ui/src/viewport.rs` (its `edge_tests`) in M1.5
 //! step 1, re-based on the 1 µm f64 lattice, plus the lattice pins the
 //! old f32 version could not express; clustering added in step 2.
+//!
+//! Gate map (M4.4): covers app::geometry, app::model, app::world.
 
 use hsmworks_app::geometry::cube;
 use hsmworks_app::geometry::feature::{

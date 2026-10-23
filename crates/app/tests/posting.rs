@@ -8,6 +8,8 @@
 //! Fixtures reuse the proven operation-level ones: the contour test's
 //! model-box (operations.rs) and the drill test's matched-hole peck
 //! (M1.6), so any warning here is a posting bug, not a generator one.
+//!
+//! Gate map (M4.4): covers app::commands, app::drilling, app::geo2d, app::geometry, app::machine, app::machining2d, app::model, app::operation, app::posting, app::schema, app::sim, app::stock, app::stock_sim, app::tools, app::world.
 
 use flecs_ecs::prelude::World;
 

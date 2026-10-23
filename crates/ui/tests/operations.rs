@@ -3,6 +3,8 @@
 //! itself is pinned in `crates/app/tests/operations.rs`; these tests own
 //! the ui-side half - statuses, drafts, and undo/redo through the queue.
 //! Provenance: our own tests, specced from the panes' contract.
+//!
+//! Gate map (M4.4): covers ui::interact, ui::operations, ui::state, app::cl, app::commands, app::geometry, app::machining2d, app::model, app::operation, app::schema, app::stock, app::tools.
 
 use hsmworks_app::model;
 use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};

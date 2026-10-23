@@ -8,6 +8,11 @@
 //! scallop law's home turf), a 45-degree cone (the law's equality case),
 //! and a box (pure structure - its flat shelves are the parallel
 //! strategy's jurisdiction, so the envelope must stay silent on them).
+//!
+//! Gate map (M4.4): covers app::cl, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::stock_sim, app::verify.
+//! Lane shape (M4.4): 12 law tests run here in seconds; 27 envelope-VERDICT and
+//! dome-generation tests are #[ignore]d - run them with
+//! `cargo test --release -p hsmworks-app -- --ignored` at milestone close.
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::finishing3d::{
@@ -196,6 +201,7 @@ fn dome() -> Vec<Triangle> {
 const RIM_Z: f64 = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn dome_waterline_is_envelope_clean() {
     // The headline promise: rings from the tangent-locus scan, walked
     // with the ball, leave the swept envelope within tolerance of the
@@ -226,6 +232,7 @@ fn dome_waterline_is_envelope_clean() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn cone_rest_hits_the_scallop_budget_not_past_it() {
     // The 45-degree wall is where `Delta z = 2 sqrt(r tol)` is exactly
     // at budget: the measured ridge should be AT the cusp the law
@@ -249,6 +256,7 @@ fn cone_rest_hits_the_scallop_budget_not_past_it() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn box_walls_are_pure_structure() {
     // A box has no tangent ring across its flat shelves, and the column
     // model sees no surface on its vertical walls: the VERDICT must be
@@ -280,6 +288,7 @@ fn box_walls_are_pure_structure() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn overhang_is_caught_by_the_measurement() {
     // The module's entry law: a vertical plunge over an overhang
     // violates the tangent promise. A sphere run past its equator has
@@ -303,6 +312,7 @@ fn overhang_is_caught_by_the_measurement() {
 }
 
 #[test]
+#[ignore = "heavy lane: waterline generation over the 12x96 dome (structural expectations ride this fixture's counts); ~10-50s in debug, seconds in release; run at milestone close with -- --ignored"]
 fn rings_close_and_the_chain_is_continuous() {
     // Every plunge lands on its ring's first point; every ring's last
     // feed returns to that point; and the whole path chains - no move
@@ -346,6 +356,7 @@ fn rings_close_and_the_chain_is_continuous() {
 }
 
 #[test]
+#[ignore = "heavy lane: waterline generation over the 12x96 dome (structural expectations ride this fixture's counts); ~10-50s in debug, seconds in release; run at milestone close with -- --ignored"]
 fn levels_snap_to_the_bottom_and_obey_the_stepdown() {
     // The ladder's last level is exactly `bottom_z` (shared snap law),
     // and successive plunge planes differ by at most the scallop
@@ -380,6 +391,7 @@ fn levels_snap_to_the_bottom_and_obey_the_stepdown() {
 }
 
 #[test]
+#[ignore = "heavy lane: waterline generation over the 12x96 dome (structural expectations ride this fixture's counts); ~10-50s in debug, seconds in release; run at milestone close with -- --ignored"]
 fn a_hop_plane_replaces_only_the_inter_ring_rapids() {
     // The shared ladder law, finish flavor: rings within one level hop
     // at `retract_z` (clamped to clearance); a level change still
@@ -429,6 +441,7 @@ fn twin_dome() -> Vec<Triangle> {
 }
 
 #[test]
+#[ignore = "heavy lane: waterline generation over the 12x96 dome (structural expectations ride this fixture's counts); ~10-50s in debug, seconds in release; run at milestone close with -- --ignored"]
 fn climb_and_conventional_are_mirror_walks() {
     // The law is the SAME rings walked OPPOSITE ways - not identical
     // move lists. fit_arcs segments a ring from its start vertex, and
@@ -525,6 +538,7 @@ fn climb_and_conventional_are_mirror_walks() {
 }
 
 #[test]
+#[ignore = "heavy lane: waterline generation over the 12x96 dome (structural expectations ride this fixture's counts); ~10-50s in debug, seconds in release; run at milestone close with -- --ignored"]
 fn the_generator_is_deterministic() {
     let f = dome();
     let p = params(18.0, RIM_Z);
@@ -616,6 +630,7 @@ fn scallop_stepdown_law_is_exact_and_total() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn the_ball_radius_is_the_diameters_half_in_every_law() {
     // A guard against a silent factor-of-two: the path planned with Ø6
     // measures envelope-clean as the radius-3 ball that planned it -
@@ -806,6 +821,7 @@ fn scallop_stepover_law_is_exact_and_total() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn plateau_parallel_cuts_the_shelf_and_the_rings_take_the_walls() {
     // The auto-split's headline: one path, two strategies, and the
     // shelf - waterline's known blind spot - comes off clean.
@@ -828,6 +844,7 @@ fn plateau_parallel_cuts_the_shelf_and_the_rings_take_the_walls() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn tilted_shelf_lines_are_the_stepover_times_the_cosine() {
     // The cos-law, measured: the raster's line spacing on a 30-degree
     // slope is sqrt(8 r tol) * cos(alpha) exactly, and the cusp the
@@ -870,6 +887,7 @@ fn tilted_shelf_lines_are_the_stepover_times_the_cosine() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn blind_pocket_floor_is_cut_and_nothing_sinks_below_it() {
     // Two laws at once: the topmost-support law gives the floor
     // (the pocket's columns answer to their own floor at 5, not to
@@ -899,6 +917,7 @@ fn blind_pocket_floor_is_cut_and_nothing_sinks_below_it() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn multidirection_rasters_cross() {
     // The second pass runs perpendicular: substantial straight feeds
     // along BOTH axes, where the single raster runs only along x.
@@ -933,6 +952,7 @@ fn multidirection_rasters_cross() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn hidden_floor_stays_rest_and_the_path_stays_above_it() {
     // The visible ceiling's jurisdiction, stated as far as today's
     // measurement can honestly go: the finisher machines the surface
@@ -1027,6 +1047,7 @@ fn dir_buckets(t: &Toolpath) -> (usize, usize, usize) {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn scallop_crosses_the_diagonals_and_measures_clean() {
     // The headline: both diagonal senses run real feeds, and the
     // envelope kernel signs off on the whole path - gouge and cusp
@@ -1049,6 +1070,7 @@ fn scallop_crosses_the_diagonals_and_measures_clean() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn scallop_plateau_is_constant_cusp_on_the_shelf() {
     // The prismatic case the diagonals exist for: a flat shelf ringed
     // by vertical walls. The crossed pair must hold the cusp
@@ -1065,6 +1087,7 @@ fn scallop_plateau_is_constant_cusp_on_the_shelf() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn scallop_holds_the_cos_law_on_the_tilted_shelf() {
     // Same terrain the parallel cos-law test measures, crossed: the
     // lines run ±45 to the fall, so each family meets the slope at
@@ -1090,6 +1113,7 @@ fn scallop_holds_the_cos_law_on_the_tilted_shelf() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn scallop_pocket_floor_gets_its_own_cross() {
     // The step_pocket: floor and shelf both shallow, walls steep.
     // Both regions must be ridden by diagonal lines and the ring
@@ -1194,6 +1218,7 @@ fn parallel_all(f: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn the_hill_under_radial_and_spiral_is_envelope_clean() {
     // The measured promise, both families: the same cos-law spacing
     // that keeps the raster's cusp inside `tol` on a tilt `a` keeps
@@ -1267,6 +1292,7 @@ fn contour_closes_its_rings_and_project_walks_the_rim() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn the_hill_under_contour_and_project_is_envelope_clean() {
     // The measured promise, both families: the shadow's spacing is
     // the same cos-law stepover the raster pays, and the lift is the
@@ -1346,6 +1372,7 @@ fn n_kind(t: &Toolpath, k: MoveKind) -> usize {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn ramp_chains_the_plateau_raster() {
     // Flat ground is the chain's best case: every line-to-line
     // diagonal rides above its own support, so the hop's
@@ -1405,6 +1432,7 @@ fn ramp_chains_the_plateau_raster() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn ramp_never_gouges_the_ground_it_certs() {
     // The dome is where a straight chord sinks below the arc's
     // support - whether each hill diagonal lands or refuses is
@@ -1429,6 +1457,7 @@ fn ramp_never_gouges_the_ground_it_certs() {
 }
 
 #[test]
+#[ignore = "heavy lane: waterline generation over the 12x96 dome (structural expectations ride this fixture's counts); ~10-50s in debug, seconds in release; run at milestone close with -- --ignored"]
 fn a_chain_too_long_to_certify_declines_itself() {
     // The probe cap in test form: an explicit spacing of 0.5 mm under
     // a tolerance of 1e-4 puts the serpentine's lateral connector at
@@ -1451,6 +1480,7 @@ fn a_chain_too_long_to_certify_declines_itself() {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn the_ring_families_ignore_the_chain() {
     // Ramp lives in the runs emitter's between-lines branch alone;
     // rings are their own emitter and never route through it. On
@@ -1512,6 +1542,7 @@ fn the_ring_families_ignore_the_chain() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn the_ramp_angle_default_certifies_what_v17_certified() {
     // Stage D's certified diagonal chain, same ground as its cos-law
     // test: the tilted wedge, where every serpentine connector hops
@@ -1639,6 +1670,7 @@ fn folds() -> Vec<Triangle> {
 }
 
 #[test]
+#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn minimum_step_floors_the_refinement_not_the_edges() {
     // The corrugated belt: five 22.5-degree facets across the raster.
     // Its fold PEAKS are validity gaps - a ball center within

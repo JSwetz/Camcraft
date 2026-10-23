@@ -3,6 +3,8 @@
 //! entity, the collision laws fire on planted steel and stay silent
 //! without it, and every fixture command round-trips through the
 //! history - including the marker surviving a plain tree delete.
+//!
+//! Gate map (M4.4): covers app::cl, app::commands, app::fixture, app::geo2d, app::geometry, app::machine, app::model, app::operation, app::posting, app::schema, app::setup, app::stock, app::tools, app::verify, app::world.
 
 use hsmworks_app::cl::{Move, MoveKind, Toolpath};
 use hsmworks_app::commands::{

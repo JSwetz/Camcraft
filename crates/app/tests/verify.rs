@@ -1,5 +1,10 @@
 //! Verification warnings: clean generated paths stay silent, and each of
 //! the five planted offenders yields exactly its warning class.
+//!
+//! Gate map (M4.4): covers app::cl, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::verify.
+//! Lane shape (M4.4): 15 structural verifies run in milliseconds; the two
+//! cone_facets(96) envelope verdicts are #[ignore]d - heavy lane, run them with
+//! `cargo test --release -p hsmworks-app -- --ignored` at milestone close.
 
 use hsmworks_app::cl::{Cycle, CycleKind, Move, MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};
@@ -459,6 +464,7 @@ fn cone_waterline() -> Toolpath {
 }
 
 #[test]
+#[ignore = "verdict lane: full envelope scan of cone_facets(96); release ~seconds - run at milestone close with -- --ignored"]
 fn envelope_clean_path_verifies_silent() {
     // The 45-degree cone at its scallop budget: measured rest sits AT
     // the tolerance the stepdown was derived from, inside the
@@ -471,6 +477,7 @@ fn envelope_clean_path_verifies_silent() {
 }
 
 #[test]
+#[ignore = "verdict lane: full envelope scan of cone_facets(96); release ~seconds - run at milestone close with -- --ignored"]
 fn envelope_verdict_follows_the_stated_tol() {
     // The SAME path judged against 0.01: what stands exposed is the
     // generator's own chord error - the rings are promised within the

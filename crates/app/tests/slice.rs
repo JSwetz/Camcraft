@@ -1,6 +1,8 @@
 //! Slicer tests: mesh-crossing cycles in, normalized regions out. Goldens
 //! are hand-computable prisms; degenerate meshes must error, never panic
 //! (Prime Directive).
+//!
+//! Gate map (M4.4): covers app::geo2d, app::geometry.
 
 use hsmworks_app::geo2d::Point2;
 use hsmworks_app::geometry::slice::{self, SliceError};

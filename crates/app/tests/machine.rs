@@ -10,6 +10,8 @@
 //! authorizes us to reuse - while every VALUE is our own invention.
 //! Program tests build `Machine` structs directly; only the reader
 //! tests feed it text.
+//!
+//! Gate map (M4.4): covers app::commands, app::geometry, app::machine, app::model, app::operation, app::post, app::posting, app::schema, app::stock, app::tools, app::world.
 
 use flecs_ecs::prelude::World;
 

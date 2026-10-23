@@ -1,6 +1,7 @@
 # CI: the same gate ladder the project runs by hand (M1.7e).
 # Golden regression suite first (named for the ROADMAP bullet), then the
-# full suites, clippy with warnings denied, and the headless app run.
+# full suites, the release-lane verdicts the debug run #[ignore]s (M4.4),
+# clippy with warnings denied, and the headless app run.
 # Provenance: our own build law; mirrors the AGENTS.md testing layout.
 name: CI
 on:
@@ -34,6 +35,9 @@ jobs:
       - name: App tests
         shell: bash
         run: cargo test -p hsmworks-app -- --test-threads=4
+      - name: Heavy verdicts (release lane, M4.4)
+        shell: bash
+        run: cargo test --release -p hsmworks-app -- --ignored
       - name: UI tests
         shell: bash
         run: cargo test -p hsmworks-ui -- --test-threads=4

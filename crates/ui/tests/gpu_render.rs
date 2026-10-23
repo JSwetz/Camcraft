@@ -6,6 +6,8 @@
 //! is otherwise unverified. These tests instantiate a real `View3D`, render
 //! known geometry, and assert it paints pixels. On a machine with no usable
 //! adapter they skip (green with a note) rather than fail.
+//!
+//! Gate map (M4.4): covers ui::state, ui::viewport, app::stock.
 
 use std::collections::HashSet;
 

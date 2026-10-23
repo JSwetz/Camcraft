@@ -3,6 +3,8 @@
 //! files join generator code and the post script in one lock - if
 //! either changes meaning, this test says so, and the diff is the
 //! review (UPDATE workflow per tests/golden/CLAUDE.md).
+//!
+//! Gate map (M4.4): covers app::post.
 
 use hsmworks_app::post::{cnc, engine};
 use std::path::{Path, PathBuf};

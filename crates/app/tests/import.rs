@@ -2,6 +2,8 @@
 //! The corrupt corpus is built in code (deterministic) so it is byte-exact
 //! and reviewable; cube.stl / box.obj live in testdata/models/ for manual
 //! runs and are the same unit cube.
+//!
+//! Gate map (M4.4): covers app::geometry.
 
 use std::path::{Path, PathBuf};
 

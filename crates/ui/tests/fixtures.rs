@@ -4,6 +4,8 @@
 //! picker - the file arms and the public `import_as_fixture` hand-off
 //! stand in for the dialogs.
 //! Provenance: our own harness; behavior specced from the pages.
+//!
+//! Gate map (M4.4): covers ui::state, app::fixture, app::model.
 
 use hsmworks_app::fixture;
 use hsmworks_app::model;

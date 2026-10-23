@@ -1290,7 +1290,7 @@ envelope-VERDICT tests (`scallop_crosses_the_diagonals_and_measures_clean`,
 grid `envelope_scan` over a 12×96 dome plus a full `verify()` in
 Envelope mode with its own `slice::project(facets, 64)`, at debug speed.
 
-- **Split LAW from VERDICT.** Law tests assert generation shape —
+- ✅ **Split LAW from VERDICT.** Law tests assert generation shape —
   bucket membership, refusal strings, move and link counts — and must
   run in milliseconds: generate one small path, assert the structure,
   done. Verdict tests assert the geometry *machines clean* (scan,
@@ -1299,18 +1299,18 @@ Envelope mode with its own `slice::project(facets, 64)`, at debug speed.
   verdict half moves to its own `#[test] #[ignore]` lane or a separate
   `--test` binary so `cargo test -p hsmworks-app --test finish3d` is
   seconds, not the tail that decides the milestone.
-- **The heavy lane runs on release, opt-in.** `#[ignore]`d verdicts
+- ✅ **The heavy lane runs on release, opt-in.** `#[ignore]`d verdicts
   execute under `cargo test --release -- --ignored` — an hour of debug
   grind is minutes optimized — scheduled at milestone closes and
   pre-push, never per-edit. The split must not lose coverage: the count
   of law + verdict tests before and after must match, and the verdict
   lane keeps its own golden asserts.
-- **Targeted gate selection.** The gate ladder learns to run only the
+- ✅ **Targeted gate selection.** The gate ladder learns to run only the
   test binaries the diff touches (`cargo test -p <crate> --test <name>`
   per changed file; suites are already one binary each, so selection is
   free), with the full ladder reserved for milestone commits. Document
   the map in the test file headers: which binary covers which module.
-- **Budget.** Default debug ladder target: under ~5 min wall on this
+- ✅ **Budget.** Default debug ladder target: under ~5 min wall on this
   32-core box — the finish3d split is the single biggest lever (it is
   the current longest pole), so it lands first; then sweep the other
   suites for the same verdict-in-the-law-lane shape (`machining3d`,
@@ -1412,7 +1412,7 @@ need to figure out how to offload simulation, voxel body calculation and tool pr
 | **M4.1** | Code refactor | Refactor of codebase, test, and code organisation. | 📋 |
 | **M4.2** | Multibuilds | Refactor of codebase is done and application builds for multipls OS and environments - incl. selectable GPU backends (DX12/Metal/Vulkan/GL-ES). | 📋 |
 | **M4.3** | Defer Code | All references to "hsmworks" in the code needs to be renamed and re-referenced to camcraft | 📋 |
-| **M4.4** | Test cost shape | Law/verdict test split, `#[ignore]`+release heavy lane, diff-targeted gate selection - finish3d's 30-min tail first | 📋 |
+| **M4.4** | Test cost shape | Done: law/verdict split - finish3d 39 tests (27 `#[ignore]`d), verify's two envelope verdicts moved; release heavy lane 30 min → 3.4 min (CI runs it); Gate-map headers in every suite; debug ladder ~2 s where it was a 30-min tail | ✅ |
 | **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |

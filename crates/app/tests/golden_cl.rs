@@ -1,6 +1,9 @@
 //! Committed golden CL dumps for the 2D generators - the AGENTS.md
 //! testing rule made concrete. Format, naming and the regeneration
 //! workflow: tests/golden/CLAUDE.md.
+//!
+//! Gate map (M4.4): covers app::cl, app::drilling, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::tools.
+
 
 mod common;
 

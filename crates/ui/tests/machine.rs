@@ -4,6 +4,8 @@
 //! `crates/app/tests/machine.rs`; this half owns statuses, the command
 //! law around them, and the sentence shape the bar prints.
 //! Provenance: our own tests, specced from the panes' contract.
+//!
+//! Gate map (M4.4): covers ui::actions, ui::state, app::machine, app::operation, app::stock, app::tools.
 
 use std::path::PathBuf;
 

@@ -2,6 +2,8 @@
 //! tessellation and leaves coarse polygons alone, leads post as single
 //! arc moves, chords stay inside the sagitta law's word, and paths with
 //! arcs still chain and stay finite.
+//!
+//! Gate map (M4.4): covers app::cl, app::geo2d, app::geometry, app::machining2d.
 
 use hsmworks_app::cl::{Move, MoveKind};
 use hsmworks_app::geo2d::{Loop, Point2, Region};

@@ -6,6 +6,8 @@
 //!
 //! Helpers are duplicated from `tests/setups.rs` (cross-test-file imports
 //! are not the idiom here).
+//!
+//! Gate map (M4.4): covers app::commands, app::geometry, app::operation, app::schema, app::setup_sheet, app::stock, app::tools, app::world.
 
 use flecs_ecs::prelude::World;
 

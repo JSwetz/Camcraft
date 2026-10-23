@@ -5,6 +5,8 @@
 //! clothing, and the part surface read straight off the mesh.
 //! Provenance: published CAM simulation practice (Z-map subtraction),
 //! our own code, per the Clean-Room Protocol.
+//!
+//! Gate map (M4.4): covers app::cl, app::geo2d, app::geometry, app::stock, app::stock_sim.
 
 use hsmworks_app::cl::{ArcMove, Move, MoveKind};
 use hsmworks_app::geo2d::{Loop, Point2, Region};

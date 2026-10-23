@@ -9,6 +9,51 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M4.4 - Test cost shape
+
+**The verdict lane is `#[ignore]`, not a second binary.** ROADMAP offered
+either; ignore-in-place keeps every fixture, helper and golden assert in
+one file (finish3d's law tests share `dome()`/`cone()` builders with its
+verdicts — a split binary would duplicate them or reach across `mod`).
+The reason string names the lane and the command, so `cargo test
+-- --ignored --list` is self-documenting. *Cost to change:* a separate
+`--test` binary later is a cut-paste of the marked blocks; nothing
+structural prefers one over the other.
+
+**Six LAW-shaped tests joined the heavy lane.** `a_hop_plane...`,
+`climb_and_conventional...`, `the_generator_is_deterministic`,
+`levels_snap...`, `rings_close...` and `a_chain_too_long...` assert
+generation STRUCTURE (ring counts, link classes, determinism) but ride
+the 12×96 dome because their expected counts are that fixture's numbers -
+10 to 52 s each at debug speed with no envelope scan at all. Shrinking
+their fixture would mean re-deriving every hardcoded count - a rewrite
+with silent-weakening risk, which the Prime Directive outranks. They run
+in the release lane instead; M4.1's suite move is the honest moment to
+give them small-fixture twins. *Cost to change:* the twin work, whenever
+the geometry module lands in its own crate.
+
+**Coverage arithmetic is the law, not a nicety:** 39 `#[test]`s before,
+39 after (27 ignored); verify.rs 17 → 17 (2 ignored, each a 150 s
+`cone_facets(96)` envelope - the whole suite's 155 s was those two). The
+default debug ladder is finish3d 0.8 s + verify 0.9 s + the ~5 s field,
+against the ROADMAP's 5-min budget. *Cost to change:* none.
+
+**Measured, this run:** heavy lane in release - finish3d 27 verdicts in
+202 s (the same set ground ~30 min in debug; "an hour of debug grind is
+minutes optimized" holds at 9x), verify's two envelope verdicts in 22 s.
+Default debug ladder: finish3d 0.8 s, verify 0.9 s, the rest of the
+ladder unchanged - comfortably under the 5-min budget.
+
+**CI grew the release-lane step rather than losing the verdicts.** A
+plain `cargo test` silently skips `#[ignore]`d tests forever - the split
+would have DELETED coverage on every non-local gate. The one
+`cargo test --release -p hsmworks-app -- --ignored` step (after App
+tests, before UI) keeps every verdict enforced pre-push. It pays a
+release compile of the app crate; that's the price of an honest opt-in
+lane, and rust-cache amortizes it. *Cost to change:* dropping the step
+trades measured-clean guarantees for CI minutes - a bad trade, flag it
+if CI time ever forces it.
+
 ## M3.3 close-out - the 0.3.0 release and the Phase-4 ordering
 
 **Shipped 0.3.0 on the M3.3 D commit.** Cargo version + RELEASE_NOTES

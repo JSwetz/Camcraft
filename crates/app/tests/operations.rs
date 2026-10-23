@@ -2,6 +2,8 @@
 //! else - commands own their fields, undo/redo is exact, generation runs
 //! at command construction (validate early), and staleness is derived,
 //! never stored.
+//!
+//! Gate map (M4.4): covers app::cl, app::commands, app::drilling, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::model, app::operation, app::schema, app::stock, app::tools, app::verify, app::world.
 
 use flecs_ecs::prelude::World;
 

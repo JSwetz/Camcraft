@@ -3,6 +3,9 @@
 //! egui is the only shell, and anything else refuses by name rather than
 //! silently drawing a different app.
 //! Provenance: our own tests.
+//!
+//! Gate map (M4.4): covers ui::run.
+
 
 #[test]
 fn egui_headless_cli_exit_code_is_zero() {

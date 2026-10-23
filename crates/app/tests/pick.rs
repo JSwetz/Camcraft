@@ -1,5 +1,7 @@
 //! Ray picking: nearest model along the ray, misses and degenerate rays
 //! return None - never a panic. Includes rigid (rotated) placements.
+//!
+//! Gate map (M4.4): covers app::commands, app::geometry, app::schema, app::stock.
 
 use hsmworks_app::commands::{Command, ImportModel};
 use hsmworks_app::geometry::{cube, Mesh, Point3, quat_from_yaw};

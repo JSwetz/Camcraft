@@ -147,11 +147,20 @@ carries its own tests inside its crate (M4.1).
 
 Gate yourself narrowly, not by re-running everything: build once with
 `cargo test -p hsmworks-app -p hsmworks-ui --no-run`, then run the individual
-test binaries for the areas you touched (`target\debug\deps\<name>-<hash>.exe`,
-in parallel - they take no cargo lock). A full-suite pass belongs at milestone
-close-out, not inside a feature loop. The slow tails (finish3d) are exactly
-what M4.4 splits up; until then, a targeted run that skips them and says so is
-an honest gate, a serial 30-40 min re-ladder is not.
+test binaries the diff touches (`target\debug\deps\<name>-<hash>.exe`, in
+parallel - they take no cargo lock). Each suite's header carries the module
+map (`Gate map (M4.4): covers app::x, app::y...`) - pick binaries from it,
+not from the whole tree. The debug ladder's budget is under ~5 min wall;
+everything slower is in the heavy lane below, not in yours.
+
+Laws and verdicts run in different lanes (M4.4): tests that MEASURE geometry
+clean (envelope scans, full-precision projections) or generate over the big
+fixtures are `#[ignore]`d - `cargo test --release -p hsmworks-app --
+--ignored` executes them in minutes and belongs at milestone close-out and
+pre-push, never per-edit. The ignore reason names its lane. Coverage must
+not ride the split away: `#[test]` count before and after must match, and
+the ignored set keeps its golden asserts. UI snapshot binaries resolve their
+goldens from `crates/ui` - run them with that CWD.
 
 `VisualRunner` is auto-enabled: windows show, run fast, and stay open if closed
 early; hidden runs cap at 30s; auto-close after 10s when no test is pending; on

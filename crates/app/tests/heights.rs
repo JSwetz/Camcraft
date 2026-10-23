@@ -5,6 +5,8 @@
 //! Stale), and a v5 file's bare numbers land as `Fixed` to the bit.
 //! Provenance: HSMWorks expresses heights the same way (From + Offset);
 //! specced from its published user documentation, behavior only.
+//!
+//! Gate map (M4.4): covers app::commands, app::geometry, app::machining2d, app::model, app::operation, app::project, app::schema, app::stock, app::tools, app::world.
 
 use flecs_ecs::prelude::World;
 

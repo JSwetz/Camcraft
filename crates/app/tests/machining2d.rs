@@ -5,6 +5,8 @@
 //! clearance plane for level changes, and at the retract hop plane for
 //! lifts between passes of one level - None retract means the hop plane
 //! is the clearance plane, and the rapids are where they always were).
+//!
+//! Gate map (M4.4): covers app::cl, app::geo2d, app::machining2d.
 
 use hsmworks_app::cl::{MoveKind, Toolpath};
 use hsmworks_app::geo2d::{Loop, Point2, Region};

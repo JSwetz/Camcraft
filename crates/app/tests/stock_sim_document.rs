@@ -11,6 +11,8 @@
 //! box stock, faced at z 18 by a 4 mm tool - against a model top of 18
 //! that is clean, 20 an undercut (gouge), 16 a standing layer (rest),
 //! each 2 mm exactly, located.
+//!
+//! Gate map (M4.4): covers app::commands, app::geometry, app::machining2d, app::model, app::operation, app::posting, app::schema, app::stock, app::stock_sim, app::tools, app::world.
 
 use flecs_ecs::prelude::World;
 

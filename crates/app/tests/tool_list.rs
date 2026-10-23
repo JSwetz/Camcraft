@@ -6,6 +6,8 @@
 //! idiom), ungenerated ops are listed at zero, setups split the list,
 //! the program roll-up counts the whole sequence, and an empty
 //! document says so without panicking.
+//!
+//! Gate map (M4.4): covers app::cl, app::commands, app::model, app::operation, app::schema, app::stock, app::tool_list, app::tools, app::world.
 
 use flecs_ecs::prelude::World;
 

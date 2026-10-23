@@ -2,6 +2,8 @@
 //! contour and drilling caches must obey the same laws the unit tests
 //! pin on synthetic ones - and the generators' own feed numbers must
 //! round-trip through the sim's time.
+//!
+//! Gate map (M4.4): covers app::cl, app::drilling, app::geo2d, app::machining2d, app::sim, app::tools.
 
 use hsmworks_app::cl::Toolpath;
 use hsmworks_app::drilling::{self, CycleParams, CycleChoice, Hole};
