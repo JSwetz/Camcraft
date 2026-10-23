@@ -1,0 +1,116 @@
+# AGENTS.md — how to write a `.cps` post
+
+Companion to the root AGENTS.md; it inherits every law there (Prime
+Directive, clean-room protocol, everything-is-a-command). Provenance of
+this folder: original scripts, specced from public G-code standards
+(RS-274 / ISO 6983) and published control programming manuals for
+BEHAVIOR only — no vendor `.cps` text, template, or post file was read,
+adapted, or paraphrased. Each file starts with a provenance comment
+naming its sources; a new post must not ship without one.
+
+## What a `.cps` is
+
+Plain JavaScript, evaluated once with the engine's PRELUDE prepended
+(`crates/app/src/post/js.rs`). No module system, no host calls beyond
+the prelude's functions. The consumer is `crates/app/src/post/` — the
+in-app post gate (`app::posting`) and `post.exe`. The record stream it
+consumes is specced in `docs/CNC-INTERMEDIATE.md` — read that first;
+the property table there is the vocabulary, this file is the grammar.
+
+Manifest: top-level assignments only — `description`, `vendor`, `legal`,
+`certificationLevel`, `minimumRevision`, `extension`, `setCodePage`,
+`capabilities`. All are text; the engine reads none of them, but the
+file-viewer's about box does, and every shipped post carries them.
+New files: `vendor = "Camcraft"` (the M4.3 naming law — the shipped
+five still carry the old label; do not copy that line's value).
+
+## The hook contract
+
+The engine calls, in this order, only the hooks you define (full
+argument semantics in `docs/CNC-INTERMEDIATE.md`):
+
+| hook | fires |
+|---|---|
+| `onOpen` | once, before all records (write the header here) |
+| `onParameter(name, value)` | per `PARAM`; `onSpindleSpeed` follows the `SpindleSpeed` one |
+| `onToolChange(number, name)` | per `TOOL` |
+| `onSection` / `onSectionEnd` | per operation span (preamble bookends) |
+| `onCommand(name)` | before every motion/cycle; returning literal `false` swallows the record — legal filtering, counted, never silent |
+| `onRapid` / `onLinear` / `onCircular` / `onPlunge` | the motion kinds (`onPlunge` only if defined, else `onLinear`) |
+| `onCycle` → `onCyclePoint` → `onDwell(s)` → `onCycleEnd` | per canned cycle |
+| `onComment(text)` | per `WARN` (the PRELUDE default echoes it verbatim) |
+| `onRadiusCompensation` | RESERVED — never called (no comp data in the stream until G41/G42 paths land); honor the contract by emitting `G40`, do not invent a call site |
+| `onClose` | once, after all records (retract + `%`-end here) |
+
+Output is only what `writeln`/`write`/`writeBlock` push into `OUT`;
+`message(s)` is a COUNTED WARNING, not text — in-app it blocks the
+write (the gate), so the released program never carries one.
+
+## The laws every post states
+
+- **Determinism.** No `Date`, no randomness, no path-dependent state
+  beyond the record stream — the same input posts byte-identical text
+  (goldens depend on it, `the_dialects_actually_differ` and
+  `every_builtin_posts_every_golden_byte_exact` enforce the shape).
+- **The machine is truth.** Read `machine.spindleMax` (refuse rpm above
+  it by name), `machine.coolants` (the program's coolant word is the
+  machine's own first-Flood `mCode`, or stay silent; M9 is the fixed
+  stop pair), `machine.rtcp` and `machine.rotaries` (RTCP may be
+  OUTPUT only when `rtcp === true`; a tilted record on a non-RTCP
+  machine is a `message()` refusal — never a reinterpretation), and
+  the rate ceilings for anything you pace.
+- **Refuse, never lie.** A record you cannot honor in this dialect
+  gets a counted `message()` naming why (Fanuc's `tilt()` returns null
+  after one refusal per program — a per-line refusal is noise, a
+  silent skip is the silent wrong answer).
+- **World coordinates, origin-relative.** The stream speaks WORLD mm;
+  programs are written from the work offset. Subtract
+  `OriginX/Y/Z` (PARAMs, 0 for legacy `.cl`) from every position word;
+  NEVER from increments (`I/J`, cycle `Q`) — a shared translation
+  cancels there.
+- **Preamble completeness.** A posted program without an offset, a
+  tool, or a spindle is not a posted program: close the preamble over
+  everything the first raw motion line needs (`startPreamble`
+  pattern), and serve legacy streams that carry no `SECTION` by
+  firing it from the first motion too.
+- **Modal discipline.** G98 / G43.4 / retract modes once per program
+  or per arm; tool change resets the arm and the angle memory
+  (stage D). The cycle group suppresses its expanded chain — one
+  cycle block per hole, bare X Y continuations when the signature is
+  unchanged, `G80` before any cycle-signature change or section end.
+- **Legacy tolerance.** It must run on a `.cl`-only stream: guard
+  absent properties (`has(properties.A)` is the tilt test), default
+  everything, and let the modal feed stand where `FeedRate` is null.
+
+## The shipped five, and what actually differs
+
+Fanuc (entry 0 — the default, goldens at `crates/app/tests/golden/nc/`),
+Haas, Siemens 840D, Heidenhain (DIN/ISO mode), Mazak — each
+addressed BY NAME through `BUILTINS` in `crates/app/src/posting.rs`;
+their dialect goldens ride under `nc/<dialect>/`. The knobs that
+legitimately differ: header delimiters (`%` vs `;` vs bare), the `O`
+word, spindle words (`S.. M3` vs `MOTON S..`), tool-change words
+(`T.. M6`, +`D..` on Sinumerik), and whether a G98 retract word
+exists to write at all (DIN families retract to R by documented
+default — inventing a word is the same lying as omitting one).
+
+## Adding a post to the app
+
+1. Write the `.cps` here (copy `mazak.cps` as the structural skeleton
+   — it is the shortest honest path), with its provenance header.
+2. Register it: one `("<Name>", include_str!(...))` line in `BUILTINS`
+   (`crates/app/src/posting.rs`). Entry 0 stays Fanuc forever; the
+   picker lists by name automatically after that.
+3. Produce its goldens (`crates/app/tests/golden/nc/<name>/`) and add
+   the dialect to `conformance.rs`'s list — its
+   `every_builtin_posts_every_golden_byte_exact` runs over every
+   `BUILTINS` entry, so an unregistered/unpinned post fails the suite,
+   not the shop.
+4. Gate: `cargo test -p hsmworks-app --test conformance --test
+   fanuc_post --test posting`, plus a CLI smoke —
+   `post.exe --machine ../machines/vmc.mch <name>.cps <file>.cnc out.nc`
+   against a committed golden `.cl` (every golden is a legal input).
+
+A USER post needs none of that: `SelectPost` → *Load post script…*
+mounts any `.cps` by path; unreadable or unparsable refuses by name —
+the same law `Script::load`'s clean refusal gives the CLI.
