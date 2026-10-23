@@ -1,0 +1,10 @@
+[package]
+name = "camcraft-geometry"
+description = "The geometry seam of the M4.1 crate split: 3D mesh types and operations plus the 2D plane library. No ECS, no schema, no app types. Clean-room implementation, public sources only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+clipper2-rust = { workspace = true }

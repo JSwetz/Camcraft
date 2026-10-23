@@ -9,7 +9,7 @@ pub mod commands;
 pub mod drilling;
 pub mod fixture;
 pub mod finishing3d;
-pub mod geo2d;
+pub use camcraft_geometry::geo2d;
 pub mod geometry;
 pub mod machining2d;
 pub mod machining3d;

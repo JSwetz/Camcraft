@@ -33,7 +33,7 @@ pub fn cube(min: Point3, max: Point3) -> Mesh {
 
 /// Closed cylinder of `4 * segments` triangles, CCW seen from outside. Local
 /// frame: axis on Z, XY-centered about the origin, z in [0, height] - the
-/// stock convention (see `crate::stock`).
+/// stock convention (the app crate's `stock` module).
 ///
 /// Total function: degenerate input (non-finite or non-positive size, fewer
 /// than 3 segments) yields an empty mesh, never nonsense triangles; the

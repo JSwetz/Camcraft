@@ -4,7 +4,7 @@ License texts for material bundled in `assets/` and linked as attribution-
 free dependencies, per AGENTS.md "Assets" and "Dependencies". Adding a
 dependency or an icon set? Its notice goes here.
 
-## clipper2-rust (polygon boolean & offset engine, crates/app/src/geo2d.rs)
+## clipper2-rust (polygon boolean & offset engine, crates/geometry/src/geo2d.rs)
 
 Port by Lars Brubaker of Clipper2 by Angus Johnson. BSL-1.0 (below):
 commercial use and redistribution permitted; the notice must accompany

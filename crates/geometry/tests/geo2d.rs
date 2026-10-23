@@ -2,9 +2,9 @@
 //! Clipper2 port. Goldens are hand-computable; degenerate inputs must
 //! error, never panic (Prime Directive).
 //!
-//! Gate map (M4.4): covers app::geo2d.
+//! Gate map (M4.4): covers camcraft_geometry::geo2d.
 
-use hsmworks_app::geo2d::{GeoError, Loop, Point2, Region};
+use camcraft_geometry::geo2d::{GeoError, Loop, Point2, Region};
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop {
     Loop::new(vec![

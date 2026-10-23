@@ -2,11 +2,12 @@
 //! are hand-computable prisms; degenerate meshes must error, never panic
 //! (Prime Directive).
 //!
-//! Gate map (M4.4): covers app::geo2d, app::geometry.
+//! Gate map (M4.4): covers camcraft_geometry::geo2d,
+//! camcraft_geometry::geometry.
 
-use hsmworks_app::geo2d::Point2;
-use hsmworks_app::geometry::slice::{self, SliceError};
-use hsmworks_app::geometry::{cube, cylinder, Point3, Triangle};
+use camcraft_geometry::geo2d::Point2;
+use camcraft_geometry::geometry::slice::{self, SliceError};
+use camcraft_geometry::geometry::{cube, cylinder, Point3, Triangle};
 
 fn close(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-6 * b.max(1.0).abs()
@@ -139,7 +140,7 @@ fn flat_model_and_garbage_are_refused() {
     )];
     assert!(matches!(
         slice::slice(&huge, 0.5),
-        Err(SliceError::Geo(hsmworks_app::geo2d::GeoError::OutOfRange))
+        Err(SliceError::Geo(camcraft_geometry::geo2d::GeoError::OutOfRange))
     ));
     assert!(matches!(
         slice::slice(&[sheet[0], huge[0]][..], 0.5),

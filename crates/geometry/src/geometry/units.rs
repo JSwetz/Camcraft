@@ -6,7 +6,8 @@
 //!
 //! Crate-boundary home (M4.1 R0, docs/M4.1-CRATE-SPLIT.md): this enum is
 //! pure data and belongs to the geometry crate; the flecs singleton glue
-//! and the display formatters live on in `crate::units`.
+//! and the display formatters live on in the app crate's `units`
+//! module.
 
 /// Exact by the 1959 international agreement.
 pub const MM_PER_INCH: f64 = 25.4;
