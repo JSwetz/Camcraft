@@ -1,0 +1,204 @@
+use super::*;
+use crate::geo2d::Point2;
+
+#[test]
+fn stadium_is_a_closed_simple_ring() {
+    let r = stadium(Point2::new(0.0, 0.0), Point2::new(50.0, 0.0), 10.0).expect("finite");
+    assert_eq!(r.loops().len(), 1);
+    // The center and both caps' extents are inside; a point beyond the
+    // cap is not.
+    assert!(r.contains(Point2::new(25.0, 0.0)));
+    assert!(r.contains(Point2::new(59.9, 0.0)));
+    assert!(!r.contains(Point2::new(60.5, 0.0)));
+    // The caps reach 10 mm past each endpoint, so just inside a cap is
+    // in, and a point past its arc is out.
+    assert!(r.contains(Point2::new(-9.5, 0.0)));
+    assert!(!r.contains(Point2::new(-10.5, 0.0)));
+}
+
+#[test]
+fn zero_length_stadium_is_a_circle() {
+    let r = stadium(Point2::new(1.0, 2.0), Point2::new(1.0, 2.0), 5.0).expect("finite");
+    assert!(r.contains(Point2::new(1.0, 2.0)));
+    assert!(!r.contains(Point2::new(1.0 + 5.5, 2.0)));
+}
+
+#[test]
+fn params_sanity_gates() {
+    // `is_sane` is structural - finite numbers, positive increments,
+    // in-range slots; ordering needs resolved heights and lives in
+    // `depth_sane`, which commands run with the world in hand. An
+    // unresolved reference is never a lie there: refusing happens at
+    // generate, by name.
+    let world = crate::world::new_world();
+    let ok = OpParams::Face {
+        stepover: 8.0,
+        clearance_z: Height::fixed(5.0),
+        cut_z: Height::fixed(-0.5),
+        top_z: None,
+        stepdown: None,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    assert!(ok.is_sane() && depth_sane(&world, None, &ok));
+    // Staged facing is sane when it descends: a top below the
+    // finished height, or a zero stepdown, is not.
+    let staged = OpParams::Face {
+        stepover: 8.0,
+        clearance_z: Height::fixed(5.0),
+        cut_z: Height::fixed(-0.5),
+        top_z: Some(Height::fixed(1.0)),
+        stepdown: Some(0.5),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    assert!(staged.is_sane() && depth_sane(&world, None, &staged));
+    let low = OpParams::Face {
+        stepover: 8.0,
+        clearance_z: Height::fixed(5.0),
+        cut_z: Height::fixed(-0.5),
+        top_z: Some(Height::fixed(-0.6)),
+        stepdown: Some(0.5),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    assert!(low.is_sane(), "structurally fine - the order is the flaw");
+    assert!(
+        !depth_sane(&world, None, &low),
+        "staged top below the finished height"
+    );
+    let no_step = OpParams::Face {
+        stepover: 8.0,
+        clearance_z: Height::fixed(5.0),
+        cut_z: Height::fixed(-0.5),
+        top_z: Some(Height::fixed(1.0)),
+        stepdown: Some(0.0),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    assert!(!no_step.is_sane(), "stepdown must be positive when set");
+    let bad = OpParams::Pocket {
+        stepover: f64::NAN,
+        stock_to_leave: 0.0,
+        clearance_z: Height::fixed(5.0),
+        retract_z: None,
+        top_z: Height::fixed(0.0),
+        bottom_z: Height::fixed(-4.0),
+        stepdown: 2.0,
+        feed: 400.0,
+        plunge_feed: 80.0,
+        climb: true,
+        strategy: PocketStrategy::Zigzag,
+    };
+    assert!(!bad.is_sane());
+    // A depth range that runs upward is nonsense, refused at command
+    // creation - not by the shape of the numbers but by their z's.
+    let up = OpParams::Trace {
+        clearance_z: Height::fixed(5.0),
+        retract_z: None,
+        top_z: Height::fixed(-4.0),
+        bottom_z: Height::fixed(0.0),
+        stepdown: 1.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    assert!(up.is_sane());
+    assert!(!depth_sane(&world, None, &up));
+    // An out-of-range slot is structural: there is no seventh offset.
+    let ghost = OpParams::Trace {
+        clearance_z: Height::fixed(5.0),
+        retract_z: None,
+        top_z: Height::fixed(5.0),
+        bottom_z: Height::of(HeightReference::WorkOffset(6), 0.0),
+        stepdown: 1.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    assert!(!ghost.is_sane(), "work-offset references must name a real slot");
+}
+
+#[test]
+fn stamp_follows_every_input() {
+    // Tool numerics, params and source must each move the digest; the
+    // world pieces are exercised in tests/operations.rs, the pure
+    // param path is deterministic here (Fixed heights resolve without
+    // touching the world).
+    let world = crate::world::new_world();
+    let a = OpParams::Face {
+        stepover: 8.0,
+        clearance_z: Height::fixed(5.0),
+        cut_z: Height::fixed(-0.5),
+        top_z: None,
+        stepdown: None,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    // (No struct-update syntax on enum variants: write it out.)
+    let b = OpParams::Face {
+        stepover: 8.0,
+        clearance_z: Height::fixed(5.0),
+        cut_z: Height::fixed(-0.6),
+        top_z: None,
+        stepdown: None,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    let c = OpParams::Face {
+        stepover: 8.0,
+        clearance_z: Height::fixed(5.0),
+        cut_z: Height::fixed(-0.5),
+        top_z: Some(Height::fixed(1.0)),
+        stepdown: Some(0.5),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    let mut ha = std::hash::DefaultHasher::new();
+    let mut hb = std::hash::DefaultHasher::new();
+    let mut hc = std::hash::DefaultHasher::new();
+    a.stamp_with(&world, None, &mut ha);
+    b.stamp_with(&world, None, &mut hb);
+    c.stamp_with(&world, None, &mut hc);
+    assert_ne!(ha.finish(), hb.finish());
+    assert_ne!(ha.finish(), hc.finish(), "staging moves the stamp");
+}
+
+#[test]
+fn face_stamp_moves_with_stepdown() {
+    // A cached single-level facing must never be replayed as the
+    // answer for a staged one - and two stagings that cut different
+    // stacks must not claim each other's cache either.
+    let world = crate::world::new_world();
+    let face_with = |top_z: Option<Height>, stepdown: Option<f64>| OpParams::Face {
+        stepover: 8.0,
+        clearance_z: Height::fixed(5.0),
+        cut_z: Height::fixed(-0.5),
+        top_z,
+        stepdown,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+    };
+    let digest = |p: &OpParams| {
+        let mut h = std::hash::DefaultHasher::new();
+        p.stamp_with(&world, None, &mut h);
+        h.finish()
+    };
+    let legacy = face_with(None, None);
+    let staged = face_with(Some(Height::fixed(1.0)), Some(0.5));
+    let deeper = face_with(Some(Height::fixed(1.0)), Some(0.4));
+    assert_ne!(digest(&legacy), digest(&staged), "staging invalidates");
+    assert_ne!(digest(&staged), digest(&deeper), "step size is geometry");
+    assert_eq!(
+        digest(&staged),
+        digest(&face_with(Some(Height::fixed(1.0)), Some(0.5)))
+    );
+}

@@ -116,9 +116,12 @@ reference each other. `Part` stores `child: Entity` (not parent); systems
 query directly (no helper accessors). `decompose` stores facets directly into
 `Part`.
 
-Check only touched files: `cargo check -p hsmworks-ui` / `-p hsmworks-app` (not
-the whole workspace, which rebuilds flecs). Once M4.1's subcrate split lands,
-the same rule reads `-p` per touched crate.
+Check only touched files: `-p` per touched crate - `hsmworks-ui`,
+`hsmworks-app`, `camcraft-motion`, `camcraft-sim`, `camcraft-post`,
+`camcraft-tools`, `camcraft-cl`, `camcraft-geometry` (not the whole
+workspace, which rebuilds flecs). The M4.1 split landed: geometry/cl/tools/
+post/sim/motion are their own crates; app's `operation` and `project` modules
+are split along section seams.
 
 ## Code shape (Phase 4 onward)
 

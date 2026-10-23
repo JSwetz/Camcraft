@@ -1,0 +1,314 @@
+
+
+use super::*;
+
+/// Inputs an operation depends on: tool (name and numerics), parameters,
+/// and the source's placement and shape. `None` when a referenced entity
+/// is gone - an unresolvable digest is never equal to a stored one, which
+/// is exactly the "Stale" reading a deleted tool should give.
+/// The digest of an operation's inputs as they stand right now.
+/// `op_name` is the operation's own name: re-machining digests the
+/// program AHEAD of it (M3.1 D), and program order is name order, so
+/// the name is part of the question. Callers that build a stamp for an
+/// operation that has no entity yet (or none that matters) pass `""`,
+/// which reads as "no predecessors" and writes no rest term.
+#[must_use]
+/// `setup` is the operation's declared setup (M3.2 A): the stock entity,
+/// the resolved heights and the re-machining mask all read it, so an
+/// operation that switches setups stamps like the world it would
+/// machine. `None` is the first setup - bit-for-bit the old stamp in a
+/// document without setups (the implicit-setup law).
+pub fn current_stamp(
+    world: &World,
+    tool_name: &str,
+    src: &SrcRef,
+    params: &OpParams,
+    op_name: &str,
+    setup: Option<&str>,
+) -> Option<GenStamp> {
+    let mut h = std::hash::DefaultHasher::new();
+    // v2: heights became From+Offset expressions and their resolved
+    // sources feed the digest - every op cached under v1 reads Stale
+    // once and clears on regenerate (same one-time churn as the
+    // b3eaebc stamp move, the mechanism working, not broken).
+    h.write(b"hsmw-op-stamp-v2");
+    let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
+    h.write(tool_name.as_bytes());
+    h.write_u8(0xff);
+    let tool = model::find_by_name(world, tool_name)
+        .and_then(|e| model::tool_of(world, &e))?;
+    h.write_u8(match tool.kind {
+        crate::tools::ToolKind::EndMill => 0,
+        crate::tools::ToolKind::BallNose => 1,
+        crate::tools::ToolKind::BullNose => 2,
+        crate::tools::ToolKind::Drill => 3,
+        crate::tools::ToolKind::Tap => 4,
+        crate::tools::ToolKind::Bore => 5,
+    });
+    for v in [
+        tool.diameter,
+        tool.corner_r,
+        tool.flute_len,
+        tool.shank_d,
+        tool.shank_len,
+        tool.holder_d,
+        tool.holder_len,
+    ] {
+        w(&mut h, v);
+    }
+    // Kind-scoped numbers: a tool digests only what its kind reads. A
+    // tip_angle parked on a ball nose is inert data, and inert data must
+    // never make an operation look stale - the same law the profile and
+    // the cycles draw by. It also keeps every pre-M1.6 stamp value
+    // unchanged: no one-time churn for the milling kinds.
+    match tool.kind {
+        crate::tools::ToolKind::Drill => w(&mut h, tool.tip_angle),
+        crate::tools::ToolKind::Tap => w(&mut h, tool.pitch),
+        _ => {}
+    }
+    params.stamp_with(world, setup, &mut h);
+    match src {
+        SrcRef::Stock => {
+            h.write_u8(b'S');
+            let stock_name = crate::setup::stock_entity_name(world, setup);
+            let entity = model::find_by_name(world, &stock_name)?;
+            let loc = model::transform_of(world, &entity).unwrap_or_default();
+            for v in [loc.pos.x, loc.pos.y, loc.pos.z, loc.rot[0], loc.rot[1], loc.rot[2], loc.rot[3]]
+            {
+                w(&mut h, v);
+            }
+            match model::stock_def_of(world, &entity)? {
+                StockShape::Box { dx, dy, dz } => {
+                    h.write_u8(0);
+                    for v in [dx, dy, dz] {
+                        w(&mut h, v);
+                    }
+                }
+                StockShape::Cylinder { diameter, height } => {
+                    h.write_u8(1);
+                    w(&mut h, diameter);
+                    w(&mut h, height);
+                }
+                StockShape::FromModel { source } => {
+                    h.write_u8(2);
+                    h.write(source.as_bytes());
+                    // M3.1 B: the name is provenance; what gets milled is
+                    // the stock's own copy, so the copy is what the digest
+                    // reads. UpdateModel re-derives the copy inside the
+                    // update command (the propagation law), so an update to
+                    // the source lands here as a moved signature - and a
+                    // stock whose source was deleted stays honestly Ok,
+                    // because the material it describes never changed.
+                    let tris = model::facets_of(world, &entity)?;
+                    h.write_u64(revision::signature(&model::features_of_local(&tris)));
+                }
+            }
+        }
+        SrcRef::Entity(name) => {
+            h.write_u8(b'E');
+            h.write(name.as_bytes());
+            let entity = model::find_by_name(world, name)?;
+            let loc = model::transform_of(world, &entity).unwrap_or_default();
+            for v in [loc.pos.x, loc.pos.y, loc.pos.z, loc.rot[0], loc.rot[1], loc.rot[2], loc.rot[3]]
+            {
+                w(&mut h, v);
+            }
+            // M3.1 A: the revision signature, not count + bounds. Facet
+            // count and AABB are coincidences waiting to happen - a solid
+            // that keeps both while moving material (the diamond where the
+            // cube was) must read Stale, and a re-tessellation of the same
+            // faces must not. Face ids are local-frame content hashes, so
+            // the transform hashed above carries all the placement.
+            let tris = model::facets_of(world, &entity)?;
+            h.write_u64(revision::signature(&model::features_of_local(&tris)));
+        }
+        SrcRef::Selection(items) => {
+            // b'L', not b'S': the Stock arm already owns that byte, and a
+            // digest that collides across source kinds is a staleness bug.
+            h.write_u8(b'L');
+            h.write_usize(items.len());
+            let mut digested: Vec<&str> = Vec::new();
+            for g in items {
+                h.write_u8(match g.feature {
+                    FeatureSel::Face(_) => 0,
+                    FeatureSel::Chain(_) => 1,
+                    FeatureSel::Patch(_) => 2,
+                });
+                h.write_usize(g.entity.len());
+                h.write(g.entity.as_bytes());
+                let id = match g.feature {
+                    FeatureSel::Face(id) | FeatureSel::Chain(id) | FeatureSel::Patch(id) => id,
+                };
+                h.write_u64(id);
+                // The pick resolves against this entity's LOCAL features
+                // (ids are transform-free) and projects through its
+                // transform, so both belong in the digest. The face-id
+                // signature - M3.1's ids-as-signatures law, the same one
+                // the Entity arm reads - keeps a re-import whose faces
+                // survive fresh (a re-tessellation cannot move a pick),
+                // and any real change moves ids, so it goes stale. Face
+                // ids are content hashes of their facet positions, so a
+                // different mesh that repeats the facet count cannot hide.
+                let entity = model::find_by_name(world, &g.entity)?;
+                if !digested.contains(&g.entity.as_str()) {
+                    digested.push(g.entity.as_str());
+                    let loc = model::transform_of(world, &entity).unwrap_or_default();
+                    for v in [
+                        loc.pos.x,
+                        loc.pos.y,
+                        loc.pos.z,
+                        loc.rot[0],
+                        loc.rot[1],
+                        loc.rot[2],
+                        loc.rot[3],
+                    ] {
+                        w(&mut h, v);
+                    }
+                    let tris = model::facets_of(world, &entity)?;
+                    h.write_u64(revision::signature(&model::features_of_local(&tris)));
+                }
+            }
+        }
+    }
+    // M3.1 D re-machining: the program AHEAD is an input too - a 3D
+    // pocket consumes what earlier operations leave standing, so when
+    // their recorded PATHS or their order move, its cached path no
+    // longer describes the same cut. With nothing ahead of it nothing
+    // is written: first operations' and other kinds' stamps are
+    // bit-for-bit what they were before stage D (the inert-data law).
+    if params.kind() == OpType::Pocket3D
+        && let Some(digest) = crate::rest::prior_digest(world, op_name, setup)
+    {
+        h.write_u8(b'R');
+        h.write_u64(digest);
+    }
+    // M3.2 B what-the-program-clamps-to is deliberately NOT here.
+    // Workholding - user fixtures and the machine-derived table and
+    // spindle bands - rides the post's LIVE verification gate, exactly
+    // like the M2.3 machine limits: "load the roomy one and the same
+    // program still posts" is the user-facing law, and the gate
+    // re-checks the steel here and now, so a moved vise can never post
+    // silently without churning a single stamp. Generation still
+    // reports fixture warnings early (the verify call below reads the
+    // boxes live); staleness from workholding is the failure mode this
+    // keeps out (see RECOMMENDED.md, the M2.3-law extension).
+    Some(GenStamp(h.finish()))
+}
+
+/// Derived status of one entity: never stored, always recomputed from the
+/// cache, the stamp and the live world (AGENTS.md: commands own fields).
+#[must_use]
+pub fn status_of(world: &World, entity: &flecs_ecs::prelude::Entity) -> OpStatus {
+    let Some(op) = model::operation_of(world, entity) else {
+        return OpStatus::Never;
+    };
+    let Some(cache) = model::toolpath_of(world, entity) else {
+        return OpStatus::Never;
+    };
+    if cache.path.is_empty() {
+        return OpStatus::Never; // a cache with no moves is no cache
+    }
+    let name = model::name_of(world, entity).unwrap_or_default();
+    match (
+        op.stamp,
+        current_stamp(
+            world,
+            &op.tool,
+            &op.src,
+            &op.params,
+            &name,
+            op.setup.as_deref(),
+        ),
+    ) {
+        (Some(stored), Some(now)) if stored == now => OpStatus::Ok,
+        _ => OpStatus::Stale,
+    }
+}
+
+/// Why an operation reads Stale, phrased for a user who can act on it
+/// (M3.1 C). The stamp is a single digest, so it cannot itself say what
+/// moved; this asks the world the cheap live questions instead - the
+/// ones whose answer is true independent of history: is the tool still
+/// there, does each referenced entity still exist, does each picked
+/// feature id still exist in its entity's live geometry, can every
+/// height still resolve. When none of them fires, the honest answer is
+/// the general one: something the generation read has changed. None
+/// when the operation is not Stale.
+#[must_use]
+pub fn stale_reason(
+    world: &flecs_ecs::prelude::World,
+    entity: &flecs_ecs::prelude::Entity,
+) -> Option<String> {
+    if status_of(world, entity) != OpStatus::Stale {
+        return None;
+    }
+    let op = model::operation_of(world, entity)?;
+    match model::find_by_name(world, &op.tool) {
+        None => return Some(format!("its tool '{}' no longer exists", op.tool)),
+        Some(t) if !model::is_tool(world, &t) => {
+            return Some(format!("'{}' is no longer a tool", op.tool));
+        }
+        _ => {}
+    }
+    match &op.src {
+        SrcRef::Stock => {
+            let stock_name = crate::setup::stock_entity_name(world, op.setup.as_deref());
+            if model::find_by_name(world, &stock_name).is_none() {
+                return Some("the stock no longer exists - set it up again".into());
+            }
+        }
+        SrcRef::Entity(name) => {
+            if model::find_by_name(world, name).is_none() {
+                return Some(format!("its geometry source '{name}' was deleted"));
+            }
+        }
+        SrcRef::Selection(items) => {
+            for g in items {
+                let Some(e) = model::find_by_name(world, &g.entity) else {
+                    return Some(format!("'{}' was deleted", g.entity));
+                };
+                let Some(tris) = model::facets_of(world, &e) else {
+                    return Some(format!("'{}' no longer carries geometry", g.entity));
+                };
+                let features = model::features_of_local(&tris);
+                let (present, what) = match g.feature {
+                    FeatureSel::Face(id) => (
+                        revision::face_ids(&features).binary_search(&id).is_ok(),
+                        "face",
+                    ),
+                    FeatureSel::Patch(id) => (
+                        revision::patch_ids(&features).binary_search(&id).is_ok(),
+                        "welded face",
+                    ),
+                    FeatureSel::Chain(id) => (
+                        revision::chain_ids(&features).binary_search(&id).is_ok(),
+                        "edge chain",
+                    ),
+                };
+                if !present {
+                    return Some(format!(
+                        "the picked {what} of '{}' no longer exists - the geometry moved",
+                        g.entity
+                    ));
+                }
+            }
+        }
+    }
+    for h in collect_heights(&op.params) {
+        if let Some(missing) = missing_source(world, op.setup.as_deref(), h.reference) {
+            return Some(format!("a height is measured from {missing}"));
+        }
+    }
+    // M3.1 D: the program ahead is the LAST question, and reaching it
+    // forces the answer: every own-input question above came back
+    // clean while the stamp still mismatches, so a cutting
+    // predecessor's recorded path is what moved - whatever its own
+    // status reads.
+    if op.params.kind() == OpType::Pocket3D
+        && let Some(name) = model::name_of(world, entity)
+        && let Some(why) = crate::rest::prior_stale(world, &name, op.setup.as_deref())
+    {
+        return Some(why);
+    }
+    Some("the geometry or tool inputs changed since it was generated".into())
+}
