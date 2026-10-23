@@ -59,9 +59,17 @@ pass). machining2d.rs 2299, finishing3d.rs 1579, feature.rs 1545,
 stock_sim.rs (world half) 1240, drilling.rs 1024, machining3d.rs 915,
 verify.rs 905 live in crates now and carry the same debt per crate.
 
-**Graphify:** R5's file moves were many enough for a full rebuild
-(`--force` not needed - nothing deleted), which also re-curated the
-operation/project community labels around the new files.
+**Graphify:** R5's file moves were many enough for a full rebuild. The
+plain rebuild tripped both export guards - the #479 shrink guard (the
+cache re-mints doc nodes sparsely, 3477 raw < 4318 saved) and the
+semantic-loss guard (849 saved doc ids). Resolved per the
+doc-node-guard recipe: fold saved ∪ new with every saved-origin doc
+node restored (saved wins the id on label duplicates) - no `--force`,
+nothing content-lost. Residual: the restored edges that pointed at
+legacy `_rs_`-format sourceless ghosts are dangling in the raw sidecar
+(310) and dropped by the builder - zero in the final graph. Final:
+4397 nodes / 11501 edges / 221 communities, old names carried by
+member-overlap vote.
 
 ## M4.4 - Test cost shape
 
