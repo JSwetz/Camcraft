@@ -45,17 +45,20 @@ fn reference() -> Machine {
         spindle_min: Some(50.0),
         spindle_max: Some(12000.0),
         axes: vec![
-            AxisLimits { name: "X".into(), feed: Some(5000.0), rapid: Some(15000.0), travel: Some((-100.0, 100.0)) },
-            AxisLimits { name: "Y".into(), feed: Some(5000.0), rapid: Some(15000.0), travel: Some((-100.0, 100.0)) },
-            AxisLimits { name: "Z".into(), feed: Some(3000.0), rapid: Some(10000.0), travel: Some((-100.0, 100.0)) },
+            AxisLimits { name: "X".into(), feed: Some(5000.0), rapid: Some(15000.0), travel: Some((-100.0, 100.0)), ..Default::default() },
+            AxisLimits { name: "Y".into(), feed: Some(5000.0), rapid: Some(15000.0), travel: Some((-100.0, 100.0)), ..Default::default() },
+            AxisLimits { name: "Z".into(), feed: Some(3000.0), rapid: Some(10000.0), travel: Some((-100.0, 100.0)), ..Default::default() },
         ],
         max_tool_length: Some(150.0),
         max_tool_diameter: Some(20.0),
         // No spindle body stated: this reference machine keeps the
         // pre-M3.2B verdicts byte-identical - the spindle band only
-        // exists when the `.mch` says it does.
+        // exists when the `.mch` says it does. Stage C's new fields
+        // (kind, power, changer, coolants) join that law: unstated
+        // here, silent in every verdict the pre-stage-C tests hold.
         spindle_d: None,
         spindle_len: None,
+        ..Default::default()
     }
 }
 
@@ -414,12 +417,14 @@ fn a_flood_of_violations_reports_forty_and_counts_the_rest() {
 
 #[test]
 fn the_post_mirror_states_only_what_the_machine_stated() {
-    // M3.3 A's bridge: a checker-parsed `Machine` reaches the script
-    // through `post::machine::mirror` - the static grammar, stated
-    // numbers only. An unstated spindle limit is ABSENT (the posts'
-    // `> 0` guard keeps the silence honest), rotary axes are not
-    // mirrored (no 3-axis post reads them yet), and coolant never
-    // appears: a parsed `.mch` carries no coolant list.
+    // M3.3 A's bridge, widened by stage C: a checker-parsed `Machine`
+    // reaches the script through `post::machine::mirror` - the static
+    // grammar, stated numbers only. An unstated spindle limit is
+    // ABSENT (the posts' `> 0` guard keeps the silence honest), rotary
+    // axes are not mirrored (no prismatic post reads one, and a
+    // deg/min rapid in an mm/min field would be a unit lie), and
+    // coolant says nothing the machine did not: no `coolants` field on
+    // the machine, no coolant key in the mirror.
     let m = Machine {
         model: "MirrorMill".into(),
         vendor: "Hsmworks Testbench".into(),
@@ -430,6 +435,7 @@ fn the_post_mirror_states_only_what_the_machine_stated() {
                 feed: Some(4000.0),
                 rapid: Some(7000.0),
                 travel: None,
+                ..Default::default()
             },
             AxisLimits { name: "C".into(), ..Default::default() },
         ],
@@ -458,4 +464,245 @@ fn the_post_mirror_states_only_what_the_machine_stated() {
     assert_eq!(mute["name"], "");
     assert_eq!(mute["spindleMax"], 0.0, "absent reads 0: the `> 0` guards keep it silent");
     assert_eq!(mute["rapidRate"], 0.0);
+    assert_eq!(mute["coolants"].as_array().map(Vec::len), Some(0), "and an empty list");
+}
+
+// ---- declared kind + full numbers (M3.3 stage C) ----
+
+#[test]
+fn the_declared_kind_outranks_the_axis_inventory() {
+    // stage C: a file that says what it is wins; the M3.2 inference
+    // stays as the fallback for files that state nothing.
+    use hsmworks_app::machine::{Kind, kind};
+    let axis = |n: &str| AxisLimits {
+        name: n.to_string(),
+        ..Default::default()
+    };
+    let m = |names: &[&str], k: Option<&str>| Machine {
+        axes: names.iter().copied().map(axis).collect(),
+        kind: k.map(str::to_owned),
+        ..Default::default()
+    };
+    assert_eq!(kind(Some(&m(&["X", "Y", "Z"], Some("mill")))), Kind::Mill);
+    assert_eq!(kind(Some(&m(&["X", "Z"], Some("lathe")))), Kind::Lathe);
+    assert_eq!(
+        kind(Some(&m(&["X", "Y", "Z"], Some("turning")))),
+        Kind::Lathe,
+        "declared wins even over a milling inventory - the file knows parts the kinematics tree hides"
+    );
+    assert_eq!(
+        kind(Some(&m(&["X", "Y", "Z", "C"], Some("Mill-Turn")))),
+        Kind::MillTurn,
+        "the word reader is case-and-punctuation tolerant"
+    );
+    assert_eq!(kind(Some(&m(&["X", "Y", "Z"], None))), Kind::Mill, "unstated: the old law");
+    assert_eq!(Kind::MillTurn.word(), "mill-turn", "one canonical spelling");
+    assert_eq!(Kind::from_word("mill turn"), Some(Kind::MillTurn));
+    assert_eq!(Kind::from_word("drill press"), None);
+    // A flagged rotary decides without letter games.
+    let mut milled = m(&["X", "Y", "Z"], None);
+    milled.axes.push(AxisLimits {
+        name: "Q".to_string(),
+        rotary: true,
+        ..Default::default()
+    });
+    assert_eq!(kind(Some(&milled)), Kind::MillTurn, "Y plus a rotary is a mill-turn");
+}
+
+#[test]
+fn parse_reads_the_full_stage_c_grammar() {
+    let text = r#"{
+      "general": {"model": "StageC 1", "vendor": "Hsmworks Testbench", "kind": "mill-turn"},
+      "kinematics": {"default": {
+        "units": {"length": "mm", "angle": "degrees"},
+        "parts": [
+          {"name": "head", "type": "head",
+           "spindle": {"min_speed": 30.0, "max_speed": 12000.0, "power": 11.0},
+           "tool_station": {"max_tool_length": 250.0, "coolants": [
+             {"name": "Flood", "mCode": "M8"}, "Mist", {"name": "Air", "mCode": 5}
+           ]}},
+          {"name": "X", "type": "linear", "travel": {"min": -200.0, "max": 200.0}},
+          {"name": "Y", "type": "linear", "resolution": 0.001},
+          {"name": "C", "type": "rotary", "travel": {"min": -360.0, "max": 360.0}, "resolution": 0.0001}
+        ]}},
+      "tooling": {"number_of_tools": 24}}"#;
+    let m = parse_mch(text).expect("the widened grammar parses");
+    assert_eq!(m.kind.as_deref(), Some("mill-turn"), "the word, as stated");
+    assert_eq!(m.spindle_power, Some(11.0));
+    assert_eq!(m.tool_count, Some(24));
+    assert_eq!(m.coolants.len(), 3);
+    assert_eq!(
+        (m.coolants[0].name.as_str(), m.coolants[0].m_code.as_str()),
+        ("Flood", "M8")
+    );
+    assert_eq!(m.coolants[1].name, "Mist", "a bare string names the option");
+    assert_eq!(m.coolants[1].m_code, "", "with no code to state");
+    assert_eq!(m.coolants[2].m_code, "M5", "a bare number normalizes to the word");
+    let c = m.axes.iter().find(|a| a.name == "C").expect("the rotary joined the table");
+    assert!(c.rotary, "flagged by the part type, not the letter");
+    assert_eq!(c.travel, Some((-360.0, 360.0)), "the turning range, degrees");
+    assert_eq!(c.resolution, Some(0.0001), "degrees, unscaled by any inch factor");
+    let y = m.axes.iter().find(|a| a.name == "Y").expect("Y");
+    assert_eq!(y.resolution, Some(0.001), "linear resolution is a length");
+    assert!(m.is_sane());
+    assert_eq!(
+        hsmworks_app::machine::kind(Some(&m)),
+        hsmworks_app::machine::Kind::MillTurn
+    );
+}
+
+#[test]
+fn a_coolant_list_at_the_tooling_root_also_reads() {
+    // Some files keep the options at the tooling root rather than on
+    // the station; either home is the same list.
+    let text = r#"{
+      "kinematics": {"default": {"parts": [{"name": "head", "type": "head"}]}},
+      "tooling": {"coolants": ["Flood"]}}"#;
+    let m = parse_mch(text).expect("the alternate home parses");
+    assert_eq!(m.coolants.len(), 1);
+    assert_eq!(
+        (m.coolants[0].name.as_str(), m.coolants[0].m_code.as_str()),
+        ("Flood", "")
+    );
+}
+
+#[test]
+fn a_kind_that_is_not_a_kind_refuses_at_the_door() {
+    // The one gate is parse_mch: an unreadable word never reaches a
+    // mounted machine, so nothing downstream re-litigates it.
+    let bad = r#"{"general": {"kind": "router"}}"#;
+    let err = parse_mch(bad).expect_err("a word the grammar does not know");
+    assert!(err.contains("router"), "the refusal names the word: {err}");
+    let notaword = r#"{"general": {"kind": {"surprise": 1}}}"#;
+    assert!(parse_mch(notaword).is_err(), "a table is not a declaration");
+    let empty = r#"{"general": {"kind": ""}}"#;
+    assert_eq!(parse_mch(empty).expect("empty states nothing").kind, None);
+    // Hand-edited project files face the loader's is_sane gate.
+    let smuggled = Machine {
+        kind: Some("router".to_string()),
+        ..Default::default()
+    };
+    assert!(!smuggled.is_sane());
+    let blank_option = Machine {
+        coolants: vec![hsmworks_app::machine::Coolant {
+            name: String::new(),
+            m_code: "M8".to_string(),
+        }],
+        ..Default::default()
+    };
+    assert!(!blank_option.is_sane(), "a coolant nobody can name");
+}
+
+#[test]
+fn the_changer_counts_the_distinct_tools() {
+    // Two ops drawing on two tools, one slot: physically impossible,
+    // and the checker says the numbers.
+    let (world, mut history) = faced_doc();
+    history.execute(
+        &world,
+        AddTool::new(&world, "EM-0600-4FL", catalog_tool("EM-0600-4FL")).expect("second tool"),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Face2",
+            "EM-0600-4FL",
+            SrcRef::Stock,
+            OpParams::Face {
+                stepover: 3.0,
+                clearance_z: Height::fixed(25.0),
+                cut_z: Height::fixed(18.0),
+                top_z: None,
+                stepdown: None,
+                feed: 1200.0,
+                plunge_feed: 300.0,
+                climb: true,
+            },
+        )
+        .expect("second op"),
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face2").expect("generate second"),
+    );
+    let mut tight = reference();
+    tight.tool_count = Some(1);
+    let c = check_document(&world, &tight).expect("checks");
+    assert!(
+        c.problems.iter().any(|p| p.contains("2 tools, the changer holds 1")),
+        "{:?}",
+        c.problems
+    );
+    let mut roomy = reference();
+    roomy.tool_count = Some(2);
+    let c = check_document(&world, &roomy).expect("checks");
+    assert!(
+        !c.problems.iter().any(|p| p.contains("changer")),
+        "two slots for two tools says nothing about the changer: {:?}",
+        c.problems
+    );
+}
+
+#[test]
+fn the_changer_says_nothing_when_the_machine_stated_nothing() {
+    // The unstated limit keeps its unstated face: no `number_of_tools`
+    // is no claim, never a one-slot verdict.
+    let (world, _h) = faced_doc();
+    let mut mute = reference();
+    mute.tool_count = None;
+    let c = check_document(&world, &mute).expect("checks");
+    assert!(c.problems.iter().all(|p| !p.contains("changer")), "{:?}", c.problems);
+}
+
+#[test]
+fn the_coolant_list_reaches_the_script() {
+    // stage C completes the bridge the unmounted document already
+    // walked: the mounted list, codes and name-only entries alike.
+    use hsmworks_app::machine::Coolant;
+    let m = Machine {
+        coolants: vec![
+            Coolant {
+                name: "Flood".to_string(),
+                m_code: "M8".to_string(),
+            },
+            Coolant {
+                name: "Air blast".to_string(),
+                m_code: String::new(),
+            },
+        ],
+        ..reference()
+    };
+    let props = hsmworks_app::post::machine::script_props(&hsmworks_app::post::machine::mirror(&m));
+    let list = props["coolants"].as_array().expect("a coolants list");
+    assert_eq!(list.len(), 2);
+    assert_eq!(
+        (list[0]["name"].as_str(), list[0]["mCode"].as_str()),
+        (Some("Flood"), Some("M8"))
+    );
+    assert_eq!(list[1]["mCode"].as_str(), Some(""), "named only - the post stays silent on it");
+}
+
+#[test]
+fn every_shipped_machine_mounts_and_speaks_its_declaration() {
+    // The built-in library the Setup pane offers: every entry is
+    // parseable, sane, and its declared kind matches what its own
+    // axis inventory infers - the files are honest both ways.
+    use hsmworks_app::machine::{Kind, kind};
+    use hsmworks_app::posting::MACHINES;
+    let expectations = [
+        ("VMC 3-axis", Kind::Mill),
+        ("Mill-turn", Kind::MillTurn),
+        ("Lathe", Kind::Lathe),
+    ];
+    assert_eq!(MACHINES.len(), expectations.len(), "the pane offers what the tests pin");
+    for ((name, text), (want_name, want_kind)) in MACHINES.iter().zip(expectations) {
+        assert_eq!(*name, want_name);
+        let m = parse_mch(text).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(m.is_sane(), "{name} must be a machine this app can check");
+        assert_eq!(kind(Some(&m)), want_kind, "{name} declared");
+        let mut inferred = m.clone();
+        inferred.kind = None;
+        assert_eq!(kind(Some(&inferred)), want_kind, "{name}'s axes agree with its word");
+    }
 }

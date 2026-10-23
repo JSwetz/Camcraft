@@ -19,12 +19,15 @@ pub fn from_json(text: &str) -> Result<Value, serde_json::Error> {
 /// sim's traverse timer walk `kinematics.static` instead. This says
 /// the same numbers in that grammar, stating only what the file
 /// stated: an unstated limit is absent, never a zero that lies (the
-/// posts' `> 0` guards keep silence faithful). Coolants: a parsed
-/// `.mch` carries no coolant list, so the mirror states none and the
-/// post omits the M-code (honest absence, the unstated-limit law in
-/// coolant clothes; stage C grows the checker grammar to carry it).
-/// Rotary axes are not mirrored - no 3-axis post reads them, and the
-/// traverse paces only prismatic motion (stage D, RTCP).
+/// posts' `> 0` guards keep silence faithful). Coolants arrived with
+/// M3.3 stage C: a machine that names its options says so under
+/// `head.toolStation.coolants`, and one that names nothing mirrors
+/// nothing - the post holds its coolant word silent, exactly as it
+/// did when the bridge carried none. Rotary axes are still not
+/// mirrored: the prismatic script contract has no rotary word to
+/// read, the traverse paces only prismatic motion, and a deg/min
+/// rapid leaking into an mm/min ceiling would be a unit lie
+/// (stage D, RTCP).
 #[must_use]
 pub fn mirror(m: &crate::machine::Machine) -> Value {
     let mut axes: Vec<Value> = Vec::new();
@@ -54,6 +57,23 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
     let mut head = serde_json::Map::new();
     if let Some(s) = m.spindle_max {
         head.insert("spindle".to_owned(), json!({"max": s}));
+    }
+    if !m.coolants.is_empty() {
+        // Only what the file stated: a named-without-code entry rides
+        // as a bare name, and script_props reads it as codeless - the
+        // post keeps silent about a coolant it cannot address.
+        let cs: Vec<Value> = m
+            .coolants
+            .iter()
+            .map(|c| {
+                if c.m_code.is_empty() {
+                    json!({ "name": c.name })
+                } else {
+                    json!({ "name": c.name, "mCode": c.m_code })
+                }
+            })
+            .collect();
+        head.insert("toolStation".to_owned(), json!({ "coolants": cs }));
     }
     json!({
         "name": m.model,

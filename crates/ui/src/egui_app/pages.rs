@@ -1343,12 +1343,12 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     }
 }
 
-fn field(ui: &mut Ui, label: &str) {
+pub(crate) fn field(ui: &mut Ui, label: &str) {
     ui.add_space(3.0);
     ui.label(label);
 }
 
-fn num(ui: &mut Ui, u: Unit, v: &mut f64) {
+pub(crate) fn num(ui: &mut Ui, u: Unit, v: &mut f64) {
     num_prec(ui, u, v, 4);
 }
 
@@ -1380,17 +1380,17 @@ fn num_prec(ui: &mut Ui, u: Unit, v: &mut f64, prec: usize) {
 }
 
 /// Feed rates (mm/min stored, in/min shown): same lens, coarser text.
-fn num_feed(ui: &mut Ui, u: Unit, v: &mut f64) {
+pub(crate) fn num_feed(ui: &mut Ui, u: Unit, v: &mut f64) {
     num_prec(ui, u, v, 2);
 }
 
 /// Degrees, rpm, counts: no lens - these were never millimeters.
-fn num_plain(ui: &mut Ui, v: &mut f64) {
+pub(crate) fn num_plain(ui: &mut Ui, v: &mut f64) {
     ui.add(DragValue::new(v).speed(0.1));
 }
 
 /// Combo over `&[&str]` with a usize model (imgui's combo idiom).
-fn combo(ui: &mut Ui, id: &str, idx: &mut usize, names: &[&str]) {
+pub(crate) fn combo(ui: &mut Ui, id: &str, idx: &mut usize, names: &[&str]) {
     let cur = names
         .get((*idx).min(names.len().saturating_sub(1)))
         .copied()
@@ -1643,19 +1643,45 @@ fn post_section(ui: &mut Ui, state: &mut State) {
     });
 }
 
-/// The document's machine (M2.3 C): setup furniture, read live off the
-/// world singleton like the units row above - no mirror to go stale.
-/// The summary is exactly what the file stated; a blank is a `?`, never
-/// an invented ceiling. Stage D turns "states" into a posting gate;
-/// until then this section informs, it does not block.
+/// The document's machine (M2.3 C, group completed by M3.3 stage C):
+/// setup furniture read live off the world singleton - no mirror to go
+/// stale. The summary is exactly what the file stated; a blank is a
+/// `?`, never an invented ceiling. The library combo picks a shipped
+/// machine BY NAME, "Load other" reaches any `.mch` through the file
+/// law, and "Edit" opens the draft editor; all three land on the
+/// same `LoadMachine` command, so every change here is undoable
+/// furniture, not a field poke. The kind line follows the DECLARED
+/// kind where the machine states one, the axis inventory otherwise.
 fn machine_section(ui: &mut Ui, state: &mut State) {
     let (path, m) = machine::of(&state.world);
     ui.label("Machine");
+    ui.horizontal(|ui| {
+        ui.label("Library");
+        let names: Vec<&str> = posting::MACHINES.iter().map(|(n, _)| *n).collect();
+        let sel: Option<usize> = names
+            .iter()
+            .position(|n| path == posting::builtin_path(n));
+        let text = match sel {
+            Some(i) => names[i].to_owned(),
+            None => "other".to_owned(),
+        };
+        let mut pick: Option<String> = None;
+        egui::ComboBox::from_id_salt("machine_library")
+            .selected_text(text)
+            .show_ui(ui, |ui| {
+                for (i, n) in names.iter().enumerate() {
+                    if ui.selectable_label(sel == Some(i), *n).clicked() {
+                        pick = Some((*n).to_owned());
+                    }
+                }
+            });
+        if let Some(name) = pick {
+            state.pending.push_back(CommandKind::LoadBuiltinMachine(name));
+        }
+    });
     match &m {
         Some(m) => {
             ui.label(m.summary());
-            // The workspace the ribbon will offer (M3.2 stage E): the
-            // kind the axis inventory says this machine is.
             ui.label(format!(
                 "{} workspace",
                 machine::kind(Some(m)).label()
@@ -1666,6 +1692,9 @@ fn machine_section(ui: &mut Ui, state: &mut State) {
             ui.horizontal(|ui| {
                 if ui.button("Load other").clicked() {
                     state.pending.push_back(CommandKind::LoadMachineDialog);
+                }
+                if ui.button("Edit").clicked() {
+                    state.pending.push_back(CommandKind::EditMachineDialog);
                 }
                 if ui.button("Clear").clicked() {
                     state.pending.push_back(CommandKind::ClearMachine);

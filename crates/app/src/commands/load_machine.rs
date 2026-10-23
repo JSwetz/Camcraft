@@ -52,6 +52,22 @@ impl LoadMachine {
         let m = crate::machine::parse_mch(&text).map_err(CommandError::Invalid)?;
         Self::new(world, path.display().to_string(), Some(m))
     }
+
+    /// Mount a built-in machine from the shipped library (M3.3 stage
+    /// C) by NAME - a stale or typo'd name refuses instead of quietly
+    /// mounting a different machine than the pane advertised. The
+    /// mount path records the library, not a file that exists.
+    pub fn builtin(world: &World, name: &str) -> Result<Self, CommandError> {
+        let m = match crate::posting::MACHINES.iter().find(|(n, _)| *n == name) {
+            Some((_, text)) => crate::machine::parse_mch(text).map_err(CommandError::Invalid)?,
+            None => {
+                return Err(CommandError::Invalid(format!(
+                    "machine {name} is not in the built-in library"
+                )));
+            }
+        };
+        Self::new(world, crate::posting::builtin_path(name), Some(m))
+    }
 }
 
 impl Command for LoadMachine {

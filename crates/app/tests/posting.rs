@@ -549,18 +549,21 @@ fn a_mounted_machine_names_the_program_and_speaks_only_its_own_coolant() {
                 feed: Some(5000.0),
                 rapid: Some(9000.0),
                 travel: None,
+                ..Default::default()
             },
             hsmworks_app::machine::AxisLimits {
                 name: "Y".into(),
                 feed: Some(5000.0),
                 rapid: Some(9000.0),
                 travel: None,
+                ..Default::default()
             },
             hsmworks_app::machine::AxisLimits {
                 name: "Z".into(),
                 feed: Some(3000.0),
                 rapid: Some(4000.0),
                 travel: None,
+                ..Default::default()
             },
         ],
         ..Default::default()
@@ -584,6 +587,49 @@ fn a_mounted_machine_names_the_program_and_speaks_only_its_own_coolant() {
     let axes = v["kinematics"]["static"]["axes"].as_array().expect("three axes");
     assert_eq!(axes.len(), 3);
     assert_eq!(hsmworks_app::sim::Traverse::from_machine(&v).z, 4000.0);
+}
+
+#[test]
+fn a_mounted_coolant_list_writes_its_own_codes() {
+    // M3.3 C finishes A's sentence: the very word A's honest absence
+    // suppressed now flows - and it flows from the mount, not from the
+    // shipped default the unmounted document speaks.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
+    history.execute(&world, cmd.expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+
+    let mounted = hsmworks_app::machine::Machine {
+        model: "CoolMill".into(),
+        coolants: vec![
+            hsmworks_app::machine::Coolant {
+                name: "Brine".into(),
+                m_code: "M51".into(),
+            },
+            hsmworks_app::machine::Coolant {
+                name: "Air".into(),
+                m_code: String::new(),
+            },
+        ],
+        ..Default::default()
+    };
+    let path = tmp_nc("mount-coolant");
+    history.execute(
+        &world,
+        LoadMachine::new(&world, "cool.mch".into(), Some(mounted)).expect("sane"),
+    );
+    posting::post_setup(&world, &path).expect("the mounted coolant posts");
+    let text = std::fs::read_to_string(&path).expect("written");
+    let _ = std::fs::remove_file(&path);
+    assert!(text.contains("(CoolMill)"));
+    assert!(text.contains("M51"), "the mount's own code speaks: {text}");
+    assert!(
+        !text.contains("M8"),
+        "the shipped default's M8 is gone with the default: {text}"
+    );
 }
 
 #[test]

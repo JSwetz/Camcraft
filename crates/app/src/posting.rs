@@ -41,6 +41,29 @@ pub const BUILTINS: &[(&str, &str)] = &[
 /// The default machine as text: a plain 3-axis VMC with flood coolant.
 pub const DEFAULT_MCH: &str = include_str!("../../../assets/machines/3axis-vmc.mch");
 
+/// The built-in machine LIBRARY (M3.3 stage C), checker grammar - the
+/// files the Setup pane's machine group lists by name, the way
+/// `BUILTINS` lists posts. Same law as the post registry: addressed
+/// by name (a Setup that names "Mill-turn" still names it after the
+/// library grows), and entry 0 stays the plain VMC, because the
+/// first-shipped default is what old sessions remember. Unlike posts,
+/// a machine choice is not stored as a reference - the document
+/// mounts the parsed machine itself - so the name here is a picker
+/// label and an install-time default, never a file's identity.
+pub const MACHINES: &[(&str, &str)] = &[
+    ("VMC 3-axis", include_str!("../../../assets/machines/vmc.mch")),
+    ("Mill-turn", include_str!("../../../assets/machines/millturn.mch")),
+    ("Lathe", include_str!("../../../assets/machines/lathe.mch")),
+];
+
+/// The mount path a built-in library entry records (stage C): the
+/// pane's combo and the `LoadMachine::builtin` command say the same
+/// string, so "loaded from" never quotes a file that does not exist.
+#[must_use]
+pub fn builtin_path(name: &str) -> String {
+    format!("built-in: {name}")
+}
+
 /// The default machine: a plain 3-axis VMC with flood coolant.
 pub fn default_machine() -> Value {
     static M: std::sync::OnceLock<Value> = std::sync::OnceLock::new();

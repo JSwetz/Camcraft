@@ -2539,3 +2539,67 @@ fn the_post_choice_round_trips_and_a_v22_file_means_the_built_in() {
     let _ = std::fs::remove_file(&p);
     let _ = std::fs::remove_file(&plain);
 }
+
+#[test]
+fn the_stage_c_machine_fields_round_trip_and_unset_ones_mint_nothing() {
+    // The widened grammar rides the SAME DTO with no version bump:
+    // fields a file stated round-trip intact, fields it left unstated
+    // never appear in the save - a pre-stage-C file and a pre-C save
+    // are byte-identical, which is what lets us skip the bump honestly.
+    use hsmworks_app::machine::Coolant;
+    let world = new_world();
+    let m = machine::Machine {
+        model: "Wide 1".into(),
+        vendor: "Hsmworks Testbench".into(),
+        kind: Some("mill-turn".into()),
+        spindle_power: Some(18.5),
+        tool_count: Some(40),
+        coolants: vec![
+            Coolant { name: "Flood".into(), m_code: "M8".into() },
+            Coolant { name: "Air".into(), m_code: String::new() },
+        ],
+        axes: vec![
+            machine::AxisLimits { name: "X".into(), ..Default::default() },
+            machine::AxisLimits {
+                name: "C".into(),
+                rotary: true,
+                travel: Some((-360.0, 360.0)),
+                resolution: Some(0.001),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    let cmd = hsmworks_app::commands::LoadMachine::new(&world, "wide.mch".into(), Some(m.clone()))
+        .expect("sane");
+    hsmworks_app::commands::History::default().execute(&world, cmd);
+    let p = tmp_path("stagec_fields");
+    project::save(&world, &p).expect("save");
+    let text = std::fs::read_to_string(&p).expect("read");
+    assert!(text.contains("\"kind\"") && text.contains("mill-turn"), "{text}");
+    assert!(text.contains("\"tool_count\"") && text.contains("40"));
+    assert!(text.contains("\"rotary\""));
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    let (_, m2) = machine::of(&world2);
+    assert_eq!(m2, Some(m), "every stage C number survives");
+
+    // And the unstated machine still mints none of the new keys -
+    // the v19 test above proves the old shape; this pins the skipers.
+    let plain = tmp_path("stagec_mute");
+    let mute = new_world();
+    let cmd = hsmworks_app::commands::LoadMachine::new(
+        &mute,
+        "mute.mch".into(),
+        Some(machine::Machine::default()),
+    )
+    .expect("the mute file is a mute machine");
+    hsmworks_app::commands::History::default().execute(&mute, cmd);
+    project::save(&mute, &plain).expect("save mute");
+    let mute_text = std::fs::read_to_string(&plain).expect("read");
+    for key in ["\"kind\"", "\"spindle_power\"", "\"tool_count\"", "\"coolants\"", "\"rotary\""] {
+        assert!(!mute_text.contains(key), "unstated must not mint {key}: {mute_text}");
+    }
+    let _ = std::fs::remove_file(&p);
+    let _ = std::fs::remove_file(&plain);
+}

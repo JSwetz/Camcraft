@@ -22,6 +22,9 @@
 //! Provenance: our own code, from our own spike.
 
 mod icons;
+// pub(crate) past egui_app: `State::machine_editor` names its draft
+// type (M3.3 stage C), so state.rs has to see through the door.
+pub(crate) mod machine_editor;
 mod painted;
 mod pages;
 mod panes;

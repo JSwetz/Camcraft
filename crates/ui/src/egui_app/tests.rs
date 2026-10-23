@@ -2002,6 +2002,74 @@ fn a_lathe_machine_darkens_the_mill_cells() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// M3.3 stage C, the Setup pane's machine group headless: the built-in
+/// library mounts by name, and the editor's Apply is a `LoadMachine`
+/// at the mount's own path - so undo puts back the exact numbers the
+/// library mounted, and a stranger name is refused by name.
+#[test]
+fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() {
+    let mut harness = shell_harness();
+    harness.run();
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::LoadBuiltinMachine("Lathe".to_string()));
+    harness.run();
+    let (path, mounted) = hsmworks_app::machine::of(&harness.state().state.world);
+    assert_eq!(path, "built-in: Lathe", "the mount records through the shared built-in path");
+    let mut mounted = mounted.expect("the library lathe is mounted");
+    assert_eq!(
+        hsmworks_app::machine::kind(Some(&mounted)),
+        hsmworks_app::machine::Kind::Lathe,
+        "the declared kind drives the workspaces, not a guess"
+    );
+    // A declared lathe darkens the mill cells just like the inferred
+    // one the test above judges - one law, two roads.
+    assert!(!panes::enabled(Cmd::Create(1), &harness.state().state));
+
+    let spindle_max = mounted.spindle_max;
+    // The editor's Apply, fed the draft the dialog would have shown
+    // with one number changed.
+    mounted.spindle_max = Some(4321.0);
+    harness.state_mut().state.pending.push_back(CommandKind::EditMachineApply {
+        path,
+        machine: Box::new(mounted),
+    });
+    harness.run();
+    let (_, m) = hsmworks_app::machine::of(&harness.state().state.world);
+    assert_eq!(
+        m.expect("edited").spindle_max,
+        Some(4321.0),
+        "Apply reached the world through the history"
+    );
+
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    let (_, m) = hsmworks_app::machine::of(&harness.state().state.world);
+    assert_eq!(
+        m.expect("mounted").spindle_max,
+        spindle_max,
+        "undo restores the library's exact numbers"
+    );
+
+    // A name the library does not hold is refused by name, and the
+    // document stands exactly where it stood.
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::LoadBuiltinMachine("Drill press".to_string()));
+    harness.run();
+    assert!(
+        harness.state().state.status.contains("Drill press"),
+        "the refusal names the stranger: {:?}",
+        harness.state().state.status
+    );
+    let (_, m) = hsmworks_app::machine::of(&harness.state().state.world);
+    assert_eq!(m.expect("still mounted").spindle_max, spindle_max);
+}
+
 #[test]
 fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     let mut harness = shell_harness();

@@ -76,6 +76,15 @@ pub enum CommandKind {
     LoadMachineDialog,
     LoadMachineFile(PathBuf),
     ClearMachine,
+    /// M3.3 stage C, the machine group's other two hands: pick a
+    /// machine from the built-in library BY NAME (a name missing from
+    /// the library refuses, it never mounts a neighbor), or open/apply
+    /// the editor. Editing is a command too - the draft in the window
+    /// is ephemeral, and only Apply writes through `LoadMachine`, so
+    /// undo puts the machine's previous numbers back exactly.
+    LoadBuiltinMachine(String),
+    EditMachineDialog,
+    EditMachineApply { path: String, machine: Box<hsmworks_app::machine::Machine> },
     /// The post script (M3.3 A): the built-in arm ships, the dialog arm
     /// picks a user `.cps` through the file-pick law, and the path arm
     /// is what the headless tests run. Selection is a command like
@@ -799,6 +808,11 @@ pub struct State {
     /// when the named tool vanishes (the ghost law, mirrored from
     /// [`State::pane_target`]).
     pub tool_editor: Option<String>,
+    /// The machine editor window (M3.3 stage C): `None` closed. An
+    /// ephemeral draft like [`State::tool_editor`] - the numbers under
+    /// edit are a copy of the machine until Apply pushes `LoadMachine`,
+    /// which is the command, which is the undo.
+    pub machine_editor: Option<crate::egui_app::machine_editor::MachineEditor>,
     /// `doc_version` the setup drafts were last refetched at.
     ui_synced_doc: u64,
     /// (draft identity, `doc_version` it was fetched at) per pane; see
@@ -935,6 +949,7 @@ impl State {
                 ..ToolUi::default()
             },
             tool_editor: None,
+            machine_editor: None,
             ui_synced_doc: 0,
             op_synced: (String::new(), 0),
             tool_synced: (String::new(), 0),
@@ -1558,6 +1573,7 @@ impl State {
                 // Frozen evidence of the old document retires with it.
                 self.post_view = None;
                 self.program_sim = None;
+                self.machine_editor = None;
                 self.doc_version += 1;
                 self.status = String::from("new document");
             }
@@ -1678,6 +1694,51 @@ impl State {
                     }
                     Err(err) => {
                         self.refuse(ErrorScope::Setup, format!("machine not cleared: {err}"))
+                    }
+                }
+            }
+            CommandKind::LoadBuiltinMachine(name) => {
+                match LoadMachine::builtin(&self.world, &name) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.machine_editor = None;
+                        self.status = format!("machine: {name} (built-in)");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("machine not loaded: {err}"))
+                    }
+                }
+            }
+            CommandKind::EditMachineDialog => {
+                let (path, m) = machine::of(&self.world);
+                match m {
+                    Some(m) => {
+                        self.machine_editor =
+                            Some(crate::egui_app::machine_editor::MachineEditor {
+                                path,
+                                machine: m,
+                            });
+                    }
+                    None => self.refuse(
+                        ErrorScope::Setup,
+                        String::from("no machine to edit - load one first"),
+                    ),
+                }
+            }
+            CommandKind::EditMachineApply { path, machine } => {
+                match LoadMachine::new(&self.world, path, Some(*machine)) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.machine_editor = None;
+                        self.status = String::from("machine edited");
+                    }
+                    // Refused edits keep the window open: the draft is
+                    // someone's work, and a silent close would be the
+                    // silent wrong answer with the work thrown away.
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("machine edit refused: {err}"))
                     }
                 }
             }
@@ -2348,6 +2409,7 @@ impl State {
         self.history.clear();
         self.post_view = None; // the old document's program is not this one's
         self.program_sim = None; // and neither is its stock verdict
+        self.machine_editor = None; // nor a draft over its machine's numbers
         match project::load(&self.world, &path) {
             Ok(()) => {
                 self.doc_version += 1;

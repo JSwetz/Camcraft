@@ -36,6 +36,7 @@ use crate::state::{DragMode, State};
 use crate::viewport::View3D;
 
 use super::icons;
+use super::machine_editor;
 use super::pages;
 use super::panes;
 use super::theme;
@@ -537,6 +538,10 @@ pub(crate) fn shell_layout(
     // stands). None on a fresh State, closed by ✖, reopened by the next
     // successful post, so the snapshot never moves until a post happens.
     pages::gcode_window(ui.ctx(), state);
+    // M3.3 stage C: the machine editor - same window law as both above
+    // (in-app egui::Window over the dock, None on a fresh State, so
+    // snapshots never move until the Setup pane opens it).
+    machine_editor::window(ui.ctx(), state);
 }
 
 /// Feed this pass's CPU-texture deltas (the font atlas first of all) to the
