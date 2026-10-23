@@ -13,8 +13,6 @@
 //! component; the operation layer reads radii and lengths out of it for
 //! generation and the shank-reach law in `verify`.
 
-use crate::verify::ToolGeom;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolKind {
     EndMill,
@@ -45,10 +43,23 @@ impl core::fmt::Display for ToolKind {
     }
 }
 
+/// The cutting tool and what rides above it. Radii are coaxial with the
+/// spindle; lengths stack upward from the cut edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolGeom {
+    pub radius: f64,
+    /// Usable flute length below the shank.
+    pub flute_len: f64,
+    pub shank_radius: f64,
+    pub shank_len: f64,
+    pub holder_radius: f64,
+    pub holder_len: f64,
+}
+
 /// One rotating cutter, coaxial with the spindle: a cutting body of
 /// `diameter`/`flute_len` (corner rounded by `corner_r`), a plain shank,
 /// and whatever holder the setup assumes above it. Radii live as
-/// diameters here; `verify::ToolGeom` takes the halved coaxial stack.
+/// diameters here; `ToolGeom` takes the halved coaxial stack.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tool {
     pub kind: ToolKind,

@@ -20,7 +20,7 @@ use std::f64::consts::PI;
 
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
-use crate::units::Unit;
+use crate::geometry::units::Unit;
 
 /// G0 rapid, G1 feed, G1 with a plunge (reduced) feed - the three verbs a
 /// 2.5-D path needs. The distinction drives display color now and post

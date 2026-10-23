@@ -83,19 +83,7 @@ use std::collections::HashMap;
 use crate::cl::{Move, MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
-
-/// The cutting tool and what rides above it. Radii are coaxial with the
-/// spindle; lengths stack upward from the cut edge.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ToolGeom {
-    pub radius: f64,
-    /// Usable flute length below the shank.
-    pub flute_len: f64,
-    pub shank_radius: f64,
-    pub shank_len: f64,
-    pub holder_radius: f64,
-    pub holder_len: f64,
-}
+pub use crate::tools::ToolGeom;
 
 /// What the path means, which decides which laws apply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

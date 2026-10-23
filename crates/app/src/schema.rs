@@ -11,7 +11,7 @@ use flecs_ecs::prelude::*;
 
 use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::operation::{GenStamp, OpParams, SrcRef};
+use crate::operation::types::{GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 use crate::verify::Warning;
@@ -159,7 +159,7 @@ pub struct Toolpath {
 /// `SetUnits` command or a v8 project file says otherwise; every stored
 /// number stays millimeters whatever this says (see `units` module law).
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Units(pub crate::units::Unit);
+pub struct Units(pub crate::geometry::units::Unit);
 
 /// The machine this document posts to (M2.3 stage C), stored as a flecs
 /// singleton like `Units`: setup furniture, never a browser row, a name
@@ -169,7 +169,7 @@ pub struct Units(pub crate::units::Unit);
 #[derive(Component, Debug, Clone, Default, PartialEq)]
 pub struct MachineDef {
     pub path: String,
-    pub machine: Option<crate::machine::Machine>,
+    pub machine: Option<crate::machine::def::Machine>,
 }
 
 /// Which post script the document runs (M3.3 A/B), a flecs singleton
@@ -195,8 +195,7 @@ pub enum PostRef {
 /// tree, undo, and save all reach stock through this.
 pub const STOCK_NAME: &str = "Stock";
 
-/// Work coordinate system slots - the machine offsets posted as G54..G59.
-pub const WCS_SLOTS: [&str; 6] = ["G54", "G55", "G56", "G57", "G58", "G59"];
+pub use crate::operation::types::WCS_SLOTS;
 
 /// Registers every schema component with a fresh world. Called by
 /// `world::new_world()` so every binary (and every test) gets identical

@@ -1,0 +1,251 @@
+//! Machine definitions and program limits (M2.3 stage C).
+//!
+//! Provenance: the `.mch` file layout is the machine-definition JSON
+//! format reused by user instruction (our reader, our field semantics,
+//! nothing copied from any vendor's parser or documentation beyond the
+//! observable shape of a machine file); the limit-checking rules are
+//! general machine-tool practice - a spindle has a speed range, an
+//! axis has a feed ceiling and a stroke, and a tool table has a
+//! length and diameter the magazine accepts.
+//!
+//! The design law: an UNSTATED limit checks nothing. Vendor machine
+//! files carry zeros for speeds nobody configured, and a zero rapid
+//! speed does not mean the machine cannot rapids - it means the file
+//! doesn't say. Every number here is therefore an `Option`, and `0`
+//! reads as `None`. A program judged against a sparse machine says
+//! exactly what the machine file says, no more - the silent wrong
+//! answer in its friendliest form would be a green checkmark earned
+//! by inventing a ceiling.
+//!
+//! Travel is the same law with a sharper edge: standard machine files
+//! carry no stroke numbers at all, so the check is live only when our
+//! own files add a `"travel": {"min": .., "max": ..}` object to a
+//! linear part. Those numbers are read in PROGRAM coordinates through
+//! the active WCS - the file cannot know a work offset, and guessing a
+//! machine origin would invent the very number the check needs.
+//!
+//! M3.3 stage C widened the readable grammar, all of it optional -
+//! files written before stage C parse exactly as they always did:
+//! `general.kind` declares what the machine IS (mill / lathe /
+//! mill-turn; unstated means the axis inventory decides, stage E's
+//! older law); `spindle.power` (kW), `tooling.number_of_tools` (the
+//! changer's slots), and `tool_station.coolants` (names, with their
+//! M-codes where the file states them) carry the full numbers; and
+//! `"type": "rotary"` parts join the axis table with degrees for
+//! travel and a `"resolution"` key for positioning steps. The mirror
+//! to the post grammar (posting) now speaks coolants too, so a
+//! mounted machine's coolant words are its own.
+
+//!
+//! M4.1 R0 split (docs/M4.1-CRATE-SPLIT.md): the plain types live in
+//! [`def`], the `.mch` reader in [`parse`]; this module keeps what
+//! touches the world - the singleton glue and the program checker.
+
+pub mod def;
+mod parse;
+
+pub use def::*;
+pub use parse::parse_mch;
+
+use flecs_ecs::core::WorldGet;
+use flecs_ecs::prelude::World;
+
+use crate::geometry::Point3;
+use crate::model;
+use crate::posting;
+use crate::schema::MachineDef;
+
+/// The document's machine, read from the flecs singleton: (the path it
+/// was loaded from, the definition). `("", None)` until a `LoadMachine`
+/// command or a v19 project file says otherwise - and a document with
+/// no machine checks nothing, which is the unstated-limit law wearing
+/// a document-sized hat.
+#[must_use]
+pub fn of(world: &World) -> (String, Option<Machine>) {
+    world
+        .try_get::<&MachineDef>(|d| (d.path.clone(), d.machine.clone()))
+        .unwrap_or_default()
+}
+
+/// Write the singleton. For the `LoadMachine` command and the project
+/// reader only - the same law `units::set` keeps: setup state moves
+/// through commands or a document load, never ad hoc.
+pub fn set(world: &World, path: &str, machine: Option<&Machine>) {
+    world.set(MachineDef {
+        path: path.to_owned(),
+        machine: machine.cloned(),
+    });
+}
+
+/// The document's machine kind, read off the singleton without the
+/// clone `of` does - the per-frame accessor for ribbon gating.
+#[must_use]
+pub fn kind_of(world: &World) -> Kind {
+    world
+        .try_get::<&MachineDef>(|d| kind(d.machine.as_ref()))
+        .unwrap_or(Kind::Mill)
+}
+
+/// What a program asks that the machine cannot give. Located like the
+/// deviation verdict - every line names its op - because a limit
+/// violation without a WHERE is trivia, not a warning.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MachineCheck {
+    pub problems: Vec<String>,
+    /// How many more the reporter withheld (the walk caps its list;
+    /// the count never lies).
+    pub more: usize,
+}
+
+impl MachineCheck {
+    #[must_use]
+    pub fn is_ok(&self) -> bool {
+        self.problems.is_empty()
+    }
+}
+
+const REPORT_CAP: usize = 40;
+
+/// Check the WHOLE program - the same op walk the sim and the post
+/// share, so the gate that stage D wires sees one machine judgment
+/// over exactly what would post. Never re-plans: cached moves only.
+pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, String> {
+    let ops = posting::program_ops(world)?;
+    let mut out = MachineCheck::default();
+
+    // The changer (M3.3 C): a program whose ops draw on more distinct
+    // tools than the drum holds physically cannot run, however each
+    // tool passes on its own. Counted by name, the same identity the
+    // ops and the library agree on.
+    if let Some(slots) = machine.tool_count {
+        let mut names: Vec<String> = Vec::new();
+        for (_, e) in &ops {
+            if let Some(op) = model::operation_of(world, e)
+                && !names.contains(&op.tool)
+            {
+                names.push(op.tool.clone());
+            }
+        }
+        if names.len() > slots {
+            say(
+                &mut out,
+                format!("program calls {} tools, the changer holds {slots}", names.len()),
+            );
+        }
+    }
+
+    for (name, e) in &ops {
+        let op = model::operation_of(world, e).ok_or_else(|| format!("{name}: lost its operation"))?;
+        let tool = model::find_by_name(world, &op.tool)
+            .and_then(|t| model::tool_of(world, &t))
+            .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
+        let cache = model::toolpath_of(world, e).ok_or_else(|| format!("{name}: lost its toolpath"))?;
+        // Travel numbers in the file are PROGRAM coordinates; the
+        // cached moves are world millimeters. This is the post's own
+        // origin law (one copy, in posting), so a G54 slide shifts
+        // what passes exactly as it shifts the G-code.
+        let (_, origin) = posting::wcs_context(world, op.setup.as_deref(), &op.params);
+
+        // Spindle: the tool's suggested speed is what the op runs -
+        // today every op posts its tool's rpm, so the tool IS the
+        // program's spindle word.
+        if tool.rpm > 0.0 {
+            if let Some(hi) = machine.spindle_max
+                && tool.rpm > hi
+            {
+                say(&mut out, format!("{name}: tool {} runs {:.0} rpm, above the machine's {hi:.0}", op.tool, tool.rpm));
+            }
+            if let Some(lo) = machine.spindle_min
+                && tool.rpm < lo
+            {
+                say(&mut out, format!("{name}: tool {} runs {:.0} rpm, below the machine's {lo:.0}", op.tool, tool.rpm));
+            }
+        }
+        // The tool table: long or fat cutters the magazine refuses.
+        // "Tool length" is the whole protrusion from the spindle nose
+        // to the tip - what the magazine's clearance measures: cutter,
+        // shank, and the holder the setup assumes above them.
+        if let Some(l) = machine.max_tool_length {
+            let len = tool.flute_len + tool.shank_len + tool.holder_len;
+            if len > l {
+                say(&mut out, format!("{name}: tool {} is {len:.1} mm long, the machine takes {l:.1}", op.tool));
+            }
+        }
+        if let Some(diam) = machine.max_tool_diameter
+            && tool.diameter > diam
+        {
+            say(&mut out, format!("{name}: tool {} is {:.1} mm across, the machine takes {diam:.1}", op.tool, tool.diameter));
+        }
+
+        for (i, mv) in cache.path.moves.iter().enumerate() {
+            // Feed: only stated feeds check against stated ceilings.
+            if let Some(feed) = mv.feed {
+                let d = [
+                    mv.to.x - mv.from.x,
+                    mv.to.y - mv.from.y,
+                    mv.to.z - mv.from.z,
+                ];
+                if let Some(ceil) = machine.feed_ceiling(d)
+                    && feed > ceil
+                {
+                    say(&mut out, format!(
+                        "{name}: move {i} feeds {feed:.0} mm/min, {} tops out at {ceil:.0}",
+                        slowest_axis(&machine.axes, ceil)
+                    ));
+                }
+            }
+            // Travel: endpoints and - for arcs - the quarter points
+            // the sweep can bulge past. A straight move's extremes
+            // ARE its endpoints.
+            for p in move_extremes(mv) {
+                for (k, w) in [p.x, p.y, p.z].iter().enumerate() {
+                    let v = w - origin[k];
+                    if let Some((lo, hi)) = machine.axis(k).and_then(|a| a.travel)
+                        && (v < lo || v > hi)
+                    {
+                        say(&mut out, format!(
+                            "{name}: move {i} reaches {v:.3} in {}, the stroke is {lo:.3}..{hi:.3}",
+                            machine.axis(k).map_or("?", |a| a.name.as_str())
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The arc's four XY quarter points plus both endpoints; a straight
+/// move's two endpoints. (A quarter is outside the sweep only when
+/// the arc goes the other way around it; checking all four can only
+/// over-report a limit the post would then also cross, never hide a
+/// violation - and over-reporting a REAL stroke is stage C's honest
+/// direction of error.)
+fn move_extremes(mv: &crate::cl::Move) -> Vec<Point3> {
+    let mut v = vec![mv.from, mv.to];
+    if let Some(arc) = &mv.arc {
+        let dx = mv.from.x - arc.center.x;
+        let dy = mv.from.y - arc.center.y;
+        let r = (dx * dx + dy * dy).sqrt();
+        v.push(Point3::new(arc.center.x + r, arc.center.y, mv.to.z));
+        v.push(Point3::new(arc.center.x - r, arc.center.y, mv.to.z));
+        v.push(Point3::new(arc.center.x, arc.center.y + r, mv.to.z));
+        v.push(Point3::new(arc.center.x, arc.center.y - r, mv.to.z));
+    }
+    v
+}
+
+fn slowest_axis(axes: &[AxisLimits], ceil: f64) -> String {
+    axes.iter()
+        .find(|a| a.feed == Some(ceil))
+        .map(|a| a.name.clone())
+        .unwrap_or_else(|| "an axis".into())
+}
+
+fn say(out: &mut MachineCheck, s: String) {
+    if out.problems.len() < REPORT_CAP {
+        out.problems.push(s);
+    } else {
+        out.more += 1;
+    }
+}
