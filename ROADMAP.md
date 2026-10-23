@@ -1230,6 +1230,16 @@ to each subcrate to make testing cleaner.
 - **MacOSX**: Secondary prioritsation.
 - **WASM**: A web version for online use.
 - **Docker**: Using docker builds for every target.
+- **GPU backends**: the shell runs egui through a plain wgpu instance
+  with auto adapter selection (`Backends::PRIMARY`, first hit) — the
+  Metal/Vulkan/DX12/GL-ES(ANGLE) options are compiled in but never
+  chosen, forced, or reported. Add a backend pick (app flag or env),
+  an honest fallback chain, and a startup log line naming the adapter
+  the viewport actually got — a driver blacklist workaround needs
+  something to work around *with*. The 3D viewport is the GPU-heavy
+  consumer (toolpath meshes, stock sim surfaces); the WASM target
+  reaches the same code through wgpu's WebGPU/WebGL shim, so the
+  GL-ES tier is what makes the web build honest rather than lucky.
 
 ### M4.3 - Defer HSMWorks label thru out the code.
 **Goal: Removing the HSMWorks branding as its conflicting**
@@ -1369,7 +1379,7 @@ need to figure out how to offload simulation, voxel body calculation and tool pr
 | **M3.2** | Production setups | Done: multi-setup with implicit-setup law + datum transfer (A); fixtures - user STEP solids wearing a marker, spindle/table bands from the `.mch`, live-gate collision law (B); per-setup tool list in change order (C); setup sheets, one form-fed page per setup, no timestamps (D); workspaces by machine kind, axis-inventory inference (E) | ✅ |
 | **M3.3** | Every control covered | Post engine, 5 posts, machine definitions (mill/lathe kinds, axis limits, speeds and feeds, coolant), RTCP, 0.3.0 | 📋 |
 | **M4.1** | Code refactor | Refactor of codebase, test, and code organisation. | 📋 |
-| **M4.2** | Multibuilds | Refactor of codebase is done and application builds for multipls OS and environments. | 📋 |
+| **M4.2** | Multibuilds | Refactor of codebase is done and application builds for multipls OS and environments - incl. selectable GPU backends (DX12/Metal/Vulkan/GL-ES). | 📋 |
 | **M4.3** | Defer Code | All references to "hsmworks" in the code needs to be renamed and re-referenced to camcraft | 📋 |
 | **M4.4** | Test cost shape | Law/verdict test split, `#[ignore]`+release heavy lane, diff-targeted gate selection - finish3d's 30-min tail first | 📋 |
 | **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
