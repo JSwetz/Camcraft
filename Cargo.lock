@@ -696,12 +696,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "camcraft-cl"
+version = "0.3.0"
+dependencies = [
+ "camcraft-geometry",
+]
+
+[[package]]
 name = "camcraft-geometry"
 version = "0.3.0"
 dependencies = [
  "clipper2-rust",
  "thiserror 2.0.21",
 ]
+
+[[package]]
+name = "camcraft-tools"
+version = "0.3.0"
 
 [[package]]
 name = "castaway"
@@ -1825,7 +1836,9 @@ name = "hsmworks-app"
 version = "0.3.0"
 dependencies = [
  "boa_engine",
+ "camcraft-cl",
  "camcraft-geometry",
+ "camcraft-tools",
  "clipper2-rust",
  "flecs_ecs",
  "ruststep",

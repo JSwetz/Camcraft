@@ -8,6 +8,8 @@ rust-version.workspace = true
 [dependencies]
 flecs_ecs = { workspace = true }
 camcraft-geometry = { workspace = true }
+camcraft-cl = { workspace = true }
+camcraft-tools = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

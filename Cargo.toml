@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/app", "crates/ui", "crates/geometry"]
+members = ["crates/app", "crates/cl", "crates/tools", "crates/ui", "crates/geometry"]
 
 [workspace.package]
 version = "0.3.0"
@@ -10,6 +10,8 @@ rust-version = "1.90"
 [workspace.dependencies]
 hsmworks-app = { path = "crates/app" }
 camcraft-geometry = { path = "crates/geometry" }
+camcraft-cl = { path = "crates/cl" }
+camcraft-tools = { path = "crates/tools" }
 
 # ECS - alpha bindings, hard-pinned; expect churn on bumps.
 # flecs_alerts is NOT optional: flecs_ecs_sys 0.2.1's bindings.rs references

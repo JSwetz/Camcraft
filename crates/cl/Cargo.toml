@@ -1,0 +1,9 @@
+[package]
+name = "camcraft-cl"
+description = "The motion model: CLFile/Toolpath as the intermediate format, the micron lattice, the machine-code-neutral move record. Clean-room implementation, public sources only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+camcraft-geometry = { workspace = true }

@@ -1,0 +1,8 @@
+[package]
+name = "camcraft-tools"
+description = "The tool catalog types: one rotating cutter or hole-making cycle, described as data. Clean-room implementation, public sources only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]

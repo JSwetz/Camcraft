@@ -50,11 +50,14 @@ pub struct ArcMove {
     pub ccw: bool,
 }
 
-/// Snap to the repo's fixed-point grid (microns): the same lattice the
+/// Snap to the project's fixed-point grid (microns): the same lattice the
 /// golden writer, the geo2d bridge and the stamp digests quantize to.
+/// Public since M4.1 R2 - the generator crates quantize through this one
+/// function, so the lattice is part of the CL contract, not a private
+/// helper of the motion model.
 /// Non-finite values pass through untouched - refusing is the callers'
 /// job, and the chord flattening already falls back around them.
-pub(crate) fn lattice(v: f64) -> f64 {
+pub fn lattice(v: f64) -> f64 {
     if v.is_finite() {
         (v * 1e6).round() / 1e6
     } else {
@@ -322,7 +325,7 @@ impl Toolpath {
             .iter()
             .find(|m| m.kind == MoveKind::Plunge)
             .and_then(|m| m.feed)
-            .map_or(String::new(), |f| format!(" @ {}", crate::units::feed(f, unit)));
+            .map_or(String::new(), |f| format!(" @ {}", crate::geometry::units::feed(f, unit)));
         format!(
             "generated {name}: {n} moves ({p} plunge(s){feed}, {} level(s), {a} arc(s)), {warnings} warning(s)",
             levels.len()

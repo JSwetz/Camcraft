@@ -32,9 +32,11 @@ jobs:
           cargo test -p hsmworks-app
           --test golden_cl --test posting --test fanuc_post
           --test project_roundtrip -- --test-threads=4
-      - name: Geometry crate tests (M4.1 R1)
+      - name: Split crate tests (M4.1 R1-R2)
         shell: bash
-        run: cargo test -p camcraft-geometry -- --test-threads=4
+        run: >-
+          cargo test -p camcraft-geometry -p camcraft-cl
+          -p camcraft-tools -- --test-threads=4
       - name: App tests
         shell: bash
         run: cargo test -p hsmworks-app -- --test-threads=4
@@ -46,7 +48,7 @@ jobs:
         run: cargo test -p hsmworks-ui -- --test-threads=4
       - name: Clippy
         shell: bash
-        run: cargo clippy -p camcraft-geometry -p hsmworks-app -p hsmworks-ui --all-targets -- -D warnings
+        run: cargo clippy -p camcraft-geometry -p camcraft-cl -p camcraft-tools -p hsmworks-app -p hsmworks-ui --all-targets -- -D warnings
       - name: Headless app run
         shell: bash
         run: cargo run -q -p hsmworks-ui -- --headless

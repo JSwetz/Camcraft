@@ -4,7 +4,7 @@
 //! documentation of commercial CAM workflows and published technical
 //! literature. No HSMWorks source, binaries, or assets were consulted.
 
-pub mod cl;
+pub use camcraft_cl::cl;
 pub mod commands;
 pub mod drilling;
 pub mod fixture;
@@ -29,7 +29,7 @@ pub mod sim;
 pub mod stock;
 pub mod stock_sim;
 pub mod tool_list;
-pub mod tools;
+pub use camcraft_tools::tools;
 pub mod units;
 pub mod verify;
 pub mod world;
