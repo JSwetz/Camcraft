@@ -15,6 +15,7 @@ pub mod feature;
 mod primitives;
 pub mod revision;
 pub mod slice;
+pub mod stock;
 pub mod units;
 
 pub use primitives::{cube, cylinder};

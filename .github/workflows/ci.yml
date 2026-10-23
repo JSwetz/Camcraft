@@ -36,13 +36,14 @@ jobs:
         shell: bash
         run: >-
           cargo test -p camcraft-geometry -p camcraft-cl
-          -p camcraft-tools -p camcraft-post -- --test-threads=4
+          -p camcraft-tools -p camcraft-post -p camcraft-sim -p camcraft-motion
+          -- --test-threads=4
       - name: App tests
         shell: bash
         run: cargo test -p hsmworks-app -- --test-threads=4
       - name: Heavy verdicts (release lane, M4.4)
         shell: bash
-        run: cargo test --release -p hsmworks-app -- --ignored
+        run: cargo test --release -p hsmworks-app -p camcraft-motion -- --ignored
       - name: UI tests
         shell: bash
         run: cargo test -p hsmworks-ui -- --test-threads=4
@@ -50,8 +51,8 @@ jobs:
         shell: bash
         run: >-
           cargo clippy -p camcraft-geometry -p camcraft-cl
-          -p camcraft-tools -p camcraft-post -p hsmworks-app -p hsmworks-ui
-          --all-targets -- -D warnings
+          -p camcraft-tools -p camcraft-post -p camcraft-sim -p camcraft-motion
+          -p hsmworks-app -p hsmworks-ui --all-targets -- -D warnings
       - name: Headless app run
         shell: bash
         run: cargo run -q -p hsmworks-ui -- --headless

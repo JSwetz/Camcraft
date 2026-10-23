@@ -579,7 +579,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         if let Some(hit) = island_cache.borrow().get(&key) {
             return hit.clone();
         }
-        let fresh = crate::machining3d::material_above(facets, z).ok();
+        let fresh = crate::geometry::slice::material_above(facets, z).ok();
         island_cache
             .borrow_mut()
             .entry(key)

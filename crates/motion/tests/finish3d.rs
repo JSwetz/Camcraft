@@ -9,21 +9,21 @@
 //! and a box (pure structure - its flat shelves are the parallel
 //! strategy's jurisdiction, so the envelope must stay silent on them).
 //!
-//! Gate map (M4.4): covers app::cl, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::stock_sim, app::verify.
+//! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::stock_sim, camcraft_motion::verify.
 //! Lane shape (M4.4): 12 law tests run here in seconds; 27 envelope-VERDICT and
 //! dome-generation tests are #[ignore]d - run them with
 //! `cargo test --release -p hsmworks-app -- --ignored` at milestone close.
 
-use hsmworks_app::cl::{MoveKind, Toolpath};
-use hsmworks_app::finishing3d::{
+use camcraft_motion::cl::{MoveKind, Toolpath};
+use camcraft_motion::finishing3d::{
     contour, parallel, project, radial, scallop_stepdown, scallop_stepover, spiral, waterline,
     Finish3DParams, FinishPattern,
 };
-use hsmworks_app::geometry::{slice, Point3, Triangle};
-use hsmworks_app::geo2d::Region;
-use hsmworks_app::machining2d::GenError;
-use hsmworks_app::stock_sim::envelope_scan;
-use hsmworks_app::verify::{verify, Mode, ToolGeom, VerifyContext};
+use camcraft_motion::geometry::{slice, Point3, Triangle};
+use camcraft_motion::geo2d::Region;
+use camcraft_motion::machining2d::GenError;
+use camcraft_motion::stock_sim::envelope_scan;
+use camcraft_motion::verify::{verify, Mode, ToolGeom, VerifyContext};
 
 const PI: f64 = std::f64::consts::PI;
 const TAU: f64 = std::f64::consts::TAU;
@@ -151,7 +151,7 @@ fn gate(cell: f64) -> f64 {
     TOL + cell * cell / (2.0 * R) + 1e-9
 }
 
-fn envelope(facets: &[Triangle], t: &Toolpath) -> hsmworks_app::stock_sim::EnvelopeReport {
+fn envelope(facets: &[Triangle], t: &Toolpath) -> camcraft_motion::stock_sim::EnvelopeReport {
     envelope_scan(facets, &t.moves, R, TOL).expect("fixture-sized grid")
 }
 
@@ -166,7 +166,7 @@ fn verify_finish(
     facets: &[Triangle],
     t: &Toolpath,
     stock_top: f64,
-) -> Vec<hsmworks_app::verify::Warning> {
+) -> Vec<camcraft_motion::verify::Warning> {
     let region: Region = slice::project(facets, 64).expect("fixture silhouette");
     let tool = ToolGeom {
         radius: R,
@@ -306,7 +306,7 @@ fn overhang_is_caught_by_the_measurement() {
     assert!(
         warns
             .iter()
-            .any(|w| matches!(w, hsmworks_app::verify::Warning::Envelope { .. })),
+            .any(|w| matches!(w, camcraft_motion::verify::Warning::Envelope { .. })),
         "the verifier's word is missing: {warns:?}"
     );
 }

@@ -235,3 +235,24 @@ fn weld(pts: &mut Vec<Point2>, keys: &mut HashMap<(i64, i64), u32>, p: Point2) -
 fn beyond_horizon(p: Point3) -> bool {
     p.x.abs() >= COORD_LIMIT || p.y.abs() >= COORD_LIMIT || p.z.abs() >= COORD_LIMIT
 }
+
+/// The model's cross-section strictly above `z`, nudge-retried when a
+/// plane grazes a tessellated shelf (reading an errored slice as
+/// "no material" would be the silent wrong answer; the retry lands
+/// above the shelf instead, failing safe). Three probes, one
+/// millionth-of-a-millimetre apart, first survivor wins. Home of the
+/// islands law since M4.1 R4 - `machining3d::material_above` wraps
+/// this, the verifier's island cache calls it directly: one law,
+/// three readers, at the layer that owns the mesh (M2.1a).
+pub fn material_above(facets: &[Triangle], z: f64) -> Result<Region, SliceError> {
+    const EPS: f64 = 1e-6;
+    let mut err = None;
+    for k in 0..3 {
+        let probe = z + f64::from(k + 1) * EPS;
+        match slice(facets, probe) {
+            Ok(r) => return Ok(r),
+            Err(e) => err = Some(e),
+        }
+    }
+    Err(err.unwrap_or(SliceError::Invalid("cannot section the model".into())))
+}

@@ -1,0 +1,14 @@
+[package]
+name = "camcraft-sim"
+description = "Verification and material simulation: dexel stock, rest meshes, traverse timing, fixture predicates. Consumes (facets, stock, tool) data - no world, no entities. Clean-room implementation, public sources only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+camcraft-cl = { workspace = true }
+camcraft-geometry = { workspace = true }
+camcraft-tools = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

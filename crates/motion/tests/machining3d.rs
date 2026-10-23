@@ -8,18 +8,18 @@
 //! Provenance: our own design, specced from published CAM
 //! behavior, per the Clean-Room Protocol.
 //!
-//! Gate map (M4.4): covers app::cl, app::geo2d, app::geometry, app::machining2d, app::machining3d, app::stock_sim, app::verify.
+//! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::machining3d, camcraft_motion::stock_sim, camcraft_motion::verify.
 
-use hsmworks_app::cl::{MoveKind, Toolpath};
-use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::geometry::{Point3, Triangle};
-use hsmworks_app::machining2d::{GenError, PocketStrategy};
-use hsmworks_app::machining3d::{
+use camcraft_motion::cl::{MoveKind, Toolpath};
+use camcraft_motion::geo2d::{Loop, Point2, Region};
+use camcraft_motion::geometry::{Point3, Triangle};
+use camcraft_motion::machining2d::{GenError, PocketStrategy};
+use camcraft_motion::machining3d::{
     Entry3D, FFO_FLOOR, Pocket3DParams, engagement_step, material_above, optimize_feed, pocket3d,
     pocket3d_prev, pocket3d_with_rest, pocket3d_with_rest_prev,
 };
-use hsmworks_app::stock_sim::Dexel;
-use hsmworks_app::verify::{Mode, ToolGeom, VerifyContext, verify};
+use camcraft_motion::stock_sim::Dexel;
+use camcraft_motion::verify::{Mode, ToolGeom, VerifyContext, verify};
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
     Point3::new(x, y, z)
@@ -114,10 +114,10 @@ fn tool() -> ToolGeom {
 /// hands the generator (region_for's Pocket3D arm), asked of the law
 /// itself here so the fixtures stay honest about it.
 fn silhouette(facets: &[Triangle]) -> Region {
-    hsmworks_app::geometry::slice::project(facets, 64).unwrap()
+    camcraft_motion::geometry::slice::project(facets, 64).unwrap()
 }
 
-fn verify_against(facets: &[Triangle], region: &Region, path: &Toolpath) -> Vec<hsmworks_app::verify::Warning> {
+fn verify_against(facets: &[Triangle], region: &Region, path: &Toolpath) -> Vec<camcraft_motion::verify::Warning> {
     let tool = tool();
     let cx = VerifyContext {
         region,
@@ -816,7 +816,7 @@ fn ffo_is_deterministic_and_hands_a_rapid_only_path_back_untouched() {
     let o2 = optimize_feed(&t, &f, &region, &prm).unwrap();
     assert_eq!(o1, o2, "two runs are the same answer");
 
-    let mut b = hsmworks_app::cl::PathBuilder::new(p(0.0, 0.0, 5.0));
+    let mut b = camcraft_motion::cl::PathBuilder::new(p(0.0, 0.0, 5.0));
     b.push(MoveKind::Rapid, p(10.0, 10.0, 5.0), None);
     let rapids = b.finish();
     let out = optimize_feed(&rapids, &f, &region, &prm).unwrap();

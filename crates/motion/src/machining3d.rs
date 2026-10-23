@@ -253,18 +253,7 @@ fn from_slice(e: SliceError) -> GenError {
 /// them, and the tests to pin the monotonicity the ladder assumes -
 /// one law, three readers (M2.1a).
 pub fn material_above(facets: &[Triangle], z: f64) -> Result<Region, GenError> {
-    let mut err = None;
-    for k in 0..3 {
-        let probe = z + f64::from(k + 1) * EPS;
-        match slice::slice(facets, probe) {
-            Ok(r) => return Ok(r),
-            Err(e) => err = Some(e),
-        }
-    }
-    Err(err.map_or(
-        GenError::Invalid("cannot section the model".into()),
-        from_slice,
-    ))
+    slice::material_above(facets, z).map_err(from_slice)
 }
 
 /// Would a feed chord `a -> b` along this level's plane properly cross
@@ -322,8 +311,8 @@ pub fn pocket3d(
 }
 
 /// The re-machining sibling (M3.1 D): the same ladder, run against the
-/// stock state the previous operations left (`mask: Some`, see
-/// [`crate::rest`]). Every masked level target is a subset of the
+/// stock state the previous operations left (`mask: Some`, see the
+/// app crate's `rest`). Every masked level target is a subset of the
 /// unmasked one, so a first operation - or a program with nothing cut
 /// before it - generates the identical path.
 pub fn pocket3d_prev(

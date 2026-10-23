@@ -6,12 +6,12 @@
 //! Provenance: published CAM simulation practice (Z-map subtraction),
 //! our own code, per the Clean-Room Protocol.
 //!
-//! Gate map (M4.4): covers app::cl, app::geo2d, app::geometry, app::stock, app::stock_sim.
+//! Gate map (M4.4): covers camcraft_sim::cl, camcraft_sim::geo2d, camcraft_sim::geometry, camcraft_sim::stock, camcraft_sim::stock_sim.
 
-use hsmworks_app::cl::{ArcMove, Move, MoveKind};
-use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::geometry::{Point3, Triangle};
-use hsmworks_app::stock_sim::{self, Dexel, StockError};
+use camcraft_sim::cl::{ArcMove, Move, MoveKind};
+use camcraft_sim::geo2d::{Loop, Point2, Region};
+use camcraft_sim::geometry::{Point3, Triangle};
+use camcraft_sim::stock_sim::{self, Dexel, StockError};
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
     Point3::new(x, y, z)
@@ -384,7 +384,7 @@ fn program_chains_ops_in_order() {
     // third op that finishes the margin erases the rest, and no op
     // ever erases a gouge. Rapids touch nothing anywhere.
     let cell = stock_sim::auto_cell(2.0, 10.0, 10.0);
-    let box_stock = hsmworks_app::stock::StockShape::Box { dx: 10.0, dy: 10.0, dz: 5.0 };
+    let box_stock = camcraft_sim::stock::StockShape::Box { dx: 10.0, dy: 10.0, dz: 5.0 };
     let mut d = Dexel::from_shape(&box_stock, cell).expect("box stock grid");
     let o1 = [feed(p(-3.0, 0.0, 2.0), p(2.0, 0.0, 2.0))];
     let o2 = [
@@ -461,7 +461,7 @@ fn the_cylinders_world_is_air_beside_the_round() {
     // phantom material nowhere: outside columns never existed, and
     // deviation over them is NaN - no verdict, never a zero.
     let mut d = Dexel::from_shape(
-        &hsmworks_app::stock::StockShape::Cylinder { diameter: 10.0, height: 5.0 },
+        &camcraft_sim::stock::StockShape::Cylinder { diameter: 10.0, height: 5.0 },
         0.5,
     )
     .unwrap();
@@ -506,12 +506,12 @@ fn model_stock_stocks_the_model_itself() {
     let bad = vec![Triangle::new(p(0.0, 0.0, 0.0), p(f64::NAN, 1.0, 0.0), p(0.0, 1.0, 0.0))];
     assert!(Dexel::from_facets(&bad, 0.5).is_err());
     assert!(matches!(
-        Dexel::from_shape(&hsmworks_app::stock::StockShape::FromModel { source: "m".into() }, 0.5),
+        Dexel::from_shape(&camcraft_sim::stock::StockShape::FromModel { source: "m".into() }, 0.5),
         Err(StockError::Invalid(_))
     ));
     // And the shape's own degeneracies refuse like the block's do.
     assert!(Dexel::from_shape(
-        &hsmworks_app::stock::StockShape::Box { dx: 0.0, dy: 4.0, dz: 4.0 },
+        &camcraft_sim::stock::StockShape::Box { dx: 0.0, dy: 4.0, dz: 4.0 },
         0.5
     )
     .is_err());
@@ -521,7 +521,7 @@ fn model_stock_stocks_the_model_itself() {
 fn simulate_refuses_before_touching_anything() {
     // A half-run grid that looks like a sim is the silent wrong
     // answer wearing a lab coat: validation happens op by op, first.
-    let box_stock = hsmworks_app::stock::StockShape::Box { dx: 10.0, dy: 10.0, dz: 5.0 };
+    let box_stock = camcraft_sim::stock::StockShape::Box { dx: 10.0, dy: 10.0, dz: 5.0 };
     let mut d = Dexel::from_shape(&box_stock, 0.5).unwrap();
     let before = d.clone();
     let bad_moves = [plunge(0.0, 0.0, f64::NAN, 5.0)];
@@ -558,7 +558,7 @@ fn the_sim_is_deterministic_including_its_nans() {
     // program must agree to the bit, NaN patterns included.
     let run = || {
         let mut d = Dexel::from_shape(
-            &hsmworks_app::stock::StockShape::Cylinder { diameter: 10.0, height: 5.0 },
+            &camcraft_sim::stock::StockShape::Cylinder { diameter: 10.0, height: 5.0 },
             0.4,
         )
         .unwrap();

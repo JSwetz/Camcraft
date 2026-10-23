@@ -11,6 +11,8 @@ camcraft-geometry = { workspace = true }
 camcraft-cl = { workspace = true }
 camcraft-tools = { workspace = true }
 camcraft-post = { workspace = true }
+camcraft-sim = { workspace = true }
+camcraft-motion = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "camcraft-motion"
+description = "The generators: 2D pockets and profiles, 3D depths and islands, waterline and parallel finishing, drill cycles - model and tool in, CL out. No world, no entities. Clean-room implementation, public sources only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+camcraft-cl = { workspace = true }
+camcraft-geometry = { workspace = true }
+camcraft-sim = { workspace = true }
+camcraft-tools = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

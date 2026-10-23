@@ -711,12 +711,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "camcraft-motion"
+version = "0.3.0"
+dependencies = [
+ "camcraft-cl",
+ "camcraft-geometry",
+ "camcraft-sim",
+ "camcraft-tools",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "camcraft-post"
 version = "0.3.0"
 dependencies = [
  "boa_engine",
  "camcraft-cl",
  "camcraft-geometry",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "camcraft-sim"
+version = "0.3.0"
+dependencies = [
+ "camcraft-cl",
+ "camcraft-geometry",
+ "camcraft-tools",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1849,7 +1874,9 @@ version = "0.3.0"
 dependencies = [
  "camcraft-cl",
  "camcraft-geometry",
+ "camcraft-motion",
  "camcraft-post",
+ "camcraft-sim",
  "camcraft-tools",
  "clipper2-rust",
  "flecs_ecs",

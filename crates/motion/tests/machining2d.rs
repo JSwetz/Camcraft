@@ -6,11 +6,11 @@
 //! lifts between passes of one level - None retract means the hop plane
 //! is the clearance plane, and the rapids are where they always were).
 //!
-//! Gate map (M4.4): covers app::cl, app::geo2d, app::machining2d.
+//! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::geo2d, camcraft_motion::machining2d.
 
-use hsmworks_app::cl::{MoveKind, Toolpath};
-use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::machining2d::{
+use camcraft_motion::cl::{MoveKind, Toolpath};
+use camcraft_motion::geo2d::{Loop, Point2, Region};
+use camcraft_motion::machining2d::{
     ARC_FIT_TOL, chord_clears, contour, face, on_boundary, pocket, ring_is_circular, slot, trace,
     ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, Side, SlotParams,
     TraceParams,

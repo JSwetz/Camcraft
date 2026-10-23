@@ -59,7 +59,7 @@ impl Hole {
     /// the generator's gate): finite numbers, a positive radius, and a
     /// floor below the entry - a hole that cuts upward is not a hole.
     #[must_use]
-    pub(crate) fn is_usable(&self) -> bool {
+    pub fn is_usable(&self) -> bool {
         self.all_finite() && self.radius > 0.0 && self.floor_z < self.entry_z
     }
 }
