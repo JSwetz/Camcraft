@@ -9,6 +9,60 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M4.1 - The crate split, rung by rung (commits 43745cb..415dd85 + this docs)
+
+**New crates are `camcraft-*`; existing binary crates keep their names for
+now.** `hsmworks-app`/`hsmworks-ui` ride until the M4.3 debrand renames
+them; the six new crates had no legacy brand debt, so they shipped as
+camcraft-geometry/cl/tools/post/sim/motion directly. Cost to change: one
+Cargo.toml pass + import sweep, same work M4.3 owes anyway.
+
+**post.exe lives in camcraft-post.** It is the post engine's binary; R3
+moved it there with its bin name unchanged (`post`), so the packaging
+script keeps finding it without a hardcoded app path (re-verified at
+close-out: `post 0.3.0 (boa_engine)`).
+
+**R0 was a fifth relocation, not a no-op rung.** Type homes moved inside
+app first (doc note listed four; a fifth - sim's Traverse - emerged when
+stock_sim split). Logged so the graph and the docs agree.
+
+**The release-offset subtask ran at close-out, not per rung.** ROADMAP's
+"with every gate passed where a feature has been set" was read as the
+milestone (a feature ship-unit), not each refactor commit: a
+`cargo build --release` after every rung would have re-compiled the same
+tree six times. It ran once at M4.1 close-out and passed (one transient
+flecs_ecs_sys gcc build-script failure under the backgrounded run -
+rerun clean; worth noting as CI flake if it recurs).
+
+**Deviation register (R1-R4), all deliberate:**
+- R4 left `rest.rs` in app - it is re-machining orchestration (walks the
+  world, reads stamps), not a generator; the motion crate owns the
+  physics, app keeps the choreography.
+- R4 sank the islands law `material_above` to
+  `geometry::slice::material_above` - it reads a mesh, nothing above the
+  geometry layer; three readers (machining3d wrapper, sim verify,
+  app stock-sim path) share one law at the lowest honest home.
+- R4 put solid-rest's engine in camcraft-sim, not motion - rest queries
+  are material accounting (dexel grid), motion only consumes them; the
+  motion→sim dependency is exactly that edge.
+- R5's 400-line rule landed as "split along section seams"; six files
+  still exceed 400 (see ledger) - the alternative was mid-function cuts
+  that break the "one concern per file" honesty.
+
+**R5 400-line backlog ledger** (line counts at the split; each gets cut
+again the next time it is touched, no dedicated sweep):
+operation/generate.rs 481, project/params_impl.rs 499, project/params.rs
+463, operation/selection.rs 416, operation/stitch.rs 413,
+operation/types.rs 808 (pre-dates R5: the component/type registry -
+splitting it means splitting schema.rs's twin, hold for M4.3's naming
+pass). machining2d.rs 2299, finishing3d.rs 1579, feature.rs 1545,
+stock_sim.rs (world half) 1240, drilling.rs 1024, machining3d.rs 915,
+verify.rs 905 live in crates now and carry the same debt per crate.
+
+**Graphify:** R5's file moves were many enough for a full rebuild
+(`--force` not needed - nothing deleted), which also re-curated the
+operation/project community labels around the new files.
+
 ## M4.4 - Test cost shape
 
 **The verdict lane is `#[ignore]`, not a second binary.** ROADMAP offered

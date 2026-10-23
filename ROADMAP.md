@@ -1247,11 +1247,25 @@ headless tested.
 ### M4.1 - Seperating the code into crates
 **Goal: Sepearting all components into smaller crates.**
 
-- **Identify code blocks**: Identify and map out code for operations, setups, machines etc etc. all the parts that make out the application
-- **Chunk the parts up**: Cut all the parts apart and refactor.
-- **Move tests**: Move tests to their relevant crates.
-- **Run tests**: Make sure each crates test can be run individuall.
-- **Clean up**: Make sure all tests pass, code compiles and applicatiotn passes a user test.
+- ✅ **Identify code blocks**: the seam map in `docs/M4.1-CRATE-SPLIT.md` -
+  geometry/cl/tools/post/sim/motion as crate futures, plus the R0 type
+  relocations that pre-positioned ownership inside app (M4.1 R0)
+- ✅ **Chunk the parts up**: six crates landed, one rung each -
+  camcraft-geometry (R1), camcraft-cl + camcraft-tools (R2),
+  camcraft-post (R3), camcraft-sim + camcraft-motion with the
+  stock_sim/fixture knot dissolved (R4); app's operation and project
+  monoliths split along section seams (R5). Tree-mirrored re-exports
+  keep every `crate::x::y` path compiling across boundaries
+- ✅ **Move tests**: each crate carries its own suites (geometry 29 lib +
+  24, sim 16 + 17, motion 27 + 108, post 17, cl 4, tools 5); coverage
+  law held at every rung - 785 `#[test]` before == after
+- ✅ **Run tests**: every crate's tests run individually (`cargo test -p
+  <crate>`); the CI split lane runs six `-p` flags in parallel, the
+  heavy lane the release-profile verdicts (finish3d 27 ignored in
+  motion, app verify 2 envelope verdicts)
+- ✅ **Clean up**: workspace check green, clippy `-D warnings` green over
+  all eight packages, release build on stable green (the 0.3.0-milestone
+  vehicle), user hand-test deferred per the standing workflow
 
 ### M4.2 - Multi plattform build targets.
 **Goal: Building the same application, for multiple OS environments.**
@@ -1409,7 +1423,7 @@ need to figure out how to offload simulation, voxel body calculation and tool pr
 | **M3.1** | Model changes, toolpaths update | Done: stable feature identity + `UpdateModel` revision (A), stamp inputs - tool/WCS/FromModel stock propagate, staleness rides the copy (B), live-question `stale_reason` + one-undo-unit `RegenerateAll` (C), re-MACHining - rest masks from predecessors' recorded paths, converges in two rounds (D) | ✅ |
 | **M3.2** | Production setups | Done: multi-setup with implicit-setup law + datum transfer (A); fixtures - user STEP solids wearing a marker, spindle/table bands from the `.mch`, live-gate collision law (B); per-setup tool list in change order (C); setup sheets, one form-fed page per setup, no timestamps (D); workspaces by machine kind, axis-inventory inference (E) | ✅ |
 | **M3.3** | Every control covered | Done: post template engine - mounted `.mch` shapes output, `SelectPost` rides the undo history, user `.cps` refuse by name (A); five built-in posts - Fanuc, Haas, 840D, Heidenhain, Mazak - by-name registry, conformance goldens (B); machine definitions - declared kind gates the op families, full numbers mirrored, coolant M-codes, changer capacity, draft-law editor (C); RTCP - G43.4 delegates pivots to the controller, rotaries mirror as geometry, angle words modal both ways; block-by-block post trace with derived selection (D); 0.3.0 | ✅ |
-| **M4.1** | Code refactor | Refactor of codebase, test, and code organisation. | 📋 |
+| **M4.1** | Code refactor | Done: six subcrates on the seam map (geometry R1, cl+tools R2, post R3, sim+motion R4 with the stock_sim/fixture knot dissolved); app's operation and project monoliths split along section seams (R5); tests moved crate-by-crate, coverage law held 785==785 at every rung; CI + release lanes run per crate (M4.1) | ✅ |
 | **M4.2** | Multibuilds | Refactor of codebase is done and application builds for multipls OS and environments - incl. selectable GPU backends (DX12/Metal/Vulkan/GL-ES). | 📋 |
 | **M4.3** | Defer Code | All references to "hsmworks" in the code needs to be renamed and re-referenced to camcraft | 📋 |
 | **M4.4** | Test cost shape | Done: law/verdict split - finish3d 39 tests (27 `#[ignore]`d), verify's two envelope verdicts moved; release heavy lane 30 min → 3.4 min (CI runs it); Gate-map headers in every suite; debug ladder ~2 s where it was a 30-min tail | ✅ |
