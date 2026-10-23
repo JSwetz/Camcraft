@@ -25,8 +25,18 @@ use std::path::Path;
 
 /// The post scripts that ship with the app (name, text), embedded so
 /// an install never depends on a loose path. `PostRef::Builtin` means
-/// the first entry; stage B grows the list and the picker with it.
-pub const BUILTINS: &[(&str, &str)] = &[("Fanuc", include_str!("../../../assets/posts/fanuc.cps"))];
+/// the first entry (the default document's post, the meaning of a
+/// project with no post key); a named built-in addresses an entry by
+/// name, which survives registry growth the way an index never could.
+/// Entry 0 is Fanuc and stays Fanuc - the goldens and every pre-stage-B
+/// file say so.
+pub const BUILTINS: &[(&str, &str)] = &[
+    ("Fanuc", include_str!("../../../assets/posts/fanuc.cps")),
+    ("Haas", include_str!("../../../assets/posts/haas.cps")),
+    ("Siemens 840D", include_str!("../../../assets/posts/sinumerik.cps")),
+    ("Heidenhain", include_str!("../../../assets/posts/heidenhain.cps")),
+    ("Mazak", include_str!("../../../assets/posts/mazak.cps")),
+];
 
 /// The default machine as text: a plain 3-axis VMC with flood coolant.
 pub const DEFAULT_MCH: &str = include_str!("../../../assets/machines/3axis-vmc.mch");
@@ -75,21 +85,34 @@ pub fn post_label(world: &World) -> String {
             Some((name, _)) => format!("{name} (built-in)"),
             None => "built-in".to_owned(),
         },
+        PostRef::Named(name) => match BUILTINS.iter().find(|(n, _)| *n == name) {
+            Some((n, _)) => format!("{n} (built-in)"),
+            // Unresolvable at display time: name the stranger. A
+            // removed registry entry must show as itself, not as the
+            // default it will never post as (script_source refuses).
+            None => format!("{name} (built-in, missing)"),
+        },
         PostRef::File(path) => path,
     }
 }
 
 /// The script source this document posts with: (label, text). A
-/// `File` post whose text cannot be read is a refusal naming the
-/// path - never a silent run with the built-in instead (a
-/// substituted post is exactly the silent wrong answer this whole
-/// codebase exists to prevent; the Prime Directive).
+/// `File` post whose text cannot be read, or a `Named` post missing
+/// from the registry, is a refusal naming what is gone - never a
+/// silent run with the default instead (a substituted post is exactly
+/// the silent wrong answer this whole codebase exists to prevent; the
+/// Prime Directive).
 pub fn script_source(world: &World) -> Result<(String, String), String> {
     match post_of(world) {
         PostRef::Builtin => BUILTINS
             .first()
             .map(|(name, cps)| (format!("{name} (built-in)"), (*cps).to_owned()))
             .ok_or_else(|| "the built-in post registry is empty".to_owned()),
+        PostRef::Named(name) => BUILTINS
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(n, cps)| (format!("{n} (built-in)"), (*cps).to_owned()))
+            .ok_or_else(|| format!("built-in post {name} is not in the registry")),
         PostRef::File(path) => {
             let text = std::fs::read_to_string(&path)
                 .map_err(|e| format!("post script {path}: {e}"))?;

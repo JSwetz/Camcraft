@@ -24,13 +24,26 @@ impl SelectPost {
     /// Choose a post script. A `File` reference must be readable and
     /// must run: an unreadable path or a script that throws at open
     /// names itself in the refusal (the Prime Directive has no
-    /// "we'll find out when we post" clause).
+    /// "we'll find out when we post" clause). A `Named` reference must
+    /// exist in the shipped registry (M3.3 B): the picker only offers
+    /// real names, so a stranger is a corrupt project, and a corrupt
+    /// project's post choice is refused the same way.
     pub fn new(world: &World, next: PostRef) -> Result<Self, CommandError> {
-        if let PostRef::File(path) = &next {
-            let text = std::fs::read_to_string(path)
-                .map_err(|e| CommandError::Invalid(format!("post script {path}: {e}")))?;
-            engine::run(&text, &serde_json::Value::Null, "")
-                .map_err(|e| CommandError::Invalid(format!("post script {path} does not run: {e}")))?;
+        match &next {
+            PostRef::File(path) => {
+                let text = std::fs::read_to_string(path)
+                    .map_err(|e| CommandError::Invalid(format!("post script {path}: {e}")))?;
+                engine::run(&text, &serde_json::Value::Null, "")
+                    .map_err(|e| CommandError::Invalid(format!("post script {path} does not run: {e}")))?;
+            }
+            PostRef::Named(name) => {
+                if !posting::BUILTINS.iter().any(|(n, _)| n == name) {
+                    return Err(CommandError::Invalid(format!(
+                        "built-in post {name} is not in the registry"
+                    )));
+                }
+            }
+            PostRef::Builtin => {}
         }
         let prev = posting::post_of(world);
         if prev == next {

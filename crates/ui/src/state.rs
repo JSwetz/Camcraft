@@ -85,6 +85,11 @@ pub enum CommandKind {
     SelectPostBuiltin,
     SelectPostDialog,
     SelectPostFile(PathBuf),
+    /// Pick a built-in from the shipped registry by NAME (M3.3 B) -
+    /// the combo's index is screen furniture; what the document stores
+    /// is the name, so a registry re-growth never re-points a saved
+    /// file's post.
+    SelectPostNamed(String),
     /// Work offset: slot origin plus full orientation as yaw-pitch-roll
     /// degrees (R = Rz ⊗ Ry ⊗ Rx). The world stores a unit quaternion;
     /// pure-yaw setups use roll = pitch = 0.
@@ -1685,6 +1690,7 @@ impl State {
             CommandKind::SelectPostFile(path) => {
                 self.select_post(PostRef::File(path.display().to_string()));
             }
+            CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
             CommandKind::StockFit { margin, shape: radio } => {
                 if radio == 2 {
                     // From-model stock IS its source's shape; there is

@@ -172,16 +172,22 @@ pub struct MachineDef {
     pub machine: Option<crate::machine::Machine>,
 }
 
-/// Which post script the document runs (M3.3 A), a flecs singleton
+/// Which post script the document runs (M3.3 A/B), a flecs singleton
 /// like `MachineDef`: setup furniture, never a browser row.
-/// `Builtin` is the app's own shipped script; `File` names the user's
-/// `.cps` by path - validated when selected (the `SelectPost`
-/// constructor compiles it), re-read at post time and refused by name
-/// if it went missing, never silently swapped back to the built-in.
+/// `Builtin` is the app's own shipped default - the first registry
+/// entry, and the meaning of a project file with no post choice at
+/// all; `Named` addresses a shipped registry entry by name (M3.3 B:
+/// names are stable across registry growth, indices are not, so the
+/// document stores the name); `File` names the user's `.cps` by path -
+/// all validated when selected (the `SelectPost` constructor compiles
+/// files, checks names against the registry), re-read at post time and
+/// refused by name if they went missing, never silently swapped back
+/// to the default.
 #[derive(Component, Debug, Clone, Default, PartialEq)]
 pub enum PostRef {
     #[default]
     Builtin,
+    Named(String),
     File(String),
 }
 

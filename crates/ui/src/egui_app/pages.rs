@@ -1598,19 +1598,42 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     post_section(ui, state);
 }
 
-/// The document's post script (M3.3 A): setup furniture, read live off
-/// the world singleton like the machine section above. The label is
-/// exactly what the post resolves - one truth, so a pane can never
-/// advertise a script the gate did not run. Loading a `.cps` of your
-/// own is a command; undo puts the built-in back.
+/// The document's post script (M3.3 A/B): setup furniture, read live
+/// off the world singleton like the machine section above. The label
+/// is exactly what the post resolves - one truth, so a pane can never
+/// advertise a script the gate did not run. The combo offers the five
+/// shipped posts BY NAME (an index would silently re-point the
+/// document when the registry grows or reorders); loading a `.cps` of
+/// your own and returning to the default are commands too - undo puts
+/// the previous post back.
 fn post_section(ui: &mut Ui, state: &mut State) {
     let current = posting::post_of(&state.world);
     ui.label("Post");
-    ui.label(match &current {
-        PostRef::Builtin => posting::post_label(&state.world),
-        PostRef::File(path) => path.clone(),
-    });
+    ui.label(posting::post_label(&state.world));
     ui.horizontal(|ui| {
+        let names: Vec<&str> = posting::BUILTINS.iter().map(|(n, _)| *n).collect();
+        let sel: Option<usize> = match &current {
+            PostRef::Builtin => Some(0),
+            PostRef::Named(n) => names.iter().position(|m| *m == n.as_str()),
+            PostRef::File(_) => None,
+        };
+        let text = match sel {
+            Some(i) => names[i].to_owned(),
+            None => "custom".to_owned(),
+        };
+        let mut pick: Option<String> = None;
+        egui::ComboBox::from_id_salt("post_registry")
+            .selected_text(text)
+            .show_ui(ui, |ui| {
+                for (i, n) in names.iter().enumerate() {
+                    if ui.selectable_label(sel == Some(i), *n).clicked() {
+                        pick = Some((*n).to_owned());
+                    }
+                }
+            });
+        if let Some(name) = pick {
+            state.pending.push_back(CommandKind::SelectPostNamed(name));
+        }
         if ui.button("Load post (.cps)").clicked() {
             state.pending.push_back(CommandKind::SelectPostDialog);
         }

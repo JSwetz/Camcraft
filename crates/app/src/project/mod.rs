@@ -74,9 +74,10 @@
 //! marker - the component did not exist - and the default (absent means
 //! no fixture) is exactly the pre-B world: collision checked against
 //! stock and model alone. Step-up is the stamp itself, like every bump
-//! since v6. v23 is M3.3 stage A: the top-level `post` key (the user
-//! `.cps` path; absent means the built-in post - exactly what every
-//! pre-v23 file ran, since the built-in was the only post). No
+//! since v6. v23 is M3.3 stages A-B: the top-level `post` key (a user
+//! `.cps` path, or a shipped registry name once stage B grew the
+//! registry; absent means the default post - exactly what every
+//! pre-v23 file ran, since the registry then held one script). No
 //! pre-v23 file can contain the key and its default is the shipping
 //! behavior verbatim. Step-up is the stamp itself, like every bump
 //! since v6. v1-v22 files migrate on load, one version step at a time.
@@ -138,15 +139,31 @@ pub struct ProjectFile {
     /// also protects an undo of `DeleteSetup` mid-history).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_setup: Option<String>,
-    /// The document's post script (M3.3 A), v23+. An absent key means
-    /// the built-in post - exactly what every v22 file ran, since the
-    /// built-in was then the only post. A path is stored as chosen:
-    /// opening does not re-validate it (the `SelectPost` constructor
-    /// did), and a post that went missing refuses by name at post
-    /// time, never silently falling back (`script_source`'s law).
+    /// The document's post script (M3.3 A/B), v23+. An absent key
+    /// means the default post - what every v22 file ran, since the
+    /// registry then held one script. `{"file": path}` names a user
+    /// `.cps`; `{"named": name}` picks a shipped registry entry BY
+    /// NAME (stage B grew the registry to five, and an index into it
+    /// would make a re-order silently change a saved document's post -
+    /// names survive growth, indices don't). Chosen values are stored
+    /// as chosen: opening does not re-validate (the `SelectPost`
+    /// constructor did), and a script that went missing - file or
+    /// registry name - refuses by name at post time, never silently
+    /// falling back (`script_source`'s law).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub post: Option<String>,
+    pub post: Option<PostDto>,
     pub entities: Vec<EntityDto>,
+}
+
+/// The file mirror of the `PostRef` singleton (M3.3): exactly the two
+/// choices a document can carry beyond the default, each spelled for
+/// what it is - a registry name or a path, never one string standing
+/// ambiguously for both.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PostDto {
+    Named(String),
+    File(String),
 }
 
 /// The file mirror of the `MachineDef` singleton: the parsed machine
@@ -1719,11 +1736,12 @@ pub fn collect(world: &World) -> ProjectFile {
         // deleted setup saves as it reads (the fallback is the law, not
         // a defect to hide).
         active_setup: crate::setup::stored_active(world),
-        // The built-in posts like every pre-v23 document, so it writes
-        // no key (the mute-machine law, worn in the post's clothes).
+        // The default post matches every pre-v23 document, so it
+        // writes no key (the mute-machine law, worn in the post's clothes).
         post: match crate::posting::post_of(world) {
             crate::schema::PostRef::Builtin => None,
-            crate::schema::PostRef::File(path) => Some(path),
+            crate::schema::PostRef::Named(name) => Some(PostDto::Named(name)),
+            crate::schema::PostRef::File(path) => Some(PostDto::File(path)),
         },
         entities,
     }
@@ -1971,14 +1989,17 @@ fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<(), ProjectEr
     // legal: `setup::active`'s existence fallback is the same law the
     // live world uses mid-history, so the file reads as it was saved.
     crate::setup::set_active(world, file.active_setup);
-    // Opening lands the post choice too - including the built-in, so a
+    // Opening lands the post choice too - including the default, so a
     // stale singleton from the previous document can never leak in (the
-    // units law again). A path is landed as written, unvalidated: it
-    // names a file, not a limit, and the post-time refusal is the net.
+    // units law again). Paths and registry names are landed as written,
+    // unvalidated: each names a script, not a limit, and the post-time
+    // refusal is the net (`script_source` reads both, and both refuse
+    // by name when gone).
     crate::posting::post_set(
         world,
         &match file.post {
-            Some(path) => crate::schema::PostRef::File(path),
+            Some(PostDto::Named(name)) => crate::schema::PostRef::Named(name),
+            Some(PostDto::File(path)) => crate::schema::PostRef::File(path),
             None => crate::schema::PostRef::Builtin,
         },
     );
