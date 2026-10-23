@@ -47,6 +47,20 @@ separated key (`X:1000` / `X=1000`) are the same word to the parser,
 so the canonical spaced writer, the compact joined form, and the
 legacy positional form all round-trip.
 
+## Rotary address words (stage D)
+
+A motion record may command the tool orientation with keyed words
+`A <i> B <i> C <i>` (millidegrees, ×1000, the same integer discipline
+as the length words): `Rapid X 10000 Y 0 Z 5000 A 40000 B 0 C 0`.
+The values are ABSOLUTE commanded angles, and they locate the TOOL
+TIP — no pivot compensation is implied by the stream; a post that
+keeps the machine prismatic must refuse such a record, never
+re-interpret it. The law at the parser: a tilted record states all
+three letters (an unstated one reads `0`), and every in-app `dump` of
+a prismatic toolpath omits them entirely — absence is the ordinary
+case, and the properties `A`/`B`/`C` are then not present at all,
+which is how a script tests for tilt (`has(properties.A)`).
+
 ## Parameter names
 
 The engine publishes every PARAM, both WCS slots, and a set of fixed
@@ -58,6 +72,7 @@ behavior only):
 |---|---|
 | `StartX` `StartY` `StartZ` | current point before the record (mm) |
 | `X` `Y` `Z` | record end point (mm; cycles: center XY, bottom Z) |
+| `A` `B` `C` | commanded tool angles, degrees — ABSENT unless the record carries the words above |
 | `IJKIncrement` | absolute arc center, mm (from `Arc` I J) |
 | `FeedRate` | in-feed, mm/min (from F × 0.001) |
 | `FeedReference` | `surface` when set |
@@ -80,7 +95,12 @@ behavior only):
 - `properties` — one object per record, as above; `W` an alias
 - `currentPosition` — `{X, Y, Z}`, live
 - `machine` — the `.mch` flattened: `rapidRate`, `feedRateMax`,
-  `spindleMax`, `coolants[]`
+  `spindleMax`, `coolants[]`, `rotaries[]` (letter + stated direction
+  + travel in degrees, geometry never speeds), and `rtcp` — a
+  geometric judgment, true when some rotary states a direction that
+  is not the Z column (an A about X tilts; a spindle-column C turns
+  in plane). A script may output RTCP modes only when `rtcp` is true;
+  a tilted record on a `rtcp:false` machine is a counted refusal.
 - writes: `writeln(s)`, `write(s)` (appends to the open line),
   `writeBlock(...parts)`, `writeWord(w)`, `writeAddress(letter, value, dp)`,
   `writeComment(s)`, `writeBlankLine()`, `writeOutput(...)`
@@ -113,7 +133,24 @@ normalized stream.
 
 `app::post::engine::run` returns the program text, a `line_map`
 (program line → record index, `None` for header/footer lines), the
-counted `warnings` (stream `WARN`s plus every `message()`), and the
+`blocks` trace, the counted `warnings` (stream `WARN`s plus every
+`message()` — a `WARN` also voices through `onComment`), and the
 `swallowed` count. Warnings block the in-app post (the validation
 gate, M1.7b); the CLI prints them and still succeeds — it is a
 developer tool.
+
+## The block trace (stage D)
+
+`blocks` is the run's block-by-block story: one `TraceBlock` per
+record that wrote lines (`record` = its index in the normalized
+stream, `label` = a human-readable echo of the record, `first..last`
+= half-open program-line range), plus a `header` block (`record`
+`None`) for what `onOpen` wrote and an `end` block for `onClose`. A
+record the script swallowed by returning `false` appears with an
+empty range and a `(no output)` suffix — loss stays visible. Records
+that legitimately emit nothing (a `PARAM` the post only stores, the
+`TOOL` this post prints inside its preamble) get no block; the trace
+reads as the program, not as the stream echoed back. `post --trace
+<file>` writes the excerpt (each block as a `; [record N] label`
+header over its lines) and the viewer shows the same blocks beside
+the listing; clicking a block centers its first line.

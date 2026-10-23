@@ -9,7 +9,73 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
-## M3.3 C - Declared kind, full numbers, coolant codes, changer capacity, machine editor (this commit)
+## M3.3 D - RTCP output and the block trace (this commit)
+
+**The post delegates the pivot math to the controller.** The stream's
+A/B/C words are absolute commanded angles in the tool-tip frame; the
+Fanuc post emits them verbatim under `G43.4` and never rotates a
+vector itself. Why: RTCP is precisely the function the control
+implements — a post doing its own kinematics would double-transform
+the moment the control's setting disagrees with ours. The refusal
+that blocks a tilted stream on a non-RTCP machine is the same law
+seen from the other side: without the mode, the same XYZ cuts
+different metal, so reinterpretation is the silent gouge. *Cost to
+change:* a future offline-RTCP mode (posts that compute tip paths for
+controls WITHOUT G43.4) would add a geometry helper to the driver
+side and a new machine capability word; nothing in the format blocks
+it.
+
+**`machine.rtcp` is a geometric judgment, not a naming one.** The
+script's boolean is true when some rotary states a direction whose Z
+component is not dominant - an A about X tilts, a C about Z spins in
+plane. A rotary that states no direction tilts nothing a post may
+promise (silence stays silence through the mirror AND the raw file
+door). This is stage C's promise kept ("stage D adds the rotary
+mirror honestly"): rotaries ride their own `kinematics.static.rotaries`
+section - letter, direction, travel - and their deg/min rates enter
+NO prismatic field; the ceiling folds now filter rotaries out,
+closing the latent leak where a 9000 deg/min table out-rated a 7000
+mm/min slide into `rapidRate`. *Cost to change:* none - the shape is
+what the posts read.
+
+**The modal angle law runs in both directions, and the arm is the
+memory reset.** After `G43.4`, the first tilted block states all three
+letters (the control's modal memory starts blank); afterwards only
+the letters whose commanded value CHANGED ride the block - including
+on the home return, where a zero that others already carry stays
+silent. A tool change (G49 cancels TCPM) re-arms: the next tilted
+move re-commands all three even when the angles repeat. *Cost to
+change:* the dedup table is three scalars in the script's preamble.
+
+**Angles ride the stream, never the CL goldens.** `MoveRec.abc` is
+`Option`; every in-app dump of a prismatic toolpath writes `None`
+(zero bytes of change to the 13 committed `.nc` goldens - they were
+byte-compared after this whole seam). The `.cl` legacy dialect has no
+angle words by law; only the v1 `A <i> B <i> C <i>` keyed form speaks
+tilt. *Cost to change:* none; the parser's all-three-or-none law
+means a half-stated tilt never enters silently.
+
+**The trace derives, it does not store.** The viewer's trace pane has
+no selection field: the highlighted block is the one owning the
+scroll cursor the window already publishes, and clicking a block
+centers its first line through the row's own `scroll_to_me` - the
+next frame's cursor law reads the selection back. A swallowed record
+appears in `blocks` with an empty range and "(no output)"; a record
+that legitimately writes nothing (a stored PARAM, a TOOL whose words
+the post prints in the section preamble) gets no block - the trace
+reads as the program, not as the stream echoed back. *Cost to
+change:* storing a selection would need a second cursor law to agree
+with the first; the derived one cannot disagree.
+
+**`sim.rs` did not change, and that is the tested claim.**
+`Traverse::from_machine` only ever receives the mirror (rotary-free
+by construction, the filter above is the guarantee) or the raw
+default VMC (no rotaries stated). A tilted-motion TIMING model would
+need the sim to understand TCP - M5's machine-sim territory, not
+output. The machine/operations tests pin that the walk stays the
+post's walk. *Cost to change:* none pending.
+
+## M3.3 C - Declared kind, full numbers, coolant codes, changer capacity, machine editor
 
 **The kind is stored as the file's WORD, and declared outranks
 inferred.** `Machine.kind` is `Option<String>`, not the enum: a project

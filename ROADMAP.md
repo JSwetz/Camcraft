@@ -1214,8 +1214,25 @@ registry home before Phase 5's multi-axis and turning families arrive.
       is a plain `LoadMachine` at the mount's path, so undo restores the
       exact previous numbers; three original built-in machines mount by
       name from the pane (M3.3 stage C)
-- **RTCP output**: G43.4 / A-angles correctly emitted for trunnion and tilting-head machines
-- **Post debugging**: block-by-block trace from toolpath to line of G-code
+- ✅ **RTCP output**: G43.4 / A-angles correctly emitted for trunnion and tilting-head
+      machines - the stream carries absolute commanded angles as keyed `A/B/C` words
+      (millidegrees, tool-tip frame; a tilted record states all three letters, every
+      prismatic dump omits them), a rotary's direction vector rides the machine file
+      and mirrors as geometry (letter, axis, degree travel - its deg/min rates join
+      nothing, closing stage C's ceiling leak), `machine.rtcp` is a geometric judgment
+      (some rotary off the Z column: an A tilts, a spindle-column C turns), the Fanuc
+      post arms `G43.4 H_n` once per tool, re-arms at the change, and commands the
+      angle words modally in both directions - and a tilted move on any machine the
+      script says cannot tilt is a counted, named refusal that writes no angle words
+      (M3.3 stage D)
+- ✅ **Post debugging**: block-by-block trace from toolpath to line of G-code - the
+      engine records which stream record wrote which program lines (`TraceBlock`,
+      half-open; header and footer own no record, a swallowed record rides the trace
+      labeled "(no output)" so loss stays visible), `post --trace <file>` prints the
+      program as its own provenance, and the viewer grows a "trace" pane whose
+      selection is DERIVED from the scroll cursor the window already publishes -
+      clicking a block centers its first line, the pane stores no second truth
+      (M3.3 stage D)
 
 ---
 
