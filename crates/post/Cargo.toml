@@ -12,3 +12,8 @@ boa_engine = "0.21.1" # moved from app at M4.1 R3; hard-pinned, sandboxed by js.
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# M4.2 WASM rung: boa's RNG chain needs the JS entropy source on
+# wasm32-unknown-unknown (native builds never see this section).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }

@@ -37,6 +37,7 @@ use crate::viewport::View3D;
 
 use super::icons;
 use super::machine_editor;
+use super::gpu;
 use super::pages;
 use super::panes;
 use super::theme;
@@ -54,7 +55,7 @@ const STATUS_H: f32 = 22.0;
 
 /// The windowed shell (the `--ui egui` entry without `--headless`); returns
 /// the process exit code.
-pub(crate) fn run_windowed() -> i32 {
+pub(crate) fn run_windowed(pick: gpu::GpuPick) -> i32 {
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(err) => {
@@ -63,7 +64,7 @@ pub(crate) fn run_windowed() -> i32 {
         }
     };
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut shell = Shell::new();
+    let mut shell = Shell::new(pick);
     let code = match event_loop.run_app(&mut shell) {
         Ok(()) => shell.exit_code,
         Err(err) => {
@@ -110,6 +111,9 @@ struct Shell {
     exit_code: i32,
     failed: bool,
     exit_requested: bool,
+    /// M4.2: the validated GPU backend pick; drives init_gpu's attempts
+    /// chain (preferred mask first, then auto, then all).
+    gpu_pick: gpu::GpuPick,
     state: State,
 }
 
@@ -150,7 +154,7 @@ pub(crate) fn build_dock() -> DockState<Tab> {
 }
 
 impl Shell {
-    fn new() -> Self {
+    fn new(pick: gpu::GpuPick) -> Self {
         // M-d: startup is a plain State::new() - byte-identical in shape to
         // imgui's App::new. The demo seed left the window path; world::seed
         // is what the harnesses and the headless proof call directly now.
@@ -178,6 +182,7 @@ impl Shell {
             exit_code: 0,
             failed: false,
             exit_requested: false,
+            gpu_pick: pick,
             state,
         }
     }
@@ -201,37 +206,59 @@ impl Shell {
             }
         };
         let size = window.inner_size();
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        // SAFETY: `window` lives in self.window and the surface drops before
-        // it (field order); the raw handle stays valid meanwhile.
-        let target = match unsafe {
-            wgpu::SurfaceTargetUnsafe::from_display_and_window(&window, &window)
-        } {
-            Ok(t) => t,
-            Err(err) => {
-                self.fail(el, "surface handle", err);
+        // M4.2: the honest fallback chain. Each attempt gets a restricted
+        // instance and its own adapter request; a miss names the backend it
+        // tried and yields to the next. The adapter we actually get is the
+        // one we log - never a silent substitution.
+        let mut won: Option<(wgpu::Surface<'static>, wgpu::Adapter)> = None;
+        let mut last_err = String::from("all backends exhausted");
+        for (label, backends) in gpu::attempts(&self.gpu_pick) {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends,
+                ..wgpu::InstanceDescriptor::new_without_display_handle()
+            });
+            // SAFETY: `window` lives in self.window and the surface drops
+            // before it (field order); the raw handle stays valid meanwhile.
+            let target = match unsafe {
+                wgpu::SurfaceTargetUnsafe::from_display_and_window(&window, &window)
+            } {
+                Ok(t) => t,
+                Err(err) => {
+                    self.fail(el, "surface handle", err);
+                    return;
+                }
+            };
+            // SAFETY: the window outlives the surface (same argument as above).
+            let surface = match unsafe { instance.create_surface_unsafe(target) } {
+                Ok(s) => s,
+                Err(err) => {
+                    self.fail(el, "surface creation", err);
+                    return;
+                }
+            };
+            let options = wgpu::RequestAdapterOptions {
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            };
+            match pollster::block_on(instance.request_adapter(&options)) {
+                Ok(adapter) => {
+                    won = Some((surface, adapter));
+                    break;
+                }
+                Err(err) => {
+                    eprintln!("gpu: {label} unavailable ({err}) - falling back");
+                    last_err = err.to_string();
+                }
+            }
+        }
+        let (surface, adapter) = match won {
+            Some(pair) => pair,
+            None => {
+                self.fail(el, "no suitable GPU adapter", last_err);
                 return;
             }
         };
-        // SAFETY: the window outlives the surface (same argument as above).
-        let surface = match unsafe { instance.create_surface_unsafe(target) } {
-            Ok(s) => s,
-            Err(err) => {
-                self.fail(el, "surface creation", err);
-                return;
-            }
-        };
-        let options = wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        };
-        let adapter = match pollster::block_on(instance.request_adapter(&options)) {
-            Ok(a) => a,
-            Err(err) => {
-                self.fail(el, "no suitable GPU adapter", err);
-                return;
-            }
-        };
+        println!("{}", gpu::describe(&adapter).log_line());
         let (device, queue) = match pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor::default(),
         )) {

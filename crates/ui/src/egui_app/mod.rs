@@ -21,6 +21,9 @@
 //! in one place.
 //! Provenance: our own code, from our own spike.
 
+// pub(crate) for its own unit tests and the shell's init path: the M4.2
+// GPU backend pick - parse, honest fallback chain, adapter log line.
+pub(crate) mod gpu;
 mod icons;
 // pub(crate) past egui_app: `State::machine_editor` names its draft
 // type (M3.3 stage C), so state.rs has to see through the door.
@@ -43,7 +46,20 @@ mod tests;
 /// selects the no-window proof (seeded document, fallback adapter, View3D
 /// readback); anything else opens the windowed shell.
 pub fn run(args: &[String]) -> i32 {
+    // M4.2: the backend pick is validated before anything opens - a bad
+    // name refuses by name (exit 2, the `--ui` shape), never silently auto.
+    let env = std::env::var("CAMCRAFT_GPU_BACKEND").ok();
+    let pick = match gpu::pick_from(args, env.as_deref()) {
+        Ok(p) => p,
+        Err(err) => {
+            eprintln!("gpu: {err}");
+            return 2;
+        }
+    };
     if args.iter().any(|a| a == "--headless") {
+        if pick != gpu::GpuPick::Auto {
+            println!("gpu: --headless pins the fallback adapter for determinism; backend pick ignored");
+        }
         match shell::headless::run() {
             Ok(()) => {
                 println!("egui shell headless: seeded document, command world, View3D green");
@@ -55,6 +71,6 @@ pub fn run(args: &[String]) -> i32 {
             }
         }
     } else {
-        shell::run_windowed()
+        shell::run_windowed(pick)
     }
 }

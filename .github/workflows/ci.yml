@@ -19,9 +19,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-latest only until the flecs bindings and the egui/wgpu
-        # stack are proven on a Linux runner - green over breadth; the
-        # matrix shape is here so widening it is one line (RECOMMENDED.md).
+        # The full suite stays Windows-only: the UI test lane opens real
+        # windows (VisualRunner/kittest) and the hosted Linux/macOS runners
+        # have no GPU. M4.2's build job covers the rest of the OS map.
         os: [windows-latest]
     steps:
       - uses: actions/checkout@v4
@@ -56,3 +56,47 @@ jobs:
       - name: Headless app run
         shell: bash
         run: cargo run -q -p hsmworks-ui -- --headless
+
+  # M4.2: the same code on the rest of the OS map. Everything that runs
+  # without a GPU: the golden byte-parity suites (the cross-platform float
+  # claim) and the pure-computation crate tests. The UI window lane stays
+  # on the Windows job above.
+  build:
+    name: build+parity (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Workspace check (all targets)
+        shell: bash
+        run: cargo check --workspace --all-targets
+      - name: Golden regression suite (byte parity)
+        shell: bash
+        run: >-
+          cargo test -p hsmworks-app
+          --test golden_cl --test posting --test fanuc_post
+          --test project_roundtrip -- --test-threads=4
+      - name: Split crate tests
+        shell: bash
+        run: >-
+          cargo test -p camcraft-geometry -p camcraft-cl
+          -p camcraft-tools -p camcraft-post -p camcraft-sim -p camcraft-motion
+          -- --test-threads=4
+
+  # M4.2 WASM rung: the post engine (CPS scripts in, NC out) must keep
+  # compiling for the web target; its runtime harness belongs to the
+  # web-sys-mvp rung, not this check.
+  wasm:
+    name: wasm compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup target add wasm32-unknown-unknown
+      - name: Post engine for wasm32-unknown-unknown
+        shell: bash
+        run: cargo check -p camcraft-post -p camcraft-cl -p camcraft-geometry --target wasm32-unknown-unknown
