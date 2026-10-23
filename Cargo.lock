@@ -1814,7 +1814,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hsmworks-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "boa_engine",
  "clipper2-rust",
@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "hsmworks-ui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "egui",
  "egui-wgpu",
