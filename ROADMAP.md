@@ -1185,7 +1185,12 @@ registry home before Phase 5's multi-axis and turning families arrive.
       mounted `.mch` now shapes the output, a `SelectPost` command picks
       a user `.cps` through the undo history, and a missing or broken
       script refuses by name instead of falling back (M3.3 stage A)
-- **Built-in posts**: Fanuc, Haas, Siemens 840D, Heidenhain, Mazak - each with conformance tests against a golden G-code suite
+- ✅ **Built-in posts**: Fanuc, Haas, Siemens 840D, Heidenhain, Mazak - each
+      with conformance tests against a golden G-code suite: five original
+      `.cps` scripts, a 5x13 matrix over the committed streams plus a
+      synthesized one that reaches the tool/spindle/modal-cycle words, the
+      registry addressed by name so projects survive it growing
+      (M3.3 stage B)
 - **Machine definitions**: a machine group in the Setup pane - select or edit a
       machine, its name shown in the setup, driving simulation limits and post
       output. A machine declares its kind - mill, lathe, or mill-turn - and

@@ -9,7 +9,76 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
-## M3.3 A - Post selection, mounted-machine output, user .cps posts (this commit)
+## M3.3 B - Five built-in posts, by-name registry, conformance goldens (this commit)
+
+**Built-ins are addressed by name; the stage-A flag is closed.**
+`PostRef` gained `Named(String)` exactly where stage A said stage B
+would: a persisted *index* into an array that grows would make every
+existing file's meaning shift under a re-order, a name cannot. Entry 0
+remains Fanuc forever (`Builtin` still means it — every pre-B project
+posts Fanuc, unchanged), and the Setup-pane combo resolves names to
+rows at draw time; the row index is screen furniture, the document
+stores the name. An unknown name (a project from a future build with
+more posts) refuses at `SelectPost` creation and displays as
+"(built-in, missing)" — never a silent swap to Fanuc. *Cost to
+change:* none — the name is the persistence contract.
+
+**`PostDto` is a tagged enum, not one ambiguous string.** v23's `post`
+key now serializes `{"named": "Haas"}` or `{"file": "C:\\...x.cps"}`
+(serde externally-tagged; `Builtin` = absent = None). A single string
+field could not honestly distinguish `Haas` the name from a file
+called `Haas`, and the value domain of v23 widened mid-version because
+v23 has never shipped to a user — the bump already belongs to M3.3,
+and pre-release formats get to firm up inside their own version. *Cost
+to change:* a v24 bump if a released build ever needs a different shape.
+
+**Where public convention is silent, house style decided, and the
+goldens lock it.** `%` fence: Fanuc/Haas/Mazak yes, Sinumerik/Heidenhain
+no. Line numbers: Sinumerik only (N10 steps). Motion words: 2-digit
+(Fanuc, Mazak) vs 1-digit (Haas, Sinumerik DIN, Heidenhain DIN). Tool
+word: `T02 M6` + `G43 H02` (Fanuc), plain `T2 M6` + `G43 H2` (Haas,
+Mazak), `T2 D2 M6` no G43 (Sinumerik — DIN tool offsets own length),
+`T2 M6` no length word (Heidenhain DIN). Retract mode: `G98` once +
+modal bare-X Y continuation (Fanuc, Haas, Mazak) vs every hole fully
+restated, no G98 word (Sinumerik, Heidenhain). Spindle: `S.. M3` vs
+Mazak's `MOTON S..`/`MOTOFF`. Peck: G73 (fast) / G83 (full-retract);
+Mazak G73 rides its own dialect. Each `.cps` header cites the public
+standard its choices follow and names the house-style spots as ours.
+
+**Heidenhain ships as DIN/ISO, not native KL.** The KL/TCL cycle
+language (`CALL CYCLE(…)`) is a proprietary-grammar dialect we can
+only reimplement from documentation fragments; DIN/ISO is the same
+control's RS-244-class mode, fully public. The conformance law needs
+scripts we can defend line by line. A KL-mode post is a legitimate
+future registry entry — the by-name registry grows without disturbing
+any saved project. *Cost to change:* one more BUILTINS row.
+
+**The synthesized stream exists because the legacy goldens were
+motion-only.** Every `.cl` golden predates params and tool blocks, so
+no committed program ever contained an `S.. M3`, a `T.. M6` or a
+dwelled `G82` — the exact words the five dialects disagree on.
+`conformance.rs` posts one hand-built v1 stream (params, tool, contour,
+five hole cycles) through all five scripts into `nc/synth_<stem>.nc`.
+Its cycles anchor (`AT n`) on the opening rapid of their own hole
+chain — the shape a real generator dump has. Anchor them at move 0
+and `normalize_program_order` re-seats the group ahead of the
+contour, whose moves then die in the chain-suppression guard
+(`if (inCycle) return`) — 0 swallowed, silently absent. A synthetic
+stream must be shaped like a real one; the law is now in the test's
+own doc comment. *Cost to change:* regenerating `WRITE_GOLDEN=1`
+reads the diff like every other golden.
+
+**One latent, repo-wide, pre-existing eol hazard (not introduced
+here, found by the commit warnings).** The goldens are LF in the
+object store and `core.autocrlf` converts them to CRLF at checkout —
+but the engine emits LF and the tests compare byte-exact, so a
+*fresh clone* would fail every golden until someone normalizes. This
+tree has never re-checked-out those files, so it has never bitten.
+The one-line fix is a `.gitattributes` (`*.nc *.cl *.cps text eol=lf`
+or a global `* text=auto eol=lf` decision); it touches every file
+stat, so it belongs to a discussion, not a feature commit.
+
+## M3.3 A - Post selection, mounted-machine output, user .cps posts
 
 **The mounted machine reaches the post as a mirror, not as raw JSON.**
 The plan carried a "raw rides the mount" design (store the `.mch` file's
