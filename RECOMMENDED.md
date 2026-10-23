@@ -2684,6 +2684,65 @@ reads exactly like the law.
   pins what is true today so a regression in the core's portability
   fails loudly.
 
+## M4.3 — the debrand rename: what moved, what stayed, why (code
+`refactor: rename hsmworks to camcraft across crates, cps posts and
+tooling (M4.3)` + this docs)
+
+- **The law, and its one limit.** "Nothing carries the old brand" is
+  enforced for everything that is *naming our product*: crate/package
+  names (`camcraft-*`), the binary (`camcraft-ui.exe`), the project
+  extension (`.camproj` + filter + `untitled.camproj`), the window
+  title ("CamCraft"), the cps `vendor` line ("CamCraft (independent,
+  unaffiliated)", `nm` fallback "CAMCRAFT"), the dist zip name, the
+  import thread name, doc-comment self-references, workspace and CI
+  flags. What names *Autodesk's product* in a true statement ("a
+  clean-room implementation of HSMWorks", "no HSMWorks source was
+  consulted", "HSMWorks-style From") is the trademark-disclaimer
+  posture the repo was built on and stays verbatim - a rename that
+  erased those sentences would erase the provenance law itself.
+
+- **Wire magics stay `HSMW-CL`/`HSMW-CNC` - considered and kept.** The
+  brand's initials survive in exactly two places: the first line of
+  the CL dump and CNC intermediate formats. A format signature is a
+  compatibility contract, not a logo: every committed golden, every
+  `.camproj` with an embedded stream, and every `.cnc` file on a
+  shop floor is keyed on it. Renaming would orphan all of it (the
+  parser's fallback is *absence* of magic → legacy `.cl` rules, not a
+  second spelling), buy zero user-visible debranding, and churn 21
+  goldens the suite's stability law protects. The parser keeps one
+  canonical spelling per format; if a `CAMC-*` ever ships it will be
+  a versioned format decision, not a brand sweep. `docs/CNC-
+  INTERMEDIATE.md` documents the tokens as what they are: names from
+  the pre-rename era of our own format.
+
+- **Hash salts moved, and the churn is the mechanism.**
+  `hsmw-op-stamp-v2`/`hsmw-rest-*` → `camcraft-*`. The op stamp rides
+  in saved projects, so every document saved pre-rename reads Stale
+  once on open and clears on regenerate - the identical, documented
+  behavior of a stamp-version bump (the `b3eaebc` precedent; stamp.rs
+  now carries the note), visible in the UI, never silent. The
+  alternative (parking a wrong brand in a hash because it *might*
+  cause a regeneration) trades a trademark concern for a comment that
+  lies about what the bytes are.
+
+- **Test fixtures renamed too** ("CamCraft Testbench" vendor,
+  `camcraft-posting-`/`camcraft-gone-` tmp names): fictional-vendor
+  strings are ours to name, and a fixture is exactly where a stray
+  brand re-enters the greps forever. One law test needed a real fix,
+  not a rename: `fanuc_post::tilted_move_...` asserted the no-angle-
+  word law with `!program.contains('A')` - harmless while the old
+  brand had no A; "CAMCRAFT" has two. The assertion now checks what
+  the law states: no `A` adjacent to a digit/sign, so prose in
+  header comments cannot trip it (the test's intent, made exact).
+
+- **Docs discipline: ledgers keep era names.** Completed ROADMAP rows
+  and older RECOMMENDED entries keep the names they were written with
+  (`cargo test -p hsmworks-app` in an M2.3-era line is history, not
+  branding); operational files (AGENTS.md family, doc titles, gate
+  commands) were swept. Re-writing history entries after a rename
+  falsifies the decision record - the record is what the post-roadmap
+  discussion reads.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

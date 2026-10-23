@@ -1306,8 +1306,23 @@ headless tested.
 ### M4.3 - Defer HSMWorks label thru out the code.
 **Goal: Removing the HSMWorks branding as its conflicting**
 
-- **Debrand**: Find every instance of where "hsmworks" been used.
-- **Rename**: New name is "camcraft"
+- ✅ **Debrand**: Find every instance of where "hsmworks" been used.
+      Every crate, string, comment and identifier now reads camcraft -
+      packages `camcraft-*`, bin `camcraft-ui.exe`, project files
+      `.camproj`, window title "CamCraft", the cps vendor line, the zip
+      name, the import thread; the `.cl`/`.cnc` **wire magics stay**
+      (`HSMW-CL`/`HSMW-CNC` - a format signature is a compatibility
+      contract, the parser accepts both histories, renaming one would
+      silently orphan every file on a user's disk), the hash **salts
+      moved** (`camcraft-op-stamp-v2`, `camcraft-rest-*` - one-time
+      Stale-read for saved documents, the same churn a version bump
+      causes, by design); trademark sentences that NAME Autodesk's
+      product ("a clean-room implementation of HSMWorks", "no HSMWorks
+      source was consulted") are true statements and stay (M4.3)
+- ✅ **Rename**: New name is "camcraft" - `cargo check/test/clippy
+      --workspace` green on the new names (595 passed / 0 failed / 29
+      ignored, 792 `#[test]` before == after), goldens byte-stable,
+      post `--version` intact, dist artifacts `camcraft-0.x.0-*`
 
 ### M4.4 - Test cost shape: fast, targeted gates
 **Goal: a gate run costs what the diff cost — no 30-minute suite tail**
@@ -1442,7 +1457,7 @@ need to figure out how to offload simulation, voxel body calculation and tool pr
 | **M3.3** | Every control covered | Done: post template engine - mounted `.mch` shapes output, `SelectPost` rides the undo history, user `.cps` refuse by name (A); five built-in posts - Fanuc, Haas, 840D, Heidenhain, Mazak - by-name registry, conformance goldens (B); machine definitions - declared kind gates the op families, full numbers mirrored, coolant M-codes, changer capacity, draft-law editor (C); RTCP - G43.4 delegates pivots to the controller, rotaries mirror as geometry, angle words modal both ways; block-by-block post trace with derived selection (D); 0.3.0 | ✅ |
 | **M4.1** | Code refactor | Done: six subcrates on the seam map (geometry R1, cl+tools R2, post R3, sim+motion R4 with the stock_sim/fixture knot dissolved); app's operation and project monoliths split along section seams (R5); tests moved crate-by-crate, coverage law held 785==785 at every rung; CI + release lanes run per crate (M4.1) | ✅ |
 | **M4.2** | Multibuilds | Done: GPU backend pick - `--gpu-backend`/env, refuse-by-name, preferred→auto→all honest chain, adapter log line; Linux native check + suites (18/20 goldens; 2 dome goldens drift on Linux libm - named skip, M4.2b fix owed, RECOMMENDED); macOS + wasm-compile CI jobs (geometry/cl/post green on wasm32); Docker-for-every-target left open (tooling death, RECOMMENDED) | ✅ |
-| **M4.3** | Defer Code | All references to "hsmworks" in the code needs to be renamed and re-referenced to camcraft | 📋 |
+| **M4.3** | Defer Code | Done: hsmworks→camcraft everywhere user-facing or self-referential - crates/packages, `camcraft-ui.exe`, `.camproj` (+filter+untitled name), window title, cps vendor line, dist zip, thread name, doc titles; hash salts moved (one-time Stale, by design), wire magics kept (format = compatibility contract), Autodesk-trademark true-sentences kept; full suite green on the new names (595 pass / 792 `#[test]` law held / clippy -D warnings), goldens byte-stable, post `--version` intact | ✅ |
 | **M4.4** | Test cost shape | Done: law/verdict split - finish3d 39 tests (27 `#[ignore]`d), verify's two envelope verdicts moved; release heavy lane 30 min → 3.4 min (CI runs it); Gate-map headers in every suite; debug ladder ~2 s where it was a 30-min tail | ✅ |
 | **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
