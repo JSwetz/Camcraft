@@ -9,6 +9,73 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M3.3 C - Declared kind, full numbers, coolant codes, changer capacity, machine editor (this commit)
+
+**The kind is stored as the file's WORD, and declared outranks
+inferred.** `Machine.kind` is `Option<String>`, not the enum: a project
+file round-trips exactly what was written, and `is_sane` is the single
+place that decides what is statable (an unreadable word refuses at
+`parse_mch`, so no mounted machine can carry one). When the declaration
+and the axis inventory disagree, the declaration wins - "the file
+knows parts the kinematics tree hides" - which is the discussion-worthy
+half: a mistyped `kind: "lathe"` on a real VMC darkens the mill cells
+with nothing to contradict it except the axis table a row below.
+*Cost to change:* the word is the persistence shape; normalizing to
+the enum at parse is a one-line switch that would start rewriting
+files.
+
+**Stage C fixed a law M3.2 E could never reach.** The mill-turn
+inference tested for A/B/C names, but the parser collected only
+`"type": "linear"` parts - a real file's rotary never entered the
+inventory, so MillTurn was unreachable outside hand-built structs.
+Rotary parts now join, with a stated `rotary: bool` (a linear axis
+named A is a slide; a rotary named Q still turns) and the letter test
+kept as the legacy fallback. Rotary numbers never ride the inch→mm
+factor - a deg/min scaled as mm/min is a unit lie, so scaling is
+per-part. The same unit law is why rotary axes stay out of the post
+mirror's prismatic axis list: the CPS contract has no rotary word, and
+staging D/RTCP will add one honestly rather than slip degrees into a
+millimeters field. *Cost to change:* none pending; stage D owns the
+rotary mirror section.
+
+**No version bump, on the skip-if-unstated promise.** Every new field
+(`kind`, `spindle_power`, `tool_count`, `coolants`, per-axis
+`rotary`/`resolution`) is `skip_serializing_if`-gated: a pre-stage-C
+project saves byte-identically and loads unchanged, and the roundtrip
+test pins that an unstated machine MINTS none of the new keys. Coolants
+reaching the post completes stage A's sentence through the same mirror
+(a `toolStation.coolants` the mounted struct grew), so the editor's
+Apply and the file mount take one road - `machine_value` re-mirrors
+the live struct and there is no stale-raw seam to rot. A name-only
+entry rides codeless and posts nothing: visible on the sheet, silent
+in the program. *Cost to change:* a bump only if a field ever needs a
+different spelling than its Rust name.
+
+**The machine editor is the tool editor's draft law, and Apply is
+plain `LoadMachine`.** The window edits a COPY (ephemeral,
+never-saved, never-undoable); Apply mounts through the SAME command a
+file-load uses, at the SAME path (`built-in: {name}` for the library,
+via one shared format function so "loaded from" never quotes a file
+that does not exist), and undo restores the exact previous numbers. No
+new command type. A refused Apply keeps the window open - the draft is
+someone's work, and discarding it silently is the silent wrong answer
+wearing a dialog. The built-in machines are named in the pane but are
+NOT a stored reference: mounting stores the parsed machine itself, so
+editing a VMC never edits the shipped file. *Cost to change:* an
+`EditMachine` command type would only exist to remember what the
+History already knows.
+
+**Two numbers stated, deliberately not judged.** Spindle power checks
+nothing yet - the consumption model that could violate it belongs to
+the tool library's per-material speeds/feeds work, and checking
+against nothing is a false green. Changer capacity counts DISTINCT
+tool NAMES across the program, not tool changes: a 12-slot drum running
+13 changes of 1 tool is fine, and the checker says so by silence. The
+three library files (VMC, Mill-turn, Lathe - all original, checker
+grammar) are pinned by a test that reads each both ways: declared kind
+equals inferred kind. *Cost to change:* power's verdict lands with the
+speeds/feeds model; nothing to unwind first.
+
 ## M3.3 B - Five built-in posts, by-name registry, conformance goldens (this commit)
 
 **Built-ins are addressed by name; the stage-A flag is closed.**

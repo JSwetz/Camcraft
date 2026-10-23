@@ -1191,7 +1191,7 @@ registry home before Phase 5's multi-axis and turning families arrive.
       synthesized one that reaches the tool/spindle/modal-cycle words, the
       registry addressed by name so projects survive it growing
       (M3.3 stage B)
-- **Machine definitions**: a machine group in the Setup pane - select or edit a
+- ✅ **Machine definitions**: a machine group in the Setup pane - select or edit a
       machine, its name shown in the setup, driving simulation limits and post
       output. A machine declares its kind - mill, lathe, or mill-turn - and
       the operation families a setup offers follow the kind; today every
@@ -1205,7 +1205,15 @@ registry home before Phase 5's multi-axis and turning families arrive.
       the coolant set from the `.mch` machine file). The user-facing workflow (pick a machine,
       edit it, see it on the setup) is specced from published CAM user
       documentation only; no vendor strings, templates, or post files are
-      copied or adapted
+      copied or adapted - the declared word now outranks the axis
+      inventory (inference kept as the unstated-file fallback), rotary
+      parts join the table (fixing the law M3.2 E stated but no file
+      could reach), the checker counts distinct tools against the
+      changer, a mounted coolant list speaks its own M-codes through
+      the mirror, and the machine editor drafts over a copy whose Apply
+      is a plain `LoadMachine` at the mount's path, so undo restores the
+      exact previous numbers; three original built-in machines mount by
+      name from the pane (M3.3 stage C)
 - **RTCP output**: G43.4 / A-angles correctly emitted for trunnion and tilting-head machines
 - **Post debugging**: block-by-block trace from toolpath to line of G-code
 
@@ -1216,7 +1224,8 @@ registry home before Phase 5's multi-axis and turning families arrive.
 The rust codebase is to complicated and convoluted. All motion types, operations, tool management,
 heights and offsets, movement, simulation. Should be isolated as smaller subcreates. Code
 files should be no larger than 400 lines of code to keep it maintainable. All tests should be isolated
-to each subcrate to make testing cleaner.
+to each subcrate to make testing cleaner. Each crate should produce a standalone executable that can be
+headless tested.
 
 ### M4.1 - Seperating the code into crates
 **Goal: Sepearting all components into smaller crates.**
