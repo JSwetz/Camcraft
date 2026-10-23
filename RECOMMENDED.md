@@ -54,6 +54,14 @@ lane, and rust-cache amortizes it. *Cost to change:* dropping the step
 trades measured-clean guarantees for CI minutes - a bad trade, flag it
 if CI time ever forces it.
 
+**No release build is owed for M4.4.** The standing order offsets a
+release at each gated feature milestone; M4.4 moved no `src` line (test
+annotations, docs, CI only), so the v0.3.0 binary is still the current
+hand-test vehicle and shipping a byte-identical 0.3.x would be ceremony.
+The next release offset lands on the Phase-4 milestone that first moves
+src - which the ordering below makes M4.1. *Cost to change:* none; the
+ladder simply picks up at the next milestone tag.
+
 ## M3.3 close-out - the 0.3.0 release and the Phase-4 ordering
 
 **Shipped 0.3.0 on the M3.3 D commit.** Cargo version + RELEASE_NOTES
