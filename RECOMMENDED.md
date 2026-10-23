@@ -9,6 +9,38 @@
 Format per entry: **what was decided**, **why**, **what it'd cost to change
 later**. Newest milestone first.
 
+## M3.3 close-out - the 0.3.0 release and the Phase-4 ordering
+
+**Shipped 0.3.0 on the M3.3 D commit.** Cargo version + RELEASE_NOTES
+rewritten "what's new since 0.2.0", persistence quoted v19→v23, annotated
+tag `v0.3.0` on the lock-sync commit, docs tag `m3.3-done`. PROJECT_VERSION
+23 stayed the file-format number - the two "versions" are different clocks
+and the notes say so in different words. *Cost to change:* none - the
+release train is the same one 0.1.0 and 0.2.0 rode.
+
+**Phase 4 runs M4.4 FIRST, before the M4.1 subcrate split.** The roadmap
+lists them in numeric order, but M4.4 (test cost shape) is the one that
+pays every later milestone: finish3d's ~30-min tail taxes each close-out
+gate, and M4.1's split would move those tests twice - once to split them,
+once to fix their paths. The law/verdict split + `#[ignore]` heavy lane +
+diff-targeted gating lands first, then the crates move under tests that
+already run in seconds. *Cost to change:* resequencing is free until
+either one lands; after M4.1 it costs a re-split.
+
+**Gate note for the close-out itself:** all 30 app suites green in two
+parallel waves (32-core box, no cargo lock on direct binary runs), all 8
+UI suites green serially from `crates/ui` (the snapshot goldens resolve
+CWD-relative - a "Missing snapshot" panic is the cwd, not a regression),
+clippy clean, the 13+57 `.nc` goldens byte-identical. The full-suite pass
+here is the milestone close-out AGENTS.md allows, not a new habit.
+
+**graphify --update at close-out hit the semantic-loss guard and was
+resolved by hand** (fold saved∪new per file, `dedup=False` - the fuzzy
+fold retires guard-required ids by collapsing pre-existing twin nodes).
+A `--update` on this repo should keep `dedup=False` until the guard and
+dedup agree; the TODO.md re-queue from the unverified-shrink flag is
+expected and will force-clean on its own next run.
+
 ## M3.3 D - RTCP output and the block trace (this commit)
 
 **The post delegates the pivot math to the controller.** The stream's
