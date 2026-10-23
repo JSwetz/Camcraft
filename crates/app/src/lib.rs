@@ -17,7 +17,7 @@ pub mod machine;
 pub mod model;
 pub mod operation;
 pub mod pick;
-pub mod post;
+pub use camcraft_post::post;
 pub mod posting;
 pub mod project;
 pub mod rest;

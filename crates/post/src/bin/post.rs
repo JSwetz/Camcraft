@@ -7,7 +7,7 @@
 //! our output text are ours. Development tool and CI check runner:
 //! the in-app validation gate (M1.7b) is what refuses a machine.
 
-use hsmworks_app::post::{self, engine};
+use camcraft_post::post::{self, engine};
 use serde_json::Value;
 use std::path::Path;
 use std::process::ExitCode;

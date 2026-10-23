@@ -282,7 +282,7 @@ impl Machine {
     /// Positional indexing would silently check the wrong stroke when a
     /// file names a subset of axes or leads with a U - the table is
     /// ordered for display, names are what make a limit mean something.
-    pub(super) fn axis(&self, k: usize) -> Option<&AxisLimits> {
+    pub fn axis(&self, k: usize) -> Option<&AxisLimits> {
         let n = ["X", "Y", "Z"].get(k)?.to_ascii_uppercase();
         self.axes
             .iter()
@@ -292,7 +292,7 @@ impl Machine {
     /// The feed ceiling of a coordinated move: the slowest stated
     /// ceiling among the axes the move actually drives. `None` when
     /// no driven axis states one - nothing to violate.
-    pub(super) fn feed_ceiling(&self, d: [f64; 3]) -> Option<f64> {
+    pub fn feed_ceiling(&self, d: [f64; 3]) -> Option<f64> {
         let mut best: Option<f64> = None;
         for (k, moved) in d.map(|x| x.abs() > 0.0).iter().enumerate() {
             if !*moved {

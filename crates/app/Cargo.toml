@@ -10,6 +10,7 @@ flecs_ecs = { workspace = true }
 camcraft-geometry = { workspace = true }
 camcraft-cl = { workspace = true }
 camcraft-tools = { workspace = true }
+camcraft-post = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -19,4 +20,3 @@ truck-polymesh = { workspace = true }
 truck-meshalgo = { workspace = true }
 ruststep = { workspace = true }
 clipper2-rust = { workspace = true }
-boa_engine = "0.21.1"

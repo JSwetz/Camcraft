@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: >-
           cargo test -p camcraft-geometry -p camcraft-cl
-          -p camcraft-tools -- --test-threads=4
+          -p camcraft-tools -p camcraft-post -- --test-threads=4
       - name: App tests
         shell: bash
         run: cargo test -p hsmworks-app -- --test-threads=4
@@ -48,7 +48,10 @@ jobs:
         run: cargo test -p hsmworks-ui -- --test-threads=4
       - name: Clippy
         shell: bash
-        run: cargo clippy -p camcraft-geometry -p camcraft-cl -p camcraft-tools -p hsmworks-app -p hsmworks-ui --all-targets -- -D warnings
+        run: >-
+          cargo clippy -p camcraft-geometry -p camcraft-cl
+          -p camcraft-tools -p camcraft-post -p hsmworks-app -p hsmworks-ui
+          --all-targets -- -D warnings
       - name: Headless app run
         shell: bash
         run: cargo run -q -p hsmworks-ui -- --headless

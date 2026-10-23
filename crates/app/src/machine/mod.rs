@@ -41,11 +41,10 @@
 //! [`def`], the `.mch` reader in [`parse`]; this module keeps what
 //! touches the world - the singleton glue and the program checker.
 
-pub mod def;
-mod parse;
-
-pub use def::*;
-pub use parse::parse_mch;
+// M4.1 R3: the plain types and the `.mch` reader live in camcraft-post
+// (crates/post/src/machine/); this module keeps only what touches the
+// world - the singleton glue and the program checker.
+pub use camcraft_post::machine::*;
 
 use flecs_ecs::core::WorldGet;
 use flecs_ecs::prelude::World;

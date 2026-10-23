@@ -2,17 +2,21 @@
 //! the driver's hook contract, and the clean-refusal law on every
 //! malformed path.
 //!
-//! Gate map (M4.4): covers app::cl, app::geo2d, app::geometry, app::post.
+//! Gate map (M4.4): covers camcraft_post::cl, ::geo2d, ::geometry,
+//! ::post.
 
-use hsmworks_app::cl::{CycleKind, MoveKind, Toolpath};
-use hsmworks_app::post::cnc::{self, CycleRec, MoveRec, Record};
-use hsmworks_app::post::{engine, machine, normalize_program_order, Dump, PostError};
+use camcraft_post::cl::{CycleKind, MoveKind, Toolpath};
+use camcraft_post::post::cnc::{self, CycleRec, MoveRec, Record};
+use camcraft_post::post::{engine, machine, normalize_program_order, Dump, PostError};
 use serde_json::json;
 
+/// The `.cl` goldens are generator output (written by app's golden_cl),
+/// so they stay in app's fixture dir; this suite reads them as the
+/// post's input side of the same contract (M4.1 R3 note in
+/// docs/M4.1-CRATE-SPLIT.md).
 fn golden(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("golden")
+        .join("../app/tests/golden")
         .join(name);
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("golden {name}: {e}"))
 }
@@ -301,12 +305,12 @@ fn machine_flattens_for_the_script() {
 
 #[test]
 fn dump_interleaves_cycles_at_their_anchor_moves() {
-    use hsmworks_app::geo2d::Point2;
-    use hsmworks_app::geometry::Point3;
+    use camcraft_post::geo2d::Point2;
+    use camcraft_post::geometry::Point3;
     let mut t = Toolpath::default();
     for i in 0..4 {
         let (kind, z) = if i % 2 == 0 { (MoveKind::Rapid, 10.0) } else { (MoveKind::Plunge, -5.0) };
-        t.moves.push(hsmworks_app::cl::Move {
+        t.moves.push(camcraft_post::cl::Move {
             kind,
             from: Point3 { x: 0.0, y: 0.0, z: 10.0 },
             to: Point3 { x: i as f64, y: 0.0, z },
@@ -315,7 +319,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         });
     }
     t.cycles = vec![
-        hsmworks_app::cl::Cycle {
+        camcraft_post::cl::Cycle {
             kind: CycleKind::Drill,
             xy: Point2 { x: 0.0, y: 0.0 },
             r_z: 5.0,
@@ -325,7 +329,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
             dwell: 0.0,
             first_move: 0,
         },
-        hsmworks_app::cl::Cycle {
+        camcraft_post::cl::Cycle {
             kind: CycleKind::Tap,
             xy: Point2 { x: 2.0, y: 0.0 },
             r_z: 5.0,
@@ -351,7 +355,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         stock_top_z: 0.0,
         warnings: vec!["drill vs hole dia advisory".into()],
     };
-    let recs = hsmworks_app::post::dump(&t, &d);
+    let recs = camcraft_post::post::dump(&t, &d);
     // dump emits each cycle with first_move <= mi just before move mi:
     // the shape is c m m c m m ENDSECTION.
     let mut mi = 0usize;

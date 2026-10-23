@@ -21,6 +21,7 @@ jobs:
       - name: Build release binaries
         shell: bash
         run: cargo build --release -p hsmworks-ui -p hsmworks-app
+          -p camcraft-post
       - name: Assemble portable zip
         shell: pwsh
         run: |
