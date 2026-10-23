@@ -10,7 +10,7 @@
 #[test]
 fn egui_headless_cli_exit_code_is_zero() {
     assert_eq!(
-        hsmworks_ui::run(&[
+        camcraft_ui::run(&[
             String::from("--ui"),
             String::from("egui"),
             String::from("--headless")
@@ -24,7 +24,7 @@ fn selecting_the_retired_imgui_shell_refuses_with_rc_2() {
     // The M-g law: no silent fallback. A user scripting `--ui imgui` gets a
     // named refusal and rc 2, before any window or renderer is touched.
     assert_eq!(
-        hsmworks_ui::run(&[
+        camcraft_ui::run(&[
             String::from("--ui"),
             String::from("imgui"),
             String::from("--headless")
@@ -35,5 +35,5 @@ fn selecting_the_retired_imgui_shell_refuses_with_rc_2() {
 
 #[test]
 fn ui_flag_without_a_value_refuses_with_rc_2() {
-    assert_eq!(hsmworks_ui::run(&[String::from("--ui")]), 2);
+    assert_eq!(camcraft_ui::run(&[String::from("--ui")]), 2);
 }

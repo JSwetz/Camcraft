@@ -4,7 +4,7 @@
 //! Provenance: the workflow is specced from published CAM user
 //! documentation behavior (a machine definition is picked or edited,
 //! its name shows in the setup); every field, word and widget here is
-//! ours, keyed to the grammar in `hsmworks_app::machine`.
+//! ours, keyed to the grammar in `camcraft_app::machine`.
 //!
 //! The editor's law is the draft law of the tool editor: every field
 //! edits a COPY of the mounted machine, and nothing is a command until
@@ -16,8 +16,8 @@
 //! `None` checks nothing and a zero is not a ceiling.
 
 use egui::{ComboBox, DragValue, TextEdit, Ui, Window};
-use hsmworks_app::machine::{self, Coolant, Kind, Machine};
-use hsmworks_app::units::Unit;
+use camcraft_app::machine::{self, Coolant, Kind, Machine};
+use camcraft_app::units::Unit;
 
 use super::pages;
 use crate::state::{CommandKind, State};

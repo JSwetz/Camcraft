@@ -1,6 +1,6 @@
 //! camcraft-geometry - the first crate out of the M4.1 ladder (R1,
 //! docs/M4.1-CRATE-SPLIT.md). The module tree mirrors the old
-//! `hsmworks_app::{geometry, geo2d}` paths on purpose: nothing inside
+//! `camcraft_app::{geometry, geo2d}` paths on purpose: nothing inside
 //! these files had to be re-pathed, and the app re-exports the whole
 //! tree so UI and integration paths compile untouched.
 //!

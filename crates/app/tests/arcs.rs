@@ -5,10 +5,10 @@
 //!
 //! Gate map (M4.4): covers app::cl, app::geo2d, app::geometry, app::machining2d.
 
-use hsmworks_app::cl::{Move, MoveKind};
-use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::geometry::Point3;
-use hsmworks_app::machining2d::{ContourParams, Lead, Seg, Side, contour, fit_arcs};
+use camcraft_app::cl::{Move, MoveKind};
+use camcraft_app::geo2d::{Loop, Point2, Region};
+use camcraft_app::geometry::Point3;
+use camcraft_app::machining2d::{ContourParams, Lead, Seg, Side, contour, fit_arcs};
 
 fn p2(x: f64, y: f64) -> Point2 {
     Point2::new(x, y)

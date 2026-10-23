@@ -1,5 +1,5 @@
 [package]
-name = "hsmworks-app"
+name = "camcraft-app"
 description = "Domain layer: geometry, components, commands, project io. Clean-room implementation, public sources only."
 version.workspace = true
 edition.workspace = true

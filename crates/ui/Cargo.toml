@@ -1,12 +1,12 @@
 [package]
-name = "hsmworks-ui"
+name = "camcraft-ui"
 description = "egui shell: docked panels, entity tree, ribbon, 3D viewport."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-hsmworks-app = { workspace = true }
+camcraft-app = { workspace = true }
 flecs_ecs = { workspace = true }
 winit = { workspace = true }
 rfd = { workspace = true }
@@ -26,5 +26,5 @@ egui_dock = { workspace = true }
 egui_kittest = { workspace = true }
 
 [[bin]]
-name = "hsmworks-ui"
+name = "camcraft-ui"
 path = "src/main.rs"

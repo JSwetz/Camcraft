@@ -55,7 +55,7 @@ fails with a "stale; regenerate with WRITE_GOLDEN=1" hint, and a missing
 file fails the same way - never silently generating it. To regenerate:
 
 ```
-WRITE_GOLDEN=1 cargo test -p hsmworks-app --test golden_cl
+WRITE_GOLDEN=1 cargo test -p camcraft-app --test golden_cl
 git diff crates/app/tests/golden/
 ```
 

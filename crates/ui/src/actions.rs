@@ -11,7 +11,7 @@
 //! these. Enabling/disabling stays with the surface (it knows what the
 //! user can act on), but the effect lives here exactly once.
 
-use hsmworks_app::operation::SrcRef;
+use camcraft_app::operation::SrcRef;
 
 use crate::operations::quick_params;
 use crate::state::{CommandKind, State, UiTarget};
@@ -36,7 +36,7 @@ pub(crate) fn save_project(state: &mut State) {
 
 /// Post every operation to one NC program (M1.7b). The dialog arm picks
 /// the path; the gate itself - generated, fresh, warning-free or refused
-/// by name - lives once in the app layer (hsmworks_app::posting).
+/// by name - lives once in the app layer (camcraft_app::posting).
 pub(crate) fn post_program(state: &mut State) {
     state.pending.push_back(CommandKind::PostProgramDialog);
 }
@@ -87,7 +87,7 @@ pub(crate) fn toggle_deviate(state: &mut State) {
         state.status = String::from("deviate off");
         return;
     }
-    match hsmworks_app::stock_sim::simulate_document(&state.world) {
+    match camcraft_app::stock_sim::simulate_document(&state.world) {
         Ok(sim) => {
             state.status = deviate_readout(&sim.dev);
             // The machine's vote joins the verdict when a machine is
@@ -113,8 +113,8 @@ pub(crate) fn toggle_deviate(state: &mut State) {
 /// makes it gate. Pure, so the ui tests keep its shape without a window.
 #[must_use]
 pub fn machine_vote(world: &flecs_ecs::prelude::World) -> Option<String> {
-    let m = hsmworks_app::machine::of(world).1?;
-    Some(match hsmworks_app::machine::check_document(world, &m) {
+    let m = camcraft_app::machine::of(world).1?;
+    Some(match camcraft_app::machine::check_document(world, &m) {
         Ok(c) if c.is_ok() => String::from("; machine: within limits"),
         Ok(c) => format!(
             "; machine: {} limit problem(s){}",
@@ -135,8 +135,8 @@ pub fn machine_vote(world: &flecs_ecs::prelude::World) -> Option<String> {
 /// and the test-pinned string law (`sim_readout`'s sibling). Pure, so
 /// the ui tests keep its shape without a window.
 #[must_use]
-pub fn deviate_readout(dev: &hsmworks_app::stock_sim::Deviation) -> String {
-    use hsmworks_app::geometry::Point3;
+pub fn deviate_readout(dev: &camcraft_app::stock_sim::Deviation) -> String {
+    use camcraft_app::geometry::Point3;
     if dev.is_clean() {
         return String::from("deviate: clean - the program meets the model everywhere");
     }
@@ -222,7 +222,7 @@ pub(crate) fn add_operation(state: &mut State, kind: usize) {
     let mut n = state.operation_count() + 1;
     let name = loop {
         let candidate = format!("Operation{n}");
-        if hsmworks_app::model::find_by_name(&state.world, &candidate).is_none() {
+        if camcraft_app::model::find_by_name(&state.world, &candidate).is_none() {
             break candidate;
         }
         n += 1;

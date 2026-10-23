@@ -7,19 +7,19 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, RegenerateAll,
     SetStock, SetWcsOrigin, UpdateModel,
 };
-use hsmworks_app::geometry::{Mesh, IDENTITY_Q, Point3, cube};
-use hsmworks_app::machining2d::{Lead, Side};
-use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
-use hsmworks_app::schema::{Location, Operation, Toolpath, STOCK_NAME};
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::{catalog, Tool};
-use hsmworks_app::world::new_world;
+use camcraft_app::geometry::{Mesh, IDENTITY_Q, Point3, cube};
+use camcraft_app::machining2d::{Lead, Side};
+use camcraft_app::model;
+use camcraft_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
+use camcraft_app::schema::{Location, Operation, Toolpath, STOCK_NAME};
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::world::new_world;
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -521,7 +521,7 @@ fn face_params_5() -> OpParams {
     }
 }
 
-fn stock_facets(world: &World) -> Vec<hsmworks_app::geometry::Triangle> {
+fn stock_facets(world: &World) -> Vec<camcraft_app::geometry::Triangle> {
     let stock = model::find_by_name(world, STOCK_NAME).expect("stock exists");
     model::facets_of(world, &stock).expect("stock carries geometry")
 }
@@ -638,7 +638,7 @@ fn a_model_update_does_not_touch_a_box_stock() {
 // why an operation reads Stale (the live questions), and the batch fix
 // that regenerates the whole job in one undo unit.
 
-use hsmworks_app::operation::HeightReference;
+use camcraft_app::operation::HeightReference;
 
 fn reason(world: &World, name: &str) -> Option<String> {
     let e = model::find_by_name(world, name).expect("entity exists");
@@ -974,7 +974,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
     // is 8 collinear points tracing the same 60x60 rectangle.
     let pts = region.loops()[0].points();
     assert!(pts.len() >= 4);
-    let extent = |get: fn(&hsmworks_app::geo2d::Point2) -> f64| -> f64 {
+    let extent = |get: fn(&camcraft_app::geo2d::Point2) -> f64| -> f64 {
         let lo = pts.iter().map(get).fold(f64::MAX, f64::min);
         let hi = pts.iter().map(get).fold(f64::MIN, f64::max);
         hi - lo
@@ -1016,9 +1016,9 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
 
 // ===================== M1.5 step 4: selection sources =====================
 
-use hsmworks_app::geometry::feature::{self, FaceKind};
-use hsmworks_app::geometry::Triangle;
-use hsmworks_app::operation::{FeatureSel, GeoSel};
+use camcraft_app::geometry::feature::{self, FaceKind};
+use camcraft_app::geometry::Triangle;
+use camcraft_app::operation::{FeatureSel, GeoSel};
 
 /// Planar face whose plane sits highest along +z - the box's top. Face
 /// normals are sign-canonical, so both horizontal faces report (0,0,1)
@@ -1069,7 +1069,7 @@ fn any_chain_of(world: &World, name: &str) -> u64 {
 }
 
 /// A 16-chord flat disc of radius r at z = 0, as an importable mesh.
-fn disc_mesh(r: f64) -> hsmworks_app::geometry::Mesh {
+fn disc_mesh(r: f64) -> camcraft_app::geometry::Mesh {
     let tau = std::f64::consts::TAU;
     let p = |i: usize| {
         let a = tau * i as f64 / 16.0;
@@ -1078,7 +1078,7 @@ fn disc_mesh(r: f64) -> hsmworks_app::geometry::Mesh {
     let facets: Vec<Triangle> = (0..16)
         .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
         .collect();
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 fn sel(entity: &str, feature: FeatureSel) -> SrcRef {
@@ -1154,7 +1154,7 @@ fn a_vertical_or_tilted_pick_refuses_with_the_fix_in_the_message() {
     let face = op(face_sel_params());
     assert_eq!(operation::region_of(&world, &face), None);
     let e = operation::generate(&world, &face, "").expect_err("wall cannot be faced");
-    assert!(matches!(e, hsmworks_app::machining2d::GenError::Invalid(_)));
+    assert!(matches!(e, camcraft_app::machining2d::GenError::Invalid(_)));
     assert!(e.to_string().contains("not horizontal"), "{e}");
 
     // Contouring a whole wall face: its rim collapses to a line from
@@ -1253,7 +1253,7 @@ fn pocket_refuses_an_open_run() {
             feed: 800.0,
             plunge_feed: 200.0,
             climb: true,
-            strategy: hsmworks_app::machining2d::PocketStrategy::Zigzag,
+            strategy: camcraft_app::machining2d::PocketStrategy::Zigzag,
         },
         stamp: None,
         setup: None,
@@ -1349,8 +1349,8 @@ fn selection_commands_validate_at_construction() {
 
 // ============== M1.5 step 8: selection-aware generation ==============
 
-use hsmworks_app::cl::MoveKind;
-use hsmworks_app::verify::Warning;
+use camcraft_app::cl::MoveKind;
+use camcraft_app::verify::Warning;
 
 /// An open chain whose two ends sit at distinct XY points - a horizontal
 /// rim edge, the one kind of box run a centerline pass is about.
@@ -1445,7 +1445,7 @@ fn an_open_run_contours_on_its_centerline() {
 /// turn stays under it. The chain walk cannot close it, so the rim
 /// arrives as exactly two open half-runs whose ends meet end to end:
 /// the split-rim shape the M1.5.1 hand-test hit on the STEP bore.
-fn split_rim_disc(r: f64) -> hsmworks_app::geometry::Mesh {
+fn split_rim_disc(r: f64) -> camcraft_app::geometry::Mesh {
     let tau = std::f64::consts::TAU;
     let p = |i: usize| {
         let a = tau * i as f64 / 16.0;
@@ -1455,7 +1455,7 @@ fn split_rim_disc(r: f64) -> hsmworks_app::geometry::Mesh {
     let facets: Vec<Triangle> = (0..16)
         .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
         .collect();
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 /// The open runs an entity's chains carry, in chain order.
@@ -1678,7 +1678,7 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
     // (which vertex a loop starts at) is an input-order artifact, so the
     // positions compare as sets, not as sequences.
     assert_eq!(pf.moves.len(), pr.moves.len(), "equal move budget");
-    let xy = |p: &hsmworks_app::cl::Toolpath| -> Vec<[f64; 2]> {
+    let xy = |p: &camcraft_app::cl::Toolpath| -> Vec<[f64; 2]> {
         let mut v: Vec<[f64; 2]> = p
             .moves
             .iter()
@@ -1788,14 +1788,14 @@ fn a_mixed_pick_list_cuts_boundary_then_run_and_says_what_overlap_means() {
 
 // ====== M1.5.1 step 6: open runs bind face regions, out to stock ======
 
-use hsmworks_app::geo2d::Point2;
+use camcraft_app::geo2d::Point2;
 
 /// A flat 16-chord disc whose rim carries a hard crease every `every`
 /// vertices - the seam bulge puts the chord turn past the 30-degree
 /// merge angle there, so the rim walks as `16 / every` open runs: four
 /// quarter rims at `every = 4`, two half rims at `every = 8` (the
 /// `split_rim_disc` shape the step-4 tests stitch closed.
-fn seamed_sheet(r: f64, every: usize) -> hsmworks_app::geometry::Mesh {
+fn seamed_sheet(r: f64, every: usize) -> camcraft_app::geometry::Mesh {
     let tau = std::f64::consts::TAU;
     let p = |i: usize| {
         let a = tau * i as f64 / 16.0;
@@ -1805,7 +1805,7 @@ fn seamed_sheet(r: f64, every: usize) -> hsmworks_app::geometry::Mesh {
     let facets: Vec<Triangle> = (0..16)
         .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
         .collect();
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 /// The hand-test's model in flat form: a 40x40 plate with a bore whose
@@ -1813,7 +1813,7 @@ fn seamed_sheet(r: f64, every: usize) -> hsmworks_app::geometry::Mesh {
 /// tessellation of a cylindrical wall in a face, reduced to the shape
 /// the region logic must answer. The bore walks as exactly two open
 /// half-runs; the square outer rim as four short ones.
-fn bored_plate() -> hsmworks_app::geometry::Mesh {
+fn bored_plate() -> camcraft_app::geometry::Mesh {
     let tau = std::f64::consts::TAU;
     let bore = |i: usize| {
         let a = tau * (i % 16) as f64 / 16.0;
@@ -1841,15 +1841,15 @@ fn bored_plate() -> hsmworks_app::geometry::Mesh {
         facets.push(Triangle::new(op(i), op(i + 1), bp(i + 1)));
         facets.push(Triangle::new(op(i), bp(i + 1), bp(i)));
     }
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 /// A 60x20 sheet scribbled once down its middle: two planar faces, and
 /// the long straight top and bottom runs a face op must resolve to a
 /// side by the material score, not by a coin flip.
-fn scribed_sheet() -> hsmworks_app::geometry::Mesh {
+fn scribed_sheet() -> camcraft_app::geometry::Mesh {
     let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
-    hsmworks_app::geometry::Mesh {
+    camcraft_app::geometry::Mesh {
         facets: vec![
             Triangle::new(p(-30.0, -10.0), p(0.0, -10.0), p(0.0, 10.0)),
             Triangle::new(p(-30.0, -10.0), p(0.0, 10.0), p(-30.0, 10.0)),
@@ -1881,7 +1881,7 @@ fn bore_runs_of(world: &World, name: &str) -> Vec<u64> {
 /// the wall tessellates into strips that weld, exactly what STEP hands
 /// back for a cylindrical face). Unlike `bored_plate` this has metal to
 /// section: the silhouette keeps the bore as a through-hole.
-fn bored_block() -> hsmworks_app::geometry::Mesh {
+fn bored_block() -> camcraft_app::geometry::Mesh {
     let tau = std::f64::consts::TAU;
     let bp = |i: usize, z: f64| {
         let a = tau * (i % 16) as f64 / 16.0;
@@ -1909,7 +1909,7 @@ fn bored_block() -> hsmworks_app::geometry::Mesh {
         quad(bp(i, 8.0), bp(j, 8.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
         quad(op(j, 8.0), op(i, 8.0), op(i, 0.0), op(j, 0.0), &mut facets);
     }
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 /// Picks for a list of chain ids on one entity, in the given order.
@@ -2647,13 +2647,13 @@ fn side_change_goes_stale_once_and_generate_clears_it() {
 
 // ---------------------------------------------------------------- M1.6 drilling
 
-use hsmworks_app::cl::CycleKind;
-use hsmworks_app::drilling::{self, CycleChoice, Hole};
+use camcraft_app::cl::CycleKind;
+use camcraft_app::drilling::{self, CycleChoice, Hole};
 
 /// A 20x20x10 block bored through by a sixteen-facet Ø4 hole - the closed
 /// solid form of what STEP hands back for a drilled part, the same weld
 /// as `bored_block` at drill scale so recognition can see a wall.
-fn drilled_block() -> hsmworks_app::geometry::Mesh {
+fn drilled_block() -> camcraft_app::geometry::Mesh {
     let tau = std::f64::consts::TAU;
     let bp = |i: usize, z: f64| {
         let a = tau * (i % 16) as f64 / 16.0;
@@ -2681,7 +2681,7 @@ fn drilled_block() -> hsmworks_app::geometry::Mesh {
         quad(bp(i, 10.0), bp(j, 10.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
         quad(op(j, 10.0), op(i, 10.0), op(i, 0.0), op(j, 0.0), &mut facets);
     }
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 fn drill_params(holes: Vec<Hole>, top_z: f64, clearance_z: f64) -> OpParams {
@@ -2775,7 +2775,7 @@ fn a_hole_deeper_than_the_drill_reaches_warns_and_still_generates() {
         cache
             .warnings
             .iter()
-            .any(|w| matches!(w, hsmworks_app::verify::Warning::ShankHit { part: true, .. })),
+            .any(|w| matches!(w, camcraft_app::verify::Warning::ShankHit { part: true, .. })),
         "reach law must speak: {:?}",
         cache.warnings
     );
@@ -2847,8 +2847,8 @@ fn moving_the_part_marks_the_drill_op_stale_until_regen() {
 
 /// R20 spherical cap to the 45 deg rim - the same solid `finish3d.rs`
 /// walks directly, as an imported model.
-fn dome_mesh() -> hsmworks_app::geometry::Mesh {
-    use hsmworks_app::geometry::{Triangle, Point3};
+fn dome_mesh() -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::{Triangle, Point3};
     const TAU: f64 = std::f64::consts::TAU;
     let (radius, polar_max, n_lat, n_lon) = (20.0, std::f64::consts::FRAC_PI_4, 12usize, 96usize);
     let mut facets = Vec::new();
@@ -2882,14 +2882,14 @@ fn dome_mesh() -> hsmworks_app::geometry::Mesh {
     for j in 0..n_lon {
         facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
     }
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 const DOME_RIM_Z: f64 = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
 
 fn finish_params(top_z: f64, bottom_z: f64, tolerance: f64) -> OpParams {
     OpParams::Finish3D {
-        pattern: hsmworks_app::finishing3d::FinishPattern::Waterline,
+        pattern: camcraft_app::finishing3d::FinishPattern::Waterline,
         stepover: None,
         tolerance,
         clearance_z: Height::fixed(25.0),

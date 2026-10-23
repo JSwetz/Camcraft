@@ -15,20 +15,20 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use flecs_ecs::prelude::World;
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     ActivateSetup, AddTool, ChangeTool, CommandError, CreateOperation, CreateSetup, DeleteEntity,
     DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks,
     EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine, MoveFixture,
     RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry, SetOperationSetup, SetStock,
     SetUnits, SetWcsOrigin, TagFixture, UntagFixture, UpdateModel,
 };
-use hsmworks_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
-use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
-use hsmworks_app::schema::{Location, Operation as OperationDef, PostRef, WCS_SLOTS};
-use hsmworks_app::stock::{self, StockShape};
-use hsmworks_app::tools::{catalog, Tool, ToolKind};
-use hsmworks_app::units::{self, Unit};
-use hsmworks_app::{machine, model, posting, project, world::new_world};
+use camcraft_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
+use camcraft_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
+use camcraft_app::schema::{Location, Operation as OperationDef, PostRef, WCS_SLOTS};
+use camcraft_app::stock::{self, StockShape};
+use camcraft_app::tools::{catalog, Tool, ToolKind};
+use camcraft_app::units::{self, Unit};
+use camcraft_app::{machine, model, posting, project, world::new_world};
 
 use crate::viewport::Camera;
 
@@ -84,7 +84,7 @@ pub enum CommandKind {
     /// undo puts the machine's previous numbers back exactly.
     LoadBuiltinMachine(String),
     EditMachineDialog,
-    EditMachineApply { path: String, machine: Box<hsmworks_app::machine::Machine> },
+    EditMachineApply { path: String, machine: Box<camcraft_app::machine::Machine> },
     /// The post script (M3.3 A): the built-in arm ships, the dialog arm
     /// picks a user `.cps` through the file-pick law, and the path arm
     /// is what the headless tests run. Selection is a command like
@@ -695,7 +695,7 @@ pub struct PostView {
     /// record wrote which lines. Frozen evidence like the text beside
     /// it - the viewer shows the trace the post actually did, never a
     /// re-derivation.
-    pub blocks: Vec<hsmworks_app::post::TraceBlock>,
+    pub blocks: Vec<camcraft_app::post::TraceBlock>,
     /// The trace pane's visibility. View state like the camera - not
     /// undoable, not saved; the block list belongs to the one program
     /// on screen, so a document switch retires the whole viewer.
@@ -764,7 +764,7 @@ pub struct State {
     /// of one program state, exactly like [`PostView`]'s text - never a
     /// command, never saved, retired by a document switch; an edit does
     /// not silently re-run it, re-arming re-judges.
-    pub program_sim: Option<hsmworks_app::stock_sim::ProgramSim>,
+    pub program_sim: Option<camcraft_app::stock_sim::ProgramSim>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -866,7 +866,7 @@ pub enum UiTarget {
     None,
     /// The stock solid (its page doubles as the creation form).
     Stock,
-    /// One of [`hsmworks_app::schema::WCS_SLOTS`], by index.
+    /// One of [`camcraft_app::schema::WCS_SLOTS`], by index.
     WcsSlot(usize),
     /// A model entity: the info page.
     Model(String),
@@ -1005,8 +1005,8 @@ impl State {
         // The drafts mirror the ACTIVE setup's furniture (M3.2 A): with
         // no setups declared this is the legacy `Stock`/`G54` entities,
         // byte for byte; with them, the pane edits where the user works.
-        let active = hsmworks_app::setup::active(&self.world);
-        let stock_name = hsmworks_app::setup::stock_entity_name(&self.world, active.as_deref());
+        let active = camcraft_app::setup::active(&self.world);
+        let stock_name = camcraft_app::setup::stock_entity_name(&self.world, active.as_deref());
         if let Some(entity) = model::find_by_name(&self.world, &stock_name)
             && model::is_stock(&self.world, &entity)
         {
@@ -1035,7 +1035,7 @@ impl State {
                 None => {}
             }
         }
-        let placed = hsmworks_app::setup::wcs_entity(
+        let placed = camcraft_app::setup::wcs_entity(
             &self.world,
             active.as_deref(),
             self.wcs_ui.slot,
@@ -1796,9 +1796,9 @@ impl State {
                 // The fit replaces the ACTIVE setup's stock, and keeps
                 // that entity's deliberate rotation (M3.2 A: the name is
                 // resolved here; the command re-resolves at construction).
-                let stock_name = hsmworks_app::setup::stock_entity_name(
+                let stock_name = camcraft_app::setup::stock_entity_name(
                     &self.world,
-                    hsmworks_app::setup::active(&self.world).as_deref(),
+                    camcraft_app::setup::active(&self.world).as_deref(),
                 );
                 let rot = model::find_by_name(&self.world, &stock_name)
                     .and_then(|entity| model::transform_of(&self.world, &entity))
@@ -2124,7 +2124,7 @@ impl State {
                     // Bind to the context the page shows: the active
                     // setup, or the implicit-first `None` of a document
                     // with no setups at all.
-                    self.import_as_fixture = Some(hsmworks_app::setup::active(&self.world));
+                    self.import_as_fixture = Some(camcraft_app::setup::active(&self.world));
                     self.import_path(path);
                 }
             }
@@ -2233,7 +2233,7 @@ impl State {
         let (tx, rx) = mpsc::channel();
         let worker_path = path.clone();
         let spawned = std::thread::Builder::new()
-            .name("hsmworks-import".to_string())
+            .name("camcraft-import".to_string())
             .spawn(move || {
                 // No World here: pure file + geometry work, Send across.
                 let result = ImportModel::new(&worker_path);
@@ -2467,7 +2467,7 @@ impl State {
     /// sheet is derived from the document, nothing about it goes in
     /// the history, and the status line is the only effect.
     fn setup_sheet_path(&mut self, path: PathBuf) {
-        let sheets = hsmworks_app::setup_sheet::render_all(&self.world);
+        let sheets = camcraft_app::setup_sheet::render_all(&self.world);
         let mut out = String::new();
         for (i, (_title, sheet)) in sheets.iter().enumerate() {
             if i > 0 {
@@ -2508,7 +2508,7 @@ fn pick_mesh_file() -> Option<PathBuf> {
 
 fn pick_project_file() -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .add_filter("HSMWorks Project", &["hsmproj"])
+        .add_filter("CamCraft Project", &["camproj"])
         .pick_file()
 }
 
@@ -2528,8 +2528,8 @@ fn pick_post_file() -> Option<PathBuf> {
 
 fn save_project_dialog() -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .add_filter("HSMWorks Project", &["hsmproj"])
-        .set_file_name("untitled.hsmproj")
+        .add_filter("CamCraft Project", &["camproj"])
+        .set_file_name("untitled.camproj")
         .save_file()
 }
 

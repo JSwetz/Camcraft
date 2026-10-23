@@ -1,7 +1,7 @@
-//! HSMWorks clean-room UI shell: winit + egui (docked panels) + wgpu viewport.
+//! CamCraft UI shell (clean-room): winit + egui (docked panels) + wgpu viewport.
 //!
 //! Layering (AGENTS.md): ui -> app -> flecs. This crate renders and routes
-//! input; every persistent world change goes through `hsmworks_app::commands`.
+//! input; every persistent world change goes through `camcraft_app::commands`.
 //! The imgui stack that lived here until M1.4.2 M-g is retired: `egui_app`
 //! is the shell, `interact` and `state` the shared law underneath it.
 

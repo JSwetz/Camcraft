@@ -4,15 +4,15 @@
 //! Gate map (M4.4): covers app::cl, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::verify.
 //! Lane shape (M4.4): 15 structural verifies run in milliseconds; the two
 //! cone_facets(96) envelope verdicts are #[ignore]d - heavy lane, run them with
-//! `cargo test --release -p hsmworks-app -- --ignored` at milestone close.
+//! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
 
-use hsmworks_app::cl::{Cycle, CycleKind, Move, MoveKind, Toolpath};
-use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::geometry::Point3;
-use hsmworks_app::machining2d::{
+use camcraft_app::cl::{Cycle, CycleKind, Move, MoveKind, Toolpath};
+use camcraft_app::geo2d::{Loop, Point2, Region};
+use camcraft_app::geometry::Point3;
+use camcraft_app::machining2d::{
     contour, pocket, trace, ContourParams, PocketParams, PocketStrategy, Side, TraceParams,
 };
-use hsmworks_app::verify::{Mode, ToolGeom, VerifyContext, Warning, verify};
+use camcraft_app::verify::{Mode, ToolGeom, VerifyContext, Warning, verify};
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
     Point3::new(x, y, z)
@@ -132,7 +132,7 @@ fn clean_contour_verifies_silent() {
             plunge_feed: 100.0,
             climb: true,
             side: Side::Auto,
-            lead: hsmworks_app::machining2d::Lead::None,
+            lead: camcraft_app::machining2d::Lead::None,
             tolerance: 0.01,
             tab_count: 0,
             tab_width: 0.0,
@@ -385,8 +385,8 @@ fn a_hole_within_reach_verifies_silent() {
 // and refuse to call silence a proof when the measurement cannot run.
 // ---------------------------------------------------------------------------
 
-use hsmworks_app::finishing3d::{self, Finish3DParams};
-use hsmworks_app::geometry::Triangle;
+use camcraft_app::finishing3d::{self, Finish3DParams};
+use camcraft_app::geometry::Triangle;
 
 fn cone_facets(n_lon: usize) -> Vec<Triangle> {
     let mut facets = Vec::new();
@@ -507,7 +507,7 @@ fn envelope_gouge_names_the_nearest_move() {
     // z 5. The trench a ball leaves in an overhead column is its own
     // tip plane, so the wanted surface at 10 is cut down to 5 - a 5 mm
     // gouge on exactly the move that made it.
-    let f: Vec<Triangle> = hsmworks_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
+    let f: Vec<Triangle> = camcraft_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
     let t = Toolpath::new(vec![
         Move::new(MoveKind::Rapid, p(0.0, 0.0, 15.0), p(-15.0, 0.0, 15.0), None),
         Move::new(MoveKind::Plunge, p(-15.0, 0.0, 15.0), p(-15.0, 0.0, 5.0), Some(100.0)),
@@ -535,7 +535,7 @@ fn an_envelope_that_cannot_measure_proves_nothing() {
     ]);
     let r = rect(-10.0, -10.0, 10.0, 10.0);
     let tool = ball();
-    let f: Vec<Triangle> = hsmworks_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
+    let f: Vec<Triangle> = camcraft_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
     assert_eq!(
         verify(&t, &env_ctx(&r, None, &tool, Some(0.1))),
         vec![Warning::Gouge { at: 1 }],

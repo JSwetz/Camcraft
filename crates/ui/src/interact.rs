@@ -20,14 +20,14 @@
 //! Provenance: our own code, from our own imgui app (M1-era, specced from
 //! public CAM conventions; see app.rs's history and ROADMAP).
 
-use hsmworks_app::cl::MoveKind;
-use hsmworks_app::geometry::feature;
-use hsmworks_app::geometry::{Aabb, Point3, transform_point};
-use hsmworks_app::geo2d::Region;
-use hsmworks_app::operation::{FeatureSel, GeoSel, Height};
-use hsmworks_app::schema::WCS_SLOTS;
-use hsmworks_app::units;
-use hsmworks_app::{model, operation, pick};
+use camcraft_app::cl::MoveKind;
+use camcraft_app::geometry::feature;
+use camcraft_app::geometry::{Aabb, Point3, transform_point};
+use camcraft_app::geo2d::Region;
+use camcraft_app::operation::{FeatureSel, GeoSel, Height};
+use camcraft_app::schema::WCS_SLOTS;
+use camcraft_app::units;
+use camcraft_app::{model, operation, pick};
 use winit::keyboard::ModifiersState;
 
 use crate::state::{CommandKind, GeoPick, HoverHit, State};
@@ -333,9 +333,9 @@ pub(crate) fn edge_nearest(state: &State, p: [f32; 2], radius: f32) -> Option<(S
         .collect();
     // The stock that stands in the viewport is the ACTIVE setup's - the
     // pick law follows the one-order law's context, not a global name.
-    let stock_name = hsmworks_app::setup::stock_entity_name(
+    let stock_name = camcraft_app::setup::stock_entity_name(
         &state.world,
-        hsmworks_app::setup::active(&state.world).as_deref(),
+        camcraft_app::setup::active(&state.world).as_deref(),
     );
     if let Some(stock) = model::find_by_name(&state.world, &stock_name) {
         entities.push((stock_name, stock));
@@ -656,7 +656,7 @@ fn feature_segments(
 /// A vertex behind the camera drops only the segments that touch it.
 fn push_poly(
     mvp: &[[f32; 4]; 4],
-    loc: &hsmworks_app::schema::Location,
+    loc: &camcraft_app::schema::Location,
     pts: &[[f64; 3]],
     closed: bool,
     out: &mut Vec<([f32; 2], [f32; 2])>,

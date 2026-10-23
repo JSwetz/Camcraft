@@ -12,9 +12,9 @@
 use std::collections::HashSet;
 
 use egui_wgpu::wgpu;
-use hsmworks_app::stock::{StockShape, stock_mesh};
-use hsmworks_ui::state::DisplayMode;
-use hsmworks_ui::viewport::{Camera, GpuPart, View3D};
+use camcraft_app::stock::{StockShape, stock_mesh};
+use camcraft_ui::state::DisplayMode;
+use camcraft_ui::viewport::{Camera, GpuPart, View3D};
 
 const SIDE: u32 = 256;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;

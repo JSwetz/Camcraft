@@ -7,8 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
-use hsmworks_app::geometry::import::{self, Format, ImportError, MAX_FACETS};
-use hsmworks_app::geometry::{cube, Mesh, Point3};
+use camcraft_app::geometry::import::{self, Format, ImportError, MAX_FACETS};
+use camcraft_app::geometry::{cube, Mesh, Point3};
 
 fn testdata(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/models").join(name)

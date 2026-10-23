@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use hsmworks_app::cl::{MoveKind, Toolpath};
+use camcraft_app::cl::{MoveKind, Toolpath};
 
 /// Golden coordinate resolution in mm: 0.001 = 1 um.
 pub const CL_SCALE: f64 = 0.001;
@@ -78,13 +78,13 @@ pub fn gen_to_cltext(t: &Toolpath) -> String {
     }
     for c in &t.cycles {
         let kind = match c.kind {
-            hsmworks_app::cl::CycleKind::Spot => "Spot",
-            hsmworks_app::cl::CycleKind::Drill => "Drill",
-            hsmworks_app::cl::CycleKind::Peck => "Peck",
-            hsmworks_app::cl::CycleKind::Deep => "Deep",
-            hsmworks_app::cl::CycleKind::Tap => "Tap",
-            hsmworks_app::cl::CycleKind::Bore => "Bore",
-            hsmworks_app::cl::CycleKind::BackBore => "BackBore",
+            camcraft_app::cl::CycleKind::Spot => "Spot",
+            camcraft_app::cl::CycleKind::Drill => "Drill",
+            camcraft_app::cl::CycleKind::Peck => "Peck",
+            camcraft_app::cl::CycleKind::Deep => "Deep",
+            camcraft_app::cl::CycleKind::Tap => "Tap",
+            camcraft_app::cl::CycleKind::Bore => "Bore",
+            camcraft_app::cl::CycleKind::BackBore => "BackBore",
         };
         s.push_str(&format!(
             "; CYCLE {kind} X{} Y{} RZ{} BZ{} ENTRY{} PECK{} DWELL{} AT{}\n",
@@ -107,7 +107,7 @@ fn golden_dir() -> PathBuf {
 
 /// Compare `text` against `tests/golden/<name>`; with WRITE_GOLDEN set in
 /// the environment, rewrite the file instead (regeneration workflow:
-/// `WRITE_GOLDEN=1 cargo test -p hsmworks-app`, then read the diff and
+/// `WRITE_GOLDEN=1 cargo test -p camcraft-app`, then read the diff and
 /// commit only intended changes). A missing golden fails with a hint
 /// rather than quietly generating a fresh one.
 pub fn write_golden(name: &str, text: &str) {

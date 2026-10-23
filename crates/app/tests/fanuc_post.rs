@@ -6,7 +6,7 @@
 //!
 //! Gate map (M4.4): covers app::post.
 
-use hsmworks_app::post::{cnc, engine};
+use camcraft_app::post::{cnc, engine};
 use std::path::{Path, PathBuf};
 
 fn repo(rel: &str) -> PathBuf {
@@ -165,7 +165,17 @@ ENDSECTION
         vec!["tilted move on a machine without a tilting rotary"],
         "counted, named, and (via the gate) write-blocking"
     );
-    assert!(!out.program.contains('A'), "no angle word rides a prismatic program: {}", out.program);
+    // An axis word is A followed by a number or sign - a bare
+    // contains('A') would trip on any prose in the header comments
+    // (the brand name has an A in it; the axis law does not care).
+    assert!(
+        !out.program
+            .as_bytes()
+            .windows(2)
+            .any(|w| w[0] == b'A' && (w[1].is_ascii_digit() || w[1] == b'-')),
+        "no angle word rides a prismatic program: {}",
+        out.program
+    );
 }
 
 #[test]

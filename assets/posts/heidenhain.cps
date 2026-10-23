@@ -9,7 +9,7 @@
 // hole, the house style (see fanuc.cps) decides, and the conformance
 // goldens lock that decision, not any vendor's.
 description = "Heidenhain TNC (3-axis mill, DIN/ISO mode, cycles G73-G89, G2/G3)";
-vendor = "HSMWorks (independent, unaffiliated)";
+vendor = "CamCraft (independent, unaffiliated)";
 legal = "Original clean-room work; public documentation only";
 certificationLevel = 1;
 minimumRevision = 1;
@@ -91,7 +91,7 @@ function coolantCode() {
 // Identity in one parenthetical comment - the mode needs no fence and
 // the post writes no program number (the control names its programs).
 function onOpen() {
-  var nm = (typeof machine !== "undefined" && machine.name) || "HSMWORKS";
+  var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   block(["(" + nm + ")"]);
 }
 

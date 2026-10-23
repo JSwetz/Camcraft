@@ -22,13 +22,13 @@
 //! refuse to draw is a plane this shell does not draw either.
 //! Provenance: our own code, mirrored from app.rs.
 
-use hsmworks_app::commands::ImportModel;
-use hsmworks_app::geometry::{Point3, cube, feature, transform_point};
-use hsmworks_app::machining2d::{Lead, Side};
-use hsmworks_app::model;
-use hsmworks_app::operation::{FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
-use hsmworks_app::schema::WCS_SLOTS;
-use hsmworks_app::tools::{Tool, catalog};
+use camcraft_app::commands::ImportModel;
+use camcraft_app::geometry::{Point3, cube, feature, transform_point};
+use camcraft_app::machining2d::{Lead, Side};
+use camcraft_app::model;
+use camcraft_app::operation::{FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
+use camcraft_app::schema::WCS_SLOTS;
+use camcraft_app::tools::{Tool, catalog};
 
 use crate::interact::ftoz;
 use crate::state::{CommandKind, State, UiTarget};
@@ -227,9 +227,9 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             // The drawn block is the ACTIVE setup's stock, resolved by the
             // same law the tree row and the pick use; a setup-free document
             // resolves to the legacy "Stock" name and draws exactly as before.
-            let stock_name = hsmworks_app::setup::stock_entity_name(
+            let stock_name = camcraft_app::setup::stock_entity_name(
                 &state.world,
-                hsmworks_app::setup::active(&state.world).as_deref(),
+                camcraft_app::setup::active(&state.world).as_deref(),
             );
             if let Some(entity) = model::find_by_name(&state.world, &stock_name)
                 && model::is_stock(&state.world, &entity)

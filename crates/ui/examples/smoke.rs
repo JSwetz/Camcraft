@@ -2,8 +2,8 @@
 //! command queue the shell feeds. Prints a pass/fail line per stage.
 use std::path::PathBuf;
 
-use hsmworks_app::model;
-use hsmworks_ui::state::{CommandKind, State};
+use camcraft_app::model;
+use camcraft_ui::state::{CommandKind, State};
 
 fn count(state: &State) -> usize {
     model::named_entities(&state.world).len()
@@ -45,7 +45,7 @@ fn main() {
     state.settle();
     check("corrupt import refused, world intact", count(&state) == 2, &state);
 
-    let tmp = std::env::temp_dir().join("hsmworks-smoke.hsmproj");
+    let tmp = std::env::temp_dir().join("camcraft-smoke.camproj");
     state.pending.push_back(CommandKind::SaveProjectFile(tmp.clone()));
     state.settle();
     check("save", state.status.starts_with("saved"), &state);
@@ -60,7 +60,7 @@ fn main() {
     let mut saver = State::new();
     saver.pending.push_back(CommandKind::OpenProjectFile(tmp.clone()));
     saver.settle();
-    let again = std::env::temp_dir().join("hsmworks-smoke-resave.hsmproj");
+    let again = std::env::temp_dir().join("camcraft-smoke-resave.camproj");
     saver.pending.push_back(CommandKind::SaveProjectFile(again.clone()));
     saver.settle();
     check("save is byte-stable", first == std::fs::read(&again).unwrap_or_default(), &saver);

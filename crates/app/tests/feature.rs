@@ -7,14 +7,14 @@
 //!
 //! Gate map (M4.4): covers app::geometry, app::model, app::world.
 
-use hsmworks_app::geometry::cube;
-use hsmworks_app::geometry::feature::{
+use camcraft_app::geometry::cube;
+use camcraft_app::geometry::feature::{
     chains, digest_of, feature_edges, features_of_facets, patch_rings, patches, Chain, EdgeKind,
     FaceKind, Features, LoopKind,
 };
-use hsmworks_app::geometry::{Mesh, Point3, Triangle};
-use hsmworks_app::model;
-use hsmworks_app::world::new_world;
+use camcraft_app::geometry::{Mesh, Point3, Triangle};
+use camcraft_app::model;
+use camcraft_app::world::new_world;
 
 fn flat(mesh: &Mesh) -> Vec<[f64; 3]> {
     mesh.facets
@@ -35,7 +35,7 @@ fn flat_row() -> Vec<[f64; 3]> {
     quad(0.0).into_iter().chain(quad(1.0)).flatten().collect()
 }
 
-fn kinds(edges: &[hsmworks_app::geometry::feature::FeatureEdge]) -> Vec<EdgeKind> {
+fn kinds(edges: &[camcraft_app::geometry::feature::FeatureEdge]) -> Vec<EdgeKind> {
     edges.iter().map(|e| e.kind).collect()
 }
 
@@ -199,7 +199,7 @@ fn horizontal_faces(f: &Features) -> Vec<u64> {
         .collect()
 }
 
-fn faces_at_z(f: &Features, z: f64) -> Vec<&hsmworks_app::geometry::feature::Face> {
+fn faces_at_z(f: &Features, z: f64) -> Vec<&camcraft_app::geometry::feature::Face> {
     f.faces
         .iter()
         .filter(|x| x.kind == FaceKind::Planar && x.normal[2] > 0.5 && (x.offset - z).abs() < 1e-6)

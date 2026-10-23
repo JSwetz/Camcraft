@@ -3,10 +3,10 @@
 //!
 //! Gate map (M4.4): covers app::commands, app::geometry, app::schema, app::stock.
 
-use hsmworks_app::commands::{Command, ImportModel};
-use hsmworks_app::geometry::{cube, Mesh, Point3, quat_from_yaw};
-use hsmworks_app::schema::Location;
-use hsmworks_app::{model, pick, world::new_world};
+use camcraft_app::commands::{Command, ImportModel};
+use camcraft_app::geometry::{cube, Mesh, Point3, quat_from_yaw};
+use camcraft_app::schema::Location;
+use camcraft_app::{model, pick, world::new_world};
 
 fn cube_at(origin: Point3) -> Mesh {
     cube(origin, Point3::new(origin.x + 1.0, origin.y + 1.0, origin.z + 1.0))
@@ -120,8 +120,8 @@ fn first_hit_f_skip_lets_the_ray_through() {
 
 #[test]
 fn models_win_over_stock_and_stock_is_pickable() {
-    use hsmworks_app::commands::SetStock;
-    use hsmworks_app::stock::StockShape;
+    use camcraft_app::commands::SetStock;
+    use camcraft_app::stock::StockShape;
 
     let world = new_world();
     ImportModel::from_mesh("part", cube_at(Point3::ZERO)).apply(&world);

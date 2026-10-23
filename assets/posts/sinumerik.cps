@@ -6,7 +6,7 @@
 // convention leaves a hole, the house style (see fanuc.cps) decides,
 // and the conformance goldens lock that decision, not any vendor's.
 description = "Siemens 840D (3-axis mill, DIN/ISO cycles G73-G89, G2/G3)";
-vendor = "HSMWorks (independent, unaffiliated)";
+vendor = "CamCraft (independent, unaffiliated)";
 legal = "Original clean-room work; public documentation only";
 certificationLevel = 1;
 minimumRevision = 1;
@@ -86,7 +86,7 @@ function coolantCode() {
 // The DIN family comments with ';' and needs no fence; identity is one
 // comment line, and the first real block carries the plane.
 function onOpen() {
-  var nm = (typeof machine !== "undefined" && machine.name) || "HSMWORKS";
+  var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("; " + nm);
 }
 

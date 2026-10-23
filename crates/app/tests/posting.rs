@@ -13,23 +13,23 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     AddTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine, SelectPost,
     SetStock, SetWcsOrigin,
 };
-use hsmworks_app::drilling::CycleChoice;
-use hsmworks_app::geo2d::Point2;
-use hsmworks_app::geometry::{cube, IDENTITY_Q, Point3};
-use hsmworks_app::machining2d::{Lead, Side};
-use hsmworks_app::model;
-use hsmworks_app::schema::{Location, PostRef};
-use hsmworks_app::operation::{Height, HeightReference, OpParams, SrcRef};
-use hsmworks_app::posting;
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::catalog;
-use hsmworks_app::world::new_world;
+use camcraft_app::drilling::CycleChoice;
+use camcraft_app::geo2d::Point2;
+use camcraft_app::geometry::{cube, IDENTITY_Q, Point3};
+use camcraft_app::machining2d::{Lead, Side};
+use camcraft_app::model;
+use camcraft_app::schema::{Location, PostRef};
+use camcraft_app::operation::{Height, HeightReference, OpParams, SrcRef};
+use camcraft_app::posting;
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::catalog;
+use camcraft_app::world::new_world;
 
-fn catalog_tool(name: &str) -> hsmworks_app::tools::Tool {
+fn catalog_tool(name: &str) -> camcraft_app::tools::Tool {
     catalog()
         .into_iter()
         .find(|(n, _)| *n == name)
@@ -67,7 +67,7 @@ fn contour_params() -> OpParams {
     }
 }
 
-fn drill_params(hole: hsmworks_app::drilling::Hole, top_z: f64, clearance_z: f64) -> OpParams {
+fn drill_params(hole: camcraft_app::drilling::Hole, top_z: f64, clearance_z: f64) -> OpParams {
     OpParams::Drill {
         clearance_z: Height::fixed(clearance_z),
         retract_z: None,
@@ -82,8 +82,8 @@ fn drill_params(hole: hsmworks_app::drilling::Hole, top_z: f64, clearance_z: f64
     }
 }
 
-fn hole(x: f64, y: f64, radius: f64, entry_z: f64, floor_z: f64, through: bool) -> hsmworks_app::drilling::Hole {
-    hsmworks_app::drilling::Hole {
+fn hole(x: f64, y: f64, radius: f64, entry_z: f64, floor_z: f64, through: bool) -> camcraft_app::drilling::Hole {
+    camcraft_app::drilling::Hole {
         xy: Point2::new(x, y),
         radius,
         entry_z,
@@ -124,7 +124,7 @@ fn contour_and_drill() -> (World, History) {
 
 fn tmp_nc(tag: &str) -> std::path::PathBuf {
     let mut p = std::env::temp_dir();
-    p.push(format!("hsmw-posting-{}-{}.nc", tag, std::process::id()));
+    p.push(format!("camcraft-posting-{}-{}.nc", tag, std::process::id()));
     let _ = std::fs::remove_file(&p);
     p
 }
@@ -278,7 +278,7 @@ fn a_gouging_program_is_refused_by_the_verification_gate() {
 
     // The gate's evidence is the Deviate cell's evidence: the same
     // walk, so the count in the sentence is the sim's own.
-    let sim = hsmworks_app::stock_sim::simulate_document(&world).expect("sim runs");
+    let sim = camcraft_app::stock_sim::simulate_document(&world).expect("sim runs");
     let lines = posting::verification_gate(&world);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(
@@ -302,9 +302,9 @@ fn machine_limits_block_the_post_and_within_limits_does_not() {
     history.execute(&world, cmd.expect("create"));
     history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
 
-    let tight = hsmworks_app::machine::Machine {
+    let tight = camcraft_app::machine::Machine {
         model: "TestMill 1".into(),
-        vendor: "Hsmworks Testbench".into(),
+        vendor: "CamCraft Testbench".into(),
         spindle_min: Some(50.0),
         spindle_max: Some(10000.0), // EM-0400-2FL runs 12000
         ..Default::default()
@@ -321,7 +321,7 @@ fn machine_limits_block_the_post_and_within_limits_does_not() {
 
     // The same program under a machine that can give it: the gate
     // opens without touching the program - it never re-plans.
-    let roomy = hsmworks_app::machine::Machine { spindle_max: Some(12000.0), ..tight };
+    let roomy = camcraft_app::machine::Machine { spindle_max: Some(12000.0), ..tight };
     history
         .execute(&world, LoadMachine::new(&world, "roomy.mch".into(), Some(roomy)).expect("sane"));
     assert!(posting::verification_gate(&world).is_empty());
@@ -363,7 +363,7 @@ fn a_program_the_sim_cannot_judge_still_posts() {
         model::toolpath_of(&world, &e).expect("cache").warnings.is_empty(),
         "generation must be silent - the sim's silence here is the tested thing"
     );
-    assert!(hsmworks_app::stock_sim::simulate_document(&world).is_err(), "fixture: no stock, no judge");
+    assert!(camcraft_app::stock_sim::simulate_document(&world).is_err(), "fixture: no stock, no judge");
     assert!(posting::verification_gate(&world).is_empty(), "no verdict, no veto");
     posting::post_setup(&world, &tmp_nc("nostock")).expect("unjudged is not unsafe");
 }
@@ -499,7 +499,7 @@ fn posted_carries_line_positions_matching_the_move_chain() {
 /// A scratch `.cps` with the given text, named for this process.
 fn tmp_cps(tag: &str, text: &str) -> std::path::PathBuf {
     let mut p = std::env::temp_dir();
-    p.push(format!("hsmw-posting-{}-{}.cps", tag, std::process::id()));
+    p.push(format!("camcraft-posting-{}-{}.cps", tag, std::process::id()));
     let _ = std::fs::remove_file(&p);
     std::fs::write(&p, text).expect("write temp cps");
     p
@@ -540,27 +540,27 @@ fn a_mounted_machine_names_the_program_and_speaks_only_its_own_coolant() {
     assert!(plain.contains("(VMC 3-AXIS)"), "the shipped machine names the header: {plain}");
     assert!(plain.contains("M8"), "the shipped VMC states flood coolant");
 
-    let mounted = hsmworks_app::machine::Machine {
+    let mounted = camcraft_app::machine::Machine {
         model: "TestMill 2".into(),
-        vendor: "Hsmworks Testbench".into(),
+        vendor: "CamCraft Testbench".into(),
         spindle_min: Some(100.0),
         spindle_max: Some(24000.0), // the 12000 rpm tool is inside it
         axes: vec![
-            hsmworks_app::machine::AxisLimits {
+            camcraft_app::machine::AxisLimits {
                 name: "X".into(),
                 feed: Some(5000.0),
                 rapid: Some(9000.0),
                 travel: None,
                 ..Default::default()
             },
-            hsmworks_app::machine::AxisLimits {
+            camcraft_app::machine::AxisLimits {
                 name: "Y".into(),
                 feed: Some(5000.0),
                 rapid: Some(9000.0),
                 travel: None,
                 ..Default::default()
             },
-            hsmworks_app::machine::AxisLimits {
+            camcraft_app::machine::AxisLimits {
                 name: "Z".into(),
                 feed: Some(3000.0),
                 rapid: Some(4000.0),
@@ -588,7 +588,7 @@ fn a_mounted_machine_names_the_program_and_speaks_only_its_own_coolant() {
     assert_eq!(v["name"], "TestMill 2");
     let axes = v["kinematics"]["static"]["axes"].as_array().expect("three axes");
     assert_eq!(axes.len(), 3);
-    assert_eq!(hsmworks_app::sim::Traverse::from_machine(&v).z, 4000.0);
+    assert_eq!(camcraft_app::sim::Traverse::from_machine(&v).z, 4000.0);
 }
 
 #[test]
@@ -604,14 +604,14 @@ fn a_mounted_coolant_list_writes_its_own_codes() {
     history.execute(&world, cmd.expect("create"));
     history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
 
-    let mounted = hsmworks_app::machine::Machine {
+    let mounted = camcraft_app::machine::Machine {
         model: "CoolMill".into(),
         coolants: vec![
-            hsmworks_app::machine::Coolant {
+            camcraft_app::machine::Coolant {
                 name: "Brine".into(),
                 m_code: "M51".into(),
             },
-            hsmworks_app::machine::Coolant {
+            camcraft_app::machine::Coolant {
                 name: "Air".into(),
                 m_code: String::new(),
             },
@@ -671,7 +671,7 @@ fn a_user_script_is_validated_on_choice_undone_cleanly_and_missed_loudly() {
     assert!(err.to_string().contains("does not run"), "{err}");
     let _ = std::fs::remove_file(&bad);
 
-    let missing = std::env::temp_dir().join(format!("hsmw-gone-{}.cps", std::process::id()));
+    let missing = std::env::temp_dir().join(format!("camcraft-gone-{}.cps", std::process::id()));
     let _ = std::fs::remove_file(&missing);
     let err = SelectPost::new(&world, PostRef::File(missing.display().to_string()))
         .expect_err("an unreadable path is refused at the pick");

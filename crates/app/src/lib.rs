@@ -1,4 +1,4 @@
-//! HSMWorks clean-room app layer.
+//! CamCraft app layer - a clean-room implementation.
 //!
 //! Provenance: independent implementation specced solely from public
 //! documentation of commercial CAM workflows and published technical

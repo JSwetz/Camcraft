@@ -6,23 +6,23 @@
 //!
 //! Gate map (M4.4): covers app::cl, app::commands, app::fixture, app::geo2d, app::geometry, app::machine, app::model, app::operation, app::posting, app::schema, app::setup, app::stock, app::tools, app::verify, app::world.
 
-use hsmworks_app::cl::{Move, MoveKind, Toolpath};
-use hsmworks_app::commands::{
+use camcraft_app::cl::{Move, MoveKind, Toolpath};
+use camcraft_app::commands::{
     AddTool, CommandError, CreateOperation, CreateSetup, DeleteEntity, DeleteFixture, GenerateOperation,
     History, MoveFixture, SetStock, TagFixture, UntagFixture,
 };
-use hsmworks_app::fixture::{self, FixtureBox, MACHINE_TABLE};
-use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::geometry::{Point3, Triangle};
-use hsmworks_app::machine::{self, AxisLimits, Machine};
-use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
-use hsmworks_app::posting;
-use hsmworks_app::schema::{FixtureDef, Location};
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::{catalog, Tool};
-use hsmworks_app::verify::{FixturePart, Mode, ToolGeom, VerifyContext, Warning, verify};
-use hsmworks_app::world::new_world;
+use camcraft_app::fixture::{self, FixtureBox, MACHINE_TABLE};
+use camcraft_app::geo2d::{Loop, Point2, Region};
+use camcraft_app::geometry::{Point3, Triangle};
+use camcraft_app::machine::{self, AxisLimits, Machine};
+use camcraft_app::model;
+use camcraft_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
+use camcraft_app::posting;
+use camcraft_app::schema::{FixtureDef, Location};
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::verify::{FixturePart, Mode, ToolGeom, VerifyContext, Warning, verify};
+use camcraft_app::world::new_world;
 
 /// Stock + a 4 mm end mill + a generated face operation: the same
 /// fixture the operations suite runs on, rebuilt here so the live-gate
@@ -572,7 +572,7 @@ fn re_binding_a_fixture_is_undoable_as_a_re_bind() {
 }
 
 fn setup_names(world: &flecs_ecs::prelude::World) -> Vec<String> {
-    hsmworks_app::setup::names(world)
+    camcraft_app::setup::names(world)
 }
 
 #[test]
@@ -716,7 +716,7 @@ fn workholding_never_stales_a_fresh_toolpath() {
         &world,
         CreateSetup::new(&world, None, None).expect("a second setup"),
     );
-    let second = hsmworks_app::setup::names(&world)
+    let second = camcraft_app::setup::names(&world)
         .into_iter()
         .nth(1)
         .expect("two setups");

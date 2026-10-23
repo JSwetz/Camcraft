@@ -14,20 +14,20 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     AddTool, CreateOperation, EditOperationParams, GenerateOperation, History, ImportModel,
     RegenerateAll, SetStock,
 };
-use hsmworks_app::cl::{Move, MoveKind};
-use hsmworks_app::geometry::{Mesh, Point3, Triangle, cube, quat_from_yaw};
-use hsmworks_app::machining2d::{GenError, PocketStrategy};
-use hsmworks_app::machining3d::Entry3D;
-use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
-use hsmworks_app::schema::{Location, Toolpath};
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::{catalog, Tool};
-use hsmworks_app::world::new_world;
+use camcraft_app::cl::{Move, MoveKind};
+use camcraft_app::geometry::{Mesh, Point3, Triangle, cube, quat_from_yaw};
+use camcraft_app::machining2d::{GenError, PocketStrategy};
+use camcraft_app::machining3d::Entry3D;
+use camcraft_app::model;
+use camcraft_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
+use camcraft_app::schema::{Location, Toolpath};
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::world::new_world;
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()

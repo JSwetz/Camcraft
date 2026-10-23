@@ -15,20 +15,20 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, SetWcsOrigin,
 };
-use hsmworks_app::geometry::{IDENTITY_Q, Point3, cube};
-use hsmworks_app::machine::{AxisLimits, Machine, check_document, parse_mch};
-use hsmworks_app::model;
-use hsmworks_app::operation::{Height, OpParams, SrcRef};
-use hsmworks_app::posting;
-use hsmworks_app::schema::Location;
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::catalog;
-use hsmworks_app::world::new_world;
+use camcraft_app::geometry::{IDENTITY_Q, Point3, cube};
+use camcraft_app::machine::{AxisLimits, Machine, check_document, parse_mch};
+use camcraft_app::model;
+use camcraft_app::operation::{Height, OpParams, SrcRef};
+use camcraft_app::posting;
+use camcraft_app::schema::Location;
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::catalog;
+use camcraft_app::world::new_world;
 
-fn catalog_tool(name: &str) -> hsmworks_app::tools::Tool {
+fn catalog_tool(name: &str) -> camcraft_app::tools::Tool {
     catalog()
         .into_iter()
         .find(|(n, _)| *n == name)
@@ -43,7 +43,7 @@ fn catalog_tool(name: &str) -> hsmworks_app::tools::Tool {
 fn reference() -> Machine {
     Machine {
         model: "TestMill 1".into(),
-        vendor: "Hsmworks Testbench".into(),
+        vendor: "CamCraft Testbench".into(),
         spindle_min: Some(50.0),
         spindle_max: Some(12000.0),
         axes: vec![
@@ -104,7 +104,7 @@ fn faced_doc() -> (World, History) {
 
 #[test]
 fn the_axis_inventory_picks_the_workspace() {
-    use hsmworks_app::machine::{Kind, kind};
+    use camcraft_app::machine::{Kind, kind};
     let axis = |n: &str| AxisLimits {
         name: n.to_string(),
         ..Default::default()
@@ -138,7 +138,7 @@ fn parse_reads_the_limits() {
     // Our own file, our own values; the layout is the .mch shape the
     // kinematics chain (head -> X -> Y -> Z) takes in the wild.
     let text = r#"{
-      "general": {"model": "TestMill 1", "vendor": "Hsmworks Testbench"},
+      "general": {"model": "TestMill 1", "vendor": "CamCraft Testbench"},
       "kinematics": {"default": {
         "units": {"angle": "degrees", "length": "mm"},
         "parts": [
@@ -168,7 +168,7 @@ fn parse_reads_the_limits() {
     }"#;
     let m = parse_mch(text).expect("well-formed file");
     assert_eq!(m, reference(), "the reader and the fixture struct are the same machine");
-    assert!(m.summary().starts_with("Hsmworks Testbench TestMill 1"));
+    assert!(m.summary().starts_with("CamCraft Testbench TestMill 1"));
     assert!(m.summary().contains("3 axes (3 with a known stroke)"));
 }
 
@@ -398,8 +398,8 @@ fn the_machine_walk_is_the_post_walk() {
     let (world, mut history) = faced_doc();
     // Stale it the way stage B's tests do - the stock's placement is
     // in the op's digest.
-    let stock = model::find_by_name(&world, hsmworks_app::schema::STOCK_NAME).expect("stock");
-    model::set_transform(&world, &stock, hsmworks_app::schema::Location { pos: Point3::new(0.0, 0.0, 1.0), rot: IDENTITY_Q });
+    let stock = model::find_by_name(&world, camcraft_app::schema::STOCK_NAME).expect("stock");
+    model::set_transform(&world, &stock, camcraft_app::schema::Location { pos: Point3::new(0.0, 0.0, 1.0), rot: IDENTITY_Q });
     let err = check_document(&world, &reference()).expect_err("stale blocks the check");
     assert!(err.contains("Face1") && err.contains("regenerate"), "{err}");
     history.execute(&world, GenerateOperation::new(&world, "Face1").expect("regenerate"));
@@ -430,7 +430,7 @@ fn the_post_mirror_states_only_what_the_machine_stated() {
     // field on the machine, no coolant key in the mirror.
     let m = Machine {
         model: "MirrorMill".into(),
-        vendor: "Hsmworks Testbench".into(),
+        vendor: "CamCraft Testbench".into(),
         spindle_max: Some(8000.0),
         axes: vec![
             AxisLimits {
@@ -444,7 +444,7 @@ fn the_post_mirror_states_only_what_the_machine_stated() {
         ],
         ..Default::default()
     };
-    let v = hsmworks_app::post::machine::mirror(&m);
+    let v = camcraft_app::post::machine::mirror(&m);
     assert_eq!(v["name"], "MirrorMill");
     let axes = v["kinematics"]["static"]["axes"].as_array().expect("axes array");
     assert_eq!(axes.len(), 1, "the rotary C keeps out of the traverse grammar");
@@ -456,14 +456,14 @@ fn the_post_mirror_states_only_what_the_machine_stated() {
     assert_eq!(v["kinematics"]["static"]["head"]["spindle"]["max"], 8000.0);
     assert_eq!(v["rapidRate"], 7000.0, "the ceiling is the fastest stated axis");
 
-    let props = hsmworks_app::post::machine::script_props(&v);
+    let props = camcraft_app::post::machine::script_props(&v);
     assert_eq!(props["name"], "MirrorMill");
     assert_eq!(props["spindleMax"], 8000.0);
     assert_eq!(props["coolants"].as_array().map(Vec::len), Some(0), "silent coolant, stated");
 
     // The mute machine mirrors to silence, not to zeros that lie.
-    let mute = hsmworks_app::post::machine::script_props(
-        &hsmworks_app::post::machine::mirror(&Machine::default()),
+    let mute = camcraft_app::post::machine::script_props(
+        &camcraft_app::post::machine::mirror(&Machine::default()),
     );
     assert_eq!(mute["name"], "");
     assert_eq!(mute["spindleMax"], 0.0, "absent reads 0: the `> 0` guards keep it silent");
@@ -477,7 +477,7 @@ fn the_post_mirror_states_only_what_the_machine_stated() {
 fn the_declared_kind_outranks_the_axis_inventory() {
     // stage C: a file that says what it is wins; the M3.2 inference
     // stays as the fallback for files that state nothing.
-    use hsmworks_app::machine::{Kind, kind};
+    use camcraft_app::machine::{Kind, kind};
     let axis = |n: &str| AxisLimits {
         name: n.to_string(),
         ..Default::default()
@@ -516,7 +516,7 @@ fn the_declared_kind_outranks_the_axis_inventory() {
 #[test]
 fn parse_reads_the_full_stage_c_grammar() {
     let text = r#"{
-      "general": {"model": "StageC 1", "vendor": "Hsmworks Testbench", "kind": "mill-turn"},
+      "general": {"model": "StageC 1", "vendor": "CamCraft Testbench", "kind": "mill-turn"},
       "kinematics": {"default": {
         "units": {"length": "mm", "angle": "degrees"},
         "parts": [
@@ -550,8 +550,8 @@ fn parse_reads_the_full_stage_c_grammar() {
     assert_eq!(y.resolution, Some(0.001), "linear resolution is a length");
     assert!(m.is_sane());
     assert_eq!(
-        hsmworks_app::machine::kind(Some(&m)),
-        hsmworks_app::machine::Kind::MillTurn
+        camcraft_app::machine::kind(Some(&m)),
+        camcraft_app::machine::Kind::MillTurn
     );
 }
 
@@ -588,7 +588,7 @@ fn a_kind_that_is_not_a_kind_refuses_at_the_door() {
     };
     assert!(!smuggled.is_sane());
     let blank_option = Machine {
-        coolants: vec![hsmworks_app::machine::Coolant {
+        coolants: vec![camcraft_app::machine::Coolant {
             name: String::new(),
             m_code: "M8".to_string(),
         }],
@@ -663,7 +663,7 @@ fn the_changer_says_nothing_when_the_machine_stated_nothing() {
 fn the_coolant_list_reaches_the_script() {
     // stage C completes the bridge the unmounted document already
     // walked: the mounted list, codes and name-only entries alike.
-    use hsmworks_app::machine::Coolant;
+    use camcraft_app::machine::Coolant;
     let m = Machine {
         coolants: vec![
             Coolant {
@@ -677,7 +677,7 @@ fn the_coolant_list_reaches_the_script() {
         ],
         ..reference()
     };
-    let props = hsmworks_app::post::machine::script_props(&hsmworks_app::post::machine::mirror(&m));
+    let props = camcraft_app::post::machine::script_props(&camcraft_app::post::machine::mirror(&m));
     let list = props["coolants"].as_array().expect("a coolants list");
     assert_eq!(list.len(), 2);
     assert_eq!(
@@ -692,8 +692,8 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
     // The built-in library the Setup pane offers: every entry is
     // parseable, sane, and its declared kind matches what its own
     // axis inventory infers - the files are honest both ways.
-    use hsmworks_app::machine::{Kind, kind};
-    use hsmworks_app::posting::MACHINES;
+    use camcraft_app::machine::{Kind, kind};
+    use camcraft_app::posting::MACHINES;
     let expectations = [
         ("VMC 3-axis", Kind::Mill),
         ("Mill-turn", Kind::MillTurn),
@@ -785,7 +785,7 @@ fn rotaries_mirror_as_geometry_never_as_speeds() {
         ],
         ..Default::default()
     };
-    let v = hsmworks_app::post::machine::mirror(&m);
+    let v = camcraft_app::post::machine::mirror(&m);
     let axes = v["kinematics"]["static"]["axes"].as_array().expect("axes");
     assert_eq!(axes.len(), 1, "only the slide is an axis");
     assert_eq!(v["kinematics"]["static"]["axes"][0]["letter"], "X");
@@ -797,7 +797,7 @@ fn rotaries_mirror_as_geometry_never_as_speeds() {
     assert_eq!(rots[0]["travel"], serde_json::json!([-120.0, 120.0]));
     assert!(rots[0].get("speeds").is_none(), "geometry, never speeds");
 
-    let p = hsmworks_app::post::machine::script_props(&v);
+    let p = camcraft_app::post::machine::script_props(&v);
     assert_eq!(p["rtcp"], serde_json::json!(true), "an A about X tilts");
     assert_eq!(p["rotaries"].as_array().map(Vec::len), Some(1));
 }
@@ -818,7 +818,7 @@ fn a_spin_axis_turns_but_never_tilts() {
         }],
         ..Default::default()
     };
-    let p = hsmworks_app::post::machine::script_props(&hsmworks_app::post::machine::mirror(&m));
+    let p = camcraft_app::post::machine::script_props(&camcraft_app::post::machine::mirror(&m));
     assert_eq!(p["rtcp"], serde_json::json!(false));
     assert_eq!(p["rotaries"].as_array().map(Vec::len), Some(1));
 
@@ -831,7 +831,7 @@ fn a_spin_axis_turns_but_never_tilts() {
         .expect("the stock machine file ships"),
     )
     .expect("valid json");
-    let raw = hsmworks_app::post::machine::script_props(&mch);
+    let raw = camcraft_app::post::machine::script_props(&mch);
     assert_eq!(raw["rtcp"], serde_json::json!(false), "the C is a spindle column");
 }
 
@@ -849,7 +849,7 @@ fn an_unstated_rotary_tilts_nothing_a_post_may_promise() {
         }],
         ..Default::default()
     };
-    let p = hsmworks_app::post::machine::script_props(&hsmworks_app::post::machine::mirror(&m));
+    let p = camcraft_app::post::machine::script_props(&camcraft_app::post::machine::mirror(&m));
     assert_eq!(p["rtcp"], serde_json::json!(false));
     assert_eq!(p["rotaries"][0]["name"], "B");
     assert_eq!(p["rotaries"][0]["direction"], serde_json::Value::Null);
@@ -857,7 +857,7 @@ fn an_unstated_rotary_tilts_nothing_a_post_may_promise() {
     let raw = serde_json::json!({ "kinematics": { "static": { "axes": [
         { "letter": "X", "speeds": { "rapid": 5000.0 } },
         { "letter": "A", "axis": [0.0, 1.0, 0.0] } ] } } });
-    let r = hsmworks_app::post::machine::script_props(&raw);
+    let r = camcraft_app::post::machine::script_props(&raw);
     assert_eq!(r["rtcp"], serde_json::json!(true), "the raw door reads geometry too");
     assert_eq!(r["rapidRate"], 5000.0, "the rotary letter never joins the ceiling");
 }

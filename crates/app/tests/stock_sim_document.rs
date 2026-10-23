@@ -16,21 +16,21 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock,
 };
-use hsmworks_app::geometry::{IDENTITY_Q, Point3, cube, quat_from_yaw};
-use hsmworks_app::machining2d::{Lead, Side};
-use hsmworks_app::model;
-use hsmworks_app::operation::{Height, OpParams, SrcRef};
-use hsmworks_app::posting;
-use hsmworks_app::schema::{Location, STOCK_NAME};
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::stock_sim::{DEV_TOL, simulate_document};
-use hsmworks_app::tools::catalog;
-use hsmworks_app::world::new_world;
+use camcraft_app::geometry::{IDENTITY_Q, Point3, cube, quat_from_yaw};
+use camcraft_app::machining2d::{Lead, Side};
+use camcraft_app::model;
+use camcraft_app::operation::{Height, OpParams, SrcRef};
+use camcraft_app::posting;
+use camcraft_app::schema::{Location, STOCK_NAME};
+use camcraft_app::stock::StockShape;
+use camcraft_app::stock_sim::{DEV_TOL, simulate_document};
+use camcraft_app::tools::catalog;
+use camcraft_app::world::new_world;
 
-fn catalog_tool(name: &str) -> hsmworks_app::tools::Tool {
+fn catalog_tool(name: &str) -> camcraft_app::tools::Tool {
     catalog()
         .into_iter()
         .find(|(n, _)| *n == name)

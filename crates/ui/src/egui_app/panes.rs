@@ -8,7 +8,7 @@
 //! (super::icons), with the painted vector marks as their no-GPU twins -
 //! the retired imgui icons module folded into this stack, not replaced.
 //!
-//! Layering holds (AGENTS.md): world access is `hsmworks_app`'s public API
+//! Layering holds (AGENTS.md): world access is `camcraft_app`'s public API
 //! only, and every change goes through `state.pending` / the command
 //! methods, never an ad-hoc field poke. The whole-pane law
 //! (docs/spike-egui-go-no-go.md) forbids porting a pane by halves.
@@ -22,10 +22,10 @@
 
 use egui::{Key, Label, Rect, RichText, Sense, Ui, Vec2};
 
-use hsmworks_app::model;
-use hsmworks_app::operation::{self, OpParams, OpType};
-use hsmworks_app::schema::WCS_SLOTS;
-use hsmworks_app::tools::ToolKind;
+use camcraft_app::model;
+use camcraft_app::operation::{self, OpParams, OpType};
+use camcraft_app::schema::WCS_SLOTS;
+use camcraft_app::tools::ToolKind;
 
 use crate::actions;
 use crate::state::{CommandKind, DisplayMode, Sim, State, UiTarget};
@@ -226,8 +226,8 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Create(i) => {
             // imgui's swap: the buttons sit disabled over an empty tool
             // list, and the tip says what to do about it (ribbon.rs:138).
-            if hsmworks_app::machine::kind_of(&state.world)
-                == hsmworks_app::machine::Kind::Lathe
+            if camcraft_app::machine::kind_of(&state.world)
+                == camcraft_app::machine::Kind::Lathe
             {
                 "The document's machine is a lathe - turning operations \
                  land with M4.2; these milling cells do not drive it"
@@ -264,7 +264,7 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
         // else - a lathe document darkens every Create cell honestly
         // instead of offering mill paths its machine cannot run.
         Cmd::Create(_) => {
-            hsmworks_app::machine::kind_of(&state.world) != hsmworks_app::machine::Kind::Lathe
+            camcraft_app::machine::kind_of(&state.world) != camcraft_app::machine::Kind::Lathe
                 && !state.tool_names().is_empty()
         }
         Cmd::Simulate => state.has_toolpaths(),
@@ -608,8 +608,8 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     // Setups (M3.2 A): the row appears once the document has any, and
     // the Stock and WCS rows below resolve through the ACTIVE one - the
     // tree shows the context you are standing in, never a global ghost.
-    let active = hsmworks_app::setup::active(&state.world);
-    if !hsmworks_app::setup::names(&state.world).is_empty() {
+    let active = camcraft_app::setup::active(&state.world);
+    if !camcraft_app::setup::names(&state.world).is_empty() {
         push_row(
             &mut rows,
             &mut leaves,
@@ -623,7 +623,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             Leaf::Setups,
         );
     }
-    let stock_name = hsmworks_app::setup::stock_entity_name(&state.world, active.as_deref());
+    let stock_name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
     push_row(
         &mut rows,
         &mut leaves,
@@ -638,7 +638,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     );
     for (i, slot) in WCS_SLOTS.iter().enumerate() {
         let placed =
-            hsmworks_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
+            camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), i).is_some();
         push_row(
             &mut rows,
             &mut leaves,
@@ -678,7 +678,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     }
 
     push_row(&mut rows, &mut leaves, "Tools".into(), String::new(), painted::Kind::Section, None, false, false, 0, Leaf::Section);
-    let tools: Vec<(String, hsmworks_app::tools::Tool)> = model::named_entities(&state.world)
+    let tools: Vec<(String, camcraft_app::tools::Tool)> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_tool(&state.world, e))
         .filter_map(|(name, e)| model::tool_of(&state.world, &e).map(|t| (name, t)))
@@ -794,9 +794,9 @@ pub fn browser(
             Leaf::Setups => actions::target(state, UiTarget::Setups),
             Leaf::Stock => {
                 actions::target(state, UiTarget::Stock);
-                let stock_name = hsmworks_app::setup::stock_entity_name(
+                let stock_name = camcraft_app::setup::stock_entity_name(
                     &state.world,
-                    hsmworks_app::setup::active(&state.world).as_deref(),
+                    camcraft_app::setup::active(&state.world).as_deref(),
                 );
                 if model::find_by_name(&state.world, &stock_name).is_some() {
                     state.pending.push_back(CommandKind::Select(Some(stock_name)));

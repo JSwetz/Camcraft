@@ -10,19 +10,19 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     ActivateSetup, AddTool, CommandError, CreateOperation, CreateSetup, DeleteOperation,
     DeleteSetup, GenerateOperation, History, SetOperationSetup, SetStock, SetWcsOrigin,
 };
-use hsmworks_app::geometry::{IDENTITY_Q, Point3};
-use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
-use hsmworks_app::rest;
-use hsmworks_app::schema::{Location, STOCK_NAME, WCS_SLOTS};
-use hsmworks_app::setup;
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::{catalog, Tool};
-use hsmworks_app::world::new_world;
+use camcraft_app::geometry::{IDENTITY_Q, Point3};
+use camcraft_app::model;
+use camcraft_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
+use camcraft_app::rest;
+use camcraft_app::schema::{Location, STOCK_NAME, WCS_SLOTS};
+use camcraft_app::setup;
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::world::new_world;
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -78,7 +78,7 @@ fn create_face(world: &World, history: &mut History, name: &str, cut_z: f64) {
 fn run(
     world: &World,
     history: &mut History,
-    cmd: Result<impl hsmworks_app::commands::Command + 'static, CommandError>,
+    cmd: Result<impl camcraft_app::commands::Command + 'static, CommandError>,
     what: &str,
 ) {
     history.execute(world, cmd.unwrap_or_else(|e| panic!("{what}: {e:?}")));
@@ -239,7 +239,7 @@ fn program_order_is_setup_rank_then_name() {
     assert_eq!(order, vec!["Y_Face".to_string(), "Z_Face".to_string()]);
     assert!(setup::active(&world).as_deref() == Some("Setup1"));
     // The order law is the POST's order law - by call, one function.
-    let posted: Vec<String> = hsmworks_app::posting::program_ops(&world)
+    let posted: Vec<String> = camcraft_app::posting::program_ops(&world)
         .expect("program")
         .into_iter()
         .map(|(n, _)| n)

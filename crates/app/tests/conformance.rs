@@ -6,15 +6,15 @@
 //! diff is the review (UPDATE workflow per tests/golden/CLAUDE.md).
 //!
 //! Regenerate after an intentional change:
-//! `WRITE_GOLDEN=1 cargo test -p hsmworks-app --test conformance`
+//! `WRITE_GOLDEN=1 cargo test -p camcraft-app --test conformance`
 //! Fanuc's goldens live at the top of `golden/nc/` (M1.7b law, the
 //! suite `fanuc_post.rs` already locks); the four stage-B dialects get
 //! one subdirectory each.
 //!
 //! Gate map (M4.4): covers app::cl, app::post, app::posting.
 
-use hsmworks_app::cl::{CycleKind, MoveKind};
-use hsmworks_app::post::{cnc, engine};
+use camcraft_app::cl::{CycleKind, MoveKind};
+use camcraft_app::post::{cnc, engine};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -282,7 +282,7 @@ fn every_builtin_registry_entry_compiles() {
     // a stale include or a renamed file is a compile-time... no:
     // include_str! is compile-time, but the NAMES are the persistence
     // contract, so spell the registry out here against posting.rs.
-    let names: Vec<&str> = hsmworks_app::posting::BUILTINS.iter().map(|(n, _)| *n).collect();
+    let names: Vec<&str> = camcraft_app::posting::BUILTINS.iter().map(|(n, _)| *n).collect();
     assert_eq!(
         names,
         POSTS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>(),

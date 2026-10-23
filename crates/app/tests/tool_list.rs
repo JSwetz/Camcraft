@@ -1,6 +1,6 @@
 //! M3.2 stage C acceptance: the per-setup tool list is a pure read of
 //! the program order, first-use order and change law documented in
-//! `hsmworks_app::tool_list` - rows follow the order tools enter the
+//! `camcraft_app::tool_list` - rows follow the order tools enter the
 //! spindle, a switch back re-charges a change, time is the moves' own
 //! feeds (honest recomputation, the `peck_chain_agrees_with_cycle_record`
 //! idiom), ungenerated ops are listed at zero, setups split the list,
@@ -11,17 +11,17 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::cl::{Move, Toolpath};
-use hsmworks_app::commands::{
+use camcraft_app::cl::{Move, Toolpath};
+use camcraft_app::commands::{
     ActivateSetup, AddTool, CreateOperation, CreateSetup, GenerateOperation, History, SetStock,
 };
-use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tool_list::{self, RAPID_MM_S, TOOL_CHANGE_S};
-use hsmworks_app::tools::{catalog, Tool};
-use hsmworks_app::schema::Location;
-use hsmworks_app::world::new_world;
+use camcraft_app::model;
+use camcraft_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
+use camcraft_app::stock::StockShape;
+use camcraft_app::tool_list::{self, RAPID_MM_S, TOOL_CHANGE_S};
+use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::schema::Location;
+use camcraft_app::world::new_world;
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -127,11 +127,11 @@ fn recompute(path: &Toolpath) -> (f64, f64, f64) {
     for m in &path.moves {
         let l = seg_len(m);
         match m.kind {
-            hsmworks_app::cl::MoveKind::Rapid => {
+            camcraft_app::cl::MoveKind::Rapid => {
                 rap += l;
                 secs += l / RAPID_MM_S;
             }
-            hsmworks_app::cl::MoveKind::Feed | hsmworks_app::cl::MoveKind::Plunge => {
+            camcraft_app::cl::MoveKind::Feed | camcraft_app::cl::MoveKind::Plunge => {
                 cut += l;
                 match m.feed {
                     Some(f) if f > 0.0 => secs += 60.0 * l / f,

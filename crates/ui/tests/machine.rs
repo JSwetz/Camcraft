@@ -9,14 +9,14 @@
 
 use std::path::PathBuf;
 
-use hsmworks_app::machine;
-use hsmworks_app::operation::{Height, OpParams, SrcRef};
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::catalog;
-use hsmworks_ui::actions;
-use hsmworks_ui::state::{CommandKind, ErrorScope, State};
+use camcraft_app::machine;
+use camcraft_app::operation::{Height, OpParams, SrcRef};
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::catalog;
+use camcraft_ui::actions;
+use camcraft_ui::state::{CommandKind, ErrorScope, State};
 
-fn catalog_tool(name: &str) -> hsmworks_app::tools::Tool {
+fn catalog_tool(name: &str) -> camcraft_app::tools::Tool {
     catalog()
         .into_iter()
         .find(|(n, _)| *n == name)
@@ -25,7 +25,7 @@ fn catalog_tool(name: &str) -> hsmworks_app::tools::Tool {
 }
 
 fn tmp_mch(tag: &str, text: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("hsmworks_ui_machine_{tag}_{}.mch", std::process::id()));
+    let p = std::env::temp_dir().join(format!("camcraft_ui_machine_{tag}_{}.mch", std::process::id()));
     std::fs::write(&p, text).expect("write the fixture file");
     p
 }
@@ -253,7 +253,7 @@ fn the_machine_gate_refuses_the_post_by_name() {
     state.pending.push_back(CommandKind::LoadMachineFile(tight.clone()));
     state.drain_actions();
 
-    let nc = std::env::temp_dir().join(format!("hsmworks_ui_gate_{}.nc", std::process::id()));
+    let nc = std::env::temp_dir().join(format!("camcraft_ui_gate_{}.nc", std::process::id()));
     let _ = std::fs::remove_file(&nc);
     state.pending.push_back(CommandKind::PostProgramFile(nc.clone()));
     state.drain_actions();

@@ -7,9 +7,9 @@
 //!
 //! Gate map (M4.4): covers ui::state, app::fixture, app::model.
 
-use hsmworks_app::fixture;
-use hsmworks_app::model;
-use hsmworks_ui::state::{CommandKind, State};
+use camcraft_app::fixture;
+use camcraft_app::model;
+use camcraft_ui::state::{CommandKind, State};
 
 fn cube_path() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

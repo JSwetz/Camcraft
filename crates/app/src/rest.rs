@@ -88,7 +88,7 @@ struct Ahead {
 fn path_hash(moves: &[Move]) -> u64 {
     use std::hash::Hasher;
     let mut h = std::hash::DefaultHasher::new();
-    h.write(b"hsmw-rest-path-v1");
+    h.write(b"camcraft-rest-path-v1");
     h.write_u64(moves.len() as u64);
     for m in moves {
         h.write_u8(match m.kind {
@@ -177,7 +177,7 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
 fn digest_of(ahead: &[Ahead]) -> u64 {
     use std::hash::Hasher;
     let mut h = std::hash::DefaultHasher::new();
-    h.write(b"hsmw-rest-v1");
+    h.write(b"camcraft-rest-v1");
     for a in ahead {
         h.write(a.name.as_bytes());
         if a.cut {

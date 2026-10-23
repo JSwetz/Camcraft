@@ -11,17 +11,17 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     ActivateSetup, AddTool, CommandError, CreateOperation, CreateSetup, GenerateOperation, History,
     SetStock, SetWcsOrigin,
 };
-use hsmworks_app::geometry::{IDENTITY_Q, Point3};
-use hsmworks_app::operation::{Height, HeightReference, OpParams, SrcRef};
-use hsmworks_app::schema::Location;
-use hsmworks_app::setup_sheet;
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::{catalog, Tool};
-use hsmworks_app::world::new_world;
+use camcraft_app::geometry::{IDENTITY_Q, Point3};
+use camcraft_app::operation::{Height, HeightReference, OpParams, SrcRef};
+use camcraft_app::schema::Location;
+use camcraft_app::setup_sheet;
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::world::new_world;
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -77,7 +77,7 @@ fn create_face(world: &World, history: &mut History, name: &str, cut_z: f64) {
 fn run(
     world: &World,
     history: &mut History,
-    cmd: Result<impl hsmworks_app::commands::Command + 'static, CommandError>,
+    cmd: Result<impl camcraft_app::commands::Command + 'static, CommandError>,
     what: &str,
 ) {
     history.execute(world, cmd.unwrap_or_else(|e| panic!("{what}: {e:?}")));

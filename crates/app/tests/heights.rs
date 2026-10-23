@@ -10,19 +10,19 @@
 
 use flecs_ecs::prelude::World;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     AddTool, CommandError, CreateOperation, DeleteEntity, GenerateOperation, History, ImportModel,
     SetStock, SetWcsOrigin,
 };
-use hsmworks_app::geometry::{cube, IDENTITY_Q, Point3};
-use hsmworks_app::machining2d::PocketStrategy;
-use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
-use hsmworks_app::project;
-use hsmworks_app::schema::{Location, STOCK_NAME};
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::{catalog, Tool};
-use hsmworks_app::world::new_world;
+use camcraft_app::geometry::{cube, IDENTITY_Q, Point3};
+use camcraft_app::machining2d::PocketStrategy;
+use camcraft_app::model;
+use camcraft_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
+use camcraft_app::project;
+use camcraft_app::schema::{Location, STOCK_NAME};
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::world::new_world;
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -379,7 +379,7 @@ fn v5_numeric_heights_land_as_fixed_to_the_bit() {
     // Resaved, the same number is an explicit expression - and reopens
     // with identical bits.
     let path = std::env::temp_dir()
-        .join(format!("hsmworks_heights_v5_{}.hsmproj", std::process::id()));
+        .join(format!("camcraft_heights_v5_{}.camproj", std::process::id()));
     project::save(&world, &path).expect("save");
     let saved = std::fs::read_to_string(&path).expect("read");
     let _ = std::fs::remove_file(&path);
@@ -416,7 +416,7 @@ fn references_and_placements_survive_a_project_roundtrip() {
         CreateOperation::new(&world, "P1", "EM-0400-2FL", SrcRef::Stock, params).expect("create"),
     );
     let path = std::env::temp_dir()
-        .join(format!("hsmworks_heights_rt_{}.hsmproj", std::process::id()));
+        .join(format!("camcraft_heights_rt_{}.camproj", std::process::id()));
     project::save(&world, &path).expect("save");
     let saved = std::fs::read_to_string(&path).expect("read");
     let _ = std::fs::remove_file(&path);

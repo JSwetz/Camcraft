@@ -106,7 +106,7 @@ default — inventing a word is the same lying as omitting one).
    `every_builtin_posts_every_golden_byte_exact` runs over every
    `BUILTINS` entry, so an unregistered/unpinned post fails the suite,
    not the shop.
-4. Gate: `cargo test -p hsmworks-app --test conformance --test
+4. Gate: `cargo test -p camcraft-app --test conformance --test
    fanuc_post --test posting`, plus a CLI smoke —
    `post.exe --machine ../machines/vmc.mch <name>.cps <file>.cnc out.nc`
    against a committed golden `.cl` (every golden is a legal input).

@@ -20,7 +20,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build release binaries
         shell: bash
-        run: cargo build --release -p hsmworks-ui -p hsmworks-app
+        run: cargo build --release -p camcraft-ui -p camcraft-app
           -p camcraft-post
       - name: Assemble portable zip
         shell: pwsh
@@ -31,16 +31,16 @@ jobs:
           # host-dependent (empty workspace_version under PowerShell 5.1).
           $ver = ((& ".\target\release\post.exe" --version) -split '\s+')[1]
           if (-not $ver) { throw "cannot read the version from post.exe" }
-          $stage = "dist/hsmworks-$ver-win-x64"
+          $stage = "dist/camcraft-$ver-win-x64"
           New-Item -ItemType Directory -Force `
               "$stage/assets/posts", "$stage/assets/machines", "$stage/assets/ui" | Out-Null
-          Copy-Item target/release/hsmworks-ui.exe $stage
+          Copy-Item target/release/camcraft-ui.exe $stage
           Copy-Item target/release/post.exe $stage
           Copy-Item assets/posts/* "$stage/assets/posts"
           Copy-Item assets/machines/* "$stage/assets/machines"
           Copy-Item assets/ui/* "$stage/assets/ui"
           Copy-Item RELEASE_NOTES.md $stage
-          Compress-Archive -Path $stage -DestinationPath "dist/hsmworks-$ver-win-x64.zip" -Force
+          Compress-Archive -Path $stage -DestinationPath "dist/camcraft-$ver-win-x64.zip" -Force
           Get-ChildItem dist
       - uses: actions/upload-artifact@v4
         with:

@@ -12,7 +12,7 @@
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::stock_sim, camcraft_motion::verify.
 //! Lane shape (M4.4): 12 law tests run here in seconds; 27 envelope-VERDICT and
 //! dome-generation tests are #[ignore]d - run them with
-//! `cargo test --release -p hsmworks-app -- --ignored` at milestone close.
+//! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
 
 use camcraft_motion::cl::{MoveKind, Toolpath};
 use camcraft_motion::finishing3d::{

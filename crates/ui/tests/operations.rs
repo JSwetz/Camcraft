@@ -6,13 +6,13 @@
 //!
 //! Gate map (M4.4): covers ui::interact, ui::operations, ui::state, app::cl, app::commands, app::geometry, app::machining2d, app::model, app::operation, app::schema, app::stock, app::tools.
 
-use hsmworks_app::model;
-use hsmworks_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
-use hsmworks_app::schema::STOCK_NAME;
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::{Tool, catalog};
-use hsmworks_app::machining2d::{Lead, Side};
-use hsmworks_ui::state::{CommandKind, ErrorScope, OpUi, State, ToolUi, UiTarget};
+use camcraft_app::model;
+use camcraft_app::operation::{self, Height, HeightReference, OpParams, OpStatus, SrcRef};
+use camcraft_app::schema::STOCK_NAME;
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::{Tool, catalog};
+use camcraft_app::machining2d::{Lead, Side};
+use camcraft_ui::state::{CommandKind, ErrorScope, OpUi, State, ToolUi, UiTarget};
 
 fn catalog_tool(name: &str) -> Tool {
     catalog()
@@ -75,7 +75,7 @@ fn status(state: &State, name: &str) -> OpStatus {
     operation::status_of(&state.world, &e)
 }
 
-fn cache(state: &State, name: &str) -> Option<hsmworks_app::cl::Toolpath> {
+fn cache(state: &State, name: &str) -> Option<camcraft_app::cl::Toolpath> {
     let e = model::find_by_name(&state.world, name).expect("operation entity");
     model::toolpath_of(&state.world, &e).map(|tp| tp.path)
 }
@@ -544,10 +544,10 @@ fn delete_operation_round_trips_through_the_queue() {
 // CommandKinds the chip buttons queue - and mirrored back by sync_ops_ui.
 // The pane's drawing code itself is the same read-only walk of these.
 
-use hsmworks_app::commands::ImportModel;
-use hsmworks_app::geometry::{cube, feature, Point3};
-use hsmworks_app::operation::{FeatureSel, GeoSel};
-use hsmworks_ui::interact::queue_feature_pick;
+use camcraft_app::commands::ImportModel;
+use camcraft_app::geometry::{cube, feature, Point3};
+use camcraft_app::operation::{FeatureSel, GeoSel};
+use camcraft_ui::interact::queue_feature_pick;
 
 /// A cube part (so faces and chains exist to pick) with Face1 targeted as
 /// the pane's draft, exactly as selecting it in the browser would.
@@ -795,8 +795,8 @@ fn selection_rows_read_as_human_descriptors() {
 /// A disc whose rim carries two hard creases: the chain walk splits it
 /// into exactly two open runs (the fixture from
 /// `crates/app/tests/operations.rs`, same law, copied for the ui seam).
-fn split_rim_disc(r: f64) -> hsmworks_app::geometry::Mesh {
-    use hsmworks_app::geometry::Triangle;
+fn split_rim_disc(r: f64) -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::Triangle;
     let tau = std::f64::consts::TAU;
     let pt = |i: usize| {
         let a = tau * i as f64 / 16.0;
@@ -806,7 +806,7 @@ fn split_rim_disc(r: f64) -> hsmworks_app::geometry::Mesh {
     let facets: Vec<Triangle> = (0..16)
         .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), pt(i), pt(i + 1)))
         .collect();
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 #[test]
@@ -1064,7 +1064,7 @@ fn geometry_notes_report_through_the_panel_seam() {
 #[test]
 fn strategy_combo_offers_auto() {
     assert_eq!(
-        hsmworks_ui::operations::strategy_names(),
+        camcraft_ui::operations::strategy_names(),
         &["Zigzag", "Waterline", "Auto"],
         "the combo offers Auto beside the explicit choices"
     );

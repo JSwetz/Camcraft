@@ -8,7 +8,7 @@
 // (see fanuc.cps) decides, and the conformance goldens lock that
 // decision, not any vendor's.
 description = "Mazak (3-axis mill, G73/G81/G82/G83/G84/G86/G89, G2/G3, G98)";
-vendor = "HSMWorks (independent, unaffiliated)";
+vendor = "CamCraft (independent, unaffiliated)";
 legal = "Original clean-room work; public documentation only";
 certificationLevel = 1;
 minimumRevision = 1;
@@ -83,7 +83,7 @@ function coolantCode() {
 
 // -------------------------------------------------------------- header
 function onOpen() {
-  var nm = (typeof machine !== "undefined" && machine.name) || "HSMWORKS";
+  var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
   block(["O0001", "(" + nm + ")"]);
 }

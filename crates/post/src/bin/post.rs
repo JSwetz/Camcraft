@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-post - HSMWorks post processor (clean-room)
+post - CamCraft post processor (clean-room)
 
 USAGE:
     post [OPTIONS] <config.cps> <intermediate.cnc|.cl> <output.nc>

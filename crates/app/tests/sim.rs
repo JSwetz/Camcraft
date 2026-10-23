@@ -5,12 +5,12 @@
 //!
 //! Gate map (M4.4): covers app::cl, app::drilling, app::geo2d, app::machining2d, app::sim, app::tools.
 
-use hsmworks_app::cl::Toolpath;
-use hsmworks_app::drilling::{self, CycleParams, CycleChoice, Hole};
-use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::machining2d::{contour, ContourParams, Lead, Side};
-use hsmworks_app::sim::{script, Readout, Traverse};
-use hsmworks_app::tools::{catalog, Tool};
+use camcraft_app::cl::Toolpath;
+use camcraft_app::drilling::{self, CycleParams, CycleChoice, Hole};
+use camcraft_app::geo2d::{Loop, Point2, Region};
+use camcraft_app::machining2d::{contour, ContourParams, Lead, Side};
+use camcraft_app::sim::{script, Readout, Traverse};
+use camcraft_app::tools::{catalog, Tool};
 
 fn tr() -> Traverse {
     Traverse {
@@ -92,7 +92,7 @@ fn contour_timeline_matches_its_own_geometry() {
             + (m.to.y - m.from.y).powi(2)
             + (m.to.z - m.from.z).powi(2))
         .sqrt();
-        use hsmworks_app::cl::MoveKind;
+        use camcraft_app::cl::MoveKind;
         match m.kind {
             MoveKind::Rapid => {
                 let axis_secs = (60.0 * (m.to.x - m.from.x).abs() / tr().xy)

@@ -5,25 +5,25 @@
 
 use std::path::PathBuf;
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     AddTool, CreateOperation, CreateSetup, GenerateOperation, History, ImportModel, SetStock,
     SetWcsOrigin,
 };
-use hsmworks_app::geometry::feature;
-use hsmworks_app::machine;
-use hsmworks_app::setup;
-use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
-use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, OpStatus, SrcRef};
-use hsmworks_app::schema::Location;
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools::{Tool, catalog};
-use hsmworks_app::geometry::{IDENTITY_Q, cube, cylinder, Point3};
-use hsmworks_app::model;
-use hsmworks_app::project::{self, ProjectError};
-use hsmworks_app::world::new_world;
+use camcraft_app::geometry::feature;
+use camcraft_app::machine;
+use camcraft_app::setup;
+use camcraft_app::machining2d::{Lead, PocketStrategy, Side};
+use camcraft_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, OpStatus, SrcRef};
+use camcraft_app::schema::Location;
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::{Tool, catalog};
+use camcraft_app::geometry::{IDENTITY_Q, cube, cylinder, Point3};
+use camcraft_app::model;
+use camcraft_app::project::{self, ProjectError};
+use camcraft_app::world::new_world;
 
 fn tmp_path(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("hsmworks_proj_{tag}_{}.hsmproj", std::process::id()))
+    std::env::temp_dir().join(format!("camcraft_proj_{tag}_{}.camproj", std::process::id()))
 }
 
 fn populated_world() -> flecs_ecs::prelude::World {
@@ -135,7 +135,7 @@ fn v1_file_migrates_to_v2() {
 
 #[test]
 fn rotation_survives_round_trip() {
-    use hsmworks_app::geometry::quat_from_yaw;
+    use camcraft_app::geometry::quat_from_yaw;
     use std::f64::consts::FRAC_PI_2;
 
     let path = tmp_path("rot");
@@ -159,7 +159,7 @@ fn rotation_survives_round_trip() {
     let loc = model::transform_of(&world2, &e2).expect("location");
     assert_eq!((loc.pos.x, loc.pos.y, loc.pos.z), (5.0, 0.0, 0.0));
     // Local (1,0,0) must land at world (5,1,0) after the yaw-90 rotation.
-    let w = hsmworks_app::geometry::transform_point(Point3::new(1.0, 0.0, 0.0), loc.pos, loc.rot);
+    let w = camcraft_app::geometry::transform_point(Point3::new(1.0, 0.0, 0.0), loc.pos, loc.rot);
     assert!((w.x - 5.0).abs() < 1e-12 && (w.y - 1.0).abs() < 1e-12 && w.z.abs() < 1e-12);
 }
 
@@ -1159,7 +1159,7 @@ fn drill_params_and_cycle_cache_round_trip_and_a_stray_cycle_is_refused() {
     else {
         panic!("drill params expected, got {:?}", o.params);
     };
-    assert_eq!(*cycle, hsmworks_app::drilling::CycleChoice::Peck);
+    assert_eq!(*cycle, camcraft_app::drilling::CycleChoice::Peck);
     assert_eq!(*peck, 6.0);
     assert_eq!(holes.len(), 2);
     assert_eq!((holes[1].xy.x, holes[1].xy.y), (20.0, 15.5));
@@ -1279,7 +1279,7 @@ fn v10_file_steps_to_v11_and_the_pocket3d_grammar_round_trips() {
     assert_eq!(*stepover, 2.5);
     assert_eq!(*stock_to_leave, 0.4);
     assert_eq!(*strategy, PocketStrategy::Waterline);
-    assert_eq!(*entry, hsmworks_app::machining3d::Entry3D::Helix);
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix);
     assert_eq!(*helix_radius, 2.0);
     assert!(retract_z.is_none(), "absent retract stays absent");
     assert!(
@@ -1343,7 +1343,7 @@ fn v11_file_steps_to_v12() {
         panic!("the pocket3d params must read unchanged, got {:?}", o.params);
     };
     assert!(!*rest_rough, "a v11 file never rest-roughed; off is its meaning");
-    assert_eq!(*entry, hsmworks_app::machining3d::Entry3D::Ramp);
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Ramp);
 
     let path = tmp_path("v12");
     project::save(&world, &path).expect("save");
@@ -1596,7 +1596,7 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
     let OpParams::Finish3D { pattern, stepover, .. } = &o.params else {
         panic!("finish3d params expected, got {:?}", o.params);
     };
-    assert_eq!(*pattern, hsmworks_app::finishing3d::FinishPattern::Waterline);
+    assert_eq!(*pattern, camcraft_app::finishing3d::FinishPattern::Waterline);
     assert!(stepover.is_none(), "absent stepover means the cos-law derives it");
     let path = tmp_path("v16a");
     project::save(&world, &path).expect("save");
@@ -1638,7 +1638,7 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
     };
     assert_eq!(
         *pattern,
-        hsmworks_app::finishing3d::FinishPattern::ParallelMulti
+        camcraft_app::finishing3d::FinishPattern::ParallelMulti
     );
     assert_eq!(*stepover, Some(0.3));
     assert!(!*ramp, "a v16 file has no `ramp` word: the hop, exactly what v16 ran");
@@ -1675,7 +1675,7 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
     let OpParams::Finish3D { pattern, .. } = &o4.params else {
         panic!("finish3d params expected");
     };
-    assert_eq!(*pattern, hsmworks_app::finishing3d::FinishPattern::Scallop);
+    assert_eq!(*pattern, camcraft_app::finishing3d::FinishPattern::Scallop);
     let path_sc = tmp_path("v16s");
     project::save(&world4, &path_sc).expect("save");
     let saved_sc = std::fs::read_to_string(&path_sc).expect("read");
@@ -1686,10 +1686,10 @@ fn v15_file_steps_to_v16_and_the_parallel_grammar_round_trips() {
     // "contour" and "project" join the v16 grammar as words, not as
     // a version.
     for (word, want) in [
-        ("radial", hsmworks_app::finishing3d::FinishPattern::Radial),
-        ("spiral", hsmworks_app::finishing3d::FinishPattern::Spiral),
-        ("contour", hsmworks_app::finishing3d::FinishPattern::Contour),
-        ("project", hsmworks_app::finishing3d::FinishPattern::Project),
+        ("radial", camcraft_app::finishing3d::FinishPattern::Radial),
+        ("spiral", camcraft_app::finishing3d::FinishPattern::Spiral),
+        ("contour", camcraft_app::finishing3d::FinishPattern::Contour),
+        ("project", camcraft_app::finishing3d::FinishPattern::Project),
     ] {
         let t = text.replace("\"parallel_multi\"", &format!("\"{word}\""));
         let w = new_world();
@@ -2436,7 +2436,7 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
 
 #[test]
 fn units_round_trip_and_a_v7_file_means_millimeters() {
-    use hsmworks_app::units::{self, Unit};
+    use camcraft_app::units::{self, Unit};
 
     // An inch document: the file says so, a save-load-save is stable,
     // and the millimeter numbers inside are untouched by the lens.
@@ -2501,9 +2501,9 @@ fn the_post_choice_round_trips_and_a_v22_file_means_the_built_in() {
     // a v22-shaped file (no key) means the built-in - the pure
     // step-up, same as every bump since v6 - and opening a file
     // without the key CLEARS a stale choice, the units-law leak guard.
-    use hsmworks_app::commands::SelectPost;
-    use hsmworks_app::posting;
-    use hsmworks_app::schema::PostRef;
+    use camcraft_app::commands::SelectPost;
+    use camcraft_app::posting;
+    use camcraft_app::schema::PostRef;
 
     let cps = std::env::temp_dir().join(format!("hsmw_rtpost_{}.cps", std::process::id()));
     std::fs::write(&cps, "function onOpen() { writeln(\"(RT)\"); }").expect("write temp cps");
@@ -2548,7 +2548,7 @@ fn the_stage_c_machine_fields_round_trip_and_unset_ones_mint_nothing() {
     // fields a file stated round-trip intact, fields it left unstated
     // never appear in the save - a pre-stage-C file and a pre-C save
     // are byte-identical, which is what lets us skip the bump honestly.
-    use hsmworks_app::machine::Coolant;
+    use camcraft_app::machine::Coolant;
     let world = new_world();
     let m = machine::Machine {
         model: "Wide 1".into(),
@@ -2572,9 +2572,9 @@ fn the_stage_c_machine_fields_round_trip_and_unset_ones_mint_nothing() {
         ],
         ..Default::default()
     };
-    let cmd = hsmworks_app::commands::LoadMachine::new(&world, "wide.mch".into(), Some(m.clone()))
+    let cmd = camcraft_app::commands::LoadMachine::new(&world, "wide.mch".into(), Some(m.clone()))
         .expect("sane");
-    hsmworks_app::commands::History::default().execute(&world, cmd);
+    camcraft_app::commands::History::default().execute(&world, cmd);
     let p = tmp_path("stagec_fields");
     project::save(&world, &p).expect("save");
     let text = std::fs::read_to_string(&p).expect("read");
@@ -2590,13 +2590,13 @@ fn the_stage_c_machine_fields_round_trip_and_unset_ones_mint_nothing() {
     // the v19 test above proves the old shape; this pins the skipers.
     let plain = tmp_path("stagec_mute");
     let mute = new_world();
-    let cmd = hsmworks_app::commands::LoadMachine::new(
+    let cmd = camcraft_app::commands::LoadMachine::new(
         &mute,
         "mute.mch".into(),
         Some(machine::Machine::default()),
     )
     .expect("the mute file is a mute machine");
-    hsmworks_app::commands::History::default().execute(&mute, cmd);
+    camcraft_app::commands::History::default().execute(&mute, cmd);
     project::save(&mute, &plain).expect("save mute");
     let mute_text = std::fs::read_to_string(&plain).expect("read");
     for key in ["\"kind\"", "\"spindle_power\"", "\"tool_count\"", "\"coolants\"", "\"rotary\""] {

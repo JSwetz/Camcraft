@@ -39,10 +39,10 @@ use egui_dock::DockState;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 
-use hsmworks_app::model;
-use hsmworks_app::operation::{FeatureSel, Height, OpParams, SrcRef};
-use hsmworks_app::schema::WCS_SLOTS;
-use hsmworks_app::units::{self, Unit};
+use camcraft_app::model;
+use camcraft_app::operation::{FeatureSel, Height, OpParams, SrcRef};
+use camcraft_app::schema::WCS_SLOTS;
+use camcraft_app::units::{self, Unit};
 
 use crate::interact;
 use crate::state::{CommandKind, DragMode, GeoPick, PostView, State, UiTarget};
@@ -298,7 +298,7 @@ fn blank_startup_renders_and_frames_honestly() {
 #[test]
 fn file_ops_round_trip_through_commands() {
     let mut harness = shell_harness();
-    let path = std::env::temp_dir().join(format!("hsmworks-egui-md-{}.hsmproj", std::process::id()));
+    let path = std::env::temp_dir().join(format!("camcraft-egui-md-{}.camproj", std::process::id()));
 
     harness
         .state_mut().state.pending
@@ -378,7 +378,7 @@ fn post_cell_queues_and_the_file_arm_runs_the_gate() {
     }
 
     let mut harness = shell_harness();
-    let path = std::env::temp_dir().join(format!("hsmworks-egui-post-{}.nc", std::process::id()));
+    let path = std::env::temp_dir().join(format!("camcraft-egui-post-{}.nc", std::process::id()));
     let _ = std::fs::remove_file(&path);
 
     // Phase 0 - the warned face of the gate, on the seed as shipped: its
@@ -564,7 +564,7 @@ fn status_bar_offers_regenerate_all_when_something_is_stale() {
     {
         let st = &harness.state().state;
         let e = model::find_by_name(&st.world, "Contour1").expect("op");
-        assert_eq!(hsmworks_app::operation::status_of(&st.world, &e), hsmworks_app::operation::OpStatus::Stale);
+        assert_eq!(camcraft_app::operation::status_of(&st.world, &e), camcraft_app::operation::OpStatus::Stale);
     }
 
     harness.get_by_label("Regenerate all stale (1)").click();
@@ -572,7 +572,7 @@ fn status_bar_offers_regenerate_all_when_something_is_stale() {
     assert_eq!(harness.state().state.status, "regenerated 1 operation(s)");
     let st = &harness.state().state;
     let e = model::find_by_name(&st.world, "Contour1").expect("op");
-    assert_eq!(hsmworks_app::operation::status_of(&st.world, &e), hsmworks_app::operation::OpStatus::Ok);
+    assert_eq!(camcraft_app::operation::status_of(&st.world, &e), camcraft_app::operation::OpStatus::Ok);
     // The affordance follows the state: no stale rows, no button.
     assert!(
         harness.query_by_label("Regenerate all stale (1)").is_none(),
@@ -1865,8 +1865,8 @@ fn the_cube_leaves_the_viewport_gestures_alone() {
 /// The 40x40x8 block bored through by a 16-facet bore - the app's own
 /// recognition fixture, imported here so the UI law runs against the
 /// same pixels a STEP file hands us.
-fn bored_block() -> hsmworks_app::geometry::Mesh {
-    use hsmworks_app::geometry::{Point3, Triangle};
+fn bored_block() -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::{Point3, Triangle};
     let tau = std::f64::consts::TAU;
     let bp = |i: usize, z: f64| {
         let a = tau * (i % 16) as f64 / 16.0;
@@ -1894,7 +1894,7 @@ fn bored_block() -> hsmworks_app::geometry::Mesh {
         quad(bp(i, 8.0), bp(j, 8.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
         quad(op(j, 8.0), op(i, 8.0), op(i, 0.0), op(j, 0.0), &mut facets);
     }
-    hsmworks_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh { facets }
 }
 
 #[test]
@@ -1925,7 +1925,7 @@ fn ribbon_drill_cell_creates_a_drill_operation() {
         panic!("the sixth cell must create a Drill operation, got {:?}", op.params.kind())
     };
     assert!(holes.is_empty(), "a fresh drill starts without a hole list");
-    assert_eq!(*cycle, hsmworks_app::drilling::CycleChoice::Auto);
+    assert_eq!(*cycle, camcraft_app::drilling::CycleChoice::Auto);
 }
 
 /// M3.2 stage E, the workspaces-by-kind law: the ribbon follows the
@@ -2016,12 +2016,12 @@ fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() 
         .pending
         .push_back(CommandKind::LoadBuiltinMachine("Lathe".to_string()));
     harness.run();
-    let (path, mounted) = hsmworks_app::machine::of(&harness.state().state.world);
+    let (path, mounted) = camcraft_app::machine::of(&harness.state().state.world);
     assert_eq!(path, "built-in: Lathe", "the mount records through the shared built-in path");
     let mut mounted = mounted.expect("the library lathe is mounted");
     assert_eq!(
-        hsmworks_app::machine::kind(Some(&mounted)),
-        hsmworks_app::machine::Kind::Lathe,
+        camcraft_app::machine::kind(Some(&mounted)),
+        camcraft_app::machine::Kind::Lathe,
         "the declared kind drives the workspaces, not a guess"
     );
     // A declared lathe darkens the mill cells just like the inferred
@@ -2037,7 +2037,7 @@ fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() 
         machine: Box::new(mounted),
     });
     harness.run();
-    let (_, m) = hsmworks_app::machine::of(&harness.state().state.world);
+    let (_, m) = camcraft_app::machine::of(&harness.state().state.world);
     assert_eq!(
         m.expect("edited").spindle_max,
         Some(4321.0),
@@ -2046,7 +2046,7 @@ fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() 
 
     harness.state_mut().state.pending.push_back(CommandKind::Undo);
     harness.run();
-    let (_, m) = hsmworks_app::machine::of(&harness.state().state.world);
+    let (_, m) = camcraft_app::machine::of(&harness.state().state.world);
     assert_eq!(
         m.expect("mounted").spindle_max,
         spindle_max,
@@ -2066,7 +2066,7 @@ fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() 
         "the refusal names the stranger: {:?}",
         harness.state().state.status
     );
-    let (_, m) = hsmworks_app::machine::of(&harness.state().state.world);
+    let (_, m) = camcraft_app::machine::of(&harness.state().state.world);
     assert_eq!(m.expect("still mounted").spindle_max, spindle_max);
 }
 
@@ -2101,8 +2101,8 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
             op.params.kind()
         )
     };
-    assert_eq!(*strategy, hsmworks_app::machining2d::PocketStrategy::Auto);
-    assert_eq!(*entry, hsmworks_app::machining3d::Entry3D::Plunge);
+    assert_eq!(*strategy, camcraft_app::machining2d::PocketStrategy::Auto);
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Plunge);
 }
 
 #[test]
@@ -2150,7 +2150,7 @@ fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     assert_eq!(*retract_z, None);
     assert_eq!(
         *pattern,
-        hsmworks_app::finishing3d::FinishPattern::Parallel,
+        camcraft_app::finishing3d::FinishPattern::Parallel,
         "the fresh finish op must ride flats and walls alike"
     );
     assert_eq!(*stepover, None, "spacing follows the cos-law until asked not to");
@@ -2173,14 +2173,14 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         _ => panic!("the pane must draft a 3D Finish op"),
     };
     let (p0, s0) = staged(&harness);
-    assert_eq!(p0, hsmworks_app::finishing3d::FinishPattern::Parallel);
+    assert_eq!(p0, camcraft_app::finishing3d::FinishPattern::Parallel);
     assert_eq!(s0, None);
     {
         let sh = harness.state_mut();
         sh.state.op_tab = 2; // Passes
         sh.state.sync_ops_ui();
         if let OpParams::Finish3D { pattern, stepover, .. } = &mut sh.state.op_ui.params {
-            *pattern = hsmworks_app::finishing3d::FinishPattern::Waterline;
+            *pattern = camcraft_app::finishing3d::FinishPattern::Waterline;
             *stepover = Some(1.5);
         }
     }
@@ -2208,7 +2208,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     assert_eq!(
         live,
         Some((
-            hsmworks_app::finishing3d::FinishPattern::Waterline,
+            camcraft_app::finishing3d::FinishPattern::Waterline,
             Some(1.5),
         )),
         "Apply must carry pattern and stepover to the world"
@@ -2236,7 +2236,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         });
     assert_eq!(
         back,
-        Some((hsmworks_app::finishing3d::FinishPattern::Parallel, None)),
+        Some((camcraft_app::finishing3d::FinishPattern::Parallel, None)),
         "undo must restore the defaults the cell seeded"
     );
     // M2.2c: the Scallop word rides the same command lane. Stage it,
@@ -2246,7 +2246,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         let sh = harness.state_mut();
         sh.state.sync_ops_ui();
         if let OpParams::Finish3D { pattern, .. } = &mut sh.state.op_ui.params {
-            *pattern = hsmworks_app::finishing3d::FinishPattern::Scallop;
+            *pattern = camcraft_app::finishing3d::FinishPattern::Scallop;
         }
     }
     harness.run();
@@ -2263,7 +2263,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         });
     assert_eq!(
         op,
-        Some((hsmworks_app::finishing3d::FinishPattern::Scallop, None)),
+        Some((camcraft_app::finishing3d::FinishPattern::Scallop, None)),
         "Apply must carry the scallop word to the world"
     );
     harness
@@ -2287,7 +2287,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         });
     assert_eq!(
         back,
-        Some((hsmworks_app::finishing3d::FinishPattern::Parallel, None)),
+        Some((camcraft_app::finishing3d::FinishPattern::Parallel, None)),
         "undo must invert the scallop apply like any other"
     );
     // M2.2e stage D: the ramp checkbox rides the same command lane, on
@@ -2424,7 +2424,7 @@ fn detect_holes_refuses_recognizes_and_undo_empties_again() {
         let (world, history) = (&sh.state.world, &mut sh.state.history);
         history.execute(
             world,
-            hsmworks_app::commands::ImportModel::from_mesh("Plate", bored_block()),
+            camcraft_app::commands::ImportModel::from_mesh("Plate", bored_block()),
         );
     }
     harness.run_steps(2);
@@ -2567,9 +2567,9 @@ fn simulate_cell_arms_transport_and_stop_disarms() {
 /// string and nothing else, so the string carries the whole verdict.
 #[test]
 fn deviate_readout_sentences_each_truth() {
-    use hsmworks_app::geometry::Point3;
+    use camcraft_app::geometry::Point3;
     let d = |rest_cells, gouge_cells, max_rest, max_gouge, tol| {
-        hsmworks_app::stock_sim::Deviation {
+        camcraft_app::stock_sim::Deviation {
             cells_x: 8,
             cells_y: 8,
             cell: 1.0,
@@ -2612,7 +2612,7 @@ fn deviate_readout_sentences_each_truth() {
         crate::actions::deviate_readout(&lost).contains("GOUGE 4 cells") && both_needs_question(&lost),
         "the missing WHERE must show as '?'"
     );
-    fn both_needs_question(d: &hsmworks_app::stock_sim::Deviation) -> bool {
+    fn both_needs_question(d: &camcraft_app::stock_sim::Deviation) -> bool {
         crate::actions::deviate_readout(d).ends_with("mm?)")
     }
 }
@@ -2695,7 +2695,7 @@ fn sim_readout_names_the_op_and_the_verb() {
     assert!(i.contains("in/min"), "the verb rides the units lens: {i}");
     // An empty script has no name to show and must not pretend.
     let none = super::shell::sim_readout(
-        &hsmworks_app::sim::Script::default(),
+        &camcraft_app::sim::Script::default(),
         0.0,
         Unit::Millimeters,
     );
@@ -2766,18 +2766,18 @@ fn a_successful_post_opens_the_viewer_and_new_document_retires_it() {
     // positions from the same engine run, open on success, gone with
     // the document.
     let mut harness = shell_harness();
-    let path = std::env::temp_dir().join(format!("hsmworks-egui-view-{}.nc", std::process::id()));
+    let path = std::env::temp_dir().join(format!("camcraft-egui-view-{}.nc", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let mut skim = {
         let st = &harness.state().state;
-        let e = hsmworks_app::model::find_by_name(&st.world, "Contour1").expect("the seed's op");
-        hsmworks_app::model::operation_of(&st.world, &e)
+        let e = camcraft_app::model::find_by_name(&st.world, "Contour1").expect("the seed's op");
+        camcraft_app::model::operation_of(&st.world, &e)
             .expect("op")
             .params
             .clone()
     };
-    if let hsmworks_app::operation::OpParams::Contour { bottom_z, .. } = &mut skim {
-        *bottom_z = hsmworks_app::operation::Height::fixed(29.5);
+    if let camcraft_app::operation::OpParams::Contour { bottom_z, .. } = &mut skim {
+        *bottom_z = camcraft_app::operation::Height::fixed(29.5);
     }
     harness.state_mut().state.pending.push_back(CommandKind::EditOperationParams {
         name: "Contour1".into(),
@@ -2885,8 +2885,8 @@ fn selecting_a_post_script_is_a_command_with_the_pane_labels() {
     // built-in arm resets; undo puts the previous choice back; and a
     // script that does not exist is a visible refusal, never a quiet
     // keep-the-old choice.
-    use hsmworks_app::posting;
-    use hsmworks_app::schema::PostRef;
+    use camcraft_app::posting;
+    use camcraft_app::schema::PostRef;
 
     let dir = std::env::temp_dir().join(format!("hsmw-ui-post-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");

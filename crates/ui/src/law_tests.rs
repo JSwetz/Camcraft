@@ -7,10 +7,10 @@
 //!
 //! Provenance: our own tests, carried from the app's first gizmo steps.
 
-use hsmworks_app::geometry::{feature, transform_point, Point3};
-use hsmworks_app::operation::{FeatureSel, GeoSel};
-use hsmworks_app::schema::STOCK_NAME;
-use hsmworks_app::{model, operation};
+use camcraft_app::geometry::{feature, transform_point, Point3};
+use camcraft_app::operation::{FeatureSel, GeoSel};
+use camcraft_app::schema::STOCK_NAME;
+use camcraft_app::{model, operation};
 
 use crate::egui_app::world;
 use crate::interact::{
@@ -124,7 +124,7 @@ mod anchor_tests {
 
     use super::*;
     use crate::state::{CommandKind, quat_yaw_deg};
-    use hsmworks_app::stock::StockShape;
+    use camcraft_app::stock::StockShape;
 
     fn stock_box(state: &mut State, dx: f64, dy: f64, dz: f64, pos: [f64; 3]) {
         state.pending.push_back(CommandKind::SetStock {
@@ -251,11 +251,11 @@ mod path_tests {
     //! the overlay buffer is what these pin down.
 
     use super::*;
-    use hsmworks_app::commands::{AddTool, CreateOperation, GenerateOperation, ImportModel};
-    use hsmworks_app::geometry::cube;
-    use hsmworks_app::operation::{Height, OpParams, SrcRef};
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_app::tools::catalog;
+    use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, ImportModel};
+    use camcraft_app::geometry::cube;
+    use camcraft_app::operation::{Height, OpParams, SrcRef};
+    use camcraft_app::stock::StockShape;
+    use camcraft_app::tools::catalog;
 
     fn state_with_generated_path() -> State {
         let mut state = State::new();
@@ -416,8 +416,8 @@ mod path_tests {
                     feed: 800.0,
                     plunge_feed: 200.0,
                     climb: true,
-                    side: hsmworks_app::machining2d::Side::Auto,
-                    lead: hsmworks_app::machining2d::Lead::None,
+                    side: camcraft_app::machining2d::Side::Auto,
+                    lead: camcraft_app::machining2d::Lead::None,
                     tolerance: 0.1,
                     tab_count: 0,
                     tab_width: 0.0,
@@ -545,11 +545,11 @@ mod preview_tests {
     //! segments. Both are pure world reads; pinned down headless.
 
     use super::*;
-    use hsmworks_app::commands::ImportModel;
-    use hsmworks_app::geometry::cube;
-    use hsmworks_app::operation::{Height, OpParams, SrcRef};
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_app::tools::catalog;
+    use camcraft_app::commands::ImportModel;
+    use camcraft_app::geometry::cube;
+    use camcraft_app::operation::{Height, OpParams, SrcRef};
+    use camcraft_app::stock::StockShape;
+    use camcraft_app::tools::catalog;
 
     fn face_state() -> State {
         let mut state = State::new();
@@ -866,11 +866,11 @@ mod feature_pick_tests {
     //! too, at the same projection the gizmo and anchor tests use.
 
     use super::*;
-    use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
-    use hsmworks_app::geometry::{cube, cylinder};
-    use hsmworks_app::operation::{GeoSel, Height, OpParams, SrcRef};
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_app::tools::catalog;
+    use camcraft_app::commands::{AddTool, CreateOperation, ImportModel};
+    use camcraft_app::geometry::{cube, cylinder};
+    use camcraft_app::operation::{GeoSel, Height, OpParams, SrcRef};
+    use camcraft_app::stock::StockShape;
+    use camcraft_app::tools::catalog;
 
     fn state_with_op() -> State {
         let mut state = State::new();
@@ -1123,12 +1123,12 @@ mod height_plane_tests {
     //! planes; a source that bounds nothing still gets its levels marked.
 
     use super::*;
-    use hsmworks_app::commands::{AddTool, CreateOperation, ImportModel};
-    use hsmworks_app::geometry::cube;
-    use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
-    use hsmworks_app::operation::{Height, HeightReference, OpParams, SrcRef};
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_app::tools::catalog;
+    use camcraft_app::commands::{AddTool, CreateOperation, ImportModel};
+    use camcraft_app::geometry::cube;
+    use camcraft_app::machining2d::{Lead, PocketStrategy, Side};
+    use camcraft_app::operation::{Height, HeightReference, OpParams, SrcRef};
+    use camcraft_app::stock::StockShape;
+    use camcraft_app::tools::catalog;
 
     fn contour(clearance_z: Height) -> OpParams {
         OpParams::Contour {

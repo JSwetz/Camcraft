@@ -1,4 +1,4 @@
-# HSMWorks CL Intermediate (`.cnc` role) — format v1
+# CamCraft CL Intermediate (`.cnc` role) — format v1
 
 Provenance: our own format, designed here. Only its *role* matches the
 Fusion 360 post architecture (an intermediate the post script consumes,

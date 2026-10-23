@@ -9,12 +9,12 @@
 
 #[test]
 fn headless_cli_exit_code_is_zero() {
-    assert_eq!(hsmworks_ui::run(&[String::from("--headless")]), 0);
+    assert_eq!(camcraft_ui::run(&[String::from("--headless")]), 0);
 }
 
 #[test]
 fn state_starts_clean() {
-    let state = hsmworks_ui::state::State::new();
+    let state = camcraft_ui::state::State::new();
     assert_eq!(state.status, "ready");
     assert!(!state.has_selection());
     assert!(!state.history.can_undo());
@@ -22,7 +22,7 @@ fn state_starts_clean() {
 
 #[test]
 fn selecting_a_missing_model_is_a_no_op_not_a_crash() {
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.pending.push_back(CommandKind::Select(Some("ghost".into())));
@@ -32,15 +32,15 @@ fn selecting_a_missing_model_is_a_no_op_not_a_crash() {
 
 #[test]
 fn camera_frame_all_on_empty_world_is_polite() {
-    let mut state = hsmworks_ui::state::State::new();
-    state.pending.push_back(hsmworks_ui::state::CommandKind::FrameAll);
+    let mut state = camcraft_ui::state::State::new();
+    state.pending.push_back(camcraft_ui::state::CommandKind::FrameAll);
     state.drain_actions();
     assert_eq!(state.status, "nothing to frame");
 }
 
 #[test]
 fn import_completes_on_the_worker_thread() {
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_ui::state::{CommandKind, State};
 
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../testdata/models/cube.stl");
@@ -61,7 +61,7 @@ fn reimporting_the_same_name_updates_the_model_without_duplicating_or_dropping_i
     // M3.1 A's UI law: a same-named import lands as UpdateModel on the one
     // entity the name keys - never a silent no-op, never a second model,
     // and undo restores the previous geometry instead of deleting it.
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_ui::state::{CommandKind, State};
 
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../testdata/models/cube.stl");
@@ -75,27 +75,27 @@ fn reimporting_the_same_name_updates_the_model_without_duplicating_or_dropping_i
     // The same file over the same name: the update lands, and the honest
     // summary is that nothing moved.
     assert_eq!(state.status, "updated cube (geometry unchanged)", "{:?}", state.status);
-    let entity = hsmworks_app::model::find_by_name(&state.world, "cube").expect("one model");
-    assert_eq!(hsmworks_app::model::rev_of(&state.world, &entity), 2, "revision two");
-    assert_eq!(hsmworks_app::model::facets_of(&state.world, &entity).map(|f| f.len()), Some(12));
+    let entity = camcraft_app::model::find_by_name(&state.world, "cube").expect("one model");
+    assert_eq!(camcraft_app::model::rev_of(&state.world, &entity), 2, "revision two");
+    assert_eq!(camcraft_app::model::facets_of(&state.world, &entity).map(|f| f.len()), Some(12));
 
     // Undo trades back, not away: the entity stands with revision 1.
     state.pending.push_back(CommandKind::Undo);
     state.settle();
-    let entity = hsmworks_app::model::find_by_name(&state.world, "cube").expect("not deleted");
-    assert_eq!(hsmworks_app::model::rev_of(&state.world, &entity), 1);
+    let entity = camcraft_app::model::find_by_name(&state.world, "cube").expect("not deleted");
+    assert_eq!(camcraft_app::model::rev_of(&state.world, &entity), 1);
     assert_eq!(
-        hsmworks_app::model::facets_of(&state.world, &entity).map(|f| f.len()),
+        camcraft_app::model::facets_of(&state.world, &entity).map(|f| f.len()),
         Some(12),
         "geometry restored, not gone"
     );
 
     state.pending.push_back(CommandKind::Redo);
     state.settle();
-    let entity = hsmworks_app::model::find_by_name(&state.world, "cube").expect("still one");
-    assert_eq!(hsmworks_app::model::rev_of(&state.world, &entity), 2, "redo counts again");
+    let entity = camcraft_app::model::find_by_name(&state.world, "cube").expect("still one");
+    assert_eq!(camcraft_app::model::rev_of(&state.world, &entity), 2, "redo counts again");
     // One entity, ever: the tree has no second "cube" to show.
-    let named: Vec<String> = hsmworks_app::model::model_entities(&state.world)
+    let named: Vec<String> = camcraft_app::model::model_entities(&state.world)
         .into_iter()
         .map(|(name, _)| name)
         .collect();
@@ -104,7 +104,7 @@ fn reimporting_the_same_name_updates_the_model_without_duplicating_or_dropping_i
 
 #[test]
 fn corrupt_import_errors_on_the_worker_never_panics() {
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     // Dispatch refuses by extension before reading; no IGES kernel exists.
@@ -117,10 +117,10 @@ fn corrupt_import_errors_on_the_worker_never_panics() {
 }
 
 fn box_stock(
-    shape: hsmworks_app::stock::StockShape,
+    shape: camcraft_app::stock::StockShape,
     pos: [f64; 3],
-) -> hsmworks_ui::state::CommandKind {
-    hsmworks_ui::state::CommandKind::SetStock {
+) -> camcraft_ui::state::CommandKind {
+    camcraft_ui::state::CommandKind::SetStock {
         shape,
         pos,
         yaw_deg: 0.0,
@@ -129,10 +129,10 @@ fn box_stock(
 
 #[test]
 fn set_stock_creates_the_entity_and_undo_removes_it() {
-    use hsmworks_app::model;
-    use hsmworks_app::schema::STOCK_NAME;
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_app::schema::STOCK_NAME;
+    use camcraft_app::stock::StockShape;
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.pending.push_back(box_stock(
@@ -199,10 +199,10 @@ fn set_stock_creates_the_entity_and_undo_removes_it() {
 
 #[test]
 fn invalid_stock_parameters_are_reported_not_applied() {
-    use hsmworks_app::model;
-    use hsmworks_app::schema::STOCK_NAME;
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_ui::state::State;
+    use camcraft_app::model;
+    use camcraft_app::schema::STOCK_NAME;
+    use camcraft_app::stock::StockShape;
+    use camcraft_ui::state::State;
 
     let mut state = State::new();
     state.pending.push_back(box_stock(
@@ -221,10 +221,10 @@ fn invalid_stock_parameters_are_reported_not_applied() {
 
 #[test]
 fn stock_fit_wraps_models_and_double_fit_does_not_grow() {
-    use hsmworks_app::model;
-    use hsmworks_app::schema::STOCK_NAME;
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_app::schema::STOCK_NAME;
+    use camcraft_app::stock::StockShape;
+    use camcraft_ui::state::{CommandKind, State};
 
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../testdata/models/cube.stl");
@@ -272,10 +272,10 @@ fn cylinder_fit_keeps_the_cylinder_choice() {
     // Feedback 4: fit ignored the selected shape and rebuilt the stock as a
     // box, after which the pane snapped the radio back to Box - the cylinder
     // looked broken in both Apply-then-Fit and plain Fit flows.
-    use hsmworks_app::model;
-    use hsmworks_app::schema::STOCK_NAME;
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_app::schema::STOCK_NAME;
+    use camcraft_app::stock::StockShape;
+    use camcraft_ui::state::{CommandKind, State};
 
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../testdata/models/cube.stl");
@@ -348,9 +348,9 @@ fn cylinder_fit_keeps_the_cylinder_choice() {
 
 #[test]
 fn from_model_stock_refuses_fit_with_a_clear_status() {
-    use hsmworks_app::model;
-    use hsmworks_app::schema::STOCK_NAME;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_app::schema::STOCK_NAME;
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state
@@ -371,7 +371,7 @@ fn from_model_stock_refuses_fit_with_a_clear_status() {
 
 #[test]
 fn stock_fit_without_models_is_a_polite_status() {
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state
@@ -387,8 +387,8 @@ fn stock_fit_without_models_is_a_polite_status() {
 
 #[test]
 fn set_wcs_creates_offset_undo_removes_and_bad_slot_refuses() {
-    use hsmworks_app::model;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.pending.push_back(CommandKind::SetWcs {
@@ -424,10 +424,10 @@ fn set_wcs_creates_offset_undo_removes_and_bad_slot_refuses() {
 
 #[test]
 fn delete_by_name_round_trips_stock() {
-    use hsmworks_app::model;
-    use hsmworks_app::schema::STOCK_NAME;
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_app::schema::STOCK_NAME;
+    use camcraft_app::stock::StockShape;
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.pending.push_back(box_stock(
@@ -452,9 +452,9 @@ fn delete_by_name_round_trips_stock() {
 fn anchor_grid_places_origin_on_the_stock_box() {
     // A grid click in the pane boils down to these two helpers feeding the
     // existing SetWcs command; pin their contract end to end.
-    use hsmworks_app::model;
-    use hsmworks_app::stock::StockShape;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_app::stock::StockShape;
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.pending.push_back(box_stock(
@@ -496,8 +496,8 @@ fn anchor_grid_places_origin_on_the_stock_box() {
 
 #[test]
 fn origin_undo_leaves_no_stale_readout() {
-    use hsmworks_app::model;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.wcs_ui.slot = 1; // G55
@@ -527,9 +527,9 @@ fn origin_undo_leaves_no_stale_readout() {
 
 #[test]
 fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
-    use hsmworks_app::geometry::{Point3, transform_point};
-    use hsmworks_app::model;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::geometry::{Point3, transform_point};
+    use camcraft_app::model;
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     // A spindle that points along world -Y is a +90 roll about X.
@@ -585,12 +585,12 @@ fn wcs_orientation_tilts_the_offset_and_undo_restores_it() {
 
 #[test]
 fn setup_furniture_stays_out_of_the_model_list() {
-    use hsmworks_app::model;
-    use hsmworks_ui::state::{CommandKind, State};
+    use camcraft_app::model;
+    use camcraft_ui::state::{CommandKind, State};
 
     let mut state = State::new();
     state.pending.push_back(box_stock(
-        hsmworks_app::stock::StockShape::Box {
+        camcraft_app::stock::StockShape::Box {
             dx: 10.0,
             dy: 10.0,
             dz: 10.0,

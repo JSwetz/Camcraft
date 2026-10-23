@@ -1254,7 +1254,7 @@ fn feature_edges(verts: &[[f32; 3]]) -> Vec<u32> {
         .iter()
         .map(|v| [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])])
         .collect();
-    hsmworks_app::geometry::feature::feature_edges(&pts)
+    camcraft_app::geometry::feature::feature_edges(&pts)
         .into_iter()
         .flat_map(|e| [e.i, e.j])
         .collect()

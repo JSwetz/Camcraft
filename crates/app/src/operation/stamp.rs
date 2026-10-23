@@ -31,7 +31,10 @@ pub fn current_stamp(
     // sources feed the digest - every op cached under v1 reads Stale
     // once and clears on regenerate (same one-time churn as the
     // b3eaebc stamp move, the mechanism working, not broken).
-    h.write(b"hsmw-op-stamp-v2");
+    // (M4.3: the salt says camcraft - a one-time Stale read for
+    // documents saved under the old salt, the same churn the version
+    // bumps produce, working as designed.)
+    h.write(b"camcraft-op-stamp-v2");
     let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
     h.write(tool_name.as_bytes());
     h.write_u8(0xff);

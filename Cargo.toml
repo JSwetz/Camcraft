@@ -9,7 +9,7 @@ edition = "2024"
 rust-version = "1.90"
 
 [workspace.dependencies]
-hsmworks-app = { path = "crates/app" }
+camcraft-app = { path = "crates/app" }
 camcraft-geometry = { path = "crates/geometry" }
 camcraft-cl = { path = "crates/cl" }
 camcraft-tools = { path = "crates/tools" }
@@ -28,7 +28,7 @@ serde_json = "1"
 
 # Platform + dialog deps shared with the UI stack; imgui retired at M1.4.2
 # M-g (the dear-imgui-* trio left with it).
-# No direct wgpu dep: hsmworks-ui uses egui_wgpu::wgpu so types match the
+# No direct wgpu dep: camcraft-ui uses egui_wgpu::wgpu so types match the
 # renderer exactly (wgpu is re-exported, version-selected by the set below).
 winit = "0.30"
 rfd = "0.15"

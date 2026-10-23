@@ -696,6 +696,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "camcraft-app"
+version = "0.3.0"
+dependencies = [
+ "camcraft-cl",
+ "camcraft-geometry",
+ "camcraft-motion",
+ "camcraft-post",
+ "camcraft-sim",
+ "camcraft-tools",
+ "clipper2-rust",
+ "flecs_ecs",
+ "ruststep",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "truck-meshalgo",
+ "truck-polymesh",
+ "truck-stepio",
+ "truck-topology",
+]
+
+[[package]]
 name = "camcraft-cl"
 version = "0.3.0"
 dependencies = [
@@ -751,6 +773,23 @@ dependencies = [
 [[package]]
 name = "camcraft-tools"
 version = "0.3.0"
+
+[[package]]
+name = "camcraft-ui"
+version = "0.3.0"
+dependencies = [
+ "camcraft-app",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "egui_dock",
+ "egui_kittest",
+ "flecs_ecs",
+ "image",
+ "pollster 0.4.0",
+ "rfd",
+ "winit",
+]
 
 [[package]]
 name = "castaway"
@@ -1870,45 +1909,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hsmworks-app"
-version = "0.3.0"
-dependencies = [
- "camcraft-cl",
- "camcraft-geometry",
- "camcraft-motion",
- "camcraft-post",
- "camcraft-sim",
- "camcraft-tools",
- "clipper2-rust",
- "flecs_ecs",
- "ruststep",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "truck-meshalgo",
- "truck-polymesh",
- "truck-stepio",
- "truck-topology",
-]
-
-[[package]]
-name = "hsmworks-ui"
-version = "0.3.0"
-dependencies = [
- "egui",
- "egui-wgpu",
- "egui-winit",
- "egui_dock",
- "egui_kittest",
- "flecs_ecs",
- "hsmworks-app",
- "image",
- "pollster 0.4.0",
- "rfd",
- "winit",
-]
 
 [[package]]
 name = "iana-time-zone"

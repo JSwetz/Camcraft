@@ -7,7 +7,7 @@
 // the properties object from any host (our engine publishes more,
 // the reference base less; this text runs on either unchanged).
 description = "Fanuc (3-axis mill, G73/G81/G82/G83/G84/G86/G89, G2/G3, G98)";
-vendor = "HSMWorks (independent, unaffiliated)";
+vendor = "CamCraft (independent, unaffiliated)";
 legal = "Original clean-room work; public documentation only";
 certificationLevel = 1;
 minimumRevision = 1;
@@ -109,7 +109,7 @@ function coolantCode() {
 
 // -------------------------------------------------------------- header
 function onOpen() {
-  var nm = (typeof machine !== "undefined" && machine.name) || "HSMWORKS";
+  var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
   writeln("%");
   block(["O0001", "(" + nm + ")"]);
 }

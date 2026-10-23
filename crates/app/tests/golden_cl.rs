@@ -9,9 +9,9 @@ mod common;
 
 use common::{gen_to_cltext, write_golden};
 
-use hsmworks_app::cl::MoveKind;
-use hsmworks_app::geo2d::{Loop, Point2, Region};
-use hsmworks_app::machining2d::{
+use camcraft_app::cl::MoveKind;
+use camcraft_app::geo2d::{Loop, Point2, Region};
+use camcraft_app::machining2d::{
     contour, face, pocket, slot, trace, ContourParams, FaceParams, Lead, PocketParams,
     PocketStrategy, Side, SlotParams, TraceParams,
 };
@@ -323,8 +323,8 @@ fn trace_plate_with_hole_matches_golden() {
 
 // ------------------------------------------------------------ drilling
 
-use hsmworks_app::drilling::{CycleChoice, CycleParams, Hole, drill};
-use hsmworks_app::tools::{Tool, ToolKind};
+use camcraft_app::drilling::{CycleChoice, CycleParams, Hole, drill};
+use camcraft_app::tools::{Tool, ToolKind};
 
 fn cycle_tool(kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64) -> Tool {
     Tool {
@@ -383,7 +383,7 @@ fn drill_plate_matches_golden() {
     let t = drill(&p).unwrap();
     assert_eq!(t.cycles.len(), 2);
     assert!(
-        t.cycles.iter().all(|c| c.kind == hsmworks_app::cl::CycleKind::Drill),
+        t.cycles.iter().all(|c| c.kind == camcraft_app::cl::CycleKind::Drill),
         "one-diameter depths must Auto to plain Drill"
     );
     write_golden("drill_plate.cl", &gen_to_cltext(&t));
@@ -417,7 +417,7 @@ fn drill_peck_matches_golden() {
     };
     let t = drill(&p).unwrap();
     assert_eq!(t.cycles.len(), 1);
-    assert_eq!(t.cycles[0].kind, hsmworks_app::cl::CycleKind::Peck);
+    assert_eq!(t.cycles[0].kind, camcraft_app::cl::CycleKind::Peck);
     assert!((t.cycles[0].peck - 18.0).abs() < 1e-9, "auto chip-break step = 3d");
     write_golden("drill_peck.cl", &gen_to_cltext(&t));
 }
@@ -450,7 +450,7 @@ fn tap_plate_matches_golden() {
     };
     let t = drill(&p).unwrap();
     assert_eq!(t.cycles.len(), 1);
-    assert_eq!(t.cycles[0].kind, hsmworks_app::cl::CycleKind::Tap);
+    assert_eq!(t.cycles[0].kind, camcraft_app::cl::CycleKind::Tap);
     write_golden("tap_plate.cl", &gen_to_cltext(&t));
 }
 
@@ -461,8 +461,8 @@ fn tap_plate_matches_golden() {
 
 #[test]
 fn finish3d_waterline_cone() {
-    use hsmworks_app::finishing3d::{waterline, Finish3DParams, FinishPattern};
-    use hsmworks_app::geometry::{Point3, Triangle};
+    use camcraft_app::finishing3d::{waterline, Finish3DParams, FinishPattern};
+    use camcraft_app::geometry::{Point3, Triangle};
     let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     // 45-degree cone, apex (0,0,20), R20 base ring at z 0, closed bottom.
     let n = 96;
@@ -512,8 +512,8 @@ fn finish3d_waterline_cone() {
 
 #[test]
 fn finish3d_scallop_plateau() {
-    use hsmworks_app::finishing3d::{parallel, Finish3DParams, FinishPattern};
-    use hsmworks_app::geometry::{Point3, Triangle};
+    use camcraft_app::finishing3d::{parallel, Finish3DParams, FinishPattern};
+    use camcraft_app::geometry::{Point3, Triangle};
     let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     // 20x20x10 block (the finish3d.rs plateau fixture's proportions):
     // top at z 10, four walls, no bottom - a finish model, not a
@@ -564,8 +564,8 @@ fn finish3d_scallop_plateau() {
 
 #[test]
 fn finish3d_ramp_parallel_plateau() {
-    use hsmworks_app::finishing3d::{parallel, Finish3DParams, FinishPattern};
-    use hsmworks_app::geometry::{Point3, Triangle};
+    use camcraft_app::finishing3d::{parallel, Finish3DParams, FinishPattern};
+    use camcraft_app::geometry::{Point3, Triangle};
     let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     // The scallop golden's block again: 20x20x10, top at z 10, no bottom.
     let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
@@ -614,8 +614,8 @@ fn finish3d_ramp_parallel_plateau() {
 
 #[test]
 fn finish3d_radial_dome() {
-    use hsmworks_app::finishing3d::{radial, Finish3DParams, FinishPattern};
-    use hsmworks_app::geometry::{Point3, Triangle};
+    use camcraft_app::finishing3d::{radial, Finish3DParams, FinishPattern};
+    use camcraft_app::geometry::{Point3, Triangle};
     let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     // Spherical cap, apex (0,0,12), rim at polar 60 deg, closed by a
     // flat base - the dome fixture's shape at golden-sized tessellation.
@@ -676,8 +676,8 @@ fn finish3d_radial_dome() {
 
 #[test]
 fn finish3d_spiral_plateau() {
-    use hsmworks_app::finishing3d::{spiral, Finish3DParams, FinishPattern};
-    use hsmworks_app::geometry::{Point3, Triangle};
+    use camcraft_app::finishing3d::{spiral, Finish3DParams, FinishPattern};
+    use camcraft_app::geometry::{Point3, Triangle};
     let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     // The scallop golden's block: 20x20x10, top at z 10, no bottom.
     let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
@@ -720,8 +720,8 @@ fn finish3d_spiral_plateau() {
 
 #[test]
 fn finish3d_contour_plateau() {
-    use hsmworks_app::finishing3d::{contour, Finish3DParams, FinishPattern};
-    use hsmworks_app::geometry::{Point3, Triangle};
+    use camcraft_app::finishing3d::{contour, Finish3DParams, FinishPattern};
+    use camcraft_app::geometry::{Point3, Triangle};
     let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     // The scallop golden's block: 20x20x10, top at z 10, no bottom.
     let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
@@ -764,8 +764,8 @@ fn finish3d_contour_plateau() {
 
 #[test]
 fn finish3d_project_dome() {
-    use hsmworks_app::finishing3d::{project, Finish3DParams, FinishPattern};
-    use hsmworks_app::geometry::{Point3, Triangle};
+    use camcraft_app::finishing3d::{project, Finish3DParams, FinishPattern};
+    use camcraft_app::geometry::{Point3, Triangle};
     let p3 = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
     // The radial golden's dome, verbatim - so the two polar-family
     // goldens differ only in the kinematic.

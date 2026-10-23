@@ -196,7 +196,7 @@ impl Shell {
 
     fn init_gpu(&mut self, el: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
-            .with_title("HSMWorks (egui shell)")
+            .with_title("CamCraft")
             .with_inner_size(LogicalSize::new(1280.0, 800.0));
         let window = match el.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -709,7 +709,7 @@ fn viewport_panel(
     if state.sim.is_some() {
         let sc = sim_script(state);
         let total = sc.total.max(0.0);
-        let unit = hsmworks_app::units::of(&state.world);
+        let unit = camcraft_app::units::of(&state.world);
         if let Some(sim) = state.sim.as_mut() {
             // Clamp a stalled frame's dt: a hiccup never teleports the
             // tool through material.
@@ -1085,19 +1085,19 @@ fn viewport_panel(
 /// move). Pure and `pub(crate)` so the tests pin the string law without a
 /// window.
 pub(crate) fn sim_readout(
-    sc: &hsmworks_app::sim::Script,
+    sc: &camcraft_app::sim::Script,
     t: f64,
-    unit: hsmworks_app::units::Unit,
+    unit: camcraft_app::units::Unit,
 ) -> String {
     let f = sc.at(t);
     let verb = match f.readout {
-        hsmworks_app::sim::Readout::Rapid => "RAPID".to_owned(),
-        hsmworks_app::sim::Readout::Feed(v) => {
-            format!("F {} {}", hsmworks_app::units::feed(v, unit), unit.feed_suffix())
+        camcraft_app::sim::Readout::Rapid => "RAPID".to_owned(),
+        camcraft_app::sim::Readout::Feed(v) => {
+            format!("F {} {}", camcraft_app::units::feed(v, unit), unit.feed_suffix())
         }
-        hsmworks_app::sim::Readout::Dwell(x) => format!("DWELL {x:.1} s"),
-        hsmworks_app::sim::Readout::Idle if f.done => "END".to_owned(),
-        hsmworks_app::sim::Readout::Idle => "STANDBY".to_owned(),
+        camcraft_app::sim::Readout::Dwell(x) => format!("DWELL {x:.1} s"),
+        camcraft_app::sim::Readout::Idle if f.done => "END".to_owned(),
+        camcraft_app::sim::Readout::Idle => "STANDBY".to_owned(),
     };
     let op = f
         .op
@@ -1110,10 +1110,10 @@ pub(crate) fn sim_readout(
 /// tree-order walk the post takes (hidden paths included - hidden is
 /// display, not suppression; the law stands on `State::has_toolpaths`),
 /// so the transport clock and the posted program count the same moves.
-pub(crate) fn sim_script(state: &State) -> hsmworks_app::sim::Script {
-    use hsmworks_app::{model, posting, sim};
+pub(crate) fn sim_script(state: &State) -> camcraft_app::sim::Script {
+    use camcraft_app::{model, posting, sim};
     let tr = sim::Traverse::from_machine(&posting::machine_value(&state.world));
-    let paths: Vec<(String, hsmworks_app::cl::Toolpath)> = model::named_entities(&state.world)
+    let paths: Vec<(String, camcraft_app::cl::Toolpath)> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_operation(&state.world, e))
         .filter_map(|(n, e)| model::toolpath_of(&state.world, &e).map(|tp| (n, tp.path)))
@@ -1164,7 +1164,7 @@ fn parr(p: egui::Pos2) -> [f32; 2] {
 /// Contour1 carries a non-empty cached toolpath, i.e. seed -> commands ->
 /// generate worked.
 pub(crate) mod headless {
-    use hsmworks_app::model;
+    use camcraft_app::model;
 
     use crate::state::{CommandKind, State};
     use crate::viewport::{Camera, View3D};

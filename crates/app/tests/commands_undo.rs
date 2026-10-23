@@ -5,15 +5,15 @@
 
 use std::path::{Path, PathBuf};
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     CommandError, DeleteEntity, History, ImportModel, SetStock, SetUnits, SetWcsOrigin, UpdateModel,
 };
-use hsmworks_app::units::{self, Unit};
-use hsmworks_app::geometry::{cube, Mesh, Point3, Triangle};
-use hsmworks_app::model;
-use hsmworks_app::schema::{Location, STOCK_NAME};
-use hsmworks_app::stock::{CYLINDER_SEGMENTS, StockShape};
-use hsmworks_app::world::new_world;
+use camcraft_app::units::{self, Unit};
+use camcraft_app::geometry::{cube, Mesh, Point3, Triangle};
+use camcraft_app::model;
+use camcraft_app::schema::{Location, STOCK_NAME};
+use camcraft_app::stock::{CYLINDER_SEGMENTS, StockShape};
+use camcraft_app::world::new_world;
 
 fn testdata(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/models").join(name)
@@ -113,7 +113,7 @@ fn delete_missing_entity_fails_at_construction() {
 
 #[test]
 fn corrupt_import_fails_at_construction() {
-    let path = std::env::temp_dir().join(format!("hsmworks_corrupt_{}.stl", std::process::id()));
+    let path = std::env::temp_dir().join(format!("camcraft_corrupt_{}.stl", std::process::id()));
     if std::fs::write(&path, b"garbage not an stl at all \x00\xff").is_err() {
         return; // no temp dir on this machine; the corpus tests cover parsing
     }
@@ -129,7 +129,7 @@ fn corrupt_import_fails_at_construction() {
 /// Everything undo must bring back for stock: parameters, placement, facets.
 fn stock_state(
     world: &flecs_ecs::prelude::World,
-) -> Option<(StockShape, Location, Vec<hsmworks_app::geometry::Triangle>)> {
+) -> Option<(StockShape, Location, Vec<camcraft_app::geometry::Triangle>)> {
     let entity = model::find_by_name(world, STOCK_NAME)?;
     let shape = model::stock_def_of(world, &entity)?;
     Some((
@@ -180,7 +180,7 @@ fn stock_replace_undo_restores_previous_params() {
     };
     let at = |z: f64| Location {
         pos: Point3::new(0.0, 0.0, z),
-        rot: hsmworks_app::geometry::IDENTITY_Q,
+        rot: camcraft_app::geometry::IDENTITY_Q,
     };
 
     history.execute(&world, SetStock::new(&world, box_a.clone(), at(0.0)).unwrap());
@@ -234,7 +234,7 @@ fn stock_validates_at_construction() {
             },
             Location {
                 pos: Point3::new(0.0, f64::INFINITY, 0.0),
-                rot: hsmworks_app::geometry::IDENTITY_Q,
+                rot: camcraft_app::geometry::IDENTITY_Q,
             }
         ),
         Err(CommandError::Invalid(_))
@@ -286,7 +286,7 @@ fn wcs_lazy_create_undo_removes() {
     let mut history = History::default();
     let at = Location {
         pos: Point3::new(10.0, -5.0, 2.5),
-        rot: hsmworks_app::geometry::IDENTITY_Q,
+        rot: camcraft_app::geometry::IDENTITY_Q,
     };
 
     history.execute(&world, SetWcsOrigin::new(&world, "G55", at).unwrap());
@@ -341,14 +341,14 @@ fn delete_stock_undo_restores_kind() {
 
 // ===================== M1.5 step 5: SetOperationGeometry =====================
 
-use hsmworks_app::commands::{
+use camcraft_app::commands::{
     AddTool, CreateOperation, EditOperationLinks, GenerateOperation, SetOperationGeometry,
 };
-use hsmworks_app::geometry::feature::FaceKind;
-use hsmworks_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, SrcRef};
-use hsmworks_app::tools::catalog;
+use camcraft_app::geometry::feature::FaceKind;
+use camcraft_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, SrcRef};
+use camcraft_app::tools::catalog;
 
-fn cat_tool(name: &str) -> hsmworks_app::tools::Tool {
+fn cat_tool(name: &str) -> camcraft_app::tools::Tool {
     catalog()
         .into_iter()
         .find(|(n, _)| *n == name)

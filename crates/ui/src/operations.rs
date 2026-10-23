@@ -17,16 +17,16 @@
 //! about a stale path.
 
 use flecs_ecs::prelude::World;
-use hsmworks_app::geo2d::Point2;
-use hsmworks_app::machining2d::{Lead, PocketStrategy, Side};
-use hsmworks_app::operation::{self, Height, HeightReference, OpParams};
-use hsmworks_app::units;
-use hsmworks_app::verify::Warning;
+use camcraft_app::geo2d::Point2;
+use camcraft_app::machining2d::{Lead, PocketStrategy, Side};
+use camcraft_app::operation::{self, Height, HeightReference, OpParams};
+use camcraft_app::units;
+use camcraft_app::verify::Warning;
 
 /// The Strategy combo's labels, in index order - one source for the
 /// labels, the combo, and any test checking what the pane offers. Auto
 /// sits beside the explicit choices; picking it stores the choice, and
-/// [`hsmworks_app::machining2d::PocketStrategy::resolve`] answers which
+/// [`camcraft_app::machining2d::PocketStrategy::resolve`] answers which
 /// path it cuts at generate.
 pub fn strategy_names() -> &'static [&'static str] {
     &["Zigzag", "Waterline", "Auto"]
@@ -40,7 +40,7 @@ pub fn strategy3d_names() -> &'static [&'static str] {
 }
 /// The Side combo's labels, in index order (M1.5.4 issue 2). Auto sits
 /// beside the explicit choices like the pocket's Strategy: picking it
-/// stores the choice, and [`hsmworks_app::operation::contour_auto_side`]
+/// stores the choice, and [`camcraft_app::operation::contour_auto_side`]
 /// (the very walk generation runs) answers which side a contour takes
 /// at generate.
 pub fn side_names() -> &'static [&'static str] {
@@ -49,7 +49,7 @@ pub fn side_names() -> &'static [&'static str] {
 
 /// The Cycle combo's labels, in `CycleChoice` index order (M1.6). Auto
 /// again sits beside the explicit choices - and it is the tool that
-/// answers for it ([`hsmworks_app::drilling::auto_kind`]: a tap cycle
+/// answers for it ([`camcraft_app::drilling::auto_kind`]: a tap cycle
 /// for a tap, a boring cycle for a bore, depth-vs-diameter otherwise),
 /// so the note next to the combo reads from the op's tool, not a guess.
 pub fn cycle_names() -> &'static [&'static str] {
@@ -57,8 +57,8 @@ pub fn cycle_names() -> &'static [&'static str] {
 }
 
 /// Combo index for a cycle choice - the inverse of what picking names.
-pub(crate) fn cycle_index(c: &hsmworks_app::drilling::CycleChoice) -> usize {
-    use hsmworks_app::drilling::CycleChoice as C;
+pub(crate) fn cycle_index(c: &camcraft_app::drilling::CycleChoice) -> usize {
+    use camcraft_app::drilling::CycleChoice as C;
     match c {
         C::Auto => 0,
         C::Spot => 1,
@@ -200,7 +200,7 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             // (or the explicit Depth field if one is set); the G54
             // default below would be a plane no drilled hole implies.
             bottom_z: None,
-            cycle: hsmworks_app::drilling::CycleChoice::Auto,
+            cycle: camcraft_app::drilling::CycleChoice::Auto,
             peck: 0.0,
             dwell: 0.0,
             feed,
@@ -223,7 +223,7 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             strategy: PocketStrategy::Auto,
             // The dive the 2-D pocket already makes; ramp and helix are
             // opt-in once the walls are known to allow them.
-            entry: hsmworks_app::machining3d::Entry3D::Plunge,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             // The staircase is honest noise until the user asks for
             // the closing pass: rest roughing costs a second ladder.
@@ -239,7 +239,7 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
             // The auto-split is the default: waterline alone would
             // leave every flat shelf standing proud, and a silent
             // miss is the one answer this app never gives.
-            pattern: hsmworks_app::finishing3d::FinishPattern::Parallel,
+            pattern: camcraft_app::finishing3d::FinishPattern::Parallel,
             // None = the stepover cos-law derives spacing from the
             // tolerance; the panel can override it per line set.
             stepover: None,
@@ -460,7 +460,7 @@ mod height_row_tests {
     //! to fix it - never show a stale or guessed z.
 
     use super::*;
-    use hsmworks_app::world::new_world;
+    use camcraft_app::world::new_world;
 
     #[test]
     fn a_resolved_height_echoes_the_plane_it_lands_on() {
@@ -584,7 +584,7 @@ mod height_row_tests {
         assert!(bottom_z.is_none(), "hole floors ride the holes, not G54");
         assert_eq!(clearance_z.reference, HeightReference::TopOfStock);
         assert!(retract_z.is_none(), "None hops to clearance, like the pocket family");
-        assert_eq!(cycle, hsmworks_app::drilling::CycleChoice::Auto);
+        assert_eq!(cycle, camcraft_app::drilling::CycleChoice::Auto);
         assert!(holes.is_empty());
         assert_eq!((peck, dwell), (0.0, 0.0), "0 peck lets the Auto law size it; no dwell");
     }
@@ -624,7 +624,7 @@ mod height_row_tests {
         assert_eq!(top_z, Height::fixed(-1.0), "the contour's top becomes the R plane");
         assert_eq!((feed, plunge_feed), (700.0, 90.0));
         assert!(holes.is_empty(), "a type change never invents a hole list");
-        assert_eq!(cycle, hsmworks_app::drilling::CycleChoice::Auto);
+        assert_eq!(cycle, camcraft_app::drilling::CycleChoice::Auto);
         assert!(retract_z.is_none(), "like the pocket family, a fresh hop plane is None");
         let OpParams::Pocket { top_z, feed, climb, stepdown, .. } =
             retype(&retype(&cont_seed(), 5), 2)
@@ -646,7 +646,7 @@ mod warning_fold_tests {
     //! must not print every one.
 
     use super::fold_warnings;
-    use hsmworks_app::verify::Warning;
+    use camcraft_app::verify::Warning;
 
     fn shank_run(from: usize, to: usize, part: bool) -> Vec<Warning> {
         (from..=to)

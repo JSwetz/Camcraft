@@ -48,17 +48,17 @@ use egui::{
     Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
-use hsmworks_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
-use hsmworks_app::machine;
-use hsmworks_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
-use hsmworks_app::model;
-use hsmworks_app::posting;
-use hsmworks_app::operation::{self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef};
-use hsmworks_app::schema::{Operation, PostRef, WCS_SLOTS};
-use hsmworks_app::stock::StockShape;
-use hsmworks_app::tools;
-use hsmworks_app::units::{self, Unit};
-use hsmworks_app::verify::Warning;
+use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
+use camcraft_app::machine;
+use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
+use camcraft_app::model;
+use camcraft_app::posting;
+use camcraft_app::operation::{self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef};
+use camcraft_app::schema::{Operation, PostRef, WCS_SLOTS};
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools;
+use camcraft_app::units::{self, Unit};
+use camcraft_app::verify::Warning;
 
 
 use crate::actions;
@@ -292,7 +292,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     // in. Moving is never a stamp edit - SetOperationSetup keeps the
     // stamp and lets the resolved-Z digest say whether the op went Stale.
     ui.label("Setup");
-    let setups = hsmworks_app::setup::names(&state.world);
+    let setups = camcraft_app::setup::names(&state.world);
     if setups.is_empty() {
         ui.label("Global stock and offsets - this document has no setups yet.");
     } else if exists {
@@ -313,7 +313,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     } else {
         // A draft has no membership until Add declares it: the command
         // stamps the active setup at construction (the one-order law).
-        let eff = hsmworks_app::setup::active(&state.world);
+        let eff = camcraft_app::setup::active(&state.world);
         ui.label(format!(
             "Will machine in {}.",
             eff.unwrap_or_else(|| "the first setup".to_owned())
@@ -570,7 +570,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let op_ctx: Option<String> = model::find_by_name(&state.world, &nm)
         .and_then(|e| model::operation_of(&state.world, &e))
         .and_then(|o| o.setup);
-    if let OpParams::Drill { cycle: hsmworks_app::drilling::CycleChoice::Auto, holes, .. } =
+    if let OpParams::Drill { cycle: camcraft_app::drilling::CycleChoice::Auto, holes, .. } =
         &state.op_ui.params
     {
         // What Auto answers for, in the tool's and first hole's own
@@ -584,15 +584,15 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         ) {
             (Some(t), Some(h)) => {
                 let depth = h.entry_z - h.floor_z;
-                let pick = hsmworks_app::drilling::auto_kind(t.kind, depth, t.diameter);
+                let pick = camcraft_app::drilling::auto_kind(t.kind, depth, t.diameter);
                 let name = match pick {
-                    hsmworks_app::cl::CycleKind::Spot => "Spot",
-                    hsmworks_app::cl::CycleKind::Drill => "Drill",
-                    hsmworks_app::cl::CycleKind::Peck => "Peck",
-                    hsmworks_app::cl::CycleKind::Deep => "Deep (G83)",
-                    hsmworks_app::cl::CycleKind::Tap => "Tap",
-                    hsmworks_app::cl::CycleKind::Bore => "Bore",
-                    hsmworks_app::cl::CycleKind::BackBore => "Back bore",
+                    camcraft_app::cl::CycleKind::Spot => "Spot",
+                    camcraft_app::cl::CycleKind::Drill => "Drill",
+                    camcraft_app::cl::CycleKind::Peck => "Peck",
+                    camcraft_app::cl::CycleKind::Deep => "Deep (G83)",
+                    camcraft_app::cl::CycleKind::Tap => "Tap",
+                    camcraft_app::cl::CycleKind::Bore => "Bore",
+                    camcraft_app::cl::CycleKind::BackBore => "Back bore",
                 };
                 Some(format!(
                     "Auto -> {name} for this tool and a depth of {}",
@@ -632,7 +632,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     .as_ref()
                     .and_then(|t| model::tool_of(&state.world, t))
                     .map_or(6.0, |t| t.diameter);
-                let outer: Vec<hsmworks_app::geo2d::Point2> = region
+                let outer: Vec<camcraft_app::geo2d::Point2> = region
                     .loops()
                     .iter()
                     .max_by(|a, b| a.area().abs().total_cmp(&b.area().abs()))
@@ -1062,13 +1062,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 combo(ui, "d_cycle", &mut c_idx, cycle_names());
                 if c_idx != before {
                     *cycle = match c_idx {
-                        1 => hsmworks_app::drilling::CycleChoice::Spot,
-                        2 => hsmworks_app::drilling::CycleChoice::Drill,
-                        3 => hsmworks_app::drilling::CycleChoice::Peck,
-                        4 => hsmworks_app::drilling::CycleChoice::Tap,
-                        5 => hsmworks_app::drilling::CycleChoice::Bore,
-                        6 => hsmworks_app::drilling::CycleChoice::BackBore,
-                        _ => hsmworks_app::drilling::CycleChoice::Auto,
+                        1 => camcraft_app::drilling::CycleChoice::Spot,
+                        2 => camcraft_app::drilling::CycleChoice::Drill,
+                        3 => camcraft_app::drilling::CycleChoice::Peck,
+                        4 => camcraft_app::drilling::CycleChoice::Tap,
+                        5 => camcraft_app::drilling::CycleChoice::Bore,
+                        6 => camcraft_app::drilling::CycleChoice::BackBore,
+                        _ => camcraft_app::drilling::CycleChoice::Auto,
                     };
                 }
                 if let Some(note) = &cycle_note {
@@ -1168,20 +1168,20 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("levels come from the mesh: each shelf cuts around the material standing above it");
                 field(ui, "Entry");
                 let mut e_idx = match entry {
-                    hsmworks_app::machining3d::Entry3D::Plunge => 0,
-                    hsmworks_app::machining3d::Entry3D::Ramp => 1,
-                    hsmworks_app::machining3d::Entry3D::Helix => 2,
+                    camcraft_app::machining3d::Entry3D::Plunge => 0,
+                    camcraft_app::machining3d::Entry3D::Ramp => 1,
+                    camcraft_app::machining3d::Entry3D::Helix => 2,
                 };
                 let before = e_idx;
                 combo(ui, "p3_entry", &mut e_idx, &ENTRY_KINDS);
                 if e_idx != before {
                     *entry = match e_idx {
-                        1 => hsmworks_app::machining3d::Entry3D::Ramp,
-                        2 => hsmworks_app::machining3d::Entry3D::Helix,
-                        _ => hsmworks_app::machining3d::Entry3D::Plunge,
+                        1 => camcraft_app::machining3d::Entry3D::Ramp,
+                        2 => camcraft_app::machining3d::Entry3D::Helix,
+                        _ => camcraft_app::machining3d::Entry3D::Plunge,
                     };
                 }
-                if matches!(entry, hsmworks_app::machining3d::Entry3D::Helix) {
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
                     field(ui, "Helix lead radius");
                     num(ui, u, helix_radius);
                     ui.label("a plunge stands in wherever a helix of this radius cannot fit");
@@ -1247,33 +1247,33 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             if tab == SEC_PASSES {
                 field(ui, "Pattern");
                 let mut pat_idx = match pattern {
-                    hsmworks_app::finishing3d::FinishPattern::Waterline => 0,
-                    hsmworks_app::finishing3d::FinishPattern::Parallel => 1,
-                    hsmworks_app::finishing3d::FinishPattern::ParallelMulti => 2,
-                    hsmworks_app::finishing3d::FinishPattern::Scallop => 3,
-                    hsmworks_app::finishing3d::FinishPattern::Radial => 4,
-                    hsmworks_app::finishing3d::FinishPattern::Spiral => 5,
-                    hsmworks_app::finishing3d::FinishPattern::Contour => 6,
-                    hsmworks_app::finishing3d::FinishPattern::Project => 7,
+                    camcraft_app::finishing3d::FinishPattern::Waterline => 0,
+                    camcraft_app::finishing3d::FinishPattern::Parallel => 1,
+                    camcraft_app::finishing3d::FinishPattern::ParallelMulti => 2,
+                    camcraft_app::finishing3d::FinishPattern::Scallop => 3,
+                    camcraft_app::finishing3d::FinishPattern::Radial => 4,
+                    camcraft_app::finishing3d::FinishPattern::Spiral => 5,
+                    camcraft_app::finishing3d::FinishPattern::Contour => 6,
+                    camcraft_app::finishing3d::FinishPattern::Project => 7,
                 };
                 let before = pat_idx;
                 combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
                 if pat_idx != before {
                     *pattern = match pat_idx {
-                        1 => hsmworks_app::finishing3d::FinishPattern::Parallel,
-                        2 => hsmworks_app::finishing3d::FinishPattern::ParallelMulti,
-                        3 => hsmworks_app::finishing3d::FinishPattern::Scallop,
-                        4 => hsmworks_app::finishing3d::FinishPattern::Radial,
-                        5 => hsmworks_app::finishing3d::FinishPattern::Spiral,
-                        6 => hsmworks_app::finishing3d::FinishPattern::Contour,
-                        7 => hsmworks_app::finishing3d::FinishPattern::Project,
-                        _ => hsmworks_app::finishing3d::FinishPattern::Waterline,
+                        1 => camcraft_app::finishing3d::FinishPattern::Parallel,
+                        2 => camcraft_app::finishing3d::FinishPattern::ParallelMulti,
+                        3 => camcraft_app::finishing3d::FinishPattern::Scallop,
+                        4 => camcraft_app::finishing3d::FinishPattern::Radial,
+                        5 => camcraft_app::finishing3d::FinishPattern::Spiral,
+                        6 => camcraft_app::finishing3d::FinishPattern::Contour,
+                        7 => camcraft_app::finishing3d::FinishPattern::Project,
+                        _ => camcraft_app::finishing3d::FinishPattern::Waterline,
                     };
                 }
                 ui.label(
                     "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette - then the rings take the flanks.",
                 );
-                if !matches!(pattern, hsmworks_app::finishing3d::FinishPattern::Waterline) {
+                if !matches!(pattern, camcraft_app::finishing3d::FinishPattern::Waterline) {
                     field(ui, "Stepover");
                     let mut over = stepover.is_some();
                     if ui.checkbox(&mut over, "Set line spacing").changed() {
@@ -1560,9 +1560,9 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     // with no setups in the document this resolves to the old global
     // "Stock", so the legacy behavior is the degenerate case, not a
     // branch. sync_setup_ui already mirrored this entity's numbers.
-    let active = hsmworks_app::setup::active(&state.world);
+    let active = camcraft_app::setup::active(&state.world);
     let stock_name =
-        hsmworks_app::setup::stock_entity_name(&state.world, active.as_deref());
+        camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
     let has_stock = model::find_by_name(&state.world, &stock_name)
         .is_some_and(|e| model::is_stock(&state.world, &e));
     if let Some(s) = active.as_deref() {
@@ -1829,13 +1829,13 @@ fn wcs_page(ui: &mut Ui, state: &mut State, slot: usize) {
     ui.add_space(6.0);
     // The slot WORDS are always the RS-274 literals (law f: a posted G55
     // is a G55); only the entity behind each follows the setup.
-    let wcs_ctx = hsmworks_app::setup::active(&state.world);
+    let wcs_ctx = camcraft_app::setup::active(&state.world);
     ui.label(match wcs_ctx.as_deref() {
         Some(s) => format!("Placed offsets in setup {s}:"),
         None => "Placed offsets:".to_owned(),
     });
     for (i, name) in WCS_SLOTS.iter().enumerate() {
-        let line = match hsmworks_app::setup::wcs_entity(&state.world, wcs_ctx.as_deref(), i)
+        let line = match camcraft_app::setup::wcs_entity(&state.world, wcs_ctx.as_deref(), i)
             .and_then(|e| model::transform_of(&state.world, &e))
         {
             Some(loc) => format!(
@@ -1895,8 +1895,8 @@ fn turn_wcs(state: &mut State, axis: usize, sign: f64) {
 /// re-clamp law). The Stock and Work-offset pages always edit the ACTIVE
 /// row's furniture, so this page manages context, never geometry.
 fn setups_page(ui: &mut Ui, state: &mut State) {
-    let names = hsmworks_app::setup::names(&state.world);
-    let active = hsmworks_app::setup::active(&state.world);
+    let names = camcraft_app::setup::names(&state.world);
+    let active = camcraft_app::setup::active(&state.world);
     if names.is_empty() {
         ui.label(
             "No setups in this document: the one global stock and the \
@@ -1934,10 +1934,10 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
                 }
             });
         });
-        if let Some(def) = hsmworks_app::setup::def_of(&state.world, name) {
+        if let Some(def) = camcraft_app::setup::def_of(&state.world, name) {
             let placed = (0..WCS_SLOTS.len())
                 .filter(|i| {
-                    hsmworks_app::setup::wcs_entity(&state.world, Some(name.as_str()), *i)
+                    camcraft_app::setup::wcs_entity(&state.world, Some(name.as_str()), *i)
                         .is_some()
                 })
                 .count();
@@ -1979,7 +1979,7 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
 /// implies, so there is no draft and no command here.
 fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     let u = state.units();
-    let rows = hsmworks_app::tool_list::for_setup(&state.world, ctx);
+    let rows = camcraft_app::tool_list::for_setup(&state.world, ctx);
     if rows.is_empty() {
         ui.label("Tool list: no generated operation in this setup yet.");
         return;
@@ -1995,12 +1995,12 @@ fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
             if row.changes == 1 { "" } else { "s" },
             units::len(row.cut_mm, u, 2),
             units::len(row.rapid_mm, u, 2),
-            hsmworks_app::setup_sheet::minutes(row.minutes),
+            camcraft_app::setup_sheet::minutes(row.minutes),
         ));
     }
     ui.label(format!(
         "    setup total: est {} min",
-        hsmworks_app::setup_sheet::minutes(hsmworks_app::tool_list::setup_minutes(
+        camcraft_app::setup_sheet::minutes(camcraft_app::tool_list::setup_minutes(
             &state.world, ctx,
         )),
     ));
@@ -2027,8 +2027,8 @@ fn sheet_footer(ui: &mut Ui, state: &mut State) {
 /// in a command constructor) and tags on landing.
 fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     let u = state.units();
-    let fixtures = hsmworks_app::fixture::tagged(&state.world, ctx);
-    let table = hsmworks_app::fixture::table_box(&state.world);
+    let fixtures = camcraft_app::fixture::tagged(&state.world, ctx);
+    let table = camcraft_app::fixture::table_box(&state.world);
     // A draft whose row vanished (deleted or untagged, here or via
     // undo) retires with it - the pane never edits a ghost.
     if !state.fixture_ui.name.is_empty()
@@ -2350,7 +2350,7 @@ fn gcode_listing(
     ui: &mut Ui,
     program: &str,
     line: &mut usize,
-    blocks: &[hsmworks_app::post::TraceBlock],
+    blocks: &[camcraft_app::post::TraceBlock],
     trace_on: bool,
     jump: &std::cell::Cell<Option<usize>>,
 ) {
@@ -2699,7 +2699,7 @@ mod turn_tests {
     //! pages.rs's own `turn_wcs`/`apply_wcs_drafts`.
 
     use super::*;
-    use hsmworks_app::geometry::{Point3, transform_point};
+    use camcraft_app::geometry::{Point3, transform_point};
 
     fn place(state: &mut State, pos: [f64; 3], yaw_deg: f64) {
         state.pending.push_back(CommandKind::SetWcs {
@@ -2712,7 +2712,7 @@ mod turn_tests {
         state.drain_actions();
     }
 
-    fn location(state: &State, slot: &str) -> hsmworks_app::schema::Location {
+    fn location(state: &State, slot: &str) -> camcraft_app::schema::Location {
         let entity = model::find_by_name(&state.world, slot).expect("offset entity");
         model::transform_of(&state.world, &entity).expect("location")
     }

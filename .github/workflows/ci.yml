@@ -29,7 +29,7 @@ jobs:
       - name: Golden regression suite
         shell: bash
         run: >-
-          cargo test -p hsmworks-app
+          cargo test -p camcraft-app
           --test golden_cl --test posting --test fanuc_post
           --test project_roundtrip -- --test-threads=4
       - name: Split crate tests (M4.1 R1-R2)
@@ -40,22 +40,22 @@ jobs:
           -- --test-threads=4
       - name: App tests
         shell: bash
-        run: cargo test -p hsmworks-app -- --test-threads=4
+        run: cargo test -p camcraft-app -- --test-threads=4
       - name: Heavy verdicts (release lane, M4.4)
         shell: bash
-        run: cargo test --release -p hsmworks-app -p camcraft-motion -- --ignored
+        run: cargo test --release -p camcraft-app -p camcraft-motion -- --ignored
       - name: UI tests
         shell: bash
-        run: cargo test -p hsmworks-ui -- --test-threads=4
+        run: cargo test -p camcraft-ui -- --test-threads=4
       - name: Clippy
         shell: bash
         run: >-
           cargo clippy -p camcraft-geometry -p camcraft-cl
           -p camcraft-tools -p camcraft-post -p camcraft-sim -p camcraft-motion
-          -p hsmworks-app -p hsmworks-ui --all-targets -- -D warnings
+          -p camcraft-app -p camcraft-ui --all-targets -- -D warnings
       - name: Headless app run
         shell: bash
-        run: cargo run -q -p hsmworks-ui -- --headless
+        run: cargo run -q -p camcraft-ui -- --headless
 
   # M4.2: the same code on the rest of the OS map. Everything that runs
   # without a GPU: the golden byte-parity suites (the cross-platform float
@@ -80,7 +80,7 @@ jobs:
         # libm (M4.2b, RECOMMENDED.md) - skipped with names until the
         # generator's cull is made quantization-safe, never silently.
         run: >-
-          cargo test -p hsmworks-app
+          cargo test -p camcraft-app
           --test golden_cl --test posting --test fanuc_post
           --test project_roundtrip -- --test-threads=4
           --skip finish3d_project_dome --skip finish3d_radial_dome
