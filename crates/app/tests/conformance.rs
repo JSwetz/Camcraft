@@ -119,6 +119,7 @@ fn synth_stream() -> String {
             feed,
             center: None,
             ccw: false,
+            abc: None,
         })
     };
     cnc::serialize(&[
@@ -141,6 +142,7 @@ fn synth_stream() -> String {
             feed: Some(500.0),
             center: Some((40.0, 35.0)),
             ccw: true,
+            abc: None,
         }),
         // Hole chains: the approach rapid (moves 3..7) then the cycle
         // anchored on it. The rapids are the chain the cycle replaces

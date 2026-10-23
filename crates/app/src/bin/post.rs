@@ -26,6 +26,7 @@ ARGS:
 OPTIONS:
     --machine <mch>   machine definition (.mch JSON)
     --log <file>      write the warning list here instead of stderr
+    --trace <file>    write the block-by-block trace here (stage D)
     -h, --help        print this text
     --version         print the version
 ";
@@ -34,6 +35,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut machine: Option<String> = None;
     let mut log: Option<String> = None;
+    let mut trace: Option<String> = None;
     let mut positional: Vec<String> = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -46,16 +48,14 @@ fn main() -> ExitCode {
                 println!("post {} (boa_engine)", env!("CARGO_PKG_VERSION"));
                 return ExitCode::SUCCESS;
             }
-            "--machine" | "--log" => {
-                let key = if a == "--machine" { "machine" } else { "log" };
+            "--machine" | "--log" | "--trace" => {
+                let slot = match a.as_str() {
+                    "--machine" => &mut machine,
+                    "--log" => &mut log,
+                    _ => &mut trace,
+                };
                 match it.next() {
-                    Some(v) => {
-                        if key == "machine" {
-                            machine = Some(v.clone());
-                        } else {
-                            log = Some(v.clone());
-                        }
-                    }
+                    Some(v) => *slot = Some(v.clone()),
                     None => {
                         eprintln!("post: {a} needs a value");
                         return ExitCode::FAILURE;
@@ -73,7 +73,14 @@ fn main() -> ExitCode {
         eprintln!("post: expected exactly three paths (try --help)");
         return ExitCode::FAILURE;
     }
-    run(&positional[0], &positional[1], &positional[2], machine.as_deref(), log.as_deref())
+    run(
+        &positional[0],
+        &positional[1],
+        &positional[2],
+        machine.as_deref(),
+        log.as_deref(),
+        trace.as_deref(),
+    )
 }
 
 fn die(msg: String) -> ExitCode {
@@ -87,6 +94,7 @@ fn run(
     output: &str,
     machine: Option<&str>,
     log: Option<&str>,
+    trace: Option<&str>,
 ) -> ExitCode {
     let cps = match std::fs::read_to_string(config) {
         Ok(s) => s,
@@ -134,10 +142,34 @@ fn run(
                     }
                 }
             }
+            if let Some(path) = trace {
+                // The debugging trace (M3.3 stage D): every block of
+                // the program annotated with the toolpath record that
+                // wrote it - the whole stream-to-line story in one
+                // file. Swallowed records appear owning no lines,
+                // visible by name; silent loss is the failure mode.
+                let lines: Vec<&str> = out.program.lines().collect();
+                let mut t = String::new();
+                for b in &out.blocks {
+                    match b.record {
+                        Some(i) => t.push_str(&format!("; [record {i}] {}\n", b.label)),
+                        None => t.push_str(&format!("; {}\n", b.label)),
+                    }
+                    let lo = b.first.min(lines.len());
+                    let hi = b.last.min(lines.len());
+                    for (n, ln) in lines.iter().enumerate().skip(lo).take(hi - lo) {
+                        t.push_str(&format!("{:>5}  {ln}\n", n + 1));
+                    }
+                }
+                if let Err(e) = std::fs::write(Path::new(path), &t) {
+                    return die(format!("cannot write {path}: {e}"));
+                }
+            }
             println!(
-                "post: {input} -> {output}: {} line(s), {} mapped record(s), {} swallowed",
+                "post: {input} -> {output}: {} line(s), {} mapped record(s), {} blocks, {} swallowed",
                 lines,
                 out.line_map.iter().filter(|l| l.record.is_some()).count(),
+                out.blocks.len(),
                 out.swallowed,
             );
             ExitCode::SUCCESS

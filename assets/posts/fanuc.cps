@@ -29,6 +29,9 @@ var cycleSig = "";         // g|Z|R|Q of the open group (modal X Y holes)
 var retractSet = false;    // G98 written once per program
 var coolant = "";          // the M-code this program started, if any
 var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
+var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
+var lastA = 0, lastB = 0, lastC = 0; // angle words the last block commanded (deg)
+var tiltRefused = false;   // a refusal the gate counts once, not per line
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs):
 // the stream speaks world coordinates; the machine measures its program
 // from the work offset. A legacy .cl carries no PARAMs, so these stay 0.
@@ -56,6 +59,35 @@ function xyz(p) { return [wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, o
 function wo(letter, v, o) { return has(v) ? letter + fu(v - o) : ""; }  // axis word, origin-relative
 function msg(s) {  // counted warning where the host offers message()
   if (typeof message === "function") message(s); else writeln("; " + s);
+}
+
+// RTCP output (stage D). A tilted record locates the TOOL TIP in the
+// work offset while the machine turns - G43.4 delegates the kinematics
+// to the controller, so the post never does pivot math; it arms the
+// mode, voices the commanded angles modally, and refuses by name
+// (counted warning, gate-blocked) wherever it cannot honor one. Law:
+// a tilted record states all three angles (the stream's parser zeros
+// unstated letters), so the presence of A decides; angle memory
+// resets with the arm, so re-arming always commands all three words.
+// A prismatic record never touches the mode - the tilt stays modal.
+function tilt(p) {  // words to append, [] if none, null if refused
+  if (!has(p.A)) return [];
+  if (typeof machine === "undefined" || machine.rtcp !== true) {
+    if (!tiltRefused) { tiltRefused = true; msg("tilted move on a machine without a tilting rotary"); }
+    return null;
+  }
+  if (inCycle) { msg("tilted move inside a canned-cycle group"); return null; }
+  if (!tcpmOn) {
+    block(["G43.4", "H" + pad2(tNo)]);
+    tcpmOn = true;
+    lastA = p.A; lastB = p.B; lastC = p.C;
+    return [w("A", p.A), w("B", p.B), w("C", p.C)];
+  }
+  var words = [];
+  if (p.A !== lastA) { words.push("A" + fu(p.A)); lastA = p.A; }
+  if (p.B !== lastB) { words.push("B" + fu(p.B)); lastB = p.B; }
+  if (p.C !== lastC) { words.push("C" + fu(p.C)); lastC = p.C; }
+  return words;
 }
 
 // The .mch tool-station coolant list carries names + M-codes; the
@@ -100,6 +132,8 @@ function onSpindleSpeed() {
 function onToolChange(number, name) {
   tNo = number;
   toolWait = true;
+  tcpmOn = false;              // a new tool re-arms TCPM (stage D)
+  lastA = 0; lastB = 0; lastC = 0;
 }
 
 // The preamble closes over everything a raw motion line needs to be a
@@ -131,6 +165,11 @@ function endPreamble() {
   inCycle = false;
   if (coolant) block(["M9"]);
   block(["M5"]);
+  // The next preamble carries G49, which cancels TCPM too - so the
+  // arm and the angle memory reset here, and a later tilt re-arms by
+  // commanding all three words (stage D).
+  tcpmOn = false;
+  lastA = 0; lastB = 0; lastC = 0;
 }
 
 function onSection() { startPreamble(); }
@@ -142,17 +181,20 @@ function onSectionEnd() { endPreamble(); }
 // chain is the generator's truth, not a second copy of output.
 function onRapid() {
   startPreamble();
-  if (inCycle) return;
-  block(["G00"].concat(xyz(properties)));
+  var tw = tilt(properties);
+  if (tw === null || inCycle) return;
+  block(["G00"].concat(xyz(properties), tw));
 }
 function onLinear() {
   startPreamble();
-  if (inCycle) return;
-  block(["G01"].concat(xyz(properties), [fw(properties.FeedRate)]));
+  var tw = tilt(properties);
+  if (tw === null || inCycle) return;
+  block(["G01"].concat(xyz(properties), tw, [fw(properties.FeedRate)]));
 }
 function onCircular() {
   startPreamble();
-  if (inCycle) return;
+  var tw = tilt(properties);
+  if (tw === null || inCycle) return;
   var p = properties;
   var c = p.IJKIncrement || {};
   block([
@@ -162,8 +204,7 @@ function onCircular() {
     // must NOT enter them - center minus start in the stream's frame.
     w("I", has(c.I) && has(p.StartX) ? c.I - p.StartX : null),
     w("J", has(c.J) && has(p.StartY) ? c.J - p.StartY : null),
-    fw(p.FeedRate),
-  ]);
+  ].concat(tw, [fw(p.FeedRate)]));
 }
 
 // ------------------------------------------------------- canned cycles

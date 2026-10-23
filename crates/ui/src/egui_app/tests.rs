@@ -2722,6 +2722,8 @@ fn gcode_segment_highlights_the_move_the_scroll_line_posts() {
             line_pos,
             open,
             line,
+            blocks: Vec::new(),
+            trace: false,
         });
         super::shell::gcode_segment(&st)
     };
@@ -2833,6 +2835,8 @@ fn the_viewer_window_publishes_the_scroll_cursor() {
         line_pos: (0..120).map(|i| Some([i as f64, 0.0, 0.0])).collect(),
         open: true,
         line: 0,
+        blocks: Vec::new(),
+        trace: false,
     });
     harness.run();
     {

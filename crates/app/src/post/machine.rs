@@ -23,15 +23,36 @@ pub fn from_json(text: &str) -> Result<Value, serde_json::Error> {
 /// M3.3 stage C: a machine that names its options says so under
 /// `head.toolStation.coolants`, and one that names nothing mirrors
 /// nothing - the post holds its coolant word silent, exactly as it
-/// did when the bridge carried none. Rotary axes are still not
-/// mirrored: the prismatic script contract has no rotary word to
-/// read, the traverse paces only prismatic motion, and a deg/min
-/// rapid leaking into an mm/min ceiling would be a unit lie
-/// (stage D, RTCP).
+/// did when the bridge carried none. Stage D brought the rotaries
+/// across - as geometry, kept out of `axes` where the traverse and
+/// the rate ceilings live: their direction and degree travel join
+/// the script under `kinematics.static.rotaries`, and their deg/min
+/// rates join nothing, because a rate mirrored into an mm/min field
+/// would be the unit lie stage C named and this file keeps its word.
 #[must_use]
 pub fn mirror(m: &crate::machine::Machine) -> Value {
     let mut axes: Vec<Value> = Vec::new();
+    let mut rotaries: Vec<Value> = Vec::new();
     for a in &m.axes {
+        if a.rotary {
+            // The stage D door: a rotary mirrors as GEOMETRY - its
+            // letter, its stated direction, its travel in degrees -
+            // never as speeds. A deg/min rate in an mm/min field
+            // would be the unit lie stage C refused, and the RTCP
+            // question a post asks ("does this machine tilt?") is
+            // answered by the direction, not by the rate.
+            let mut r = serde_json::Map::new();
+            r.insert("letter".to_owned(), json!(a.name));
+            r.insert("type".to_owned(), json!("rotary"));
+            if let Some(d) = a.axis {
+                r.insert("direction".to_owned(), json!([d[0], d[1], d[2]]));
+            }
+            if let Some((lo, hi)) = a.travel {
+                r.insert("travel".to_owned(), json!([lo, hi]));
+            }
+            rotaries.push(Value::Object(r));
+            continue;
+        }
         let direction = match a.name.as_str() {
             "X" => [1.0, 0.0, 0.0],
             "Y" => [0.0, 1.0, 0.0],
@@ -51,9 +72,21 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
             "speeds": Value::Object(speeds),
         }));
     }
-    // Rates the script reads as ceilings: the fastest stated axis.
-    let rapid = m.axes.iter().filter_map(|a| a.rapid).fold(0.0_f64, f64::max);
-    let feed = m.axes.iter().filter_map(|a| a.feed).fold(0.0_f64, f64::max);
+    // Rates the script reads as ceilings: the fastest stated axis -
+    // and stated axes are LINEAR only. A rotary's deg/min is not a
+    // number any prismatic ceiling may absorb (stage C's law, kept).
+    let rapid = m
+        .axes
+        .iter()
+        .filter(|a| !a.rotary)
+        .filter_map(|a| a.rapid)
+        .fold(0.0_f64, f64::max);
+    let feed = m
+        .axes
+        .iter()
+        .filter(|a| !a.rotary)
+        .filter_map(|a| a.feed)
+        .fold(0.0_f64, f64::max);
     let mut head = serde_json::Map::new();
     if let Some(s) = m.spindle_max {
         head.insert("spindle".to_owned(), json!({"max": s}));
@@ -77,7 +110,7 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
     }
     json!({
         "name": m.model,
-        "kinematics": { "static": { "axes": axes, "head": Value::Object(head) } },
+        "kinematics": { "static": { "axes": axes, "rotaries": rotaries, "head": Value::Object(head) } },
         "rapidRate": rapid,
         "feedRateMax": feed,
     })
@@ -106,6 +139,10 @@ pub fn script_props(m: &Value) -> Value {
         .and_then(Value::as_array)
         .map(|axes| {
             axes.iter()
+                // A raw file may list its rotaries among the axes;
+                // their deg/min is not a prismatic ceiling (stage C's
+                // unit law, kept through the raw door too).
+                .filter(|a| !is_rotary_letter(a.get("letter").and_then(Value::as_str)))
                 .map(|a| f64_or(get(a, &["speeds", "rapid"]), 0.0))
                 .fold(0.0_f64, f64::max)
         })
@@ -132,6 +169,50 @@ pub fn script_props(m: &Value) -> Value {
                 .collect()
         })
         .unwrap_or_default();
+    // The rotary inventory (stage D): the mirror's geometry section,
+    // or - through the raw door - the axes that carry an A/B/C
+    // letter. RTCP is then a geometric question, not a naming one:
+    // the machine can tilt only if some rotary states a direction
+    // that is not the Z column. An unstated direction tilts nothing
+    // a post may promise, and `machine.rtcp` says so.
+    let mut rotaries: Vec<Value> = Vec::new();
+    if let Some(rs) = get(m, &["kinematics", "static", "rotaries"]).and_then(Value::as_array) {
+        for r in rs {
+            rotaries.push(json!({
+                "name": get(r, &["letter"]).and_then(Value::as_str).unwrap_or(""),
+                "direction": get(r, &["direction"]).cloned().unwrap_or(Value::Null),
+                "travel": get(r, &["travel"]).cloned().unwrap_or(Value::Null),
+            }));
+        }
+    }
+    if rotaries.is_empty()
+        && let Some(axes) = get(m, &["kinematics", "static", "axes"]).and_then(Value::as_array)
+    {
+        for a in axes {
+            let letter = a.get("letter").and_then(Value::as_str).unwrap_or("");
+            if is_rotary_letter(Some(letter)) {
+                rotaries.push(json!({
+                    "name": letter,
+                    "direction": a.get("axis").cloned().unwrap_or(Value::Null),
+                    "travel": Value::Null,
+                }));
+            }
+        }
+    }
+    let rtcp = rotaries.iter().any(|r| {
+        r.get("direction")
+            .and_then(Value::as_array)
+            .filter(|d| d.len() == 3)
+            .and_then(|d| {
+                let [x, y, z] = [
+                    d[0].as_f64()?,
+                    d[1].as_f64()?,
+                    d[2].as_f64()?,
+                ];
+                Some(z * z < 0.99 * (x * x + y * y + z * z))
+            })
+            .unwrap_or(false)
+    });
     json!({
         "name": get(m, &["name"]).and_then(Value::as_str).unwrap_or(""),
         "capabilities": get(m, &["capabilities"]).cloned().unwrap_or_else(|| json!({})),
@@ -139,5 +220,15 @@ pub fn script_props(m: &Value) -> Value {
         "feedRateMax": feed,
         "spindleMax": spindle,
         "coolants": coolants,
+        "rotaries": rotaries,
+        "rtcp": rtcp,
     })
+}
+
+/// The RS-274 rotary addresses: A turns about X, B about Y, C about Z.
+/// Everything else in an axes list is linear by our grammar (a Q
+/// slide is a slide - stage C's stated law, re-echoed at the raw
+/// door, where letters are all a bare file says).
+fn is_rotary_letter(letter: Option<&str>) -> bool {
+    matches!(letter, Some("A") | Some("B") | Some("C"))
 }

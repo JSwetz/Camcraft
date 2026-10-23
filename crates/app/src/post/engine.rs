@@ -21,6 +21,19 @@ pub struct LineInfo {
     pub record: Option<usize>,
 }
 
+/// One toolpath record's stretch of program lines (M3.3 stage D,
+/// post debugging): the block the trace pane selects and `--trace`
+/// logs. `first..last` is half-open into the program's line numbers;
+/// `record` is `None` for the header `onOpen` wrote and the footer
+/// `onClose` wrote - lines no toolpath record owns.
+#[derive(Clone, Debug)]
+pub struct TraceBlock {
+    pub record: Option<usize>,
+    pub label: String,
+    pub first: usize,
+    pub last: usize,
+}
+
 /// The finished program plus the evidence a reviewer needs.
 #[derive(Clone, Debug)]
 pub struct PostOutput {
@@ -29,6 +42,12 @@ pub struct PostOutput {
     /// Program line -> stream record, the viewer's sync map (the
     /// record's index doubles as the move index for motion records).
     pub line_map: Vec<LineInfo>,
+    /// Block-by-block trace: every record that wrote lines (and every
+    /// motion record `onCommand` swallowed, which writes none - loss
+    /// stays visible, never silent). Records that legitimately emit
+    /// nothing (a `PARAM` a post only stores) are absent, so the
+    /// trace reads as program, not as the stream echoed back.
+    pub blocks: Vec<TraceBlock>,
     /// `WARN` records plus every `message()` the script logged - the
     /// validation gate's counted warnings, in file order.
     pub warnings: Vec<String>,
@@ -45,15 +64,21 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
     let mut s = Script::load(cps)?;
     s.set_machine(&machine::script_props(mch))?;
     s.call("onOpen", "")?;
+    let head = s.out_len()?;
 
     let mut warnings = Vec::new();
     let mut base: BTreeMap<String, Value> = BTreeMap::new();
     let mut pos = (0.0f64, 0.0f64, 0.0f64);
     let mut line_map: Vec<LineInfo> = Vec::new();
+    let mut blocks: Vec<TraceBlock> = Vec::new();
+    if head > 0 {
+        blocks.push(TraceBlock { record: None, label: "header".into(), first: 0, last: head });
+    }
     let mut swallowed = 0usize;
 
     for (i, r) in records.iter().enumerate() {
         let before = s.out_len()?;
+        let mut swallow = false;
         match r {
             Record::Param { name, value } => {
                 base.insert(name.clone(), value.clone());
@@ -102,6 +127,7 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                 let cmd = p.get("command").cloned().unwrap_or(Value::Null);
                 if is_false(&s.call("onCommand", &cmd.to_string())?) {
                     swallowed += 1;
+                    swallow = true;
                 } else {
                     let hook = if m.center.is_some() {
                         "onCircular"
@@ -121,6 +147,7 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                 s.set_current(pos.0, pos.1, pos.2)?;
                 if is_false(&s.call("onCommand", &json!("Drilling").to_string())?) {
                     swallowed += 1;
+                    swallow = true;
                 } else {
                     s.call("onCycle", "")?;
                     s.call("onCyclePoint", "")?;
@@ -138,6 +165,15 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
         for line in before..after {
             line_map.push(LineInfo { line, record: Some(i) });
         }
+        // A swallowed motion record writes nothing, and the trace
+        // still shows it - the loss is the story.
+        if after > before || swallow {
+            let mut label = r.trace_label();
+            if after == before {
+                label.push_str(" (no output)");
+            }
+            blocks.push(TraceBlock { record: Some(i), label, first: before, last: after });
+        }
     }
 
     let before = s.out_len()?;
@@ -145,6 +181,9 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
     let after = s.out_len()?;
     for line in before..after {
         line_map.push(LineInfo { line, record: None });
+    }
+    if after > before {
+        blocks.push(TraceBlock { record: None, label: "end".into(), first: before, last: after });
     }
 
     let (out, msgs) = s.drain()?;
@@ -157,6 +196,7 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
     Ok(PostOutput {
         program,
         line_map,
+        blocks,
         warnings,
         swallowed,
     })

@@ -99,6 +99,15 @@ pub struct AxisLimits {
     /// a move either reaches its coordinate or the file lied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<f64>,
+    /// The rotary's axis of rotation in machine coordinates (M3.3
+    /// stage D, RTCP): the part's stated `axis` vector, kept as
+    /// written - a direction is a ratio, never scaled by the file's
+    /// length units. A table trunnion says [1,0,0] (an A that tilts);
+    /// a spindle-column C says [0,0,1] (a turn that never tilts).
+    /// Absent = the file states no geometry, and no post may claim
+    /// one for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis: Option<[f64; 3]>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -458,6 +467,35 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
                 }
             });
             let resolution = scale(rate(part.get("resolution")), scale_v);
+            // A rotary's stated rotation direction (stage D): three
+            // finite numbers or a refusal that names the axis - a
+            // garbled tilt vector must never quietly become "no
+            // tilt", because the whole RTCP judgment rides on it.
+            let mut axis = None;
+            if let Some(a) = part.get("axis") {
+                let d = a.as_array().filter(|v| v.len() == 3).map(|v| {
+                    [
+                        v[0].as_f64(),
+                        v[1].as_f64(),
+                        v[2].as_f64(),
+                    ]
+                });
+                match d {
+                    Some([Some(x), Some(y), Some(z)]) => {
+                        if *rotary && x == 0.0 && y == 0.0 && z == 0.0 {
+                            return Err(format!(
+                                "machine file: rotary axis {name} states the zero direction"
+                            ));
+                        }
+                        axis = Some([x, y, z]);
+                    }
+                    _ => {
+                        return Err(format!(
+                            "machine file: axis {name} direction must be three finite numbers"
+                        ));
+                    }
+                }
+            }
             axes.push(AxisLimits {
                 name: name.clone(),
                 rotary: *rotary,
@@ -465,6 +503,7 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
                 rapid: scale(rate(c.and_then(|c| c.get("max_rapid_speed"))), scale_v),
                 travel,
                 resolution,
+                axis,
             });
         }
         axes.sort_by_key(|a| ctrl_coord(ctrl, &a.name));
@@ -510,6 +549,7 @@ impl Machine {
             && self.coolants.iter().all(|c| !c.name.is_empty())
             && self.axes.iter().all(|a| {
                 rate_ok(a.feed) && rate_ok(a.rapid) && rate_ok(a.resolution) && a.travel.is_none_or(|(lo, hi)| lo.is_finite() && hi.is_finite() && hi > lo)
+                    && a.axis.is_none_or(|d| d.iter().all(|x| x.is_finite()))
             })
             && match (self.spindle_min, self.spindle_max) {
                 (Some(lo), Some(hi)) => hi >= lo,

@@ -28,7 +28,7 @@ pub mod engine;
 pub mod js;
 pub mod machine;
 
-pub use engine::{LineInfo, PostOutput};
+pub use engine::{LineInfo, PostOutput, TraceBlock};
 
 use crate::cl::{MoveKind, Toolpath};
 use cnc::{CycleRec, MoveRec, Record};
@@ -181,6 +181,11 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             feed: m.feed,
             center: m.arc.map(|a| (a.center.x, a.center.y)),
             ccw: m.arc.map(|a| a.ccw).unwrap_or(false),
+            // The in-app stream is prismatic by fact, not by omission
+            // (stage D): no generator yet orients a tool, so no move
+            // may claim an angle it was never asked to hold. External
+            // `.cnc` producers own the `Some` side of that contract.
+            abc: None,
         }));
     }
     for c in &cycles[ci..] {

@@ -683,3 +683,47 @@ fn a_user_script_is_validated_on_choice_undone_cleanly_and_missed_loudly() {
     assert!(!gone_path.exists(), "the refusal writes nothing, ever");
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn the_trace_rides_the_program_it_wrote() {
+    // Stage D's viewer contract, the app half: the trace pane draws
+    // from the SAME run that wrote the file - blocks run forward and
+    // stay inside the program, the header and the footer belong to no
+    // record, every record that spoke is a block, and the tool change
+    // names its own. No re-post: the blocks and the text arrive on
+    // one struct or the viewer would be tracing a different program.
+    let (world, _h) = contour_and_drill();
+    let path = tmp_nc("trace");
+    let posted = posting::post_setup(&world, &path).expect("posts");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(posted.lines, posted.program.lines().count());
+    assert!(!posted.blocks.is_empty(), "a real program leaves a trace");
+    let mut cursor = 0usize;
+    for b in &posted.blocks {
+        assert!(b.first >= cursor && b.first <= b.last.max(b.first + 1), "blocks run forward: {b:?}");
+        assert!(b.last <= posted.lines, "a block reaches past the program: {b:?}");
+        cursor = b.last;
+    }
+    assert_eq!(posted.blocks[0].record, None, "the header belongs to no record");
+    assert_eq!(posted.blocks[0].label, "header");
+    assert_eq!(posted.blocks.last().unwrap().record, None, "so does the footer");
+    // The tool record itself writes no line (this post emits T/M6 in
+    // the section preamble, from the stored ToolNumber property - the
+    // trace shows where lines were WRITTEN, not what was heard), but
+    // the sections and the peck cycle the two ops became all ride it.
+    assert!(posted.blocks.iter().all(|b| b.record.is_none() || !b.label.starts_with("tool")), "a silent record has no empty block: {:?}", posted.blocks.iter().map(|b| &b.label).collect::<Vec<_>>());
+    assert!(
+        posted.blocks.iter().any(|b| b.label.starts_with("cycle")),
+        "the canned cycle rides the trace: {:?}",
+        posted.blocks.iter().map(|b| &b.label).collect::<Vec<_>>()
+    );
+    // Every record that wrote a line is named exactly once - the
+    // viewer's list is the run, not the stream echoed back.
+    let mut seen: Vec<Option<usize>> = Vec::new();
+    for b in &posted.blocks {
+        if let Some(r) = b.record {
+            assert!(!seen.contains(&Some(r)), "record {r} appears twice in one trace");
+            seen.push(Some(r));
+        }
+    }
+}

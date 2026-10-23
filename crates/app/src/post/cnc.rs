@@ -48,6 +48,15 @@ pub struct MoveRec {
     /// Arc: the absolute XY center.
     pub center: Option<(f64, f64)>,
     pub ccw: bool,
+    /// Commanded absolute A/B/C angles, degrees (M3.3 stage D, RTCP).
+    /// `None` - every record our generators write - means the tool
+    /// stands as it always has: vertical, table at home. `Some` means
+    /// the X/Y/Z above locate the TOOL TIP in the work offset while
+    /// the machine turns to these angles; a post whose dialect has no
+    /// RTCP output must refuse such a record by name, never post its
+    /// XYZ as if the tool were vertical (the Prime Directive's exact
+    /// shape: silently reinterpreted coordinates are a gouge).
+    pub abc: Option<[f64; 3]>,
 }
 
 /// One canned-cycle record: the M1.6 `Cycle` in stream clothing. Zs and
@@ -94,6 +103,11 @@ impl MoveRec {
         m.insert("Y".into(), json!(self.y));
         m.insert("Z".into(), json!(self.z));
         m.insert("FeedRate".into(), json!(self.feed));
+        if let Some([a, b, c]) = self.abc {
+            m.insert("A".into(), json!(a));
+            m.insert("B".into(), json!(b));
+            m.insert("C".into(), json!(c));
+        }
         if self.kind == MoveKind::Plunge {
             m.insert("LinearMovementIncludeOpts".into(), json!({ "L": [1] }));
         }
@@ -132,6 +146,49 @@ pub fn cycle_name(kind: CycleKind) -> &'static str {
 }
 
 impl Record {
+    /// The debugging name of one record (M3.3 stage D, post
+    /// debugging): what a block of emitted lines stands for, in the
+    /// trace pane and the `--trace` log. Positions are the stream's
+    /// own millimeters; angles, when the record commands them, ride
+    /// along - a trace that hides the tilt is not a trace.
+    pub fn trace_label(&self) -> String {
+        let pos = |x: f64, y: f64, z: f64| format!("({x:.3}, {y:.3}, {z:.3})");
+        match self {
+            Record::Param { name, .. } => format!("param {name}"),
+            Record::Warn { text } => format!("warning: {text}"),
+            Record::Tool { number, name } => format!("tool {number} · {name}"),
+            Record::Section { begin: true } => "section".into(),
+            Record::Section { begin: false } => "end section".into(),
+            Record::Move(m) => {
+                let kind = match m.kind {
+                    MoveKind::Rapid => "rapid",
+                    MoveKind::Feed => "feed",
+                    MoveKind::Plunge => "plunge",
+                };
+                let mut s = format!("{kind} → {}", pos(m.x, m.y, m.z));
+                if m.center.is_some() {
+                    s = format!(
+                        "arc {} → {}",
+                        if m.ccw { "ccw" } else { "cw" },
+                        pos(m.x, m.y, m.z)
+                    );
+                }
+                if let Some(f) = m.feed {
+                    s.push_str(&format!(" @ {f:.0} mm/min"));
+                }
+                if let Some([a, b, c]) = m.abc {
+                    s.push_str(&format!(" A {a:.3}° B {b:.3}° C {c:.3}°"));
+                }
+                s
+            }
+            Record::Cycle(c) => format!(
+                "cycle {} → {}",
+                cycle_name(c.kind),
+                pos(c.x, c.y, c.bottom_z)
+            ),
+        }
+    }
+
     /// The `onCommand` name for this record, "" for structural ones.
     pub fn command_name(&self) -> &'static str {
         match self {
@@ -184,9 +241,16 @@ pub fn serialize(records: &[Record]) -> String {
                     .feed
                     .map(|f| format!(" F {}", (f * 1000.0).round() as i64))
                     .unwrap_or_default();
+                // Commanded angles (stage D): milli-degrees on the
+                // same lattice law as the microns above - the angle
+                // a record states is the angle it parses back to.
+                let abc = m
+                    .abc
+                    .map(|[a, b, c]| format!(" A {} B {} C {}", q(a), q(b), q(c)))
+                    .unwrap_or_default();
                 match m.center {
                     Some((cx, cy)) => s.push_str(&format!(
-                        "Arc {} X {} Y {} Z {}{f} I {} J {}\n",
+                        "Arc {} X {} Y {} Z {}{f}{abc} I {} J {}\n",
                         if m.ccw { "CCW" } else { "CW" },
                         q(m.x),
                         q(m.y),
@@ -195,7 +259,7 @@ pub fn serialize(records: &[Record]) -> String {
                         q(cy),
                     )),
                     None => s.push_str(&format!(
-                        "{} X {} Y {} Z {}{f}\n",
+                        "{} X {} Y {} Z {}{f}{abc}\n",
                         match m.kind {
                             MoveKind::Rapid => "Rapid",
                             MoveKind::Feed => "Feed",
@@ -328,6 +392,12 @@ fn normalize_key(k: &str) -> Option<&'static str> {
         "I" => "I",
         "J" => "J",
         "S" => "S",
+        // Stage D: commanded rotary angles, absolute degrees written
+        // in milli-degrees. Keyed words only - a positional value
+        // never means an angle (the legacy law is unchanged).
+        "A" => "A",
+        "B" => "B",
+        "C" => "C",
         _ => return None,
     })
 }
@@ -505,6 +575,8 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                 let mut feed = None;
                 let mut ci = None;
                 let mut cj = None;
+                let mut abc = [0.0f64; 3];
+                let mut tilted = false;
                 let mut pos = 0usize;
                 for w in words {
                     match w {
@@ -525,6 +597,18 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                             "I" => ci = Some(v / 1000.0),
                             "J" => cj = Some(v / 1000.0),
                             "S" => ccw = v >= 0.0,
+                            "A" => {
+                                abc[0] = v / 1000.0;
+                                tilted = true;
+                            }
+                            "B" => {
+                                abc[1] = v / 1000.0;
+                                tilted = true;
+                            }
+                            "C" => {
+                                abc[2] = v / 1000.0;
+                                tilted = true;
+                            }
                             _ => {}
                         },
                     }
@@ -554,6 +638,7 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     feed,
                     center,
                     ccw,
+                    abc: tilted.then_some(abc),
                 }));
                 move_idx += 1;
                 in_section = true;

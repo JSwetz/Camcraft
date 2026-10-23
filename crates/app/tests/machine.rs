@@ -417,14 +417,15 @@ fn a_flood_of_violations_reports_forty_and_counts_the_rest() {
 
 #[test]
 fn the_post_mirror_states_only_what_the_machine_stated() {
-    // M3.3 A's bridge, widened by stage C: a checker-parsed `Machine`
-    // reaches the script through `post::machine::mirror` - the static
-    // grammar, stated numbers only. An unstated spindle limit is
-    // ABSENT (the posts' `> 0` guard keeps the silence honest), rotary
-    // axes are not mirrored (no prismatic post reads one, and a
-    // deg/min rapid in an mm/min field would be a unit lie), and
-    // coolant says nothing the machine did not: no `coolants` field on
-    // the machine, no coolant key in the mirror.
+    // M3.3 A's bridge, widened by stages C and D: a checker-parsed
+    // `Machine` reaches the script through `post::machine::mirror` -
+    // the static grammar, stated numbers only. An unstated spindle
+    // limit is ABSENT (the posts' `> 0` guard keeps the silence
+    // honest), rotary axes mirror as GEOMETRY under `rotaries` and
+    // never join `axes` (no rate follows them across - a deg/min
+    // number in an mm/min field would be the unit lie stage C named),
+    // and coolant says nothing the machine did not: no `coolants`
+    // field on the machine, no coolant key in the mirror.
     let m = Machine {
         model: "MirrorMill".into(),
         vendor: "Hsmworks Testbench".into(),
@@ -437,14 +438,15 @@ fn the_post_mirror_states_only_what_the_machine_stated() {
                 travel: None,
                 ..Default::default()
             },
-            AxisLimits { name: "C".into(), ..Default::default() },
+            AxisLimits { name: "C".into(), rotary: true, rapid: Some(9000.0), ..Default::default() },
         ],
         ..Default::default()
     };
     let v = hsmworks_app::post::machine::mirror(&m);
     assert_eq!(v["name"], "MirrorMill");
     let axes = v["kinematics"]["static"]["axes"].as_array().expect("axes array");
-    assert_eq!(axes.len(), 1, "the rotary C is not mirrored in stage A");
+    assert_eq!(axes.len(), 1, "the rotary C keeps out of the traverse grammar");
+    assert_eq!(v["kinematics"]["static"]["rotaries"].as_array().map(Vec::len), Some(1), "and rides the geometry section instead");
     assert_eq!(axes[0]["letter"], "X");
     assert_eq!(axes[0]["speeds"]["rapid"], 7000.0);
     assert_eq!(axes[0]["speeds"]["normal"], 4000.0);
@@ -705,4 +707,155 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
         inferred.kind = None;
         assert_eq!(kind(Some(&inferred)), want_kind, "{name}'s axes agree with its word");
     }
+}
+
+// ---- rotary geometry + RTCP judgment (M3.3 stage D) ----
+
+#[test]
+fn a_rotary_states_its_direction() {
+    // The tilt question a post asks is geometric: WHICH way does the
+    // part turn? The file states it as a direction vector, kept as
+    // written (a ratio, never scaled by the file's length units).
+    let text = r#"{
+      "general": {"model": "Trunnion D"},
+      "kinematics": {"default": {"parts": [
+        {"name": "X", "type": "linear"},
+        {"name": "A", "type": "rotary", "axis": [1.0, 0.0, 0.0],
+         "travel": {"min": -120.0, "max": 120.0}}
+      ]}}}"#;
+    let m = parse_mch(text).expect("the stage D grammar reads");
+    let a = m.axes.iter().find(|x| x.name == "A").expect("rotary A");
+    assert_eq!(a.axis, Some([1.0, 0.0, 0.0]));
+    assert!(m.is_sane());
+}
+
+#[test]
+fn a_garbled_direction_refuses_by_name() {
+    // The whole RTCP judgment rides on the vector, so a garbled one
+    // must never read as "no tilt stated" - that would be the silent
+    // answer the Prime Directive forbids.
+    for bad in [
+        r#""axis": [1.0, "up", 0.0]"#,
+        r#""axis": [1.0, 0.0]"#,
+        r#""axis": 90.0"#,
+    ] {
+        let text = format!(
+            r#"{{ "general": {{}}, "kinematics": {{ "default": {{ "parts": [
+                {{ "name": "B", "type": "rotary", {bad} }} ] }} }} }}"#
+        );
+        let e = parse_mch(&text).expect_err("garbled direction refuses");
+        assert!(e.contains("axis B") || e.contains("B"), "names the axis: {e}");
+    }
+    // The zero vector directions nothing.
+    let zero = r#"{ "general": {}, "kinematics": { "default": { "parts": [
+        { "name": "C", "type": "rotary", "axis": [0.0, 0.0, 0.0] } ] } } }"#;
+    let e = parse_mch(zero).expect_err("a zero direction is no direction");
+    assert!(e.contains("zero"), "names the lie: {e}");
+}
+
+#[test]
+fn rotaries_mirror_as_geometry_never_as_speeds() {
+    // Stage C's unit law, kept across the seam: the mirror's `axes`
+    // array feeds the sim's traverse and the script's mm/min
+    // ceilings, so a rotary lives in its own `rotaries` section -
+    // letter, direction, degrees of travel - and its deg/min rates
+    // join NOTHING. (The ceiling fold pre-stage-D absorbed a rotary
+    // rapid into rapidRate: a 9000 deg/min table out-rating a 7000
+    // mm/min slide would have been a lie in the mirror itself.)
+    let m = Machine {
+        model: "TiltMill".into(),
+        axes: vec![
+            AxisLimits {
+                name: "X".into(),
+                rapid: Some(7000.0),
+                feed: Some(4000.0),
+                ..Default::default()
+            },
+            AxisLimits {
+                name: "A".into(),
+                rotary: true,
+                rapid: Some(9000.0),
+                feed: Some(1500.0),
+                travel: Some((-120.0, 120.0)),
+                axis: Some([1.0, 0.0, 0.0]),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    let v = hsmworks_app::post::machine::mirror(&m);
+    let axes = v["kinematics"]["static"]["axes"].as_array().expect("axes");
+    assert_eq!(axes.len(), 1, "only the slide is an axis");
+    assert_eq!(v["kinematics"]["static"]["axes"][0]["letter"], "X");
+    assert_eq!(v["rapidRate"], 7000.0, "the deg/min never enters the ceiling");
+    let rots = v["kinematics"]["static"]["rotaries"].as_array().expect("rotaries");
+    assert_eq!(rots.len(), 1);
+    assert_eq!(rots[0]["letter"], "A");
+    assert_eq!(rots[0]["direction"], serde_json::json!([1.0, 0.0, 0.0]));
+    assert_eq!(rots[0]["travel"], serde_json::json!([-120.0, 120.0]));
+    assert!(rots[0].get("speeds").is_none(), "geometry, never speeds");
+
+    let p = hsmworks_app::post::machine::script_props(&v);
+    assert_eq!(p["rtcp"], serde_json::json!(true), "an A about X tilts");
+    assert_eq!(p["rotaries"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn a_spin_axis_turns_but_never_tilts() {
+    // The millturn law, geometric: a C about Z spins the part in the
+    // table plane. It is a rotary (it rides the rotaries array) but
+    // machine.rtcp is FALSE - no post may promise tilt to a machine
+    // whose only rotary cannot leave the vertical.
+    let m = Machine {
+        model: "SpinMill".into(),
+        axes: vec![AxisLimits {
+            name: "C".into(),
+            rotary: true,
+            axis: Some([0.0, 0.0, 1.0]),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let p = hsmworks_app::post::machine::script_props(&hsmworks_app::post::machine::mirror(&m));
+    assert_eq!(p["rtcp"], serde_json::json!(false));
+    assert_eq!(p["rotaries"].as_array().map(Vec::len), Some(1));
+
+    // And the shipped mill-turn file agrees with its own mirror.
+    let mch: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../assets/machines/millturn.mch"),
+        )
+        .expect("the stock machine file ships"),
+    )
+    .expect("valid json");
+    let raw = hsmworks_app::post::machine::script_props(&mch);
+    assert_eq!(raw["rtcp"], serde_json::json!(false), "the C is a spindle column");
+}
+
+#[test]
+fn an_unstated_rotary_tilts_nothing_a_post_may_promise() {
+    // Silence stays silence through BOTH doors: the mirror of a
+    // rotary without a direction, and the raw-grammar axes that
+    // carry A/B/C letters with no vector at all.
+    let m = Machine {
+        model: "Quiet".into(),
+        axes: vec![AxisLimits {
+            name: "B".into(),
+            rotary: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let p = hsmworks_app::post::machine::script_props(&hsmworks_app::post::machine::mirror(&m));
+    assert_eq!(p["rtcp"], serde_json::json!(false));
+    assert_eq!(p["rotaries"][0]["name"], "B");
+    assert_eq!(p["rotaries"][0]["direction"], serde_json::Value::Null);
+
+    let raw = serde_json::json!({ "kinematics": { "static": { "axes": [
+        { "letter": "X", "speeds": { "rapid": 5000.0 } },
+        { "letter": "A", "axis": [0.0, 1.0, 0.0] } ] } } });
+    let r = hsmworks_app::post::machine::script_props(&raw);
+    assert_eq!(r["rtcp"], serde_json::json!(true), "the raw door reads geometry too");
+    assert_eq!(r["rapidRate"], 5000.0, "the rotary letter never joins the ceiling");
 }

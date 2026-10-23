@@ -62,6 +62,12 @@ function wo(letter, v, o) { return has(v) ? letter + fu(v - o) : ""; }
 function msg(s) {  // counted warning where the host offers message()
   if (typeof message === "function") message(s); else writeln("; " + s);
 }
+var tiltRefused = false;  // stage D: one named refusal per program, not per line
+function tiltOk(p) {  // RTCP words are Fanuc-family; this dialect refuses them
+  if (!has(p.A)) return true;
+  if (!tiltRefused) { tiltRefused = true; msg("tilted move - Heidenhain post has no RTCP output"); }
+  return false;
+}
 
 // The .mch tool-station coolant list carries names + M-codes; the
 // first Flood entry (else the first entry at all) is this machine's
@@ -146,17 +152,17 @@ function onSectionEnd() { endPreamble(); }
 // not a second copy of output.
 function onRapid() {
   startPreamble();
-  if (inCycle) return;
+  if (!tiltOk(properties) || inCycle) return;
   block(["G0"].concat(xyz(properties)));
 }
 function onLinear() {
   startPreamble();
-  if (inCycle) return;
+  if (!tiltOk(properties) || inCycle) return;
   block(["G1"].concat(xyz(properties), [fw(properties.FeedRate)]));
 }
 function onCircular() {
   startPreamble();
-  if (inCycle) return;
+  if (!tiltOk(properties) || inCycle) return;
   var p = properties;
   var c = p.IJKIncrement || {};
   block([

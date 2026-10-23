@@ -73,3 +73,112 @@ fn post_errors_are_refusals_not_output() {
         assert!(e.is_err(), "degenerate input must error: {bad:?}");
     }
 }
+
+#[test]
+fn rtcp_output_arms_once_and_walks_the_angles() {
+    // Stage D: the trunnion machine + a tilted stream posts G43.4
+    // once, the angle words modally (only the changed letter on the
+    // next block), and the home return carries its zeros. The
+    // machine states a tilting rotary (A about X); the post reads
+    // machine.rtcp and honors it.
+    let cps = read("assets/posts/fanuc.cps");
+    let mch = serde_json::json!({
+        "name": "TRUNNION",
+        "kinematics": { "static": { "rotaries": [
+            { "letter": "A", "type": "rotary", "direction": [1.0, 0.0, 0.0],
+              "travel": [-120.0, 120.0] } ] } }
+    });
+    let stream = "\
+TOOL 1 10MM BALL
+SECTION
+Rapid X 10000 Y 0 Z 5000 A 40000 B 0 C 0
+Feed X 10000 Y 0 Z 0 F 150000 A 40000 B 0 C 0
+Feed X 20000 Y 0 Z 0 F 150000 A 45000 B 0 C 0
+Feed X 30000 Y 0 Z 0 F 150000 A 0 B 0 C 0
+ENDSECTION
+";
+    let out = engine::run(&cps, &mch, stream).expect("post");
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    let lines: Vec<&str> = out.program.lines().collect();
+    let at = |needle: &str| -> usize {
+        lines.iter().position(|l| l.contains(needle)).unwrap_or_else(|| panic!("no {needle:?} in:\n{}", out.program))
+    };
+    let arm = at("G43.4 H01");
+    let tilt1 = at("A40");
+    assert!(arm < tilt1, "the arm precedes the first tilt");
+    assert_eq!(lines.iter().filter(|l| l.contains("G43.4")).count(), 1, "armed once");
+    assert_eq!(lines[arm + 1], "G00 X10 Y0 Z5 A40 B0 C0", "all three letters on the arm");
+    // The cut continues: only A changed since the last block.
+    assert_eq!(lines[at("A45")], "G01 X20 Y0 Z0 A45 F150", "modal words: unchanged angles rest");
+    assert!(lines[at("A45")].matches(' ').count() < lines[tilt1].matches(' ').count());
+    // The home return: only A had left zero, so only A comes back -
+    // the modal law runs in both directions. TCPM stays armed (the
+    // next G49 would be a new preamble's; this program ends first).
+    assert_eq!(lines[at("X30")], "G01 X30 Y0 Z0 A0 F150");
+}
+
+#[test]
+fn tool_change_rearms_tcpm() {
+    // G43.4 belongs to the tool: the next tool's first tilted move
+    // re-arms it (the second G43.4 sits with the second G43).
+    let cps = read("assets/posts/fanuc.cps");
+    let mch = serde_json::json!({
+        "kinematics": { "static": { "rotaries": [
+            { "letter": "B", "type": "rotary", "direction": [0.0, 1.0, 0.0] } ] } }
+    });
+    let stream = "\
+TOOL 1 T1
+SECTION
+Rapid X 0 Y 0 Z 5 B 30000
+ENDSECTION
+TOOL 2 T2
+SECTION
+Rapid X 0 Y 0 Z 5 B 30000
+ENDSECTION
+";
+    let out = engine::run(&cps, &mch, stream).expect("post");
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    assert_eq!(out.program.matches("G43.4").count(), 2, "{}", out.program);
+    // The second tilt re-commands B even though its value repeats:
+    // the arm, not the angle, reset.
+    assert_eq!(out.program.matches("B30").count(), 2, "{}", out.program);
+}
+
+#[test]
+fn tilted_move_on_a_prismatic_machine_is_refused_by_name() {
+    // The refusal law (stage D): a stream that turns a tool the
+    // machine never said it could tilt is blocked, not reposted as
+    // prismatic motion (the same XYZ means different metal without
+    // RTCP - reinterpretation would be the silent wrong answer).
+    let cps = read("assets/posts/fanuc.cps");
+    let stream = "\
+TOOL 1 T1
+SECTION
+Rapid X 0 Y 0 Z 5 A 40000
+ENDSECTION
+";
+    let out = engine::run(&cps, &serde_json::json!({}), stream).expect("run");
+    assert_eq!(
+        out.warnings,
+        vec!["tilted move on a machine without a tilting rotary"],
+        "counted, named, and (via the gate) write-blocking"
+    );
+    assert!(!out.program.contains('A'), "no angle word rides a prismatic program: {}", out.program);
+}
+
+#[test]
+fn non_rtcp_dialects_refuse_a_tilted_stream() {
+    // Haas (and the four share the law): a tilted stream is a
+    // refusal, never a prismatic approximation of 5-axis motion.
+    for name in ["haas", "mazak", "sinumerik", "heidenhain"] {
+        let cps = read(&format!("assets/posts/{name}.cps"));
+        let stream = "TOOL 1 T1\nSECTION\nFeed X 0 Y 0 Z -1 F 1000 A 40000\nENDSECTION\n";
+        let out = engine::run(&cps, &serde_json::json!({}), stream).expect("run");
+        assert!(!out.warnings.is_empty(), "{name}: a tilt must warn");
+        assert!(
+            out.warnings[0].contains("RTCP"),
+            "{name} refuses by name: {:?}",
+            out.warnings
+        );
+    }
+}

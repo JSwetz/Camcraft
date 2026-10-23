@@ -691,6 +691,15 @@ pub struct PostView {
     /// view state like the playhead (AGENTS.md), written by the window's
     /// pass and read by the viewport's highlight.
     pub line: usize,
+    /// The block-by-block trace of this same run (M3.3 stage D): which
+    /// record wrote which lines. Frozen evidence like the text beside
+    /// it - the viewer shows the trace the post actually did, never a
+    /// re-derivation.
+    pub blocks: Vec<hsmworks_app::post::TraceBlock>,
+    /// The trace pane's visibility. View state like the camera - not
+    /// undoable, not saved; the block list belongs to the one program
+    /// on screen, so a document switch retires the whole viewer.
+    pub trace: bool,
 }
 
 pub struct State {
@@ -2442,6 +2451,8 @@ impl State {
                     line_pos: posted.line_pos,
                     open: true,
                     line: 0,
+                    blocks: posted.blocks,
+                    trace: false,
                 });
             }
             // A refused post leaves any previous program (file and viewer)

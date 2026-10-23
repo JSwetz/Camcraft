@@ -44,8 +44,8 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense, Shape,
-    Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense,
+    Shape, Stroke, TextEdit, Ui, Vec2, Window,
 };
 
 use hsmworks_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
@@ -2243,46 +2243,158 @@ pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
         .and_then(|s| s.to_str())
         .unwrap_or("program")
         .to_owned();
-    let n = view.program.lines().count();
     let mut open = view.open;
     // Disjoint field borrows: the closure writes `line` and reads
     // `program` at once, and `open` is a copy resolved after the pass.
-    let PostView { program, line, .. } = view;
+    let PostView { program, line, blocks, trace, .. } = view;
+    // The trace pane's selection is DERIVED (the block owning the
+    // scroll cursor), never stored - the one cursor law the viewer
+    // already obeys, applied to a second view of the same evidence.
+    let owning = |ln: usize| -> Option<usize> {
+        blocks
+            .iter()
+            .position(|b| ln >= b.first && ln < b.last.max(b.first + 1))
+    };
     Window::new(format!("G-code - {stem}"))
         .id(Id::new("gcode-viewer"))
         .open(&mut open)
         .default_size([560.0, 400.0])
         .show(ctx, |ui| {
-            ScrollArea::vertical()
-                .id_salt("gcode-scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    // The scroll offset is read, not stored: egui lays
-                    // the inner ui out at `-offset`, so the clip rect's
-                    // center against the content top names the middle
-                    // row - that row is the sync cursor. Uniform rows
-                    // (one monospace label per line, spacing fixed) are
-                    // what make the division exact.
-                    let row_h = ui.text_style_height(&egui::TextStyle::Monospace);
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    let top = ui.min_rect().min.y;
-                    let vis = ui.clip_rect();
-                    *line = (((vis.center().y - top) / row_h).max(0.0) as usize).min(n.saturating_sub(1));
-                    let width = ui.available_width();
-                    for (i, ln) in program.lines().enumerate() {
-                        let label = format!("{:>4}  {}", i + 1, ln);
-                        // add_sized pins every row to exactly row_h, so
-                        // the cursor arithmetic above stays exact over
-                        // a long program instead of drifting a row.
-                        ui.add_sized(
-                            [width, row_h],
-                            Label::new(egui::RichText::new(label).monospace())
-                                .selectable(false),
-                        );
-                    }
-                });
+            let jump = std::cell::Cell::new(None::<usize>);
+            ui.horizontal(|ui| {
+                // Stage D: the debugging trace, beside the program it
+                // explains. Off by default - the plain viewer draws
+                // exactly as it always did.
+                ui.checkbox(trace, "trace");
+            });
+            let trace_on = *trace;
+            let sel = owning(*line);
+            // Trace off: the listing is the window's direct child -
+            // byte-for-byte the geometry every cursor-law test was
+            // written against. Trace on: egui 0.36's Sides, sized to
+            // the listing's left (300 px) and the rest to the
+            // program. (A `horizontal` of `allocate_ui` panes was
+            // tried first and is wrong inside an auto-shrinking
+            // Window: the child measures available_width as its
+            // desired width, the window grows to satisfy it, and the
+            // next frame's cursor law reads a rectangle it never
+            // wrote. Sides asks each child only for a row during
+            // sizing, so the window's rect stays the user's.)
+            if trace_on {
+                let h = ui.available_height();
+                egui::containers::Sides::new()
+                    .shrink_right()
+                    .height(h)
+                    .show(
+                        ui,
+                        |ui| {
+                            ui.allocate_ui(Vec2::new(300.0, h), |ui| {
+                                ScrollArea::vertical()
+                                    .id_salt("gcode-trace-list")
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        for (i, b) in blocks.iter().enumerate() {
+                                            let txt = format!("{:>4}  {}", b.first + 1, b.label);
+                                            let rt = egui::RichText::new(txt)
+                                                .monospace()
+                                                .size(11.0)
+                                                .color(if sel == Some(i) {
+                                                    ui.visuals().strong_text_color()
+                                                } else {
+                                                    ui.visuals().text_color()
+                                                });
+                                            let r = ui.add(
+                                                Label::new(rt).selectable(false).sense(Sense::click()),
+                                            );
+                                            if r.clicked() {
+                                                jump.set(Some(b.first));
+                                            }
+                                        }
+                                    });
+                            });
+                        },
+                        |ui| {
+                            gcode_listing(
+                                ui,
+                                program.as_str(),
+                                line,
+                                blocks.as_slice(),
+                                true,
+                                &jump,
+                            );
+                        },
+                    );
+            } else {
+                gcode_listing(
+                    ui,
+                    program.as_str(),
+                    line,
+                    blocks.as_slice(),
+                    false,
+                    &jump,
+                );
+            }
         });
     view.open = open;
+}
+
+/// The program listing: every line, uniformly `row_h` tall, with the
+/// scroll cursor law the viewer is tested against (the middle row of
+/// the clip rect IS the published line). Drawn as the window's direct
+/// child or to the right of the trace panel - one geometry, two
+/// hosts. While the trace is open, lines outside the block under
+/// study rest weak; a row of the clicked block centers itself, so the
+/// cursor law reads the selection back next frame - the pane stores
+/// no second truth about the scroll.
+fn gcode_listing(
+    ui: &mut Ui,
+    program: &str,
+    line: &mut usize,
+    blocks: &[hsmworks_app::post::TraceBlock],
+    trace_on: bool,
+    jump: &std::cell::Cell<Option<usize>>,
+) {
+    ScrollArea::vertical()
+        .id_salt("gcode-scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            // The scroll offset is read, not stored: egui lays the
+            // inner ui out at `-offset`, so the clip rect's center
+            // against the content top names the middle row - that row
+            // is the sync cursor. Uniform rows (one monospace label
+            // per line, spacing fixed) are what make the division
+            // exact.
+            let n = program.lines().count();
+            let row_h = ui.text_style_height(&egui::TextStyle::Monospace);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let top = ui.min_rect().min.y;
+            let vis = ui.clip_rect();
+            *line = (((vis.center().y - top) / row_h).max(0.0) as usize).min(n.saturating_sub(1));
+            let want = trace_on
+                .then(|| {
+                    blocks
+                        .iter()
+                        .position(|b| *line >= b.first && *line < b.last.max(b.first + 1))
+                        .map(|bi| (blocks[bi].first, blocks[bi].last))
+                })
+                .flatten();
+            let width = ui.available_width();
+            for (i, ln) in program.lines().enumerate() {
+                let label = format!("{:>4}  {}", i + 1, ln);
+                let mut rt = egui::RichText::new(label).monospace();
+                if let Some((a, b)) = want && !(i >= a && i < b.max(a + 1)) {
+                    rt = rt.weak();
+                }
+                // add_sized pins every row to exactly row_h, so the
+                // cursor arithmetic above stays exact over a long
+                // program instead of drifting a row.
+                let resp = ui.add_sized([width, row_h], Label::new(rt).selectable(false));
+                if jump.get() == Some(i) {
+                    resp.scroll_to_me(Some(Align::Center));
+                    jump.set(None);
+                }
+            }
+        });
 }
 
 pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {

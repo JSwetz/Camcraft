@@ -156,6 +156,11 @@ pub struct Posted {
     /// One entry per program line: the world position of the move that
     /// line writes, or `None` for header, tool and section lines.
     pub line_pos: Vec<Option<[f64; 3]>>,
+    /// Block-by-block trace of this very run (M3.3 stage D): which
+    /// toolpath record wrote which program lines, in the engine's own
+    /// words. The viewer's trace pane rides the same run that wrote
+    /// the file - one source of truth, never a re-post.
+    pub blocks: Vec<engine::TraceBlock>,
 }
 
 /// Post every operation of the document, in tree order, to one NC
@@ -207,6 +212,7 @@ pub fn post_script(world: &World, out_path: &Path, cps: &str) -> Result<Posted, 
         lines,
         program: out.program,
         line_pos,
+        blocks: out.blocks,
     })
 }
 

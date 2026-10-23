@@ -31,6 +31,7 @@ fn sample() -> Vec<Record> {
             feed: None,
             center: None,
             ccw: false,
+            abc: None,
         }),
         Record::Move(MoveRec {
             kind: MoveKind::Feed,
@@ -40,6 +41,7 @@ fn sample() -> Vec<Record> {
             feed: Some(1200.0),
             center: None,
             ccw: false,
+            abc: None,
         }),
         Record::Move(MoveRec {
             kind: MoveKind::Feed,
@@ -49,6 +51,7 @@ fn sample() -> Vec<Record> {
             feed: Some(1200.0),
             center: Some((1.5, -2.0)),
             ccw: true,
+            abc: None,
         }),
         Record::Section { begin: false },
     ]
@@ -414,4 +417,78 @@ fn keyed_with_equals_and_colon_forms_agree() {
     };
     assert_eq!(m1, m2);
     assert_eq!(m1.feed, Some(500.0));
+}
+
+#[test]
+fn tilted_moves_roundtrip_their_words() {
+    // Stage D (RTCP): A/B/C ride the stream as keyed words in
+    // milli-degrees - the same lattice as the um coordinates. A
+    // tilted record states ALL THREE letters; unstated ones read
+    // back zero, never a leftover. Absence of the words is the
+    // vertical home, and every in-app record is that: the dump
+    // writes no angles (prismatic by fact, not omission).
+    let recs = vec![Record::Move(MoveRec {
+        kind: MoveKind::Feed,
+        x: 10.0,
+        y: 0.0,
+        z: -5.0,
+        feed: Some(500.0),
+        center: None,
+        ccw: false,
+        abc: Some([40.0, -90.0, 0.125]),
+    })];
+    let text = cnc::serialize(&recs);
+    assert!(text.contains("A 40000 B -90000 C 125"), "{text}");
+    let back = cnc::parse(&text).expect("angles parse");
+    assert_eq!(back, recs, "angles are identity through the stream");
+    // One letter stated, the pair unstated: zeros come along, per law.
+    let one = cnc::parse("Feed X 1 Y 1 Z 1 A 30000\n").expect("single word");
+    let Some(Record::Move(m)) = one.first() else {
+        panic!("move");
+    };
+    assert_eq!(m.abc, Some([30.0, 0.0, 0.0]));
+    // And the plain record stays angle-free.
+    let plain = cnc::parse("Feed X 1 Y 1 Z 1\n").expect("plain");
+    let Some(Record::Move(m)) = plain.first() else {
+        panic!("move");
+    };
+    assert_eq!(m.abc, None);
+}
+
+#[test]
+fn the_trace_maps_records_to_lines() {
+    // Post debugging (stage D): the engine says which record wrote
+    // which lines - header and footer owned by no record, and a
+    // swallowed motion showing up owning NOTHING, the loss visible.
+    let cps = r#"
+function onOpen() { writeln("; head"); }
+function onRapid() { writeln("G00 X0"); }
+function onLinear() { writeln("G01 X1"); }
+function onCommand(cmd) { return cmd !== "Linear"; }
+function onClose() { writeln("M30"); }
+"#;
+    let text = cnc::serialize(&[
+        Record::Move(MoveRec {
+            kind: MoveKind::Rapid, x: 0.0, y: 0.0, z: 0.0,
+            feed: None, center: None, ccw: false, abc: None,
+        }),
+        Record::Move(MoveRec {
+            kind: MoveKind::Feed, x: 1.0, y: 0.0, z: 0.0,
+            feed: Some(100.0), center: None, ccw: false, abc: None,
+        }),
+    ]);
+    let out = engine::run(cps, &json!(null), &text).expect("post");
+    assert_eq!(out.swallowed, 1);
+    assert_eq!(out.blocks.len(), 4, "header, both moves, end");
+    let h = &out.blocks[0];
+    assert_eq!((h.record.as_ref(), h.first, h.last), (None, 0, 1));
+    assert_eq!(h.label, "header");
+    let r = &out.blocks[1];
+    assert_eq!((r.record, r.first, r.last), (Some(0), 1, 2));
+    assert!(r.label.starts_with("rapid →"), "kind and place: {}", r.label);
+    let f = &out.blocks[2];
+    assert_eq!((f.record, f.first, f.last), (Some(1), 2, 2));
+    assert!(f.label.contains("(no output)"), "swallowed is said: {}", f.label);
+    let e = &out.blocks[3];
+    assert_eq!((e.record.as_ref(), e.first, e.last, e.label.as_str()), (None, 2, 3, "end"));
 }
