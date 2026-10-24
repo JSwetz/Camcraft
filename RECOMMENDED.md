@@ -2783,6 +2783,80 @@ tooling (M4.3)` + this docs)
   cull decisions, and M5.0 regenerates nothing else - the two named CI
   skips retire in the same close-out that proves the structure split kept
   every golden byte-stable.
+  *Superseded by the M4.2b entry below: it landed solo, and first.*
+
+## M4.2b — the dome drift was a tie, not a rate (code `fix(motion,cl): quantize the 3D-finish scan, hull and arc splits off the platform's libm (M4.2b)` + this docs)
+
+- **Root cause, measured, after two wrong hypotheses.** The M4.2 note
+  said "ULP drift in the sampler's sin/cos lands near-duplicate points
+  on the cull threshold" - wrong on both halves. Ring dumps (a temporary
+  probe, since removed) showed the two platforms emit different VERTEX
+  COUNTS for the same z-level loop: Windows 222, Linux 220, with exactly
+  the three golden-adjacent vertices fused into one. The drift lives in
+  `facet_polygon`'s argmax: the scan point for one facet is the best of
+  at most six support candidates (3 vertices + 3 edge-stationary
+  points), and on a facet with an edge perpendicular to the scan
+  direction - which latitude-band facets are, everywhere - the vertex
+  and edge supports are EXACTLY equal in mathematics. The winner is
+  then decided by the last bits of each libm's cos/sin, and since the
+  candidate's point carries `rho·u` with a different `u`, the hull's
+  dedup (`==`) and cross-product (`<=0`) decisions flip: three
+  near-collinear points survive on Windows, fuse on Linux. Culling is
+  not the culprit; nothing reaches a "threshold" - the polygons
+  themselves differ before the cull ever sees them.
+
+- **Fix by construction: the decision surface contains no floats.**
+  Scan points are snapped to the micron grid the moment they are born
+  (`lattice` = the same 1e6 grid as the geo2d bridge's SCALE, so the
+  bridge's round is a fixpoint and the union sees identical integers on
+  every platform); the support value is compared on the grid; and
+  `convex_hull` runs in exact i64/i128 - map to grid ints, sort, dedup,
+  Andrew's chains with i128 cross products, map back as `x as f64 /
+  1e6`. A 1000 mm part is 1e9 units, products fit i128 with room to
+  spare; saturating casts keep nonsense input finite (Prime Directive).
+  Tie-breaking is now candidate ORDER, identical on every target. The
+  march-sampler lattice fix kept from the first pass remains - it is
+  still true that every march sample lands on the grid, now asserted by
+  the `every_march_sample_lands_on_the_micron_lattice` law test.
+
+- **Law override - the goldens were regenerated, against the letter of
+  the owed fix.** Both the M4.2 note and this file's Phase-5 entry said
+  "regenerate nothing". That proved impossible: the committed Windows
+  goldens encode Windows' tie-bits at those mathematically-exact ties,
+  so any platform-invariant generator must move them. Seven files were
+  rewritten, all COARSER by sub-µm slivers (radial_dome 1982→1958,
+  project_dome 560→536, waterline_cone 121→113, the four plateaus −8
+  each): the removed moves are near-collinear vertices the exact hull
+  fuses. The tolerance proof is the heavy lane, not an argument - all
+  27 ignored finish3d measurements and both app envelope verdicts pass
+  in release, and fit_arcs' chord-deviation law bounds the cut
+  regardless of which candidate the old tie chose. Linux parity was
+  then VERIFIED, not assumed: the same 20 goldens, 20/20 on
+  Ubuntu-24.04, and both named CI `--skip`s are retired in the same
+  commit.
+
+- **The two ceil sites stayed fixed anyway, orthogonal to the dome.**
+  `machining2d::fit_arcs`' segment count and `cl::arc_chords`' chord
+  count both divided by libm-derived quantities where a mathematically
+  clean result (2π, an exact multiple) arrives as 2±1 ULP - `ceil` of
+  that is a platform coin flip for EVERY closed ring and arc, waiting
+  for its own drift story. The idiom is `(lattice(q) + 1e-12).ceil()`:
+  the lattice swallows the accumulated noise, the epsilon biases
+  UPWARD so a fix can never remove a chord Windows had - over-splitting
+  is the safe direction (more, shorter arcs, same deviation bound).
+  The probes showed these two did not contribute to the dome drift;
+  they are kept because they remove real knife-edges, proven
+  goldens-identical on Windows.
+
+- **Solo, and before M5.0.1 - reversing the Phase-5 note.** The plan
+  said M4.2b rides M5.0's close-out; it landed first instead, because
+  M5.0.1's law is "goldens byte-identical across the split" - that law
+  cannot be tested against a sampler whose output is a platform coin
+  flip. A drifting generator under a byte-identity law means every
+  split's green gate is luck, so the drift had to die before the file
+  moves started. The two CI skips retire now rather than at M5.0's
+  close-out - the skips were the debt's receipt; keeping them past the
+  proof would hide it.
 
 ## How this file ends
 

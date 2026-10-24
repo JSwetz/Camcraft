@@ -1390,8 +1390,10 @@ Phase-5 shape law.
       kind <-> params <-> stamp <-> generate-dispatch <-> verify-mode <->
       DTO <-> UI tables, so a new operation is a params struct + a generator
       fn + a table row, not a 14-file hunt
-- ⏳ **Pay M4.2b**: quantize the dome sampler to microns before the cull,
-      drop the two named CI skips
+- ✅ **Pay M4.2b**: quantize the dome sampler to microns before the cull,
+      drop the two named CI skips — done in M5.0's run-up: scan points on
+      the lattice, hull in exact integers, arc splits lattice-biased; all
+      20 goldens pass on Linux and Windows from one committed set
 
 ### M5.1 - 5-Axis Milling
 **Goal: simultaneous-axis and tilted machining done safely.**
@@ -1481,7 +1483,7 @@ need to figure out how to offload simulation, voxel body calculation and tool pr
 | **M4.2** | Multibuilds | Done: GPU backend pick - `--gpu-backend`/env, refuse-by-name, preferred→auto→all honest chain, adapter log line; Linux native check + suites (18/20 goldens; 2 dome goldens drift on Linux libm - named skip, M4.2b fix owed, RECOMMENDED); macOS + wasm-compile CI jobs (geometry/cl/post green on wasm32); Docker-for-every-target left open (tooling death, RECOMMENDED) | ✅ |
 | **M4.3** | Defer Code | Done: hsmworks→camcraft everywhere user-facing or self-referential - crates/packages, `camcraft-ui.exe`, `.camproj` (+filter+untitled name), window title, cps vendor line, dist zip, thread name, doc titles; hash salts moved (one-time Stale, by design), wire magics kept (format = compatibility contract), Autodesk-trademark true-sentences kept; full suite green on the new names (595 pass / 792 `#[test]` law held / clippy -D warnings), goldens byte-stable, post `--version` intact | ✅ |
 | **M4.4** | Test cost shape | Done: law/verdict split - finish3d 39 tests (27 `#[ignore]`d), verify's two envelope verdicts moved; release heavy lane 30 min → 3.4 min (CI runs it); Gate-map headers in every suite; debug ladder ~2 s where it was a 30-min tail | ✅ |
-| **M4.2b** | Dome-golden fix | Owed from M4.2: quantize dome sampler points to microns BEFORE the dedupe-cull so platform libm cannot move move-counts; then drop the two named CI `--skip`s. Slotted into Phase 5's run-up (M5.0) so no new golden is born on the drifting sampler. | 🔧 |
+| **M4.2b** | Dome-golden fix | Done: the drift was never the sampler's rates - it was float-bit ties in the facet scan's argmax at mathematically-exact tangencies, resolved differently by each platform's libm. Fix: scan points born on the micron lattice, support compared on the lattice, convex hull in exact i64/i128 integers, arc splits `(lattice(q)+1e-12).ceil()`. Windows goldens regenerated once (7 files, coarser by 8-24 moves; envelope + verify lanes prove no tolerance broke); both named CI `--skip`s retired; Linux parity 20/20 (RECOMMENDED: law override) | ✅ |
 | **M5.0** | Structure prelude | The kind-fan-out collapse + six oversized-file splits (operation/types, machining2d, finishing3d, verify, stock_sim, +drilling/machining3d) that let M5.1/M5.2 add ~25 op kinds at one-table-row cost instead of 14-file edits; goldens byte-identical (structure, not behavior). Coverage 792==792. See docs/M5-PHASE5-PLAN.md. | 📋 |
 | **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
@@ -1490,13 +1492,17 @@ need to figure out how to offload simulation, voxel body calculation and tool pr
 
 ## Open questions & deferred
 
-- **M4.2b (deferred from M4.2, owed)**: the two dome goldens
-  (`finish3d_project_dome`, `finish3d_radial_dome`) emit 2 fewer moves on
-  Linux - ULP drift in the dome sampler's sin/cos lands near-duplicate
-  points exactly on the cull threshold. Fix law: quantize the sampled
-  point to microns BEFORE the dedupe decision, so platform libm cannot
-  change move counts; then remove the two named `--skip`s from the CI
-  parity job and regenerate nothing.
+- **M4.2b (resolved)**: the dome-golden drift was NOT the sampler's
+  sin/cos rates reaching the cull threshold - ring dumps proved the two
+  platforms emit different VERTEX COUNTS for the same facet ring (222 vs
+  220), an argmax tie in the scan-point search at horizontal-edge
+  facets, where vertex and edge support are exactly equal in math and
+  only float bits choose. Fixed by construction: lattice-quantized scan
+  points + exact-integer hull. The owed "regenerate nothing" clause
+  proved impossible - the old Windows goldens encoded Windows' tie-bits
+  at those exact ties - so seven goldens were regenerated, coarser by
+  8-24 moves, with the heavy envelope/verify lanes as the tolerance
+  proof. See RECOMMENDED.md.
 - **Geometry kernel**: [ricosjp/truck](https://github.com/ricosjp/truck) (Apache-2.0,
   Rust-native B-rep: truck-topology/geometry/meshalgo + truck-stepio STEP IO) is now
   LINKED and ships STEP→mesh import (M1.2) - pure Rust, no C++ toolchain risk,
