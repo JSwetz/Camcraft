@@ -50,24 +50,9 @@ pub fn generate(
                 .unwrap_or(f64::NEG_INFINITY),
         );
 
-    let mode = match op.params.kind() {
-        // Drill verifies as Boundary on purpose: its region's rim loops
-        // put the gouge law's tangency test at the hole wall, where a
-        // matched drill passes and an oversized tool is flagged. What
-        // the move-by-move laws cannot see for a straight deep plunge
-        // (it clears its own kerf, so the band sampling never fires)
-        // the cycle reach law in `verify` checks over `path.cycles`.
-        OpType::Face | OpType::Contour | OpType::Drill => Mode::Boundary,
-        // The 3-D pocket verifies as Area with the mesh in hand (the
-        // `model` field below): the region is its silhouette, the
-        // per-level islands come from the facets.
-        OpType::Pocket | OpType::Slot | OpType::Pocket3D => Mode::Area,
-        OpType::Trace => Mode::Engrave,
-        // The waterline's verdict is measured, not deduced from
-        // tangency: law (f) of `verify` scans the swept ball against
-        // the mesh (the `finish_tol` field below carries the budget).
-        OpType::Finish3D => Mode::Envelope,
-    };
+    // Which verify laws the path answers to is registry data (M5.0.2):
+    // the row's comment explains each choice.
+    let mode = op.params.kind().info().mode;
 
     // The height seam: the params' From+offset expressions become the
     // generators' plain f64s right here. Every unresolved reference is

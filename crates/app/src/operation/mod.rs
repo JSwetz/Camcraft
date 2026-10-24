@@ -65,10 +65,12 @@ use crate::machining3d::{self, Entry3D, Pocket3DParams};
 use crate::model;
 use crate::schema::Operation;
 use crate::stock::StockShape;
-use crate::verify::{self, Mode, VerifyContext, Warning};
+use crate::verify::{self, VerifyContext, Warning};
 
 mod heights;
 pub use heights::*;
+mod kinds;
+pub use kinds::*;
 mod params;
 mod stamp;
 pub use stamp::*;

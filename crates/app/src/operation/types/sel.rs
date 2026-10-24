@@ -75,18 +75,10 @@ pub enum OpType {
 }
 
 impl core::fmt::Display for OpType {
+    /// The panel label, read from the kind registry (M5.0.2) - the one
+    /// list the tree, sheet, combo and ribbon tips all quote.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let s = match self {
-            OpType::Face => "Face",
-            OpType::Contour => "2D Contour",
-            OpType::Pocket => "2D Pocket",
-            OpType::Slot => "Slot",
-            OpType::Trace => "Trace",
-            OpType::Drill => "Drill",
-            OpType::Pocket3D => "3D Pocket",
-            OpType::Finish3D => "3D Finish",
-        };
-        f.write_str(s)
+        f.write_str(self.info().label)
     }
 }
 

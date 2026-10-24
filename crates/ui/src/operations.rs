@@ -17,8 +17,6 @@
 //! about a stale path.
 
 use flecs_ecs::prelude::World;
-use camcraft_app::geo2d::Point2;
-use camcraft_app::machining2d::{Lead, PocketStrategy, Side};
 use camcraft_app::operation::{self, Height, HeightReference, OpParams};
 use camcraft_app::units;
 use camcraft_app::verify::Warning;
@@ -125,160 +123,7 @@ pub(crate) fn unresolved_note(
 /// One law, both callers: the page's type combo and the ribbon's Create
 /// cells (via `crate::actions::add_operation`) both come through here.
 pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
-    let feed = feed_of(cur);
-    let plunge = plunge_of(cur);
-    let climb = climb_of(cur);
-    let clearance = cur.clearance();
-    let stepover = stepover_of(cur).unwrap_or(3.0);
-    let stepdown = stepdown_of(cur).unwrap_or(5.0);
-    let top = top_of(cur).unwrap_or_else(|| Height::of(HeightReference::TopOfModel, 0.0));
-    let bottom = bottom_of(cur).unwrap_or_else(|| Height::of(HeightReference::WorkOffset(0), 0.0));
-    let retract = retract_of(cur).unwrap_or_else(|| Height::of(HeightReference::TopOfStock, 10.0));
-    match kind {
-        1 => OpParams::Contour {
-            side: Side::Auto,
-            stock_to_leave: 0.0,
-            clearance_z: clearance,
-            retract_z: retract,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            feed,
-            plunge_feed: plunge,
-            climb,
-            lead: Lead::Linear { length: 8.0 },
-            tolerance: 0.01,
-            tab_count: 0,
-            tab_width: 5.0,
-            tab_height: 1.0,
-        },
-        2 => OpParams::Pocket {
-            stepover,
-            stock_to_leave: 0.0,
-            clearance_z: clearance,
-            retract_z: None,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            feed,
-            plunge_feed: plunge,
-            climb,
-            // New pockets let the shape come from the outline; explicit
-            // choices on live operations are never retyped over.
-            strategy: PocketStrategy::Auto,
-        },
-        3 => OpParams::Slot {
-            a: Point2::new(-20.0, 0.0),
-            b: Point2::new(20.0, 0.0),
-            width: 4.0,
-            stock_to_leave: 0.0,
-            clearance_z: clearance,
-            retract_z: None,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            stepover,
-            feed,
-            plunge_feed: plunge,
-            climb,
-        },
-        4 => OpParams::Trace {
-            clearance_z: clearance,
-            retract_z: None,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            feed,
-            plunge_feed: plunge,
-            climb,
-        },
-        5 => OpParams::Drill {
-            clearance_z: clearance,
-            retract_z: None,
-            top_z: top,
-            // No shared bottom: each hole's floor rides the hole itself
-            // (or the explicit Depth field if one is set); the G54
-            // default below would be a plane no drilled hole implies.
-            bottom_z: None,
-            cycle: camcraft_app::drilling::CycleChoice::Auto,
-            peck: 0.0,
-            dwell: 0.0,
-            feed,
-            plunge_feed: plunge,
-            // Creation is legal with an empty list; the generator
-            // refuses to run one, and Detect holes fills it.
-            holes: Vec::new(),
-        },
-        6 => OpParams::Pocket3D {
-            stepover,
-            stock_to_leave: 0.0,
-            clearance_z: clearance,
-            retract_z: None,
-            top_z: top,
-            bottom_z: bottom,
-            stepdown,
-            feed,
-            plunge_feed: plunge,
-            climb,
-            strategy: PocketStrategy::Auto,
-            // The dive the 2-D pocket already makes; ramp and helix are
-            // opt-in once the walls are known to allow them.
-            entry: camcraft_app::machining3d::Entry3D::Plunge,
-            helix_radius: 1.0,
-            // The staircase is honest noise until the user asks for
-            // the closing pass: rest roughing costs a second ladder.
-            rest_rough: false,
-            // The law's default (r·(1−cos 45°) ≈ 15% of the diameter);
-            // reads only under Adaptive, which the fresh op does not pick.
-            max_engagement: 45.0,
-            // Feed modulation costs a sim run; the fresh op posts the
-            // programmed feed everywhere until the user asks otherwise.
-            feed_opt: false,
-        },
-        7 => OpParams::Finish3D {
-            // The auto-split is the default: waterline alone would
-            // leave every flat shelf standing proud, and a silent
-            // miss is the one answer this app never gives.
-            pattern: camcraft_app::finishing3d::FinishPattern::Parallel,
-            // None = the stepover cos-law derives spacing from the
-            // tolerance; the panel can override it per line set.
-            stepover: None,
-            // A general 3-D finish budget: half the common 0.1 mm
-            // shop tolerance, coarse enough that the scallop stepdown
-            // on a typical R3 ball stays well under the level cap,
-            // fine enough that the rings read as a finish.
-            tolerance: 0.05,
-            clearance_z: clearance,
-            // None hops rings to clearance - the pocket family's law.
-            retract_z: None,
-            top_z: top,
-            bottom_z: bottom,
-            feed,
-            plunge_feed: plunge,
-            climb,
-            // Fresh finishes hop: the ramp is opt-in, like the pocket's
-            // between-ring entry - the certified diagonal is a claim
-            // about the ground, and a new op has none on record yet.
-            ramp: false,
-            // The march refines to its own floor until a machinist
-            // says otherwise; the ramp's slope cap waits for a ramp
-            // to govern, at the law's own 45 degrees.
-            min_step: None,
-            ramp_angle: 45.0,
-        },
-        _ => OpParams::Face {
-            stepover,
-            clearance_z: clearance,
-            cut_z: Height::of(HeightReference::TopOfStock, 0.0),
-            // A fresh face cuts one level; staging is opt-in in the
-            // panel, never a surprise default.
-            top_z: None,
-            stepdown: None,
-            feed,
-            plunge_feed: plunge,
-            climb,
-        },
-    }
+    camcraft_app::operation::retype_params(cur, kind)
 }
 
 /// Parameter set a ribbon quick-add starts an operation of `kind` with:
@@ -287,111 +132,6 @@ pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
 /// and generation resolves them against whatever the document holds.
 pub(crate) fn quick_params(kind: usize) -> OpParams {
     retype(&crate::state::OpUi::default().params, kind)
-}
-
-fn feed_of(p: &OpParams) -> f64 {
-    match p {
-        OpParams::Face { feed, .. }
-        | OpParams::Contour { feed, .. }
-        | OpParams::Pocket { feed, .. }
-        | OpParams::Pocket3D { feed, .. }
-        | OpParams::Slot { feed, .. }
-        | OpParams::Trace { feed, .. }
-        | OpParams::Drill { feed, .. }
-        | OpParams::Finish3D { feed, .. } => *feed,
-    }
-}
-
-fn plunge_of(p: &OpParams) -> f64 {
-    match p {
-        OpParams::Face { plunge_feed, .. }
-        | OpParams::Contour { plunge_feed, .. }
-        | OpParams::Pocket { plunge_feed, .. }
-        | OpParams::Pocket3D { plunge_feed, .. }
-        | OpParams::Slot { plunge_feed, .. }
-        | OpParams::Trace { plunge_feed, .. }
-        | OpParams::Drill { plunge_feed, .. }
-        | OpParams::Finish3D { plunge_feed, .. } => *plunge_feed,
-    }
-}
-
-fn climb_of(p: &OpParams) -> bool {
-    match p {
-        OpParams::Face { climb, .. }
-        | OpParams::Contour { climb, .. }
-        | OpParams::Pocket { climb, .. }
-        | OpParams::Pocket3D { climb, .. }
-        | OpParams::Slot { climb, .. }
-        | OpParams::Trace { climb, .. }
-        | OpParams::Finish3D { climb, .. } => *climb,
-        // A drill has no climb notion - re-typing one to a milling kind
-        // starts from the fresh default instead of inventing a carry.
-        OpParams::Drill { .. } => true,
-    }
-}
-
-fn stepover_of(p: &OpParams) -> Option<f64> {
-    match p {
-        OpParams::Face { stepover, .. }
-        | OpParams::Pocket { stepover, .. }
-        | OpParams::Pocket3D { stepover, .. }
-        | OpParams::Slot { stepover, .. } => Some(*stepover),
-        _ => None,
-    }
-}
-
-fn stepdown_of(p: &OpParams) -> Option<f64> {
-    match p {
-        OpParams::Contour { stepdown, .. }
-        | OpParams::Pocket { stepdown, .. }
-        | OpParams::Pocket3D { stepdown, .. }
-        | OpParams::Slot { stepdown, .. }
-        | OpParams::Trace { stepdown, .. } => Some(*stepdown),
-        _ => None,
-    }
-}
-
-fn bottom_of(p: &OpParams) -> Option<Height> {
-    match p {
-        OpParams::Contour { bottom_z, .. }
-        | OpParams::Pocket { bottom_z, .. }
-        | OpParams::Pocket3D { bottom_z, .. }
-        | OpParams::Slot { bottom_z, .. }
-        | OpParams::Trace { bottom_z, .. }
-        | OpParams::Finish3D { bottom_z, .. } => Some(*bottom_z),
-        // A drill's floor is normally the hole's own, from the model;
-        // only an explicit Depth override is a plane to carry over.
-        OpParams::Drill { bottom_z, .. } => *bottom_z,
-        OpParams::Face { .. } => None,
-    }
-}
-
-fn top_of(p: &OpParams) -> Option<Height> {
-    match p {
-        OpParams::Contour { top_z, .. }
-        | OpParams::Pocket { top_z, .. }
-        | OpParams::Pocket3D { top_z, .. }
-        | OpParams::Slot { top_z, .. }
-        | OpParams::Trace { top_z, .. }
-        | OpParams::Drill { top_z, .. }
-        | OpParams::Finish3D { top_z, .. } => Some(*top_z),
-        OpParams::Face { .. } => None,
-    }
-}
-
-/// The between-pass hop plane, present or not: Contour always stores one,
-/// the other hopped kinds keep it in an option (None hops to clearance).
-fn retract_of(p: &OpParams) -> Option<Height> {
-    match p {
-        OpParams::Contour { retract_z, .. } => Some(*retract_z),
-        OpParams::Pocket { retract_z, .. }
-        | OpParams::Pocket3D { retract_z, .. }
-        | OpParams::Slot { retract_z, .. }
-        | OpParams::Trace { retract_z, .. }
-        | OpParams::Drill { retract_z, .. }
-        | OpParams::Finish3D { retract_z, .. } => *retract_z,
-        OpParams::Face { .. } => None,
-    }
 }
 
 /// One line per warning kind, not one per colliding move. verify records
@@ -460,6 +200,7 @@ mod height_row_tests {
     //! to fix it - never show a stale or guessed z.
 
     use super::*;
+    use camcraft_app::machining2d::{Lead, Side};
     use camcraft_app::world::new_world;
 
     #[test]
@@ -541,12 +282,12 @@ mod height_row_tests {
         for kind in [1usize, 2, 3, 4] {
             let p = quick_params(kind);
             assert_eq!(
-                top_of(&p).map(|h| h.reference),
+                operation::top_of(&p).map(|h| h.reference),
                 Some(HeightReference::TopOfModel),
                 "kind {kind} tops out at the model",
             );
             assert_eq!(
-                bottom_of(&p).map(|h| (h.reference, h.offset)),
+                operation::bottom_of(&p).map(|h| (h.reference, h.offset)),
                 Some((HeightReference::WorkOffset(0), 0.0)),
                 "kind {kind} bottoms out at G54",
             );

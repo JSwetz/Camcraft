@@ -536,16 +536,9 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
 }
 
 fn kind_index(kind: OpType) -> usize {
-    match kind {
-        OpType::Face => 0,
-        OpType::Contour => 1,
-        OpType::Pocket => 2,
-        OpType::Slot => 3,
-        OpType::Trace => 4,
-        OpType::Drill => 5,
-        OpType::Pocket3D => 6,
-        OpType::Finish3D => 7,
-    }
+    // The registry's table order (M5.0.2) - the same index the ribbon's
+    // Create cells and TYPES use, by construction.
+    kind.ordinal()
 }
 
 // --------------------------------------------------------------- param rows

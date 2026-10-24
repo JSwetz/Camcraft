@@ -34,19 +34,11 @@ use super::icons::{Icon, IconSet};
 use super::painted;
 use super::theme::Palette;
 
-/// The operation kinds in panel order (mirrors operations.rs's TYPES).
-/// Shared with pages.rs: the Type combo there and the ribbon tips here
-/// quote the same table.
-pub(crate) const TYPES: [&str; 8] = [
-    "Face",
-    "2D Contour",
-    "2D Pocket",
-    "Slot",
-    "Trace",
-    "Drill",
-    "3D Pocket",
-    "3D Finish",
-];
+/// The operation kinds in panel order - the app's kind registry labels
+/// (M5.0.2), one list for the whole surface. Shared with pages.rs: the
+/// Type combo there and the ribbon tips here quote the same table.
+pub(crate) const TYPES: [&str; camcraft_app::operation::KIND_COUNT] =
+    camcraft_app::operation::ALL_LABELS;
 
 // ---------------------------------------------------------------- shortcuts
 
@@ -195,17 +187,18 @@ fn label_of(c: Cmd) -> &'static str {
 
 fn text_of(c: Cmd) -> String {
     match c {
-        Cmd::Create(i) => match i {
-            0 => "Face",
-            1 => "Contour",
-            2 => "Pocket",
-            3 => "Slot",
-            4 => "Trace",
-            5 => "Drill",
-            6 => "3D Pocket",
-            _ => "3D Finish",
-        }
-        .to_owned(),
+        // The ribbon caption is registry data (M5.0.2) - imgui's strings,
+        // same order as the Create cells below. The list here is built
+        // from the table, so an out-of-range index means a table bug:
+        // stop in debug, name it and stay on screen in release.
+        Cmd::Create(i) => match camcraft_app::operation::KindInfo::ALL.get(i) {
+            Some(k) => k.caption.to_owned(),
+            None => {
+                debug_assert!(false, "Create({i}) past the kind table");
+                eprintln!("ribbon: unknown op kind {i}");
+                "op".to_owned()
+            }
+        },
         other => label_of(other).to_owned(),
     }
 }
@@ -297,20 +290,18 @@ fn icon_of(c: Cmd) -> Icon {
         Cmd::Stock => Icon::Stock,
         Cmd::Origin => Icon::WorkOffset,
         Cmd::Tools => Icon::Tools,
-        Cmd::Create(i) => match i {
-            0 => Icon::Face,
-            1 => Icon::Contour,
-            2 => Icon::Pocket,
-            3 => Icon::Slot,
-            4 => Icon::Trace,
-            // The 3-D pocket wears the pocket's glyph - same family,
-            // captioned apart by text_of (RECOMMENDED.md: no new asset
-            // for a kind whose 2-D sibling already says "pocket").
-            // The finish has no such sibling: its rings are the model's
-            // own contours, so it carries an original waterline glyph.
-            5 => Icon::Drill,
-            6 => Icon::Pocket,
-            _ => Icon::Finish3D,
+        // Icons stay a UI table (asset names do not belong in the app),
+        // but an exhaustive match on the kind, not on the index: a new
+        // registry row with no icon here stops at the compiler, never
+        // silently borrows the last glyph (M5.0.2 - the old `_ =>` arm
+        // was one of the three silent-drift catch-alls).
+        Cmd::Create(i) => match camcraft_app::operation::KindInfo::ALL.get(i) {
+            Some(k) => op_icon(k.ty),
+            None => {
+                debug_assert!(false, "Create({i}) past the kind table");
+                eprintln!("ribbon: unknown op kind {i}");
+                Icon::Generate
+            }
         },
         Cmd::Undo => Icon::Undo,
         Cmd::Redo => Icon::Redo,

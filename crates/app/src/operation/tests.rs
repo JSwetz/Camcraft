@@ -169,6 +169,16 @@ fn stamp_follows_every_input() {
     c.stamp_with(&world, None, &mut hc);
     assert_ne!(ha.finish(), hb.finish());
     assert_ne!(ha.finish(), hc.finish(), "staging moves the stamp");
+    // The registry law (M5.0.2): one row per kind, table order ==
+    // OpType::ordinal == digest tag, labels exactly as Display quotes
+    // them. The tags are digest bytes - drift here greys every cache.
+    assert_eq!(KindInfo::ALL.len(), 8);
+    for (i, row) in KindInfo::ALL.iter().enumerate() {
+        assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
+        assert_eq!(row.tag as usize, i, "digest tag must equal table order");
+        assert_eq!(KindInfo::ALL[row.ty.ordinal()].ty, row.ty);
+        assert_eq!(row.ty.to_string(), ALL_LABELS[i], "label drift");
+    }
 }
 
 #[test]

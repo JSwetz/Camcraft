@@ -52,6 +52,10 @@ impl OpParams {
             w(h, p.x);
             w(h, p.y);
         };
+        // The kind tag opens the digest (M5.0.2): what was a magic
+        // literal at the head of each arm is now the registry row's
+        // data - the bytes written are unchanged.
+        h.write_u8(self.kind().info().tag);
         match self {
             OpParams::Face {
                 stepover,
@@ -63,7 +67,6 @@ impl OpParams {
                 plunge_feed,
                 climb,
             } => {
-                h.write_u8(0);
                 w(h, *stepover);
                 wh(h, *clearance_z);
                 wh(h, *cut_z);
@@ -99,7 +102,6 @@ impl OpParams {
                 tab_height,
                 climb,
             } => {
-                h.write_u8(1);
                 w(h, *stock_to_leave);
                 wh(h, *clearance_z);
                 wh(h, *retract_z);
@@ -148,7 +150,6 @@ impl OpParams {
                 climb,
                 strategy,
             } => {
-                h.write_u8(2);
                 w(h, *stepover);
                 w(h, *stock_to_leave);
                 wh(h, *clearance_z);
@@ -186,7 +187,6 @@ impl OpParams {
                 max_engagement,
                 feed_opt,
             } => {
-                h.write_u8(6);
                 w(h, *stepover);
                 w(h, *stock_to_leave);
                 wh(h, *clearance_z);
@@ -231,7 +231,6 @@ impl OpParams {
                 min_step,
                 ramp_angle,
             } => {
-                h.write_u8(7);
                 // v16: the pattern chooses a different kinematic (and
                 // the raster fields only answer to Parallel), so they
                 // belong in the digest; the Some/None split keeps a
@@ -286,7 +285,6 @@ impl OpParams {
                 plunge_feed,
                 climb,
             } => {
-                h.write_u8(3);
                 wp2(h, *a);
                 wp2(h, *b);
                 w(h, *width);
@@ -310,7 +308,6 @@ impl OpParams {
                 plunge_feed,
                 climb,
             } => {
-                h.write_u8(4);
                 wh(h, *clearance_z);
                 wh(h, *top_z);
                 wh(h, *bottom_z);
@@ -332,7 +329,6 @@ impl OpParams {
                 plunge_feed,
                 holes,
             } => {
-                h.write_u8(5);
                 wh(h, *clearance_z);
                 wh(h, *top_z);
                 wh_opt(h, *bottom_z);
