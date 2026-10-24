@@ -1,0 +1,130 @@
+//! Split from `machining3d.rs` by M5.0.1; structure only.
+
+use super::params::{CHORD_TOL, Pocket3DParams};
+use super::rest::EPS;
+use super::feed::{guard_input, home, sim_of};
+use super::ladder::ladder;
+
+use crate::cl::Toolpath;
+use crate::geo2d::Region;
+use crate::geometry::Triangle;
+use crate::machining2d::{
+    cut_levels, GenError,
+};
+use crate::stock_sim::{self, Dexel, StockReport};
+/// The per-level cutter plan and its walk, level after level - the 3-D
+/// sibling of `machining2d::pocket`'s run, with the passes recomputed
+/// from the model at every z (that is the whole difference: 2-D knows
+/// its plan once, 3-D's plan IS the ladder).
+pub fn pocket3d(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+) -> Result<Toolpath, GenError> {
+    pocket3d_prev(facets, footprint, p, None)
+}
+
+/// The re-machining sibling (M3.1 D): the same ladder, run against the
+/// stock state the previous operations left (`mask: Some`, see the
+/// app crate's `rest`). Every masked level target is a subset of the
+/// unmasked one, so a first operation - or a program with nothing cut
+/// before it - generates the identical path.
+pub fn pocket3d_prev(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    mask: Option<&Dexel>,
+) -> Result<Toolpath, GenError> {
+    guard_input(facets, footprint, p)?;
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+    ladder(facets, footprint, p, &zs, None, mask, home(p))
+}
+
+/// The rest-material sibling (M2.1b): the same level ladder, then a
+/// second, half-stepdown pass aimed at what the simulation says is
+/// still standing. The coarse ladder's staircase is the acknowledged
+/// price of planes - at most `stepdown` above a raised surface - and
+/// this closes it toward stepdown/2 per round the caller dares to run.
+/// Entries here are always plain plunges, and the superset law is why:
+/// a column the coarse ladder cleared at z is clear at every plane
+/// above z, so a vertical dive into rest material can never cross part
+/// geometry. The report is the sim's verdict on the COMBINED path,
+/// measured against the mesh's own surface.
+pub fn pocket3d_with_rest(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+) -> Result<(Toolpath, StockReport), GenError> {
+    pocket3d_with_rest_prev(facets, footprint, p, None)
+}
+
+/// The re-machining sibling of [`pocket3d_with_rest`] (M3.1 D): the
+/// coarse ladder already skips what the program ahead machined, the
+/// rest leg chases what even that left standing, and the closing
+/// report reads the whole program's stock, not this operation's
+/// private copy of it.
+pub fn pocket3d_with_rest_prev(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    mask: Option<&Dexel>,
+) -> Result<(Toolpath, StockReport), GenError> {
+    guard_input(facets, footprint, p)?;
+    let r = p.tool_diameter * 0.5;
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+    let coarse = ladder(facets, footprint, p, &zs, None, mask, home(p))?;
+
+    // What the coarse ladder leaves standing, column by column: the
+    // op-frame grid simulated from raw stock, or - when the program
+    // cut before us - the document grid with our moves added to its
+    // history (one grid, one story; M3.1 D).
+    let dex = match mask {
+        Some(prev) => {
+            let mut d = prev.clone();
+            for m in &coarse.moves {
+                d.subtract(m, r, CHORD_TOL);
+            }
+            d
+        }
+        None => {
+            let (mut d, _) = sim_of(facets, footprint, p)?;
+            for m in &coarse.moves {
+                d.subtract(m, r, CHORD_TOL);
+            }
+            d
+        }
+    };
+
+    // The rest ladder: same laws, half the step, rest-shaped targets.
+    let zs_r = cut_levels(p.top_z, p.bottom_z, p.stepdown * 0.5);
+    let start = coarse.moves.last().map_or_else(|| home(p), |m| m.to);
+    let mut moves = coarse.moves;
+    match ladder(facets, footprint, p, &zs_r, Some(&dex), None, start) {
+        Ok(rp) => moves.extend(rp.moves),
+        // Nothing stood above any rest plane: the coarse path was
+        // already clean at lattice scale. A success, not a refusal.
+        Err(GenError::Empty(_)) => {}
+        Err(e) => return Err(e),
+    }
+    let path = Toolpath {
+        moves,
+        cycles: Vec::new(),
+    };
+    if !path.all_finite() {
+        return Err(GenError::Invalid("path left the finite horizon".into()));
+    }
+
+    // The verdict on the whole job: re-run the sim from where this
+    // operation started - raw stock, or the program's standing state
+    // - over the combined path, so the report describes the machining,
+    // not one of its legs.
+    let mut dex = match mask {
+        Some(prev) => prev.clone(),
+        None => sim_of(facets, footprint, p)?.0,
+    };
+    let part = stock_sim::part_surface(facets, dex.x0, dex.y0, dex.cell, dex.nx, dex.ny);
+    for m in &path.moves {
+        dex.subtract(m, r, CHORD_TOL);
+    }
+    Ok((path, stock_sim::measure(&dex, &part, footprint, EPS)))
+}
