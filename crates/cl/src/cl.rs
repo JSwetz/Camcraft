@@ -167,7 +167,14 @@ pub fn arc_chords(a: Point2, b: Point2, arc: ArcMove, tol: f64) -> Vec<(Point2, 
     // Sagitta r(1 - cos(step/2)) <= tol bounds the sweep per chord.
     let max_step = 2.0 * (1.0 - (tol / r).clamp(-1.0, 1.0)).clamp(-1.0, 1.0).acos();
     let n = if max_step > 0.0 {
-        (d / max_step).ceil() as usize
+        // M4.2b: `d` arrives from atan2 and `max_step` from acos, so a
+        // sweep that is a clean multiple of the chord budget lands on
+        // the ceil boundary ± a couple of last bits - and which side
+        // of it the platform's libm leaves you is not a machining
+        // fact. Quantize before the decision: one chord fewer only
+        // when the budget is met to a relative 1e-6 (a sagitta short
+        // of tol by 1e-11 mm), never a silent miss of a real one.
+        (lattice(d / max_step) + 1e-12).ceil() as usize
     } else {
         usize::MAX
     }

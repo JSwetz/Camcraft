@@ -19,7 +19,7 @@ use std::f64::consts::PI;
 
 use thiserror::Error;
 
-use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::cl::{lattice, MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::{GeoError, Loop, Point2, Region};
 use crate::geometry::Point3;
 
@@ -795,7 +795,16 @@ pub fn fit_arcs(pts: &[Point2], tol: f64) -> Vec<Seg> {
                 // turn; a closing full circle becomes two arcs meeting at
                 // the far vertex, so the builder never sees the
                 // zero-sweep single arc that would erase the ring.
-                let k = (total / PI).ceil().max(1.0) as usize;
+                // M4.2b: a closed ring's `total` is 2*pi to the last
+                // accumulated atan2 bit - glibc and the Windows CRT
+                // disagree there, and a raw ceil(2.0 ± ULP) would let
+                // the platform pick 2 or 3 splits for every ring in
+                // the shop. The lattice swallows that noise (it is
+                // 1e-13 here, a thousand times under the quantum)
+                // and still honours a genuine fraction: a ratio that
+                // really sits > 5e-7 above an integer wanted another
+                // piece and keeps it.
+                let k = (lattice(total / PI) + 1e-12).ceil().max(1.0) as usize;
                 for m in 1..=k {
                     let idx = if m == k { e } else { s + (e - s) * m / k };
                     segs.push(Seg::Arc {

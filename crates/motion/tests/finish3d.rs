@@ -10,11 +10,11 @@
 //! strategy's jurisdiction, so the envelope must stay silent on them).
 //!
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::stock_sim, camcraft_motion::verify.
-//! Lane shape (M4.4): 12 law tests run here in seconds; 27 envelope-VERDICT and
+//! Lane shape (M4.4): 13 law tests run here in seconds; 27 envelope-VERDICT and
 //! dome-generation tests are #[ignore]d - run them with
 //! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
 
-use camcraft_motion::cl::{MoveKind, Toolpath};
+use camcraft_motion::cl::{lattice, MoveKind, Toolpath};
 use camcraft_motion::finishing3d::{
     contour, parallel, project, radial, scallop_stepdown, scallop_stepover, spiral, waterline,
     Finish3DParams, FinishPattern,
@@ -547,6 +547,32 @@ fn the_generator_is_deterministic() {
         waterline(&f, &p).expect("second").moves,
         "two calls, two paths - a stamp would churn forever"
     );
+}
+
+/// The M4.2b law, pinned on one machine: the march quantizes every
+/// point it asks the surface about onto the micron lattice, so its
+/// halving/accept decision reads the same bits on glibc and the
+/// Windows CRT - the wobble that made the dome goldens disagree 560
+/// to 558. What a decision consumes, the output exhibits: every
+/// stored sample is a lattice point, never a platform-dependent
+/// real a hair off one. (A mesh-wide ULP nudge is deliberately NOT
+/// asserted - jittering the facet planes moves the model's own
+/// knife-edges, a rim sitting exactly on a programmed floor, which
+/// is degenerate-fixture territory, not the platform's last bit.)
+#[test]
+fn every_march_sample_lands_on_the_micron_lattice() {
+    let domed = sphere_cap(12.0, PI / 3.0, 6, 24);
+    let p = params(12.0, 6.0);
+    for (family, path) in [
+        ("radial", radial(&domed, &p).expect("radial path")),
+        ("project", project(&domed, &p).expect("project path")),
+    ] {
+        for m in &path.moves {
+            for v in [m.to.x, m.to.y] {
+                assert_eq!(lattice(v), v, "{family} sample off the lattice: {v}");
+            }
+        }
+    }
 }
 
 #[test]

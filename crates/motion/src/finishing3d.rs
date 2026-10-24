@@ -71,7 +71,7 @@
 //!   hop at `retract_z` clamped to clearance** - the shared ladder
 //!   law of every depth-stepping operation in this codebase.
 
-use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::cl::{lattice, MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{cut_levels, fit_arcs, GenError, Seg};
@@ -320,8 +320,16 @@ fn facet_polygon(f: &Triangle, r: f64, cz: f64, ds: &[(f64, f64)]) -> Vec<Point2
         let mut best: Option<(f64, Point2)> = None;
         for q in &cand[..nc] {
             let rho = (r2 - (cz - q.z) * (cz - q.z)).max(0.0).sqrt();
-            let p = Point2::new(q.x + rho * ux, q.y + rho * uy);
-            let s = p.x * ux + p.y * uy;
+            // M4.2b: the scan point lands on the grid the geo2d bridge
+            // rounds onto the moment it is born, so every argument it
+            // is used in - the hull's cross products, the bridge's
+            // rounding, the union's topology - happens in exact
+            // integers on every platform. A glibc-vs-CRT last bit in
+            // `rho * ux` could otherwise choose which integer the
+            // bridge sees (the dome rings' fused-sliver drift) and
+            // how many vertices one facet's loop keeps.
+            let p = Point2::new(lattice(q.x + rho * ux), lattice(q.y + rho * uy));
+            let s = lattice(p.x * ux + p.y * uy);
             if best.is_none_or(|(b, _)| s > b) {
                 best = Some((s, p));
             }
@@ -339,28 +347,35 @@ fn facet_polygon(f: &Triangle, r: f64, cz: f64, ds: &[(f64, f64)]) -> Vec<Point2
 /// trims float noise - but sorting first makes the output independent
 /// of the scan's starting direction either way.
 fn convex_hull(pts: &[Point2]) -> Vec<Point2> {
-    let mut p = pts.to_vec();
-    p.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
-    p.dedup_by(|a, b| a.x == b.x && a.y == b.y);
+    // M4.2b: the argument is had in the bridge's integers. The scan
+    // points arrive on the grid; collinearity is an exact i128
+    // cross product, so a tangent where three scan points sit a
+    // tenth of a micron apart keeps or drops its middle vertex on
+    // the geometry, never on a float rounding. Coordinates stay
+    // well under i64's reach (a 1000 mm part is 1e9 grid units;
+    // an edge product 4e18 is i128's small change), and a saturating
+    // cast keeps even a nonsense input finite.
+    let grid = |v: f64| (v * 1e6).round() as i64;
+    let mut p: Vec<(i64, i64)> = pts.iter().map(|q| (grid(q.x), grid(q.y))).collect();
+    p.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    p.dedup_by(|a, b| a == b);
     if p.len() < 3 {
         return Vec::new();
     }
-    let cross = |o: &Point2, a: &Point2, b: &Point2| {
-        (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+    let cross = |o: &(i64, i64), a: &(i64, i64), b: &(i64, i64)| -> i128 {
+        (a.0 - o.0) as i128 * (b.1 - o.1) as i128 - (a.1 - o.1) as i128 * (b.0 - o.0) as i128
     };
-    let mut lower: Vec<Point2> = Vec::with_capacity(p.len());
+    let mut lower: Vec<(i64, i64)> = Vec::with_capacity(p.len());
     for q in &p {
-        while lower.len() >= 2
-            && cross(&lower[lower.len() - 2], &lower[lower.len() - 1], q) <= 0.0
+        while lower.len() >= 2 && cross(&lower[lower.len() - 2], &lower[lower.len() - 1], q) <= 0
         {
             lower.pop();
         }
         lower.push(*q);
     }
-    let mut upper: Vec<Point2> = Vec::with_capacity(p.len());
+    let mut upper: Vec<(i64, i64)> = Vec::with_capacity(p.len());
     for q in p.iter().rev() {
-        while upper.len() >= 2
-            && cross(&upper[upper.len() - 2], &upper[upper.len() - 1], q) <= 0.0
+        while upper.len() >= 2 && cross(&upper[upper.len() - 2], &upper[upper.len() - 1], q) <= 0
         {
             upper.pop();
         }
@@ -373,6 +388,9 @@ fn convex_hull(pts: &[Point2]) -> Vec<Point2> {
         return Vec::new(); // collinear after all: no area, no loop
     }
     lower
+        .into_iter()
+        .map(|(x, y)| Point2::new(x as f64 / 1e6, y as f64 / 1e6))
+        .collect()
 }
 
 /// The forbidden-center region at one center plane: every facet's
@@ -624,8 +642,14 @@ fn support_at(x: f64, y: f64, r: f64, floor_tip: f64, sups: &[Sup]) -> Option<f6
 
 /// Append a sample to the piece being marched. Runs are walked once;
 /// only the zero-length duplicate a finished bisection can leave
-/// behind is refused.
+/// behind is refused. The stored point rides the micron lattice
+/// (M4.2b): every coordinate the march answers from, and the
+/// duplicate test itself, then read bits no platform's libm can
+/// wobble - a ULP apart sample pair is one point on glibc and the
+/// Windows CRT alike. The reported path is unchanged: the lattice
+/// is exactly what the golden writer rounds to.
 fn push_run_pt(line: &mut Vec<(Point2, f64)>, q: Point2, c: f64) {
+    let q = Point2::new(lattice(q.x), lattice(q.y));
     if line.last().is_none_or(|(lq, _)| lq.x != q.x || lq.y != q.y) {
         line.push((q, c));
     }
@@ -670,10 +694,21 @@ fn march_curve(
     // material starts and stops, and that is the model's answer,
     // never the spacing parameter's.
     let delta_min = (delta0 / 4096.0).max(floor_mm);
+    // M4.2b: the surface is asked only at lattice points. A sample
+    // position arrives through libm (the radial chord's cos/sin, the
+    // loop's hypot-summed arc length), so one ULP of platform drift
+    // used to be enough to move a `dev > eps_chord` verdict - the
+    // dome goldens' 3-versus-2-move drift. Quantized inputs make the
+    // tangent query's mul/add/sqrt chain speak identical bits on
+    // glibc and the Windows CRT, and the halving ladder - the
+    // march's only libm-adjacent decision - lands the same way
+    // everywhere. Nothing reported changes: round-onto-the-lattice
+    // is a fixpoint of the µm rounding the golden writer applies.
+    let ask = |q: Point2| sup(Point2::new(lattice(q.x), lattice(q.y)));
     let mut line: Vec<(Point2, f64)> = Vec::new();
     let mut pieces: Vec<Vec<(Point2, f64)>> = Vec::new();
     let mut t = t0;
-    let mut cz = sup(pos(t));
+    let mut cz = ask(pos(t));
     if let Some(c) = cz {
         push_run_pt(&mut line, pos(t), c);
     }
@@ -685,7 +720,7 @@ fn march_curve(
             if tn <= t {
                 break;
             }
-            match sup(pos(tn)) {
+            match ask(pos(tn)) {
                 None => t = tn,
                 Some(c) => {
                     // The stretch between was not cuttable ground -
@@ -700,7 +735,7 @@ fn march_curve(
                     let (mut lo, mut hic, mut hicz) = (t, tn, c); // lo invalid, hic valid
                     for _ in 0..MAX_BISECT {
                         let mid = (lo + hic) * 0.5;
-                        match sup(pos(mid)) {
+                        match ask(pos(mid)) {
                             Some(cm) => {
                                 hic = mid;
                                 hicz = cm;
@@ -730,14 +765,14 @@ fn march_curve(
                 if tn <= t {
                     break 'march;
                 }
-                match sup(pos(tn)) {
+                match ask(pos(tn)) {
                     None => {
                         // End of the run: bisect to its edge from
                         // the last known valid point.
                         let (mut lo, mut loc, mut hic) = (t, cz.unwrap_or(0.0), tn);
                         for _ in 0..MAX_BISECT {
                             let mid = (lo + hic) * 0.5;
-                            match sup(pos(mid)) {
+                            match ask(pos(mid)) {
                                 Some(cm) => {
                                     lo = mid;
                                     loc = cm;
@@ -772,7 +807,7 @@ fn march_curve(
                     Some(c) if delta > delta_min => {
                         let cur = cz.unwrap_or(c);
                         let mid = (t + tn) * 0.5;
-                        let dev = match sup(pos(mid)) {
+                        let dev = match ask(pos(mid)) {
                             Some(cm) => (cm - (cur + c) * 0.5).abs(),
                             None => f64::INFINITY, // straddles an edge: refine
                         };
