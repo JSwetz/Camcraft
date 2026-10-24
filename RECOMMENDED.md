@@ -2858,6 +2858,57 @@ tooling (M4.3)` + this docs)
   close-out - the skips were the debt's receipt; keeping them past the
   proof would hide it.
 
+## M5.0.1 — the seven file splits: how a split stays honest (commits 4463808..4bf5e4d + this docs)
+
+**Splits were mechanical slices, never retyped code.** A python splitter
+read each flat file, found top-level item seams (an item plus its
+contiguous `///`/`#[…]` lines; block end = the next head's start), and
+emitted the directory module: original top-level `use` lines on every
+file's head, items moved verbatim, inline `mod tests { }` de-wrapped with
+its `#[cfg(test)]` attr hoisted to a `mod tests;` decl in mod.rs. Same-
+named items (a struct plus its impls) were addressed by `Name@line`
+when name matching alone couldn't assign them. Why: the stage law is
+"structure only, goldens byte-identical" - a hand-move invites a drive-by
+edit that a green suite may not catch, and a slice guarantees the moved
+lines are the same bytes. Cost to change: none - the layout is normal
+Rust modularity; the tooling was scaffolding.
+
+**Private items became `pub(super)`, the pub surface re-exported from
+mod.rs.** Callers, tests, and docs see exactly the paths they saw
+before. Trait-impl items stayed plain (a visibility on `fn fmt`/
+`fn from` is E0449), cross-file struct fields promoted only where a
+sibling file touches them. `pub(crate)`-everywhere and `pub`-everywhere
+were both considered and dropped: wider than the seam needs is a
+coupling loan at the exact interest rate Phase 5 is here to pay down.
+
+**Two files rode past the ~400 cap, on purpose.** `drilling/tests.rs`
+sits at 408 - eight lines past the mark; cutting the fixture helpers
+mid-block would have traded eight lines of slack for two more seams to
+audit. `verify/engine.rs` is ~415 with the whole (a)-(f) law cascade in
+one function: splitting a function body is behavior work, and this stage
+forbids behavior work; its natural seam arrives with M5.1-F's law-engine
+pass. Both exceptions are structural, not budgetary - re-audited at the
+close ladder, goldens unchanged, suite green.
+
+**One `tests.rs` per module, not tests scattered onto the domain files.**
+The coverage law (count `#[test]` before and after, keep the ignored
+lane's goldens) is a one-command check this way, and each suite's
+Gate-map header stayed where its reader expects it.
+
+**The close-out ladder got one correction worth keeping:** the
+"fresh binaries" find also matches `deps/camcraft_ui.exe` - the app's
+hardlink, not a test harness. Run it with test flags and it opens the
+GUI and waits forever; the serial UI lane silently hung on it twice.
+The lane now takes its binary list from `cargo test -p camcraft-ui
+--no-run`'s `Executable` lines (seven hashed binaries, run serially with
+CWD=`crates/ui` per the snapshot-golden law).
+
+**Measured, not copied: coverage is 793, not 792.** The ROADMAP M5.0
+stage row says "Coverage 792==792" - the honest count across bb0017c..
+HEAD is `git grep -c "#\[test\]"` = 793 before and after all seven
+splits (31 `#[ignore]` likewise), the +1 ride-along from M4.2b's probe
+tests. The stage row gets corrected when M5.0 itself closes.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

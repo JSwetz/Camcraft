@@ -1382,10 +1382,15 @@ Phase-5 shape law.
 ### M5.0 - Structure prelude
 **Goal: make adding an operation kind cheap before Phase 5 adds twenty-five.**
 
-- ⏳ **Split the oversized files** along their section seams to the ~400-line
+- ✅ **Split the oversized files** along their section seams to the ~400-line
       law: operation/types.rs, machining2d.rs, finishing3d.rs, verify.rs,
       stock_sim.rs, drilling.rs, machining3d.rs - structure only, goldens
-      byte-identical
+      byte-identical. Done in M5.0.1 (commits 4463808..4bf5e4d): seven
+      flat modules became seven directory modules, pub surfaces
+      re-exported from each mod.rs, 793 `#[test]` before and after,
+      31 `#[ignore]` kept, goldens porcelain-clean at every rung. Two
+      files sit at the cap's edge by recorded choice (drilling/tests.rs
+      408, verify/engine.rs ~415) - RECOMMENDED.md, M5.0.1.
 - ⏳ **Collapse the kind fan-out** into one registration table per family:
       kind <-> params <-> stamp <-> generate-dispatch <-> verify-mode <->
       DTO <-> UI tables, so a new operation is a params struct + a generator
