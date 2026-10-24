@@ -247,6 +247,11 @@ pub(super) fn region_for_src(
                     // with the path (M5.1 C).
                     | OpParams::Contour5D { .. }
                     | OpParams::Parallel5D { .. }
+                    // The swarf family is mesh-driven the same way, and
+                    // more strictly so: its pass lines ARE the ruling
+                    // the picked loop could only contradict (M5.1 D).
+                    | OpParams::Swarf { .. }
+                    | OpParams::AdvancedSwarf { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -300,7 +305,9 @@ pub(super) fn region_for(
         // only says where the model shadows.
         OpParams::Finish3D { .. }
         | OpParams::Contour5D { .. }
-        | OpParams::Parallel5D { .. } => {
+        | OpParams::Parallel5D { .. }
+        | OpParams::Swarf { .. }
+        | OpParams::AdvancedSwarf { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

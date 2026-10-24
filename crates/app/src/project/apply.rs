@@ -193,6 +193,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // the stamp itself, like every bump since v6.
         file.version = 24;
     }
+    if file.version == 24 {
+        // v24 -> v25: the swarf family arrives as two new params
+        // variants (`swarf`, `advanced_swarf`, M5.1 stage D), under
+        // the same law as the twins above: no v24 file can contain
+        // them, and `validate_kind` already refuses the tags before
+        // anything is written. No existing shape changed.
+        file.version = 25;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

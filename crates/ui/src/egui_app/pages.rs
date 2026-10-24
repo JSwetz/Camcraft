@@ -1477,6 +1477,77 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
+        // The swarf family (M5.1 stage D): the raster's panel, because
+        // the path is the raster run along the ruling. Two arms like
+        // the twins' - the ladder's extra word has no name for the
+        // plain kind to bind - and one shared body, `swarf_editor`.
+        OpParams::Swarf {
+            tolerance,
+            stepover,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+        } => swarf_editor(
+            ui,
+            &state.world,
+            op_ctx.as_deref(),
+            u,
+            tab,
+            tolerance,
+            stepover,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            None,
+        ),
+        OpParams::AdvancedSwarf {
+            tolerance,
+            stepover,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            passes,
+        } => swarf_editor(
+            ui,
+            &state.world,
+            op_ctx.as_deref(),
+            u,
+            tab,
+            tolerance,
+            stepover,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            Some(passes),
+        ),
     }
     if detect_holes {
         state.detect_holes(&nm);
@@ -1500,6 +1571,100 @@ fn axis_editor(ui: &mut Ui, lead_deg: &mut f64, lag_deg: &mut f64, max_tilt_deg:
     field(ui, "Max tilt (deg)");
     num_plain(ui, max_tilt_deg);
     ui.label("the cone the spindle may open from the normal; where the surface demands more, the lean folds onto the cone's edge");
+}
+
+/// The swarf family's panel (M5.1 stage D): the raster's sections
+/// worded for the ruling, in one body both kinds share. `passes` is
+/// Some only for the ladder - the or-pattern cannot name a field one
+/// variant lacks, so the arms hand their extra word in as data.
+#[allow(clippy::too_many_arguments)] // flat panel args, same shape as `cell`
+fn swarf_editor(
+    ui: &mut Ui,
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    u: Unit,
+    tab: usize,
+    tolerance: &mut f64,
+    stepover: &mut Option<f64>,
+    clearance_z: &mut Height,
+    retract_z: &mut Option<Height>,
+    top_z: &mut Height,
+    bottom_z: &mut Height,
+    feed: &mut f64,
+    plunge_feed: &mut f64,
+    climb: &mut bool,
+    lead_deg: &mut f64,
+    lag_deg: &mut f64,
+    max_tilt_deg: &mut f64,
+    passes: Option<&mut u32>,
+) {
+    if tab == SEC_HEIGHTS {
+        field(ui, "Clearance Z");
+        height_editor(ui, world, setup, clearance_z, "swarf.clearance");
+        field(ui, "Retract plane");
+        let mut hop = retract_z.is_some();
+        if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+            *retract_z = if hop {
+                Some(Height::of(top_z.reference, top_z.offset + 1.0))
+            } else {
+                None
+            };
+        }
+        if let Some(r) = retract_z {
+            field(ui, "Retract Z");
+            height_editor(ui, world, setup, r, "swarf.retract");
+            if let (Some(rz), Some(cz)) = (r.z(world), clearance_z.z(world))
+                && rz > cz
+            {
+                ui.label(format!(
+                    "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                ));
+            }
+        }
+        field(ui, "Top Z");
+        height_editor(ui, world, setup, top_z, "swarf.top");
+        field(ui, "Bottom Z");
+        height_editor(ui, world, setup, bottom_z, "swarf.bottom");
+        ui.label("Top is the first line's plane, Bottom the last one's");
+    }
+    if tab == SEC_PASSES {
+        field(ui, "Stepover");
+        let mut over = stepover.is_some();
+        if ui.checkbox(&mut over, "Set line spacing").changed() {
+            *stepover = if over {
+                Some((24.0 * tolerance.max(1e-9)).sqrt())
+            } else {
+                None
+            };
+        }
+        if let Some(s) = stepover {
+            num(ui, u, s);
+            ui.label("spacing ACROSS the ruling; along it the lines never part - the surface's own direction spaces them");
+        } else {
+            ui.label("from tolerance and tool by the scallop law, across the ruling");
+        }
+        // The ladder's rung count, the tab-count law: a plain number
+        // clamped into the generator's named range at the draft, so
+        // no panel edit ever holds a 0 or a 9.
+        if let Some(passes) = passes {
+            field(ui, "Passes");
+            let mut n = f64::from(*passes);
+            num_plain(ui, &mut n);
+            *passes = n.clamp(1.0, 4.0).round() as u32;
+            ui.label("coarse-to-fine runs: each rough pass relaxes the tolerance fourfold (and doubles the spacing), the last cuts to the value set below");
+        }
+        axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+        field(ui, "Tolerance");
+        num(ui, u, tolerance);
+        ui.label("the finish budget: lines are spaced from it, so the cusp along the flank stays within it");
+    }
+    if tab == SEC_FEEDS {
+        field(ui, &format!("Feed ({})", u.feed_suffix()));
+        num_feed(ui, u, feed);
+        field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+        num_feed(ui, u, plunge_feed);
+        ui.checkbox(climb, "Climb milling");
+    }
 }
 
 pub(crate) fn field(ui: &mut Ui, label: &str) {

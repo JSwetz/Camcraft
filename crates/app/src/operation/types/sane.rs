@@ -190,6 +190,24 @@ impl OpParams {
                 lag_deg,
                 max_tilt_deg,
                 ..
+            }
+            // The swarf door (M5.1 stage D) is the raster's door with
+            // the ruling added at generation (a dome refuses there,
+            // by name - nothing in these numbers says "ruled"): the
+            // leans still pose the unruled floors and rims the blade
+            // family shares its paths with.
+            | OpParams::Swarf {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
             } => {
                 // The finish door's shape (no stepdown - the scallop
                 // law authors it), plus the pose door (M5.1 stage C):
@@ -201,8 +219,9 @@ impl OpParams {
                 // nothing is excluded, and at or below 0 the cone
                 // holds no direction at all - both are typos about the
                 // machine's reach, refused here rather than silently
-                // ignored at the stamp. Parallel5D's optional stepover
-                // rides the same Some-or-derived law as the finish's.
+                // ignored at the stamp. The raster kinds' optional
+                // stepover rides the same Some-or-derived law as the
+                // finish's.
                 let angle = |v: &f64| v.is_finite() && v.abs() <= 90.0;
                 pos(*tolerance)
                     && clearance_z.is_sane()
@@ -216,9 +235,45 @@ impl OpParams {
                     && *max_tilt_deg > 0.0
                     && *max_tilt_deg <= 180.0
                     && (match self {
-                        OpParams::Parallel5D { stepover, .. } => stepover.is_none_or(pos),
+                        OpParams::Parallel5D { stepover, .. }
+                        | OpParams::Swarf { stepover, .. } => stepover.is_none_or(pos),
                         _ => true,
                     })
+            }
+            OpParams::AdvancedSwarf {
+                tolerance,
+                stepover,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                passes,
+                ..
+            } => {
+                // The swarf door, plus the ladder count: 1..4 is the
+                // generator's named range (motion refuses 0 and 5+ by
+                // the same numbers) - a rough above that is a file
+                // typo, not a machinist's ladder, and the door says so
+                // at command creation, not deep in a pass loop.
+                let angle = |v: &f64| v.is_finite() && v.abs() <= 90.0;
+                pos(*tolerance)
+                    && stepover.is_none_or(pos)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && angle(lead_deg)
+                    && angle(lag_deg)
+                    && *max_tilt_deg > 0.0
+                    && *max_tilt_deg <= 180.0
+                    && (1..=4).contains(passes)
             }
             OpParams::Slot {
                 a,

@@ -287,6 +287,51 @@ pub enum ParamsDto {
         lag_deg: f64,
         max_tilt_deg: f64,
     },
+    /// Declared at v25 with the swarf family (M5.1 stage D). The
+    /// parallel's shape field for field - the ruling is not a
+    /// parameter but a reading of the model, and the file that
+    /// carries no model can no more state it than a contour file
+    /// can state an edge's hash that isn't there.
+    #[serde(rename = "swarf")]
+    Swarf {
+        tolerance: f64,
+        /// Absent follows the stepover cos-law from the tolerance.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stepover: Option<f64>,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
+    /// The ladder's one extra word: the count of tolerance rungs,
+    /// written always - the kind IS the ladder, and an absent count
+    /// would silently re-post someone's roughing program as a
+    /// single finish pass. The range 1..4 is the door's, at load.
+    #[serde(rename = "advanced_swarf")]
+    AdvancedSwarf {
+        tolerance: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stepover: Option<f64>,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+        passes: u32,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

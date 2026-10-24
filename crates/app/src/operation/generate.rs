@@ -466,6 +466,79 @@ pub fn generate(
             };
             (region, path)
         }
+        // M5.1 stage D: the swarf family. The path is the raster run
+        // along the ruling the model states, so the numbers ride the
+        // parallel's law; what the kind ADDS is where the ruling comes
+        // from - the generator reads it off the facets, and refuses by
+        // name (a dome, a Z-wall) when the surface has none. The
+        // ladder's count is the one field the plain kind has no name
+        // for, so it reads back below, the twins' stepover trick.
+        OpParams::Swarf {
+            tolerance,
+            stepover,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            ..
+        }
+        | OpParams::AdvancedSwarf {
+            tolerance,
+            stepover,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            ..
+        } => {
+            let is_ladder = matches!(&op.params, OpParams::AdvancedSwarf { .. });
+            let passes = match &op.params {
+                OpParams::AdvancedSwarf { passes, .. } => *passes,
+                _ => 1,
+            };
+            if tool.kind != crate::tools::ToolKind::BallNose {
+                return Err(GenError::Invalid(format!(
+                    "{} needs a ball-nose tool, '{}' is a {}",
+                    if is_ladder { "Advanced Swarf" } else { "Swarf" },
+                    op.tool,
+                    tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let fp = Finish3DParams {
+                // The ruling replaces the pattern's choice of lines;
+                // the geometry that remains is the parallel's exactly.
+                pattern: finishing3d::FinishPattern::Parallel,
+                stepover: *stepover,
+                tool_diameter: d,
+                tolerance: *tolerance,
+                clearance_z: hl.clearance,
+                retract_z: hl.retract,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                ramp: false,
+                min_step: None,
+                ramp_angle: 45.0,
+            };
+            let axis = crate::multiaxis::AxisControl {
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: Some(*max_tilt_deg),
+            };
+            let path = if is_ladder {
+                crate::multiaxis::swarf5d_advanced(&material.facets, &fp, &axis, passes)?
+            } else {
+                crate::multiaxis::swarf5d(&material.facets, &fp, &axis)?
+            };
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -557,9 +630,13 @@ pub fn generate(
         | OpParams::Drill { .. }
         | OpParams::Finish3D { .. }
         // The 5-axis kinds leave no stock - the ball path is the
-        // finish's path, and the pose adds no material law.
+        // finish's path, and the pose adds no material law. The swarf
+        // family included: lying WITH the flank changes what the
+        // shank sees, not what the ball removes.
         | OpParams::Contour5D { .. }
-        | OpParams::Parallel5D { .. } => 0.0,
+        | OpParams::Parallel5D { .. }
+        | OpParams::Swarf { .. }
+        | OpParams::AdvancedSwarf { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -581,6 +658,8 @@ pub fn generate(
                             | OpParams::Finish3D { .. }
                             | OpParams::Contour5D { .. }
                             | OpParams::Parallel5D { .. }
+                            | OpParams::Swarf { .. }
+                            | OpParams::AdvancedSwarf { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -599,7 +678,9 @@ pub fn generate(
                     finish_tol: match &op.params {
                         OpParams::Finish3D { tolerance, .. }
                         | OpParams::Contour5D { tolerance, .. }
-                        | OpParams::Parallel5D { tolerance, .. } => Some(*tolerance),
+                        | OpParams::Parallel5D { tolerance, .. }
+                        | OpParams::Swarf { tolerance, .. }
+                        | OpParams::AdvancedSwarf { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

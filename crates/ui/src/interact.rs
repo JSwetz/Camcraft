@@ -1145,6 +1145,8 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Finish3D { retract_z, .. }
         | operation::OpParams::Contour5D { retract_z, .. }
         | operation::OpParams::Parallel5D { retract_z, .. }
+        | operation::OpParams::Swarf { retract_z, .. }
+        | operation::OpParams::AdvancedSwarf { retract_z, .. }
         | operation::OpParams::Slot { retract_z, .. }
         | operation::OpParams::Trace { retract_z, .. }
         | operation::OpParams::Drill { retract_z, .. } => *retract_z,
@@ -1212,6 +1214,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Finish3D { top_z, bottom_z, .. }
         | operation::OpParams::Contour5D { top_z, bottom_z, .. }
         | operation::OpParams::Parallel5D { top_z, bottom_z, .. }
+        // The swarf family draws the same ladder planes (M5.1 stage D).
+        | operation::OpParams::Swarf { top_z, bottom_z, .. }
+        | operation::OpParams::AdvancedSwarf { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
         | operation::OpParams::Trace { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {

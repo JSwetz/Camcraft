@@ -3239,3 +3239,275 @@ fn axis_twins_refuse_nonsense_pose_at_creation() {
     }
     assert!(matches!(mk(no_cone), Err(CommandError::Invalid(_))));
 }
+
+// ---------------------------------------------------------------------------
+// M5.1 stage D: the swarf family through the command chain. The laws
+// under test live in `multiaxis` - the pass lines run WITH the ruling
+// the analysis reads off the model, and a ruled contact poses the axis
+// ALONG it, the panel's lead/lag/cone be damned (that standing choice is
+// RECOMMENDED.md's to argue) - so at this level the checks are the trip:
+// an Ok verdict, blade-lying unit axes on the body moves, the ladder's
+// extra rungs, and the refusals (flat tool, unruled dome, a nonsense
+// pass count) named at the right door. The exact-bit geometry laws - the
+// identity with finishing3d::swarf, the rim rows' honesty, the ×4/×2
+// relaxation - are ruling.rs's; nothing here re-measures them.
+// ---------------------------------------------------------------------------
+
+/// The blade: a CIRCULAR tube about the X axis, end-capped - ruling.rs's
+/// fixture shrunk to debug-ladder size (16 rings x 6 stations, radius
+/// 12) and closed into a solid. Closed is load-bearing at this level:
+/// the app's footprint law (`slice::project`, the same silhouette every
+/// 3D finish reads) sections the mesh at 16 z-levels, and an OPEN tube
+/// shadows as dangling chords - it refuses honestly at the first probe,
+/// exactly as an open STL would refuse a Finish3D. The caps are flat,
+/// so the analysis claims no ruling on them: the end columns stay the
+/// rim rows ruling.rs calls boundary honesty, and the checks below
+/// speak inside the same 5/6 of the half-length its do.
+fn blade_mesh() -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::{Point3, Triangle};
+    const TAU: f64 = std::f64::consts::TAU;
+    let (radius, x_len, n_circ, n_x) = (12.0, 24.0, 16usize, 6usize);
+    let v = |j: usize, i: usize| {
+        let th = TAU * j as f64 / n_circ as f64;
+        Point3::new(
+            -x_len + 2.0 * x_len * i as f64 / n_x as f64,
+            radius * th.cos(),
+            radius * th.sin(),
+        )
+    };
+    let mut facets = Vec::new();
+    for j in 0..n_circ {
+        for i in 0..n_x {
+            let (a, b, c, d) = (v(j, i), v(j + 1, i), v(j + 1, i + 1), v(j, i + 1));
+            facets.push(Triangle::new(a, b, c));
+            facets.push(Triangle::new(a, c, d));
+        }
+    }
+    // The two caps: a fan about each end's true center, wound outward
+    // with the tube (at -x the fan order reverses to keep the normals
+    // honest - no zero-area triangles anywhere in a fixture).
+    let (cap, cen) = (|x: f64| Point3::new(x, 0.0, 0.0), x_len);
+    for j in 0..n_circ {
+        facets.push(Triangle::new(cap(cen), v(j, n_x), v(j + 1, n_x)));
+        facets.push(Triangle::new(cap(-cen), v(j + 1, 0), v(j, 0)));
+    }
+    camcraft_app::geometry::Mesh { facets }
+}
+
+fn swarf_params(top_z: f64, bottom_z: f64) -> OpParams {
+    OpParams::Swarf {
+        tolerance: 0.1,
+        stepover: Some(2.0),
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 15.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+    }
+}
+
+/// The ladder kind is the plain one's params plus `passes` - the panel
+/// says so and the digest agrees, so the builder says so too.
+fn advanced_swarf_params(top_z: f64, bottom_z: f64, passes: u32) -> OpParams {
+    OpParams::AdvancedSwarf {
+        tolerance: 0.1,
+        stepover: Some(2.0),
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 15.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+        passes,
+    }
+}
+
+/// The blade law at this level: unit finite poses, nothing stated in
+/// air, and a REAL population of blade-lying poses inside the blade -
+/// the 15-degree lead these params carry bends nothing where the
+/// surface speaks, which is the whole point of the kind. An EXISTENCE
+/// claim, not the every-body-move universal: the analysis keeps its
+/// ruling honest by withholding the claim at rims and on tessellations
+/// whose fit sits near the developability thresholds - and at this
+/// debug size (16 rings, capped ends: the caps' junction rows are rims
+/// too) that is whole columns of the tube. The universal identity is
+/// ruling.rs's law at motion's 32-ring size; what a dropped ruled
+/// branch would look like HERE is zero blade-lying poses, and >= 8
+/// catches exactly that.
+fn blade_pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
+    let (mut body, mut posed) = (0usize, 0usize);
+    for m in &path.moves {
+        if let Some(a) = m.axis {
+            assert!(a.iter().all(|v| v.is_finite()), "{name}: a non-finite pose on a move");
+            let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+            assert!((l - 1.0).abs() < 1e-6, "{name}: a pose of length {l}");
+            posed += 1;
+            if m.kind == MoveKind::Feed && m.to.x.abs() <= 20.0 && a[0].abs() / l > 0.995 {
+                assert!(
+                    a[1].abs() / l < 0.09 && a[2].abs() / l < 0.09,
+                    "{name}: a blade-lying count off the blade at {:?}",
+                    m.to
+                );
+                body += 1;
+            }
+        }
+        if m.kind == MoveKind::Rapid {
+            assert!(m.axis.is_none(), "{name}: a rapid states a pose");
+        }
+    }
+    assert!(body >= 8, "{name}: only {body} blade-lying body poses over a whole tube");
+    assert!(posed >= body, "{name}: uncounted poses cannot be");
+}
+
+#[test]
+fn swarf_generates_blade_lying_axes_and_verifies_clean() {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "SWA",
+            "BN-0600",
+            SrcRef::Entity("blade".into()),
+            swarf_params(11.0, -11.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "SWA").expect("generate"));
+    assert_eq!(status(&world, "SWA"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    let t = cache(&world, "SWA").expect("cached").path;
+    pose_law("swarf", &t);
+    blade_pose_law("swarf", &t);
+}
+
+#[test]
+fn advanced_swarf_adds_the_coarse_rungs() {
+    // The ladder's contract in one line: more passes, more cut, and
+    // the SAME blade-lying law on every rung. (rung-by-rung geometry -
+    // the 4x tolerance relaxation, the doubled spacing - is the
+    // motion-side swarf_multi tests' claim.)
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
+    for (name, params) in [
+        ("SW1", swarf_params(11.0, -11.0)),
+        ("SW2", advanced_swarf_params(11.0, -11.0, 2)),
+    ] {
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("blade".into()), params)
+                .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        assert_eq!(status(&world, name), OpStatus::Ok);
+    }
+    let one = cache(&world, "SW1").expect("cached").path;
+    let two = cache(&world, "SW2").expect("cached").path;
+    assert!(two.moves.len() > one.moves.len(), "the rough pass added nothing");
+    blade_pose_law("advanced swarf", &two);
+}
+
+#[test]
+fn swarf_family_refuses_a_flat_tool_by_name() {
+    // The twins' law, and the refusal says WHICH swarf: an end mill
+    // cannot touch along a ruling with its side, and silently
+    // pretending otherwise is the gouge.
+    for (name, params) in [
+        ("SwarfE", swarf_params(11.0, -11.0)),
+        ("SwarfA", advanced_swarf_params(11.0, -11.0, 2)),
+    ] {
+        let world = new_world();
+        let mut history = History::default();
+        box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+        add_tool(&world, &mut history, "EM-0600-4FL");
+        history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "EM-0600-4FL", SrcRef::Entity("blade".into()), params)
+                .expect("create"),
+        );
+        let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
+            .err()
+            .expect("the swarf kinds must refuse a flat tool")
+        else {
+            panic!("expected a machining refusal");
+        };
+        assert!(msg.contains("ball-nose"), "{msg}");
+        assert!(msg.contains("Swarf"), "{msg}");
+        assert_eq!(status(&world, name), OpStatus::Never, "the refusal leaves no path behind");
+    }
+}
+
+#[test]
+fn swarf_refuses_an_unruled_dome_by_name() {
+    // A sphere has no straight direction to read: the analysis refuses
+    // before any path is cut and says what the model is not. (The
+    // taxonomy's other arms - the Z-wall pointing at Contour, the
+    // empty model - are ruling.rs's, not double-spent here.)
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "SWD",
+            "BN-0600",
+            SrcRef::Entity("dome".into()),
+            swarf_params(18.0, DOME_RIM_Z),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) =
+        GenerateOperation::new(&world, "SWD").err().expect("a dome must refuse swarf")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("ruling"), "{msg}");
+    assert_eq!(status(&world, "SWD"), OpStatus::Never);
+}
+
+#[test]
+fn advanced_swarf_refuses_passes_nonsense_at_creation() {
+    // Validate early: the ladder's rung count is a 1..4 door at the
+    // command (and the same door at the file loader's sane check, in
+    // tests/project_roundtrip.rs). The plain kind rides the twins'
+    // doors, so one of those is re-pinned here for the new arm.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
+    let mk = |op: OpParams, name: &str| {
+        CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("blade".into()), op)
+    };
+    for n in [0u32, 5] {
+        assert!(
+            matches!(mk(advanced_swarf_params(11.0, -11.0, n), "SwBad"), Err(CommandError::Invalid(_))),
+            "passes {n} reached a generator's door"
+        );
+    }
+    mk(advanced_swarf_params(11.0, -11.0, 1), "SwOne").expect("1 is the plain ladder alone");
+    mk(advanced_swarf_params(11.0, -11.0, 4), "SwFour").expect("4 is the ladder's reach");
+    let mut zero_tol = swarf_params(11.0, -11.0);
+    if let OpParams::Swarf { tolerance, .. } = &mut zero_tol {
+        *tolerance = 0.0;
+    }
+    assert!(matches!(mk(zero_tol, "SwTol"), Err(CommandError::Invalid(_))));
+}

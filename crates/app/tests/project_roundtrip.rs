@@ -106,12 +106,17 @@ fn wrong_version_is_refused() {
     // v21 -> v22, and the_post_choice_round_trips_and_a_v22_file_means_
     // the_built_in v22 -> v23 (the additive top-level `post` key), and
     // v23_file_steps_to_v24_and_the_5axis_grammar_round_trips v23 -> v24
-    // (the `contour5d` / `parallel5d` params tags).
-    let text = r#"{"version": 25, "entities": []}"#;
+    // (the `contour5d` / `parallel5d` params tags), and
+    // v24_file_steps_to_v25_and_the_swarf_grammar_round_trips v24 -> v25
+    // (the `swarf` / `advanced_swarf` tags and the ladder's `passes`).
+    // Spell the probe from the constant: a rung named by hand goes stale
+    // (grey, then red) the day the stamp moves, as it did at v25.
+    let future = project::PROJECT_VERSION + 1;
+    let text = format!(r#"{{"version": {future}, "entities": []}}"#);
     let world = new_world();
-    match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(25)) => {}
-        other => panic!("expected UnsupportedVersion, got {other:?}"),
+    match project::open(&world, &text) {
+        Err(ProjectError::UnsupportedVersion(v)) if v == future => {}
+        other => panic!("expected UnsupportedVersion({future}), got {other:?}"),
     }
 }
 
@@ -2721,6 +2726,104 @@ fn v23_file_steps_to_v24_and_the_5axis_grammar_round_trips() {
     assert!(
         matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
         "a v24 file with a 120-degree lead must not load"
+    );
+}
+
+#[test]
+fn v24_file_steps_to_v25_and_the_swarf_grammar_round_trips() {
+    // M5.1 stage D: the swarf family arrives as two more params tags
+    // (`swarf`, `advanced_swarf`). Nothing existing changed shape, so
+    // step-up is the stamp itself, like every bump since v6.
+    let world = new_world();
+    project::open(&world, r#"{"version": 24, "entities": []}"#).expect("v24 steps up");
+    let p = tmp_path("v25a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v25 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v25 wire grammar, hand-written so the tags are pinned: the
+    // swarf's scalar shape is the parallel's minus pattern and plus the
+    // axis trio it already had; the ladder's `passes` is a REQUIRED
+    // key - an absent one is a corrupt file, not a default, because a
+    // silently-1 pass count would replay a roughing spec as a finish.
+    let text = r#"{
+        "version": 25,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "SW1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"swarf": {
+                 "tolerance": 0.1, "stepover": 1.5,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true,
+                 "lead_deg": 15.0, "lag_deg": 0.0, "max_tilt_deg": 60.0}}}},
+            {"name": "SW2", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"advanced_swarf": {
+                 "tolerance": 0.05, "stepover": 2.0,
+                 "clearance_z": {"reference": "fixed", "offset": 30.0},
+                 "retract_z": {"reference": "fixed", "offset": 40.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 400.0, "plunge_feed": 80.0, "climb": false,
+                 "lead_deg": 0.0, "lag_deg": 0.0, "max_tilt_deg": 90.0,
+                 "passes": 3}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v25 swarf grammar must read");
+    let e = model::find_by_name(&world, "SW1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Swarf { stepover, retract_z, tolerance, lead_deg, max_tilt_deg, .. } = &o.params
+    else {
+        panic!("swarf params expected, got {:?}", o.params);
+    };
+    assert_eq!((*tolerance, *stepover, *lead_deg, *max_tilt_deg), (0.1, Some(1.5), 15.0, 60.0));
+    assert!(retract_z.is_none(), "absent retract means hop-to-clearance");
+    let e = model::find_by_name(&world, "SW2").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::AdvancedSwarf { passes, retract_z, .. } = &o.params else {
+        panic!("advanced_swarf params expected, got {:?}", o.params);
+    };
+    assert_eq!(*passes, 3);
+    assert!(retract_z.is_some(), "the stated hop rides through");
+
+    // Write-parse-write is a fixed point; `passes` appears exactly
+    // once, because the plain kind's DTO mints no such key.
+    let p = tmp_path("v25b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the swarf shapes round-trip byte-identically");
+    assert!(first.contains("\"swarf\"") && first.contains("\"advanced_swarf\""), "{first}");
+    assert_eq!(first.matches("\"passes\"").count(), 1, "the plain kind must not grow a passes key");
+
+    // The sane doors at the loader: a 9-rung ladder is outside the
+    // law's 1..4 by name, and a missing rung count is a corrupt
+    // intent, not a default.
+    let bad = text.replace("\"passes\": 3", "\"passes\": 9");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v25 file with a 9-pass ladder must not load"
+    );
+    let holey = text.replace("\"passes\": 3", "");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &holey), Err(ProjectError::Corrupt(_))),
+        "advanced_swarf without passes is a corrupt file, not a silent 1"
     );
 }
 

@@ -80,6 +80,14 @@ pub enum OpType {
     /// Simultaneous 5-axis raster: the Z-following parallel pass with
     /// the same axis law (M5.1 stage C).
     Parallel5D,
+    /// Ruled-surface (bladed) finishing: the raster run ALONG the
+    /// surface's own straight direction, the tool lying with the
+    /// flank instead of scalloping against it (M5.1 stage D, see
+    /// [`crate::multiaxis`]).
+    Swarf,
+    /// The swarf family's tolerance ladder: the same path run
+    /// coarse-first, finishing at the nominal tolerance (M5.1 stage D).
+    AdvancedSwarf,
 }
 
 impl core::fmt::Display for OpType {

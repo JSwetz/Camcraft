@@ -91,6 +91,6 @@ pub use params::{
 // closest-point law the raster clearance uses, crate-visible.
 pub(crate) use support::closest_pt_tri;
 pub use polar::{radial, spiral};
-pub use raster::parallel;
+pub use raster::{parallel, swarf, swarf_multi};
 pub use rings::waterline;
 pub use shadow::{contour, project};

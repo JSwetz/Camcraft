@@ -329,6 +329,53 @@ pub enum OpParams {
         lag_deg: f64,
         max_tilt_deg: f64,
     },
+    /// Ruled-surface (bladed) finishing (M5.1 stage D): the raster run
+    /// ALONG the direction [`crate::multiaxis::ruling`] reads off the
+    /// mesh, stepping across it at the same scallop law - and the tool
+    /// LYING WITH the flank (axis tangent along the ruling, the
+    /// side-machining contact) wherever a facet holds one. Where the
+    /// surface says nothing of a ruling - floors, rims, domes between
+    /// blades - the [`Self::Parallel5D`] lean law poses the move
+    /// instead. A doubly-curved model, or one ruled only along Z,
+    /// refuses by name and points at the kind that speaks for it.
+    Swarf {
+        tolerance: f64,
+        /// Spacing ACROSS the ruling, mm; `None` follows the stepover
+        /// cos-law from the tolerance instead.
+        stepover: Option<f64>,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
+    /// The swarf family's tolerance ladder (M5.1 stage D): the same
+    /// path run coarse-first - pass i from the top at `tol·4^i`, every
+    /// scallop law tolerance-authored, so each pass doubles the
+    /// spacing and the stepdown - finishing at the nominal tolerance.
+    /// Every pass's centers stand tangent to the MODEL, never to the
+    /// previous pass, so a wrong pass count cannot hide a gouge.
+    AdvancedSwarf {
+        tolerance: f64,
+        stepover: Option<f64>,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+        /// Coarse-to-fine passes, 1..4; 1 is the plain ladder alone.
+        passes: u32,
+    },
 }
 
 impl OpParams {
@@ -345,6 +392,8 @@ impl OpParams {
             OpParams::Finish3D { .. } => OpType::Finish3D,
             OpParams::Contour5D { .. } => OpType::Contour5D,
             OpParams::Parallel5D { .. } => OpType::Parallel5D,
+            OpParams::Swarf { .. } => OpType::Swarf,
+            OpParams::AdvancedSwarf { .. } => OpType::AdvancedSwarf,
         }
     }
 
@@ -368,7 +417,9 @@ impl OpParams {
             | OpParams::Pocket3D { .. }
             | OpParams::Finish3D { .. }
             | OpParams::Contour5D { .. }
-            | OpParams::Parallel5D { .. } => None,
+            | OpParams::Parallel5D { .. }
+            | OpParams::Swarf { .. }
+            | OpParams::AdvancedSwarf { .. } => None,
         }
     }
 
@@ -385,7 +436,9 @@ impl OpParams {
             | OpParams::Pocket3D { clearance_z, .. }
             | OpParams::Finish3D { clearance_z, .. }
             | OpParams::Contour5D { clearance_z, .. }
-            | OpParams::Parallel5D { clearance_z, .. } => *clearance_z,
+            | OpParams::Parallel5D { clearance_z, .. }
+            | OpParams::Swarf { clearance_z, .. }
+            | OpParams::AdvancedSwarf { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -405,7 +458,9 @@ impl OpParams {
             | OpParams::Pocket3D { top_z, .. }
             | OpParams::Finish3D { top_z, .. }
             | OpParams::Contour5D { top_z, .. }
-            | OpParams::Parallel5D { top_z, .. } => *top_z,
+            | OpParams::Parallel5D { top_z, .. }
+            | OpParams::Swarf { top_z, .. }
+            | OpParams::AdvancedSwarf { top_z, .. } => *top_z,
         }
     }
 
@@ -464,7 +519,9 @@ impl OpParams {
             }
             OpParams::Finish3D { clearance_z, retract_z, top_z, bottom_z, .. }
             | OpParams::Contour5D { clearance_z, retract_z, top_z, bottom_z, .. }
-            | OpParams::Parallel5D { clearance_z, retract_z, top_z, bottom_z, .. } => {
+            | OpParams::Parallel5D { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::Swarf { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::AdvancedSwarf { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);

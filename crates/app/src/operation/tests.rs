@@ -172,7 +172,9 @@ fn stamp_follows_every_input() {
     // The registry law (M5.0.2): one row per kind, table order ==
     // OpType::ordinal == digest tag, labels exactly as Display quotes
     // them. The tags are digest bytes - drift here greys every cache.
-    assert_eq!(KindInfo::ALL.len(), 8);
+    // (Stage C added its two rows and never moved this pin; the lane
+    // has been red since that commit and is honest again here.)
+    assert_eq!(KindInfo::ALL.len(), 12);
     for (i, row) in KindInfo::ALL.iter().enumerate() {
         assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
         assert_eq!(row.tag as usize, i, "digest tag must equal table order");
@@ -211,4 +213,50 @@ fn face_stamp_moves_with_stepdown() {
         digest(&staged),
         digest(&face_with(Some(Height::fixed(1.0)), Some(0.5)))
     );
+}
+
+#[test]
+fn advanced_swarf_stamp_moves_with_passes() {
+    // The ladder's rung count is geometry (M5.1 stage D): a cached
+    // one-rung swarf must never answer for a rough-plus-finish ladder,
+    // and the plain kind is a DIFFERENT digest tag (row 10 vs row 11),
+    // not the ladder's bytes wearing different trousers.
+    let world = crate::world::new_world();
+    let ladder = |passes: u32| OpParams::AdvancedSwarf {
+        tolerance: 0.05,
+        stepover: None,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(10.0),
+        bottom_z: Height::fixed(-5.0),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+        passes,
+    };
+    let digest = |p: &OpParams| {
+        let mut h = std::hash::DefaultHasher::new();
+        p.stamp_with(&world, None, &mut h);
+        h.finish()
+    };
+    assert_ne!(digest(&ladder(1)), digest(&ladder(2)), "a rung is geometry");
+    assert_eq!(digest(&ladder(2)), digest(&ladder(2)));
+    let plain = OpParams::Swarf {
+        tolerance: 0.05,
+        stepover: None,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(10.0),
+        bottom_z: Height::fixed(-5.0),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    };
+    assert_ne!(digest(&plain), digest(&ladder(1)), "the family's rows must digest apart");
 }

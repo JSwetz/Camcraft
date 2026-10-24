@@ -79,7 +79,9 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Drill { feed, .. }
         | OpParams::Finish3D { feed, .. }
         | OpParams::Contour5D { feed, .. }
-        | OpParams::Parallel5D { feed, .. } => *feed,
+        | OpParams::Parallel5D { feed, .. }
+        | OpParams::Swarf { feed, .. }
+        | OpParams::AdvancedSwarf { feed, .. } => *feed,
     }
 }
 
@@ -94,7 +96,9 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Drill { plunge_feed, .. }
         | OpParams::Finish3D { plunge_feed, .. }
         | OpParams::Contour5D { plunge_feed, .. }
-        | OpParams::Parallel5D { plunge_feed, .. } => *plunge_feed,
+        | OpParams::Parallel5D { plunge_feed, .. }
+        | OpParams::Swarf { plunge_feed, .. }
+        | OpParams::AdvancedSwarf { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -108,7 +112,9 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::Trace { climb, .. }
         | OpParams::Finish3D { climb, .. }
         | OpParams::Contour5D { climb, .. }
-        | OpParams::Parallel5D { climb, .. } => *climb,
+        | OpParams::Parallel5D { climb, .. }
+        | OpParams::Swarf { climb, .. }
+        | OpParams::AdvancedSwarf { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
         OpParams::Drill { .. } => true,
@@ -121,7 +127,8 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Pocket { stepover, .. }
         | OpParams::Pocket3D { stepover, .. }
         | OpParams::Slot { stepover, .. } => Some(*stepover),
-        // Parallel5D's spacing is an Option the same way Finish3D's
+        // Parallel5D's spacing - and the swarf kinds', which run the
+        // same derivation - is an Option the same way Finish3D's
         // raster's is: a derivation by default, so the fold reads the
         // field as "not authored by a number to carry" - the retype
         // starts a fresh derived line set, never a borrowed override.
@@ -130,7 +137,9 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Drill { .. }
         | OpParams::Finish3D { .. }
         | OpParams::Contour5D { .. }
-        | OpParams::Parallel5D { .. } => None,
+        | OpParams::Parallel5D { .. }
+        | OpParams::Swarf { .. }
+        | OpParams::AdvancedSwarf { .. } => None,
     }
 }
 
@@ -142,7 +151,8 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
-        | OpParams::Contour5D { .. } | OpParams::Parallel5D { .. } => None,
+        | OpParams::Contour5D { .. } | OpParams::Parallel5D { .. }
+        | OpParams::Swarf { .. } | OpParams::AdvancedSwarf { .. } => None,
     }
 }
 
@@ -159,7 +169,9 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Drill { top_z, .. }
         | OpParams::Finish3D { top_z, .. }
         | OpParams::Contour5D { top_z, .. }
-        | OpParams::Parallel5D { top_z, .. } => Some(*top_z),
+        | OpParams::Parallel5D { top_z, .. }
+        | OpParams::Swarf { top_z, .. }
+        | OpParams::AdvancedSwarf { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -176,7 +188,9 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Trace { bottom_z, .. }
         | OpParams::Finish3D { bottom_z, .. }
         | OpParams::Contour5D { bottom_z, .. }
-        | OpParams::Parallel5D { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::Parallel5D { bottom_z, .. }
+        | OpParams::Swarf { bottom_z, .. }
+        | OpParams::AdvancedSwarf { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -196,7 +210,9 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::Drill { retract_z, .. }
         | OpParams::Finish3D { retract_z, .. }
         | OpParams::Contour5D { retract_z, .. }
-        | OpParams::Parallel5D { retract_z, .. } => *retract_z,
+        | OpParams::Parallel5D { retract_z, .. }
+        | OpParams::Swarf { retract_z, .. }
+        | OpParams::AdvancedSwarf { retract_z, .. } => *retract_z,
         OpParams::Face { .. } => None,
     }
 }
@@ -416,6 +432,50 @@ fn seed_parallel5d(c: &Carried) -> OpParams {
     }
 }
 
+/// The stage D seeds: the raster's numbers whole - a swarf path IS
+/// the raster run along the surface's own ruling, so what a fresh
+/// one starts with is what a fresh parallel starts with, pose at
+/// rest. The ruling is not a parameter: the generator reads it off
+/// the model and refuses by name when the model has none.
+fn seed_swarf(c: &Carried) -> OpParams {
+    OpParams::Swarf {
+        tolerance: 0.05,
+        stepover: None,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    }
+}
+
+/// The ladder's default rungs: 2 - rough then finish. One would
+/// make the kind a spelling of plain swarf, and the panel's whole
+/// claim is the coarse-first pass; the generator's named range runs
+/// to 4 (motion refuses past it).
+fn seed_advanced_swarf(c: &Carried) -> OpParams {
+    OpParams::AdvancedSwarf {
+        tolerance: 0.05,
+        stepover: None,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+        passes: 2,
+    }
+}
+
 /// One kind, as data: its name, the digest byte `stamp_with` writes (the
 /// tag was a magic literal in eight arms until M5.0.2 - it is order, and
 /// order belongs in the table), the verify law the generator picks, and
@@ -537,6 +597,26 @@ impl KindInfo {
             mode: Mode::Envelope,
             seed: seed_parallel5d,
         },
+        KindInfo {
+            ty: OpType::Swarf,
+            label: "Swarf",
+            caption: "Swarf",
+            tag: 10,
+            // The same measured envelope, read along the ruling (M5.1
+            // stage D): the ball's path is the raster's, so the verdict
+            // law is the finish's - the pose question (the blade lies
+            // under a leaning shank) is the stage-A band law again.
+            mode: Mode::Envelope,
+            seed: seed_swarf,
+        },
+        KindInfo {
+            ty: OpType::AdvancedSwarf,
+            label: "Advanced Swarf",
+            caption: "Adv. Swarf",
+            tag: 11,
+            mode: Mode::Envelope,
+            seed: seed_advanced_swarf,
+        },
     ];
 }
 
@@ -556,6 +636,8 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[7].label,
     KindInfo::ALL[8].label,
     KindInfo::ALL[9].label,
+    KindInfo::ALL[10].label,
+    KindInfo::ALL[11].label,
 ];
 
 impl OpType {
@@ -574,6 +656,8 @@ impl OpType {
             OpType::Finish3D => 7,
             OpType::Contour5D => 8,
             OpType::Parallel5D => 9,
+            OpType::Swarf => 10,
+            OpType::AdvancedSwarf => 11,
         }
     }
 

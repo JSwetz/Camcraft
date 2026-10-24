@@ -38,6 +38,8 @@ pub(crate) enum Icon {
     Finish3D,
     Contour5D,
     Parallel5D,
+    Swarf,
+    AdvancedSwarf,
     Undo,
     Redo,
     Delete,
@@ -52,7 +54,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 27] = [
+    pub(crate) const ALL: [Icon; 29] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -70,6 +72,8 @@ impl Icon {
         Icon::Finish3D,
         Icon::Contour5D,
         Icon::Parallel5D,
+        Icon::Swarf,
+        Icon::AdvancedSwarf,
         Icon::Undo,
         Icon::Redo,
         Icon::Delete,
@@ -113,6 +117,13 @@ impl Icon {
             // raster. Ours to give.
             Icon::Contour5D => include_bytes!("../../../../assets/ui/contour5d.png"),
             Icon::Parallel5D => include_bytes!("../../../../assets/ui/parallel5d.png"),
+            // Original drawings (no Tabler swarf glyph exists): the
+            // curved blade flank, the tool LYING with it - axis and
+            // ruling on one line through the ball - the advanced
+            // variant adding the second, shallower rung above. Ours
+            // to give.
+            Icon::Swarf => include_bytes!("../../../../assets/ui/swarf.png"),
+            Icon::AdvancedSwarf => include_bytes!("../../../../assets/ui/advancedswarf.png"),
             Icon::Undo => include_bytes!("../../../../assets/ui/arrow-back-up.png"),
             Icon::Redo => include_bytes!("../../../../assets/ui/arrow-forward-up.png"),
             Icon::Delete => include_bytes!("../../../../assets/ui/trash.png"),
@@ -150,6 +161,8 @@ impl Icon {
             Icon::Finish3D => "icon-finish3d",
             Icon::Contour5D => "icon-contour5d",
             Icon::Parallel5D => "icon-parallel5d",
+            Icon::Swarf => "icon-swarf",
+            Icon::AdvancedSwarf => "icon-advanced-swarf",
             Icon::Undo => "icon-undo",
             Icon::Redo => "icon-redo",
             Icon::Delete => "icon-delete",

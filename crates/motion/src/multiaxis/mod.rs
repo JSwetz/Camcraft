@@ -17,10 +17,15 @@
 //! those published descriptions and our own design notes only.
 
 mod stamp;
+#[cfg(test)]
+mod stamp_tests;
 pub mod contour5d;
 pub mod parallel5d;
+pub mod ruling;
+pub mod swarf;
 pub mod tilt;
 
 pub use contour5d::contour5d;
 pub use parallel5d::parallel5d;
+pub use swarf::{swarf5d, swarf5d_advanced};
 pub use tilt::{command_axis, AxisControl};

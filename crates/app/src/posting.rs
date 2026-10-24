@@ -578,6 +578,21 @@ impl HeightRefs for OpParams {
                 top_z,
                 bottom_z,
                 ..
+            }
+            // ...and the swarf family's (M5.1 stage D).
+            | OpParams::Swarf {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
+            | OpParams::AdvancedSwarf {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
             } => {
                 let mut v = vec![clearance_z, top_z, bottom_z];
                 v.extend(retract_z.iter());

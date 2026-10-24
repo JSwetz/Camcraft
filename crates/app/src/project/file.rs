@@ -1,6 +1,6 @@
 use super::*;
 
-pub const PROJECT_VERSION: u32 = 24;
+pub const PROJECT_VERSION: u32 = 25;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {

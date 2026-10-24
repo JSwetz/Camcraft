@@ -561,6 +561,21 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             top_z,
             bottom_z,
             ..
+        }
+        // The swarf family's rows are the same four (M5.1 stage D).
+        | OpParams::Swarf {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::AdvancedSwarf {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
         } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", *retract_z),
