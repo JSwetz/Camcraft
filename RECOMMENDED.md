@@ -3117,6 +3117,41 @@ plane indexing. The params `sane` door answers for all eight arms
 one match: whatever `tilt()` returns must be frameable, so a future
 kind that grows the field inherits the refusal.
 
+## Phase 6 / M6.1 - adopting the sibling repo's theme architecture (roadmap commit 44a6006; the item merge and this ledger entry land together)
+
+**Chosen:** one Phase 6 theme milestone, M6.1 "Adopt the sibling repo's
+theme architecture" - it absorbs the two items that preceded it (the
+dark/light spike and the user-theme loader) because the token-table
+port delivers both their features as a side effect. Port solidcraft's
+`crates/ui-egui` theme design into our egui shell: one named `Tokens` table as the single color+shape truth
+(radii, spacing, fonts, control sizes as tokens), Visuals *and* painted
+chrome reading the same table with a destructuring arm that turns an
+unwired token into a compile error, a versioned JSON theme format
+(`camcraft-theme/1` in ours, adapting their `solidcraft-theme/1` shape:
+`{format, name, base, colors, radii?}`), compiled-in defaults with a
+disk overlay, runtime switcher through the command law, and a
+color-vision layer on top. Six work items specced in ROADMAP.md.
+
+**Why:** our `crates/ui/src/egui_app/theme.rs` is a 122-LOC hardcoded
+dark `Palette` - 14 colors, no size tokens, nothing loadable. The
+sibling repo proves the token-table design on the same stack (egui
+0.36 + egui-wgpu), and doing it *before* the rest of the Phase 6 UI
+work means every new panel paints from tokens on day one instead of
+hand-picking colors twice.
+
+**Considered and dropped:** (a) leaving theming as-is and doing colors
+per-panel - rejected, that's the drift the token table exists to kill;
+(b) adopting solidcraft's files verbatim - rejected, clean-room law
+covers *HSMWorks* material, but a sibling repo's code is still a
+third-party dependency for us: we port the architecture, write our own
+files, keep the provenance comment honest; (c) deferring to a post-6
+polish phase - rejected, every later UI item would otherwise need a
+theme retrofit pass.
+
+**Also in this commit:** the Milestone Summary's stale `M6.1 GPU
+acceleration` row was replaced by the three Phase 6 UI rows - the GPU
+text predates the Phase 6 pivot and was already superseded.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

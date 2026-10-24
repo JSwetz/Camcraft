@@ -1480,19 +1480,7 @@ The UI is based on EGUI. And it has a dark theme that is hard coded into the app
 should all be exposed thru the theme properly. The 2 hard codded themes can for sure just exist in code, but the "alteration"
 should be read and loaded din realtime from a a "themes" folder.
 
-### M6.1 - Explore the validity of making a dark and light theme with a switcher at the top right corner of the application.
-**Goal: Implement a dark and light theme wiwth a drop down switcher..**
-
-- **Defined as JSON**: The themes should be defined as json files. This means colors, icon files. There should be no paths in these definfitions assets has their places.
-- **Compiled in**: The defult themes should be compiled into the application at compile time.
-
-### M6.2 - User themes
-**Goal: Implement a way of finding json theme files from a Themes assets folder.**
-
-- **Reading and listing**: Ability to find and list the idedntified themes. The theme files should have a descriptor section with name, creator, description.
-- **Realtime loading**: The theme should swap in ontop of existing theme in realtime. Only colors for first spike.
-
-### M6.3 - Adopt the sibling repo's theme architecture
+### M6.1 - Adopt the sibling repo's theme architecture
 **Goal: bring our egui UI up to the theme setup proven out in solidcraft
 (`~/Projects/solidcraft`, `crates/ui-egui`) — one token table that drives both
 widgets and painted chrome, loadable from JSON at runtime. Same engine as ours
@@ -1587,9 +1575,7 @@ and asset names are ours, drawn from public machining-UI convention.
 | **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
-| **M6.1** | Light and dark | JSON themes (colors + icons), compiled-in defaults, top-right switcher | 📋 |
-| **M6.2** | User themes | Discover/list `assets/themes/*.json`, descriptors, realtime swap | 📋 |
-| **M6.3** | Token architecture | Adopt the solidcraft `Tokens`/`theme_files` design: one named table drives widgets + painted chrome, radii/spacing/sizes themeable, command-law switcher | 📋 |
+| **M6.1** | Token architecture | Adopt the solidcraft `Tokens`/`theme_files` design: one named table drives widgets + painted chrome, radii/spacing/sizes themeable, command-law switcher | 📋 |
 
 ## Open questions & deferred
 
