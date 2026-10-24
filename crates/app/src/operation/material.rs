@@ -153,6 +153,20 @@ pub(super) fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> 
 /// (Prime Directive: a wrong preview is as bad as a wrong toolpath).
 #[must_use]
 pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
+    // The 3+2 index (M5.1 B): a tilted planar op draws the cutting
+    // plane's own shadow - the local region through the frame's door,
+    // at the plane its `region_height` names. A tilt that commands no
+    // direction (only a non-finite letter could, refused at the door
+    // long before here) and a picked selection under tilt (generation
+    // refuses it by name) both draw nothing: a preview generate would
+    // refuse is exactly the lie this function exists to avoid.
+    let frame = match op.params.tilt() {
+        None => None,
+        Some(t) => Some(t.frame()?),
+    };
+    if frame.is_some() && matches!(&op.src, SrcRef::Selection(_)) {
+        return None;
+    }
     if let SrcRef::Selection(items) = &op.src
         && !matches!(
             op.params,
@@ -165,7 +179,19 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
         return selection_region(world, op.setup.as_deref(), items, &op.params).ok();
     }
     let material = material_of(world, op.setup.as_deref(), &op.src).ok()?;
-    region_for(world, op.setup.as_deref(), &material, &op.params).ok()
+    match &frame {
+        None => region_for(world, op.setup.as_deref(), &material, &op.params, None).ok(),
+        Some(f) => {
+            let local = Material {
+                facets: f.local_facets(&material.facets),
+                top: material.top - f.origin.z,
+            };
+            let local = region_for(world, op.setup.as_deref(), &local, &op.params, Some(f)).ok()?;
+            let zl = resolve_height(world, op.setup.as_deref(), op.params.region_height())?
+                - f.origin.z;
+            f.world_region(&local, zl).ok()
+        }
+    }
 }
 
 /// The centerline runs `generate` would add to `region_of`'s outline for
@@ -193,12 +219,19 @@ pub fn chains_of(world: &World, op: &Operation) -> Vec<Vec<Point2>> {
 /// picking features could only disagree with it. Pocket3D too: its
 /// footprint is the model's own silhouette - the level law reads the
 /// mesh at every Z, so a picked loop could only disagree with it.
+/// `frame` is the 3+2 index this region belongs to (M5.1 B): Some
+/// means `material`'s facets are already the frame's LOCAL ones and
+/// every section plane is the world height read as axis distance from
+/// the anchor (`z - origin.z`); `region_of`'s preview and `generate`'s
+/// local pass share this one law so the drawn outline cannot
+/// disagree with the cut. None is the prismatic path, bit-identical.
 pub(super) fn region_for_src(
     world: &World,
     setup: Option<&str>,
     src: &SrcRef,
     params: &OpParams,
     material: &Material,
+    frame: Option<&crate::cl::TiltedFrame>,
 ) -> Result<Region, GenError> {
     match src {
         SrcRef::Selection(items)
@@ -210,9 +243,19 @@ pub(super) fn region_for_src(
                     | OpParams::Finish3D { .. }
             ) =>
         {
+            // The one door's lock (M5.1 B): a picked edge is a world
+            // feature; reading it in a tilted plane means projecting
+            // the pick onto the plane, and nothing here does that
+            // yet. Refuse by name rather than cut a shadow.
+            if frame.is_some() {
+                return Err(GenError::Invalid(
+                    "a tilted plane cannot yet index a picked selection - pick a whole model instead"
+                        .into(),
+                ));
+            }
             selection_region(world, setup, items, params)
         }
-        _ => region_for(world, setup, material, params),
+        _ => region_for(world, setup, material, params, frame),
     }
 }
 
@@ -227,7 +270,12 @@ pub(super) fn region_for(
     setup: Option<&str>,
     material: &Material,
     params: &OpParams,
+    frame: Option<&crate::cl::TiltedFrame>,
 ) -> Result<Region, GenError> {
+    // The section plane as the material's coordinates read it: the
+    // world height minus the anchor's z is the frame's own distance
+    // law (M5.1 B); None frame leaves every number untouched.
+    let oz = frame.map_or(0.0, |f| f.origin.z);
     match params {
         OpParams::Face { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
@@ -250,7 +298,7 @@ pub(super) fn region_for(
         | OpParams::Trace { top_z, .. } => {
             let z = resolve_height(world, setup, *top_z)
                 .ok_or_else(|| unresolved_err("Top of Part Z", *top_z, world, setup))?;
-            section(&material.facets, z)
+            section(&material.facets, z - oz)
         }
         OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
         OpParams::Drill { holes, .. } => {

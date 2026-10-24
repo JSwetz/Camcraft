@@ -323,7 +323,7 @@ impl Default for OpUi {
             // carries this clearance into every kind, so the draft
             // default must already be the seed shape the panes display -
             // quick-add and the creation form then say the same thing.
-            params: OpParams::Face {
+            params: OpParams::Face { tilt: None,
                 stepover: 3.0,
                 clearance_z: Height::of(HeightReference::TopOfStock, 25.0),
                 cut_z: Height::of(HeightReference::TopOfStock, 0.0),

@@ -52,6 +52,21 @@ impl OpParams {
             w(h, p.x);
             w(h, p.y);
         };
+        // The 3+2 index (M5.1 stage B): a tilt changes every move the
+        // generator makes, so it changes the digest. Presence first,
+        // then the two letters and the anchor - the same shape the
+        // optional scalars above use.
+        let wt = |h: &mut std::hash::DefaultHasher, t: Option<Tilt>| match t {
+            Some(t) => {
+                h.write_u8(1);
+                w(h, t.a_deg);
+                w(h, t.b_deg);
+                for v in t.origin {
+                    w(h, v);
+                }
+            }
+            None => h.write_u8(0),
+        };
         // The kind tag opens the digest (M5.0.2): what was a magic
         // literal at the head of each arm is now the registry row's
         // data - the bytes written are unchanged.
@@ -66,6 +81,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 climb,
+                tilt,
             } => {
                 w(h, *stepover);
                 wh(h, *clearance_z);
@@ -84,6 +100,7 @@ impl OpParams {
                     }
                     None => h.write_u8(0),
                 }
+                wt(h, *tilt);
             }
             OpParams::Contour {
                 stock_to_leave,
@@ -101,6 +118,7 @@ impl OpParams {
                 tab_width,
                 tab_height,
                 climb,
+                tilt,
             } => {
                 w(h, *stock_to_leave);
                 wh(h, *clearance_z);
@@ -136,6 +154,7 @@ impl OpParams {
                     Side::Inside => 1,
                     Side::Outside => 2,
                 });
+                wt(h, *tilt);
             }
             OpParams::Pocket {
                 stepover,
@@ -149,6 +168,7 @@ impl OpParams {
                 plunge_feed,
                 climb,
                 strategy,
+                tilt,
             } => {
                 w(h, *stepover);
                 w(h, *stock_to_leave);
@@ -168,6 +188,7 @@ impl OpParams {
                 // v5-era hop plane: presence, then the value (same shape
                 // as Face's staging fields appended above).
                 wh_opt(h, *retract_z);
+                wt(h, *tilt);
             }
             OpParams::Pocket3D {
                 stepover,
@@ -284,6 +305,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 climb,
+                tilt,
             } => {
                 wp2(h, *a);
                 wp2(h, *b);
@@ -297,6 +319,7 @@ impl OpParams {
                 }
                 h.write_u8(u8::from(*climb));
                 wh_opt(h, *retract_z);
+                wt(h, *tilt);
             }
             OpParams::Trace {
                 clearance_z,
@@ -307,6 +330,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 climb,
+                tilt,
             } => {
                 wh(h, *clearance_z);
                 wh(h, *top_z);
@@ -316,6 +340,7 @@ impl OpParams {
                 }
                 h.write_u8(u8::from(*climb));
                 wh_opt(h, *retract_z);
+                wt(h, *tilt);
             }
             OpParams::Drill {
                 clearance_z,

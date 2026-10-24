@@ -12,6 +12,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                tilt,
             } => {
                 ParamsDto::Face {
                     stepover: *stepover,
@@ -22,6 +23,7 @@ impl ParamsDto {
                     climb: *climb,
                     top_z: (*top_z).map(Into::into),
                     stepdown: *stepdown,
+                    tilt: (*tilt).map(Into::into),
                 }
             }
             OpParams::Contour {
@@ -40,6 +42,7 @@ impl ParamsDto {
                 tab_width,
                 tab_height,
                 side,
+                tilt,
             } => ParamsDto::Contour {
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -65,6 +68,7 @@ impl ParamsDto {
                     Side::Inside => SideDto::Inside,
                     Side::Outside => SideDto::Outside,
                 },
+                tilt: (*tilt).map(Into::into),
             },
             OpParams::Pocket {
                 stepover,
@@ -78,6 +82,7 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 strategy,
+                tilt,
             } => ParamsDto::Pocket {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -97,6 +102,7 @@ impl ParamsDto {
                 // Absent means the hop-to-clearance every pre-step-5
                 // pocket performed; a set plane round-trips exactly.
                 retract_z: (*retract_z).map(Into::into),
+                tilt: (*tilt).map(Into::into),
             },
             OpParams::Pocket3D {
                 stepover,
@@ -185,6 +191,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                tilt,
             } => ParamsDto::Slot {
                 a: [a.x, a.y],
                 b: [b.x, b.y],
@@ -199,6 +206,7 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                tilt: (*tilt).map(Into::into),
             },
             OpParams::Trace {
                 clearance_z,
@@ -209,6 +217,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                tilt,
             } => ParamsDto::Trace {
                 clearance_z: (*clearance_z).into(),
                 retract_z: (*retract_z).map(Into::into),
@@ -218,6 +227,7 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                tilt: (*tilt).map(Into::into),
             },
             OpParams::Drill {
                 clearance_z,
@@ -258,18 +268,27 @@ impl ParamsDto {
             // Absent v5 keys decode (via serde defaults) to the legacy
             // single-level face, byte-exact; present ones land on the
             // domain as staged facing.
-            ParamsDto::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb } => {
-                OpParams::Face {
-                    stepover: *stepover,
-                    clearance_z: (*clearance_z).into(),
-                    cut_z: (*cut_z).into(),
-                    top_z: (*top_z).map(Into::into),
-                    stepdown: *stepdown,
-                    feed: *feed,
-                    plunge_feed: *plunge_feed,
-                    climb: *climb,
-                }
-            }
+            ParamsDto::Face {
+                stepover,
+                clearance_z,
+                cut_z,
+                top_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                tilt,
+            } => OpParams::Face {
+                stepover: *stepover,
+                clearance_z: (*clearance_z).into(),
+                cut_z: (*cut_z).into(),
+                top_z: (*top_z).map(Into::into),
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                tilt: (*tilt).map(Into::into),
+            },
             ParamsDto::Contour {
                 stock_to_leave,
                 clearance_z,
@@ -286,6 +305,7 @@ impl ParamsDto {
                 tab_width,
                 tab_height,
                 side,
+                tilt,
             } => OpParams::Contour {
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -311,6 +331,7 @@ impl ParamsDto {
                     SideDto::Inside => Side::Inside,
                     SideDto::Outside => Side::Outside,
                 },
+                tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Pocket {
                 stepover,
@@ -324,6 +345,7 @@ impl ParamsDto {
                 climb,
                 strategy,
                 retract_z,
+                tilt,
             } => OpParams::Pocket {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -341,6 +363,7 @@ impl ParamsDto {
                     StrategyDto::Auto => PocketStrategy::Auto,
                     StrategyDto::Adaptive => PocketStrategy::Adaptive,
                 },
+                tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Pocket3D {
                 stepover,
@@ -429,6 +452,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                tilt,
             } => OpParams::Slot {
                 a: Point2::new(a[0], a[1]),
                 b: Point2::new(b[0], b[1]),
@@ -443,6 +467,7 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Trace {
                 clearance_z,
@@ -453,6 +478,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                tilt,
             } => OpParams::Trace {
                 clearance_z: (*clearance_z).into(),
                 retract_z: (*retract_z).map(Into::into),
@@ -462,6 +488,7 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Drill {
                 clearance_z,

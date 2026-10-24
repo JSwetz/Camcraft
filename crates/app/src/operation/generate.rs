@@ -34,15 +34,17 @@ pub fn generate(
     // `region.contains`, so this only widens what counts as material -
     // and it is THIS operation's setup's stock (M3.2 A), never a
     // neighbor setup's block.
-    let stock_region = match &op.src {
+    let stock_facets = match &op.src {
         SrcRef::Stock => None,
         SrcRef::Entity(_) | SrcRef::Selection(_) => {
             model::find_by_name(world, &crate::setup::stock_entity_name(world, setup))
                 .and_then(|e| model::world_facets(world, &e))
-                .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
-                .filter(|r| !r.is_empty())
         }
     };
+    let stock_region = stock_facets
+        .as_deref()
+        .and_then(|f| slice::project(f, FOOTPRINT_SAMPLES).ok())
+        .filter(|r| !r.is_empty());
     let stock_top_z = material.top
        .max(
             model::stock_world_aabb_for(world, setup)
@@ -61,18 +63,67 @@ pub fn generate(
     // the generators (and the goldens) know nothing of references.
     let hs = resolve_params(world, setup, &op.params).map_err(GenError::Invalid)?;
 
+    // The 3+2 wrap (M5.1 stage B). A planar op with a tilt generates
+    // exactly the path the upright kind would on the model as seen
+    // FROM the tilted plane: the model's facets come through the
+    // frame's `local_facets`, every resolved height is read as
+    // distance along the frame's axis from the plane anchor
+    // (`h - origin.z`, the identity-exact law: an upright frame at the
+    // world origin shifts nothing, so every prismatic file and golden
+    // rides on untouched), and the finished LOCAL path leaves through
+    // the frame's one door, `world_path`. The generators themselves
+    // never see a frame - rotation invariance is the whole argument
+    // that this is sound - and the laws that verify the path below run
+    // on the local one for exactly the same reason.
+    let frame = match op.params.tilt() {
+        None => None,
+        Some(t) => match t.frame() {
+            Some(f) => Some(f),
+            // Only a non-finite letter could get here (the parameter
+            // door refuses it); naming it beats inventing a plane.
+            None => {
+                return Err(GenError::Invalid(
+                    "the 3+2 index commands no direction - its angles are not finite".into(),
+                ))
+            }
+        },
+    };
+    let oz = frame.map_or(0.0, |f| f.origin.z);
+    let hl = ResolvedHeights {
+        clearance: hs.clearance - oz,
+        top: hs.top.map(|v| v - oz),
+        bottom: hs.bottom.map(|v| v - oz),
+        face_top: hs.face_top.map(|v| v - oz),
+        retract: hs.retract.map(|v| v - oz),
+    };
+    // The one refusal the wrap owes (M5.1 B): a picked selection is
+    // read as world geometry by the selection walk - projecting a pick
+    // onto a tilted plane is not implemented, and a shadow of the
+    // pick is not what was picked. Refused by name, never silently
+    // cut as a projection.
+    if frame.is_some() && matches!(op.src, SrcRef::Selection(_)) {
+        return Err(GenError::Invalid(
+            "a tilted plane cannot yet index a picked selection - pick a whole model instead"
+                .into(),
+        ));
+    }
+    let material_local = frame
+        .as_ref()
+        .map(|f| Material { facets: f.local_facets(&material.facets), top: material.top - oz });
+    let m_gen = material_local.as_ref().unwrap_or(&material);
+
     // Region + path per kind.
     let (region, path) = match &op.params {
         OpParams::Face { stepover, stepdown, feed, plunge_feed, climb, .. } => {
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
             let path = machining2d::face(
                 &region,
                 &FaceParams {
                     tool_diameter: d,
                     stepover: *stepover,
-                    clearance_z: hs.clearance,
-                    cut_z: req_z(hs.bottom, "Cut Z")?,
-                    top_z: hs.face_top,
+                    clearance_z: hl.clearance,
+                    cut_z: req_z(hl.bottom, "Cut Z")?,
+                    top_z: hl.face_top,
                     stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
@@ -104,10 +155,10 @@ pub fn generate(
             let cp = ContourParams {
                 tool_diameter: d,
                 stock_to_leave: *stock_to_leave,
-                clearance_z: hs.clearance,
-                retract_z: req_z(hs.retract, "Retract Z")?,
-                top_z: req_z(hs.top, "Top of Part Z")?,
-                bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                clearance_z: hl.clearance,
+                retract_z: req_z(hl.retract, "Retract Z")?,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
@@ -154,7 +205,7 @@ pub fn generate(
                     (region, path)
                 }
                 _ => {
-                    let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
+                    let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
                     let path = machining2d::contour(&region, &cp)?;
                     (region, path)
                 }
@@ -171,17 +222,17 @@ pub fn generate(
             strategy,
             ..
         } => {
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
             let path = machining2d::pocket(
                 &region,
                 &PocketParams {
                     tool_diameter: d,
                     stepover: *stepover,
                     stock_to_leave: *stock_to_leave,
-                    clearance_z: hs.clearance,
-                    retract_z: hs.retract,
-                    top_z: req_z(hs.top, "Top of Part Z")?,
-                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                    clearance_z: hl.clearance,
+                    retract_z: hl.retract,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
                     stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
@@ -211,20 +262,20 @@ pub fn generate(
             // themselves at every plane, so there is nothing here for a
             // picked loop to add - and nothing to erode by hand either:
             // one erosion per level, from that level's target.
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
             let pp = Pocket3DParams {
                 tool_diameter: d,
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
-                clearance_z: hs.clearance,
-                top_z: req_z(hs.top, "Top of Part Z")?,
-                bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                clearance_z: hl.clearance,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
                 stepdown: *stepdown,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
                 strategy: *strategy,
-                retract_z: hs.retract,
+                retract_z: hl.retract,
                 entry: *entry,
                 helix_radius: *helix_radius,
                 max_engagement: *max_engagement,
@@ -295,16 +346,16 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
             let fp = Finish3DParams {
                 pattern: *pattern,
                 stepover: *stepover,
                 tool_diameter: d,
                 tolerance: *tolerance,
-                clearance_z: hs.clearance,
-                retract_z: hs.retract,
-                top_z: req_z(hs.top, "Top of Part Z")?,
-                bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                clearance_z: hl.clearance,
+                retract_z: hl.retract,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
@@ -357,10 +408,10 @@ pub fn generate(
                     tool_diameter: d,
                     width: *width,
                     stock_to_leave: *stock_to_leave,
-                    clearance_z: hs.clearance,
-                    retract_z: hs.retract,
-                    top_z: req_z(hs.top, "Top of Part Z")?,
-                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                    clearance_z: hl.clearance,
+                    retract_z: hl.retract,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
                     stepdown: *stepdown,
                     stepover: *stepover,
                     feed: *feed,
@@ -368,18 +419,18 @@ pub fn generate(
                     climb: *climb,
                 },
             )?;
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
             (region, path)
         }
         OpParams::Trace { stepdown, feed, plunge_feed, climb, .. } => {
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
             let path = machining2d::trace(
                 &region,
                 &TraceParams {
-                    clearance_z: hs.clearance,
-                    retract_z: hs.retract,
-                    top_z: req_z(hs.top, "Top of Part Z")?,
-                    bottom_z: req_z(hs.bottom, "Bottom of Part Z")?,
+                    clearance_z: hl.clearance,
+                    retract_z: hl.retract,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
                     stepdown: *stepdown,
                     feed: *feed,
                     plunge_feed: *plunge_feed,
@@ -392,12 +443,12 @@ pub fn generate(
             // No region feeds the generator - the hole list is the
             // geometry - but the verify pass below needs one, and it is
             // built the same shared way as every other kind's.
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, &material)?;
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
             let path = drilling::drill(&drilling::CycleParams {
-                clearance_z: hs.clearance,
-                r_z: req_z(hs.top, "Top of Part Z")?,
-                hop_z: hs.retract,
-                bottom_z: hs.bottom,
+                clearance_z: hl.clearance,
+                r_z: req_z(hl.top, "Top of Part Z")?,
+                hop_z: hl.retract,
+                bottom_z: hl.bottom,
                 cycle: *cycle,
                 peck: *peck,
                 dwell: *dwell,
@@ -423,44 +474,134 @@ pub fn generate(
         .1
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
         .map(|(d, l)| (d * 0.5, l));
-    let warns = verify::verify(
-        &path,
-        &VerifyContext {
-            region: &region,
-            stock: stock_region.as_ref(),
-            // Only the mesh-driven kinds' laws are depth-dependent;
-            // every other op verifies against its static region,
-            // untouched.
-            model: matches!(
-                &op.params,
-                OpParams::Pocket3D { .. } | OpParams::Finish3D { .. }
-            )
-            .then_some(&material.facets[..]),
-            tool: &geom,
-            mode,
-            stock_top_z,
-            clearance_z: hs.clearance,
-            stock_to_leave: match &op.params {
-                OpParams::Face { .. }
-                | OpParams::Trace { .. }
-                | OpParams::Drill { .. }
-                | OpParams::Finish3D { .. } => 0.0,
-                OpParams::Contour { stock_to_leave, .. }
-                | OpParams::Pocket { stock_to_leave, .. }
-                | OpParams::Slot { stock_to_leave, .. }
-                | OpParams::Pocket3D { stock_to_leave, .. } => *stock_to_leave,
-            },
-            gouge_tol: GOUGE_TOL,
-            z_tol: Z_TOL,
-            // The finish op's envelope budget is its own tolerance; no
-            // other kind runs the envelope law.
-            finish_tol: match &op.params {
-                OpParams::Finish3D { tolerance, .. } => Some(*tolerance),
-                _ => None,
-            },
-            fixtures: &fixture_boxes,
-            spindle,
-        },
-    );
-    Ok((path, warns))
+    let stl = match &op.params {
+        OpParams::Face { .. }
+        | OpParams::Trace { .. }
+        | OpParams::Drill { .. }
+        | OpParams::Finish3D { .. } => 0.0,
+        OpParams::Contour { stock_to_leave, .. }
+        | OpParams::Pocket { stock_to_leave, .. }
+        | OpParams::Slot { stock_to_leave, .. }
+        | OpParams::Pocket3D { stock_to_leave, .. } => *stock_to_leave,
+    };
+    match &frame {
+        None => {
+            let warns = verify::verify(
+                &path,
+                &VerifyContext {
+                    region: &region,
+                    stock: stock_region.as_ref(),
+                    // Only the mesh-driven kinds' laws are depth-dependent;
+                    // every other op verifies against its static region,
+                    // untouched.
+                    model: matches!(
+                        &op.params,
+                        OpParams::Pocket3D { .. } | OpParams::Finish3D { .. }
+                    )
+                    .then_some(&material.facets[..]),
+                    tool: &geom,
+                    mode,
+                    stock_top_z,
+                    clearance_z: hl.clearance,
+                    stock_to_leave: stl,
+                    gouge_tol: GOUGE_TOL,
+                    z_tol: Z_TOL,
+                    // The finish op's envelope budget is its own tolerance;
+                    // no other kind runs the envelope law.
+                    finish_tol: match &op.params {
+                        OpParams::Finish3D { tolerance, .. } => Some(*tolerance),
+                        _ => None,
+                    },
+                    fixtures: &fixture_boxes,
+                    spindle,
+                },
+            );
+            Ok((path, warns))
+        }
+        Some(f) => {
+            // The split verdict (M5.1 B): the planar laws walk the
+            // LOCAL path, because they are rigid-invariant - XY
+            // distances, containments and half-planes measured in the
+            // cutting plane ARE the machine-truth question (a tilted
+            // rapid never "dips" in world Z; it travels the plane).
+            // The stock column's cap takes the frame-image of the
+            // world stock box's corners: a world-vertical prism is a
+            // tilted slab seen from the plane, and the corner max is
+            // never below the slab over any sampled column - an over-
+            // report, never a hide. The hardware laws walk the WORLD
+            // path: the steel of the machine does not move with the
+            // index, and stage A's lean enclosures read the pose off
+            // the moves' stamped axes. One path is posted; both are
+            // measured.
+            let path_world = f.world_path(&path, machining2d::ARC_FIT_TOL);
+            let mut st_local = stock_top_z - oz;
+            let mut boxes: Vec<(crate::geometry::Point3, crate::geometry::Point3)> = Vec::new();
+            if let Some(b) = model::stock_world_aabb_for(world, setup) {
+                boxes.push((b.min, b.max));
+            }
+            // The model's own corners too: `stock_top_z` already holds
+            // its top, but the tilted slab rides over its XY span, and
+            // the affine local-z map takes its max at a corner.
+            let mut lo = crate::geometry::Point3::new(f64::MAX, f64::MAX, f64::MAX);
+            let mut hi = crate::geometry::Point3::new(f64::MIN, f64::MIN, f64::MIN);
+            for t in &material.facets {
+                for p in [t.a, t.b, t.c] {
+                    lo.x = lo.x.min(p.x);
+                    lo.y = lo.y.min(p.y);
+                    lo.z = lo.z.min(p.z);
+                    hi.x = hi.x.max(p.x);
+                    hi.y = hi.y.max(p.y);
+                    hi.z = hi.z.max(p.z);
+                }
+            }
+            boxes.push((lo, hi));
+            for (b0, b1) in boxes {
+                for i in 0..8 {
+                    let p = crate::geometry::Point3::new(
+                        [b0.x, b1.x][(i >> 2) & 1],
+                        [b0.y, b1.y][(i >> 1) & 1],
+                        [b0.z, b1.z][i & 1],
+                    );
+                    st_local = st_local.max(f.z_local(p));
+                }
+            }
+            let stock_region_local = stock_facets
+                .as_deref()
+                .map(|t| f.local_facets(t))
+                .and_then(|t| slice::project(&t, FOOTPRINT_SAMPLES).ok())
+                .filter(|r| !r.is_empty());
+            let mut warns = verify::verify(
+                &path,
+                &VerifyContext {
+                    region: &region,
+                    stock: stock_region_local.as_ref(),
+                    model: None,
+                    tool: &geom,
+                    mode,
+                    stock_top_z: st_local,
+                    clearance_z: hl.clearance,
+                    stock_to_leave: stl,
+                    gouge_tol: GOUGE_TOL,
+                    z_tol: Z_TOL,
+                    finish_tol: None,
+                    // Steel runs against the world path below.
+                    fixtures: &[],
+                    spindle: None,
+                },
+            );
+            if !fixture_boxes.is_empty() {
+                warns.extend(verify::bands_vs_fixtures(
+                    &path_world,
+                    &geom,
+                    &fixture_boxes,
+                    spindle,
+                    GOUGE_TOL,
+                ));
+                warns.extend(verify::rapids_vs_fixtures(
+                    &path_world, &geom, &fixture_boxes,
+                ));
+            }
+            Ok((path_world, warns))
+        }
+    }
 }

@@ -357,7 +357,7 @@ fn cat_tool(name: &str) -> camcraft_app::tools::Tool {
 }
 
 fn face_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(4.5),

@@ -149,7 +149,7 @@ fn top_face_pick(state: &State, name: &str) -> Option<GeoSel> {
 /// anchored 25 mm above the stock top, retract above it, the full model
 /// height stepped 5, one work-offset bottom, a straight lead-in.
 fn contour_params() -> OpParams {
-    OpParams::Contour {
+    OpParams::Contour { tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::of(HeightReference::TopOfStock, 25.0),
         retract_z: Height::of(HeightReference::TopOfStock, 10.0),

@@ -1,5 +1,38 @@
 use super::*;
 
+use crate::operation::Tilt;
+
+/// The file mirror of `operation::Tilt` (M5.1 stage B): plain f64
+/// letters and anchor - serde's shortest-representation floats parse
+/// back to the same bits, so a round trip needs no lattice (unlike
+/// the normalized axis vectors the CL stream stores).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct TiltDto {
+    pub a_deg: f64,
+    pub b_deg: f64,
+    pub origin: [f64; 3],
+}
+
+impl From<Tilt> for TiltDto {
+    fn from(t: Tilt) -> Self {
+        TiltDto {
+            a_deg: t.a_deg,
+            b_deg: t.b_deg,
+            origin: t.origin,
+        }
+    }
+}
+
+impl From<TiltDto> for Tilt {
+    fn from(d: TiltDto) -> Self {
+        Tilt {
+            a_deg: d.a_deg,
+            b_deg: d.b_deg,
+            origin: d.origin,
+        }
+    }
+}
+
 /// The file mirror of `operation::OpParams`, tool-free by the same rule as
 /// the domain type: the diameter lives in the tool, never a parameter.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -18,6 +51,10 @@ pub enum ParamsDto {
         top_z: Option<HeightDto>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stepdown: Option<f64>,
+        /// Declared at v22-era M5.1 B: absent is no index - the
+        /// prismatic op every earlier file held.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
     },
     Contour {
         stock_to_leave: f64,
@@ -39,6 +76,9 @@ pub enum ParamsDto {
         /// Auto resolves at generate, so the stored path never changes.
         #[serde(default)]
         side: SideDto,
+        /// 3+2 index; see the Face arm.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
     },
     Pocket {
         stepover: f64,
@@ -55,6 +95,9 @@ pub enum ParamsDto {
         /// clearance", the behavior every pre-v5 pocket had.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retract_z: Option<HeightDto>,
+        /// 3+2 index; see the Face arm.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
     },
     Slot {
         a: [f64; 2],
@@ -71,6 +114,9 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// 3+2 index; see the Face arm.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
     },
     Trace {
         clearance_z: HeightDto,
@@ -82,6 +128,9 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// 3+2 index; see the Face arm.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
     },
     /// Declared at v10 with the drilling operation. The hole list is
     /// params data, not a live query: what recognition (or a typed edit)

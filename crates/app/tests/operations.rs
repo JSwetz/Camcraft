@@ -38,7 +38,7 @@ fn at(x: f64, y: f64, z: f64) -> Location {
 
 /// Face parameters for the 60x60x20 box stock with a 4 mm cutter.
 fn face_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.5),
@@ -51,7 +51,7 @@ fn face_params() -> OpParams {
 }
 
 fn contour_params() -> OpParams {
-    OpParams::Contour {
+    OpParams::Contour { tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),
@@ -233,7 +233,7 @@ fn create_operation_validates_every_reference() {
             "O",
             "EM-0400-2FL",
             SrcRef::Stock,
-            OpParams::Face {
+            OpParams::Face { tilt: None,
                 stepover: f64::NAN,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(19.5),
@@ -290,7 +290,7 @@ fn edit_params_clears_the_stamp_not_the_cache() {
     let (world, mut history) = face_world();
     let first = cache(&world, "Face1").expect("generated").path;
 
-    let lower = OpParams::Face {
+    let lower = OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.0),
@@ -509,7 +509,7 @@ fn a_reimport_with_unchanged_geometry_keeps_operations_ok() {
 
 /// Face parameters for the 10 x 10 x 5 solid the stock tests below cut.
 fn face_params_5() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(10.0),
         cut_z: Height::fixed(4.5),
@@ -719,7 +719,7 @@ fn stale_reason_names_a_height_whose_source_is_gone() {
         SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, Location::default())
             .expect("box stock"),
     );
-    let params = OpParams::Face {
+    let params = OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::of(HeightReference::TopOfStock, 5.0),
         cut_z: Height::fixed(4.5),
@@ -954,7 +954,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
     let trace = Operation {
         tool: String::new(),
         src: SrcRef::Stock,
-        params: OpParams::Trace {
+        params: OpParams::Trace { tilt: None,
             clearance_z: Height::fixed(25.0),
             retract_z: None,
             top_z: Height::fixed(10.0),
@@ -987,7 +987,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
     let face = Operation {
         tool: String::new(),
         src: SrcRef::Stock,
-        params: OpParams::Face {
+        params: OpParams::Face { tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
             cut_z: Height::fixed(19.5),
@@ -1089,7 +1089,7 @@ fn sel(entity: &str, feature: FeatureSel) -> SrcRef {
 }
 
 fn face_sel_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(4.5),
@@ -1242,7 +1242,7 @@ fn pocket_refuses_an_open_run() {
     let op = Operation {
         tool: "EM-0600-4FL".into(),
         src: sel("part", open),
-        params: OpParams::Pocket {
+        params: OpParams::Pocket { tilt: None,
             stepover: 3.0,
             stock_to_leave: 0.0,
             clearance_z: Height::fixed(10.0),
@@ -1629,7 +1629,7 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
             .expect("the disc is one planar face"),
     );
     let rim_id = rim_chain_of(&world, "disc");
-    let params = OpParams::Contour {
+    let params = OpParams::Contour { tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),
@@ -2253,7 +2253,7 @@ fn straight_runs_face_their_material_and_trace_refuses_by_name() {
             "Tr9",
             "EM-0600-4FL",
             SrcRef::Selection(items),
-            OpParams::Trace {
+            OpParams::Trace { tilt: None,
                 clearance_z: Height::fixed(25.0),
                 retract_z: None,
                 top_z: Height::fixed(5.0),
@@ -2295,7 +2295,7 @@ fn selection_notes_report_stitching_and_extension() {
 
     // A Contour over the same picks stitches into one boundary pass, so
     // the stitch is reported; nothing was extended, so that stays unsaid.
-    let contour = OpParams::Contour {
+    let contour = OpParams::Contour { tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(25.0),
         retract_z: Height::fixed(12.0),
@@ -2333,7 +2333,7 @@ fn selection_notes_report_stitching_and_extension() {
 
 /// Contour at the band z±1, one level pair deep enough for the fixtures.
 fn contour_at(side: Side, z: f64) -> OpParams {
-    OpParams::Contour {
+    OpParams::Contour { tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),

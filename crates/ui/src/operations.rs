@@ -246,7 +246,7 @@ mod height_row_tests {
     #[test]
     fn the_pane_note_appears_only_while_something_is_unresolved() {
         let world = new_world();
-        let ok = OpParams::Face {
+        let ok = OpParams::Face { tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
             cut_z: Height::fixed(19.5),
@@ -257,7 +257,7 @@ mod height_row_tests {
             climb: true,
         };
         assert_eq!(unresolved_note(&world, None, &ok), None, "all fixed - no alarm");
-        let broken = OpParams::Face {
+        let broken = OpParams::Face { tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
             cut_z: Height::of(HeightReference::BottomOfStock, 0.0),
@@ -332,7 +332,7 @@ mod height_row_tests {
 
     /// A fixed-height contour with the numbers the retype law carries.
     fn cont_seed() -> OpParams {
-        OpParams::Contour {
+        OpParams::Contour { tilt: None,
             side: Side::Auto,
             stock_to_leave: 0.0,
             clearance_z: Height::fixed(20.0),

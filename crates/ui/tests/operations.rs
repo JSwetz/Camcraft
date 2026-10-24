@@ -24,6 +24,7 @@ fn catalog_tool(name: &str) -> Tool {
 
 fn face_params() -> OpParams {
     OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.5),
@@ -182,6 +183,7 @@ fn create_generate_undo_redo_replays_the_same_path() {
 
     // A parameter edit marks it stale but keeps the old path on screen.
     let moved = OpParams::Face {
+        tilt: None,
         stepover: 4.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.5),
@@ -287,6 +289,7 @@ fn a_work_offset_reference_survives_apply_undo_and_the_draft() {
     create_face(&mut state);
 
     let referenced = OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::of(HeightReference::WorkOffset(0), 0.0),
@@ -369,6 +372,7 @@ fn retargeting_a_tool_and_bad_params() {
     // Degenerate parameters are refused at construction: status explains,
     // and the operation keeps its exact previous values and stamp.
     let junk = OpParams::Face {
+        tilt: None,
         stepover: 0.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.5),
@@ -697,6 +701,7 @@ fn apply_reports_queued_then_updated_on_drain() {
     part_and_target(&mut state);
     // Spinbox typing is what this mirrors: the draft differs from live.
     state.op_ui.params = OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(18.0),
@@ -894,6 +899,7 @@ fn box_run_pick(state: &State, name: &str) -> GeoSel {
 /// refusal must stand behind the pane).
 fn contour_draft() -> OpParams {
     OpParams::Contour {
+        tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(25.0),
         retract_z: Height::fixed(30.0),
@@ -954,6 +960,7 @@ fn generate_flushes_a_dirty_draft_before_generating() {
     // height while the operation still holds the old one. Generating under
     // that draft used to cut the old numbers silently.
     state.op_ui.params = OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(18.0),

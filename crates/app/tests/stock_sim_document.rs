@@ -39,7 +39,7 @@ fn catalog_tool(name: &str) -> camcraft_app::tools::Tool {
 }
 
 fn face_params(cut_z: f64) -> OpParams {
-    OpParams::Face {
+    OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(cut_z),
@@ -189,7 +189,7 @@ fn missing_pieces_refuse_by_name() {
     );
     let cmd = AddTool::new(&world, "EM-0600-4FL", catalog_tool("EM-0600-4FL"));
     history.execute(&world, cmd.expect("tool"));
-    let params = OpParams::Contour {
+    let params = OpParams::Contour { tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),

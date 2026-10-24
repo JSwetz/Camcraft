@@ -31,7 +31,7 @@ fn params_sanity_gates() {
     // unresolved reference is never a lie there: refusing happens at
     // generate, by name.
     let world = crate::world::new_world();
-    let ok = OpParams::Face {
+    let ok = OpParams::Face { tilt: None,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -44,7 +44,7 @@ fn params_sanity_gates() {
     assert!(ok.is_sane() && depth_sane(&world, None, &ok));
     // Staged facing is sane when it descends: a top below the
     // finished height, or a zero stepdown, is not.
-    let staged = OpParams::Face {
+    let staged = OpParams::Face { tilt: None,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -55,7 +55,7 @@ fn params_sanity_gates() {
         climb: true,
     };
     assert!(staged.is_sane() && depth_sane(&world, None, &staged));
-    let low = OpParams::Face {
+    let low = OpParams::Face { tilt: None,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -70,7 +70,7 @@ fn params_sanity_gates() {
         !depth_sane(&world, None, &low),
         "staged top below the finished height"
     );
-    let no_step = OpParams::Face {
+    let no_step = OpParams::Face { tilt: None,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -81,7 +81,7 @@ fn params_sanity_gates() {
         climb: true,
     };
     assert!(!no_step.is_sane(), "stepdown must be positive when set");
-    let bad = OpParams::Pocket {
+    let bad = OpParams::Pocket { tilt: None,
         stepover: f64::NAN,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(5.0),
@@ -97,7 +97,7 @@ fn params_sanity_gates() {
     assert!(!bad.is_sane());
     // A depth range that runs upward is nonsense, refused at command
     // creation - not by the shape of the numbers but by their z's.
-    let up = OpParams::Trace {
+    let up = OpParams::Trace { tilt: None,
         clearance_z: Height::fixed(5.0),
         retract_z: None,
         top_z: Height::fixed(-4.0),
@@ -110,7 +110,7 @@ fn params_sanity_gates() {
     assert!(up.is_sane());
     assert!(!depth_sane(&world, None, &up));
     // An out-of-range slot is structural: there is no seventh offset.
-    let ghost = OpParams::Trace {
+    let ghost = OpParams::Trace { tilt: None,
         clearance_z: Height::fixed(5.0),
         retract_z: None,
         top_z: Height::fixed(5.0),
@@ -130,7 +130,7 @@ fn stamp_follows_every_input() {
     // param path is deterministic here (Fixed heights resolve without
     // touching the world).
     let world = crate::world::new_world();
-    let a = OpParams::Face {
+    let a = OpParams::Face { tilt: None,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -141,7 +141,7 @@ fn stamp_follows_every_input() {
         climb: true,
     };
     // (No struct-update syntax on enum variants: write it out.)
-    let b = OpParams::Face {
+    let b = OpParams::Face { tilt: None,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.6),
@@ -151,7 +151,7 @@ fn stamp_follows_every_input() {
         plunge_feed: 100.0,
         climb: true,
     };
-    let c = OpParams::Face {
+    let c = OpParams::Face { tilt: None,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),
@@ -187,7 +187,7 @@ fn face_stamp_moves_with_stepdown() {
     // answer for a staged one - and two stagings that cut different
     // stacks must not claim each other's cache either.
     let world = crate::world::new_world();
-    let face_with = |top_z: Option<Height>, stepdown: Option<f64>| OpParams::Face {
+    let face_with = |top_z: Option<Height>, stepdown: Option<f64>| OpParams::Face { tilt: None,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
         cut_z: Height::fixed(-0.5),

@@ -17,7 +17,15 @@ impl OpParams {
     pub fn is_sane(&self) -> bool {
         let pos = |v: f64| v.is_finite() && v > 0.0;
         let nneg = |v: f64| v.is_finite() && v >= 0.0;
-        match self {
+        // The 3+2 index answers at the door (M5.1 stage B): a tilt is
+        // only ever storable on the planar kinds, so one check covers
+        // all eight arms - `tilt()` is None for the rest by the
+        // accessor's exhaustive law. The mounted machine's REACH is a
+        // different question and belongs to generation, which names
+        // the machine when the angle is past it.
+        let tilt_ok = self.tilt().is_none_or(|t| t.is_sane());
+        tilt_ok
+            && match self {
             OpParams::Face {
                 stepover,
                 clearance_z,

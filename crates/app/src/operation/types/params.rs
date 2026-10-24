@@ -8,6 +8,51 @@ use crate::machining3d::Entry3D;
 
 use super::height::Height;
 use super::sel::OpType;
+
+/// The 3+2 index of a planar operation (M5.1 stage B): the tool holds
+/// one pose for the whole path - commanded by the RS-274 letters A and
+/// B (degrees, [`crate::cl::pose`]'s convention, C left to the machine's
+/// table spin), with the cut plane anchored at `origin` in world mm.
+/// Stored, stamped and posted, never normalized: the letters ARE the
+/// claim, and [`Tilt::frame`] is the one reading of them. `None` in a
+/// parameter field is no index - the ordinary prismatic op.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tilt {
+    pub a_deg: f64,
+    pub b_deg: f64,
+    pub origin: [f64; 3],
+}
+
+impl Tilt {
+    /// The frame this index commands: None only when the angles state
+    /// no direction at all (a non-finite letter - refused at the
+    /// parameter door long before generation, but the frame's law is
+    /// Option, not panic).
+    #[must_use]
+    pub fn frame(&self) -> Option<crate::cl::TiltedFrame> {
+        crate::cl::TiltedFrame::from_angles(
+            crate::geometry::Point3::new(self.origin[0], self.origin[1], self.origin[2]),
+            self.a_deg,
+            self.b_deg,
+        )
+    }
+
+    /// Door sanity (M5.1 stage B): every number finite, the anchor
+    /// stably small, and the letters canonical - A in [-90, 90] and B
+    /// in [-180, 180] - because [`crate::cl`]’s pose convention maps any OTHER
+    /// letter pair is already the axis of one of these, and storing a
+    /// non-canonical pose would give the same machine position two
+    /// file identities (a stamp that changes for no motion).
+    #[must_use]
+    pub fn is_sane(&self) -> bool {
+        self.a_deg.is_finite()
+            && self.b_deg.is_finite()
+            && (-90.0..=90.0).contains(&self.a_deg)
+            && (-180.0..=180.0).contains(&self.b_deg)
+            && self.origin.iter().all(|v| v.is_finite() && v.abs() < 1e9)
+    }
+}
+
 /// Everything an operation needs beyond its tool and source. The tool
 /// diameter is deliberately absent - it lives in the tool definition and
 /// is injected at generation, so a tool edit cannot disagree with a
@@ -30,6 +75,9 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// 3+2 index (M5.1 stage B): the plane this face cuts, tilted;
+        /// `None` is the world XY the kind has always meant.
+        tilt: Option<Tilt>,
     },
     Contour {
         stock_to_leave: f64,
@@ -50,6 +98,8 @@ pub enum OpParams {
         tab_count: u32,
         tab_width: f64,
         tab_height: f64,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
     },
     Pocket {
         stepover: f64,
@@ -65,6 +115,8 @@ pub enum OpParams {
         plunge_feed: f64,
         climb: bool,
         strategy: PocketStrategy,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
     },
     Slot {
         a: Point2,
@@ -80,6 +132,8 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
     },
     Trace {
         clearance_z: Height,
@@ -90,6 +144,8 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
     },
     /// Hole machining. The hole list is params data - recognized from the
     /// model by an action in the panel, or typed - so it is undoable,
@@ -227,6 +283,24 @@ impl OpParams {
             OpParams::Drill { .. } => OpType::Drill,
             OpParams::Pocket3D { .. } => OpType::Pocket3D,
             OpParams::Finish3D { .. } => OpType::Finish3D,
+        }
+    }
+
+    /// The 3+2 index, if this kind carries one (M5.1 stage B): the
+    /// five planar kinds do, the rest answer None - an exhaustive
+    /// match, so giving tilt to another kind means answering here
+    /// with the compiler witnessing it.
+    #[must_use]
+    pub fn tilt(&self) -> Option<Tilt> {
+        match self {
+            OpParams::Face { tilt, .. }
+            | OpParams::Contour { tilt, .. }
+            | OpParams::Pocket { tilt, .. }
+            | OpParams::Slot { tilt, .. }
+            | OpParams::Trace { tilt, .. } => *tilt,
+            OpParams::Drill { .. } | OpParams::Pocket3D { .. } | OpParams::Finish3D { .. } => {
+                None
+            }
         }
     }
 

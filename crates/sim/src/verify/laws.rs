@@ -289,14 +289,52 @@ pub fn rapids_vs_fixtures(
         if m.kind != MoveKind::Rapid {
             continue;
         }
-        if fixtures
-            .iter()
-            .any(|b| crate::fixture::rapid_hits_box(&m.from, &m.to, tool.radius, b))
-        {
-            warns.push(Warning::FixtureHit {
-                at: i,
-                fixture_part: FixturePart::Rapid,
-            });
+        // Pose (M5.1 stage B, paying stage A's rapids debt): a rapid
+        // whose tool leans sweeps a TILTED disc column along the chord,
+        // not the upright pill the prismatic law measures. This law
+        // encloses the swept parallelogram - the chord's XY shifted
+        // along the whole lean run - in a capsule that is never
+        // smaller: the centre chord moved half the lean aside, and the
+        // radius grown by the parallelogram's own half-diagonal. The
+        // z window spans both tips' axis reach plus the disc. Over-
+        // report a graze, never hide a crash - the bands law's exact
+        // precedent. The prismatic branch stays bit-identical to the
+        // law's own history: same `rapid_hits_box`, same sums.
+        match m.axis.filter(|a| !is_vertical(a)) {
+            None => {
+                if fixtures
+                    .iter()
+                    .any(|b| crate::fixture::rapid_hits_box(&m.from, &m.to, tool.radius, b))
+                {
+                    warns.push(Warning::FixtureHit {
+                        at: i,
+                        fixture_part: FixturePart::Rapid,
+                    });
+                }
+            }
+            Some(a) => {
+                let lean_xy = (a[0] * a[0] + a[1] * a[1]).sqrt();
+                // |Q|/2: the parallelogram (chord ⊕ lean run) is exactly
+                // contained in the capsule of radius half the run about
+                // its centre line - every point sits |Q|/2 or less off it.
+                let run2 = 0.5 * tool.flute_len * lean_xy;
+                let r_use = tool.radius + run2;
+                let (ox, oy) = (0.5 * tool.flute_len * a[0], 0.5 * tool.flute_len * a[1]);
+                let (x0, y0) = (m.from.x + ox, m.from.y + oy);
+                let (x1, y1) = (m.to.x + ox, m.to.y + oy);
+                let za = m.from.z + tool.flute_len * a[2];
+                let zb = m.to.z + tool.flute_len * a[2];
+                let z_lo = m.from.z.min(m.to.z).min(za).min(zb) - tool.radius;
+                let z_hi = m.from.z.max(m.to.z).max(za).max(zb) + tool.radius;
+                if fixtures.iter().any(|b| {
+                    crate::fixture::band_hits_box(x0, y0, x1, y1, z_lo, z_hi, r_use, b)
+                }) {
+                    warns.push(Warning::FixtureHit {
+                        at: i,
+                        fixture_part: FixturePart::Rapid,
+                    });
+                }
+            }
         }
     }
     warns

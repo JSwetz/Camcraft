@@ -13,16 +13,23 @@
 //! angle stated: prismatic, which remains the ordinary case for every
 //! path this app generates today.
 //!
+//! A 3+2 op adds the third companion: [`TiltedFrame`], the tilted work
+//! plane the pose belongs to (M5.1 stage B). Generators run in the
+//! frame's local coordinates and cross to the world through exactly
+//! one door, [`TiltedFrame::world_path`].
+//!
 //! Invariant: every move's `from` equals the previous move's `to` (the
 //! path is a chain, no gaps); generators build through [`PathBuilder`],
 //! which maintains it by construction.
 
 mod cycle;
+mod frame;
 mod moves;
 mod path;
 mod pose;
 
 pub use cycle::{Cycle, CycleKind};
+pub use frame::TiltedFrame;
 pub use moves::{arc_chords, lattice, ArcMove, Move, MoveKind, MAX_ARC_CHORDS};
 pub use path::{PathBuilder, Toolpath};
 pub use pose::{angles_to_axis, axis_to_angles, is_vertical, normalize_axis};

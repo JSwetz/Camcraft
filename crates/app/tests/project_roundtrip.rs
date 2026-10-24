@@ -354,7 +354,7 @@ fn tools_and_generated_operations_round_trip() {
             "Face1",
             "EM-0400-2FL",
             SrcRef::Stock,
-            OpParams::Face {
+            OpParams::Face { tilt: None,
                 stepover: 3.0,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(19.5),
@@ -451,7 +451,7 @@ fn arc_move_round_trips() {
             "Skin1",
             "EM-0400-2FL",
             SrcRef::Stock,
-            OpParams::Contour {
+            OpParams::Contour { tilt: None,
                 stock_to_leave: 0.0,
                 clearance_z: Height::fixed(20.0),
                 retract_z: Height::fixed(15.0),
@@ -525,7 +525,7 @@ fn a_stated_pose_round_trips_verbatim() {
             "Face1",
             "EM-0400-2FL",
             SrcRef::Stock,
-            OpParams::Face {
+            OpParams::Face { tilt: None,
                 stepover: 5.0,
                 clearance_z: Height::fixed(15.0),
                 cut_z: Height::fixed(9.0),
@@ -809,7 +809,7 @@ fn v5_roundtrips_retract_and_auto() {
             "Pocket1",
             "EM-0400-2FL",
             SrcRef::Stock,
-            OpParams::Pocket {
+            OpParams::Pocket { tilt: None,
                 stepover: 1.0,
                 stock_to_leave: 0.0,
                 clearance_z: Height::fixed(25.0),
@@ -832,7 +832,7 @@ fn v5_roundtrips_retract_and_auto() {
             "Trace1",
             "EM-0400-2FL",
             SrcRef::Stock,
-            OpParams::Trace {
+            OpParams::Trace { tilt: None,
                 clearance_z: Height::fixed(25.0),
                 retract_z: Some(Height::fixed(23.0)),
                 top_z: Height::fixed(20.0),
@@ -911,7 +911,7 @@ fn patch_selection_round_trips() {
                 entity: "boss".into(),
                 feature: FeatureSel::Patch(pid),
             }]),
-            OpParams::Face {
+            OpParams::Face { tilt: None,
                 stepover: 3.0,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(4.5),
@@ -986,7 +986,7 @@ fn a_selection_round_trips_and_stays_ok() {
         })
         .map(|c| c.id)
         .expect("a horizontal rim edge");
-    let params = OpParams::Contour {
+    let params = OpParams::Contour { tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),
@@ -2401,7 +2401,7 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
             "C1",
             "EM-0600-4FL",
             SrcRef::Entity("part".into()),
-            OpParams::Contour {
+            OpParams::Contour { tilt: None,
                 stock_to_leave: 0.0,
                 clearance_z: Height::fixed(10.0),
                 retract_z: Height::fixed(8.0),
@@ -2471,7 +2471,7 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
             "C2",
             "EM-0600-4FL",
             SrcRef::Selection(items),
-            OpParams::Contour {
+            OpParams::Contour { tilt: None,
                 stock_to_leave: 0.0,
                 clearance_z: Height::fixed(10.0),
                 retract_z: Height::fixed(8.0),

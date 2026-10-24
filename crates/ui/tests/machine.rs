@@ -175,6 +175,7 @@ fn the_machine_vote_joins_the_deviate_clause() {
         tool: "EM-0400-2FL".into(),
         src: SrcRef::Stock,
         params: OpParams::Face {
+            tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
             cut_z: Height::fixed(18.0),
@@ -236,6 +237,7 @@ fn the_machine_gate_refuses_the_post_by_name() {
         tool: "EM-0400-2FL".into(),
         src: SrcRef::Stock,
         params: OpParams::Face {
+            tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
             cut_z: Height::fixed(19.5),

@@ -18,5 +18,5 @@ mod sane;
 mod sel;
 
 pub use height::{Height, HeightReference};
-pub use params::OpParams;
+pub use params::{OpParams, Tilt};
 pub use sel::{FeatureSel, GenStamp, GeoSel, OpStatus, OpType, SrcRef, WCS_SLOTS};

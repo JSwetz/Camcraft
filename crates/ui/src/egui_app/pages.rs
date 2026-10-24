@@ -53,7 +53,9 @@ use camcraft_app::machine;
 use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
 use camcraft_app::model;
 use camcraft_app::posting;
-use camcraft_app::operation::{self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef};
+use camcraft_app::operation::{
+    self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef, Tilt,
+};
 use camcraft_app::schema::{Operation, PostRef, WCS_SLOTS};
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools;
@@ -647,8 +649,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     }
 
     match &mut state.op_ui.params {
-        OpParams::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb } => {
+        OpParams::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb, tilt } => {
             if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "face.clearance");
                 field(ui, "Cut Z");
@@ -701,6 +704,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             tab_count,
             tab_width,
             tab_height,
+            tilt,
         } => {
             if tab == SEC_GEO {
                 field(ui, "Side");
@@ -722,6 +726,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 num(ui, u, tolerance);
             }
             if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "contour.clearance");
                 field(ui, "Retract Z (between passes)");
@@ -807,8 +812,10 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             plunge_feed,
             climb,
             strategy,
+            tilt,
         } => {
             if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "pocket.clearance");
                 field(ui, "Retract plane");
@@ -890,6 +897,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             feed,
             plunge_feed,
             climb,
+            tilt,
         } => {
             if tab == SEC_GEO {
                 field(ui, "A X");
@@ -904,6 +912,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 num(ui, u, width);
             }
             if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "slot.clearance");
                 field(ui, "Top Z");
@@ -927,8 +936,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
-        OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb } => {
+        OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb, tilt } => {
             if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "trace.clearance");
                 field(ui, "Retract plane");
@@ -1380,6 +1390,41 @@ pub(crate) fn num_feed(ui: &mut Ui, u: Unit, v: &mut f64) {
 /// Degrees, rpm, counts: no lens - these were never millimeters.
 pub(crate) fn num_plain(ui: &mut Ui, v: &mut f64) {
     ui.add(DragValue::new(v).speed(0.1));
+}
+
+/// The 3+2 index editor (M5.1 stage B): the checkbox arms or disarms
+/// a tilt, and the fields edit the two RS-274 letters (degrees - the
+/// A/B of [`camcraft_app::cl`]'s pose convention, C left to the table)
+/// and the plane anchor (mm). It writes the draft, like every other
+/// field here, so the existing EditOperationParams commit path makes
+/// the edit undoable. The panel never normalizes and never refuses:
+/// the door in [`Tilt::is_sane`] owns the bounds, and the mounted
+/// machine's reach is generation's question, answered by name there.
+fn orientation_editor(ui: &mut Ui, u: Unit, tilt: &mut Option<Tilt>) {
+    let mut armed = tilt.is_some();
+    if ui.checkbox(&mut armed, "Tilted plane (3+2)").changed() {
+        *tilt = if armed {
+            Some(Tilt {
+                a_deg: 0.0,
+                b_deg: 0.0,
+                origin: [0.0; 3],
+            })
+        } else {
+            None
+        };
+    }
+    if let Some(t) = tilt.as_mut() {
+        field(ui, "Tool axis A (deg)");
+        num_plain(ui, &mut t.a_deg);
+        field(ui, "Tool axis B (deg)");
+        num_plain(ui, &mut t.b_deg);
+        field(ui, "Plane origin X");
+        num(ui, u, &mut t.origin[0]);
+        field(ui, "Plane origin Y");
+        num(ui, u, &mut t.origin[1]);
+        field(ui, "Plane origin Z");
+        num(ui, u, &mut t.origin[2]);
+    }
 }
 
 /// Combo over `&[&str]` with a usize model (imgui's combo idiom).

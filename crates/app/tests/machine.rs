@@ -84,7 +84,7 @@ fn faced_doc() -> (World, History) {
         "Face1",
         "EM-0400-2FL",
         SrcRef::Stock,
-        OpParams::Face {
+        OpParams::Face { tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
             cut_z: Height::fixed(18.0),
@@ -613,7 +613,7 @@ fn the_changer_counts_the_distinct_tools() {
             "Face2",
             "EM-0600-4FL",
             SrcRef::Stock,
-            OpParams::Face {
+            OpParams::Face { tilt: None,
                 stepover: 3.0,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(18.0),

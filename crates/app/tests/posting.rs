@@ -48,7 +48,7 @@ fn box_stock(world: &World, history: &mut History, dx: f64, dy: f64, dz: f64) {
 }
 
 fn contour_params() -> OpParams {
-    OpParams::Contour {
+    OpParams::Contour { tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),
@@ -176,7 +176,7 @@ fn an_unborn_toolpath_refuses_to_post() {
 }
 
 fn face_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.5),
@@ -424,7 +424,7 @@ fn a_non_g54_slot_is_what_the_script_writes() {
         &world,
         SetWcsOrigin::new(&world, "G55", Location::default()).expect("place G55"),
     );
-    let params = OpParams::Face {
+    let params = OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::of(HeightReference::WorkOffset(1), 25.0),
         cut_z: Height::of(HeightReference::WorkOffset(1), 19.5),

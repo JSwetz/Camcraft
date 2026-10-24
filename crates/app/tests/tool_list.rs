@@ -37,7 +37,7 @@ fn catalog_tool(name: &str) -> Tool {
 /// hand. The plunge keeps a fixed quarter of the table feed, so a
 /// doubled parameter set doubles every feed word on the path.
 fn face_params(cut_z: f64, feed: f64) -> OpParams {
-    OpParams::Face {
+    OpParams::Face { tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(cut_z),

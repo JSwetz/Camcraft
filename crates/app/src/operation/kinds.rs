@@ -22,7 +22,7 @@ use crate::machining2d::{Lead, PocketStrategy, Side};
 use crate::machining3d::Entry3D;
 use crate::verify::Mode;
 
-use super::types::{Height, HeightReference, OpParams, OpType};
+use super::types::{Height, HeightReference, OpParams, OpType, Tilt};
 
 /// The numbers that ride a retype: every kind stores them under the same
 /// name, so the draft rule is one carry, then the row's seed (M1.5.2's
@@ -38,6 +38,12 @@ pub struct Carried {
     pub top: Height,
     pub bottom: Height,
     pub retract: Height,
+    /// The 3+2 index (M5.1 stage B): the planar kinds carry it across
+    /// a retype, the non-planar seeds never read it - so a tilted
+    /// pocket that becomes a 3D pocket loses the tilt WITH the kind
+    /// that owned it, and a tilted pocket that becomes a tilted
+    /// contour keeps it.
+    pub tilt: Option<Tilt>,
 }
 
 impl Carried {
@@ -57,6 +63,7 @@ impl Carried {
             bottom: bottom_of(p)
                 .unwrap_or_else(|| Height::of(HeightReference::WorkOffset(0), 0.0)),
             retract: retract_of(p).unwrap_or_else(|| Height::of(HeightReference::TopOfStock, 10.0)),
+            tilt: p.tilt(),
         }
     }
 }
@@ -190,6 +197,7 @@ fn seed_face(c: &Carried) -> OpParams {
         feed: c.feed,
         plunge_feed: c.plunge,
         climb: c.climb,
+        tilt: c.tilt,
     }
 }
 
@@ -210,6 +218,7 @@ fn seed_contour(c: &Carried) -> OpParams {
         tab_count: 0,
         tab_width: 5.0,
         tab_height: 1.0,
+        tilt: c.tilt,
     }
 }
 
@@ -228,6 +237,7 @@ fn seed_pocket(c: &Carried) -> OpParams {
         // New pockets let the shape come from the outline; explicit
         // choices on live operations are never retyped over.
         strategy: PocketStrategy::Auto,
+        tilt: c.tilt,
     }
 }
 
@@ -246,6 +256,7 @@ fn seed_slot(c: &Carried) -> OpParams {
         feed: c.feed,
         plunge_feed: c.plunge,
         climb: c.climb,
+        tilt: c.tilt,
     }
 }
 
@@ -259,6 +270,7 @@ fn seed_trace(c: &Carried) -> OpParams {
         feed: c.feed,
         plunge_feed: c.plunge,
         climb: c.climb,
+        tilt: c.tilt,
     }
 }
 
