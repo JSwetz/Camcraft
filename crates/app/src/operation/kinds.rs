@@ -77,7 +77,9 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Slot { feed, .. }
         | OpParams::Trace { feed, .. }
         | OpParams::Drill { feed, .. }
-        | OpParams::Finish3D { feed, .. } => *feed,
+        | OpParams::Finish3D { feed, .. }
+        | OpParams::Contour5D { feed, .. }
+        | OpParams::Parallel5D { feed, .. } => *feed,
     }
 }
 
@@ -90,7 +92,9 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Slot { plunge_feed, .. }
         | OpParams::Trace { plunge_feed, .. }
         | OpParams::Drill { plunge_feed, .. }
-        | OpParams::Finish3D { plunge_feed, .. } => *plunge_feed,
+        | OpParams::Finish3D { plunge_feed, .. }
+        | OpParams::Contour5D { plunge_feed, .. }
+        | OpParams::Parallel5D { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -102,7 +106,9 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::Pocket3D { climb, .. }
         | OpParams::Slot { climb, .. }
         | OpParams::Trace { climb, .. }
-        | OpParams::Finish3D { climb, .. } => *climb,
+        | OpParams::Finish3D { climb, .. }
+        | OpParams::Contour5D { climb, .. }
+        | OpParams::Parallel5D { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
         OpParams::Drill { .. } => true,
@@ -115,8 +121,16 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Pocket { stepover, .. }
         | OpParams::Pocket3D { stepover, .. }
         | OpParams::Slot { stepover, .. } => Some(*stepover),
-        OpParams::Contour { .. } | OpParams::Trace { .. } | OpParams::Drill { .. }
-        | OpParams::Finish3D { .. } => None,
+        // Parallel5D's spacing is an Option the same way Finish3D's
+        // raster's is: a derivation by default, so the fold reads the
+        // field as "not authored by a number to carry" - the retype
+        // starts a fresh derived line set, never a borrowed override.
+        OpParams::Contour { .. }
+        | OpParams::Trace { .. }
+        | OpParams::Drill { .. }
+        | OpParams::Finish3D { .. }
+        | OpParams::Contour5D { .. }
+        | OpParams::Parallel5D { .. } => None,
     }
 }
 
@@ -127,7 +141,8 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Pocket3D { stepdown, .. }
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
-        OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. } => None,
+        OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
+        | OpParams::Contour5D { .. } | OpParams::Parallel5D { .. } => None,
     }
 }
 
@@ -142,7 +157,9 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
         | OpParams::Drill { top_z, .. }
-        | OpParams::Finish3D { top_z, .. } => Some(*top_z),
+        | OpParams::Finish3D { top_z, .. }
+        | OpParams::Contour5D { top_z, .. }
+        | OpParams::Parallel5D { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -157,7 +174,9 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Pocket3D { bottom_z, .. }
         | OpParams::Slot { bottom_z, .. }
         | OpParams::Trace { bottom_z, .. }
-        | OpParams::Finish3D { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::Finish3D { bottom_z, .. }
+        | OpParams::Contour5D { bottom_z, .. }
+        | OpParams::Parallel5D { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -175,7 +194,9 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::Slot { retract_z, .. }
         | OpParams::Trace { retract_z, .. }
         | OpParams::Drill { retract_z, .. }
-        | OpParams::Finish3D { retract_z, .. } => *retract_z,
+        | OpParams::Finish3D { retract_z, .. }
+        | OpParams::Contour5D { retract_z, .. }
+        | OpParams::Parallel5D { retract_z, .. } => *retract_z,
         OpParams::Face { .. } => None,
     }
 }
@@ -354,6 +375,47 @@ fn seed_finish3d(c: &Carried) -> OpParams {
     }
 }
 
+/// The 5-axis stage C seeds: the finish seed's numbers with the pose
+/// at rest - lead and lag 0 (straight up the normal, the identity
+/// pose) and a 90-degree cone (the reach the machine letters refuse
+/// at posting anyway; the cone only folds when a lean is asked for).
+/// A retype FROM a tilted planar op loses the index with the kind
+/// that owned it, like every non-planar seed (`Carried`'s tilt note).
+fn seed_contour5d(c: &Carried) -> OpParams {
+    OpParams::Contour5D {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    }
+}
+
+fn seed_parallel5d(c: &Carried) -> OpParams {
+    OpParams::Parallel5D {
+        tolerance: 0.05,
+        // None = the stepover cos-law derives spacing from the
+        // tolerance, the finish's own law.
+        stepover: None,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    }
+}
+
 /// One kind, as data: its name, the digest byte `stamp_with` writes (the
 /// tag was a magic literal in eight arms until M5.0.2 - it is order, and
 /// order belongs in the table), the verify law the generator picks, and
@@ -454,6 +516,27 @@ impl KindInfo {
             mode: Mode::Envelope,
             seed: seed_finish3d,
         },
+        KindInfo {
+            ty: OpType::Contour5D,
+            label: "5-Axis Contour",
+            caption: "5-Axis Contour",
+            tag: 8,
+            // Same measured envelope law (M5.1 stage C): the ball is
+            // the cutter and a sphere's envelope is rotation-invariant,
+            // so the pose changes what the SHANK sees, not what the
+            // ball leaves - and the shank's question is the stage-A
+            // leaning band law's, run on the stamped moves.
+            mode: Mode::Envelope,
+            seed: seed_contour5d,
+        },
+        KindInfo {
+            ty: OpType::Parallel5D,
+            label: "5-Axis Parallel",
+            caption: "5-Axis Parallel",
+            tag: 9,
+            mode: Mode::Envelope,
+            seed: seed_parallel5d,
+        },
     ];
 }
 
@@ -471,6 +554,8 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[5].label,
     KindInfo::ALL[6].label,
     KindInfo::ALL[7].label,
+    KindInfo::ALL[8].label,
+    KindInfo::ALL[9].label,
 ];
 
 impl OpType {
@@ -487,6 +572,8 @@ impl OpType {
             OpType::Drill => 5,
             OpType::Pocket3D => 6,
             OpType::Finish3D => 7,
+            OpType::Contour5D => 8,
+            OpType::Parallel5D => 9,
         }
     }
 

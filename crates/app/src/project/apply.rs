@@ -184,6 +184,15 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // bump since v6.
         file.version = 23;
     }
+    if file.version == 23 {
+        // v23 -> v24: the 5-axis twins arrive as two new params
+        // variants (`contour5d`, `parallel5d`, M5.1 stage C), which no
+        // v23 file can contain - the kind tags did not exist, and
+        // `validate_kind` already refuses an unknown params tag before
+        // anything is written. No existing shape changed; step-up is
+        // the stamp itself, like every bump since v6.
+        file.version = 24;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

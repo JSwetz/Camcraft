@@ -100,7 +100,9 @@ pub fn region_z(
         | OpParams::Trace { top_z, .. }
         | OpParams::Drill { top_z, .. }
         | OpParams::Pocket3D { top_z, .. }
-        | OpParams::Finish3D { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::Finish3D { top_z, .. }
+        | OpParams::Contour5D { top_z, .. }
+        | OpParams::Parallel5D { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -166,7 +168,11 @@ pub fn resolve_params(
         | OpParams::Slot { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Pocket3D { clearance_z, retract_z, top_z, bottom_z, .. }
-        | OpParams::Finish3D { clearance_z, retract_z, top_z, bottom_z, .. } => (
+        | OpParams::Finish3D { clearance_z, retract_z, top_z, bottom_z, .. }
+        // The 5-axis kinds are the finish's height shape exactly: the
+        // same four named heights, the same optional hop.
+        | OpParams::Contour5D { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Parallel5D { clearance_z, retract_z, top_z, bottom_z, .. } => (
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),

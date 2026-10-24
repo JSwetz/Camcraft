@@ -1340,10 +1340,166 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
+        // The 5-axis twins (M5.1 stage C). The heights, feeds and the
+        // scallop law are the finish's words verbatim - the paths ARE
+        // the finish's paths with a stamped pose. There is no Pattern
+        // combo: the kind is the choice of kinematic (contour = the
+        // ring ladder, parallel = the raster), and the new content is
+        // the axis trio the `multiaxis` law reads.
+        OpParams::Contour5D {
+            tolerance,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "contour5d.clearance");
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "contour5d.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "contour5d.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "contour5d.bottom");
+                ui.label("Top is the first ring's plane, Bottom the last level's");
+            }
+            if tab == SEC_PASSES {
+                axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the finish budget: levels drop by 2 x sqrt(tool radius x tolerance), so the cusp under the ball stays within it");
+                ui.label("the rings are the waterline's; the leaning spindle is what makes this a 5-axis op");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
+        OpParams::Parallel5D {
+            tolerance,
+            stepover,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "parallel5d.clearance");
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "parallel5d.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "parallel5d.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "parallel5d.bottom");
+                ui.label("Top is the first line's plane, Bottom the last one's");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Stepover");
+                let mut over = stepover.is_some();
+                if ui.checkbox(&mut over, "Set line spacing").changed() {
+                    *stepover = if over {
+                        Some((24.0 * tolerance.max(1e-9)).sqrt())
+                    } else {
+                        None
+                    };
+                }
+                if let Some(s) = stepover {
+                    num(ui, u, s);
+                    ui.label("flat-ground spacing; on a slope it follows the terrain's cosine");
+                } else {
+                    ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
+                }
+                axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the finish budget: lines are spaced and levels drop from it, so the cusp under the ball stays within it");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);
     }
+}
+
+/// The axis trio both 5-axis kinds carry (M5.1 stage C). The law lives
+/// in `camcraft_app::multiaxis::tilt`: lead leans along the feed, lag
+/// leans across it, and the max tilt is the cone half-angle the
+/// spindle may open from the surface normal - past it the commanded
+/// direction folds onto the cone's edge. All three are degrees, so
+/// they ride `num_plain`: the unit is a lens on lengths and feeds,
+/// never on angles.
+fn axis_editor(ui: &mut Ui, lead_deg: &mut f64, lag_deg: &mut f64, max_tilt_deg: &mut f64) {
+    field(ui, "Tool lead angle (deg)");
+    num_plain(ui, lead_deg);
+    ui.label("lean with the feed, off the surface normal - tips the shank away from the wall ahead of the cut");
+    field(ui, "Tool lag angle (deg)");
+    num_plain(ui, lag_deg);
+    ui.label("lean across the feed (side tilt) - clears the wall the tool has just cut");
+    field(ui, "Max tilt (deg)");
+    num_plain(ui, max_tilt_deg);
+    ui.label("the cone the spindle may open from the normal; where the surface demands more, the lean folds onto the cone's edge");
 }
 
 pub(crate) fn field(ui: &mut Ui, label: &str) {

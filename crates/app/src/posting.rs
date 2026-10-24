@@ -562,6 +562,22 @@ impl HeightRefs for OpParams {
                 top_z,
                 bottom_z,
                 ..
+            }
+            // The 5-axis twins carry the finish's height shape one for
+            // one (M5.1 stage C) - the optional hop included.
+            | OpParams::Contour5D {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
+            | OpParams::Parallel5D {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
             } => {
                 let mut v = vec![clearance_z, top_z, bottom_z];
                 v.extend(retract_z.iter());

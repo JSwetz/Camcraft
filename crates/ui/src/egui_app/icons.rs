@@ -36,6 +36,8 @@ pub(crate) enum Icon {
     Trace,
     Drill,
     Finish3D,
+    Contour5D,
+    Parallel5D,
     Undo,
     Redo,
     Delete,
@@ -50,7 +52,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 25] = [
+    pub(crate) const ALL: [Icon; 27] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -66,6 +68,8 @@ impl Icon {
         Icon::Trace,
         Icon::Drill,
         Icon::Finish3D,
+        Icon::Contour5D,
+        Icon::Parallel5D,
         Icon::Undo,
         Icon::Redo,
         Icon::Delete,
@@ -103,6 +107,12 @@ impl Icon {
             // contour rings tightening toward the high point - the map
             // reading of a waterline finish. Ours to give.
             Icon::Finish3D => include_bytes!("../../../../assets/ui/finish3d.png"),
+            // Original drawings (no Tabler 5-axis glyph exists): the dome
+            // cross-section with the leaning ball-end - flank contour
+            // lines for the ring ladder, a straight chord for the
+            // raster. Ours to give.
+            Icon::Contour5D => include_bytes!("../../../../assets/ui/contour5d.png"),
+            Icon::Parallel5D => include_bytes!("../../../../assets/ui/parallel5d.png"),
             Icon::Undo => include_bytes!("../../../../assets/ui/arrow-back-up.png"),
             Icon::Redo => include_bytes!("../../../../assets/ui/arrow-forward-up.png"),
             Icon::Delete => include_bytes!("../../../../assets/ui/trash.png"),
@@ -138,6 +148,8 @@ impl Icon {
             Icon::Trace => "icon-trace",
             Icon::Drill => "icon-drill",
             Icon::Finish3D => "icon-finish3d",
+            Icon::Contour5D => "icon-contour5d",
+            Icon::Parallel5D => "icon-parallel5d",
             Icon::Undo => "icon-undo",
             Icon::Redo => "icon-redo",
             Icon::Delete => "icon-delete",

@@ -44,6 +44,20 @@ pub(super) fn build_sups(facets: &[Triangle], r: f64) -> Vec<Sup> {
 /// decomposition (published closed form - dot products and one
 /// barycentric solve, no iteration).
 pub(super) fn dist2_pt_tri(p: Point3, t: &[Point3; 3]) -> f64 {
+    let q = closest_pt_tri(p, t);
+    let (dx, dy, dz) = (p.x - q.x, p.y - q.y, p.z - q.z);
+    (dx * dx + dy * dy + dz * dz).max(0.0)
+}
+
+/// The closest point of the triangle to `p` - the contact point of a
+/// ball centered at `p` the instant it touches. The Voronoi-region
+/// decomposition is published closed form (dot products and one
+/// barycentric solve, no iteration); `dist2_pt_tri` above IS this
+/// function's distance, so the two can never disagree. Made
+/// crate-public for M5.1 stage C: the 5-axis stamp asks "what facet
+/// point does this ball-center rest on" - the same question the
+/// raster's clearance law asks, from the other side.
+pub(crate) fn closest_pt_tri(p: Point3, t: &[Point3; 3]) -> Point3 {
     let (a, b, c) = (t[0], t[1], t[2]);
     let (abx, aby, abz) = (b.x - a.x, b.y - a.y, b.z - a.z);
     let (acx, acy, acz) = (c.x - a.x, c.y - a.y, c.z - a.z);
@@ -59,9 +73,9 @@ pub(super) fn dist2_pt_tri(p: Point3, t: &[Point3; 3]) -> f64 {
     let vc = d1 * d4 - d3 * d2;
     let vb = d5 * d2 - d1 * d6;
     let va = d3 * d6 - d5 * d4;
-    // One region per arm; each computes the closest point q, and the
+    // One region per arm; each computes the closest point, and the
     // arms are exhaustive by the published case proof.
-    let q = if d1 <= 0.0 && d2 <= 0.0 {
+    if d1 <= 0.0 && d2 <= 0.0 {
         a
     } else if d3 >= 0.0 && d4 <= d3 {
         b
@@ -84,9 +98,7 @@ pub(super) fn dist2_pt_tri(p: Point3, t: &[Point3; 3]) -> f64 {
             a.y + aby * v + acy * w,
             a.z + abz * v + acz * w,
         )
-    };
-    let (dx, dy, dz) = (p.x - q.x, p.y - q.y, p.z - q.z);
-    (dx * dx + dy * dy + dz * dz).max(0.0)
+    }
 }
 
 /// The center is clear when every facet keeps at least `r` of ball

@@ -165,6 +165,61 @@ impl OpParams {
                     // happen at the gate, never at the emitter.
                     && (0.0..90.0).contains(ramp_angle)
             }
+            OpParams::Contour5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
+            }
+            | OpParams::Parallel5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
+            } => {
+                // The finish door's shape (no stepdown - the scallop
+                // law authors it), plus the pose door (M5.1 stage C):
+                // the two leans are angles OFF the normal, so each is
+                // confined to a quadrant - past 90 degrees the tool
+                // would point along the surface it is cutting, and no
+                // combination of lead and lag states is meant to reach
+                // for that. The clamp is a cone half-angle: above 180
+                // nothing is excluded, and at or below 0 the cone
+                // holds no direction at all - both are typos about the
+                // machine's reach, refused here rather than silently
+                // ignored at the stamp. Parallel5D's optional stepover
+                // rides the same Some-or-derived law as the finish's.
+                let angle = |v: &f64| v.is_finite() && v.abs() <= 90.0;
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && angle(lead_deg)
+                    && angle(lag_deg)
+                    && *max_tilt_deg > 0.0
+                    && *max_tilt_deg <= 180.0
+                    && (match self {
+                        OpParams::Parallel5D { stepover, .. } => stepover.is_none_or(pos),
+                        _ => true,
+                    })
+            }
             OpParams::Slot {
                 a,
                 b,

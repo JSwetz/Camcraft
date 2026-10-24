@@ -87,6 +87,9 @@ mod support;
 pub use params::{
     scallop_stepdown, scallop_stepover, Finish3DParams, FinishPattern,
 };
+// The 5-axis stamp's contact question (M5.1 C): the same Voronoi
+// closest-point law the raster clearance uses, crate-visible.
+pub(crate) use support::closest_pt_tri;
 pub use polar::{radial, spiral};
 pub use raster::parallel;
 pub use rings::waterline;

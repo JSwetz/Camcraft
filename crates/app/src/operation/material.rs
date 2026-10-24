@@ -241,6 +241,12 @@ pub(super) fn region_for_src(
                     | OpParams::Drill { .. }
                     | OpParams::Pocket3D { .. }
                     | OpParams::Finish3D { .. }
+                    // The 5-axis kinds are mesh-driven like the finish:
+                    // the rings and raster lines chase the model at
+                    // every plane, so a picked loop could only disagree
+                    // with the path (M5.1 C).
+                    | OpParams::Contour5D { .. }
+                    | OpParams::Parallel5D { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -288,9 +294,13 @@ pub(super) fn region_for(
         OpParams::Pocket3D { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
-        // Same silhouette law for the finish: the rings chase the mesh
-        // at every plane, the region only says where the model shadows.
-        OpParams::Finish3D { .. } => {
+        // Same silhouette law for the finish - and for its 5-axis
+        // twins, whose paths ARE the finish's paths with a stamped
+        // pose: the rings chase the mesh at every plane, the region
+        // only says where the model shadows.
+        OpParams::Finish3D { .. }
+        | OpParams::Contour5D { .. }
+        | OpParams::Parallel5D { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

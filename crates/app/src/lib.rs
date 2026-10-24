@@ -13,6 +13,7 @@ pub use camcraft_geometry::geo2d;
 pub mod geometry;
 pub use camcraft_motion::machining2d;
 pub use camcraft_motion::machining3d;
+pub use camcraft_motion::multiaxis;
 pub mod machine;
 pub mod model;
 pub mod operation;

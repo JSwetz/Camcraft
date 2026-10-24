@@ -291,6 +291,64 @@ impl OpParams {
                 }
                 w(h, *ramp_angle);
             }
+            // The 5-axis twins (M5.1 stage C, tags 8/9): the finish's
+            // scalar law with the pattern byte dropped - the tag
+            // already names the kinematic - and the axis trio
+            // appended, because leaning the spindle rewrites every
+            // pose on the path. The parallel's optional stepover rides
+            // the same Some/None split as the finish's: a derived
+            // spacing must never digest as the number 0.
+            OpParams::Contour5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+            }
+            | OpParams::Parallel5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
+            } => {
+                // The or-pattern cannot bind the parallel's stepover
+                // (E0642: one name, one side) - read it back below.
+                w(h, *tolerance);
+                if let OpParams::Parallel5D { stepover, .. } = self {
+                    match stepover {
+                        Some(s) => {
+                            h.write_u8(1);
+                            w(h, *s);
+                        }
+                        None => h.write_u8(0),
+                    }
+                }
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*feed, *plunge_feed] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                wh_opt(h, *retract_z);
+                for v in [*lead_deg, *lag_deg, *max_tilt_deg] {
+                    w(h, v);
+                }
+            }
             OpParams::Slot {
                 a,
                 b,

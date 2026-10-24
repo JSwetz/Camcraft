@@ -177,6 +177,76 @@ impl ParamsDto {
                 min_step: *min_step,
                 ramp_angle: *ramp_angle,
             },
+            // The 5-axis twins (M5.1 stage C): one shape, mirrored.
+            // The contour arm has no stepover to name, so the pattern
+            // reads it back (the or-pattern law again).
+            OpParams::Contour5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+            }
+            | OpParams::Parallel5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
+            } => {
+                let stepover = match p {
+                    OpParams::Parallel5D { stepover, .. } => Some(*stepover),
+                    _ => None,
+                };
+                let heights = (
+                    (*clearance_z).into(),
+                    (*top_z).into(),
+                    (*bottom_z).into(),
+                    (*retract_z).map(Into::into),
+                );
+                match stepover {
+                    Some(stepover) => ParamsDto::Parallel5D {
+                        tolerance: *tolerance,
+                        stepover,
+                        clearance_z: heights.0,
+                        top_z: heights.1,
+                        bottom_z: heights.2,
+                        feed: *feed,
+                        plunge_feed: *plunge_feed,
+                        climb: *climb,
+                        retract_z: heights.3,
+                        lead_deg: *lead_deg,
+                        lag_deg: *lag_deg,
+                        max_tilt_deg: *max_tilt_deg,
+                    },
+                    None => ParamsDto::Contour5D {
+                        tolerance: *tolerance,
+                        clearance_z: heights.0,
+                        top_z: heights.1,
+                        bottom_z: heights.2,
+                        feed: *feed,
+                        plunge_feed: *plunge_feed,
+                        climb: *climb,
+                        retract_z: heights.3,
+                        lead_deg: *lead_deg,
+                        lag_deg: *lag_deg,
+                        max_tilt_deg: *max_tilt_deg,
+                    },
+                }
+            }
             OpParams::Slot {
                 a,
                 b,
@@ -437,6 +507,61 @@ impl ParamsDto {
                 ramp: *ramp,
                 min_step: *min_step,
                 ramp_angle: *ramp_angle,
+            },
+            // The 5-axis twins (M5.1 stage C): the same shape read
+            // back - the contour has no stepover key to lose, and the
+            // parallel's None means the cos-law, not zero.
+            ParamsDto::Contour5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+            } => OpParams::Contour5D {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: *max_tilt_deg,
+            },
+            ParamsDto::Parallel5D {
+                tolerance,
+                stepover,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+            } => OpParams::Parallel5D {
+                tolerance: *tolerance,
+                stepover: *stepover,
+                clearance_z: (*clearance_z).into(),
+                retract_z: (*retract_z).map(Into::into),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: *max_tilt_deg,
             },
             ParamsDto::Slot {
                 a,

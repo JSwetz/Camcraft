@@ -269,6 +269,66 @@ pub enum OpParams {
         /// v17's chain certified. Inert while `ramp` is false.
         ramp_angle: f64,
     },
+    /// Simultaneous 5-axis level finishing (M5.1 stage C): the waterline
+    /// ring ladder a [`Self::Finish3D`] Waterline cuts, with a tool-axis
+    /// pose stamped on every cutting move. The positions are the
+    /// ball-center paths - a sphere's envelope is rotation-invariant;
+    /// what makes the path 5-axis is where the spindle points: the
+    /// contact normal, leaned `lead_deg` forward along the feed and
+    /// `lag_deg` sideways across it, folded onto the cone of
+    /// `max_tilt_deg` wherever that lean would pass the machine's
+    /// reach ([`crate::multiaxis`]'s law). The angles exist to keep the
+    /// shank clear of steep walls; the envelope verifier measures what
+    /// the ball leaves, and the stage-A leaning band law judges the
+    /// steel. Region, heights, levels and refusals follow the finish
+    /// op's laws exactly.
+    Contour5D {
+        /// Surface deviation budget, mm - the same author as the
+        /// finish op's: it sets the scallop stepdown, the scan
+        /// resolution and the arc-fit chord, and it is what the
+        /// envelope verdict measures against.
+        tolerance: f64,
+        clearance_z: Height,
+        /// Hop plane between rings of one level; `None` hops to
+        /// clearance, like the pocket family.
+        retract_z: Option<Height>,
+        /// Tip-Z of the first (highest) ring.
+        top_z: Height,
+        /// Tip-Z of the last ring.
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// Forward lean off the contact normal, degrees, in the
+        /// direction of travel (the cutting literature's lead angle).
+        lead_deg: f64,
+        /// Sideways lean off the contact normal, degrees, away from
+        /// the uncut wall (the literature's tilt/side-lean angle).
+        lag_deg: f64,
+        /// The cone half-angle the pose may never leave, degrees -
+        /// the machine's tilt reach stated by the operation.
+        max_tilt_deg: f64,
+    },
+    /// The raster sibling of [`Self::Contour5D`]: the Z-following
+    /// parallel pass with the same axis law. No `pattern` field - the
+    /// kind IS the choice of kinematic (the two-kinds-not-one-table
+    /// decision, RECOMMENDED.md).
+    Parallel5D {
+        tolerance: f64,
+        /// Raster line spacing, mm; `None` follows the stepover
+        /// cos-law from the tolerance instead.
+        stepover: Option<f64>,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
 }
 
 impl OpParams {
@@ -283,6 +343,8 @@ impl OpParams {
             OpParams::Drill { .. } => OpType::Drill,
             OpParams::Pocket3D { .. } => OpType::Pocket3D,
             OpParams::Finish3D { .. } => OpType::Finish3D,
+            OpParams::Contour5D { .. } => OpType::Contour5D,
+            OpParams::Parallel5D { .. } => OpType::Parallel5D,
         }
     }
 
@@ -298,9 +360,15 @@ impl OpParams {
             | OpParams::Pocket { tilt, .. }
             | OpParams::Slot { tilt, .. }
             | OpParams::Trace { tilt, .. } => *tilt,
-            OpParams::Drill { .. } | OpParams::Pocket3D { .. } | OpParams::Finish3D { .. } => {
-                None
-            }
+            // The 5-axis kinds (M5.1 C) are the third answer, not the
+            // second: the PART stands still and the TOOL AXIS moves -
+            // a 3+2 index inside them would command the machine to
+            // hold a pose the stamp is already writing per move.
+            OpParams::Drill { .. }
+            | OpParams::Pocket3D { .. }
+            | OpParams::Finish3D { .. }
+            | OpParams::Contour5D { .. }
+            | OpParams::Parallel5D { .. } => None,
         }
     }
 
@@ -315,7 +383,9 @@ impl OpParams {
             | OpParams::Trace { clearance_z, .. }
             | OpParams::Drill { clearance_z, .. }
             | OpParams::Pocket3D { clearance_z, .. }
-            | OpParams::Finish3D { clearance_z, .. } => *clearance_z,
+            | OpParams::Finish3D { clearance_z, .. }
+            | OpParams::Contour5D { clearance_z, .. }
+            | OpParams::Parallel5D { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -333,7 +403,9 @@ impl OpParams {
             | OpParams::Trace { top_z, .. }
             | OpParams::Drill { top_z, .. }
             | OpParams::Pocket3D { top_z, .. }
-            | OpParams::Finish3D { top_z, .. } => *top_z,
+            | OpParams::Finish3D { top_z, .. }
+            | OpParams::Contour5D { top_z, .. }
+            | OpParams::Parallel5D { top_z, .. } => *top_z,
         }
     }
 
@@ -390,7 +462,9 @@ impl OpParams {
                 f(*top_z);
                 f(*bottom_z);
             }
-            OpParams::Finish3D { clearance_z, retract_z, top_z, bottom_z, .. } => {
+            OpParams::Finish3D { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::Contour5D { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::Parallel5D { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);

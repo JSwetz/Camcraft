@@ -240,6 +240,53 @@ pub enum ParamsDto {
         #[serde(default = "default_ramp_angle")]
         ramp_angle: f64,
     },
+    /// Declared at v24 with the simultaneous-axis kinds (M5.1 stage
+    /// C). The renames state the tags for the familiar reason - the
+    /// automatic snake_case of `Contour5D` would be `contour5_d`,
+    /// and a file contract deserves the cleaner word. No `pattern`
+    /// key: the kind IS the choice of kinematic (the two-kinds-not-
+    /// one-table decision), and no stepdown/ramp/min_step keys: the
+    /// scallop law authors the ladder and the plunge owns the
+    /// entry. The axis trio is written always - it is the whole
+    /// content of the kind, and an absent lean would silently
+    /// re-post someone's tilted program vertical.
+    #[serde(rename = "contour5d")]
+    Contour5D {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// Absent means hop-to-clearance, the pocket family's law.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
+    /// Declared at v24, the parallel twin (M5.1 stage C). The one
+    /// extra field is the raster's optional stepover, absent-means-
+    /// derived exactly as the finish's.
+    #[serde(rename = "parallel5d")]
+    Parallel5D {
+        tolerance: f64,
+        /// Absent follows the stepover cos-law from the tolerance.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stepover: Option<f64>,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

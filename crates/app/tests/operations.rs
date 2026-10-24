@@ -2997,3 +2997,245 @@ fn finish3d_refuses_bad_tolerance_at_creation() {
         Err(CommandError::Invalid(_))
     ));
 }
+
+// ---------------------------------------------------------------------------
+// M5.1c: the 5-axis twins through the command chain. The law under test
+// lives in `multiaxis` - the ball ladder is the waterline/raster path
+// and what is NEW is the pose each move holds - so at this level the
+// checks are that the pose survives the trip: an Ok verdict, leaning
+// unit axes on the contact moves, nothing stated in air, and the
+// refusals (flat tool, nonsense pose) named at the right door.
+// ---------------------------------------------------------------------------
+
+/// The dome's rings stand 22..45 degrees off vertical, so a stamped
+/// path must show a leaning spindle where the finish's never does.
+fn pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
+    let mut leaned = 0usize;
+    for m in &path.moves {
+        if let Some(a) = m.axis {
+            assert!(a.iter().all(|v| v.is_finite()), "{name}: a non-finite pose on a move");
+            let len = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+            assert!((len - 1.0).abs() < 1e-6, "{name}: a pose of length {len}");
+            if m.kind == MoveKind::Feed && (a[0] * a[0] + a[1] * a[1]).sqrt() > 1e-3 {
+                leaned += 1;
+            }
+        }
+        if m.kind == MoveKind::Rapid {
+            assert!(m.axis.is_none(), "{name}: a rapid states a pose");
+        }
+    }
+    assert!(leaned > 0, "{name}: no move holds a leaning axis");
+}
+
+fn contour5d_params(top_z: f64, bottom_z: f64) -> OpParams {
+    OpParams::Contour5D {
+        tolerance: 0.1,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 15.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+    }
+}
+
+/// The dome's kin at golden-sized tessellation (6x24): the raster's
+/// fixture. The march asks every shallow facet at every sample, so
+/// the big dome's raster is the IGNORED lane's (its motion-side twin
+/// says "minutes in debug" on its tin) - the debug ladder rides the
+/// hill, where the same laws cost seconds.
+fn hill_mesh() -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::{Point3, Triangle};
+    const TAU: f64 = std::f64::consts::TAU;
+    let (radius, polar_max, n_lat, n_lon) = (12.0, std::f64::consts::FRAC_PI_3, 6usize, 24usize);
+    let mut facets = Vec::new();
+    let ring = |k: usize| -> Vec<Point3> {
+        let ph = polar_max * k as f64 / n_lat as f64;
+        let (z, rr) = (radius * ph.cos(), radius * ph.sin());
+        (0..n_lon)
+            .map(|j| {
+                let th = TAU * j as f64 / n_lon as f64;
+                Point3::new(rr * th.cos(), rr * th.sin(), z)
+            })
+            .collect()
+    };
+    let apex = Point3::new(0.0, 0.0, radius);
+    let first = ring(1);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, first[j], first[(j + 1) % n_lon]));
+    }
+    for k in 1..n_lat {
+        let ra = ring(k);
+        let rb = ring(k + 1);
+        for j in 0..n_lon {
+            let j2 = (j + 1) % n_lon;
+            facets.push(Triangle::new(ra[j], rb[j], rb[j2]));
+            facets.push(Triangle::new(ra[j], rb[j2], ra[j2]));
+        }
+    }
+    let rim = ring(n_lat);
+    let center = Point3::new(0.0, 0.0, radius * polar_max.cos());
+    for j in 0..n_lon {
+        facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
+    }
+    camcraft_app::geometry::Mesh { facets }
+}
+
+/// Apex 12, rim 60 degrees: z = 12 cos 60 = 6, and normals tilt
+/// past the raster's 45-degree jurisdiction by the equator's rim.
+const HILL_RIM_Z: f64 = 6.0;
+
+fn parallel5d_params(top_z: f64, bottom_z: f64) -> OpParams {
+    OpParams::Parallel5D {
+        tolerance: 0.1,
+        stepover: Some(2.0),
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 15.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+    }
+}
+
+#[test]
+fn contour5d_generates_leaning_axes_and_verifies_clean() {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "C5A",
+            "BN-0600",
+            SrcRef::Entity("dome".into()),
+            contour5d_params(18.0, DOME_RIM_Z),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "C5A").expect("generate"));
+    assert_eq!(status(&world, "C5A"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    let t = cache(&world, "C5A").expect("cached").path;
+    pose_law("contour5d", &t);
+    let plunges: Vec<f64> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .map(|m| m.to.z)
+        .collect();
+    assert!(plunges.last() == Some(&DOME_RIM_Z), "the bottom ring snaps to the bottom: {plunges:?}");
+}
+
+#[test]
+fn parallel5d_generates_leaning_axes_and_verifies_clean() {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 15.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("hill", hill_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "P5A",
+            "BN-0600",
+            SrcRef::Entity("hill".into()),
+            parallel5d_params(10.0, HILL_RIM_Z),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "P5A").expect("generate"));
+    assert_eq!(status(&world, "P5A"), OpStatus::Ok);
+    let t = cache(&world, "P5A").expect("cached").path;
+    pose_law("parallel5d", &t);
+    // The raster reads Top/Bottom as the first and last line's planes,
+    // not a ladder of rungs: no cut move may sink below the Bottom.
+    let lowest = t
+        .moves
+        .iter()
+        .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
+        .map(|m| m.to.z)
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        lowest >= HILL_RIM_Z - 1e-9,
+        "the raster sank below its Bottom plane: {lowest}"
+    );
+    let on_flank = t
+        .moves
+        .iter()
+        .any(|m| m.kind == MoveKind::Feed && (m.to.z - HILL_RIM_Z).abs() < 1e-9);
+    assert!(on_flank, "nothing reached the Bottom plane - the flank went uncut");
+}
+
+#[test]
+fn axis_twins_refuse_a_flat_bottomed_tool_by_name() {
+    // Same law as the finish's, and the refusal says WHICH twin: a
+    // silent fallback to a ball dressed as an end mill is the gouge.
+    for (name, params) in [
+        ("TwinC", contour5d_params(18.0, DOME_RIM_Z)),
+        ("TwinP", parallel5d_params(18.0, DOME_RIM_Z)),
+    ] {
+        let world = new_world();
+        let mut history = History::default();
+        box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+        add_tool(&world, &mut history, "EM-0600-4FL");
+        history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "EM-0600-4FL", SrcRef::Entity("dome".into()), params)
+                .expect("create"),
+        );
+        let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
+            .err()
+            .expect("the twins must refuse a flat tool")
+        else {
+            panic!("expected a machining refusal");
+        };
+        assert!(msg.contains("ball-nose"), "{msg}");
+        assert!(msg.contains("5-Axis"), "{msg}");
+        assert_eq!(status(&world, name), OpStatus::Never, "the refusal leaves no path behind");
+    }
+}
+
+#[test]
+fn axis_twins_refuse_nonsense_pose_at_creation() {
+    // Validate early at the command door: a zero deviation budget (the
+    // finish's law) and a 91-degree lean (the pose door's) never reach
+    // a generator.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    let mk = |op: OpParams| {
+        CreateOperation::new(&world, "PoseX", "BN-0600", SrcRef::Entity("dome".into()), op)
+    };
+    let OpParams::Contour5D { tolerance, .. } = contour5d_params(18.0, DOME_RIM_Z) else {
+        unreachable!()
+    };
+    let mut zero_tol = contour5d_params(18.0, DOME_RIM_Z);
+    if let OpParams::Contour5D { tolerance: t, .. } = &mut zero_tol {
+        *t = 0.0;
+    }
+    assert!(matches!(mk(zero_tol), Err(CommandError::Invalid(_))), "tol {tolerance}");
+    let mut flat_lean = parallel5d_params(18.0, DOME_RIM_Z);
+    if let OpParams::Parallel5D { lead_deg, .. } = &mut flat_lean {
+        *lead_deg = 91.0;
+    }
+    assert!(matches!(mk(flat_lean), Err(CommandError::Invalid(_))));
+    let mut no_cone = contour5d_params(18.0, DOME_RIM_Z);
+    if let OpParams::Contour5D { max_tilt_deg, .. } = &mut no_cone {
+        *max_tilt_deg = 0.0;
+    }
+    assert!(matches!(mk(no_cone), Err(CommandError::Invalid(_))));
+}

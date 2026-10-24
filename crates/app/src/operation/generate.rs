@@ -389,6 +389,83 @@ pub fn generate(
             };
             (region, path)
         }
+        // The simultaneous-axis kinds (M5.1 stage C). The ball-center
+        // path is the finish's own - a sphere's envelope is rotation-
+        // invariant, so leaning the spindle changes what the SHANK
+        // sees, not what the ball leaves - and the kind adds the POSE
+        // to every cut move. No ramp, no min_step: the plunge owns
+        // the first contact, and the scallop law alone authors the
+        // ladder. The two arms are the same generator pair the finish's
+        // pattern combo runs, with the axis stamp bolted on.
+        OpParams::Contour5D {
+            tolerance,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            ..
+        }
+        | OpParams::Parallel5D {
+            tolerance,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            ..
+        } => {
+            let is_contour = matches!(&op.params, OpParams::Contour5D { .. });
+            // The contour has no stepover field to bind (the or-pattern
+            // binds one name on one side and E0642s); read it here,
+            // where the parallel's own arm answers.
+            let stepover = match &op.params {
+                OpParams::Parallel5D { stepover, .. } => *stepover,
+                _ => None,
+            };
+            if tool.kind != crate::tools::ToolKind::BallNose {
+                return Err(GenError::Invalid(format!(
+                    "{} needs a ball-nose tool, '{}' is a {}",
+                    if is_contour { "5-Axis Contour" } else { "5-Axis Parallel" },
+                    op.tool,
+                    tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let fp = Finish3DParams {
+                pattern: if is_contour {
+                    finishing3d::FinishPattern::Waterline
+                } else {
+                    finishing3d::FinishPattern::Parallel
+                },
+                stepover: if is_contour { None } else { stepover },
+                tool_diameter: d,
+                tolerance: *tolerance,
+                clearance_z: hl.clearance,
+                retract_z: hl.retract,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                ramp: false,
+                min_step: None,
+                ramp_angle: 45.0,
+            };
+            let axis = crate::multiaxis::AxisControl {
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: Some(*max_tilt_deg),
+            };
+            let path = if is_contour {
+                crate::multiaxis::contour5d(&material.facets, &fp, &axis)?
+            } else {
+                crate::multiaxis::parallel5d(&material.facets, &fp, &axis)?
+            };
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -478,7 +555,11 @@ pub fn generate(
         OpParams::Face { .. }
         | OpParams::Trace { .. }
         | OpParams::Drill { .. }
-        | OpParams::Finish3D { .. } => 0.0,
+        | OpParams::Finish3D { .. }
+        // The 5-axis kinds leave no stock - the ball path is the
+        // finish's path, and the pose adds no material law.
+        | OpParams::Contour5D { .. }
+        | OpParams::Parallel5D { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -496,7 +577,10 @@ pub fn generate(
                     // untouched.
                     model: matches!(
                         &op.params,
-                        OpParams::Pocket3D { .. } | OpParams::Finish3D { .. }
+                        OpParams::Pocket3D { .. }
+                            | OpParams::Finish3D { .. }
+                            | OpParams::Contour5D { .. }
+                            | OpParams::Parallel5D { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -507,9 +591,15 @@ pub fn generate(
                     gouge_tol: GOUGE_TOL,
                     z_tol: Z_TOL,
                     // The finish op's envelope budget is its own tolerance;
-                    // no other kind runs the envelope law.
+                    // no other kind runs the envelope law - and the
+                    // 5-axis kinds ARE the envelope law with a leaning
+                    // shank, so they carry their tolerance the same way
+                    // (the ball's path is identical; the envelope scan
+                    // never sees the difference).
                     finish_tol: match &op.params {
-                        OpParams::Finish3D { tolerance, .. } => Some(*tolerance),
+                        OpParams::Finish3D { tolerance, .. }
+                        | OpParams::Contour5D { tolerance, .. }
+                        | OpParams::Parallel5D { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

@@ -329,6 +329,8 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Drill => Icon::Drill,
         OpType::Pocket3D => Icon::Pocket,
         OpType::Finish3D => Icon::Finish3D,
+        OpType::Contour5D => Icon::Contour5D,
+        OpType::Parallel5D => Icon::Parallel5D,
     }
 }
 

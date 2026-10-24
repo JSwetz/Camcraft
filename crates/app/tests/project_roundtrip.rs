@@ -104,11 +104,13 @@ fn wrong_version_is_refused() {
     // v19 -> v20, and v20_file_steps_to_v21_and_the_setups_grammar_round_trips
     // v20 -> v21, and v21_file_steps_to_v22_and_the_fixture_tag_round_trips
     // v21 -> v22, and the_post_choice_round_trips_and_a_v22_file_means_
-    // the_built_in v22 -> v23 (the additive top-level `post` key).
-    let text = r#"{"version": 24, "entities": []}"#;
+    // the_built_in v22 -> v23 (the additive top-level `post` key), and
+    // v23_file_steps_to_v24_and_the_5axis_grammar_round_trips v23 -> v24
+    // (the `contour5d` / `parallel5d` params tags).
+    let text = r#"{"version": 25, "entities": []}"#;
     let world = new_world();
     match project::open(&world, text) {
-        Err(ProjectError::UnsupportedVersion(24)) => {}
+        Err(ProjectError::UnsupportedVersion(25)) => {}
         other => panic!("expected UnsupportedVersion, got {other:?}"),
     }
 }
@@ -2621,6 +2623,105 @@ fn the_post_choice_round_trips_and_a_v22_file_means_the_built_in() {
     let _ = std::fs::remove_file(&cps);
     let _ = std::fs::remove_file(&p);
     let _ = std::fs::remove_file(&plain);
+}
+
+#[test]
+fn v23_file_steps_to_v24_and_the_5axis_grammar_round_trips() {
+    // M5.1 stage C: the 5-axis twins arrive as two new params tags
+    // (`contour5d`, `parallel5d`), which no v23 file can contain - the
+    // kind tags did not exist. Nothing existing changed shape;
+    // step-up is the stamp itself, like every bump since v6.
+    let world = new_world();
+    project::open(&world, r#"{"version": 23, "entities": []}"#).expect("v23 steps up");
+    let p = tmp_path("v24a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v24 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v24 wire grammar, hand-written so the tags are pinned:
+    // the finish's scalar shape plus the axis trio; the contour mints
+    // no stepover key at all (the kind has no such field), and the
+    // parallel's absent retract means hop-to-clearance exactly like
+    // the pocket family's.
+    let text = r#"{
+        "version": 24,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "C5", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"contour5d": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 600.0, "plunge_feed": 120.0, "climb": true,
+                 "lead_deg": 15.0, "lag_deg": -5.0, "max_tilt_deg": 40.0}}}},
+            {"name": "P5", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"parallel5d": {
+                 "tolerance": 0.1, "stepover": 1.2,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": false,
+                 "retract_z": {"reference": "fixed", "offset": 30.0},
+                 "lead_deg": 0.0, "lag_deg": 0.0, "max_tilt_deg": 90.0}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v24 5-axis grammar must read");
+    let e = model::find_by_name(&world, "C5").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Contour5D {
+        tolerance,
+        retract_z,
+        lead_deg,
+        lag_deg,
+        max_tilt_deg,
+        ..
+    } = &o.params
+    else {
+        panic!("contour5d params expected, got {:?}", o.params);
+    };
+    assert_eq!(*tolerance, 0.05);
+    assert!(retract_z.is_none(), "absent retract means hop-to-clearance");
+    assert_eq!((*lead_deg, *lag_deg, *max_tilt_deg), (15.0, -5.0, 40.0));
+    let e = model::find_by_name(&world, "P5").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Parallel5D { stepover, retract_z, .. } = &o.params else {
+        panic!("parallel5d params expected, got {:?}", o.params);
+    };
+    assert_eq!(*stepover, Some(1.2));
+    assert!(retract_z.is_some(), "the stated hop rides through");
+
+    // Write-parse-write is a fixed point, and both tags are clean.
+    let p = tmp_path("v24b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the 5-axis shapes round-trip byte-identically");
+    assert!(first.contains("\"contour5d\"") && first.contains("\"parallel5d\""), "{first}");
+    assert!(!first.contains("\"pattern\""), "no finish pattern key in either: {first}");
+
+    // The sane door at the loader: a 120-degree lead is past the
+    // quadrant the axis law can state, and a 200-degree cone excludes
+    // nothing - both are typos about the machine, refused by name.
+    let bad = text.replace("\"lead_deg\": 15.0", "\"lead_deg\": 120.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v24 file with a 120-degree lead must not load"
+    );
 }
 
 #[test]

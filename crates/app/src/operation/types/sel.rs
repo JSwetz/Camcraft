@@ -72,6 +72,14 @@ pub enum OpType {
     /// Mesh-driven 3D finishing: ball-nose waterline rings at the scallop
     /// stepdown (see [`crate::finishing3d`]).
     Finish3D,
+    /// Simultaneous 5-axis level finishing: the waterline ring ladder
+    /// with the TOOL AXIS moving per move - lead/lag lean against a
+    /// tilt clamp, for shank clearance on steep walls (M5.1 stage C,
+    /// see [`crate::multiaxis`]).
+    Contour5D,
+    /// Simultaneous 5-axis raster: the Z-following parallel pass with
+    /// the same axis law (M5.1 stage C).
+    Parallel5D,
 }
 
 impl core::fmt::Display for OpType {

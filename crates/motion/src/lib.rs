@@ -19,6 +19,7 @@ pub mod drilling;
 pub mod finishing3d;
 pub mod machining2d;
 pub mod machining3d;
+pub mod multiaxis;
 
 pub use camcraft_cl::cl;
 pub use camcraft_geometry::{geo2d, geometry};
