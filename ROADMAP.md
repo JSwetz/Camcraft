@@ -108,8 +108,8 @@ home.
 | 5-Axis Parallel (raster ladder, posed axis) | ✅ | M5.1 |
 | Rotary offset roughing | 📋 | M5.1 |
 | Multi-axis roughing | 📋 | M5.1 |
-| Swarf | 📋 | M5.1 |
-| Advanced swarf | 📋 | M5.1 |
+| Swarf | ✅ | M5.1 |
+| Advanced swarf | ✅ | M5.1 |
 | Multi-axis contour | 📋 | M5.1 |
 | Rotary parallel | 📋 | M5.1 |
 | Rotary contour | 📋 | M5.1 |
@@ -1420,8 +1420,18 @@ Phase-5 shape law.
       machine already speak, generation refuses an unreachable pose by
       name, and the swept-band collision laws enclose the lean. Every
       bullet below rides this seam - RECOMMENDED.md, M5.1 A.
-- **Swarf and advanced swarf**: bladed and ruled-surface finishing,
-      tolerance-aware multi-pass (the catalog's swarf pair)
+- ✅ **Swarf and advanced swarf** (stage D, commit 371cd3e): the
+      bladed finish - the mesh tells the pass which way to run: a
+      per-facet curvature fit claims a ruling direction, the raster
+      lines ride it, and on ruled contact the posed axis lies ALONG
+      the ruling (lead, lag and the cone bend nothing that would cut
+      a groove the profile doesn't have; unruled facets fall back to
+      stage C's lean law, honestly); advanced swarf adds the scallop
+      ladder - pass i at 4x tolerance, 2x stepover, centers tangent
+      to the model every pass - so the last rung IS the finish path;
+      refusals name their remedy (dome, Z-wall ruling, coarse fit);
+      positions stay bit-identical to parallel5d under a vertical
+      axis - RECOMMENDED.md, M5.1 D.
 - ✅ **5-axis contour and parallel** (stage C, commit b668048): lead/lag,
       max tilt over the waterline and raster ladders - a sphere's
       envelope is rotation-invariant, so the paths ARE stage B's, plus

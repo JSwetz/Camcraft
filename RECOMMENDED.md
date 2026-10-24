@@ -3243,6 +3243,100 @@ and the pair follows the drill/post/sim/finish3d/fixture precedent
 recorded in LICENSES.md, whose note also finally names fixture.png
 (an old omission the stage-C sweep caught).
 
+## M5.1 stage D - swarf & advanced swarf (this commit)
+
+**Swarf is the directional raster, not a new geometry kernel.** The
+kind reuses finishing3d's raster line verbatim with one addition -
+the pass direction `(ux, uy)` read off the mesh - so with a vertical
+axis its ball-center positions are BIT-IDENTICAL to stage C's
+parallel5d over the same mesh and parameters. Why: the scallop
+stepover law, the seam clamp and the ramp/bridge choreography are
+one body of tested arithmetic; a second swarf-specific line emitter
+would fork all of it for a direction vector. Considered and dropped:
+HSMWorks-style "swarf with automatic axis" as a Finish3D pattern flag
+- rejected for the same two-kinds-not-one reason as stage C's pair:
+the registry, the icons and the pages would switch on a sub-field.
+
+**The ruling law: the mesh tells the pass which way to run.**
+`multiaxis::ruling::analyze` fits each facet's surface operator
+along its two candidate directions and claims a ruling where one
+curvature is development-plain (below the threshold) and the other
+is not; a coherent pass direction for the whole set comes from a
+signed vote. On a ruled contact the posed axis lies ALONG THE RULING
+- lead, lag and the max-tilt cone are IGNORED there (the bullet every
+machinist will check: leaning off the blade would make the cylinder
+facet cut a groove the profile doesn't have; the lead does no work
+on a ruled surface because the cutting velocity is already along it).
+Where the analysis withholds its claim - rims, doubly-curved zones,
+meshes too coarse for the fit - the contact falls back to stage C's
+lean law, so the kind never refuses, it just answers with the
+weaker - and honest - orientation.
+
+**Advanced swarf is a tolerance ladder, not a rest-material
+strategy.** Pass i from the top cuts at `tolerance·4^i` with
+stepover `·2^i` - both because the scallop law is
+`stepover ~ sqrt(8r·tol)`: quadrupling tolerance doubles the
+scallop-height budget AND the spacing, so each coarse rung removes
+its own stock in wide, shallow passes and the final rung is exactly
+the plain swarf path. The centers stay tangent to the MODEL every
+pass (no z-offset), so the ladder is pure pass-count choreography -
+no rest-mesh machinery. Considered and dropped: true rest-machining
+(recur over the previous pass's stock) - stage-6-era cost, and the
+scallop law already bounds the leftover cusp to the pass's own
+tolerance. `passes` is a u32 field gated 1..=4 by the sane door
+(more than four rungs puts the coarse pass's stepover past the
+part's own width on any realistic tolerance), and the motion-layer
+`swarf5d_advanced` carries the same door by name for CLI callers.
+
+**The refusal taxonomy, stated at the seam that knows.** A dome
+("no ruling found... this surface wants Finish3D or a 5-axis
+contour"), a Z-wall ruling ("the ruling runs along Z; try Contour
+or a 3-axis kind"), a mesh whose fit answers everywhere-degenerate
+("too coarse for a ruling; Parallel will raster it"), an empty
+selection - each refused by name at the first law that can see it,
+never a silent fallback to a vertical raster. The 12-row
+`stamp_follows_every_input` registry pin (was 8) now carries both
+swarf arms - the swarf kinds' axes are per-move, so the same pin
+that caught a dropped lead on contour5d catches one here.
+
+**Closed solids are load-bearing at the app level - learned the
+hard way.** The swarf family routes through the footprint law
+(`region_for` -> `slice::project` over 16 horizontal slices), and
+project refuses an OPEN mesh by name ("the mesh is open at z =
+...: dangling chord ends"). The app's blade fixture was a tube with
+no ends; it now carries end caps, which makes the whole chain -
+footprint, selection, stock verify - behave like a real bladed
+part. The caps cost something in the pose test: their junction rows
+are rims, and the analysis (correctly) withholds the ruling claim
+from the columns beside them, at 16 rings that is a large share of
+the tube. So `blade_pose_law` counts blade-lying poses (>= 8, every
+pose unit-finite, no rapid poses) instead of asserting the
+every-body-move universal - the universal identity lives in
+motion's `ruling.rs`, tested at the tessellation where the fit is
+confident. A dropped ruled-branch would show as zero counted poses
+HERE, which is what the test is for.
+
+**stamp.rs crossed the 400-line seam - split at the test, not the
+law.** The stamp's exact-angle identities (the pitched-plane ladder
+that proves a 15-degree lead to 1e-9) moved to
+`multiaxis/stamp_tests.rs`; the law and its documentation stayed in
+`stamp.rs`. The seam is the one AGENTS.md names - a file grows past
+400 lines, split along the domain edge; here the edge is "the law"
+vs "the identities that pin it".
+
+**The future-version probe must be spelled from the constant.**
+`wrong_version_is_refused` hardcoded v25 as "the future"; the
+stage-D bump to v25 (the rung adding the swarf tags 10, 11 and the
+ladder's `passes`, nothing else) made the test ask for a refusal of
+a version that was then CURRENT - red in the way that blames the
+compiler. Now the probe is `project::PROJECT_VERSION + 1`: a rung
+named by hand cannot survive the day the stamp moves.
+
+**The glyphs are drawn original.** assets/ui/swarf.png (a tilted
+barrel-cutter along a ruled band) and advancedswarf.png (the same,
+through three widening rungs) join the bespoke set per the
+contour5d/parallel5d precedent; LICENSES.md names both.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
