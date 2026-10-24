@@ -1412,6 +1412,12 @@ Phase-5 shape law.
 ### M5.1 - 5-Axis Milling
 **Goal: simultaneous-axis and tilted machining done safely.**
 
+- ✅ **Pose seam** (plan stage A, commit 7313f96): `Move.axis` - the tool
+      orientation rides every move, None stays prismatic byte-for-byte,
+      the dump converts leaned axes to the canonical A/B/C the post and
+      machine already speak, generation refuses an unreachable pose by
+      name, and the swept-band collision laws enclose the lean. Every
+      bullet below rides this seam - RECOMMENDED.md, M5.1 A.
 - **Swarf and advanced swarf**: bladed and ruled-surface finishing,
       tolerance-aware multi-pass (the catalog's swarf pair)
 - **5-axis contour and parallel** with tool axis control: lead/lag, tilt step, max tilt
@@ -1460,16 +1466,24 @@ Phase-5 shape law.
 
 ---
 
-## Phase 6 — GPU acceleration.
+## Phase 6 — UI refactoring.
 
-The whole appplication are starting to having serious issues with graphical performance running ontop of EGUI. And we most likely
-need to figure out how to offload simulation, voxel body calculation and tool preview etc onto the GPU.
+The UI is based on EGUI. And it has a dark theme that is hard coded into the application. That is a not something users want
+2 defualt themes should exist, light and dark for one. But also the ability to change ribbon size, input fields, button size
+should all be exposed thru the theme properly. The 2 hard codded themes can for sure just exist in code, but the "alteration"
+should be read and loaded din realtime from a a "themes" folder.
 
-### M6.1 - Explore the validity of Adding GPU acceleration support.
-**Goal: Explore the options for GPU acceleration, Vulcan is prob the best option as its properly cross platform.**
+### M6.1 - Explore the validity of making a dark and light theme with a switcher at the top right corner of the application.
+**Goal: Implement a dark and light theme wiwth a drop down switcher..**
 
-- **Which runtime works?**: We have touched on GPU acceleration earlier, but need to revisits optimization.
-- **Cross-platform.**: It needs to work on windows, linux - first of all. MacOSX should work if linux does.
+- **Defined as JSON**: The themes should be defined as json files. This means colors, icon files. There should be no paths in these definfitions assets has their places.
+- **Compiled in**: The defult themes should be compiled into the application at compile time.
+
+### M6.2 - User themes
+**Goal: Implement a way of finding json theme files from a Themes assets folder.**
+
+- **Reading and listing**: Ability to find and list the idedntified themes. The theme files should have a descriptor section with name, creator, description.
+- **Realtime loading**: The theme should swap in ontop of existing theme in realtime. Only colors for first spike.
 
 ## Milestone Summary
 

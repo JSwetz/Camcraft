@@ -2963,6 +2963,68 @@ without moving coupling. It gets revisited only when M5.1's ~8 new
 kinds make a dispatch arm genuinely heavy - the table means that's a
 row + an fn + arms in four honest files, not the 14-file hunt.
 
+## M5.1 stage A — the tool axis rides the move (commit 7313f96)
+
+**The pose lives on the Move, not beside it.** Considered: a parallel
+`Vec<Option<axis>>` per path, and a `Toolpath.poses` side-table - both
+dropped. A move and its orientation are one fact about one segment;
+side tables drift out of step the first time a generator splits or
+drops a move. `Move.axis: Option<[f64; 3]>` - unit, tip→shank - makes
+the pose travel with the geometry through every existing splice, and
+`None` keeps prismatic paths byte-cheap and byte-identical. The exact
+vertical `[0, 0, 1]` is filtered `is_vertical`-EXACT, not epsilon: the
+branch exists to keep the 3-axis contract bit-for-bit (13 .nc goldens,
+untouched), and a near-vertical lean on a filtered-exact branch would
+be a silent pose loss. Near-vertical leans that come back from
+angles-above are genuinely near-vertical and take the tilt path.
+
+**Angles-above is the one conversion.** axis = Rz(C)·Ry(B)·Rx(A)·ẑ is
+the convention the .mch kinematics already state; its canonical
+inverse A = asin(clamp(-ay)), B = atan2(ax, az), C = 0 was picked over
+full ZYX Euler because C never appears in the dump (the table is
+tilted about X and Y; the tool's own spin is the spindle, not an
+axis), and one canonical answer keeps generator-written `Move.axis`,
+hand-written keyed streams, and the sim's letters all naming THE SAME
+angles for the same lean - which `a_dumped_lean_posts_the_same_program_as_a_tilted_stream`
+locks end to end.
+
+**Refusal at generation, never mid-stream.** The machine's `can_tilt`
+(direction z² < 0.99·|d|² is LEANING, so a trunnion A-about-X passes
+and a rotary-B-about-Z on a lathe does not) judges each commanded pose
+in `check_document`, and the checks say the move index, the letter,
+the degrees, and the travel in the message. Considered and dropped:
+silent clamp to travel, nearest-reachable IK, and drop-the-axis - all
+three are the silent wrong answer the Prime Directive forbids; a CAM
+program either states what it commands or refuses loudly. The safe
+floor is deliberate: stage A knows no orientation SEARCH (that's
+stage F's collision-aware tilt); here the human commands a pose and
+the machine says yes or no.
+
+**The collision bands enclose, never hide.** A leaned cylinder's
+swept volume is awkward to test against boxes, so each band becomes
+the vertical column that CONTAINS it: center shifted to the band's
+mid-height point (`mid·a[x,y]`), radius widened by the band's
+half-length spread, z planes grown by the band radius - over-approximate
+by construction. Considered: a true OBB swept test (dropped: more math
+than a CAM refusal needs, and an approximation that can only ADD a
+false graze can never hide a crash - the check's whole job is blocking
+the post). The upright path computes the original expressions bit-for-bit,
+which is why `stock_sim`'s prismatic goldens stand untouched. Rapids are
+deliberately still upright-checked: a leaned RAPID's collision law
+belongs to stage B, where indexed 3+2 position moves make the question
+concrete.
+
+**The project file stores the pose snapped once at the write.**
+`MoveDto.axis` is `#[serde(default, skip_serializing_if)]` - v22 stays
+v22, old files load, and a prismatic cache writes no pose key at all.
+Snapping to the position lattice at write and attaching VERBATIM at
+read (no re-snap) makes save-load-save byte-identical even across
+platforms whose libm bits differ; re-snapping on read would let the
+same file mean two poses depending on who read it. The cl crate's
+section split (moves/path/pose/cycle/tests) rode the same commit
+because `pose.rs` is the axis law's new home - 400-line law, and
+`axis_to_angles` did not belong bolted to the end of a 700-line file.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

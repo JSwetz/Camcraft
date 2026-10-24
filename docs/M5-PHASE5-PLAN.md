@@ -53,11 +53,15 @@ tested end-to-end in the five .cps).
 
 ## M5.1 — 5-axis milling (stages)
 
-- **A. Pose seam** — `cl::Move.axis`, dump conversion, `MoveRec.abc` producer,
+- **A. Pose seam** ✅ (commit 7313f96) — `cl::Move.axis`, dump conversion, `MoveRec.abc` producer,
   law: a tilt the mounted machine cannot reach refuses by name at generation
   time (validate early), never mid-stream. Sim bands read the axis. Goldens:
   one tilted golden stream + its 5 .nc dialect matrix (3 refuse-by-WARN —
-  already legal — fanuc/one rtcp-capable emit angles).
+  already legal — fanuc/one rtcp-capable emit angles). Delivered: the dialect
+  matrix rides live inline streams (`fanuc_post.rs` — the .nc goldens lock the
+  3-axis generator contract and stayed byte-identical; tilt is new machinery
+  with no legacy bytes), tilthead.mch registered under the inference law, and
+  rapids' tilt law deferred to B where indexed position moves make it concrete.
 - **B. 3+2 (tilted plane, indexed)** — `TiltedFrame{origin,u,v,axis}` in
   motion; existing planar generators run in-plane, every record carries the
   one commanded pose; position moves between cuts ride rapids. The planar
