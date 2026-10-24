@@ -2743,6 +2743,47 @@ tooling (M4.3)` + this docs)
   falsifies the decision record - the record is what the post-roadmap
   discussion reads.
 
+## Phase 5 — the plan and its three shape decisions
+(this docs + `docs/M5-PHASE5-PLAN.md`; code follows from M5.0's first commit)
+
+- **M5.0 exists because Phase 5 is a kind-flood, and the code told us so.**
+  The seam map measured one operation kind riding 14 files (52
+  `OpParams::Finish3D` sites - the type enum, five semantic fns, the stamp
+  tag, heights, material, generate dispatch + verify-mode + context,
+  HeightRefs, setup sheet, project DTO twice, retype + quick params, five
+  pane tables, three page dispatches, the command arm). M5.1/M5.2 name ~25
+  kinds: same-channel growth is ~350 edit sites, and every one is a place
+  the silent-wrong-answer can hide in maintenance. The user's standing
+  shape law - low coupling, high cohesion - makes the prelude not
+  optional. What was considered and dropped: trait-object params (fights
+  the Rust-owned-component law and moves dispatch into vtables nobody can
+  grep); per-family crates now (premature - the families are inside
+  motion's generators and app's tables, the crate seams the plan names are
+  where they already want to live).
+- **The tool axis is a vector below, angles above.** `cl::Move` gains
+  `axis: Option<[f64;3]>` (workpart frame); the app converts vector→`A/B/C`
+  against the mounted machine's rotary directions - one function, machine-
+  dependent (trunnion B/C vs tilting head have different solutions), with
+  shortest-travel unwrapping; the stream/post contract stays exactly
+  stage-D's (keyed millidegrees, tip-positioned XYZ, refuse-by-name on an
+  unreachable tilt). Vector-up angles would bake one machine's kinematics
+  into the geometry layer; angles-down from app keeps motion world-blind -
+  the R4 law again. post/mod.rs's hardcoded `abc: None` gets its producer
+  when M5.1-A lands, and the five-dialect refusal test already guards the
+  seam end to end.
+- **Scripting is JS on the engine we already ship.** The open question
+  ("QuickJS / Lua / Rust-native DSL", and M5.3's "TypeScript bindings")
+  resolves to boa_engine: one embedded runtime, already sandboxed under the
+  post contract's rules, already in the tree; TS consumability rides the
+  typed JSON the batch API speaks. A second interpreter (Lua) would be a
+  second sandbox to audit for a product that must never run user code
+  unsafely - considered, dropped. ROADMAP's "Lua" word on the M5.3 ledger
+  row is superseded by this entry when M5.3 is planned for real.
+- **M4.2b rides M5.0, not a solo commit**: the fix is one sampler touching
+  cull decisions, and M5.0 regenerates nothing else - the two named CI
+  skips retire in the same close-out that proves the structure split kept
+  every golden byte-stable.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

@@ -1371,6 +1371,28 @@ The Ultimate-edition feature set on top of a mature product: continuous
 multi-axis, mill-turn, and the performance and automation to run a shop
 programming department.
 
+The stage ladder and crate seams are specced in `docs/M5-PHASE5-PLAN.md`
+(measured against the code, 2026-10-24). Its governing decision: **M5.0
+runs first** - the operation-kind fan-out (14 files per kind today) and the
+six oversized files are collapsed before ~25 new kinds arrive, so each is
+one-table-row-cheap; the M4.2b dome-quantize fix rides along so no new
+golden inherits the platform-libm drift. Low coupling, high cohesion is the
+Phase-5 shape law.
+
+### M5.0 - Structure prelude
+**Goal: make adding an operation kind cheap before Phase 5 adds twenty-five.**
+
+- ⏳ **Split the oversized files** along their section seams to the ~400-line
+      law: operation/types.rs, machining2d.rs, finishing3d.rs, verify.rs,
+      stock_sim.rs, drilling.rs, machining3d.rs - structure only, goldens
+      byte-identical
+- ⏳ **Collapse the kind fan-out** into one registration table per family:
+      kind <-> params <-> stamp <-> generate-dispatch <-> verify-mode <->
+      DTO <-> UI tables, so a new operation is a params struct + a generator
+      fn + a table row, not a 14-file hunt
+- ⏳ **Pay M4.2b**: quantize the dome sampler to microns before the cull,
+      drop the two named CI skips
+
 ### M5.1 - 5-Axis Milling
 **Goal: simultaneous-axis and tilted machining done safely.**
 
@@ -1459,6 +1481,8 @@ need to figure out how to offload simulation, voxel body calculation and tool pr
 | **M4.2** | Multibuilds | Done: GPU backend pick - `--gpu-backend`/env, refuse-by-name, preferred→auto→all honest chain, adapter log line; Linux native check + suites (18/20 goldens; 2 dome goldens drift on Linux libm - named skip, M4.2b fix owed, RECOMMENDED); macOS + wasm-compile CI jobs (geometry/cl/post green on wasm32); Docker-for-every-target left open (tooling death, RECOMMENDED) | ✅ |
 | **M4.3** | Defer Code | Done: hsmworks→camcraft everywhere user-facing or self-referential - crates/packages, `camcraft-ui.exe`, `.camproj` (+filter+untitled name), window title, cps vendor line, dist zip, thread name, doc titles; hash salts moved (one-time Stale, by design), wire magics kept (format = compatibility contract), Autodesk-trademark true-sentences kept; full suite green on the new names (595 pass / 792 `#[test]` law held / clippy -D warnings), goldens byte-stable, post `--version` intact | ✅ |
 | **M4.4** | Test cost shape | Done: law/verdict split - finish3d 39 tests (27 `#[ignore]`d), verify's two envelope verdicts moved; release heavy lane 30 min → 3.4 min (CI runs it); Gate-map headers in every suite; debug ladder ~2 s where it was a 30-min tail | ✅ |
+| **M4.2b** | Dome-golden fix | Owed from M4.2: quantize dome sampler points to microns BEFORE the dedupe-cull so platform libm cannot move move-counts; then drop the two named CI `--skip`s. Slotted into Phase 5's run-up (M5.0) so no new golden is born on the drifting sampler. | 🔧 |
+| **M5.0** | Structure prelude | The kind-fan-out collapse + six oversized-file splits (operation/types, machining2d, finishing3d, verify, stock_sim, +drilling/machining3d) that let M5.1/M5.2 add ~25 op kinds at one-table-row cost instead of 14-file edits; goldens byte-identical (structure, not behavior). Coverage 792==792. See docs/M5-PHASE5-PLAN.md. | 📋 |
 | **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
