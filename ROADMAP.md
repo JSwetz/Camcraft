@@ -104,6 +104,8 @@ home.
 
 | Operation | Status | Home |
 |-----------|--------|------|
+| 5-Axis Contour (waterline ladder, posed axis) | ✅ | M5.1 |
+| 5-Axis Parallel (raster ladder, posed axis) | ✅ | M5.1 |
 | Rotary offset roughing | 📋 | M5.1 |
 | Multi-axis roughing | 📋 | M5.1 |
 | Swarf | 📋 | M5.1 |
@@ -1420,7 +1422,15 @@ Phase-5 shape law.
       bullet below rides this seam - RECOMMENDED.md, M5.1 A.
 - **Swarf and advanced swarf**: bladed and ruled-surface finishing,
       tolerance-aware multi-pass (the catalog's swarf pair)
-- **5-axis contour and parallel** with tool axis control: lead/lag, tilt step, max tilt
+- ✅ **5-axis contour and parallel** (stage C, commit b668048): lead/lag,
+      max tilt over the waterline and raster ladders - a sphere's
+      envelope is rotation-invariant, so the paths ARE stage B's, plus
+      the stamp: every move ending in tangency poses the surface normal
+      leaned forward about the binormal (lead) and sideways about the
+      tangent (lag), folded onto the max-tilt cone, never past it;
+      rapids and air moves hold no pose, drill cycles refuse the stamp
+      by name; the axis trio always rides the project file (v24), so a
+      re-post can never silently drop a lean - RECOMMENDED.md, M5.1 C.
 - **The rotary family**: rotary offset roughing, multi-axis roughing,
       multi-axis contour, rotary parallel, rotary contour, multi-axis
       finishing - the catalog's multi-axis block lands here, each riding

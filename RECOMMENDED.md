@@ -3152,6 +3152,97 @@ theme retrofit pass.
 acceleration` row was replaced by the three Phase 6 UI rows - the GPU
 text predates the Phase 6 pivot and was already superseded.
 
+## M5.1 stage C - 5-axis contour & parallel (this commit)
+
+**The pose rides the path; no new geometry kernel.** Chosen: contour5d
+and parallel5d are the stage-B waterline ring ladder and the
+finishing3d raster line *as emitted*, plus a stamp pass that writes a
+tool-axis vector onto every move that ends in contact. Why: a sphere
+is rotation-invariant - the ball-center locus a 5-axis finish must
+walk is exactly the ball-center locus a 3-axis finish walks - so
+building a second generator would fork the scallop stepdown law, the
+forbidden-center solver and the floor rule for no cut benefit. The
+5-axis content is orientation, and orientation lives in the pose
+field stage A added to `Move`. Considered and dropped: a native
+5-axis contact solver (point/edge/face contact on a
+steep-flank-derived pattern) - rejected for this stage because
+without shank-collision-aware pattern planning (stage E's brief) it
+buys nothing the stamp doesn't, at the cost of a second geometry
+stack.
+
+**The lead/lag axes are the industry pairing, not the plan doc's.**
+The stage-C brief in docs/M5-PHASE5-PLAN.md paired lead with the
+tangent rotation and lag (side tilt) with the binormal; the
+implementation is the opposite: lead leans FORWARD about the binormal
+`n x t` (the rotation that tips the tool ahead of the cut), lag leans
+SIDEWAYS about the tangent `t`. That is the pairing every public
+multi-axis manual and the ISO 10791-10 test-part tradition uses, and
+parameter labels are what a machinist reads, so they ride their
+standard meaning - the plan doc's swap is a typo in the doc, not a
+different law. tilt.rs's module comment says the same.
+
+**Two kinds, not one kind with a pattern field.** Contour5D and
+Parallel5D are separate OpType/OpParams arms with near-identical
+fields, matching how 2D Finish/3D Finish already split patterns into
+kinds; a shared "5-Axis Finish + enum pattern" kind would have made
+the registry, the icons and the pages switch on a sub-field, which is
+the shape stage B's tilted-plane kinds deliberately avoided. The
+catalog row is one bullet (this one) because the ROADMAP wrote it as
+one feature.
+
+**The stamp's laws, recorded with the numbers.** Contact is the
+tangent equation `|c - q| = r` checked with a band of `0.01 + 1e-6 * r`
+- lattice dust and arc-fit slack, never a fraction of the radius a
+bite could hide in. Rapids carry no pose (the A/B heads should not
+swing during a G0 - and stage A's post writes rapids with no axis word
+anyway); a cut move whose END sits in air holds None, so an uncut hop
+never pretends to be oriented. Drill cycles cannot be re-posed by a
+stamp at all: a tilted spindle with a straight bit would drive the cut
+off its own axis, so `stamp_axes` refuses by name (GenError::Invalid)
+rather than silently dropping the cycle. A control that states no
+direction (a NaN that slipped past the sane door) falls back to
+vertical WITH an eprintln - log, never silence.
+
+**max_tilt is a cone fold, never a hard stop.** An over-lean folds
+the axis back onto the cone `angle(n, a) = max_tilt` in the plane the
+rotation produced - the direction that was reachable stays reachable,
+only the excess angle is cut. Refusing the move instead would drop
+metal; clamping the angle but keeping the original tilt plane would
+snap the lean sideways into the wall. A None clamp runs unclamped;
+`<= 0` and `> 180` are refused at command-creation by the sane door as
+machine-reach typos, and lead/lag must satisfy `|v| <= 90` - a
+91-degree lead is a flipped tool, which is a different machine.
+
+**The axis trio always rides the project file.** v24 writes
+lead_deg/lag_deg/max_tilt_deg for every contour5d/parallel5d op even
+at defaults, where sibling scallop fields elide at default. Why: a
+re-post must never silently change a program - an elided trio in a
+file written by a lean-aware build would load 0/0/90 and post a
+VERTICAL toolpath under a tilted op's name. The version bump is the
+pure step-up rung (v23 -> v24 adds both kinds' tags, 8 and 9, and
+nothing else); the tags carry no pattern byte because the pattern IS
+the tag.
+
+**Raster end-to-end rides the hill; the dome's raster stays in the
+ignored lane.** The new app test `parallel5d_generates_leaning_axes_
+and_verifies_clean` tessellates a 6x24 sphere-cap hill, not the 40x80
+dome: support_at marches each raster line against the facet soup, so
+a full-dome raster on the app's stock/verify stack is minutes in
+debug - the law M4.4 parked in the `#[ignore]`d verdict lane
+(motion's own `multidirection_rasters_cross` carries the same note).
+The command-chain coverage (params -> sane -> generate -> stamp ->
+verify -> status) is identical on a coarse tessellation, and
+contour5d stays on the big dome (12.7 s, the same cost class as
+finish3d_waterline) because the waterline scan is linear-in-levels,
+not march-bound.
+
+**The glyphs are drawn original.** assets/ui/contour5d.png (a tilted
+spindle over a contour ladder) and parallel5d.png (a tilted spindle
+over a raster fan) join the bespoke set - Tabler has no 5-axis mark,
+and the pair follows the drill/post/sim/finish3d/fixture precedent
+recorded in LICENSES.md, whose note also finally names fixture.png
+(an old omission the stage-C sweep caught).
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
