@@ -4,7 +4,7 @@ use super::types::{Mode, VerifyContext, Warning};
 use super::laws::{bands_vs_fixtures, boundary_samples, dist2_seg, law_points, proper_cross, rapids_vs_fixtures, xy};
 
 use std::collections::HashMap;
-use crate::cl::{MoveKind, Toolpath};
+use crate::cl::{is_vertical, MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
 /// Verify a generated path. Quadratic in feed count (crossings), linear
 /// per sample for the rest; called by the operation layer after
@@ -250,22 +250,43 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                     islands_at(f, z_deepest).is_some_and(|s| s.contains(q))
                 })
         };
+        // Pose (M5.1 stage A): a leaning band is enclosed, exactly as
+        // in [`super::bands_vs_fixtures`], in a vertical column that is
+        // never smaller - shifted to the band's mid-height point on the
+        // leaning axis, widened by its half-length's horizontal spread,
+        // its bottom standing at the lower of the two axis-plane ends
+        // minus the disc radius. The annulus's inner edge stays about
+        // the TIP: the flute's kerf excuses that radius wherever the
+        // tip cuts, tilt or no tilt. Over-report a graze, never hide a
+        // gouge. The prismatic branch is the law's own history: same
+        // h0, same r2, point p unshifted.
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;
             }
             let pts = law_points(m, chord_tol);
+            let lean = m.axis.filter(|a| !is_vertical(a));
             for &(above, band_r, band_len) in &bands {
                 if band_r <= r || band_len <= 0.0 {
                     continue;
                 }
-                let h0 = m.to.z + above;
-                let r2 = (band_r + 1e-9) * (band_r + 1e-9);
+                let (offx, offy, r_band, h0) = match lean {
+                    None => (0.0, 0.0, band_r, m.to.z + above),
+                    Some(a) => {
+                        let mid = above + band_len * 0.5;
+                        let spread = (band_len * 0.5) * (a[0] * a[0] + a[1] * a[1]).sqrt();
+                        let za = m.to.z + above * a[2];
+                        let zb = m.to.z + (above + band_len) * a[2];
+                        (mid * a[0], mid * a[1], band_r + spread, za.min(zb) - band_r)
+                    }
+                };
+                let r2 = (r_band + 1e-9) * (r_band + 1e-9);
                 let mut hit = None;
                 'worst: {
                     for p in &pts {
+                        let pc = Point2::new(p.x + offx, p.y + offy);
                         for q in &samples {
-                            let dd = dist2_seg(*q, *p, *p);
+                            let dd = dist2_seg(*q, pc, pc);
                             if dd > r2 || dd <= (r + cx.gouge_tol) * (r + cx.gouge_tol) {
                                 continue; // outside this band's annulus
                             }

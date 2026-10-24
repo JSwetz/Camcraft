@@ -696,6 +696,7 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
     use camcraft_app::posting::MACHINES;
     let expectations = [
         ("VMC 3-axis", Kind::Mill),
+        ("Tilt-head 5-axis", Kind::Mill),
         ("Mill-turn", Kind::MillTurn),
         ("Lathe", Kind::Lathe),
     ];
@@ -709,6 +710,97 @@ fn every_shipped_machine_mounts_and_speaks_its_declaration() {
         inferred.kind = None;
         assert_eq!(kind(Some(&inferred)), want_kind, "{name}'s axes agree with its word");
     }
+}
+
+// ---- the checker on a live program: poses (M5.1 stage A) ----
+
+/// Lean the first FEED move of the faced doc's cached path (a test
+/// fixture, not a UI state poke - generation stands prismatic until
+/// stage B gives it a reason to lean; the gate must judge a pose
+/// anyway). Returns the move index, which the problems name.
+fn lean_first_feed(world: &World, axis: Option<[f64; 3]>) -> usize {
+    let e = model::find_by_name(world, "Face1").expect("the face op");
+    let mut t = model::toolpath_of(world, &e).expect("a fresh cache");
+    let i = t
+        .path
+        .moves
+        .iter()
+        .position(|m| m.kind == camcraft_app::cl::MoveKind::Feed)
+        .expect("a face path feeds");
+    t.path.moves[i].axis = axis;
+    e.entity_view(world).set(t);
+    i
+}
+
+#[test]
+fn a_machine_without_a_tilting_rotary_refuses_a_lean_by_name() {
+    // The pose gate (M5.1 A): absence is the ordinary case, and when
+    // the stream does state an angle, the machine answers with its
+    // rotaries - by name, never silently. Two sentences, both true:
+    // the machine states no tilting rotary at all, and it states no
+    // B axis to hold the 20 degrees the lean's canonical names.
+    let (world, _h) = faced_doc();
+    let (sa, ca) = (20f64.to_radians().sin(), 20f64.to_radians().cos());
+    let i = lean_first_feed(&world, Some([sa, 0.0, ca]));
+    let c = check_document(&world, &reference()).expect("checks");
+    let mine: Vec<&String> = c
+        .problems
+        .iter()
+        .filter(|p| p.contains(&format!("move {i}")))
+        .collect();
+    assert_eq!(mine.len(), 2, "{:?}", c.problems);
+    assert!(
+        mine[0].contains("tilts the tool")
+            && mine[0].contains("TestMill 1 states no tilting rotary"),
+        "{mine:?}"
+    );
+    assert!(
+        mine[1].contains("commands B 20.000 deg") && mine[1].contains("TestMill 1 states no B axis"),
+        "{mine:?}"
+    );
+}
+
+#[test]
+fn a_tilting_machine_judges_the_letters_and_their_travel() {
+    // Same program, a machine that owns A and B: the lean posts, and
+    // only an angle beyond the stated stroke comes back named.
+    let (world, _h) = faced_doc();
+    let mut m = reference();
+    m.model = "TiltMill".into();
+    for (name, d) in [("A", [1.0, 0.0, 0.0]), ("B", [0.0, 1.0, 0.0])] {
+        m.axes.push(AxisLimits {
+            name: name.into(),
+            rotary: true,
+            axis: Some(d),
+            travel: Some((-120.0, 120.0)),
+            ..Default::default()
+        });
+    }
+    let (sa, ca) = (20f64.to_radians().sin(), 20f64.to_radians().cos());
+    // Lean toward +x: the canonical is B 20, inside the stroke.
+    lean_first_feed(&world, Some([sa, 0.0, ca]));
+    let c = check_document(&world, &m).expect("checks");
+    assert!(c.is_ok(), "{:?}", c.problems);
+    // Lean toward -y: the canonical is A -20, also inside.
+    lean_first_feed(&world, Some([0.0, -sa, ca]));
+    assert!(check_document(&world, &m).expect("checks").is_ok());
+    // Past horizontal toward +x reads B 130 - beyond ±120, refused
+    // with the stroke named.
+    let (sb, cb) = (130f64.to_radians().sin(), 130f64.to_radians().cos());
+    let i = lean_first_feed(&world, Some([sb, 0.0, cb]));
+    let c = check_document(&world, &m).expect("checks");
+    assert_eq!(c.problems.len(), 1, "{:?}", c.problems);
+    assert!(
+        c.problems[0].contains(&format!("move {i} commands B 130.000 deg"))
+            && c.problems[0].contains("the travel is -120.000..120.000"),
+        "{:?}",
+        c.problems
+    );
+    // The exact vertical states no angle: not one word.
+    lean_first_feed(&world, Some([0.0, 0.0, 1.0]));
+    assert!(check_document(&world, &m).expect("checks").is_ok());
+    lean_first_feed(&world, None);
+    assert!(check_document(&world, &m).expect("checks").is_ok());
 }
 
 // ---- rotary geometry + RTCP judgment (M3.3 stage D) ----

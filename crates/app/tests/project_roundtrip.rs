@@ -494,6 +494,87 @@ fn arc_move_round_trips() {
 }
 
 #[test]
+fn a_stated_pose_round_trips_verbatim() {
+    // Pose (M5.1 A) in the file: `axis` is an optional key of a move.
+    // A prismatic document never writes it (its saves stay byte-shape
+    // identical to v21's - the arc-v5 precedent again), and a tilted
+    // one snaps the components ONCE at the write (lattice law) and
+    // attaches them VERBATIM at the read - no re-normalization, or the
+    // file would drift by bits under repeated reopening.
+    use camcraft_app::cl::lattice;
+    let path = tmp_path("pose");
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        SetStock::new(
+            &world,
+            StockShape::Box { dx: 40.0, dy: 40.0, dz: 10.0 },
+            Location::default(),
+        )
+        .expect("stock"),
+    );
+    history.execute(
+        &world,
+        AddTool::new(&world, "EM-0400-2FL", catalog_tool("EM-0400-2FL")).expect("tool"),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Face1",
+            "EM-0400-2FL",
+            SrcRef::Stock,
+            OpParams::Face {
+                stepover: 5.0,
+                clearance_z: Height::fixed(15.0),
+                cut_z: Height::fixed(9.0),
+                top_z: None,
+                stepdown: None,
+                feed: 1000.0,
+                plunge_feed: 200.0,
+                climb: true,
+            },
+        )
+        .expect("face"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    let clean = {
+        project::save(&world, &path).expect("save clean");
+        std::fs::read_to_string(&path).expect("read")
+    };
+    assert!(!clean.contains("\"axis\""), "a prismatic cache writes no pose key");
+
+    // Lean one move 45 degrees about - the raw 45° pair has off-lattice
+    // tails on purpose, so the write-time snap is the observable.
+    let r45 = 45f64.to_radians();
+    let raw = [r45.sin(), 0.0, r45.cos()];
+    let e = model::find_by_name(&world, "Face1").expect("op");
+    let mut t = model::toolpath_of(&world, &e).expect("cache");
+    t.path.moves[1].axis = Some(raw);
+    e.entity_view(&world).set(t);
+    project::save(&world, &path).expect("save tilted");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(first.contains("\"axis\""), "the pose key rides the move: {first}");
+
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "a stated pose round-trips byte-identically");
+
+    let dst = model::find_by_name(&world2, "Face1").expect("op loaded");
+    let after = model::toolpath_of(&world2, &dst).expect("cache").path;
+    assert_eq!(
+        after.moves[1].axis,
+        Some([lattice(raw[0]), 0.0, lattice(raw[2])]),
+        "the file's numbers are the law, snapped once at the write"
+    );
+    assert!(after.moves[0].axis.is_none(), "the unleaned moves stay unleaned");
+}
+
+#[test]
 fn v2_file_migrates_to_v3() {
     // A literal v2 project: no tool or operation fields anywhere. The
     // chained migration only carries the version forward.

@@ -33,9 +33,13 @@ unstated capability into existence.
 - `general.kind` ∈ `mill` | `lathe` | `mill-turn`. The DECLARATION
   outranks the axis inventory (`kind()` checks the word first; an
   unknown word REFUSES the file at the door — never a silent demotion
-  to inference). The inference, when no kind is stated: Y + a rotary
-  is mill-turn, Y alone is mill, X+Z without Y is lathe — note a
-  turning center with a C axis and no Y is a LATHE, not a mill-turn.
+  to inference). The inference, when no kind is stated: Y + a TURNING
+  rotary is mill-turn, Y alone is mill, X+Z without Y is lathe — note a
+  turning center with a C axis and no Y is a LATHE, not a mill-turn. A
+  rotary is turning unless its stated direction leans (z² < 0.99·|d|²
+  — the same tilt test the RTCP judgment and `can_tilt` read, one law
+  at three sites): an XYZ machine with A/B trunnions or a tilt head is
+  a MILL whose axes can lean, not a mill-turn.
 - `kinematics.default.units`: `"length": "mm"` (or `"inch"`/`"inches"`
   — the factor multiplies EVERY distance and distance-per-minute at
   load; the checker stays mm-only), `"angle": "degrees"`.
@@ -120,7 +124,7 @@ record is refused instead.
    mirror) and asserts declared kind == inferred kind, so a
    half-registered or self-contradictory definition fails the suite,
    not the shop.
-4. Gate: `cargo test -p hsmworks-app --test machine --test posting`,
+4. Gate: `cargo test -p camcraft-app --test machine --test posting`,
    plus a CLI smoke — `post.exe --machine <name>.mch <post>.cps
    <file>.cnc out.nc` over a committed golden stream (a 5-axis
    definition should drive the refusal path in fanuc.cps's `tilt()`

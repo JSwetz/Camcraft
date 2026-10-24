@@ -52,6 +52,7 @@ pub const DEFAULT_MCH: &str = include_str!("../../../assets/machines/3axis-vmc.m
 /// label and an install-time default, never a file's identity.
 pub const MACHINES: &[(&str, &str)] = &[
     ("VMC 3-axis", include_str!("../../../assets/machines/vmc.mch")),
+    ("Tilt-head 5-axis", include_str!("../../../assets/machines/tilthead.mch")),
     ("Mill-turn", include_str!("../../../assets/machines/millturn.mch")),
     ("Lathe", include_str!("../../../assets/machines/lathe.mch")),
 ];

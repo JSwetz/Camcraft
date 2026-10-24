@@ -36,9 +36,16 @@ fn q(mm: f64) -> i64 {
 /// milliseconds. `AT` is the cycle's first move index: the anchor of
 /// the agreement law that pins chain and record to each other. Nothing
 /// in the dump depends on the run: no timestamps, no hash-map iteration
-/// order, full-precision-integer coordinates.
+/// order, full-precision-integer coordinates. v4 (M5.1 stage A) adds
+/// the keyed `A`/`B`/`C` millidegree words a move whose tool leans -
+/// the same grammar the `.cnc` reader takes for a pose, and never
+/// silently dropped: a tilted path that dumped without its letters
+/// would make the golden lie about what the path is. A prismatic path
+/// dumps byte-for-byte as v1-v3 always did.
 pub fn gen_to_cltext(t: &Toolpath) -> String {
-    let version = if !t.cycles.is_empty() {
+    let version = if !t.is_prismatic() {
+        4
+    } else if !t.cycles.is_empty() {
         3
     } else if t.has_arcs() {
         2
@@ -74,6 +81,17 @@ pub fn gen_to_cltext(t: &Toolpath) -> String {
             s.push_str(&format!(" F{}", (f * 1000.0).round() as i64));
         }
         s.push_str(&arc);
+        // A stated pose posts its letters; the exact vertical is the
+        // absence of a pose (is_vertical's law), so it dumps nothing.
+        if let Some(a) = m.axis.filter(|a| !camcraft_app::cl::is_vertical(a)) {
+            let [da, db, dc] = camcraft_app::cl::axis_to_angles(a);
+            s.push_str(&format!(
+                " A{} B{} C{}",
+                (da * 1000.0).round() as i64,
+                (db * 1000.0).round() as i64,
+                (dc * 1000.0).round() as i64
+            ));
+        }
         s.push('\n');
     }
     for c in &t.cycles {

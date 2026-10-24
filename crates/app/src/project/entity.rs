@@ -13,6 +13,14 @@ pub struct MoveDto {
     /// with no arcs still writes - the field skips serialization).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<ArcDto>,
+    /// Added at v22 (M5.1 stage A, no version bump - the arc-v5
+    /// precedent): the tool pose the move states, as the unit axis's
+    /// lattice-snapped components. Absent means no angle stated -
+    /// what every path this app has ever generated held - so a save
+    /// of a prismatic document is byte-shape identical to its
+    /// pre-seam self, and the field skips serialization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis: Option<[f64; 3]>,
 }
 
 /// An arc move's center, in the XY plane, with direction. `kind` stays
@@ -191,6 +199,11 @@ impl MoveDto {
                 center: [lattice(a.center.x), lattice(a.center.y)],
                 ccw: a.ccw,
             }),
+            // The exact vertical stays exactly (0, 0, 1) through the
+            // snap (zeros and ones are lattice fixed points), so a
+            // stated-up path saves and reloads into the prismatic
+            // code paths the sim and dump branch on.
+            axis: m.axis.map(|a| [lattice(a[0]), lattice(a[1]), lattice(a[2])]),
         }
     }
 
@@ -205,10 +218,15 @@ impl MoveDto {
             Point3::new(self.to[0], self.to[1], self.to[2]),
             self.feed,
         );
-        match self.arc {
+        let m = match self.arc {
             Some(a) => m.with_arc(Point2::new(a.center[0], a.center[1]), a.ccw),
             None => m,
-        }
+        };
+        // VERBATIM, not `with_axis`: the file's numbers are the law -
+        // re-normalizing on load would move a saved axis by bits and
+        // break the save-load-save byte identity (the lattice snap in
+        // from_move is already the normalization gate at write time).
+        m.attach_axis(self.axis)
     }
 }
 

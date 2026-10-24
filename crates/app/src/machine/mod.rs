@@ -177,6 +177,61 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
         }
 
         for (i, mv) in cache.path.moves.iter().enumerate() {
+            // Pose (M5.1 stage A): a move that leans the tool asks
+            // the machine to hold an angle, and the machine answers
+            // with its rotaries - by name, never silently. Absence
+            // is the ordinary case (prismatic), checked exact so no
+            // float dust enters this branch from a normal path.
+            if let Some(a) = mv.axis
+                && !crate::cl::is_vertical(&a)
+            {
+                if !can_tilt(machine) {
+                    say(
+                        &mut out,
+                        format!(
+                            "{name}: move {i} tilts the tool; {} states no tilting rotary",
+                            machine.model
+                        ),
+                    );
+                }
+                let [da, db, dc] = crate::cl::axis_to_angles(a);
+                for (letter, ang) in [('A', da), ('B', db), ('C', dc)] {
+                    if ang.abs() <= 1e-9 {
+                        continue; // that letter holds nothing to check
+                    }
+                    // The letter names the rotary that must hold the
+                    // angle. A machine whose tilt lives under another
+                    // letter (an A trunnion asked for a B turn) is
+                    // refused by name too - the in-app check is the
+                    // safe floor; the machine's own post knows how to
+                    // re-express a pose, this gate never does IK.
+                    match machine
+                        .axes
+                        .iter()
+                        .find(|x| x.rotary && x.name.eq_ignore_ascii_case(&letter.to_string()))
+                    {
+                        None => say(
+                            &mut out,
+                            format!(
+                                "{name}: move {i} commands {letter} {ang:.3} deg; {} states no {letter} axis",
+                                machine.model
+                            ),
+                        ),
+                        Some(ax) => {
+                            if let Some((lo, hi)) = ax.travel
+                                && (ang < lo - 1e-9 || ang > hi + 1e-9)
+                            {
+                                say(
+                                    &mut out,
+                                    format!(
+                                        "{name}: move {i} commands {letter} {ang:.3} deg, the travel is {lo:.3}..{hi:.3}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             // Feed: only stated feeds check against stated ceilings.
             if let Some(feed) = mv.feed {
                 let d = [

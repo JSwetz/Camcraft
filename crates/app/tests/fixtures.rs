@@ -21,7 +21,9 @@ use camcraft_app::posting;
 use camcraft_app::schema::{FixtureDef, Location};
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools::{catalog, Tool};
-use camcraft_app::verify::{FixturePart, Mode, ToolGeom, VerifyContext, Warning, verify};
+use camcraft_app::verify::{
+    bands_vs_fixtures, FixturePart, Mode, ToolGeom, VerifyContext, Warning, verify,
+};
 use camcraft_app::world::new_world;
 
 /// Stock + a 4 mm end mill + a generated face operation: the same
@@ -323,6 +325,45 @@ fn a_shank_that_clears_stock_but_hits_planted_steel_warns_fixture_hit() {
     );
     assert!(history.undo(&world)); // re-tag
     assert_eq!(fixture::list(&world, None), vec!["Vise1".to_string()]);
+}
+
+#[test]
+fn a_leaning_shank_reports_steel_the_prismatic_law_cannot_reach() {
+    // Pose (M5.1 A) through the swept-band law: the same tip, the same
+    // jaw, four poses. Upright at x -12 the tool is all column: shank
+    // x -21..-3, holder x -32..8 - every band falls short of steel at
+    // x >= 10, and the flute (cutting air over an empty region) hits
+    // nothing. Lean 20 degrees toward +x and the shank's AXIS LINE
+    // physically crosses the jaw's footprint at z 56..62 - and the
+    // law's ENCLOSING vertical column (shifted to the band's
+    // mid-height point, widened by the half-length's spread) reports
+    // the Shank hit the prismatic law must miss. Lean the other way
+    // and the enclosure stays where the tool is: silent. The enclosing
+    // model can over-report a graze; it never hides a crash, and the
+    // exact vertical takes the law's original expressions bit-for-bit.
+    let tool = deep_tool();
+    let b = jaw_box();
+    let (sa, ca) = (20f64.to_radians().sin(), 20f64.to_radians().cos());
+    let chord = 0.01;
+    let at = |axis: Option<[f64; 3]>| {
+        let mut m = Move::new(MoveKind::Feed, p(-12.0, 15.0, 5.0), p(-12.0, 15.0, -4.0), Some(400.0));
+        m.axis = axis;
+        bands_vs_fixtures(
+            &Toolpath::new(vec![m]),
+            &tool,
+            &[b],
+            None,
+            chord,
+        )
+    };
+    assert_eq!(at(None), Vec::new(), "the upright column clears the jaw");
+    assert_eq!(at(Some([0.0, 0.0, 1.0])), Vec::new(), "an exact vertical is the same law");
+    assert_eq!(
+        at(Some([sa, 0.0, ca])),
+        vec![Warning::FixtureHit { at: 0, fixture_part: FixturePart::Shank }],
+        "leaning INTO the jaw is reported"
+    );
+    assert_eq!(at(Some([-sa, 0.0, ca])), Vec::new(), "leaning AWAY stays silent");
 }
 
 #[test]

@@ -316,6 +316,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
             to: Point3 { x: i as f64, y: 0.0, z },
             feed: if kind == MoveKind::Rapid { None } else { Some(900.0) },
             arc: None,
+            axis: None,
         });
     }
     t.cycles = vec![
@@ -376,6 +377,74 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
     let text = cnc::serialize(&recs);
     let back = normalize_program_order(cnc::parse(&text).expect("parses"));
     assert_eq!(back, recs, "dump -> text -> parse is an identity");
+}
+
+#[test]
+fn a_leaning_move_dumps_the_angles_a_stream_carries() {
+    // Pose (M5.1 A) through the dump: a stated leaning axis becomes the
+    // canonical letter angles the stream grammar already reads back
+    // (stage D's keyed words); prismatic moves - no axis, or the exact
+    // vertical - state nothing, so every committed golden's text is
+    // unchanged, byte for byte.
+    use camcraft_post::geometry::Point3;
+    let (sa, ca) = (20f64.to_radians().sin(), 20f64.to_radians().cos());
+    let feed = |x: f64| {
+        camcraft_post::cl::Move::new(
+            MoveKind::Feed,
+            Point3 { x: x - 1.0, y: 0.0, z: 1.0 },
+            Point3 { x, y: 0.0, z: 1.0 },
+            Some(200.0),
+        )
+    };
+    let m2 = feed(2.0).with_axis([sa, 0.0, ca]);
+    let m3 = feed(3.0).with_axis([0.0, 0.0, 1.0]);
+    let t = Toolpath::new(vec![feed(1.0), m2, m3]);
+    let d = Dump {
+        op_name: "Lean1",
+        tool_number: 1,
+        tool_name: "EM-0400",
+        tool_diameter: 4.0,
+        rpm: 2500.0,
+        clearance_z: 12.0,
+        retract_z: 10.0,
+        top_z: 0.0,
+        wcs: "G54",
+        origin: [0.0; 3],
+        stock: [-20.0, 20.0, -20.0, 20.0],
+        stock_top_z: 0.0,
+        warnings: vec![],
+    };
+    let recs = camcraft_post::post::dump(&t, &d);
+    let angles: Vec<Option<[f64; 3]>> = recs
+        .iter()
+        .filter_map(|r| match r {
+            Record::Move(m) => Some(m.abc),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(angles.len(), 3);
+    assert_eq!(angles[0], None);
+    let [a, b, c] = angles[1].expect("the lean states its angles");
+    assert!(
+        a.abs() < 1e-9 && (b - 20.0).abs() < 1e-9 && c.abs() < 1e-9,
+        "20 deg toward +x is the canonical B 20: {angles:?}"
+    );
+    assert_eq!(angles[2], None, "the exact vertical states nothing");
+    // The text carries the letters on the millidegree lattice, and the
+    // reader takes them back exactly as the stream law defines them.
+    let text = cnc::serialize(&recs);
+    assert!(text.contains(" A 0 B 20000 C 0"), "{text}");
+    let back = cnc::parse(&text).expect("parses");
+    let got: Vec<Option<[f64; 3]>> = back
+        .iter()
+        .filter_map(|r| match r {
+            Record::Move(m) => Some(m.abc),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(got[1], Some([0.0, 20.0, 0.0]), "{got:?}");
+    assert_eq!(got[0], None);
+    assert_eq!(got[2], None);
 }
 
 #[test]

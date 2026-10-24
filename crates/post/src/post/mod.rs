@@ -181,11 +181,17 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             feed: m.feed,
             center: m.arc.map(|a| (a.center.x, a.center.y)),
             ccw: m.arc.map(|a| a.ccw).unwrap_or(false),
-            // The in-app stream is prismatic by fact, not by omission
-            // (stage D): no generator yet orients a tool, so no move
-            // may claim an angle it was never asked to hold. External
-            // `.cnc` producers own the `Some` side of that contract.
-            abc: None,
+            // Pose (M5.1 stage A): a move that states a leaning axis
+            // commands its canonical letter angles (the cl::pose law,
+            // converted here once); a prismatic move - no axis, or
+            // the Z column itself - commands nothing, byte for byte
+            // as the stream always did. Generators earn the `Some`
+            // side by set_axis; external `.cnc` producers own the
+            // letters directly.
+            abc: m
+                .axis
+                .filter(|a| !crate::cl::is_vertical(a))
+                .map(crate::cl::axis_to_angles),
         }));
     }
     for c in &cycles[ci..] {

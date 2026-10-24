@@ -123,15 +123,19 @@ pub struct Machine {
 }
 
 /// What a machine is, inferred from its axis inventory (M3.2 stage E -
-/// the workspaces-by-kind law). Provenance: general machine-tool
-/// practice - a mill moves a cutter in X, Y and Z; a lathe turns the
-/// part and moves a tool in X and Z only; a mill-turn does both, which
-/// an ordinary file reveals as a Y axis with a rotary (A/B/C) among
-/// its axes. The inference is deliberately the minimal honest one:
-/// anything the axis list cannot decide - an unnamed file, a file with
-/// no X/Z pair - reads [`Kind::Mill`], because a mill is what every
-/// assumption in this codebase currently is, and an invented lathe
-/// workspace would be the silent wrong answer.
+/// the workspaces-by-kind law, refined by M5.1 stage A). Provenance:
+/// general machine-tool practice - a mill moves a cutter in X, Y and
+/// Z; a lathe turns the part and moves a tool in X and Z only; a
+/// mill-turn does both, which an ordinary file reveals as a Y axis
+/// with a TURNING rotary among its axes: one whose direction is the Z
+/// column (a C table) or unstated. A rotary that states a LEANING
+/// direction (an A or B head or trunnion) tilts a milling cutter and
+/// turns nothing - a Y machine with only those is still a [`Kind::Mill`],
+/// five axes of it. The inference stays deliberately the minimal
+/// honest one: anything the axis list cannot decide - an unnamed file,
+/// a file with no X/Z pair - reads [`Kind::Mill`], because a mill is
+/// what every assumption in this codebase currently is, and an
+/// invented lathe workspace would be the silent wrong answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Mill,
@@ -184,6 +188,24 @@ impl Kind {
     }
 }
 
+/// The geometric tilt question (M5.1 stage A): can this machine lean
+/// its tool? `machine.rtcp`'s law, restated for the checker's parsed
+/// axes - true iff some rotary states a direction that is not the Z
+/// column (z² < 0.99·(x²+y²+z²)). A C table is not tilt; a trunnion
+/// or a tilting head is. An UNSTATED direction tilts nothing this
+/// app may verify against: capability must be claimed, never
+/// assumed.
+#[must_use]
+pub fn can_tilt(machine: &Machine) -> bool {
+    machine.axes.iter().any(|a| a.rotary && is_tilt_axis(a))
+}
+
+/// Is `a` a rotary whose stated direction LEANS (off the Z column)?
+fn is_tilt_axis(a: &AxisLimits) -> bool {
+    a.axis
+        .is_some_and(|d| d[2] * d[2] < 0.99 * (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]))
+}
+
 /// The machine's kind (M3.3 stage C): what the file DECLARES wins;
 /// a silent file falls to the axis-inventory law of M3.2 stage E
 /// (below), which the same files always produced. An unparseable
@@ -192,7 +214,14 @@ impl Kind {
 /// the time a Machine exists, a stated kind is a known word.
 ///
 /// Rotary axes alone do not make a mill-turn: a turning center with
-/// a C axis still has no Y, and the file says "lathe".
+/// a C axis still has no Y, and the file says "lathe". And (M5.1 A)
+/// a TILTING rotary makes no more a mill-turn than a table does:
+/// A and B heads and trunnions lean a milling cutter without ever
+/// spinning a part for turning. The turning question is the same
+/// geometry `can_tilt` answers, inverted - a rotary counts toward
+/// "turning" unless its stated direction says lean; unstated
+/// rotaries stay counted, the stage-E law for the files that
+/// predate the vectors.
 #[must_use]
 pub fn kind(machine: Option<&Machine>) -> Kind {
     let Some(m) = machine else {
@@ -204,9 +233,11 @@ pub fn kind(machine: Option<&Machine>) -> Kind {
         return k;
     }
     let has = |n: &str| m.axes.iter().any(|a| a.name.eq_ignore_ascii_case(n));
-    let rotary = m.axes.iter().any(|a| a.rotary)
-        || ["A", "B", "C"].iter().any(|r| has(r));
-    match (has("Y"), has("X"), has("Z"), rotary) {
+    let stated = |a: &AxisLimits| {
+        a.rotary || ["A", "B", "C"].iter().any(|r| a.name.eq_ignore_ascii_case(r))
+    };
+    let turning = m.axes.iter().any(|a| stated(a) && !is_tilt_axis(a));
+    match (has("Y"), has("X"), has("Z"), turning) {
         (true, _, _, true) => Kind::MillTurn,
         (true, _, _, false) => Kind::Mill,
         (false, true, true, _) => Kind::Lathe,

@@ -66,6 +66,73 @@ fn cnc_roundtrip_posts_the_same_program() {
 }
 
 #[test]
+fn a_dumped_lean_posts_the_same_program_as_a_tilted_stream() {
+    // M5.1 A end to end: a generator's `Move.axis` and a hand-written
+    // stream's keyed letters must reach the script through ONE door -
+    // the record's canonical ABC. If the two ever disagree, the dump
+    // is inventing poses or losing them, and this says so.
+    use camcraft_app::cl::{Move, MoveKind, Toolpath};
+    use camcraft_app::geometry::Point3;
+    use camcraft_app::post::Dump;
+    let cps = read("assets/posts/fanuc.cps");
+    let mch = serde_json::json!({
+        "name": "TILTHEAD",
+        "kinematics": { "static": { "rotaries": [
+            { "letter": "A", "type": "rotary", "direction": [1.0, 0.0, 0.0],
+              "travel": [-120.0, 120.0] },
+            { "letter": "B", "type": "rotary", "direction": [0.0, 1.0, 0.0],
+              "travel": [-120.0, 120.0] } ] } }
+    });
+    let (sa, ca) = (20f64.to_radians().sin(), 20f64.to_radians().cos());
+    let path = Toolpath::new(vec![
+        Move::new(MoveKind::Feed, Point3 { x: 0.0, y: 0.0, z: 5.0 }, Point3 { x: 0.0, y: 0.0, z: 0.0 }, Some(150.0)),
+        Move::new(MoveKind::Feed, Point3 { x: 0.0, y: 0.0, z: 0.0 }, Point3 { x: 10.0, y: 0.0, z: 0.0 }, Some(150.0))
+            .with_axis([sa, 0.0, ca]),
+    ]);
+    let d = Dump {
+        op_name: "Lean1",
+        tool_number: 1,
+        tool_name: "EM-0400",
+        tool_diameter: 4.0,
+        rpm: 2500.0,
+        clearance_z: 12.0,
+        retract_z: 10.0,
+        top_z: 0.0,
+        wcs: "G54",
+        origin: [0.0; 3],
+        stock: [-20.0, 20.0, -20.0, 20.0],
+        stock_top_z: 0.0,
+        warnings: vec![],
+    };
+    let stream = cnc::serialize(&camcraft_app::post::dump(&path, &d));
+    // The seam wrote the letters onto the stream it dumped - the
+    // same keyed words stage D's hand-written streams carry.
+    assert!(stream.contains(" A 0 B 20000 C 0"), "{stream}");
+    let out = engine::run(&cps, &mch, &stream).expect("a lean posts on a machine that leans");
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+    assert!(out.program.contains("G43.4"), "armed: {}", out.program);
+    assert!(
+        out.program
+            .as_bytes()
+            .windows(2)
+            .any(|w| w[0] == b'B' && (w[1].is_ascii_digit() || w[1] == b'-')),
+        "a B angle word rides the program: {}",
+        out.program
+    );
+    // The upright prefix of the same run states nothing: cut the lean
+    // move and the program is the ordinary 3-axis text.
+    let flat = Toolpath::new(vec![path.moves[0]]);
+    let plain = engine::run(
+        &cps,
+        &mch,
+        &cnc::serialize(&camcraft_app::post::dump(&flat, &d)),
+    )
+    .expect("prismatic posts");
+    assert!(plain.warnings.is_empty());
+    assert!(!plain.program.contains("G43.4"), "{}", plain.program);
+}
+
+#[test]
 fn post_errors_are_refusals_not_output() {
     // Degenerate intermediates must refuse cleanly through the whole
     // stack (parse -> drive), never emit a partial program.

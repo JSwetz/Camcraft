@@ -39,6 +39,7 @@ fn feed(from: Point3, to: Point3) -> Move {
         to,
         feed: Some(500.0),
         arc: None,
+        axis: None,
     }
 }
 
@@ -126,6 +127,7 @@ fn arc_chords_under_sweep_so_the_sim_only_over_reports() {
             center: Point2::new(0.0, 0.0),
             ccw: true,
         }),
+        axis: None,
     };
     d.subtract(&m, 1.0, 2.0);
     assert!(
@@ -394,6 +396,7 @@ fn program_chains_ops_in_order() {
             to: p(4.5, 4.5, 0.5),
             feed: None,
             arc: None,
+            axis: None,
         },
         plunge(-2.5, -2.5, 1.0, 5.0),
     ];

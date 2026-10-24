@@ -2,7 +2,7 @@
 
 use super::types::{FixturePart, Warning};
 
-use crate::cl::{Move, MoveKind, Toolpath};
+use crate::cl::{is_vertical, Move, MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 pub use crate::tools::ToolGeom;
@@ -167,6 +167,19 @@ pub fn bands_vs_fixtures(
                 .map(|(a, b)| (a.x, a.y, b.x, b.y))
                 .collect(),
         };
+        // Pose (M5.1 stage A): a leaning move turns each band from a
+        // vertical column into a tilted cylinder. This law encloses
+        // the lean in a vertical column that is never smaller: the
+        // swept path shifts to the band's mid-height point on the
+        // leaning axis, the radius gains the half-length's horizontal
+        // spread, and the z planes gain the half-length's vertical
+        // reach plus the disc's own radius. An ENCLOSING model can
+        // over-report a graze; it cannot hide a crash - the tilted
+        // truth (a swept tilted cylinder against a box) is worth
+        // measuring exactly when stage B's generators start leaning
+        // real stock paths. The prismatic branch is bit-identical to
+        // the law's own history: same sums, same comparisons.
+        let lean = m.axis.filter(|a| !is_vertical(a));
         let mut struck = None;
         for (part, above, band_r, band_len) in bands.into_iter().chain(spindle) {
             // Unlike law (c), a band THINNER than the flute still
@@ -175,10 +188,34 @@ pub fn bands_vs_fixtures(
             if band_len <= 0.0 {
                 continue;
             }
-            let (bz0, bz1) = (z_deep + above, z_deep + above + band_len);
+            let (offx, offy, r_use, bz0, bz1) = match lean {
+                None => (0.0, 0.0, band_r, z_deep + above, z_deep + above + band_len),
+                Some(a) => {
+                    let mid = above + band_len * 0.5;
+                    let spread = (band_len * 0.5) * (a[0] * a[0] + a[1] * a[1]).sqrt();
+                    let za = z_deep + above * a[2];
+                    let zb = z_deep + (above + band_len) * a[2];
+                    (
+                        mid * a[0],
+                        mid * a[1],
+                        band_r + spread,
+                        za.min(zb) - band_r,
+                        za.max(zb) + band_r,
+                    )
+                }
+            };
             if fixtures.iter().any(|b| {
                 segs.iter().any(|&(ax, ay, bx, by)| {
-                    crate::fixture::band_hits_box(ax, ay, bx, by, bz0, bz1, band_r, b)
+                    crate::fixture::band_hits_box(
+                        ax + offx,
+                        ay + offy,
+                        bx + offx,
+                        by + offy,
+                        bz0,
+                        bz1,
+                        r_use,
+                        b,
+                    )
                 })
             }) {
                 struck = Some(part);
@@ -186,10 +223,33 @@ pub fn bands_vs_fixtures(
             }
         }
         if struck.is_none() {
-            let (bz0, bz1) = (z_deep, z_deep + tool.flute_len);
+            let (offx, offy, r_use, bz0, bz1) = match lean {
+                None => (0.0, 0.0, tool.radius, z_deep, z_deep + tool.flute_len),
+                Some(a) => {
+                    let mid = tool.flute_len * 0.5;
+                    let spread = (tool.flute_len * 0.5) * (a[0] * a[0] + a[1] * a[1]).sqrt();
+                    let zb = z_deep + tool.flute_len * a[2];
+                    (
+                        mid * a[0],
+                        mid * a[1],
+                        tool.radius + spread,
+                        z_deep.min(zb) - tool.radius,
+                        z_deep.max(zb) + tool.radius,
+                    )
+                }
+            };
             if fixtures.iter().any(|b| {
                 segs.iter().any(|&(ax, ay, bx, by)| {
-                    crate::fixture::band_hits_box(ax, ay, bx, by, bz0, bz1, tool.radius, b)
+                    crate::fixture::band_hits_box(
+                        ax + offx,
+                        ay + offy,
+                        bx + offx,
+                        by + offy,
+                        bz0,
+                        bz1,
+                        r_use,
+                        b,
+                    )
                 })
             }) {
                 struck = Some(FixturePart::Flute);

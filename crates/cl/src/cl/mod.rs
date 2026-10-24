@@ -1,0 +1,31 @@
+//! Cutter-location (CL) data: a linked sequence of machine moves.
+//!
+//! Provenance: our own minimal CL model. Move kinds map to the G0/G1
+//! vocabulary of ISO 6983 / RS-274 (public standards); the rapid/feed/
+//! plunge split is general machining practice. Arcs, cycles, paths and
+//! poses each live behind their own door (M5.0.1's discipline, the
+//! pose added with M5.1 stage A).
+//!
+//! A move may state a TOOL POSE: the unit axis [`Move::axis`], the
+//! same vector the RS-274 letter angles command, converted in exactly
+//! one place - [`pose`] - and read by the sim's swept-band laws, the
+//! checker's refusal law, and the post's stream dump. `None` is no
+//! angle stated: prismatic, which remains the ordinary case for every
+//! path this app generates today.
+//!
+//! Invariant: every move's `from` equals the previous move's `to` (the
+//! path is a chain, no gaps); generators build through [`PathBuilder`],
+//! which maintains it by construction.
+
+mod cycle;
+mod moves;
+mod path;
+mod pose;
+
+pub use cycle::{Cycle, CycleKind};
+pub use moves::{arc_chords, lattice, ArcMove, Move, MoveKind, MAX_ARC_CHORDS};
+pub use path::{PathBuilder, Toolpath};
+pub use pose::{angles_to_axis, axis_to_angles, is_vertical, normalize_axis};
+
+#[cfg(test)]
+mod tests;
