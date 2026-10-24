@@ -1,0 +1,22 @@
+//! Plain operation data: what an operation stores. The component
+//! wrapper lives in [`crate::schema::Operation`]; nothing in this module
+//! touches the world, an entity, or the schema - which is exactly the
+//! law M4.1 R0 draws (docs/M4.1-CRATE-SPLIT.md): the plain types' home
+//! imports no schema, so the wrappers and the data can part companies.
+//! The world-facing methods of these same types (`resolve_height`,
+//! `z`, `stamp_with`, `current_stamp`) stay in the parent module as
+//! separate impl blocks.
+//!
+//! Provenance: our own domain model; the From-reference/offset height
+//! expression is general CAM practice (public documentation of
+//! heights semantics), no vendor internals.
+
+
+mod height;
+mod params;
+mod sane;
+mod sel;
+
+pub use height::{Height, HeightReference};
+pub use params::OpParams;
+pub use sel::{FeatureSel, GenStamp, GeoSel, OpStatus, OpType, SrcRef, WCS_SLOTS};
