@@ -1,0 +1,91 @@
+//! Static verification of generated toolpaths: warnings a path can carry
+//! before anything is posted.
+//!
+//! Provenance: segment intersection by the orientation predicate is
+//! textbook computational geometry (O'Rourke, "Computational Geometry in
+//! C", public material); the tool-reach checks formalize the shop
+//! practice of comparing cutter reach against wall height (machine-tool
+//! handbooks). The rest-material model below is our own conservative
+//! approximation, stated in full where it is used. No vendor source was
+//! consulted.
+//!
+//! Seven checks, each with the exact condition that raises it:
+//!
+//! - [`Warning::Crossing`] - two Feed moves whose Z ranges overlap cross
+//!   in XY. Proper crossings only: touching at a shared vertex (a closed
+//!   trace loop, a serpentine join) is not a crossing. `Mode::Envelope`
+//!   stands it down - crossed raster families overlap by design, and the
+//!   chord that matters there is measured by law (f) instead.
+//! - [`Warning::Gouge`] - a cutter center closer to a region boundary
+//!   than `r - leave - tol`, i.e. the disc bites past the finish surface
+//!   it is supposed to touch. Engrave paths (trace) deliberately sit on
+//!   boundaries, so `Mode::Engrave` skips it.
+//! - [`Warning::ShankHit`] - uncut material inside the shank or holder
+//!   annulus above the current cut. Rest material: at a boundary sample
+//!   q (region and stock loop vertices and edge midpoints, nudged a hair
+//!   inside so membership is unambiguous), material survives above height h iff
+//!   `h < m(q)`, where `m(q)` is the stock top when q is part (never cut)
+//!   or, when q is removable stock, the deepest cut level whose path
+//!   swept q. A band bottomed at `cut_z + flute_len` (shank) or
+//!   `cut_z + flute_len + shank_len` (holder) with radius above the
+//!   flute's to q, with material still above it, collides. Sampling at
+//!   vertices and edge midpoints is conservative, not exact.
+//! - [`Warning::RapidInStock`] - a *lateral* rapid below the clearance
+//!   plane whose XY path still has material above it. Vertical rapids
+//!   are the tool retracting through its own kerf and stay exempt.
+//! - [`Warning::ShankHit`] again, from the cycle list: a hole whose
+//!   entry-to-bottom span exceeds flute + shank + holder pushes the
+//!   assembly below the entry surface no matter what the path looks
+//!   like. The move laws cannot see this at a matched drill - the
+//!   plunge sweeps exactly its own disc, so the hole's rim samples
+//!   fall inside the flute radius where law (c)'s annulus is empty -
+//!   which is why the reach law reads the cycles, not the moves.
+//! - [`Warning::FixtureHit`] - the tool assembly passes through a
+//!   fixture box (M3.2 stage B). Workholding steel is never cut and
+//!   never gouge-relevant; it joins exactly two laws: (c2), every
+//!   cutting move's swept cylinder stack - flute column, shank band,
+//!   holder band - against every box, where a jaw in the path is a
+//!   crash like uncut material is, and (d2), the tool body along a
+//!   rapid - with no clearance or kerf exemptions, because steel is
+//!   never removed material. Z contact within
+//!   [`crate::fixture::FIXTURE_HIT_TOL`]
+//!   of a face is silent (mating surfaces touch by design); everything
+//!   else errs toward HIT.
+//! - [`Warning::Envelope`] - the measured verdict of a 3-D finish
+//!   (`Mode::Envelope`, law (f) below): the swept ball envelope cuts
+//!   below, or leaves above, the model surface by more than
+//!   `finish_tol` plus the scan's quantization floor. It replaces
+//!   [`Warning::Gouge`] for ball paths, whose tangency the distance
+//!   law would misjudge.
+//!
+//! With [`VerifyContext::model`] set (the 3-D pocket, M2.1a) the
+//! boundary is depth-dependent: the gouge law adds the model's
+//! cross-section strictly above each move's deepest plane, the reach
+//! laws sample those sections' walls like any other island, and rest
+//! material counts from the deepest plane whose section does not hold
+//! the column - cutting around an island removes nothing inside it.
+//!
+//! Conservative by design: it may warn where nothing is wrong (a wall
+//! thinner than the sampling, an exotic holder shape), it must never
+//! stay silent about the seven classes above. The hard post-gate that
+//! blocks on these lands with the post processor (M2.3); until then the
+//! operation layer attaches them to the operation for display.
+//!
+//! Arc moves are flattened to chords before the laws run
+//! ([`Move::chords`]) at `gouge_tol`: a chord sits within that
+//! tolerance of the arc it samples, which is exactly the slack the
+//! radial laws already grant - so no violation beyond tolerance hides
+//! in an arc. Warnings keep indexing *moves*; an arc is one move, so
+//! swapping chords for arcs never shifts an index.
+
+
+pub use crate::tools::ToolGeom;
+
+
+mod engine;
+mod laws;
+mod types;
+
+pub use types::{FixturePart, Mode, VerifyContext, Warning};
+pub use engine::verify;
+pub use laws::{bands_vs_fixtures, rapids_vs_fixtures};
