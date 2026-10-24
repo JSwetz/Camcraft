@@ -91,7 +91,7 @@ home.
 | Corner | 📋 | M2.5 |
 | Flow (flowline; ruled-surface flow waits for M5.1) | 📋 | M2.5 |
 | Deburr | 📋 | M2.5 |
-| 3+2 roughing (tilted plane, indexed) | 📋 | M5.1 |
+| 3+2 roughing (tilted plane, indexed) | 🔄 | M5.1 |
 
 ### Milling — Drilling
 
@@ -1425,8 +1425,15 @@ Phase-5 shape law.
       multi-axis contour, rotary parallel, rotary contour, multi-axis
       finishing - the catalog's multi-axis block lands here, each riding
       the orientation and machine-sim laws below
-- **3+2 roughing**: the planar law of Phases 1-2 on a tilted, indexed work
-      plane; position commands between cuts, no simultaneous-axis motion
+- 🔄 **3+2 tilted-plane indexing** (stage B, this commit): the five
+      plane kinds carry a `Tilt`; generation runs them in the frame's
+      LOCAL coordinates and leaves through `TiltedFrame::world_path` -
+      the tilted path is the rotated flat path, move for move, with the
+      pose stamped on every move; planar laws verify local, steel laws
+      world; picked selections refuse a tilt by name; the program posts
+      only to a machine with the letters. Position commands between
+      cuts ride A; 3+2 ROUGHING strategies (the helical/adaptive
+      families on the plane) continue below
 - **Collision-aware orientation**: auto-tilt to avoid shank contact, with shortest-travel smoothing
 - **Drive curves**: machine to a curve on a surface with orientation rules
 - **Machine simulation**: full kinematic simulation of the post's A/B/C motion model, not just the toolpath

@@ -3025,6 +3025,98 @@ section split (moves/path/pose/cycle/tests) rode the same commit
 because `pose.rs` is the axis law's new home - 400-line law, and
 `axis_to_angles` did not belong bolted to the end of a 700-line file.
 
+## M5.1 stage B - 3+2 tilted-plane indexing (this commit)
+
+**The frame lives in `cl`, not `app`.** `TiltedFrame` (origin, u, v,
+axis) is pure pose mathematics next to `angles_to_axis` and
+`axis_to_angles`, which it uses and reuses; `app` only owns the
+component and the command door. Considered: `geometry` (dropped - the
+crate must not know a tool axis exists) and `app/operation` (dropped -
+`sim`'s laws and `post` both need the door, and layering forbids them
+reading `app`).
+
+**Tilt is a params field, not an Operation component.** Every planar
+kind carries `tilt: Option<Tilt>` inside its own params, so the height
+expressions, the staleness stamp and the project DTO all ride the
+machinery EditOperationParams already has - no new component, no new
+command, undo/redo and the file format stay single-track. Considered:
+a sibling component on the operation (dropped: it would fork
+staleness, retype and the DTO for a field that means nothing to a
+3D kind, and `params.tilt()` was already the single accessor the
+wrap consults).
+
+**The angles are canonical at the command door.** `Tilt::new` stores
+`a`/`b` only after `frame()` succeeds: a non-finite letter or a
+zero-norm axis is refused at `CreateOperation`/`EditOperationParams`
+by name, so no world state can hold a tilt that cannot command a
+direction, and every deep consumer (generate, preview, post, DTO)
+sees only a frameable tilt. Considered: refusing at generate time
+(dropped: violates "validate early" and would let a bad tilt live in
+a saved file).
+
+**Heights are axis distance from the anchor (`h - origin.z`).** The
+identity-exact law: `None` tilt and a frame at the origin shift
+nothing, so every prismatic file and the 13 .nc goldens ride
+untouched - and the number the operator reads is still "how far up
+along the tool, from where the part is parked". The honest
+asymmetry, found by the parked post fixture: the frame maps the
+MATERIAL by `(q - o).axis` (full anchor dot), while L1 shifts heights
+by `origin.z` only; for a leaning axis with a perpendicular anchor
+offset the two differ. A tilted op's cutting plane is therefore
+`h + o.axis - o.z` away from the world origin along the axis, not
+`h`. Chosen anyway: any law that made the material and the heights
+agree bit-wise forced a rotation of the HEIGHT definition for the
+upright case (dropped), and the operator-facing convention - the
+plane sits `h` above the anchor, along the tool - is L1's, not the
+dot's. A rigid parked twin must shift every height by the dot law
+(see `pocket_parked`'s comment). This is the entry to re-open if
+stage C's tool-length compensation makes the offset matter in
+practice.
+
+**Verification splits: plane laws local, steel laws world.** The
+planar laws (gouge, reach, level, rest) are rigid-invariant, so they
+walk the LOCAL path against the LOCAL region - the same argument
+that makes the whole wrap sound, run on the side of the door where
+the numbers are prismatic. The hardware laws (fixture bands, rapids)
+walk the WORLD path with stage A's stamped axes, because the machine
+steel does not move with the index. One path is posted, both are
+measured. Considered: running every law in world coordinates with
+tilted band geometry (dropped: re-implements the enclosure
+approximations stage A added, for zero extra truth - containment and
+distance are the same question in any rigid frame).
+
+**The tilted stock cap takes the frame-image of the world box
+corners.** `stock_top_z` in a plane is not the model top minus
+origin.z when the slab is tilted; the max over the eight corners of
+the stock/model AABB through `z_local` is never below the slab over
+any sampled column - over-report a graze, never hide a crash, the
+bands law's exact precedent.
+
+**A tilt refuses a picked selection, by name, everywhere.** A Feature
+pick is world geometry; projecting a pick onto a tilted plane is not
+implemented, and cutting a shadow of it is the silent wrong answer.
+`generate` refuses (command error), `region_of` draws nothing (a
+preview must not disagree with a refusal), `chains_of` yields
+nothing. The law lives in one line each at the three doors, tested
+from all three sides.
+
+**The post fixture rides the cached WORLD path.** `check_document`'s
+rotary/stroke laws read poses off the stored path's stamped axes
+(M5.1 A's law), so a tilted program is machine-checkable without
+re-deriving the frame in `machine.rs`; the tilt-only refusal for a
+machine with no rotaries is the same read, no new plumbing.
+`posting`'s stream carries the WARN records as always - the gate is
+unchanged, which is the point: the tilted path passed the same
+verdicts or the post blocked.
+
+**Stage-B scope: the five plane kinds.** Face/Contour/Pocket/Slot/
+Trace carry the `tilt` field; Drill, Pocket3D and Finish3D have none
+to set - their geometry is the hole list and the world-space mesh,
+and tilting those is stage C's tool-length story, not this stage's
+plane indexing. The params `sane` door answers for all eight arms
+one match: whatever `tilt()` returns must be frameable, so a future
+kind that grows the field inherits the refusal.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
