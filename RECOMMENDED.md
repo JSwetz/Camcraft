@@ -2906,8 +2906,62 @@ CWD=`crates/ui` per the snapshot-golden law).
 **Measured, not copied: coverage is 793, not 792.** The ROADMAP M5.0
 stage row says "Coverage 792==792" - the honest count across bb0017c..
 HEAD is `git grep -c "#\[test\]"` = 793 before and after all seven
-splits (31 `#[ignore]` likewise), the +1 ride-along from M4.2b's probe
-tests. The stage row gets corrected when M5.0 itself closes.
+splits (29 `#[ignore]` likewise - my "31" here was a miscount, corrected
+in the M5.0.2 close; the law is the before==after comparison, which held
+under either count), the +1 ride-along from M4.2b's probe tests. The
+stage row gets corrected when M5.0 itself closes.
+
+## M5.0.2 — the kind registry: one table, and what deliberately stays a match (commit c465558)
+
+**A const `KindInfo::ALL` table, not a `define_ops!` macro.** The brief
+said "registration table"; a declarative macro seemed the Rust-native
+shape, and it was dropped. A macro hides its expansions from grep and
+rust-analyzer, and the fan-out sites that the compiler must police
+(`kind()`, `is_sane`, the height walks, the region builders, the
+generator dispatch, the DTO mirrors) are exhaustive matches TODAY -
+the match arm IS the registration forcing a new kind to be handled.
+The table's job is only the parts that were data with no type-checker
+behind them: the stamp tag literals, the UI's label/caption/icon/order
+columns, the retype seed bodies, the verify mode. Considered and
+dropped: inventory-driven Vec registration (runtime allocation for a
+compile-time set), and typetag/erase (a dependency for a closed enum).
+
+**The three silent `_ =>` arms were the actual bug class.** panes'
+`text_of` answered "3D Finish" for any unknown index, `icon_of`
+answered the finish3d glyph, and retype answered a Face - all three
+compiled while lying. They now index the table (`ALL.get(i)`), and an
+out-of-range index is a `debug_assert` plus a named `eprintln` before
+the release-path fallback (Prime Directive: refuse loud, never crash
+on a UI path). A new kind that forgets its row cannot compile:
+`OpType::ordinal()` is exhaustive, and `info()` debug-asserts
+row.ty == self so table order drift dies in the first test run.
+
+**Digest bytes were kept sacred, not just compatible.** `stamp_with`
+had `h.write_u8(N)` as the first statement of each arm; the N moved to
+the table's `tag` column and the write was hoisted above the match -
+the byte stream is identical by construction, which is what let the
+793-test lane (and every cached-stamp path) pass untouched instead of
+requiring regolden. The registry law (row order == ordinal == tag ==
+combo index == ribbon `Create(i)` list) is asserted inside the
+existing `stamp_follows_every_input` rather than a new `#[test]`, so
+the coverage count stays byte-comparable across the refactor.
+
+**Retype went whole.** The UI's eight `retype` arms and eight
+per-kind accessors moved verbatim into app as `retype_params` + the
+`Carried` folds - behavior-by-construction, per the M5.0.1 slice
+discipline. `Carried::of` preserves both documented quirks (Drill's
+climb is always true; Drill's bottom exists only when explicit), and
+the two helpers the UI wording tests call (`top_of`/`bottom_of`)
+surfaced from private to `operation::` pub - the law comments moved
+with them.
+
+**One rung was enough.** The plan's second rung (extracting named
+per-kind fns from the generate dispatch) was evaluated and left
+undone: those matches are the compile-forced glue the design above
+protects, and renaming their bodies into functions would move code
+without moving coupling. It gets revisited only when M5.1's ~8 new
+kinds make a dispatch arm genuinely heavy - the table means that's a
+row + an fn + arms in four honest files, not the 14-file hunt.
 
 ## How this file ends
 

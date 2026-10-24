@@ -1388,13 +1388,22 @@ Phase-5 shape law.
       byte-identical. Done in M5.0.1 (commits 4463808..4bf5e4d): seven
       flat modules became seven directory modules, pub surfaces
       re-exported from each mod.rs, 793 `#[test]` before and after,
-      31 `#[ignore]` kept, goldens porcelain-clean at every rung. Two
-      files sit at the cap's edge by recorded choice (drilling/tests.rs
-      408, verify/engine.rs ~415) - RECOMMENDED.md, M5.0.1.
-- ⏳ **Collapse the kind fan-out** into one registration table per family:
+      29 `#[ignore]` kept (the 31 in the run-up notes was a miscount;
+      git grep says 29 at HEAD, then and now), goldens porcelain-clean
+      at every rung. Two files sit at the cap's edge by recorded choice
+      (drilling/tests.rs 408, verify/engine.rs ~415) - RECOMMENDED.md,
+      M5.0.1.
+- ✅ **Collapse the kind fan-out** into one registration table per family:
       kind <-> params <-> stamp <-> generate-dispatch <-> verify-mode <->
       DTO <-> UI tables, so a new operation is a params struct + a generator
-      fn + a table row, not a 14-file hunt
+      fn + a table row, not a 14-file hunt — done in M5.0.2 (commit
+      c465558): `KindInfo::ALL` in `operation/kinds.rs` carries label,
+      caption, digest tag, verify mode and seed fn per kind; the retype
+      carry folds moved from the UI with it; the UI's three silent
+      `_ =>` catch-alls are gone; registry order is compiler-forced
+      (exhaustive `ordinal()`) and pinned by assert. The glue that
+      must be per-kind (region builders, generator dispatch, sanity,
+      DTO mirrors) stays exhaustive matches - RECOMMENDED.md, M5.0.2.
 - ✅ **Pay M4.2b**: quantize the dome sampler to microns before the cull,
       drop the two named CI skips — done in M5.0's run-up: scan points on
       the lattice, hull in exact integers, arc splits lattice-biased; all
@@ -1489,7 +1498,7 @@ need to figure out how to offload simulation, voxel body calculation and tool pr
 | **M4.3** | Defer Code | Done: hsmworks→camcraft everywhere user-facing or self-referential - crates/packages, `camcraft-ui.exe`, `.camproj` (+filter+untitled name), window title, cps vendor line, dist zip, thread name, doc titles; hash salts moved (one-time Stale, by design), wire magics kept (format = compatibility contract), Autodesk-trademark true-sentences kept; full suite green on the new names (595 pass / 792 `#[test]` law held / clippy -D warnings), goldens byte-stable, post `--version` intact | ✅ |
 | **M4.4** | Test cost shape | Done: law/verdict split - finish3d 39 tests (27 `#[ignore]`d), verify's two envelope verdicts moved; release heavy lane 30 min → 3.4 min (CI runs it); Gate-map headers in every suite; debug ladder ~2 s where it was a 30-min tail | ✅ |
 | **M4.2b** | Dome-golden fix | Done: the drift was never the sampler's rates - it was float-bit ties in the facet scan's argmax at mathematically-exact tangencies, resolved differently by each platform's libm. Fix: scan points born on the micron lattice, support compared on the lattice, convex hull in exact i64/i128 integers, arc splits `(lattice(q)+1e-12).ceil()`. Windows goldens regenerated once (7 files, coarser by 8-24 moves; envelope + verify lanes prove no tolerance broke); both named CI `--skip`s retired; Linux parity 20/20 (RECOMMENDED: law override) | ✅ |
-| **M5.0** | Structure prelude | The kind-fan-out collapse + six oversized-file splits (operation/types, machining2d, finishing3d, verify, stock_sim, +drilling/machining3d) that let M5.1/M5.2 add ~25 op kinds at one-table-row cost instead of 14-file edits; goldens byte-identical (structure, not behavior). Coverage 792==792. See docs/M5-PHASE5-PLAN.md. | 📋 |
+| **M5.0** | Structure prelude | Done: the kind-fan-out collapse (M5.0.2 `KindInfo::ALL` registry - labels, captions, digest tags, verify modes, retype seeds in one table; three silent UI catch-alls removed) + seven oversized-file splits (operation/types, machining2d, finishing3d, verify, stock_sim, drilling, machining3d) + M4.2b paid; lets M5.1/M5.2 add ~25 op kinds at one-table-row cost. Goldens byte-identical (structure, not behavior). Coverage 793==793, 29 ignores kept. See docs/M5-PHASE5-PLAN.md. | ✅ |
 | **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
