@@ -1492,7 +1492,71 @@ should be read and loaded din realtime from a a "themes" folder.
 - **Reading and listing**: Ability to find and list the idedntified themes. The theme files should have a descriptor section with name, creator, description.
 - **Realtime loading**: The theme should swap in ontop of existing theme in realtime. Only colors for first spike.
 
-## Milestone Summary
+### M6.3 - Adopt the sibling repo's theme architecture
+**Goal: bring our egui UI up to the theme setup proven out in solidcraft
+(`~/Projects/solidcraft`, `crates/ui-egui`) — one token table that drives both
+widgets and painted chrome, loadable from JSON at runtime. Same engine as ours
+(egui + egui-wgpu over wgpu), so the shape of the code ports; the values and
+assets are ours.**
+
+Solidcraft's reference design, read from `crates/ui-egui/src/theme.rs` (1030
+LOC) and `theme_files.rs` (898 LOC): a single `Tokens` struct is the truth for
+colour, radii, spacing, fonts and control sizes; `Visuals` are *derived* from
+it, not authored; a theme file names a base palette and overrides individual
+tokens by name, so a custom theme is a handful of lines. Their shipped set is
+~20 JSON themes (gruvbox, nord, solarized, tokyo-night, high-contrast, an
+`amber-phosphor` CRT, `solidcraft-95`) under `assets/styles/ui/themes/`,
+`include_str!`-compiled for defaults and read from disk for user themes.
+
+- **One Tokens struct, two render paths**: replace the 14-field `Palette` in
+      `crates/ui/src/egui_app/theme.rs` with a named-token table (ink/well/
+      accent/text tiers, borders, field states, selection — then extended with
+      the geometric tokens below). `visuals()` becomes `fn visuals(&Tokens) ->
+      Visuals` derived from the table; `painted.rs` and `shell.rs` read the
+      *same* tokens by name. Their structural win is the exhaustiveness
+      pattern: their apply walks every token field in one destructuring arm, so
+      adding a colour without wiring it fails the build instead of silently
+      rendering default-egui grey. We have the identical drift risk in our
+      painted path — adopt their guard.
+- **Themes as files, not code**: a versioned format (`camcraft-theme/1`) with a
+      `descriptor` (name, creator, description, base `dark`/`light`), a `colors`
+      map keyed by token name (`#rrggbb`/`#rrggbbaa`, or an array for ramps),
+      and the size/shape knobs. No file paths inside a theme — icons stay in
+      `assets/ui/` by convention (M6.1's rule, kept). Hostile-input caps from
+      day one: byte budget, colour count, name length, custom-theme count —
+      corrupt or unknown-token themes refuse with a named diagnostic, never
+      crash, never half-apply (the Prime Directive applies to themes too).
+      Unknown keys are reported, not ignored silently.
+- **Compiled-in defaults + disk overlay**: `include_str!` the light and dark
+      defaults so a binary with no assets directory still themes correctly
+      (M6.1), and read `assets/themes/*.json` at runtime for the rest, listing
+      them for the switcher. Cache parsed themes per path so the realtime swap
+      costs nothing per frame.
+- **Sizes exposed through the theme**: the Phase-6 complaint was that ribbon
+      size, input fields and button size weren't themeable. Make them tokens —
+      corner radii (`radius_sm`…`xl`, `control_radius`), item/window/button
+      spacing, `control_height`, and the ribbon/toolbar glyph size — each
+      overridable in the theme file, with per-widget clamping to their own
+      bounds so a 400-point radius can't blow out a checkbox. Their `radii`
+      block is the model; we extend it with spacing and heights.
+- **Theme switcher in the top-right**: dropdown listing defaults + discovered
+      files, applying live on the next frame. Selection rides `ActivateSetup`-
+      style command law (AGENTS.md: everything is a command) — it must be
+      undoable and persist in the project, not be an ad-hoc field poke.
+- **Derived contrast, kept honest**: they generate hover/active steps and
+      text-on-fill choices from the accent rather than trusting hand-typed
+      values. Adopt the derivation for the states we don't spell out, and pair
+      it with an accessible-contrast check in the light theme's golden — a
+      theme that can't be read is a visible refusal, not a style preference.
+      Their `ColorVision` layer (protan/deutan/tritan remaps applied on top of
+      any theme) is a cheap follow-on once the token table exists.
+- **Both themes land in this milestone, not as an experiment**: the dark values
+      carry over from today's `Palette::DARK` so existing snapshots stay
+      meaningful; the light theme ships alongside as a second golden set.
+
+Provenance: architecture studied from a sibling project's own source, at the
+user's direction; no HSMWorks material involved. All numbers, colours, icons,
+and asset names are ours, drawn from public machining-UI convention.
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
@@ -1523,7 +1587,9 @@ should be read and loaded din realtime from a a "themes" folder.
 | **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
-| **M6.1** | GPU acceleration | Simulation, preview, SDF, Voxel, B-Rep - acceleration | 📋 |
+| **M6.1** | Light and dark | JSON themes (colors + icons), compiled-in defaults, top-right switcher | 📋 |
+| **M6.2** | User themes | Discover/list `assets/themes/*.json`, descriptors, realtime swap | 📋 |
+| **M6.3** | Token architecture | Adopt the solidcraft `Tokens`/`theme_files` design: one named table drives widgets + painted chrome, radii/spacing/sizes themeable, command-law switcher | 📋 |
 
 ## Open questions & deferred
 
