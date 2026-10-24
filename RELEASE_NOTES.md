@@ -1,4 +1,4 @@
-# HSMWorks (clean-room) 0.3.0
+# CamCraft 0.3.0 (clean-room implementation)
 
 Third public release: Milestone 3 — the production job. A model revision
 updates the toolpaths that depend on it instead of stranding them, a part can
@@ -80,7 +80,7 @@ knowledge. "HSMWorks" is a trademark of Autodesk; this project is unaffiliated
 
 ## How to run
 
-- `hsmworks-ui.exe` — the application (all UI assets are embedded).
+- `camcraft-ui.exe` — the application (all UI assets are embedded).
 - `post.exe` — the command-line post processor:
   `post [--machine <file.mch>] [--trace <file>] <config.cps>
   <intermediate.cnc> <output.nc>`
@@ -107,7 +107,7 @@ knowledge. "HSMWorks" is a trademark of Autodesk; this project is unaffiliated
 ## Build
 
 Rust (edition 2024, `rust-version` ≥ 1.90): `cargo build --release -p
-hsmworks-ui -p hsmworks-app`. CI runs the golden regression suite, all tests,
+camcraft-ui -p camcraft-app`. CI runs the golden regression suite, all tests,
 clippy with warnings denied, and the headless app run
 (.github/workflows/ci.yml).
 

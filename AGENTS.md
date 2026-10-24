@@ -135,8 +135,8 @@ reference each other. `Part` stores `child: Entity` (not parent); systems
 query directly (no helper accessors). `decompose` stores facets directly into
 `Part`.
 
-Check only touched files: `-p` per touched crate - `hsmworks-ui`,
-`hsmworks-app`, `camcraft-motion`, `camcraft-sim`, `camcraft-post`,
+Check only touched files: `-p` per touched crate - `camcraft-ui`,
+`camcraft-app`, `camcraft-motion`, `camcraft-sim`, `camcraft-post`,
 `camcraft-tools`, `camcraft-cl`, `camcraft-geometry` (not the whole
 workspace, which rebuilds flecs). The M4.1 split landed: geometry/cl/tools/
 post/sim/motion are their own crates; app's `operation` and `project` modules
@@ -156,9 +156,11 @@ Phase 4 refactors the codebase for reuse; work in the shape it is heading to:
   private helpers of another domain.
 - **Stays buildable everywhere.** No platform-specific assumptions in core
   code (M4.2 ships Windows/Linux/macOS builds from the same source).
-- **Neutral naming.** The product label changes from hsmworks to camcraft at
-  M4.3; keep crate names as-is for now, but new user-visible strings, doc
-  comments and identifiers should not spread the old brand.
+- **Neutral naming.** M4.3 renamed the product label hsmworks to camcraft
+  everywhere, crates included; nothing - string, comment, or identifier -
+  carries the old brand. Legitimate trademark mentions ("no HSMWorks
+  material consulted", "a clean-room implementation of HSMWorks") name
+  Autodesk's product and stay: they're true statements, not branding.
 
 ## Testing
 
@@ -168,7 +170,7 @@ app-level fixtures in `crates/app/tests/common/mod.rs`). Each future subcrate
 carries its own tests inside its crate (M4.1).
 
 Gate yourself narrowly, not by re-running everything: build once with
-`cargo test -p hsmworks-app -p hsmworks-ui --no-run`, then run the individual
+`cargo test -p camcraft-app -p camcraft-ui --no-run`, then run the individual
 test binaries the diff touches (`target\debug\deps\<name>-<hash>.exe`, in
 parallel - they take no cargo lock). Each suite's header carries the module
 map (`Gate map (M4.4): covers app::x, app::y...`) - pick binaries from it,
@@ -177,7 +179,7 @@ everything slower is in the heavy lane below, not in yours.
 
 Laws and verdicts run in different lanes (M4.4): tests that MEASURE geometry
 clean (envelope scans, full-precision projections) or generate over the big
-fixtures are `#[ignore]`d - `cargo test --release -p hsmworks-app --
+fixtures are `#[ignore]`d - `cargo test --release -p camcraft-app --
 --ignored` executes them in minutes and belongs at milestone close-out and
 pre-push, never per-edit. The ignore reason names its lane. Coverage must
 not ride the split away: `#[test]` count before and after must match, and
