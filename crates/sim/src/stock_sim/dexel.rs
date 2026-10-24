@@ -1,0 +1,339 @@
+//! Split from `stock_sim.rs` by M5.0.1; structure only.
+
+use super::kernel::{MAX_CELLS_PER_AXIS, StockError};
+
+use crate::cl::{Move, MoveKind};
+use crate::geo2d::{Loop, Point2, Region};
+use crate::geometry::Point3;
+/// The height field: material top per cell, row-major from (`x0`, `y0`)
+/// at the lower-left corner, cell centers at `x0 + (i + 0.5) * cell`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dexel {
+    pub x0: f64,
+    pub y0: f64,
+    pub cell: f64,
+    pub nx: usize,
+    pub ny: usize,
+    /// The surface the whole grid started at: removal is counted from
+    /// here, so a column's removed depth is one subtraction, not a
+    /// history.
+    pub stock_z: f64,
+    /// Top of the material standing at each column.
+    pub top: Vec<f64>,
+}
+
+impl Dexel {
+    /// A stock block `x0..x1 × y0..y1 × ..top_z` on the given cell size:
+    /// every column's top starts at the stock surface.
+    pub fn block(x0: f64, y0: f64, x1: f64, y1: f64, top_z: f64, cell: f64) -> Result<Self, StockError> {
+        if !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite() && top_z.is_finite())
+            || x1 <= x0
+            || y1 <= y0
+            || !(cell.is_finite() && cell > 0.0)
+        {
+            return Err(StockError::Invalid("stock box and cell must be finite, box non-empty, cell positive".into()));
+        }
+        let nx = ((x1 - x0) / cell).ceil() as usize;
+        let ny = ((y1 - y0) / cell).ceil() as usize;
+        if nx == 0 || ny == 0 || nx > MAX_CELLS_PER_AXIS || ny > MAX_CELLS_PER_AXIS {
+            return Err(StockError::Invalid(format!(
+                "grid would be {nx}x{ny} cells; at most {MAX_CELLS_PER_AXIS} per axis"
+            )));
+        }
+        Ok(Dexel {
+            x0,
+            y0,
+            cell,
+            nx,
+            ny,
+            stock_z: top_z,
+            top: vec![top_z; nx * ny],
+        })
+    }
+
+    #[must_use]
+    pub fn center(&self, ix: usize, iy: usize) -> Point2 {
+        Point2::new(
+            self.x0 + (ix as f64 + 0.5) * self.cell,
+            self.y0 + (iy as f64 + 0.5) * self.cell,
+        )
+    }
+
+    #[must_use]
+    pub fn col(&self, q: Point2) -> Option<usize> {
+        let ix = (q.x - self.x0) / self.cell;
+        let iy = (q.y - self.y0) / self.cell;
+        if ix < 0.0 || iy < 0.0 || ix >= self.nx as f64 || iy >= self.ny as f64 {
+            return None;
+        }
+        Some(ix as usize + (iy as usize) * self.nx)
+    }
+
+    /// Remove material down to the LOWEST Z of one straight, Z-linear
+    /// chord whose disc of radius `r` touches the cell center - the
+    /// atom every move reduces to. A zero-XY-length chord (a plunge)
+    /// is its own interval. The reach interval is exact for a segment,
+    /// so this is never an endpoint approximation: an oblique move
+    /// cannot over-report its cut, and cannot under-report one either.
+    pub fn cut_chord(&mut self, a: Point3, b: Point3, r: f64) {
+        if !(a.is_finite() && b.is_finite()) || !(r.is_finite() && r >= 0.0) {
+            return; // non-finite geometry cuts nothing; refusing lives
+                    // in the callers' validation laws, not mid-sweep
+        }
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        // Cells whose centers can be within r of the segment: the
+        // segment bbox grown by r, clamped to the grid. Clamping is
+        // harmless - every candidate still faces the exact reach test.
+        let fx = |v: f64| ((v - self.x0) / self.cell).floor();
+        let fy = |v: f64| ((v - self.y0) / self.cell).floor();
+        let lo_x = fx(a.x.min(b.x) - r).max(0.0) as usize;
+        let hi_x = fx(a.x.max(b.x) + r).clamp(0.0, self.nx as f64 - 1.0) as usize;
+        let lo_y = fy(a.y.min(b.y) - r).max(0.0) as usize;
+        let hi_y = fy(a.y.max(b.y) + r).clamp(0.0, self.ny as f64 - 1.0) as usize;
+        if lo_x >= self.nx || lo_y >= self.ny {
+            return;
+        }
+        for iy in lo_y..=hi_y {
+            for ix in lo_x..=hi_x {
+                let q = self.center(ix, iy);
+                // Parameter interval where the disc reaches q: the
+                // shared reach law (see `reach`), exact on the segment.
+                let Some((t0, t1)) = reach(q.x - a.x, q.y - a.y, dx, dy, r) else {
+                    continue;
+                };
+                // Z is linear along the chord, so its minimum over the
+                // interval is at one of the interval ends.
+                let za = a.z + (b.z - a.z) * t0;
+                let zb = a.z + (b.z - a.z) * t1;
+                let cut = za.min(zb);
+                let k = ix + iy * self.nx;
+                if cut < self.top[k] {
+                    self.top[k] = cut;
+                }
+            }
+        }
+    }
+
+    /// The ball-nose atom: a sphere of radius `r` whose CENTER travels
+    /// the straight, Z-linear chord `a -> b`. Above a cell center `q`,
+    /// at instant `t`, the sphere's bottom sits at
+    /// `z(t) - sqrt(r^2 - d(t)^2)` with `d` the horizontal distance
+    /// from `q` to the center path; the cut is the minimum of that
+    /// over the reach window. Endpoints do NOT suffice here (unlike
+    /// `cut_chord`, where the bottom is constant along the chord): the
+    /// bottom function is convex in `t`, so its minimum is at a window
+    /// end or at its single interior stationary point - `f'(t) = k +
+    /// (t*D^2 - w.D)/sqrt(r^2 - d^2)`, whose squaring gives the
+    /// quadratic below, and the unsquared law keeps only roots where
+    /// `(w.D - t*D^2)` shares `k`'s sign. The XY-nearest instant `t_c`
+    /// is always evaluated too, so a root lost to rounding degrades
+    /// toward the chord's mid-sagitta, never past an endpoint.
+    pub fn cut_ball(&mut self, a: Point3, b: Point3, r: f64) {
+        if !(a.is_finite() && b.is_finite()) || !(r.is_finite() && r >= 0.0) {
+            return; // the cut_chord gate: validation lives upstream
+        }
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let dd = dx * dx + dy * dy;
+        let k = b.z - a.z;
+        let fx = |v: f64| ((v - self.x0) / self.cell).floor();
+        let fy = |v: f64| ((v - self.y0) / self.cell).floor();
+        let lo_x = fx(a.x.min(b.x) - r).max(0.0) as usize;
+        let hi_x = fx(a.x.max(b.x) + r).clamp(0.0, self.nx as f64 - 1.0) as usize;
+        let lo_y = fy(a.y.min(b.y) - r).max(0.0) as usize;
+        let hi_y = fy(a.y.max(b.y) + r).clamp(0.0, self.ny as f64 - 1.0) as usize;
+        if lo_x >= self.nx || lo_y >= self.ny {
+            return;
+        }
+        let r2 = r * r;
+        for iy in lo_y..=hi_y {
+            for ix in lo_x..=hi_x {
+                let q = self.center(ix, iy);
+                let (wx, wy) = (q.x - a.x, q.y - a.y);
+                let Some((t0, t1)) = reach(wx, wy, dx, dy, r) else {
+                    continue;
+                };
+                let f = |t: f64| {
+                    let ex = wx - dx * t;
+                    let ey = wy - dy * t;
+                    a.z + k * t - (r2 - (ex * ex + ey * ey)).max(0.0).sqrt()
+                };
+                let t_c = if dd > f64::EPSILON {
+                    (wx * dx + wy * dy) / dd
+                } else {
+                    0.0
+                };
+                let mut cut = f(t0).min(f(t1)).min(f(t_c.clamp(t0, t1)));
+                if dd > f64::EPSILON {
+                    let wd = wx * dx + wy * dy;
+                    let s = dd + k * k;
+                    let qa = dd * s;
+                    let qb = -2.0 * wd * s;
+                    let qc = wd * wd + k * k * (wx * wx + wy * wy - r2);
+                    let mut disc = qb * qb - 4.0 * qa * qc;
+                    if disc < 0.0 && disc > -qb * qb * 1e-12 {
+                        disc = 0.0; // a planar double root erased by rounding
+                    }
+                    if disc >= 0.0 && disc.is_finite() {
+                        let sd = disc.sqrt();
+                        for t in [(-qb - sd) / (2.0 * qa), (-qb + sd) / (2.0 * qa)] {
+                            if t > t0 && t < t1 && (wd - t * dd) * k >= 0.0 {
+                                cut = cut.min(f(t));
+                            }
+                        }
+                    }
+                }
+                let col = ix + iy * self.nx;
+                if cut < self.top[col] {
+                    self.top[col] = cut;
+                }
+            }
+        }
+    }
+
+    /// Ball-nose version of `subtract`: moves carry TIP positions (the
+    /// whole codebase stores toolpaths tip-first), so the CENTER path
+    /// is the tip path lifted by `r` in Z and the swept solid is a
+    /// sphere at every instant. Arcs reduce to chords under the same
+    /// uniform-Z helix law as `subtract`.
+    pub fn subtract_ball(&mut self, m: &Move, r: f64, chord_tol: f64) {
+        if m.kind == MoveKind::Rapid || !m.is_finite() {
+            return;
+        }
+        match m.arc {
+            None => self.cut_ball(
+                Point3::new(m.from.x, m.from.y, m.from.z + r),
+                Point3::new(m.to.x, m.to.y, m.to.z + r),
+                r,
+            ),
+            Some(arc) => {
+                let a2 = Point2::new(m.from.x, m.from.y);
+                let b2 = Point2::new(m.to.x, m.to.y);
+                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
+                let n = cs.len().max(1) as f64;
+                let dz = m.to.z - m.from.z;
+                for (j, (ca, cb)) in cs.into_iter().enumerate() {
+                    let za = m.from.z + dz * (j as f64 / n) + r;
+                    let zb = m.from.z + dz * ((j + 1) as f64 / n) + r;
+                    self.cut_ball(
+                        Point3::new(ca.x, ca.y, za),
+                        Point3::new(cb.x, cb.y, zb),
+                        r,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Subtract one move: rapids touch nothing, straight moves are one
+    /// chord, arcs reduce to their sagitta chords with Z interpolated
+    /// at each chord endpoint (a helix descends uniformly with its
+    /// sweep - the same reading `sim::path_len` takes).
+    pub fn subtract(&mut self, m: &Move, r: f64, chord_tol: f64) {
+        if m.kind == MoveKind::Rapid || !m.is_finite() {
+            return;
+        }
+        match m.arc {
+            None => self.cut_chord(m.from, m.to, r),
+            Some(arc) => {
+                let a2 = Point2::new(m.from.x, m.from.y);
+                let b2 = Point2::new(m.to.x, m.to.y);
+                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
+                let n = cs.len().max(1) as f64;
+                let dz = m.to.z - m.from.z;
+                for (k, (ca, cb)) in cs.into_iter().enumerate() {
+                    let f0 = k as f64 / n;
+                    let f1 = (k + 1) as f64 / n;
+                    let za = m.from.z + dz * f0;
+                    let zb = m.from.z + dz * f1;
+                    self.cut_chord(
+                        Point3::new(ca.x, ca.y, za),
+                        Point3::new(cb.x, cb.y, zb),
+                        r,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Rectangle regions of the cells whose top stands above `z` (the
+    /// mask's horizontal runs merged into strips, the strips fused by
+    /// the region algebra). This is a grid query answer in region
+    /// clothing: cell-quantized by construction, and its consumer's
+    /// tolerance laws - not this shape's corners - decide what is cut.
+    pub fn above(&self, z: f64) -> Result<Region, StockError> {
+        let mut acc: Option<Region> = None;
+        for iy in 0..self.ny {
+            let mut run: Option<usize> = None;
+            for ix in 0..=self.nx {
+                let over = ix < self.nx && self.top[ix + iy * self.nx] > z;
+                match (run, over) {
+                    (None, true) => run = Some(ix),
+                    (Some(a), false) => {
+                        let r = strip(self.x0, self.y0, self.cell, a, ix, iy)?;
+                        acc = Some(match acc {
+                            None => r,
+                            Some(g) => g.union(&r).map_err(StockError::Geo)?,
+                        });
+                        run = None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(acc.unwrap_or_else(Region::empty))
+    }
+}
+
+/// The parameter interval of a chord `0 -> d` whose tool disc of
+/// radius `r` reaches a point offset `w` from the start - the reach
+/// law shared by the flat and ball kernels so both inherit one
+/// phantom rule: the window is on the SEGMENT, not the infinite line,
+/// and an interval that falls entirely outside `[0, 1]` stays empty
+/// (clamping it open would invent a cut at the nearest endpoint - the
+/// exact bug the M2.1b phantom test pins). A degenerate `d` (plunge)
+/// is its own interval, gated by distance.
+pub fn reach(wx: f64, wy: f64, dx: f64, dy: f64, r: f64) -> Option<(f64, f64)> {
+    let l2 = dx * dx + dy * dy;
+    if l2 <= f64::EPSILON {
+        if wx.hypot(wy) > r {
+            None
+        } else {
+            Some((0.0, 1.0))
+        }
+    } else {
+        let t_c = (wx * dx + wy * dy) / l2;
+        let cross = wx * dy - wy * dx;
+        let d_perp2 = (cross * cross) / l2;
+        if d_perp2 > r * r {
+            return None;
+        }
+        let half = (r * r - d_perp2).sqrt() / l2.sqrt();
+        let lo = (t_c - half).max(0.0);
+        let hi = (t_c + half).min(1.0);
+        if lo > hi {
+            None
+        } else {
+            Some((lo, hi))
+        }
+    }
+}
+
+/// One merged strip: cells `ia..ib` of row `iy`, as a closed rectangle.
+pub(super) fn strip(x0: f64, y0: f64, cell: f64, ia: usize, ib: usize, iy: usize) -> Result<Region, StockError> {
+    let (a, b) = (
+        Point2::new(x0 + ia as f64 * cell, y0 + iy as f64 * cell),
+        Point2::new(x0 + ib as f64 * cell, y0 + (iy as f64 + 1.0) * cell),
+    );
+    let loop_ = Loop::new(vec![
+        a,
+        Point2::new(b.x, a.y),
+        b,
+        Point2::new(a.x, b.y),
+    ])
+    .map_err(StockError::Geo)?;
+    Region::new(vec![loop_]).map_err(StockError::Geo)
+}
+
+pub(super) fn fy0(v: f64, y0: f64, cell: f64) -> f64 {
+    ((v - y0) / cell).floor()
+}

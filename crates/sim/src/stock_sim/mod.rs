@@ -1,0 +1,66 @@
+//! Dexel (Z-map) stock simulation for 3-D roughing (M2.1b).
+//!
+//! Provenance: the dexel/Z-map material model is classic published CAM
+//! simulation literature (a column-wise height field of remaining
+//! material, subtracted per swept tool disc); the region algebra is our
+//! Clipper2 wrapper. Provenance also by omission: this grid is the
+//! VERIFICATION layer, never the source of truth - operation geometry
+//! and tolerance laws keep evaluating against the mesh itself (the
+//! ROADMAP's standing rule for any discretized stock).
+//!
+//! ## The laws here
+//!
+//! - **Column model.** Every cell holds one number: the Z of the top of
+//!   the material standing at that XY. This is exact for everything
+//!   this codebase cuts - a Z-plunge world whose tools never machine
+//!   under an overhang - and it is the same discretization that makes
+//!   `machining3d::material_above` answerable per plane. Undercuts
+//!   would need a voxel octree; they need it nowhere yet.
+//! - **Subtraction is conservative.** A move removes, per cell, the
+//!   LOWEST Z the tool bottom reaches while its disc touches the cell
+//!   center - computed from the exact interval of the move that is in
+//!   reach, not from the endpoints. Arcs ride their `chords` (the same
+//!   sagitta law as everywhere else): chords sweep a hair LESS than
+//!   the true arc, so a sim reports a touch more rest than exists and
+//!   never a gouge the tool did not commit. A silent wrong answer is
+//!   the one failure mode; over-reporting rest is honest noise.
+//! - **Rapids touch nothing** (RS-274 G0 practice: no material contacts
+//!   a tool moving at rapid). Feeds and plunges cut.
+//! - **The ball atom is exact, not sampled** (`cut_ball`): a sphere's
+//!   bottom above a cell is a convex function of the chord parameter,
+//!   so its minimum is at a window end or at one stationary point that
+//!   a sign-guarded quadratic finds in closed form. Endpoints alone
+//!   would over-report rest (and could hide a gouge); the full law is
+//!   cheap and never guesses.
+//! - **Part surface is read from the mesh**, facet-plane interpolation
+//!   at cell centers over each facet's XY bounding box: the highest
+//!   surface covering a cell is that column's part top (`-inf` when no
+//!   facet covers it - air everywhere along the column). Rest material
+//!   and gouges are both measured against this, so the sim's verdict
+//!   uses the model, not a second hand-entered surface.
+//! - **The program sim chains ops, never re-plans them** (M2.3): the
+//!   same conservative atoms, fed the cached paths in program order,
+//!   so the grid answers "what does this whole NC program leave
+//!   standing" - the stock-comparison deviation and its color map read
+//!   that answer, and the post gate judges it once at the end.
+//! - **Deviation is located, not just counted** (M2.3): the program
+//!   report carries the XY and the sim's own Z of its worst rest and
+//!   worst gouge cells, because "the toolpath is trusted before the
+//!   machine sees it" means a human can point at where the program is
+//!   trusted to be right, or wrong. Columns that answer no verdict
+//!   (air in the stock, or air in the model) carry NaN, never a zero
+//!   dressed up as a clean bill of health.
+
+
+
+mod cut;
+mod dexel;
+mod deviate;
+mod kernel;
+mod scan;
+
+pub use cut::{auto_cell, simulate, SimOp};
+pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSurface};
+pub use dexel::{reach, Dexel};
+pub use kernel::{measure, part_surface, StockError, StockReport};
+pub use scan::{envelope_scan, EnvelopeReport};
