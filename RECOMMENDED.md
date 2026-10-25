@@ -3640,7 +3640,7 @@ d = 0, pose None, vertical - holds empirically, and because the
 stamped kind's positions are the pocket's bit for bit, the twin
 inherits the verdict rather than earning it separately.
 
-
+## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
 entry summarizing what "done" meant, and the discussion happens over it.
