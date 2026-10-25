@@ -598,6 +598,19 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             ("TOP", "Top of Part Z", Some(*top_z)),
             ("BOT", "Bottom of Part Z", Some(*bottom_z)),
         ],
+        // The rough ladder states the sheet with no RET row - the
+        // kernel's hop plane is a law, not a height (M5.1 stage E2).
+        OpParams::RotaryOffset {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        } => [
+            ("CLR", "Clearance Z", Some(*clearance_z)),
+            ("RET", "Retract Z", None),
+            ("TOP", "Top of Part Z", Some(*top_z)),
+            ("BOT", "Bottom of Part Z", Some(*bottom_z)),
+        ],
         OpParams::Drill {
             clearance_z,
             retract_z,

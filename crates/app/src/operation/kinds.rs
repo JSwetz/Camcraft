@@ -83,7 +83,8 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Swarf { feed, .. }
         | OpParams::AdvancedSwarf { feed, .. }
         | OpParams::RotaryContour { feed, .. }
-        | OpParams::RotaryParallel { feed, .. } => *feed,
+        | OpParams::RotaryParallel { feed, .. }
+        | OpParams::RotaryOffset { feed, .. } => *feed,
     }
 }
 
@@ -102,7 +103,8 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Swarf { plunge_feed, .. }
         | OpParams::AdvancedSwarf { plunge_feed, .. }
         | OpParams::RotaryContour { plunge_feed, .. }
-        | OpParams::RotaryParallel { plunge_feed, .. } => *plunge_feed,
+        | OpParams::RotaryParallel { plunge_feed, .. }
+        | OpParams::RotaryOffset { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -120,7 +122,8 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::Swarf { climb, .. }
         | OpParams::AdvancedSwarf { climb, .. }
         | OpParams::RotaryContour { climb, .. }
-        | OpParams::RotaryParallel { climb, .. } => *climb,
+        | OpParams::RotaryParallel { climb, .. }
+        | OpParams::RotaryOffset { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
         OpParams::Drill { .. } => true,
@@ -132,6 +135,9 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         OpParams::Face { stepover, .. }
         | OpParams::Pocket { stepover, .. }
         | OpParams::Pocket3D { stepover, .. }
+        // The wrap ladder's spacing is a plain number like the
+        // pocket's, not the twins' derived Option (variant docs).
+        | OpParams::RotaryOffset { stepover, .. }
         | OpParams::Slot { stepover, .. } => Some(*stepover),
         // Parallel5D's spacing - and the swarf kinds', which run the
         // same derivation - is an Option the same way Finish3D's
@@ -156,6 +162,9 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         OpParams::Contour { stepdown, .. }
         | OpParams::Pocket { stepdown, .. }
         | OpParams::Pocket3D { stepdown, .. }
+        // The ladder's infeed is radial here, but it is still the
+        // number the retype carries.
+        | OpParams::RotaryOffset { stepdown, .. }
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
@@ -182,7 +191,8 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Swarf { top_z, .. }
         | OpParams::AdvancedSwarf { top_z, .. }
         | OpParams::RotaryContour { top_z, .. }
-        | OpParams::RotaryParallel { top_z, .. } => Some(*top_z),
+        | OpParams::RotaryParallel { top_z, .. }
+        | OpParams::RotaryOffset { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -203,7 +213,8 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Swarf { bottom_z, .. }
         | OpParams::AdvancedSwarf { bottom_z, .. }
         | OpParams::RotaryContour { bottom_z, .. }
-        | OpParams::RotaryParallel { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::RotaryParallel { bottom_z, .. }
+        | OpParams::RotaryOffset { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -228,7 +239,10 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::AdvancedSwarf { retract_z, .. }
         | OpParams::RotaryContour { retract_z, .. }
         | OpParams::RotaryParallel { retract_z, .. } => *retract_z,
-        OpParams::Face { .. } => None,
+        // No hop plane to carry: the kernel names its own rapids
+        // plane (one infeed and a tool radius off the skin), and
+        // Face never stored one either.
+        OpParams::Face { .. } | OpParams::RotaryOffset { .. } => None,
     }
 }
 
@@ -530,6 +544,34 @@ fn seed_rotary_parallel(c: &Carried) -> OpParams {
     }
 }
 
+/// The stage E2 seed: the pocket ladder's numbers, read the wrap's
+/// way - `stepdown` is the radial infeed one level peels off the
+/// skin, `stepover` the spacing around it in developed arc length.
+/// The dive it starts with is the one the 2-D pocket already makes
+/// and the twins' law allows: a plunge down the radial, no rest
+/// fields the kernel cannot honor (variant docs in types::params).
+fn seed_rotary_offset(c: &Carried) -> OpParams {
+    OpParams::RotaryOffset {
+        tolerance: 0.05,
+        stepover: c.stepover,
+        stock_to_leave: 0.0,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        stepdown: c.stepdown,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        strategy: PocketStrategy::Auto,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    }
+}
+
 /// One kind, as data: its name, the digest byte `stamp_with` writes (the
 /// tag was a magic literal in eight arms until M5.0.2 - it is order, and
 /// order belongs in the table), the verify law the generator picks, and
@@ -690,6 +732,18 @@ impl KindInfo {
             mode: Mode::Envelope,
             seed: seed_rotary_parallel,
         },
+        KindInfo {
+            ty: OpType::RotaryOffset,
+            label: "Rotary Offset",
+            caption: "Rotary Offset",
+            tag: 14,
+            // The rough ladder's verdict is the measured envelope too
+            // (M5.1 stage E2): law (f) sweeps a sphere, so the pose
+            // cannot lie to it on a bar lying or standing, and the
+            // kind's tolerance is exactly that law's budget.
+            mode: Mode::Envelope,
+            seed: seed_rotary_offset,
+        },
     ];
 }
 
@@ -713,6 +767,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[11].label,
     KindInfo::ALL[12].label,
     KindInfo::ALL[13].label,
+    KindInfo::ALL[14].label,
 ];
 
 impl OpType {
@@ -735,6 +790,7 @@ impl OpType {
             OpType::AdvancedSwarf => 11,
             OpType::RotaryContour => 12,
             OpType::RotaryParallel => 13,
+            OpType::RotaryOffset => 14,
         }
     }
 

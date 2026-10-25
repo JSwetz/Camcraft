@@ -256,6 +256,9 @@ pub(super) fn region_for_src(
                     // the turn's own geometry authors the path (M5.1 E).
                     | OpParams::RotaryContour { .. }
                     | OpParams::RotaryParallel { .. }
+                    // The rough ladder wraps the same axis - its islands
+                    // come from the mesh in wrap space, never a pick.
+                    | OpParams::RotaryOffset { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -314,8 +317,11 @@ pub(super) fn region_for(
         | OpParams::Parallel5D { .. }
         | OpParams::Swarf { .. }
         | OpParams::AdvancedSwarf { .. }
+        // The wrap ladder is mesh-driven the same way: its columns are
+        // the shadow's, unrolled (stage E2).
         | OpParams::RotaryContour { .. }
-        | OpParams::RotaryParallel { .. } => {
+        | OpParams::RotaryParallel { .. }
+        | OpParams::RotaryOffset { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

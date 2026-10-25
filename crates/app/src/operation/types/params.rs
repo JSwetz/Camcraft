@@ -423,6 +423,39 @@ pub enum OpParams {
         lag_deg: f64,
         max_tilt_deg: f64,
     },
+    /// The rotary family's rough ladder (M5.1 stage E2): the pocket
+    /// machinery run in WRAP SPACE - the developed skin of the fitted
+    /// axis eroded level by level, the ladder peeling rho_max to
+    /// rho_min - and mapped back out standing RADIAL. `stepdown` is
+    /// the RADIAL infeed, `top_z`/`bottom_z` window the STATIONS along
+    /// the axis, and `tolerance` is the verify budget alone: the wrap
+    /// kernel chords by its own arc-fit law. There is no retract
+    /// because the kernel names its own rapids plane - one infeed and
+    /// one tool radius outside the skin - and showing a field that
+    /// gets overwritten would lie.
+    RotaryOffset {
+        tolerance: f64,
+        /// Spacing around the bar in developed arc length, mm - a
+        /// plain number, not the twins' Option: the ladder has no
+        /// scallop cos-law to fall back on.
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        /// Radial infeed per wrap level, mm.
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        strategy: PocketStrategy,
+        entry: Entry3D,
+        helix_radius: f64,
+        max_engagement: f64,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
 }
 
 impl OpParams {
@@ -443,6 +476,7 @@ impl OpParams {
             OpParams::AdvancedSwarf { .. } => OpType::AdvancedSwarf,
             OpParams::RotaryContour { .. } => OpType::RotaryContour,
             OpParams::RotaryParallel { .. } => OpType::RotaryParallel,
+            OpParams::RotaryOffset { .. } => OpType::RotaryOffset,
         }
     }
 
@@ -473,7 +507,8 @@ impl OpParams {
             // the axis fit frames the path, and the pose law answers
             // per move - an index would fight both.
             | OpParams::RotaryContour { .. }
-            | OpParams::RotaryParallel { .. } => None,
+            | OpParams::RotaryParallel { .. }
+            | OpParams::RotaryOffset { .. } => None,
         }
     }
 
@@ -494,7 +529,8 @@ impl OpParams {
             | OpParams::Swarf { clearance_z, .. }
             | OpParams::AdvancedSwarf { clearance_z, .. }
             | OpParams::RotaryContour { clearance_z, .. }
-            | OpParams::RotaryParallel { clearance_z, .. } => *clearance_z,
+            | OpParams::RotaryParallel { clearance_z, .. }
+            | OpParams::RotaryOffset { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -518,7 +554,8 @@ impl OpParams {
             | OpParams::Swarf { top_z, .. }
             | OpParams::AdvancedSwarf { top_z, .. }
             | OpParams::RotaryContour { top_z, .. }
-            | OpParams::RotaryParallel { top_z, .. } => *top_z,
+            | OpParams::RotaryParallel { top_z, .. }
+            | OpParams::RotaryOffset { top_z, .. } => *top_z,
         }
     }
 
@@ -584,6 +621,13 @@ impl OpParams {
             | OpParams::RotaryParallel { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            // The rough ladder carries no retract to visit - the
+            // kernel names its own rapids plane (variant docs).
+            OpParams::RotaryOffset { clearance_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
                 f(*top_z);
                 f(*bottom_z);
             }

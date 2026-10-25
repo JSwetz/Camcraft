@@ -42,6 +42,7 @@ pub(crate) enum Icon {
     AdvancedSwarf,
     RotaryContour,
     RotaryParallel,
+    RotaryOffset,
     Undo,
     Redo,
     Delete,
@@ -56,7 +57,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 31] = [
+    pub(crate) const ALL: [Icon; 32] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -78,6 +79,7 @@ impl Icon {
         Icon::AdvancedSwarf,
         Icon::RotaryContour,
         Icon::RotaryParallel,
+        Icon::RotaryOffset,
         Icon::Undo,
         Icon::Redo,
         Icon::Delete,
@@ -135,6 +137,11 @@ impl Icon {
             // normal. Ours to give.
             Icon::RotaryContour => include_bytes!("../../../../assets/ui/rotarycontour.png"),
             Icon::RotaryParallel => include_bytes!("../../../../assets/ui/rotaryparallel.png"),
+            // Original drawing (no Tabler rotary-roughing glyph exists):
+            // the turned bar with a STEPPED face - the rough ladder
+            // peeling radii, the tool riding outside on the radial.
+            // Ours to give.
+            Icon::RotaryOffset => include_bytes!("../../../../assets/ui/rotaryoffset.png"),
             Icon::Undo => include_bytes!("../../../../assets/ui/arrow-back-up.png"),
             Icon::Redo => include_bytes!("../../../../assets/ui/arrow-forward-up.png"),
             Icon::Delete => include_bytes!("../../../../assets/ui/trash.png"),
@@ -176,6 +183,7 @@ impl Icon {
             Icon::AdvancedSwarf => "icon-advanced-swarf",
             Icon::RotaryContour => "icon-rotary-contour",
             Icon::RotaryParallel => "icon-rotary-parallel",
+            Icon::RotaryOffset => "icon-rotary-offset",
             Icon::Undo => "icon-undo",
             Icon::Redo => "icon-redo",
             Icon::Delete => "icon-delete",

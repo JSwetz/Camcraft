@@ -210,6 +210,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // model data, so the file gains no key for it.
         file.version = 26;
     }
+    if file.version == 26 {
+        // v26 -> v27: the rotary rough arrives as one new params
+        // variant (`rotary_offset`, M5.1 stage E2), under the same
+        // law: no v26 file can contain it, and `validate_kind`
+        // already refuses the tag before anything is written. No
+        // existing shape changed.
+        file.version = 27;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

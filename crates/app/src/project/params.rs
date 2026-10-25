@@ -370,6 +370,37 @@ pub enum ParamsDto {
         lag_deg: f64,
         max_tilt_deg: f64,
     },
+    /// Declared at v27 with the wrap ladder (M5.1 stage E2). The
+    /// pocket's shape, read the wrap's way - and deliberately no
+    /// `retract_z` key: the kernel names its own rapids plane one
+    /// infeed and a tool radius off the skin, so a stored hop height
+    /// could only ever be ignored, and the file contract says what
+    /// the machine hears.
+    RotaryOffset {
+        tolerance: f64,
+        /// Developed arc-length spacing, a plain number like the
+        /// pocket's - the ladder has no cos-law to derive from.
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        /// Radial infeed per wrap level.
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        strategy: StrategyDto,
+        #[serde(default)]
+        entry: EntryDto,
+        /// Read only when `entry` is Helix; the pocket's law.
+        helix_radius: f64,
+        #[serde(default = "default_engagement_deg")]
+        max_engagement: f64,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

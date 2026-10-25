@@ -172,10 +172,11 @@ fn stamp_follows_every_input() {
     // The registry law (M5.0.2): one row per kind, table order ==
     // OpType::ordinal == digest tag, labels exactly as Display quotes
     // them. The tags are digest bytes - drift here greys every cache.
-    // (Stage E moved this pin with its two rows: the registry law is
-    // checked from the table itself, so the count is the only stale
-    // number a stage can leave behind.)
-    assert_eq!(KindInfo::ALL.len(), 14);
+    // (Stage E moved this pin with its two rows, stage E2 with the
+    // wrap ladder's: the registry law is checked from the table
+    // itself, so the count is the only stale number a stage can leave
+    // behind.)
+    assert_eq!(KindInfo::ALL.len(), 15);
     for (i, row) in KindInfo::ALL.iter().enumerate() {
         assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
         assert_eq!(row.tag as usize, i, "digest tag must equal table order");
@@ -305,4 +306,60 @@ fn rotary_twins_stamp_apart_and_with_their_stepover() {
     assert_ne!(digest(&contour), digest(&parallel(None)), "the twins are different rows");
     assert_ne!(digest(&parallel(None)), digest(&parallel(Some(1.5))), "a derived spacing is not the number 0");
     assert_eq!(digest(&parallel(Some(1.5))), digest(&parallel(Some(1.5))));
+}
+
+#[test]
+fn rotary_offset_stamp_moves_with_its_wrap_numbers() {
+    // M5.1 stage E2, row 14: the ladder's own bytes - a spacing that
+    // is a plain number (no Some-or-derived dance), the radial
+    // infeed, the strategy byte - must each move the stamp, and the
+    // kind must digest apart from the twins it shares the axis with
+    // purely by its tag.
+    let world = crate::world::new_world();
+    let offset = |stepover: f64, stepdown: f64, strategy: PocketStrategy| {
+        OpParams::RotaryOffset {
+            tolerance: 0.05,
+            stepover,
+            stock_to_leave: 0.0,
+            clearance_z: Height::fixed(25.0),
+            top_z: Height::fixed(10.0),
+            bottom_z: Height::fixed(-5.0),
+            stepdown,
+            feed: 800.0,
+            plunge_feed: 150.0,
+            climb: true,
+            strategy,
+            entry: crate::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
+            max_engagement: 45.0,
+            lead_deg: 0.0,
+            lag_deg: 0.0,
+            max_tilt_deg: 90.0,
+        }
+    };
+    let digest = |p: &OpParams| {
+        let mut h = std::hash::DefaultHasher::new();
+        p.stamp_with(&world, None, &mut h);
+        h.finish()
+    };
+    let auto = PocketStrategy::Auto;
+    assert_ne!(
+        digest(&offset(4.0, 3.0, auto)),
+        digest(&offset(5.0, 3.0, auto)),
+        "the developed spacing is geometry"
+    );
+    assert_ne!(
+        digest(&offset(4.0, 3.0, auto)),
+        digest(&offset(4.0, 2.0, auto)),
+        "a shallower radial infeed is a different ladder"
+    );
+    assert_ne!(
+        digest(&offset(4.0, 3.0, auto)),
+        digest(&offset(4.0, 3.0, PocketStrategy::Waterline)),
+        "the strategy byte is read by the kernel"
+    );
+    assert_eq!(
+        digest(&offset(4.0, 3.0, auto)),
+        digest(&offset(4.0, 3.0, auto))
+    );
 }

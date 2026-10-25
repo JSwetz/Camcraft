@@ -1153,7 +1153,10 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Slot { retract_z, .. }
         | operation::OpParams::Trace { retract_z, .. }
         | operation::OpParams::Drill { retract_z, .. } => *retract_z,
-        operation::OpParams::Face { .. } => None,
+        // The wrap ladder stores no hop at all - its rapids ride
+        // the kernel's law off the skin (M5.1 stage E2) - exactly
+        // Face's answer of "hop at clearance, say nothing extra".
+        operation::OpParams::Face { .. } | operation::OpParams::RotaryOffset { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1225,6 +1228,8 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::AdvancedSwarf { top_z, bottom_z, .. }
         | operation::OpParams::RotaryContour { top_z, bottom_z, .. }
         | operation::OpParams::RotaryParallel { top_z, bottom_z, .. }
+        // The rough ladder's stations draw the same two rungs (E2).
+        | operation::OpParams::RotaryOffset { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
         | operation::OpParams::Trace { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {

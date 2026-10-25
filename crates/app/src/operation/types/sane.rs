@@ -273,6 +273,51 @@ impl OpParams {
                         _ => true,
                     })
             }
+            // The wrap ladder's door (M5.1 stage E2): the Pocket3D
+            // door's numbers - plain stepover, radial stepdown, the
+            // helix and engagement read by the entry law - crossed
+            // with the rotary door's pose clause. The tolerance is
+            // the verify budget here, not a scallop input, but a
+            // sphere sweep still needs a positive one to be measured
+            // against. There is no retract to check: the field does
+            // not exist - the kernel names its own rapids plane.
+            OpParams::RotaryOffset {
+                tolerance,
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                helix_radius,
+                strategy,
+                max_engagement,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
+            } => {
+                let angle = |v: &f64| v.is_finite() && v.abs() <= 90.0;
+                pos(*tolerance)
+                    && pos(*stepover)
+                    && nneg(*stock_to_leave)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && pos(*helix_radius)
+                    && (max_engagement.is_finite()
+                        && (!matches!(strategy, PocketStrategy::Adaptive)
+                            || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
+                    && angle(lead_deg)
+                    && angle(lag_deg)
+                    && *max_tilt_deg > 0.0
+                    && *max_tilt_deg <= 180.0
+            }
             OpParams::AdvancedSwarf {
                 tolerance,
                 stepover,

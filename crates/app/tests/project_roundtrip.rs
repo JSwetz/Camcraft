@@ -110,7 +110,9 @@ fn wrong_version_is_refused() {
     // v24_file_steps_to_v25_and_the_swarf_grammar_round_trips v24 -> v25
     // (the `swarf` / `advanced_swarf` tags and the ladder's `passes`),
     // and v25_file_steps_to_v26_and_the_rotary_grammar_round_trips
-    // v25 -> v26 (the `rotary_contour` / `rotary_parallel` tags).
+    // v25 -> v26 (the `rotary_contour` / `rotary_parallel` tags),
+    // and v26_file_steps_to_v27_and_the_wrap_ladder_grammar_round_trips
+    // v26 -> v27 (the `rotary_offset` tag).
     // Spell the probe from the constant: a rung named by hand goes stale
     // (grey, then red) the day the stamp moves, as it did at v25.
     let future = project::PROJECT_VERSION + 1;
@@ -2923,6 +2925,94 @@ fn v25_file_steps_to_v26_and_the_rotary_grammar_round_trips() {
     assert!(
         matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
         "a v26 file with a 120-degree lag must not load"
+    );
+}
+
+#[test]
+fn v26_file_steps_to_v27_and_the_wrap_ladder_grammar_round_trips() {
+    // M5.1 stage E2: the rotary rough arrives as one more params tag
+    // (`rotary_offset`). Nothing existing changed shape - the axis
+    // the ladder wraps is model data, and the kernel's own rapids
+    // plane is a law, not a key - and step-up is the stamp itself,
+    // like every bump since v6.
+    let world = new_world();
+    project::open(&world, r#"{"version": 26, "entities": []}"#).expect("v26 steps up");
+    let p = tmp_path("v27a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v27 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v27 wire grammar, hand-written so the tags are pinned: the
+    // pocket's numbers, radial now - and no `retract_z` key at all,
+    // because a stored hop height could only ever be ignored. The
+    // absent `entry` means the dive and the absent `max_engagement`
+    // the law's 45 degrees, exactly as the pocket's file law reads.
+    let text = r#"{
+        "version": 27,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "RO1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"rotary_offset": {
+                 "tolerance": 0.05, "stepover": 4.0, "stock_to_leave": 0.5,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "stepdown": 3.0,
+                 "feed": 800.0, "plunge_feed": 150.0, "climb": true,
+                 "strategy": "waterline", "helix_radius": 2.0,
+                 "lead_deg": 0.0, "lag_deg": 0.0, "max_tilt_deg": 90.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v27 wrap grammar must read");
+    let e = model::find_by_name(&world, "RO1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::RotaryOffset {
+        strategy,
+        entry,
+        max_engagement,
+        stepdown,
+        stock_to_leave,
+        ..
+    } = &o.params
+    else {
+        panic!("rotary_offset params expected, got {:?}", o.params);
+    };
+    assert_eq!(*strategy, PocketStrategy::Waterline);
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Plunge, "absent entry means the dive");
+    assert_eq!(*max_engagement, 45.0, "absent engagement means the law's 45");
+    assert_eq!((*stepdown, *stock_to_leave), (3.0, 0.5));
+
+    // Write-parse-write is a fixed point, and the retract key appears
+    // exactly nowhere: the field does not exist to forget.
+    let p = tmp_path("v27b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the wrap shape round-trips byte-identically");
+    assert!(first.contains("\"rotary_offset\""), "{first}");
+    assert_eq!(first.matches("\"retract_z\"").count(), 0, "the kernel's hop plane is no file key");
+
+    // The sane door at the loader: a zero spacing around the bar is a
+    // typo no ladder can run - refused by name, never silently widened.
+    let bad = text.replace("\"stepover\": 4.0", "\"stepover\": 0.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v27 file with a zero stepover must not load"
     );
 }
 

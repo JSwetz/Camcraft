@@ -106,7 +106,8 @@ pub fn region_z(
         | OpParams::Swarf { top_z, .. }
         | OpParams::AdvancedSwarf { top_z, .. }
         | OpParams::RotaryContour { top_z, .. }
-        | OpParams::RotaryParallel { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::RotaryParallel { top_z, .. }
+        | OpParams::RotaryOffset { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -189,6 +190,17 @@ pub fn resolve_params(
             Some(req("Bottom of Part Z", *bottom_z)?),
             None,
             opt("Retract Z", *retract_z)?,
+        ),
+        // The wrap ladder names its own rapids plane - one infeed and
+        // a tool radius outside the skin - so there is no hop height
+        // to resolve; the four-number shape minus the retract is all
+        // it has (M5.1 stage E2).
+        OpParams::RotaryOffset { clearance_z, top_z, bottom_z, .. } => (
+            req("Clearance Z", *clearance_z)?,
+            Some(req("Top of Part Z", *top_z)?),
+            Some(req("Bottom of Part Z", *bottom_z)?),
+            None,
+            None,
         ),
         // The drill bottom is an override of the whole pattern, not a
         // requirement: each hole's own floor is the default depth, so an

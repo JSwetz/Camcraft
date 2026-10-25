@@ -1,7 +1,8 @@
 //! Simultaneous-axis finishing kinds - the 5-axis freeform trio of
 //! stage C (contour, parallel, swarf, all posing from the SURFACE
 //! NORMAL through `tilt`), the ruled swarf reads of stage D
-//! (`ruling`), and the rotary pair of stage E (`axis` + `rotary`,
+//! (`ruling`), and the rotary family of stage E (`axis` + `rotary`
+//! for the finishing pair, `rotary_offset` for the rough ladder, all
 //! posing from the RADIAL of a fitted axis of revolution).
 //!
 //! Where stage B kept the tool vertical and moved the PART (3+2
@@ -28,6 +29,8 @@ pub mod axis;
 pub mod contour5d;
 pub mod parallel5d;
 pub mod rotary;
+pub mod rotary_offset;
+mod wrap_exit;
 pub mod ruling;
 pub mod swarf;
 pub mod tilt;
@@ -35,5 +38,6 @@ pub mod tilt;
 pub use contour5d::contour5d;
 pub use parallel5d::parallel5d;
 pub use rotary::{rotary_contour, rotary_parallel};
+pub use rotary_offset::rotary_offset;
 pub use swarf::{swarf5d, swarf5d_advanced};
 pub use tilt::{command_axis, AxisControl};

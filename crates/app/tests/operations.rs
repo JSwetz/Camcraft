@@ -3655,6 +3655,34 @@ fn rotary_parallel_params(top_z: f64, bottom_z: f64) -> OpParams {
     }
 }
 
+fn rotary_offset_params(top_z: f64, bottom_z: f64) -> OpParams {
+    // The wrap ladder's numbers (M5.1 stage E2): the spacing is the
+    // developed arc, plain like the pocket's - no scallop cos-law to
+    // fall back on - and the infeed is RADIAL. `clearance_z` is
+    // honest window dressing here: the kernel names its own rapids
+    // plane one infeed and one tool radius outside the skin, because
+    // a world-Z hop would be a plunge into the bar.
+    OpParams::RotaryOffset {
+        tolerance: 0.1,
+        stepover: 4.0,
+        stock_to_leave: 0.5,
+        clearance_z: Height::fixed(25.0),
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        stepdown: 4.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        strategy: camcraft_app::machining2d::PocketStrategy::Auto,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+    }
+}
+
 /// The rotary twins' signature at this level: every move that cuts
 /// poses the RADIAL itself - the perpendicular from the fitted axis
 /// meeting the tool point - because the lean rests at zero and the
@@ -3882,4 +3910,175 @@ fn rotary_twins_refuse_nonsense_pose_at_creation() {
         *max_tilt_deg = 0.0;
     }
     assert!(matches!(mk(no_cone, "RcCn"), Err(CommandError::Invalid(_))));
+}
+
+#[test]
+fn rotary_offset_peels_the_wrap_ladder_and_verifies_clean() {
+    // M5.1 stage E2 over the standing bar: the pocket ladder run in
+    // wrap space, posed radially like its finish twins (law (f): the
+    // swept sphere is pose-invariant about its own axis, so Envelope
+    // verify tells the truth for a rough). The stock is deliberately
+    // a ROUND bar (d30 about the lathe's r6): the kernel's hop rides
+    // one infeed and one radius OUTSIDE the skin - about rho 16 -
+    // and a box's flat corner would honestly call that air a plunge
+    // into material. On a turned bar it is what it is: clear.
+    // The infeed is sub-step: the lathe's peel band is the 6.0 skin
+    // down to the 5.0 neck, one millimetre of it, so a 4 mm radial
+    // stepdown (the helper's) skips the window and the staircase law
+    // - reading each column's stock off its own surface, the same one
+    // pocket3d runs on block work - honestly leaves the whole step to
+    // the finishing kind. 0.5 lands levels at 6.0/5.5/5.0: a real
+    // ladder, floor one step under the skin.
+    let mut params = rotary_offset_params(14.0, -14.0);
+    if let OpParams::RotaryOffset { stepdown, .. } = &mut params {
+        *stepdown = 0.5;
+    }
+    let world = new_world();
+    let mut history = History::default();
+    let cmd = SetStock::new(
+        &world,
+        StockShape::Cylinder {
+            diameter: 30.0,
+            height: 32.0,
+        },
+        Location {
+            pos: Point3::new(0.0, 0.0, -16.0),
+            rot: IDENTITY_Q,
+        },
+    );
+    history.execute(&world, cmd.expect("round bar stock"));
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "RO1",
+            "BN-0600",
+            SrcRef::Entity("lathe".into()),
+            params,
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "RO1").expect("generate"));
+    assert_eq!(
+        status(&world, "RO1"),
+        OpStatus::Ok,
+        "the wrap ladder verifies inside its budget"
+    );
+    let t = cache(&world, "RO1").expect("cached").path;
+    radial_pose_law("RO1", &t, 2);
+    // The ladder really DESCENDED: the skim ring stands one tool
+    // radius outside the 6.0 skin (CL rho 9.0), the 5.5 level peels
+    // the neck column's band one infeed under it, and the floor
+    // ring - one step above the 5.0 neck surface - rides at CL rho
+    // 8.0. One plane's spread is not a rough.
+    let (lo, hi) = t.moves.iter().filter(|m| m.kind != MoveKind::Rapid).fold(
+        (f64::MAX, 0.0f64),
+        |(lo, hi), m| {
+            let rho = (m.to.x * m.to.x + m.to.y * m.to.y).sqrt();
+            (lo.min(rho), hi.max(rho))
+        },
+    );
+    assert!(hi > 8.9, "no ring at the skin (max rho {hi})");
+    assert!(lo < 8.6, "the ladder never left the skin: {lo}..{hi}");
+    assert!(hi - lo > 0.5, "one plane of cut is not a ladder: {lo}..{hi}");
+}
+
+#[test]
+fn rotary_offset_refuses_a_flat_tool_by_name() {
+    // The wrap pocket's floor is turned by the ball's tangency, the
+    // way the twins' skins are: a flat end cannot ride a cylinder's
+    // radial, so the kernel is never asked (and the refusal says so,
+    // by kind and by name, at generate).
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 40.0);
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "ROf",
+            "EM-0600-4FL",
+            SrcRef::Entity("lathe".into()),
+            rotary_offset_params(14.0, -14.0),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) =
+        GenerateOperation::new(&world, "ROf").err().expect("a flat tool must refuse the wrap")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("ball-nose"), "{msg}");
+    assert!(msg.contains("Rotary Offset"), "{msg}");
+    assert_eq!(status(&world, "ROf"), OpStatus::Never, "the refusal leaves no path behind");
+}
+
+#[test]
+fn rotary_offset_refuses_a_freeform_by_name() {
+    // The same fit, the same answer: no meridian, no wrap, refused
+    // before a single ring is planned (axis.rs's taxonomy, not this
+    // kind's own work).
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 40.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("boxy", freeform_box()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "ROb",
+            "BN-0600",
+            SrcRef::Entity("boxy".into()),
+            rotary_offset_params(8.0, -8.0),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) =
+        GenerateOperation::new(&world, "ROb").err().expect("a box must refuse the wrap")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("share no rotation axis"), "{msg}");
+    assert_eq!(status(&world, "ROb"), OpStatus::Never);
+}
+
+#[test]
+fn rotary_offset_refuses_nonsense_at_creation() {
+    // Validate early at the command door: the ladder's own numbers -
+    // a zero developed spacing, a zero radial infeed, a 91-degree
+    // lean, a closed cone - never reach the kernel. Unlike the
+    // twins, the spacing here is a plain number, so there is no
+    // Some-or-derived to hide a zero in.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
+    let mk = |op: OpParams, name: &str| {
+        CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("lathe".into()), op)
+    };
+    let mut zero_step = rotary_offset_params(14.0, -14.0);
+    if let OpParams::RotaryOffset { stepover, .. } = &mut zero_step {
+        *stepover = 0.0;
+    }
+    assert!(matches!(mk(zero_step, "RoSo"), Err(CommandError::Invalid(_))));
+    let mut zero_infeed = rotary_offset_params(14.0, -14.0);
+    if let OpParams::RotaryOffset { stepdown, .. } = &mut zero_infeed {
+        *stepdown = 0.0;
+    }
+    assert!(matches!(mk(zero_infeed, "RoSd"), Err(CommandError::Invalid(_))));
+    let mut flat_lean = rotary_offset_params(14.0, -14.0);
+    if let OpParams::RotaryOffset { lead_deg, .. } = &mut flat_lean {
+        *lead_deg = 91.0;
+    }
+    assert!(matches!(mk(flat_lean, "RoLd"), Err(CommandError::Invalid(_))));
+    let mut no_cone = rotary_offset_params(14.0, -14.0);
+    if let OpParams::RotaryOffset { max_tilt_deg, .. } = &mut no_cone {
+        *max_tilt_deg = 0.0;
+    }
+    assert!(matches!(mk(no_cone, "RoCn"), Err(CommandError::Invalid(_))));
 }

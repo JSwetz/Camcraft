@@ -615,6 +615,15 @@ impl HeightRefs for OpParams {
                 v.extend(retract_z.iter());
                 v
             }
+            // The wrap ladder's three - no hop plane exists to ask
+            // about; the kernel's rapids ride the skin, not a height
+            // (M5.1 stage E2).
+            OpParams::RotaryOffset {
+                clearance_z,
+                top_z,
+                bottom_z,
+                ..
+            } => vec![clearance_z, top_z, bottom_z],
             OpParams::Drill {
                 clearance_z,
                 retract_z,

@@ -397,6 +397,54 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The wrap ladder (M5.1 stage E2, tag 14): the Pocket3D
+            // door's bytes without the fields the kernel overrides or
+            // never runs (retract, rest, feed-opt), the tolerance and
+            // the three pose angles appended - the ladder's numbers,
+            // read the wrap's way, digest as the ladder it is.
+            OpParams::RotaryOffset {
+                tolerance,
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                strategy,
+                entry,
+                helix_radius,
+                max_engagement,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+            } => {
+                w(h, *stepover);
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u8(match strategy {
+                    PocketStrategy::Zigzag => 0,
+                    PocketStrategy::Waterline => 1,
+                    PocketStrategy::Auto => 2,
+                    PocketStrategy::Adaptive => 3,
+                });
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
+                });
+                for v in [*tolerance, *lead_deg, *lag_deg, *max_tilt_deg] {
+                    w(h, v);
+                }
+            }
             // The ladder is the swarf door's bytes plus the rung count
             // (an integer on the digest rides `write_u32` like the tab
             // law's count above): two and three passes are different

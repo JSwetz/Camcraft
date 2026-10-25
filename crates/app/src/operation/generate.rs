@@ -611,6 +611,69 @@ pub fn generate(
             };
             (region, path)
         }
+        // M5.1 stage E2: the rotary rough. The pocket ladder runs in
+        // WRAP SPACE about the fitted axis, so the numbers ride
+        // Pocket3D's shape - but three of them are read the wrap's
+        // way: `stepdown` infeeds RADII, `top_z`/`bottom_z` window
+        // the STATIONS (the kernel's own `(h - o.z)/u.z` law), and
+        // the rapids plane is the kernel's, one infeed and a tool
+        // radius off the skin - what resolves here only stands when
+        // the axis stands up. The refusal for a model that says
+        // nothing of turning comes from the same axis fit the twins
+        // invoke, by name.
+        OpParams::RotaryOffset {
+            stepover,
+            stock_to_leave,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            strategy,
+            entry,
+            helix_radius,
+            max_engagement,
+            tolerance,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::BallNose {
+                return Err(GenError::Invalid(format!(
+                    "Rotary Offset needs a ball-nose tool, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let pp = Pocket3DParams {
+                tool_diameter: d,
+                stepover: *stepover,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: hl.clearance,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                strategy: *strategy,
+                retract_z: hl.retract,
+                entry: *entry,
+                helix_radius: *helix_radius,
+                max_engagement: *max_engagement,
+            };
+            let axis = crate::multiaxis::AxisControl {
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: Some(*max_tilt_deg),
+            };
+            // `tolerance` is the VERIFY budget (the envelope law's),
+            // stated here so the field's double life is on record:
+            // the kernel chords by its own arc-fit tolerance.
+            let _ = tolerance;
+            let path = crate::multiaxis::rotary_offset(&material.facets, &pp, &axis)?;
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -716,7 +779,11 @@ pub fn generate(
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
-        | OpParams::Pocket3D { stock_to_leave, .. } => *stock_to_leave,
+        | OpParams::Pocket3D { stock_to_leave, .. }
+        // The ladder is the one rotary that LEAVES a shelf on purpose:
+        // the finishing kinds own the ledge under a column's last cut,
+        // so the wrap reads this number as a radial wall (E2).
+        | OpParams::RotaryOffset { stock_to_leave, .. } => *stock_to_leave,
     };
     match &frame {
         None => {
@@ -738,6 +805,7 @@ pub fn generate(
                             | OpParams::AdvancedSwarf { .. }
                             | OpParams::RotaryContour { .. }
                             | OpParams::RotaryParallel { .. }
+                            | OpParams::RotaryOffset { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -760,7 +828,10 @@ pub fn generate(
                         | OpParams::Swarf { tolerance, .. }
                         | OpParams::AdvancedSwarf { tolerance, .. }
                         | OpParams::RotaryContour { tolerance, .. }
-                        | OpParams::RotaryParallel { tolerance, .. } => Some(*tolerance),
+                        | OpParams::RotaryParallel { tolerance, .. }
+                        // The rough ladder's tolerance is exactly this
+                        // law's budget - its only reading (E2).
+                        | OpParams::RotaryOffset { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

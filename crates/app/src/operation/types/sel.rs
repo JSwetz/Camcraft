@@ -95,6 +95,11 @@ pub enum OpType {
     /// Rotary passes ALONG the fitted axis, stepping around the bar -
     /// the laid-down sibling of [`Self::RotaryContour`] (M5.1 stage E).
     RotaryParallel,
+    /// The rotary family's ROUGH ladder (M5.1 stage E2): the pocket
+    /// machinery run in wrap space about the fitted axis - the
+    /// developed cylinder eroded level by level in radial infeed,
+    /// every cut move standing RADIAL on the way back out.
+    RotaryOffset,
 }
 
 impl core::fmt::Display for OpType {

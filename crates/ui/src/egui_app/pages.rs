@@ -1617,6 +1617,105 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             lag_deg,
             max_tilt_deg,
         ),
+        // The wrap ladder (M5.1 stage E2): the pocket's panel worded
+        // for the TURN - stepdown infeeds radii, stepover spaces
+        // arc-length around the bar - and the twins' pose trio. No
+        // retract row anywhere: the kernel's rapids ride the skin by
+        // law, and the panel says so where the field would stand.
+        OpParams::RotaryOffset {
+            tolerance,
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            strategy,
+            entry,
+            helix_radius,
+            max_engagement,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "rotary_offset.clearance");
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "rotary_offset.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "rotary_offset.bottom");
+                ui.label("the world planes map onto stations along the fitted axis - the ladder roughs the bar only between them (inert on a bar lying flat)");
+                field(ui, "Stepdown (radial)");
+                num(ui, u, stepdown);
+                ui.label("the radial infeed: what one wrap level peels off the skin");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Stepover");
+                num(ui, u, stepover);
+                ui.label("spacing around the bar, in developed arc length - the wrap's own ruler");
+                field(ui, "Stock to leave");
+                num(ui, u, stock_to_leave);
+                ui.label("the shelf the finishing kind is asked to take off");
+                field(ui, "Strategy");
+                let mut st_idx = match strategy {
+                    PocketStrategy::Zigzag => 0,
+                    PocketStrategy::Waterline => 1,
+                    PocketStrategy::Adaptive => 2,
+                    PocketStrategy::Auto => 3,
+                };
+                let names = strategy3d_names();
+                let before = st_idx;
+                combo(ui, "ro_strat", &mut st_idx, names);
+                if st_idx != before {
+                    *strategy = match st_idx {
+                        1 => PocketStrategy::Waterline,
+                        2 => PocketStrategy::Adaptive,
+                        3 => PocketStrategy::Auto,
+                        _ => PocketStrategy::Zigzag,
+                    };
+                }
+                if matches!(strategy, PocketStrategy::Adaptive) {
+                    field(ui, "Max engagement (deg)");
+                    num_plain(ui, max_engagement);
+                    ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
+                }
+                field(ui, "Entry");
+                let mut e_idx = match entry {
+                    camcraft_app::machining3d::Entry3D::Plunge => 0,
+                    camcraft_app::machining3d::Entry3D::Ramp => 1,
+                    camcraft_app::machining3d::Entry3D::Helix => 2,
+                };
+                let before = e_idx;
+                combo(ui, "ro_entry", &mut e_idx, &ENTRY_KINDS);
+                if e_idx != before {
+                    *entry = match e_idx {
+                        1 => camcraft_app::machining3d::Entry3D::Ramp,
+                        2 => camcraft_app::machining3d::Entry3D::Helix,
+                        _ => camcraft_app::machining3d::Entry3D::Plunge,
+                    };
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
+                    field(ui, "Helix lead radius");
+                    num(ui, u, helix_radius);
+                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+                }
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the verify budget: the swept envelope is judged against the model within it");
+                rotary_axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);
