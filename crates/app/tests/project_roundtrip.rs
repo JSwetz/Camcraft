@@ -112,7 +112,9 @@ fn wrong_version_is_refused() {
     // and v25_file_steps_to_v26_and_the_rotary_grammar_round_trips
     // v25 -> v26 (the `rotary_contour` / `rotary_parallel` tags),
     // and v26_file_steps_to_v27_and_the_wrap_ladder_grammar_round_trips
-    // v26 -> v27 (the `rotary_offset` tag).
+    // v26 -> v27 (the `rotary_offset` tag), and
+    // v27_file_steps_to_v28_and_the_stamped_ladder_grammar_round_trips
+    // v27 -> v28 (the `multi_axis_rough` tag).
     // Spell the probe from the constant: a rung named by hand goes stale
     // (grey, then red) the day the stamp moves, as it did at v25.
     let future = project::PROJECT_VERSION + 1;
@@ -3078,4 +3080,97 @@ fn the_stage_c_machine_fields_round_trip_and_unset_ones_mint_nothing() {
     }
     let _ = std::fs::remove_file(&p);
     let _ = std::fs::remove_file(&plain);
+}
+
+#[test]
+fn v27_file_steps_to_v28_and_the_stamped_ladder_grammar_round_trips() {
+    // M5.1 stage E3: the stamped ladder arrives as one more params tag
+    // (`multi_axis_rough`) - the pocket's shape minus the `rest_rough`
+    // and `feed_opt` switches, plus the pose trio. Nothing existing
+    // changed shape; step-up is the stamp itself, like every bump
+    // since v6. The hop plane returns here (unlike the wrap's): this
+    // kernel runs the pocket's ladder, which reads it.
+    let world = new_world();
+    project::open(&world, r#"{"version": 27, "entities": []}"#).expect("v27 steps up");
+    let p = tmp_path("v28a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v28 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v28 wire grammar, hand-written so the tags are pinned: an
+    // explicit `retract_z` (a stated hop), an absent `max_engagement`
+    // (the law's 45), `entry` stated Helix. The pose trio rides with
+    // the pocket's numbers.
+    let text = r#"{
+        "version": 28,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "MR1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"multi_axis_rough": {
+                 "tolerance": 0.05, "stepover": 4.0, "stock_to_leave": 0.0,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "retract_z": {"reference": "fixed", "offset": 12.0},
+                 "top_z": {"reference": "fixed", "offset": 0.0},
+                 "bottom_z": {"reference": "fixed", "offset": -10.0},
+                 "stepdown": 5.0,
+                 "feed": 800.0, "plunge_feed": 150.0, "climb": true,
+                 "strategy": "zigzag", "entry": "helix", "helix_radius": 2.0,
+                 "lead_deg": 3.0, "lag_deg": 2.0, "max_tilt_deg": 60.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v28 stamped grammar must read");
+    let e = model::find_by_name(&world, "MR1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::MultiAxisRough {
+        strategy,
+        entry,
+        max_engagement,
+        retract_z,
+        lead_deg,
+        lag_deg,
+        max_tilt_deg,
+        ..
+    } = &o.params
+    else {
+        panic!("multi_axis_rough params expected, got {:?}", o.params);
+    };
+    assert_eq!(*strategy, PocketStrategy::Zigzag);
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix);
+    assert_eq!(*max_engagement, 45.0, "absent engagement means the law's 45");
+    assert!(retract_z.is_some(), "a stated hop must survive as a hop");
+    assert_eq!((*lead_deg, *lag_deg, *max_tilt_deg), (3.0, 2.0, 60.0));
+
+    // Write-parse-write is a fixed point, and the hop key appears
+    // exactly once: stated, so it is written.
+    let p = tmp_path("v28b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the stamped shape round-trips byte-identically");
+    assert!(first.contains("\"multi_axis_rough\""), "{first}");
+    assert_eq!(first.matches("\"retract_z\"").count(), 1, "the stated hop rides the file once");
+
+    // The sane door at the loader: a 200-degree cone is past the
+    // hemisphere the stamp may open into - a typo about the machine,
+    // refused by name.
+    let bad = text.replace("\"max_tilt_deg\": 60.0", "\"max_tilt_deg\": 200.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v28 file with a 200-degree cone must not load"
+    );
 }

@@ -4082,3 +4082,246 @@ fn rotary_offset_refuses_nonsense_at_creation() {
     }
     assert!(matches!(mk(no_cone, "RoCn"), Err(CommandError::Invalid(_))));
 }
+
+// ---------------------------------------------------------------------------
+// M5.1 stage E3: multi-axis roughing - the pocket ladder with the spindle
+// posed. The signature at this level: positions bit-identical to the
+// vertical path, move for move (the stamp only ever writes axes), the same
+// Ok verdict (law (f): the Envelope sweeps the ball as its sphere, and a
+// sphere cannot see a pose), and the pose law itself - rapids and in-plane
+// rows state nothing, wall contacts state the wall's own normal when lead
+// and lag rest at zero. None renders as vertical at the post, which is the
+// honest answer for floor contact. The refusals: the flat tool, named, and
+// the nonsense numbers at the command door.
+// ---------------------------------------------------------------------------
+
+/// The stage's fixture: a 40x40 slab to z=-10 with a 10x10 boss standing
+/// on it to z=0 (sunk 1 mm into the slab, so no facet pair is coincident
+/// and every level's sections are clean). motion's multiaxis ladder
+/// proved its laws on this shape; the app meets it again here.
+fn slab_boss_mesh() -> Mesh {
+    let mut facets = cube(
+        Point3::new(-20.0, -20.0, -20.0),
+        Point3::new(20.0, 20.0, -10.0),
+    )
+    .facets;
+    facets.extend(
+        cube(Point3::new(-5.0, -5.0, -11.0), Point3::new(5.0, 5.0, 0.0)).facets,
+    );
+    Mesh { facets }
+}
+
+fn multiaxis_rough_params() -> OpParams {
+    OpParams::MultiAxisRough {
+        tolerance: 0.1,
+        stepover: 3.0,
+        stock_to_leave: 0.0,
+        clearance_z: Height::fixed(5.0),
+        retract_z: None,
+        top_z: Height::fixed(0.0),
+        bottom_z: Height::fixed(-10.0),
+        stepdown: 5.0,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        strategy: camcraft_app::machining2d::PocketStrategy::Zigzag,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    }
+}
+
+fn multiaxis_rough_pocket_twin() -> OpParams {
+    OpParams::Pocket3D {
+        stepover: 3.0,
+        stock_to_leave: 0.0,
+        clearance_z: Height::fixed(5.0),
+        retract_z: None,
+        top_z: Height::fixed(0.0),
+        bottom_z: Height::fixed(-10.0),
+        stepdown: 5.0,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        strategy: camcraft_app::machining2d::PocketStrategy::Zigzag,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        rest_rough: false,
+        max_engagement: 45.0,
+        feed_opt: false,
+    }
+}
+
+/// The job both kinds run: box stock, ball nose, the slab with a boss,
+/// and ONE operation, generated. Alone on purpose - program order is
+/// name order and both ladder kinds consume the rest-material mask
+/// (M3.1 D), so a shared world would make the second op re-machine the
+/// first (or read Stale against its sibling's path). This law is about
+/// the stock, not a sequence: each kind must see the whole stock.
+fn ladder_job(tag: &str, stamped: bool) -> (World, History, camcraft_app::cl::Toolpath) {
+    let world = new_world();
+    let mut history = History::default();
+    let cmd = SetStock::new(
+        &world,
+        StockShape::Box {
+            dx: 40.0,
+            dy: 40.0,
+            dz: 20.0,
+        },
+        Location {
+            pos: Point3::new(0.0, 0.0, -20.0),
+            rot: IDENTITY_Q,
+        },
+    );
+    history.execute(&world, cmd.expect("box stock"));
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
+    let params = if stamped {
+        multiaxis_rough_params()
+    } else {
+        multiaxis_rough_pocket_twin()
+    };
+    history.execute(
+        &world,
+        CreateOperation::new(&world, tag, "BN-0600", SrcRef::Entity("slabboss".into()), params)
+            .expect("create"),
+    );
+    let cmd = GenerateOperation::new(&world, tag).expect("generate");
+    history.execute(&world, cmd);
+    assert_eq!(
+        status(&world, tag),
+        OpStatus::Ok,
+        "{tag} reads Stale against its own lone world"
+    );
+    let path = cache(&world, tag).expect("cached ladder").path;
+    (world, history, path)
+}
+
+#[test]
+fn multiaxis_rough_peels_the_same_ladder_and_poses_its_walls() {
+    // Two worlds, the same job: the pocket's path and the stamped one
+    // are the same ladder seen twice - and each verifies Ok inside its
+    // own world, the budget the vertical kind always met.
+    let (_pw, _ph, plain) = ladder_job("P3R", false);
+    let (_rw, _rh, rough) = ladder_job("MAR1", true);
+    assert_eq!(plain.moves.len(), rough.moves.len(), "one ladder, two readings");
+    let mut posed = 0usize;
+    let mut floor_air = 0usize;
+    for (a, b) in plain.moves.iter().zip(&rough.moves) {
+        assert!(a.axis.is_none(), "the plain ladder speaks an angle");
+        assert!(
+            a.to.x == b.to.x && a.to.y == b.to.y && a.to.z == b.to.z,
+            "the stamp moved a position: {:?} vs {:?}",
+            a.to,
+            b.to
+        );
+        if b.kind == MoveKind::Rapid {
+            assert!(b.axis.is_none(), "a rapid states an angle");
+            continue;
+        }
+        match b.axis {
+            None => {
+                if b.to.z == -10.0 {
+                    floor_air += 1;
+                }
+            }
+            Some(v) => {
+                posed += 1;
+                let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                assert!((l - 1.0).abs() < 1e-6, "a pose of length {l}");
+                assert!(v.iter().all(|c| c.is_finite()));
+                assert!(
+                    v[2].abs() < 1e-6,
+                    "a zero-lead pose leans off horizontal: {v:?} at {:?}",
+                    b.to
+                );
+            }
+        }
+    }
+    assert!(posed >= 4, "the boss walls posed nothing: {posed}");
+    assert!(posed <= 20, "poses leaked past the walls: {posed}");
+    assert!(
+        floor_air >= 1,
+        "every floor-row move claimed a wall - the floors must hold their peace"
+    );
+}
+
+#[test]
+fn multiaxis_rough_refuses_a_flat_tool_by_name() {
+    // The stamp's tangency law is a sphere's law: a flat end has no
+    // centre to place off the wall, so the kernel is never asked - the
+    // refusal names the kind and the tool at generate.
+    let world = new_world();
+    let mut history = History::default();
+    let cmd = SetStock::new(
+        &world,
+        StockShape::Box {
+            dx: 40.0,
+            dy: 40.0,
+            dz: 20.0,
+        },
+        Location {
+            pos: Point3::new(0.0, 0.0, -20.0),
+            rot: IDENTITY_Q,
+        },
+    );
+    history.execute(&world, cmd.expect("box stock"));
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "MAF",
+            "EM-0600-4FL",
+            SrcRef::Entity("slabboss".into()),
+            multiaxis_rough_params(),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) =
+        GenerateOperation::new(&world, "MAF").err().expect("a flat tool must refuse the stamp")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("ball-nose"), "{msg}");
+    assert!(msg.contains("Multi-Axis Rough"), "{msg}");
+    assert_eq!(status(&world, "MAF"), OpStatus::Never, "the refusal leaves no path behind");
+}
+
+#[test]
+fn multiaxis_rough_refuses_nonsense_at_creation() {
+    // The pocket ladder's doors carry over verbatim (the kernel runs
+    // the same bridge), and the cone joins them: a closed cone would
+    // fold every pose onto a single direction and hide it.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
+    let mk = |op: OpParams, name: &str| {
+        CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("slabboss".into()), op)
+    };
+    let mut zero_step = multiaxis_rough_params();
+    if let OpParams::MultiAxisRough { stepover, .. } = &mut zero_step {
+        *stepover = 0.0;
+    }
+    assert!(matches!(mk(zero_step, "MaSo"), Err(CommandError::Invalid(_))));
+    let mut zero_infeed = multiaxis_rough_params();
+    if let OpParams::MultiAxisRough { stepdown, .. } = &mut zero_infeed {
+        *stepdown = 0.0;
+    }
+    assert!(matches!(mk(zero_infeed, "MaSd"), Err(CommandError::Invalid(_))));
+    let mut flat_lean = multiaxis_rough_params();
+    if let OpParams::MultiAxisRough { lead_deg, .. } = &mut flat_lean {
+        *lead_deg = 91.0;
+    }
+    assert!(matches!(mk(flat_lean, "MaLd"), Err(CommandError::Invalid(_))));
+    let mut no_cone = multiaxis_rough_params();
+    if let OpParams::MultiAxisRough { max_tilt_deg, .. } = &mut no_cone {
+        *max_tilt_deg = 0.0;
+    }
+    assert!(matches!(mk(no_cone, "MaCn"), Err(CommandError::Invalid(_))));
+}

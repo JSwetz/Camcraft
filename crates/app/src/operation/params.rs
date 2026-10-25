@@ -445,6 +445,58 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The stamped ladder (M5.1 stage E3, tag 15): the Pocket3D
+            // arm's bytes verbatim - the hop plane included, the rest
+            // and feed-opt switches absent (the kernel runs neither,
+            // variant docs) - then the tolerance and the three pose
+            // angles: leaning the spindle rewrites every pose on the
+            // path, so it moves the stamp even though no position
+            // moves.
+            OpParams::MultiAxisRough {
+                tolerance,
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                strategy,
+                entry,
+                helix_radius,
+                max_engagement,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+            } => {
+                w(h, *stepover);
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u8(match strategy {
+                    PocketStrategy::Zigzag => 0,
+                    PocketStrategy::Waterline => 1,
+                    PocketStrategy::Auto => 2,
+                    PocketStrategy::Adaptive => 3,
+                });
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
+                });
+                wh_opt(h, *retract_z);
+                for v in [*tolerance, *lead_deg, *lag_deg, *max_tilt_deg] {
+                    w(h, v);
+                }
+            }
             // The ladder is the swarf door's bytes plus the rung count
             // (an integer on the digest rides `write_u32` like the tab
             // law's count above): two and three passes are different

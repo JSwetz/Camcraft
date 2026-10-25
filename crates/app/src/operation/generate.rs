@@ -674,6 +674,81 @@ pub fn generate(
             let path = crate::multiaxis::rotary_offset(&material.facets, &pp, &axis)?;
             (region, path)
         }
+        // M5.1 stage E3: the stamped ladder. The positions are the
+        // pocket's - so is this whole arm, down to the re-machining
+        // mask and the Empty remap - with the stamp's pose law
+        // written over the finished path and the ball-nose gate the
+        // tangency search needs (the stamp reads contact off a
+        // sphere; a flat end's flank is a cylinder the law does not
+        // own). No rest pass, no feed modulation: the stamp has
+        // never been shown to commute with either, and silence
+        // about a flag is a lie waiting to be filed (RECOMMENDED).
+        OpParams::MultiAxisRough {
+            stepover,
+            stock_to_leave,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            strategy,
+            entry,
+            helix_radius,
+            max_engagement,
+            tolerance,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::BallNose {
+                return Err(GenError::Invalid(format!(
+                    "Multi-Axis Rough needs a ball-nose tool, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let pp = Pocket3DParams {
+                tool_diameter: d,
+                stepover: *stepover,
+                stock_to_leave: *stock_to_leave,
+                clearance_z: hl.clearance,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                strategy: *strategy,
+                retract_z: hl.retract,
+                entry: *entry,
+                helix_radius: *helix_radius,
+                max_engagement: *max_engagement,
+            };
+            let axis = crate::multiaxis::AxisControl {
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: Some(*max_tilt_deg),
+            };
+            let _ = tolerance;
+            let prior = crate::rest::prior_state(world, op_name, setup, d * 0.5)?;
+            let mask = prior.grid.as_ref();
+            let path = match crate::multiaxis::multiaxis_rough_prev(
+                &material.facets, &region, &pp, &axis, mask,
+            ) {
+                Ok(path) => path,
+                // The pocket arm's Empty remap, verbatim: with a mask
+                // the truer sentence names the program, not the model.
+                Err(GenError::Empty(_)) if mask.is_some() => {
+                    return Err(GenError::Empty(
+                        "nothing left to cut - the operations ahead in the program already \
+                         machined this area"
+                            .into(),
+                    ));
+                }
+                Err(e) => return Err(e),
+            };
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -783,7 +858,9 @@ pub fn generate(
         // The ladder is the one rotary that LEAVES a shelf on purpose:
         // the finishing kinds own the ledge under a column's last cut,
         // so the wrap reads this number as a radial wall (E2).
-        | OpParams::RotaryOffset { stock_to_leave, .. } => *stock_to_leave,
+        | OpParams::RotaryOffset { stock_to_leave, .. }
+        // The stamped ladder leaves the pocket's shelf, same law.
+        | OpParams::MultiAxisRough { stock_to_leave, .. } => *stock_to_leave,
     };
     match &frame {
         None => {
@@ -806,6 +883,7 @@ pub fn generate(
                             | OpParams::RotaryContour { .. }
                             | OpParams::RotaryParallel { .. }
                             | OpParams::RotaryOffset { .. }
+                            | OpParams::MultiAxisRough { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -830,8 +908,12 @@ pub fn generate(
                         | OpParams::RotaryContour { tolerance, .. }
                         | OpParams::RotaryParallel { tolerance, .. }
                         // The rough ladder's tolerance is exactly this
-                        // law's budget - its only reading (E2).
-                        | OpParams::RotaryOffset { tolerance, .. } => Some(*tolerance),
+                        // law's budget - its only reading (E2), and
+                        // the stamped ladder reads it the same way
+                        // (E3): the positions are the pocket's, the
+                        // verdict measures them under the pose.
+                        | OpParams::RotaryOffset { tolerance, .. }
+                        | OpParams::MultiAxisRough { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

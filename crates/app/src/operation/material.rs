@@ -259,6 +259,10 @@ pub(super) fn region_for_src(
                     // The rough ladder wraps the same axis - its islands
                     // come from the mesh in wrap space, never a pick.
                     | OpParams::RotaryOffset { .. }
+                    // The stamped ladder is the 3-D pocket's islands
+                    // verbatim - mesh sections at every plane, and the
+                    // stamp only ever writes poses onto them.
+                    | OpParams::MultiAxisRough { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -321,7 +325,10 @@ pub(super) fn region_for(
         // the shadow's, unrolled (stage E2).
         | OpParams::RotaryContour { .. }
         | OpParams::RotaryParallel { .. }
-        | OpParams::RotaryOffset { .. } => {
+        | OpParams::RotaryOffset { .. }
+        // The stamped ladder shadows the same silhouette: leaning the
+        // spindle moves no position, so no footprint moves either.
+        | OpParams::MultiAxisRough { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

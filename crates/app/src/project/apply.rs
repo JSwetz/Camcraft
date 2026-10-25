@@ -218,6 +218,15 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // existing shape changed.
         file.version = 27;
     }
+    if file.version == 27 {
+        // v27 -> v28: the stamped ladder arrives as one new params
+        // variant (`multi_axis_rough`, M5.1 stage E3), under the same
+        // law: no v27 file can contain it, and `validate_kind`
+        // already refuses the tag before anything is written. No
+        // existing shape changed - the posed axis lives in the
+        // toolpath, not the file.
+        file.version = 28;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

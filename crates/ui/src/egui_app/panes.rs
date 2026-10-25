@@ -336,6 +336,7 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::RotaryContour => Icon::RotaryContour,
         OpType::RotaryParallel => Icon::RotaryParallel,
         OpType::RotaryOffset => Icon::RotaryOffset,
+        OpType::MultiAxisRough => Icon::MultiAxisRough,
     }
 }
 

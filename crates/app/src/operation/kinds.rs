@@ -84,7 +84,8 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::AdvancedSwarf { feed, .. }
         | OpParams::RotaryContour { feed, .. }
         | OpParams::RotaryParallel { feed, .. }
-        | OpParams::RotaryOffset { feed, .. } => *feed,
+        | OpParams::RotaryOffset { feed, .. }
+        | OpParams::MultiAxisRough { feed, .. } => *feed,
     }
 }
 
@@ -104,7 +105,8 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::AdvancedSwarf { plunge_feed, .. }
         | OpParams::RotaryContour { plunge_feed, .. }
         | OpParams::RotaryParallel { plunge_feed, .. }
-        | OpParams::RotaryOffset { plunge_feed, .. } => *plunge_feed,
+        | OpParams::RotaryOffset { plunge_feed, .. }
+        | OpParams::MultiAxisRough { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -123,7 +125,8 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::AdvancedSwarf { climb, .. }
         | OpParams::RotaryContour { climb, .. }
         | OpParams::RotaryParallel { climb, .. }
-        | OpParams::RotaryOffset { climb, .. } => *climb,
+        | OpParams::RotaryOffset { climb, .. }
+        | OpParams::MultiAxisRough { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
         OpParams::Drill { .. } => true,
@@ -138,6 +141,8 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         // The wrap ladder's spacing is a plain number like the
         // pocket's, not the twins' derived Option (variant docs).
         | OpParams::RotaryOffset { stepover, .. }
+        // The stamped ladder's spacing is the pocket's plain number.
+        | OpParams::MultiAxisRough { stepover, .. }
         | OpParams::Slot { stepover, .. } => Some(*stepover),
         // Parallel5D's spacing - and the swarf kinds', which run the
         // same derivation - is an Option the same way Finish3D's
@@ -165,6 +170,8 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // The ladder's infeed is radial here, but it is still the
         // number the retype carries.
         | OpParams::RotaryOffset { stepdown, .. }
+        // Z infeed here, the pocket's law (M5.1 stage E3).
+        | OpParams::MultiAxisRough { stepdown, .. }
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
@@ -192,7 +199,8 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::AdvancedSwarf { top_z, .. }
         | OpParams::RotaryContour { top_z, .. }
         | OpParams::RotaryParallel { top_z, .. }
-        | OpParams::RotaryOffset { top_z, .. } => Some(*top_z),
+        | OpParams::RotaryOffset { top_z, .. }
+        | OpParams::MultiAxisRough { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -214,7 +222,8 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::AdvancedSwarf { bottom_z, .. }
         | OpParams::RotaryContour { bottom_z, .. }
         | OpParams::RotaryParallel { bottom_z, .. }
-        | OpParams::RotaryOffset { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::RotaryOffset { bottom_z, .. }
+        | OpParams::MultiAxisRough { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -238,7 +247,9 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::Swarf { retract_z, .. }
         | OpParams::AdvancedSwarf { retract_z, .. }
         | OpParams::RotaryContour { retract_z, .. }
-        | OpParams::RotaryParallel { retract_z, .. } => *retract_z,
+        | OpParams::RotaryParallel { retract_z, .. }
+        // The stamped ladder hops like the pocket it stamps (E3).
+        | OpParams::MultiAxisRough { retract_z, .. } => *retract_z,
         // No hop plane to carry: the kernel names its own rapids
         // plane (one infeed and a tool radius off the skin), and
         // Face never stored one either.
@@ -544,6 +555,35 @@ fn seed_rotary_parallel(c: &Carried) -> OpParams {
     }
 }
 
+/// The stage E3 seed: the pocket ladder's numbers verbatim - the
+/// stamp moves no position, so the draft rule reads the SAME carried
+/// stepover/stepdown/strategy the plain pocket does - crossed with
+/// the twins' pose trio, defaulted inert (lead and lag at zero, cone
+/// wide open: a fresh op poses by the tangency law alone until the
+/// machinist asks for more).
+fn seed_multiaxis_rough(c: &Carried) -> OpParams {
+    OpParams::MultiAxisRough {
+        tolerance: 0.05,
+        stepover: c.stepover,
+        stock_to_leave: 0.0,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        stepdown: c.stepdown,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        strategy: PocketStrategy::Auto,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    }
+}
+
 /// The stage E2 seed: the pocket ladder's numbers, read the wrap's
 /// way - `stepdown` is the radial infeed one level peels off the
 /// skin, `stepover` the spacing around it in developed arc length.
@@ -744,6 +784,21 @@ impl KindInfo {
             mode: Mode::Envelope,
             seed: seed_rotary_offset,
         },
+        KindInfo {
+            ty: OpType::MultiAxisRough,
+            label: "Multi-Axis Rough",
+            caption: "Multi-Axis Rough",
+            tag: 15,
+            // The positions are the pocket ladder's, bit for bit, and
+            // a sphere's envelope is rotation-invariant about its own
+            // center: law (f) measures what the vertical rough would
+            // have cut, so the pose cannot lie to the verdict (M5.1
+            // stage E3). The tolerance is that law's budget, its only
+            // reading - the ladder itself chords by the pocket's own
+            // lattice laws.
+            mode: Mode::Envelope,
+            seed: seed_multiaxis_rough,
+        },
     ];
 }
 
@@ -768,6 +823,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[12].label,
     KindInfo::ALL[13].label,
     KindInfo::ALL[14].label,
+    KindInfo::ALL[15].label,
 ];
 
 impl OpType {
@@ -791,6 +847,7 @@ impl OpType {
             OpType::RotaryContour => 12,
             OpType::RotaryParallel => 13,
             OpType::RotaryOffset => 14,
+            OpType::MultiAxisRough => 15,
         }
     }
 

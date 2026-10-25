@@ -43,6 +43,7 @@ pub(crate) enum Icon {
     RotaryContour,
     RotaryParallel,
     RotaryOffset,
+    MultiAxisRough,
     Undo,
     Redo,
     Delete,
@@ -57,7 +58,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 32] = [
+    pub(crate) const ALL: [Icon; 33] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -80,6 +81,7 @@ impl Icon {
         Icon::RotaryContour,
         Icon::RotaryParallel,
         Icon::RotaryOffset,
+        Icon::MultiAxisRough,
         Icon::Undo,
         Icon::Redo,
         Icon::Delete,
@@ -142,6 +144,10 @@ impl Icon {
             // peeling radii, the tool riding outside on the radial.
             // Ours to give.
             Icon::RotaryOffset => include_bytes!("../../../../assets/ui/rotaryoffset.png"),
+            // Original drawing (no Tabler tilted-tool glyph exists): the
+            // stepped block with a LEANING tool - the ladder, posed.
+            // Ours to give.
+            Icon::MultiAxisRough => include_bytes!("../../../../assets/ui/multiaxisrough.png"),
             Icon::Undo => include_bytes!("../../../../assets/ui/arrow-back-up.png"),
             Icon::Redo => include_bytes!("../../../../assets/ui/arrow-forward-up.png"),
             Icon::Delete => include_bytes!("../../../../assets/ui/trash.png"),
@@ -184,6 +190,7 @@ impl Icon {
             Icon::RotaryContour => "icon-rotary-contour",
             Icon::RotaryParallel => "icon-rotary-parallel",
             Icon::RotaryOffset => "icon-rotary-offset",
+            Icon::MultiAxisRough => "icon-multiaxis-rough",
             Icon::Undo => "icon-undo",
             Icon::Redo => "icon-redo",
             Icon::Delete => "icon-delete",

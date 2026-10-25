@@ -107,7 +107,8 @@ pub fn region_z(
         | OpParams::AdvancedSwarf { top_z, .. }
         | OpParams::RotaryContour { top_z, .. }
         | OpParams::RotaryParallel { top_z, .. }
-        | OpParams::RotaryOffset { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::RotaryOffset { top_z, .. }
+        | OpParams::MultiAxisRough { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -184,7 +185,10 @@ pub fn resolve_params(
         | OpParams::Swarf { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::AdvancedSwarf { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::RotaryContour { clearance_z, retract_z, top_z, bottom_z, .. }
-        | OpParams::RotaryParallel { clearance_z, retract_z, top_z, bottom_z, .. } => (
+        | OpParams::RotaryParallel { clearance_z, retract_z, top_z, bottom_z, .. }
+        // The stamped ladder's four are the pocket family's, the
+        // optional hop among them (M5.1 stage E3).
+        | OpParams::MultiAxisRough { clearance_z, retract_z, top_z, bottom_z, .. } => (
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),

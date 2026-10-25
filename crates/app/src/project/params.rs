@@ -401,6 +401,37 @@ pub enum ParamsDto {
         lag_deg: f64,
         max_tilt_deg: f64,
     },
+    /// Declared at v28 with the stamped ladder (M5.1 stage E3). The
+    /// pocket's shape field for field, minus the `rest_rough` and
+    /// `feed_opt` switches the stamp has never been shown to commute
+    /// with, plus the twins' pose trio and the verify budget - the
+    /// file contract says what the generator reads, and the
+    /// generator reads these and nothing else.
+    MultiAxisRough {
+        tolerance: f64,
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: HeightDto,
+        /// Absent means hop-to-clearance, the pocket family's law.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        strategy: StrategyDto,
+        #[serde(default)]
+        entry: EntryDto,
+        /// Read only when `entry` is Helix; the pocket's law.
+        helix_radius: f64,
+        #[serde(default = "default_engagement_deg")]
+        max_engagement: f64,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

@@ -456,6 +456,37 @@ pub enum OpParams {
         lag_deg: f64,
         max_tilt_deg: f64,
     },
+    /// Multi-axis roughing (M5.1 stage E3): the [`Self::Pocket3D`]
+    /// ladder, positions bit-identical, with a tool-axis pose stamped
+    /// on every move the tangency law finds a surface to lean off -
+    /// steep flanks take the spindle off vertical within the cone,
+    /// floors and air keep it honest. `tolerance` is the VERIFY
+    /// budget alone (the envelope law's, like the wrap ladder's).
+    /// Deliberately absent next to the plain pocket: `rest_rough`
+    /// and `feed_opt`, whose sim passes the stamp has never been
+    /// shown to commute with (deferred - RECOMMENDED.md).
+    MultiAxisRough {
+        tolerance: f64,
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: Height,
+        /// Hop plane between rings of one level; `None` hops to
+        /// clearance, like the pocket family.
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        strategy: PocketStrategy,
+        entry: Entry3D,
+        helix_radius: f64,
+        max_engagement: f64,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
 }
 
 impl OpParams {
@@ -477,6 +508,7 @@ impl OpParams {
             OpParams::RotaryContour { .. } => OpType::RotaryContour,
             OpParams::RotaryParallel { .. } => OpType::RotaryParallel,
             OpParams::RotaryOffset { .. } => OpType::RotaryOffset,
+            OpParams::MultiAxisRough { .. } => OpType::MultiAxisRough,
         }
     }
 
@@ -508,7 +540,10 @@ impl OpParams {
             // per move - an index would fight both.
             | OpParams::RotaryContour { .. }
             | OpParams::RotaryParallel { .. }
-            | OpParams::RotaryOffset { .. } => None,
+            | OpParams::RotaryOffset { .. }
+            // The stamped ladder is that answer too: the poses ARE
+            // the orientation, written per move (M5.1 stage E3).
+            | OpParams::MultiAxisRough { .. } => None,
         }
     }
 
@@ -530,7 +565,8 @@ impl OpParams {
             | OpParams::AdvancedSwarf { clearance_z, .. }
             | OpParams::RotaryContour { clearance_z, .. }
             | OpParams::RotaryParallel { clearance_z, .. }
-            | OpParams::RotaryOffset { clearance_z, .. } => *clearance_z,
+            | OpParams::RotaryOffset { clearance_z, .. }
+            | OpParams::MultiAxisRough { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -555,7 +591,8 @@ impl OpParams {
             | OpParams::AdvancedSwarf { top_z, .. }
             | OpParams::RotaryContour { top_z, .. }
             | OpParams::RotaryParallel { top_z, .. }
-            | OpParams::RotaryOffset { top_z, .. } => *top_z,
+            | OpParams::RotaryOffset { top_z, .. }
+            | OpParams::MultiAxisRough { top_z, .. } => *top_z,
         }
     }
 
@@ -618,7 +655,10 @@ impl OpParams {
             | OpParams::Swarf { clearance_z, retract_z, top_z, bottom_z, .. }
             | OpParams::AdvancedSwarf { clearance_z, retract_z, top_z, bottom_z, .. }
             | OpParams::RotaryContour { clearance_z, retract_z, top_z, bottom_z, .. }
-            | OpParams::RotaryParallel { clearance_z, retract_z, top_z, bottom_z, .. } => {
+            | OpParams::RotaryParallel { clearance_z, retract_z, top_z, bottom_z, .. }
+            // The stamped ladder stores the pocket family's four, the
+            // hop included (M5.1 stage E3).
+            | OpParams::MultiAxisRough { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);

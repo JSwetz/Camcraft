@@ -3,7 +3,10 @@
 //! NORMAL through `tilt`), the ruled swarf reads of stage D
 //! (`ruling`), and the rotary family of stage E (`axis` + `rotary`
 //! for the finishing pair, `rotary_offset` for the rough ladder, all
-//! posing from the RADIAL of a fitted axis of revolution).
+//! posing from the RADIAL of a fitted axis of revolution), and the
+//! stamped pocket ladder of stage E3 (`rough`: the prismatic rough in
+//! freeform ground, posed by the same normal law as the finishing
+//! trio).
 //!
 //! Where stage B kept the tool vertical and moved the PART (3+2
 //! indexing through a tilted frame), these kinds keep the PART still
@@ -28,6 +31,7 @@ mod stamp_tests;
 pub mod axis;
 pub mod contour5d;
 pub mod parallel5d;
+pub mod rough;
 pub mod rotary;
 pub mod rotary_offset;
 mod wrap_exit;
@@ -37,6 +41,7 @@ pub mod tilt;
 
 pub use contour5d::contour5d;
 pub use parallel5d::parallel5d;
+pub use rough::{multiaxis_rough, multiaxis_rough_prev};
 pub use rotary::{rotary_contour, rotary_parallel};
 pub use rotary_offset::rotary_offset;
 pub use swarf::{swarf5d, swarf5d_advanced};

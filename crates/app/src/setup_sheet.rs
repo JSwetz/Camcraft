@@ -592,6 +592,15 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             top_z,
             bottom_z,
             ..
+        }
+        // The stamped ladder states the pocket family's four rows,
+        // the optional hop among them (M5.1 stage E3).
+        | OpParams::MultiAxisRough {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
         } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", *retract_z),

@@ -173,10 +173,10 @@ fn stamp_follows_every_input() {
     // OpType::ordinal == digest tag, labels exactly as Display quotes
     // them. The tags are digest bytes - drift here greys every cache.
     // (Stage E moved this pin with its two rows, stage E2 with the
-    // wrap ladder's: the registry law is checked from the table
-    // itself, so the count is the only stale number a stage can leave
-    // behind.)
-    assert_eq!(KindInfo::ALL.len(), 15);
+    // wrap ladder's, stage E3 with the stamped one: the registry law
+    // is checked from the table itself, so the count is the only
+    // stale number a stage can leave behind.)
+    assert_eq!(KindInfo::ALL.len(), 16);
     for (i, row) in KindInfo::ALL.iter().enumerate() {
         assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
         assert_eq!(row.tag as usize, i, "digest tag must equal table order");
@@ -362,4 +362,66 @@ fn rotary_offset_stamp_moves_with_its_wrap_numbers() {
         digest(&offset(4.0, 3.0, auto)),
         digest(&offset(4.0, 3.0, auto))
     );
+}
+
+#[test]
+fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
+    // M5.1 stage E3, row 15: the stamped ladder shares Pocket3D's
+    // bridge bytes, so the tag must split them even at identical
+    // numbers - and the cone the poses live inside is kernel input
+    // here (the stamp reads it), not window dressing: each angle
+    // moves the stamp on its own.
+    let world = crate::world::new_world();
+    let rough = |lead: f64, lag: f64, tilt: f64| OpParams::MultiAxisRough {
+        tolerance: 0.05,
+        stepover: 4.0,
+        stock_to_leave: 0.0,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(10.0),
+        bottom_z: Height::fixed(-5.0),
+        stepdown: 3.0,
+        feed: 800.0,
+        plunge_feed: 150.0,
+        climb: true,
+        strategy: PocketStrategy::Auto,
+        entry: crate::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
+        lead_deg: lead,
+        lag_deg: lag,
+        max_tilt_deg: tilt,
+    };
+    let digest = |p: &OpParams| {
+        let mut h = std::hash::DefaultHasher::new();
+        p.stamp_with(&world, None, &mut h);
+        h.finish()
+    };
+    assert_ne!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(10.0, 0.0, 90.0)), "lead poses every flank");
+    assert_ne!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(0.0, 7.0, 90.0)), "lag is the stamp's too");
+    assert_ne!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(0.0, 0.0, 45.0)), "the cone caps the lean");
+    let pocket = OpParams::Pocket3D {
+        stepover: 4.0,
+        stock_to_leave: 0.0,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(10.0),
+        bottom_z: Height::fixed(-5.0),
+        stepdown: 3.0,
+        feed: 800.0,
+        plunge_feed: 150.0,
+        climb: true,
+        strategy: PocketStrategy::Auto,
+        entry: crate::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        rest_rough: false,
+        max_engagement: 45.0,
+        feed_opt: false,
+    };
+    assert_ne!(
+        digest(&rough(0.0, 0.0, 90.0)),
+        digest(&pocket),
+        "the same ladder with poses is a different kind - the tag splits them"
+    );
+    assert_eq!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(0.0, 0.0, 90.0)));
 }

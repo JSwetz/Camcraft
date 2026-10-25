@@ -318,6 +318,51 @@ impl OpParams {
                     && *max_tilt_deg > 0.0
                     && *max_tilt_deg <= 180.0
             }
+            // The stamped ladder's door (M5.1 stage E3): the Pocket3D
+            // door verbatim - the hop plane included, which the plain
+            // pocket stores and the wrap discards - plus the pose
+            // clause and the verify budget. Positions are the
+            // pocket's, so what is sane for one is sane for the
+            // other; only the angles are new questions.
+            OpParams::MultiAxisRough {
+                tolerance,
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                helix_radius,
+                strategy,
+                max_engagement,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
+            } => {
+                let angle = |v: &f64| v.is_finite() && v.abs() <= 90.0;
+                pos(*tolerance)
+                    && pos(*stepover)
+                    && nneg(*stock_to_leave)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && pos(*helix_radius)
+                    && (max_engagement.is_finite()
+                        && (!matches!(strategy, PocketStrategy::Adaptive)
+                            || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
+                    && angle(lead_deg)
+                    && angle(lag_deg)
+                    && *max_tilt_deg > 0.0
+                    && *max_tilt_deg <= 180.0
+            }
             OpParams::AdvancedSwarf {
                 tolerance,
                 stepover,

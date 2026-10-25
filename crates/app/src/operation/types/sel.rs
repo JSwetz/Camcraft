@@ -100,6 +100,13 @@ pub enum OpType {
     /// developed cylinder eroded level by level in radial infeed,
     /// every cut move standing RADIAL on the way back out.
     RotaryOffset,
+    /// Multi-axis roughing (M5.1 stage E3): the 3-D pocket ladder,
+    /// move for move, with the stage-C stamp read over it - floors
+    /// and air keep the spindle vertical, steep flanks take it off
+    /// vertical within the tilt cone. The part stands still and the
+    /// TOOL AXIS moves; one 3+2 index cannot hold these poses (see
+    /// [`crate::multiaxis`]).
+    MultiAxisRough,
 }
 
 impl core::fmt::Display for OpType {
