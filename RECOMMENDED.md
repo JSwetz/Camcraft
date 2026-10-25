@@ -3337,6 +3337,112 @@ barrel-cutter along a ruled band) and advancedswarf.png (the same,
 through three widening rungs) join the bespoke set per the
 contour5d/parallel5d precedent; LICENSES.md names both.
 
+## M5.1 stage E - rotary contour & parallel (this commit)
+
+**The axis is read by circumcenter concurrency - the one anchor law
+that is tessellation-proof.** A revolve facet's circumcenter lies in
+its own meridian half-plane, so the facet's NORMAL LINE meets the true
+axis exactly, whatever the ring count or segment heights. Considered
+and disproven on paper before code: anchoring the normal at the
+centroid misses by a sixth of the arc at first order (the fan's
+one-diagonal asymmetry), the edge midpoint by a quarter, plane-closest
+and welded-vertex-average normals fare no better - all three refuse
+well-turned parts at coarse tessellations. The normal stays the raw
+per-triangle one (welding would reintroduce the fan asymmetry the
+center already fixed). Direction: the axis is the EIGEN-SEPARATED
+extremum of the area-weighted Σ a·n nᵗ - but BOTH the min and max
+eigenvectors are tried and the better RMS wins, because a steep cone
+tips the second moment to the other side of 45 degrees (motion's
+`a_steep_cone_still_yields_its_axis` exists for exactly that).
+Position: least squares of k̂·o = k̂·p with k̂ = n×û over every facet,
+plus one pin row (ûûᵗ) through a representative point so the solution
+is the axis LINE, not a plane of solutions.
+
+**A bit-exact upright frame is snapped, not hoped for.** Eigen-solves
+return (0, 0, 1±1e-16) for parts that stand on the table, and 1e-16
+in the direction breaks the `TiltedFrame::is_upright` identity that
+the golden law leans on (upright frames carry arcs verbatim, tilted
+frames chord them - a hair-off frame would silently switch modes
+per platform). So the fit snaps a candidate to the exact axis when it
+lands within the noise floor nz = 32·f64::EPSILON·rho of it; anything
+beyond is a real lean and rides the chord path honestly. (The same
+lane caught a genuine bug on the way: `sym_eigen`'s rotation angle
+was an `arctan`, which cannot see the quadrant - now `atan2`.)
+
+**Coarseness gets its own gate: a polygon pretending to be a wall
+refuses.** Circumcenter anchoring sees through flatness masquerading
+as roundness only via concurrency, so the fit also sweeps the fitted
+facets' bearings about the candidate and refuses when the WIDEST
+EMPTY SKIP exceeds sqrt(8·REL_TOL) radians - that angle is exactly
+the chord-sagitta budget written differently (a turn with skip g
+stands in for a wall whose chords sag rho·g²/8). Facing flats bear
+no azimuth and justly take no part - shoulders are sharp where
+lathes leave them. 16 rings pass, 8 refuse; the fixture budgets are
+in the tests.
+
+**The twins refuse each other's degenerate stances, with one shared
+sine.** A standing bar asked for parallel passes answers "passes
+along a standing bar are its rings: Rotary Contour", and a laid bar
+asked for contour rings answers the mirror sentence pointing at
+Rotary Parallel; both read LEAN_MIN = sin 1° off the same constant,
+so the pair cannot disagree about where the boundary sits. An
+isotropic fit (sphere: normals concurrent at a POINT, every axis
+equal) is refused as DOMED ground - stage C's kinds, by name - and a
+model no candidate fits gets the taxonomy's generic line. Why
+refuse a stance instead of computing through it: at lean → 0 the
+station map s(H) = (H - o·ẑ)/(û·ẑ) divides by nothing the parameters
+can speak in, and inventing a frame there would be the silent wrong
+answer the Prime Directive names.
+
+**The pose is the RADIAL, not the surface normal - and the cone
+measures off that seed.** On a turned work the line the tool actually
+offers the spindle is the perpendicular from the axis to the tool, so
+`radial_pose` replaces stage C's facet normal as `command_axis`'s
+seed n; flats (caps, floors) get radial poses too - a wall-straddling
+ball cares about the axis, not which way its facet faced. Lead leans
+in the (radial, travel) plane, lag rotates about the travel, and the
+max-tilt cone folds toward... FROM the radial: off = angle(n, a) -
+so at lead = lag = 0 the pose IS the radial exactly, cone or no cone
+(an app-level law `radial_pose_law` pins: every cut move's pose meets
+the axis line to the tool point). Where a point lies ON the axis no
+radial exists; the move holds vertical and the fit says so on stderr
+- a turned bar's rings do not go there anyway.
+
+**No new pattern kernel, and no new heights machinery: stages A-D
+composed.** Rotary contour IS the waterline rung ladder in the axis
+frame with heights mapped to axial stations s(H) = (H - o.z)/(û·ẑ) -
+the exact stage-B identity when the part stands on its z, and the
+honest station reading when it leans; rotary parallel lays the axis
+down (local z = as close to world up as the axis allows, an exact
+swap for a flat-lying bar) and runs the swarf raster there, where
+the rings degenerate into exactly the generatrices the kind is named
+for. The fitted axis is MODEL data, not a parameter: the digest adds
+the family's pattern (the twins' tags 12/13, the stepover-or-derived
+split the raster kinds ride) but no key names the axis - two runs on
+one mesh agree by determinism, and a re-fit after a model edit can
+never go stale against a stored axis. Project v26 is the two params
+tags and nothing else (a v25 file steps up with no new key).
+
+**The fixture bowtie, caught by the footprint law.** The revolve
+helper split its wall patches along a SIDE edge (a1,a2,b2)+(a2,b1,b2)
+- on a cylinder the four corners are not coplanar, and that pairing
+is a bowtie: two crossed diagonal slits per patch. `fit` never
+noticed (normals are per-triangle truth), motion's identity tests
+never noticed (both sides of an identity read the same mesh), but
+the app's `slice::project` footprint law refuses an OPEN mesh by
+name and said so - "the mesh is open at z = -15: 32 dangling chord
+ends" - on the first honest run. Both fixtures now split along the
+DIAGONAL (a1,b2,b1). The lesson rides stage D's: closed solids are
+load-bearing at the app level, and a fixture bug is worth catching
+even where only a stricter law can see it.
+
+**The glyphs are drawn original** (assets/ui/rotarycontour.png: the
+turned bar with its station rings, the ball riding OUT on the radial;
+rotaryparallel.png: the same bar with generatrix lines along it) -
+no Tabler mark says 4-axis rotary, and the ball is deliberately off
+the surface on the radial line, the kind's whole claim; LICENSES.md
+names both.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

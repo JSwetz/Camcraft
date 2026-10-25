@@ -111,8 +111,8 @@ home.
 | Swarf | ✅ | M5.1 |
 | Advanced swarf | ✅ | M5.1 |
 | Multi-axis contour | 📋 | M5.1 |
-| Rotary parallel | 📋 | M5.1 |
-| Rotary contour | 📋 | M5.1 |
+| Rotary parallel | ✅ | M5.1 |
+| Rotary contour | ✅ | M5.1 |
 | Multi-axis finishing | 📋 | M5.1 |
 
 ### Turning — Operations
@@ -1441,10 +1441,26 @@ Phase-5 shape law.
       rapids and air moves hold no pose, drill cycles refuse the stamp
       by name; the axis trio always rides the project file (v24), so a
       re-post can never silently drop a lean - RECOMMENDED.md, M5.1 C.
+- ✅ **Rotary contour and parallel** (stage E, this commit): the turned
+      part's two native ladders, each riding an axis FITTED to the
+      model - the circumcenter-concurrency law reads the rotation axis
+      off the normals alone (a revolve facet's normal line meets the
+      true axis at any tessellation; direction from the normals'
+      area-weighted second moment, position by least squares, both
+      eigenvector candidates tried, a sagitta-budget coarseness gate
+      refusing pretending polygons); contour = the waterline rings in
+      the axis frame with heights read as axial stations, parallel =
+      the swarf raster in a frame that lays the axis down - and on
+      every cut move the posed axis is the RADIAL, the line from the
+      fitted axis to the tool (lead/lag/cone measured off that seed,
+      the same trio as stage C); wrong stances refuse each other by
+      name, domed ground points at the 5-axis kinds, freeforms name
+      the taxonomy - RECOMMENDED.md, M5.1 E.
 - **The rotary family**: rotary offset roughing, multi-axis roughing,
-      multi-axis contour, rotary parallel, rotary contour, multi-axis
-      finishing - the catalog's multi-axis block lands here, each riding
-      the orientation and machine-sim laws below
+      multi-axis contour, multi-axis finishing (the parallel and
+      contour twins landed with stage E) - the catalog's multi-axis
+      block lands here, each riding the orientation and machine-sim
+      laws below
 - 🔄 **3+2 tilted-plane indexing** (stage B, this commit): the five
       plane kinds carry a `Tilt`; generation runs them in the frame's
       LOCAL coordinates and leaves through `TiltedFrame::world_path` -
