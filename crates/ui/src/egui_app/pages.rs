@@ -812,6 +812,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             plunge_feed,
             climb,
             strategy,
+            entry,
+            helix_radius,
+            max_engagement,
             tilt,
         } => {
             if tab == SEC_HEIGHTS {
@@ -852,14 +855,15 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, "Stock to leave");
                 num(ui, u, stock_to_leave);
                 field(ui, "Strategy");
+                // M5.1 H: the 2-D combo offers Adaptive beside the 3-D
+                // one's - the law runs on the plane now, so hiding the
+                // choice would make a file that carries it display a
+                // strategy it is not cutting.
                 let mut st_idx = match strategy {
                     PocketStrategy::Zigzag => 0,
                     PocketStrategy::Waterline => 1,
-                    PocketStrategy::Auto => 2,
-                    // The 2-D family does not offer Adaptive (its combo
-                    // has no such entry); a file that carries it shows
-                    // as Waterline, the alias the generator implements.
-                    PocketStrategy::Adaptive => 1,
+                    PocketStrategy::Adaptive => 2,
+                    PocketStrategy::Auto => 3,
                 };
                 let names = strategy_names();
                 let before = st_idx;
@@ -867,9 +871,35 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if st_idx != before {
                     *strategy = match st_idx {
                         1 => PocketStrategy::Waterline,
-                        2 => PocketStrategy::Auto,
+                        2 => PocketStrategy::Adaptive,
+                        3 => PocketStrategy::Auto,
                         _ => PocketStrategy::Zigzag,
                     };
+                }
+                if matches!(strategy, PocketStrategy::Adaptive) {
+                    field(ui, "Max engagement (deg)");
+                    num_plain(ui, max_engagement);
+                    ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
+                }
+                field(ui, "Entry");
+                let mut e_idx = match entry {
+                    camcraft_app::machining3d::Entry3D::Plunge => 0,
+                    camcraft_app::machining3d::Entry3D::Ramp => 1,
+                    camcraft_app::machining3d::Entry3D::Helix => 2,
+                };
+                let before = e_idx;
+                combo(ui, "p_entry", &mut e_idx, &ENTRY_KINDS);
+                if e_idx != before {
+                    *entry = match e_idx {
+                        1 => camcraft_app::machining3d::Entry3D::Ramp,
+                        2 => camcraft_app::machining3d::Entry3D::Helix,
+                        _ => camcraft_app::machining3d::Entry3D::Plunge,
+                    };
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
+                    field(ui, "Helix lead radius");
+                    num(ui, u, helix_radius);
+                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
                 }
                 if let Some(note) = &auto_note {
                     ui.label(note.clone());

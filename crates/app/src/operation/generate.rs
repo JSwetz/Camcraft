@@ -220,6 +220,9 @@ pub fn generate(
             plunge_feed,
             climb,
             strategy,
+            entry,
+            helix_radius,
+            max_engagement,
             ..
         } => {
             let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
@@ -238,6 +241,9 @@ pub fn generate(
                     plunge_feed: *plunge_feed,
                     climb: *climb,
                     strategy: *strategy,
+                    entry: *entry,
+                    helix_radius: *helix_radius,
+                    max_engagement: *max_engagement,
                 },
             )?;
             (region, path)

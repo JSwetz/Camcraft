@@ -16,6 +16,7 @@
 //! standards; no vendor strategy was inspected. No flecs, no world.
 
 pub mod drilling;
+pub mod entry;
 pub mod finishing3d;
 pub mod machining2d;
 pub mod machining3d;

@@ -312,8 +312,15 @@ fn seed_pocket(c: &Carried) -> OpParams {
         plunge_feed: c.plunge,
         climb: c.climb,
         // New pockets let the shape come from the outline; explicit
-        // choices on live operations are never retyped over.
+        // choices on live operations are never retyped over. The entry
+        // family seeds at the dive - a new pocket posts what pockets
+        // always posted until M5.1 H made the choice exist; the numbers
+        // ride the 3-D pocket's defaults so a switched strategy or
+        // entry starts from a legal one.
         strategy: PocketStrategy::Auto,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
         tilt: c.tilt,
     }
 }

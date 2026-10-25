@@ -80,6 +80,9 @@ fn pocket(clearance_z: Height, top_z: Height, bottom_z: Height) -> OpParams {
         plunge_feed: 200.0,
         climb: true,
         strategy: PocketStrategy::Zigzag,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
     }
 }
 

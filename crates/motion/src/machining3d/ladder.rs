@@ -1,9 +1,10 @@
 //! Split from `machining3d.rs` by M5.0.1; structure only.
 
 use super::params::{Entry3D, Pocket3DParams};
-use super::rest::{chord_hits_plan, dive_point, material_above};
+use super::rest::material_above;
 
-use crate::cl::{lattice, MoveKind, PathBuilder, Toolpath};
+use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::entry::{chord_hits_plan, dive_point, helix_down};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{
@@ -242,42 +243,5 @@ pub(super) fn ladder(
 pub(super) fn walk_pass(b: &mut PathBuilder, pass: &[Point2], z: f64, feed: f64, skip_first: bool) {
     for q in pass.iter().skip(if skip_first { 1 } else { 0 }) {
         b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
-    }
-}
-
-/// One helical dive between two planes: at least one full turn (split
-/// into half-circle arcs so no move is a zero-sweep full circle), Z
-/// descending linearly with the orbit. The builder must stand at `xy`
-/// on plane `z0` (the caller's rapid to the dive point); an even
-/// number of half turns ends back on `xy` at `z1` by construction -
-/// each turn is two 180° arcs whose XY net is zero.
-pub(super) fn helix_down(b: &mut PathBuilder, xy: Point2, z0: f64, z1: f64, rh: f64, feed: f64) {
-    let span = z0 - z1;
-    if span <= 0.0 || rh <= 0.0 {
-        return;
-    }
-    // At least one turn per dive; one more when the span is deeper than
-    // the circle's own reach, so the bore's slope stays inside the tool
-    // diameter's width.
-    let turns = (span / (rh * 2.0)).ceil().max(1.0);
-    let half_turns = ((turns * 2.0).ceil() as u32).max(2);
-    // Orbit about the circle whose near side is the entry point: center
-    // offset +rh in X. Endpoints sit lattice-snapped (the arc law wants
-    // a 1 um center; the builder keeps the chord endpoints exact).
-    let center = Point2::new(lattice(xy.x + rh), lattice(xy.y));
-    for h in 0..half_turns {
-        let frac = f64::from(h + 1) / f64::from(half_turns);
-        let tz = z0 - span * frac;
-        // Alternating far/near point of the circle; even counts close on
-        // xy at the last leg.
-        let px = if h % 2 == 0 { xy.x + 2.0 * rh } else { xy.x };
-        // ccw: right -> left over the +Y side.
-        b.push_arc(
-            MoveKind::Feed,
-            Point3::new(lattice(px), lattice(xy.y), lattice(tz)),
-            Some(feed),
-            center,
-            true,
-        );
     }
 }

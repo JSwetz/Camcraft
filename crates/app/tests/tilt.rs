@@ -19,6 +19,7 @@ use camcraft_app::commands::{
 use camcraft_app::geometry::feature::FaceKind;
 use camcraft_app::geometry::{Mesh, Point3, Triangle, cube};
 use camcraft_app::machining2d::{Lead, PocketStrategy, Side};
+use camcraft_app::machining3d::Entry3D;
 use camcraft_app::model;
 use camcraft_app::operation::{self, FeatureSel, GeoSel, Height, OpParams, OpStatus, SrcRef, Tilt};
 use camcraft_app::posting;
@@ -112,6 +113,11 @@ fn pocket(tilt: Option<Tilt>, top_z: f64) -> OpParams {
         plunge_feed: 100.0,
         climb: true,
         strategy: PocketStrategy::Zigzag,
+        // M5.1 H defaults: the dive, and numbers the doors accept if a
+        // test flips either field.
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
     }
 }
 
@@ -135,6 +141,9 @@ fn pocket_parked() -> OpParams {
         plunge_feed: 100.0,
         climb: true,
         strategy: PocketStrategy::Zigzag,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
     }
 }
 
@@ -633,4 +642,73 @@ fn a_tilted_program_posts_under_a_tilthead_and_refuses_under_a_vmc() {
     let err = posting::post_setup(&world, &out).expect_err("a 3-axis machine tilts nothing");
     assert!(err.contains("tilt"), "{err}");
     assert!(!out.exists(), "a refused post writes nothing");
+}
+
+/// M5.1 stage H on the index: the entry family was lifted to the plane
+/// the tilted pocket runs in, so a helix dives in LOCAL coordinates and
+/// the one door (cl's world_path) answers with chord polylines - never
+/// a tilted arc, never a lie. The 35-degree tower is the fixture on
+/// purpose: its local section is wide enough for the widened disc, so
+/// the dive is real, and the Plunge twin shows what "real" changed.
+#[test]
+fn a_tilted_pocket_sinks_on_a_helix_in_chords() {
+    let tilt = Tilt {
+        a_deg: 0.0,
+        b_deg: 35.0,
+        origin: [0.0; 3],
+    };
+    let tower = cube(Point3::new(0.0, 0.0, -10.0), Point3::new(40.0, 30.0, 25.0));
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("part", tower));
+    let mut helix = pocket(Some(tilt), 35.0);
+    let OpParams::Pocket {
+        entry, helix_radius, ..
+    } = &mut helix
+    else {
+        panic!("pocket params expected");
+    };
+    *entry = Entry3D::Helix;
+    *helix_radius = 2.0; // the 6 mm tool leaves room to spare in the band
+    for (name, p) in [("Helix", helix), ("Plain", pocket(Some(tilt), 35.0))] {
+        history.execute(
+            &world,
+            CreateOperation::new(
+                &world,
+                name,
+                "EM-0600-4FL",
+                SrcRef::Entity("part".into()),
+                p,
+            )
+            .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        assert_eq!(status(&world, name), OpStatus::Ok, "{name} verifies clean in local");
+    }
+    let f = TiltedFrame::from_angles(Point3::ZERO, tilt.a_deg, tilt.b_deg).expect("frame");
+    // The cached path is already world-expressed (the door ran at
+    // generate), so the axial depth of a move end is a plain dot with
+    // the axis letter - mapping it through the frame again would tilt
+    // the answer twice and invent a slope of stepover x sin(b).
+    let axial = |p: Point3| p.x * f.axis[0] + p.y * f.axis[1] + p.z * f.axis[2];
+    // A feed that changes its axial depth is the diagonal the plain
+    // ladder never posts: arcs crossed the plane, chords followed.
+    let diagonals = |t: &camcraft_app::cl::Toolpath| -> usize {
+        t.moves
+            .iter()
+            .filter(|m| {
+                m.kind == MoveKind::Feed && (axial(m.from) - axial(m.to)).abs() > 1e-6
+            })
+            .count()
+    };
+    let helix = cache(&world, "Helix").expect("helix cache").path;
+    let plain = cache(&world, "Plain").expect("plain cache").path;
+    assert!(helix.is_chained() && helix.all_finite(), "a real program");
+    assert!(
+        helix.moves.iter().all(|m| m.arc.is_none()),
+        "the door answers with chords, never a tilted arc"
+    );
+    assert!(diagonals(&helix) > 0, "the helix sank, it did not fall back");
+    assert_eq!(diagonals(&plain), 0, "the Plunge twin is the plain ladder");
 }

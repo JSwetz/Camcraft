@@ -792,6 +792,72 @@ fn v4_file_migrates_to_v5() {
 }
 
 #[test]
+fn pocket_entry_family_is_a_step_up_on_the_wire() {
+    // M5.1 H grew the 2-D pocket arm with serde defaults, so the format
+    // version did not move: an old file means exactly the dive every
+    // pocket posted before the family existed (plunge, the seed's 1.0 mm
+    // helix, the law's 45 degrees), and the new keys round-trip.
+    let plain = r#"{
+        "version": 30,
+        "entities": [
+            {"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"pocket": {
+                 "stepover": 3.0, "stock_to_leave": 0.0, "clearance_z": 20.0,
+                 "top_z": 8.0, "bottom_z": 2.0, "stepdown": 2.0,
+                 "feed": 900.0, "plunge_feed": 250.0, "climb": true,
+                 "strategy": "zigzag"}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, plain).expect("a pre-H pocket file must read verbatim");
+    let e = model::find_by_name(&world, "Op1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Pocket { entry, helix_radius, max_engagement, .. } = &o.params else {
+        panic!("pocket params expected, got {:?}", o.params);
+    };
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Plunge, "absent means the dive");
+    assert_eq!(*helix_radius, 1.0, "absent means the seed's lead radius");
+    assert_eq!(*max_engagement, 45.0, "absent means the law's 45 degrees");
+
+    // The explicit shape, hand-written so the tags are pinned.
+    let text = plain
+        .replace("\"strategy\": \"zigzag\"", "\"strategy\": \"adaptive\", \"max_engagement\": 30.0, \"entry\": \"helix\", \"helix_radius\": 2.5");
+    let world2 = new_world();
+    project::open(&world2, &text).expect("the grown pocket grammar must read");
+    let e2 = model::find_by_name(&world2, "Op1").expect("op");
+    let o2 = model::operation_of(&world2, &e2).expect("operation");
+    let OpParams::Pocket { strategy, entry, helix_radius, max_engagement, .. } = &o2.params else {
+        panic!("pocket params expected, got {:?}", o2.params);
+    };
+    assert_eq!(*strategy, PocketStrategy::Adaptive);
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix);
+    assert_eq!(*helix_radius, 2.5);
+    assert_eq!(*max_engagement, 30.0);
+
+    // Write-parse-write is a fixed point, and the entry tag is snake_case.
+    let path = tmp_path("hentry");
+    project::save(&world2, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let world3 = new_world();
+    project::load(&world3, &path).expect("reload");
+    project::save(&world3, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the grown pocket shape round-trips byte-identically");
+    assert!(first.contains("\"entry\": \"helix\""), "{first}");
+    assert!(first.contains("\"helix_radius\": 2.5"), "{first}");
+
+    // An unknown entry tag is corrupt text, refused, not defaulted -
+    // the pocket3d arm's law, now the plane's too.
+    let bad = text.replace("\"helix\"", "\"spiral\"");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &bad), Err(ProjectError::Corrupt(_))),
+        "must refuse an entry tag outside the vocabulary"
+    );
+}
+
+#[test]
 fn v5_roundtrips_retract_and_auto() {
     // The step-5 fields, once actually set, round-trip exactly: the
     // pocket's hop plane and Auto choice, and the trace's hop plane.
@@ -834,6 +900,9 @@ fn v5_roundtrips_retract_and_auto() {
                 plunge_feed: 250.0,
                 climb: true,
                 strategy: PocketStrategy::Auto,
+                entry: camcraft_app::machining3d::Entry3D::Plunge,
+                helix_radius: 1.0,
+                max_engagement: 45.0,
             },
         )
         .expect("pocket"),

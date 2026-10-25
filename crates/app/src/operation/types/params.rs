@@ -115,6 +115,19 @@ pub enum OpParams {
         plunge_feed: f64,
         climb: bool,
         strategy: PocketStrategy,
+        /// How the cutter engages each level; the family
+        /// [`crate::machining3d::Entry3D`] names, lifted to the planar
+        /// pocket's ladder in M5.1 H. `Plunge` is every pre-H file.
+        entry: Entry3D,
+        /// Helix centerline radius, mm; read only when `entry` is
+        /// Helix, validated there against the tool radius at generate.
+        helix_radius: f64,
+        /// Degrees of cutter contact the `Adaptive` strategy keeps its
+        /// ring step under via `engagement_step`; read only when
+        /// `strategy` is Adaptive, bounds checked there at generate
+        /// (M5.1 H made the planar pocket read this instead of riding
+        /// Waterline as an alias).
+        max_engagement: f64,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },

@@ -82,8 +82,16 @@ impl OpParams {
                 stepdown,
                 feed,
                 plunge_feed,
+                helix_radius,
+                strategy,
+                max_engagement,
                 ..
             } => {
+                // The entry family joined the planar pocket at M5.1 H,
+                // so its door mirrors Pocket3D's word for word: the
+                // generator owns the radius-vs-tool check (it owns the
+                // tool), and the engagement angle is finite always,
+                // bounded (0, 90] only when Adaptive reads it.
                 pos(*stepover)
                     && nneg(*stock_to_leave)
                     && clearance_z.is_sane()
@@ -93,6 +101,10 @@ impl OpParams {
                     && pos(*stepdown)
                     && pos(*feed)
                     && pos(*plunge_feed)
+                    && pos(*helix_radius)
+                    && (max_engagement.is_finite()
+                        && (!matches!(strategy, PocketStrategy::Adaptive)
+                            || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
             }
             OpParams::Pocket3D {
                 stepover,

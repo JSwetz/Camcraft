@@ -106,9 +106,87 @@ fn clean_pocket_verifies_silent() {
             plunge_feed: 80.0,
             climb: true,
             strategy: PocketStrategy::Zigzag,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
+            max_engagement: 45.0,
         },
     )
     .unwrap();
+    let tool = deep_tool();
+    assert_eq!(verify(&t, &ctx(&r, Some(&stock), &tool, Mode::Area)), Vec::new());
+}
+
+#[test]
+fn a_ramp_pocket_verifies_silent() {
+    // The M5.1 H ramp on the plane: the diagonal between levels cuts
+    // inside the one center area every level shares, so no law may
+    // fire on it - the same claim the ladder's chord test makes, now
+    // checked by the verifier's own eyes.
+    let r = rect(0.0, 0.0, 30.0, 30.0);
+    let stock = rect(-4.0, -4.0, 34.0, 34.0);
+    let t = pocket(
+        &r,
+        &PocketParams {
+            tool_diameter: 8.0,
+            stepover: 4.0,
+            stock_to_leave: 0.0,
+            clearance_z: 5.0,
+            retract_z: None,
+            top_z: 0.0,
+            bottom_z: -6.0,
+            stepdown: 3.0,
+            feed: 400.0,
+            plunge_feed: 80.0,
+            climb: true,
+            strategy: PocketStrategy::Zigzag,
+            entry: camcraft_app::machining3d::Entry3D::Ramp,
+            helix_radius: 1.0,
+            max_engagement: 45.0,
+        },
+    )
+    .unwrap();
+    assert!(
+        t.moves.iter().any(|m| {
+            m.kind == MoveKind::Feed && m.from.z != m.to.z && (m.from.x != m.to.x || m.from.y != m.to.y)
+        }),
+        "the fixture must actually ramp, or the test proves nothing"
+    );
+    let tool = deep_tool();
+    assert_eq!(verify(&t, &ctx(&r, Some(&stock), &tool, Mode::Area)), Vec::new());
+}
+
+#[test]
+fn a_helix_pocket_verifies_silent() {
+    // The sinking orbit: arcs are feeds like any other, and where the
+    // disc has room (30x30 with a 2 mm lead on an 8 mm tool) the dive
+    // stays inside the floor at every z it crosses.
+    let r = rect(0.0, 0.0, 30.0, 30.0);
+    let stock = rect(-4.0, -4.0, 34.0, 34.0);
+    let t = pocket(
+        &r,
+        &PocketParams {
+            tool_diameter: 8.0,
+            stepover: 4.0,
+            stock_to_leave: 0.0,
+            clearance_z: 5.0,
+            retract_z: None,
+            top_z: 0.0,
+            bottom_z: -6.0,
+            stepdown: 3.0,
+            feed: 400.0,
+            plunge_feed: 80.0,
+            climb: true,
+            strategy: PocketStrategy::Zigzag,
+            entry: camcraft_app::machining3d::Entry3D::Helix,
+            helix_radius: 2.0,
+            max_engagement: 45.0,
+        },
+    )
+    .unwrap();
+    assert!(
+        t.moves.iter().any(|m| m.arc.is_some() && m.to.z < 0.0),
+        "the fixture must actually sink on arcs, or the test proves nothing"
+    );
     let tool = deep_tool();
     assert_eq!(verify(&t, &ctx(&r, Some(&stock), &tool, Mode::Area)), Vec::new());
 }
@@ -254,6 +332,9 @@ fn holder_hits_a_part_island_when_the_flute_is_short() {
             plunge_feed: 80.0,
             climb: true,
             strategy: PocketStrategy::Zigzag,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
+            max_engagement: 45.0,
         },
     )
     .unwrap();

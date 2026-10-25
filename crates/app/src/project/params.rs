@@ -95,6 +95,21 @@ pub enum ParamsDto {
         /// clearance", the behavior every pre-v5 pocket had.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retract_z: Option<HeightDto>,
+        /// Absent means `plunge` - the climb-and-dive every pocket
+        /// posted before M5.1 H gave the planar ladder an entry field
+        /// at all (additive defaults: the format version does not move).
+        #[serde(default)]
+        entry: EntryDto,
+        /// Read only when `entry` is Helix; absent means the seed's
+        /// 1.0 mm, the same default the 3-D pocket carries.
+        #[serde(default = "default_helix_radius")]
+        helix_radius: f64,
+        /// Read only when `strategy` is Adaptive; absent means the
+        /// law's 45° (`pocket3d`'s law, same word). Pre-H files that
+        /// stored Adaptive meant the waterline alias - they now ring
+        /// at r(1 - cos 45); RECOMMENDED.md owns that statement.
+        #[serde(default = "default_engagement_deg")]
+        max_engagement: f64,
         /// 3+2 index; see the Face arm.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,
@@ -507,6 +522,12 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
 
 pub(super) fn default_engagement_deg() -> f64 {
     45.0
+}
+
+/// The seed's helix centerline radius, mm (M5.1 H gave the planar
+/// pocket an `entry` field; its files predate the number).
+fn default_helix_radius() -> f64 {
+    1.0
 }
 
 /// The file mirror of `machining3d::Entry3D`; `default` is Plunge, the

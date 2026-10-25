@@ -9,6 +9,7 @@
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::geo2d, camcraft_motion::machining2d.
 
 use camcraft_motion::cl::{MoveKind, Toolpath};
+use camcraft_motion::entry::Entry3D;
 use camcraft_motion::geo2d::{Loop, Point2, Region};
 use camcraft_motion::machining2d::{
     ARC_FIT_TOL, chord_clears, contour, face, on_boundary, pocket, ring_is_circular, slot, trace,
@@ -813,6 +814,12 @@ fn pp() -> PocketParams {
         plunge_feed: 100.0,
         climb: true,
         strategy: PocketStrategy::Zigzag,
+        // The M5.1 H defaults: the dive every pocket posted before the
+        // entry family existed, a helix radius the door would accept,
+        // and the law's 45° reading only under Adaptive.
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
     }
 }
 
@@ -1079,6 +1086,36 @@ fn pocket_refuses_bad_input() {
             p.stepover = 5.0; // > r = 4
             p
         },
+        {
+            // The entry family's doors, same words as the 3-D ladder.
+            let mut p = pp();
+            p.entry = Entry3D::Helix;
+            p.helix_radius = 0.0;
+            p
+        },
+        {
+            let mut p = pp();
+            p.entry = Entry3D::Helix;
+            p.helix_radius = 6.0; // over r = 5: turns would not overlap
+            p
+        },
+        {
+            let mut p = pp();
+            p.helix_radius = f64::NAN; // unread by Plunge, still must be finite
+            p
+        },
+        {
+            let mut p = pp();
+            p.strategy = PocketStrategy::Adaptive;
+            p.max_engagement = 0.0; // a zero step is an infinite ladder
+            p
+        },
+        {
+            let mut p = pp();
+            p.strategy = PocketStrategy::Adaptive;
+            p.max_engagement = 91.0; // past where consecutive rings overlap
+            p
+        },
     ];
     for p in cases {
         assert!(matches!(pocket(&sq, &p), Err(GenError::Invalid(_))), "{p:?}");
@@ -1088,6 +1125,13 @@ fn pocket_refuses_bad_input() {
     ok.tool_diameter = 8.0;
     ok.stepover = 5.0;
     assert!(pocket(&sq, &ok).is_ok());
+    // Adaptive spaces its rings at the law's step, so a stepover past
+    // Waterline's radius bound is ignored, not refused (M5.1 H): the
+    // reach door asks `tiling_step`, and r(1 - cos 45) is well inside.
+    let mut law = pp();
+    law.strategy = PocketStrategy::Adaptive;
+    law.stepover = 9.0; // > r = 5, read only by the other strategies
+    assert!(pocket(&sq, &law).is_ok());
     // Narrower than the tool: material no legal position can reach.
     assert!(matches!(
         pocket(&rect(0.0, 0.0, 8.0, 8.0), &pp()),
@@ -1627,18 +1671,118 @@ fn trace_is_deterministic() {
 
 
 #[test]
-fn adaptive_is_the_documented_waterline_alias_in_2d() {
-    // The 2-D family has no engagement field to read (the angle rides the
-    // 3-D params only), so Adaptive is implemented as exactly the
-    // waterline geometry - the equality is that decision, move for move.
-    // The 2-D combo never offers it; a file (or a stamp) can carry it.
+fn adaptive_is_the_engagement_law_on_the_plane() {
+    // Since M5.1 H the planar pocket's Adaptive rings march inward at
+    // the engagement step r (1 - cos theta), not at a free stepover -
+    // the alias is gone. The law's closed end is the equality check:
+    // 90 degrees gives step = r exactly, the tiling a Waterline run at
+    // stepover r produces, move for move.
     let region = rect(0.0, 0.0, 30.0, 30.0);
     let mut w = pp();
     w.strategy = PocketStrategy::Waterline;
     let mut a = pp();
     a.strategy = PocketStrategy::Adaptive;
+    a.max_engagement = 90.0;
+    a.stepover = 9.0; // the ignored field, deliberately out of reach
     let tw = pocket(&region, &w).expect("waterline valid");
-    let ta = pocket(&region, &a).expect("the alias valid");
-    assert_eq!(ta.moves, tw.moves, "the alias is not a second geometry");
-    assert!(ta.is_chained() && ta.all_finite());
+    let ta = pocket(&region, &a).expect("90 degrees is the one-radius step");
+    assert_eq!(
+        ta.moves, tw.moves,
+        "theta 90 must be exactly the one-radius waterline"
+    );
+    // Below the closed end the angle, not the field, spaces the rings:
+    // a 45 budget bites at r(1 - cos 45) ~ 1.46 and rings far denser.
+    let mut s = pp();
+    s.strategy = PocketStrategy::Adaptive;
+    s.max_engagement = 45.0;
+    let ts = pocket(&region, &s).expect("adaptive at 45 valid");
+    assert!(
+        ts.moves.len() > tw.moves.len(),
+        "a 45 deg budget must ring tighter than the 5 mm stepover does"
+    );
+    assert!(ts.is_chained() && ts.all_finite());
+}
+
+#[test]
+fn a_ramp_down_the_plane_feeds_in_one_diagonal() {
+    // The 3-D ladder's ramp on a planar pocket: every level shares one
+    // center area, so a chord that clears it is legal at every plane
+    // the diagonal crosses. The first level can only plunge (no open
+    // floor above it); the -3.0 level is entered on the slope.
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let mut p = pp();
+    p.entry = Entry3D::Ramp;
+    let t = pocket(&region, &p).expect("ramp valid");
+    let first_plunge = t.moves.iter().find(|m| m.to.z == 0.0).expect("level 0 cut");
+    assert_eq!(first_plunge.kind, MoveKind::Plunge, "the dive into the top");
+    assert!(
+        t.moves.iter().any(|m| {
+            m.kind == MoveKind::Feed
+                && (m.from.x != m.to.x || m.from.y != m.to.y)
+                && m.from.z != m.to.z
+                && m.from.z > -3.0
+                && m.to.z == -3.0
+        }),
+        "the -3.0 level is entered on a ramp"
+    );
+    assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn a_helix_that_fits_on_the_plane_descends_in_arcs() {
+    // Same law as the 3-D twin, planar: the dive sits mid-row, the
+    // widened disc (tool radius + helix radius) eroded from the one
+    // center every level shares, and Z sinks with the orbit.
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let mut p = pp();
+    p.entry = Entry3D::Helix;
+    p.helix_radius = 2.0;
+    let t = pocket(&region, &p).expect("helix valid");
+    assert!(
+        t.moves.iter().any(|m| m.arc.is_some() && m.to.z < 0.0),
+        "the helix posts arcs that sink"
+    );
+    // The orbit's XY net is zero: a full-turn dive ends where it began
+    // in plan, so the level's first feed starts from the dive point.
+    assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn a_helix_with_no_room_on_the_plane_plunges() {
+    // Fail-safe the ladder proves: where the widened disc fits nowhere
+    // (a pocket barely wider than the tool), no dive is chosen and the
+    // crossing keeps the honest climb-and-dive - slower, never a gouge.
+    let region = rect(0.0, 0.0, 12.0, 12.0); // center is a 2 mm square
+    let mut p = pp();
+    p.entry = Entry3D::Helix;
+    p.helix_radius = 4.9; // r + rh ~ 9.9: no row midpoint has room
+    let t = pocket(&region, &p).expect("still a valid pocket");
+    let level2 = t
+        .moves
+        .iter()
+        .find(|m| m.to.z == -3.0)
+        .expect("the -3.0 level was cut by something");
+    assert_eq!(level2.kind, MoveKind::Plunge, "no dive, no arcs");
+    assert!(!t.moves.iter().any(|m| m.arc.is_some()), "the fallback is pure");
+    assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn the_plunge_entry_posts_the_plain_ladder() {
+    // Byte-identity, structural form: with the family's default arm
+    // the level crossings are exactly the climb-and-dive the pocket
+    // posted before M5.1 H - no arcs, no diagonals, no XY-changing
+    // feed with two different z ends.
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let t = pocket(&region, &pp()).expect("plain pocket");
+    assert!(
+        !t.moves.iter().any(|m| m.arc.is_some()),
+        "zigzag never arcs, entry or not"
+    );
+    assert!(
+        !t.moves.iter().any(|m| {
+            m.kind == MoveKind::Feed && m.from.z != m.to.z && (m.from.x != m.to.x || m.from.y != m.to.y)
+        }),
+        "a Plunge pocket has no diagonal feeds"
+    );
 }

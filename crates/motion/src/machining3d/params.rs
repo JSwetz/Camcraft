@@ -20,21 +20,11 @@ impl From<StockError> for GenError {
     }
 }
 
-/// How the cutter first engages material at a level.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Entry3D {
-    #[default]
-    /// Axial dive at the pass entry, the 2-D pocket motion.
-    Plunge,
-    /// One straight diagonal feed from the previous level's plane down
-    /// to this one (first level: falls back to a plunge - there is no
-    /// open floor to start a ramp from).
-    Ramp,
-    /// Helical interpolation: orbit while descending one stepdown (the
-    /// widened arc law, see `cl.rs`). Air orbits above stock are never
-    /// posted: the first level's dive is the surface itself.
-    Helix,
-}
+/// The entry family and the engagement law moved to the crate's
+/// `entry` seam in M5.1 H, so the planar pocket can engage its levels
+/// the way the 3-D ladder does; the paths callers always used stay
+/// exactly that.
+pub use crate::entry::{engagement_step, Entry3D};
 
 /// Everything `pocket3d` needs, all numbers resolved (heights are the
 /// operation layer's business, same seam as `machining2d`).
@@ -63,19 +53,6 @@ pub struct Pocket3DParams {
     /// [`engagement_step`] - the whole of constant-engagement
     /// roughing's geometry law (M2.1c).
     pub max_engagement: f64,
-}
-
-/// The engagement law, in one line of trigonometry: a pass that bites
-/// a wall face radially by `a` with a disc of radius `r` contacts it
-/// over a half-angle `theta` with `a = r (1 - cos theta)` - the sagitta
-/// of the contact arc. Inverting it gives the biggest ring step whose
-/// contact stays under a chosen angle: `a = r (1 - cos theta_max)`.
-/// Published trochoidal/HEM literature is all computations of this
-/// same disc-against-wall geometry; this is our own reading of it,
-/// pinned by `the_engagement_law_is_the_sagitta` (M2.1c).
-#[must_use]
-pub fn engagement_step(tool_r: f64, max_engagement_deg: f64) -> f64 {
-    tool_r * (1.0 - max_engagement_deg.to_radians().cos())
 }
 
 impl Pocket3DParams {

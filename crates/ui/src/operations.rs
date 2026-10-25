@@ -27,7 +27,7 @@ use camcraft_app::verify::Warning;
 /// [`camcraft_app::machining2d::PocketStrategy::resolve`] answers which
 /// path it cuts at generate.
 pub fn strategy_names() -> &'static [&'static str] {
-    &["Zigzag", "Waterline", "Auto"]
+    &["Zigzag", "Waterline", "Adaptive", "Auto"]
 }
 /// The 3-D pocket's Strategy combo, in index order. Adaptive joins the
 /// family (M2.1c); Auto stays last, the same shape as

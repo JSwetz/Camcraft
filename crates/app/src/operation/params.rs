@@ -168,6 +168,9 @@ impl OpParams {
                 plunge_feed,
                 climb,
                 strategy,
+                entry,
+                helix_radius,
+                max_engagement,
                 tilt,
             } => {
                 w(h, *stepover);
@@ -175,7 +178,12 @@ impl OpParams {
                 wh(h, *clearance_z);
                 wh(h, *top_z);
                 wh(h, *bottom_z);
-                for v in [*stepdown, *feed, *plunge_feed] {
+                // M5.1 H: the entry family's numbers change the posted
+                // ladder exactly like the 3-D pocket's do, so they
+                // digest the same way (and pre-H ops go Stale once and
+                // regenerate byte-identically - the mechanism saying
+                // so, as it did for `rest_rough` and `feed_opt`).
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
@@ -184,6 +192,11 @@ impl OpParams {
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Auto => 2,
                     PocketStrategy::Adaptive => 3,
+                });
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
                 });
                 // v5-era hop plane: presence, then the value (same shape
                 // as Face's staging fields appended above).

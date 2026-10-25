@@ -231,6 +231,9 @@ fn pocket_zigzag_plate_with_island_matches_golden() {
         plunge_feed: 80.0,
         climb: true,
         strategy: PocketStrategy::Zigzag,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
     };
     let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();
     write_golden("pocket_zigzag_plate_with_island.cl", &gen_to_cltext(&t));
@@ -254,6 +257,9 @@ fn pocket_waterline_matches_golden() {
         plunge_feed: 80.0,
         climb: true,
         strategy: PocketStrategy::Waterline,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
     };
     let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();
     write_golden("pocket_waterline_plate_with_island.cl", &gen_to_cltext(&t));

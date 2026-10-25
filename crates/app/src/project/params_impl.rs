@@ -82,6 +82,9 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 strategy,
+                entry,
+                helix_radius,
+                max_engagement,
                 tilt,
             } => ParamsDto::Pocket {
                 stepover: *stepover,
@@ -102,6 +105,13 @@ impl ParamsDto {
                 // Absent means the hop-to-clearance every pre-step-5
                 // pocket performed; a set plane round-trips exactly.
                 retract_z: (*retract_z).map(Into::into),
+                entry: match entry {
+                    Entry3D::Plunge => EntryDto::Plunge,
+                    Entry3D::Ramp => EntryDto::Ramp,
+                    Entry3D::Helix => EntryDto::Helix,
+                },
+                helix_radius: *helix_radius,
+                max_engagement: *max_engagement,
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Pocket3D {
@@ -638,6 +648,9 @@ impl ParamsDto {
                 climb,
                 strategy,
                 retract_z,
+                entry,
+                helix_radius,
+                max_engagement,
                 tilt,
             } => OpParams::Pocket {
                 stepover: *stepover,
@@ -656,6 +669,15 @@ impl ParamsDto {
                     StrategyDto::Auto => PocketStrategy::Auto,
                     StrategyDto::Adaptive => PocketStrategy::Adaptive,
                 },
+                // Absent keys ride the DTO defaults: the dive, the
+                // seed's 1 mm helix, the law's 45 degrees (M5.1 H).
+                entry: match entry {
+                    EntryDto::Plunge => Entry3D::Plunge,
+                    EntryDto::Ramp => Entry3D::Ramp,
+                    EntryDto::Helix => Entry3D::Helix,
+                },
+                helix_radius: *helix_radius,
+                max_engagement: *max_engagement,
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Pocket3D {

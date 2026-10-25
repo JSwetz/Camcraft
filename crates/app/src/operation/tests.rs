@@ -93,6 +93,9 @@ fn params_sanity_gates() {
         plunge_feed: 80.0,
         climb: true,
         strategy: PocketStrategy::Zigzag,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
     };
     assert!(!bad.is_sane());
     // A depth range that runs upward is nonsense, refused at command

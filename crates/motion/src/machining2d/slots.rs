@@ -133,7 +133,7 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     let mut bld = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
-    run_levels(&mut bld, &[pass], &zs, &motion, None);
+    run_levels(&mut bld, &[pass], &zs, &motion, None, None);
     let cur = bld.at();
     bld.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
@@ -230,7 +230,7 @@ pub fn trace(region: &Region, p: &TraceParams) -> Result<Toolpath, GenError> {
     // Trace engraves the region's own vertices - the point is to ride
     // the boundary as picked, so no arc fitter runs here.
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
-    run_levels(&mut b, &passes, &zs, &motion, None);
+    run_levels(&mut b, &passes, &zs, &motion, None, None);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 

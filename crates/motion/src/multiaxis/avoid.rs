@@ -248,10 +248,8 @@ pub(crate) fn escape_axis(
     // Shortest axis travel first; the nominal's own lean breaks ties.
     cands.sort_by(|x, y| x.1.total_cmp(&y.1).then(x.2.total_cmp(&y.2)));
     cands.dedup_by(|x, y| ang(x.0, y.0) <= 1e-9);
-    for (a, _, _) in cands {
-        if !shank_hits(p, a, r, s, facets, boxes) {
-            return Some(a);
-        }
-    }
-    None
+    cands
+        .into_iter()
+        .map(|(a, _, _)| a)
+        .find(|&a| !shank_hits(p, a, r, s, facets, boxes))
 }

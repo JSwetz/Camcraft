@@ -1067,13 +1067,14 @@ fn geometry_notes_report_through_the_panel_seam() {
 
 // M1.5.2 step 5: Auto joins the pocket's Strategy combo. The label list
 // is the single source the combo renders from, so the pane and the test
-// cannot drift apart.
+// cannot drift apart. M5.1 H: Adaptive joins too - the engagement law
+// runs on the planar pocket now, so the combo must not hide it.
 #[test]
 fn strategy_combo_offers_auto() {
     assert_eq!(
         camcraft_ui::operations::strategy_names(),
-        &["Zigzag", "Waterline", "Auto"],
-        "the combo offers Auto beside the explicit choices"
+        &["Zigzag", "Waterline", "Adaptive", "Auto"],
+        "the combo offers Adaptive and Auto beside the explicit choices"
     );
 }
 

@@ -1,6 +1,7 @@
 //! Split from `machining2d.rs` by M5.0.1; structure only.
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::entry::{engagement_step, Entry3D};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
@@ -16,14 +17,15 @@ use super::slots::chord_clears;
 pub enum PocketStrategy {
     Zigzag,
     Waterline,
-    /// Constant-engagement rings (M2.1c, `adaptive` in the 3-D family):
-    /// the same ring tiling as Waterline, but the 3-D generator drives
-    /// it at the engagement-law step `r (1 - cos theta_max)` instead of
-    /// a free stepover, so every pass bites the wall by the same bound
-    /// the cutter's contact angle was chosen for. The 2-D pocket has no
-    /// engagement field of its own yet, so there this is Waterline's
-    /// geometry at the stated stepover - a documented alias, not a
-    /// different path.
+    /// Constant-engagement rings (M2.1c's law, real for the planar
+    /// pocket since M5.1 H): the same ring tiling as Waterline, but
+    /// spaced at the engagement-law step `r (1 - cos theta_max)` from
+    /// the params' `max_engagement` instead of a free stepover, so
+    /// every pass bites the wall by the same bound the cutter's
+    /// contact angle was chosen for. Until H this was Waterline's
+    /// geometry at the stated stepover - a documented alias; the law
+    /// now runs here too, through the same `engagement_step` the 3-D
+    /// ladder reads.
     Adaptive,
     /// Waterline where the pocket's outer boundary is round enough for
     /// rings to be the honest shape, Zigzag otherwise. The resolution is
@@ -82,6 +84,20 @@ pub struct PocketParams {
     /// Between-ring hop plane within one level. `None` hops to
     /// clearance - every pre-M1.5.2 pocket's shape, kept byte-exact.
     pub retract_z: Option<f64>,
+    /// How the ladder crosses a level plane (M5.1 H, the family the
+    /// 3-D ladder names in `crate::entry`). `Plunge` is every pocket
+    /// posted before this field existed, and the arm's legality
+    /// proofs live in `run_levels` the same way `ladder.rs` owns
+    /// them for the 3-D family.
+    pub entry: Entry3D,
+    /// Helix centerline circle radius (mm); validated at most the tool
+    /// radius so successive turns overlap and the dive cuts a clean
+    /// bore - the 3-D ladder's door, same words.
+    pub helix_radius: f64,
+    /// The `Adaptive` strategy's engagement bound, in degrees of
+    /// instant cutter contact; read only under `Adaptive` (through
+    /// [`PocketParams::tiling_step`], still validated finite.
+    pub max_engagement: f64,
 }
 
 impl PocketParams {
@@ -96,6 +112,8 @@ impl PocketParams {
             self.stepover,
             self.feed,
             self.plunge_feed,
+            self.helix_radius,
+            self.max_engagement,
         ]
         .into_iter()
         .all(f64::is_finite);
@@ -109,21 +127,28 @@ impl PocketParams {
         if self.stepover <= 0.0 {
             return Err(GenError::Invalid("stepover must be positive".into()));
         }
-        // Two parallel cut lines a stepover apart cover every point
-        // between them (distance at most stepover/2 to the nearer one),
-        // and zigzag puts grazing rows on the extreme coverage centers,
-        // so stepover <= diameter covers the region. Waterline's innermost
-        // ring can stand a whole stepover from the material it collapses
+        // Two parallel cut lines a step apart cover every point between
+        // them (distance at most step/2 to the nearer one), and zigzag
+        // puts grazing rows on the extreme coverage centers, so a step
+        // within the diameter covers the region. Waterline's innermost
+        // ring can stand a whole step from the material it collapses
         // around, so it must stay within one radius. Auto is bounded by
         // the looser law: its waterline branch carries the radius bound
-        // inside `resolve`, and anything else runs zigzag.
+        // inside `resolve`, and anything else runs zigzag. The checked
+        // number is `tiling_step` - what spaces the passes - so an
+        // `Adaptive` plan is honest at its engagement-law step even
+        // where the (ignored) stepover field would not be (M5.1 H;
+        // the 3-D ladder makes the same distinction the other way:
+        // it bounds the field and never coarsens the grid past the law).
         let reach = match self.strategy {
             PocketStrategy::Zigzag | PocketStrategy::Auto => self.tool_diameter,
             // Adaptive rings are Waterline's geometry; the same reach
-            // bound keeps their innermost ring honest.
+            // bound keeps their innermost ring honest. The law's step
+            // is at most one radius for any angle in the door, so
+            // beyond it the door is the check.
             PocketStrategy::Waterline | PocketStrategy::Adaptive => self.tool_diameter * 0.5,
         };
-        if self.stepover > reach {
+        if self.tiling_step() > reach {
             return Err(GenError::Invalid(
                 "stepover leaves bands the tool cannot reach".into(),
             ));
@@ -143,7 +168,39 @@ impl PocketParams {
         if self.retract_z.is_some_and(|rz| rz < self.top_z) {
             return Err(GenError::Invalid("retract plane sits inside the material".into()));
         }
+        if self.entry == Entry3D::Helix {
+            let r = self.tool_diameter * 0.5;
+            if self.helix_radius <= 0.0 || self.helix_radius > r {
+                return Err(GenError::Invalid(
+                    "helix radius must be positive and at most the tool radius".into(),
+                ));
+            }
+        }
+        if self.strategy == PocketStrategy::Adaptive {
+            // The law's own bounds, same as the 3-D ladder's door: a
+            // zero angle is a zero step (an infinite ladder), and past
+            // 90 degrees the sagitta passes one radius - past where
+            // consecutive rings still overlap.
+            if self.max_engagement <= 0.0 || self.max_engagement > 90.0 {
+                return Err(GenError::Invalid(
+                    "engagement angle must be in (0, 90] degrees".into(),
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// What actually spaces the passes at a level: the engagement-law
+    /// step under `Adaptive`, the stated stepover otherwise. The pass
+    /// plan and the reach door both ask this one function, mirroring
+    /// `Pocket3DParams::tiling_step` (M5.1 H).
+    fn tiling_step(&self) -> f64 {
+        match self.strategy {
+            PocketStrategy::Adaptive => {
+                engagement_step(self.tool_diameter * 0.5, self.max_engagement)
+            }
+            _ => self.stepover,
+        }
     }
 }
 
@@ -153,13 +210,15 @@ impl PocketParams {
 /// the tool must stay inside the material rather than outside it. Every
 /// feed point lies in that area, so the tool edge never crosses a wall.
 ///
-/// Transitions: between levels the tool lifts to `clearance_z`, rapids
-/// over and plunges again; within a level a straight connection between
-/// two cut segments is kept as a Feed exactly when [`chord_clears`]
-/// proves it never leaves the cutter-center area (boundary grazing counts
-/// as staying in - it is the tangency wall passes are built on), and
-/// otherwise it becomes lift-rapid-plunge. Rapids inside the footprint
-/// below the safe plane are the verifier's business (step 7).
+/// Transitions: between levels the tool crosses in with its `entry`
+/// family - the dive it always posted, or the ramp diagonal / helical
+/// bore the 3-D ladder proves and `run_levels` now shares (M5.1 H);
+/// within a level a straight connection between two cut segments is
+/// kept as a Feed exactly when [`chord_clears`] proves it never leaves
+/// the cutter-center area (boundary grazing counts as staying in - it
+/// is the tangency wall passes are built on), and otherwise it becomes
+/// lift-rapid-plunge. Rapids inside the footprint below the safe plane
+/// are the verifier's business (step 7).
 pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     p.validate()?;
     if region.is_empty() {
@@ -187,7 +246,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         }
         s => s,
     };
-    let passes = plan_passes(&center, p.stepover, p.climb, strategy)?;
+    let passes = plan_passes(&center, p.tiling_step(), p.climb, strategy)?;
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
@@ -198,8 +257,9 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         PocketStrategy::Zigzag | PocketStrategy::Auto => None,
         PocketStrategy::Waterline | PocketStrategy::Adaptive => Some(ARC_FIT_TOL),
     };
-    let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
-    run_levels(&mut b, &passes, &zs, &motion, fit);
+    let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed)
+        .with_entry(p.entry, p.helix_radius);
+    run_levels(&mut b, &passes, &zs, &motion, fit, Some(&center));
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 

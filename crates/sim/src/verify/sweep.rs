@@ -79,10 +79,13 @@ pub(super) fn mid_turn_sweeps(
                 .and_then(normalize_axis)
                 .map_or([0.0; 3], axis_to_angles)
         };
-        if m.kind != MoveKind::Rapid && held != next && !shanked.contains(&i) {
-            if let Some(part) = swing_hit(m, held, next, bands, r, gouge_tol, chord_tol, samples, in_stock, surface, part_at) {
-                warns.push(Warning::SweepHit { at: i, part });
-            }
+        if m.kind != MoveKind::Rapid
+            && held != next
+            && !shanked.contains(&i)
+            && let Some(part) =
+                swing_hit(m, held, next, bands, r, gouge_tol, chord_tol, samples, in_stock, surface, part_at)
+        {
+            warns.push(Warning::SweepHit { at: i, part });
         }
         held = next;
     }
@@ -197,7 +200,9 @@ fn path_point(m: &Move, t: f64, chord_tol: f64) -> Point3 {
         total += ((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y)).sqrt();
     }
     let z = m.from.z + (m.to.z - m.from.z) * t;
-    if !(total > 0.0) || chords.is_empty() {
+    // `!(total > 0.0)` in NaN-honest form: a non-positive OR
+    // non-finite walk parks the column at the move's start.
+    if total <= 0.0 || !total.is_finite() || chords.is_empty() {
         return Point3::new(m.from.x, m.from.y, z);
     }
     let target = t * total;
