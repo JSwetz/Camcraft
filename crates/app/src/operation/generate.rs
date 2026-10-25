@@ -539,6 +539,78 @@ pub fn generate(
             };
             (region, path)
         }
+        // M5.1 stage E: the rotary twins. The path is the finish's
+        // own ladder seen through a frame the FITTED axis defines, so
+        // the numbers ride the same law; what the kinds add is the
+        // axis - model data, refused by name when the model says
+        // nothing of turning (and by the other twin when the part's
+        // stance is its sibling's) - and the radial pose in place of
+        // the surface normal's.
+        OpParams::RotaryContour {
+            tolerance,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            ..
+        }
+        | OpParams::RotaryParallel {
+            tolerance,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            ..
+        } => {
+            let is_contour = matches!(&op.params, OpParams::RotaryContour { .. });
+            let stepover = match &op.params {
+                OpParams::RotaryParallel { stepover, .. } => *stepover,
+                _ => None,
+            };
+            if tool.kind != crate::tools::ToolKind::BallNose {
+                return Err(GenError::Invalid(format!(
+                    "{} needs a ball-nose tool, '{}' is a {}",
+                    if is_contour { "Rotary Contour" } else { "Rotary Parallel" },
+                    op.tool,
+                    tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let fp = Finish3DParams {
+                // The kind names the ladder - waterline rings about
+                // the axis, or passes along it - so the pattern byte
+                // answers the kernel's own reading.
+                pattern: finishing3d::FinishPattern::Waterline,
+                stepover: if is_contour { None } else { stepover },
+                tool_diameter: d,
+                tolerance: *tolerance,
+                clearance_z: hl.clearance,
+                retract_z: hl.retract,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                ramp: false,
+                min_step: None,
+                ramp_angle: 45.0,
+            };
+            let axis = crate::multiaxis::AxisControl {
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: Some(*max_tilt_deg),
+            };
+            let path = if is_contour {
+                crate::multiaxis::rotary_contour(&material.facets, &fp, &axis)?
+            } else {
+                crate::multiaxis::rotary_parallel(&material.facets, &fp, &axis)?
+            };
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -636,7 +708,11 @@ pub fn generate(
         | OpParams::Contour5D { .. }
         | OpParams::Parallel5D { .. }
         | OpParams::Swarf { .. }
-        | OpParams::AdvancedSwarf { .. } => 0.0,
+        | OpParams::AdvancedSwarf { .. }
+        // Rotary leaves no stock either: the posed path is the
+        // finish's path, the axis fit adds no material law.
+        | OpParams::RotaryContour { .. }
+        | OpParams::RotaryParallel { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -660,6 +736,8 @@ pub fn generate(
                             | OpParams::Parallel5D { .. }
                             | OpParams::Swarf { .. }
                             | OpParams::AdvancedSwarf { .. }
+                            | OpParams::RotaryContour { .. }
+                            | OpParams::RotaryParallel { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -680,7 +758,9 @@ pub fn generate(
                         | OpParams::Contour5D { tolerance, .. }
                         | OpParams::Parallel5D { tolerance, .. }
                         | OpParams::Swarf { tolerance, .. }
-                        | OpParams::AdvancedSwarf { tolerance, .. } => Some(*tolerance),
+                        | OpParams::AdvancedSwarf { tolerance, .. }
+                        | OpParams::RotaryContour { tolerance, .. }
+                        | OpParams::RotaryParallel { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

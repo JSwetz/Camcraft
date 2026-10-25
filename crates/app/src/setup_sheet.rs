@@ -576,6 +576,22 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             top_z,
             bottom_z,
             ..
+        }
+        // The rotary twins' too - the world planes the generator
+        // reads into axial stations (M5.1 stage E).
+        | OpParams::RotaryContour {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::RotaryParallel {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
         } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", *retract_z),

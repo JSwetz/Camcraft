@@ -333,6 +333,8 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Parallel5D => Icon::Parallel5D,
         OpType::Swarf => Icon::Swarf,
         OpType::AdvancedSwarf => Icon::AdvancedSwarf,
+        OpType::RotaryContour => Icon::RotaryContour,
+        OpType::RotaryParallel => Icon::RotaryParallel,
     }
 }
 

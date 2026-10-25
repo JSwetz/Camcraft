@@ -1548,6 +1548,75 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             max_tilt_deg,
             Some(passes),
         ),
+        // The rotary twins (M5.1 stage E): the swarf family's panel
+        // worded for the TURN - the axis is a reading of the model, so
+        // the trio stands in for it where the ruling's name would
+        // otherwise be. Two arms, one body: the contour kind has no
+        // spacing field for the or-pattern to name, so the arms hand
+        // it in as data, the twins' law.
+        OpParams::RotaryContour {
+            tolerance,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+        } => rotary_editor(
+            ui,
+            &state.world,
+            op_ctx.as_deref(),
+            u,
+            tab,
+            tolerance,
+            None,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+        ),
+        OpParams::RotaryParallel {
+            tolerance,
+            stepover,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+        } => rotary_editor(
+            ui,
+            &state.world,
+            op_ctx.as_deref(),
+            u,
+            tab,
+            tolerance,
+            Some(stepover),
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+        ),
     }
     if detect_holes {
         state.detect_holes(&nm);
@@ -1665,6 +1734,108 @@ fn swarf_editor(
         num_feed(ui, u, plunge_feed);
         ui.checkbox(climb, "Climb milling");
     }
+}
+
+/// The rotary twins' panel (M5.1 stage E): the swarf body worded for
+/// the turn. `stepover` is Some only for the parallel kind - the
+/// contour's stations drop by the scallop law alone, and an or-pattern
+/// cannot name a field one variant lacks, so the arms hand their
+/// spacing in as data.
+#[allow(clippy::too_many_arguments)] // flat panel args, same shape as `swarf_editor`
+fn rotary_editor(
+    ui: &mut Ui,
+    world: &flecs_ecs::prelude::World,
+    setup: Option<&str>,
+    u: Unit,
+    tab: usize,
+    tolerance: &mut f64,
+    stepover: Option<&mut Option<f64>>,
+    clearance_z: &mut Height,
+    retract_z: &mut Option<Height>,
+    top_z: &mut Height,
+    bottom_z: &mut Height,
+    feed: &mut f64,
+    plunge_feed: &mut f64,
+    climb: &mut bool,
+    lead_deg: &mut f64,
+    lag_deg: &mut f64,
+    max_tilt_deg: &mut f64,
+) {
+    if tab == SEC_HEIGHTS {
+        field(ui, "Clearance Z");
+        height_editor(ui, world, setup, clearance_z, "rotary.clearance");
+        field(ui, "Retract plane");
+        let mut hop = retract_z.is_some();
+        if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+            *retract_z = if hop {
+                Some(Height::of(top_z.reference, top_z.offset + 1.0))
+            } else {
+                None
+            };
+        }
+        if let Some(r) = retract_z {
+            field(ui, "Retract Z");
+            height_editor(ui, world, setup, r, "rotary.retract");
+            if let (Some(rz), Some(cz)) = (r.z(world), clearance_z.z(world))
+                && rz > cz
+            {
+                ui.label(format!(
+                    "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                ));
+            }
+        }
+        field(ui, "Top Z");
+        height_editor(ui, world, setup, top_z, "rotary.top");
+        field(ui, "Bottom Z");
+        height_editor(ui, world, setup, bottom_z, "rotary.bottom");
+        ui.label("the world planes map onto stations along the fitted axis - Top where the run starts, Bottom where it ends");
+    }
+    if tab == SEC_PASSES {
+        if let Some(stepover) = stepover {
+            field(ui, "Stepover");
+            let mut over = stepover.is_some();
+            if ui.checkbox(&mut over, "Set line spacing").changed() {
+                *stepover = if over {
+                    Some((24.0 * tolerance.max(1e-9)).sqrt())
+                } else {
+                    None
+                };
+            }
+            if let Some(s) = stepover {
+                num(ui, u, s);
+                ui.label("spacing AROUND the turn; along the axis the lines never part - the cylinder's own direction spaces them");
+            } else {
+                ui.label("from tolerance and tool by the scallop law, around the turn");
+            }
+        }
+        rotary_axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+        field(ui, "Tolerance");
+        num(ui, u, tolerance);
+        ui.label("the finish budget: stations and lines follow from it, so the cusp under the ball stays within it");
+    }
+    if tab == SEC_FEEDS {
+        field(ui, &format!("Feed ({})", u.feed_suffix()));
+        num_feed(ui, u, feed);
+        field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+        num_feed(ui, u, plunge_feed);
+        ui.checkbox(climb, "Climb milling");
+    }
+}
+
+/// The axis trio, worded for the rotary twins: the leans pose off the
+/// RADIAL, not the surface normal - the wall of a turn answers for the
+/// whole ring at once, and the law lives in
+/// `camcraft_motion::multiaxis::rotary` (M5.1 stage E).
+fn rotary_axis_editor(ui: &mut Ui, lead_deg: &mut f64, lag_deg: &mut f64, max_tilt_deg: &mut f64) {
+    field(ui, "Tool lead angle (deg)");
+    num_plain(ui, lead_deg);
+    ui.label("lean with the feed, off the radial from the fitted axis - tips the shank away from the wall ahead of the cut");
+    field(ui, "Tool lag angle (deg)");
+    num_plain(ui, lag_deg);
+    ui.label("lean across the feed (side tilt), off the radial - clears the wall the tool has just cut");
+    field(ui, "Max tilt (deg)");
+    num_plain(ui, max_tilt_deg);
+    ui.label("the cone the spindle may open from the radial; where the stance demands more, the lean folds onto the cone's edge");
 }
 
 pub(crate) fn field(ui: &mut Ui, label: &str) {

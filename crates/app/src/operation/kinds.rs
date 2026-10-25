@@ -81,7 +81,9 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Contour5D { feed, .. }
         | OpParams::Parallel5D { feed, .. }
         | OpParams::Swarf { feed, .. }
-        | OpParams::AdvancedSwarf { feed, .. } => *feed,
+        | OpParams::AdvancedSwarf { feed, .. }
+        | OpParams::RotaryContour { feed, .. }
+        | OpParams::RotaryParallel { feed, .. } => *feed,
     }
 }
 
@@ -98,7 +100,9 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Contour5D { plunge_feed, .. }
         | OpParams::Parallel5D { plunge_feed, .. }
         | OpParams::Swarf { plunge_feed, .. }
-        | OpParams::AdvancedSwarf { plunge_feed, .. } => *plunge_feed,
+        | OpParams::AdvancedSwarf { plunge_feed, .. }
+        | OpParams::RotaryContour { plunge_feed, .. }
+        | OpParams::RotaryParallel { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -114,7 +118,9 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::Contour5D { climb, .. }
         | OpParams::Parallel5D { climb, .. }
         | OpParams::Swarf { climb, .. }
-        | OpParams::AdvancedSwarf { climb, .. } => *climb,
+        | OpParams::AdvancedSwarf { climb, .. }
+        | OpParams::RotaryContour { climb, .. }
+        | OpParams::RotaryParallel { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
         OpParams::Drill { .. } => true,
@@ -139,7 +145,9 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Contour5D { .. }
         | OpParams::Parallel5D { .. }
         | OpParams::Swarf { .. }
-        | OpParams::AdvancedSwarf { .. } => None,
+        | OpParams::AdvancedSwarf { .. }
+        | OpParams::RotaryContour { .. }
+        | OpParams::RotaryParallel { .. } => None,
     }
 }
 
@@ -152,7 +160,8 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
         | OpParams::Contour5D { .. } | OpParams::Parallel5D { .. }
-        | OpParams::Swarf { .. } | OpParams::AdvancedSwarf { .. } => None,
+        | OpParams::Swarf { .. } | OpParams::AdvancedSwarf { .. }
+        | OpParams::RotaryContour { .. } | OpParams::RotaryParallel { .. } => None,
     }
 }
 
@@ -171,7 +180,9 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Contour5D { top_z, .. }
         | OpParams::Parallel5D { top_z, .. }
         | OpParams::Swarf { top_z, .. }
-        | OpParams::AdvancedSwarf { top_z, .. } => Some(*top_z),
+        | OpParams::AdvancedSwarf { top_z, .. }
+        | OpParams::RotaryContour { top_z, .. }
+        | OpParams::RotaryParallel { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -190,7 +201,9 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Contour5D { bottom_z, .. }
         | OpParams::Parallel5D { bottom_z, .. }
         | OpParams::Swarf { bottom_z, .. }
-        | OpParams::AdvancedSwarf { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::AdvancedSwarf { bottom_z, .. }
+        | OpParams::RotaryContour { bottom_z, .. }
+        | OpParams::RotaryParallel { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -212,7 +225,9 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::Contour5D { retract_z, .. }
         | OpParams::Parallel5D { retract_z, .. }
         | OpParams::Swarf { retract_z, .. }
-        | OpParams::AdvancedSwarf { retract_z, .. } => *retract_z,
+        | OpParams::AdvancedSwarf { retract_z, .. }
+        | OpParams::RotaryContour { retract_z, .. }
+        | OpParams::RotaryParallel { retract_z, .. } => *retract_z,
         OpParams::Face { .. } => None,
     }
 }
@@ -476,6 +491,45 @@ fn seed_advanced_swarf(c: &Carried) -> OpParams {
     }
 }
 
+/// The stage E seeds: the finish's numbers whole, the pose at rest -
+/// lead and lag 0 stand the tool exactly on the RADIAL (the rotary
+/// identity) and the 90-degree cone states the reach. The axis is not
+/// a parameter: the generator fits it to the model and refuses by
+/// name when the model says nothing of turning, like the ruling
+/// before it.
+fn seed_rotary_contour(c: &Carried) -> OpParams {
+    OpParams::RotaryContour {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    }
+}
+
+fn seed_rotary_parallel(c: &Carried) -> OpParams {
+    OpParams::RotaryParallel {
+        tolerance: 0.05,
+        stepover: None,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    }
+}
+
 /// One kind, as data: its name, the digest byte `stamp_with` writes (the
 /// tag was a magic literal in eight arms until M5.0.2 - it is order, and
 /// order belongs in the table), the verify law the generator picks, and
@@ -617,6 +671,25 @@ impl KindInfo {
             mode: Mode::Envelope,
             seed: seed_advanced_swarf,
         },
+        KindInfo {
+            ty: OpType::RotaryContour,
+            label: "Rotary Contour",
+            caption: "Rotary Contour",
+            tag: 12,
+            // The rings are the finish's, posed radially (M5.1 stage
+            // E): the ball's path decides the verdict, the fitted
+            // axis and the lean answer only where the spindle points.
+            mode: Mode::Envelope,
+            seed: seed_rotary_contour,
+        },
+        KindInfo {
+            ty: OpType::RotaryParallel,
+            label: "Rotary Parallel",
+            caption: "Rotary Parallel",
+            tag: 13,
+            mode: Mode::Envelope,
+            seed: seed_rotary_parallel,
+        },
     ];
 }
 
@@ -638,6 +711,8 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[9].label,
     KindInfo::ALL[10].label,
     KindInfo::ALL[11].label,
+    KindInfo::ALL[12].label,
+    KindInfo::ALL[13].label,
 ];
 
 impl OpType {
@@ -658,6 +733,8 @@ impl OpType {
             OpType::Parallel5D => 9,
             OpType::Swarf => 10,
             OpType::AdvancedSwarf => 11,
+            OpType::RotaryContour => 12,
+            OpType::RotaryParallel => 13,
         }
     }
 

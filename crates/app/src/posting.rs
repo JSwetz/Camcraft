@@ -593,6 +593,23 @@ impl HeightRefs for OpParams {
                 top_z,
                 bottom_z,
                 ..
+            }
+            // The rotary twins' shape is the same four world planes;
+            // the generator reads them into axial stations itself
+            // (M5.1 stage E), so the post sees the finish's law.
+            | OpParams::RotaryContour {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
+            | OpParams::RotaryParallel {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
             } => {
                 let mut v = vec![clearance_z, top_z, bottom_z];
                 v.extend(retract_z.iter());

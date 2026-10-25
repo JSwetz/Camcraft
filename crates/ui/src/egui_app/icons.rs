@@ -40,6 +40,8 @@ pub(crate) enum Icon {
     Parallel5D,
     Swarf,
     AdvancedSwarf,
+    RotaryContour,
+    RotaryParallel,
     Undo,
     Redo,
     Delete,
@@ -54,7 +56,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 29] = [
+    pub(crate) const ALL: [Icon; 31] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -74,6 +76,8 @@ impl Icon {
         Icon::Parallel5D,
         Icon::Swarf,
         Icon::AdvancedSwarf,
+        Icon::RotaryContour,
+        Icon::RotaryParallel,
         Icon::Undo,
         Icon::Redo,
         Icon::Delete,
@@ -124,6 +128,13 @@ impl Icon {
             // to give.
             Icon::Swarf => include_bytes!("../../../../assets/ui/swarf.png"),
             Icon::AdvancedSwarf => include_bytes!("../../../../assets/ui/advancedswarf.png"),
+            // Original drawings (no Tabler rotary glyph exists): the
+            // turned bar with the tool riding OUTSIDE it - rings about
+            // the barrel for the contour's stations, lines along it for
+            // the parallel's raster - the ball on the radial, not the
+            // normal. Ours to give.
+            Icon::RotaryContour => include_bytes!("../../../../assets/ui/rotarycontour.png"),
+            Icon::RotaryParallel => include_bytes!("../../../../assets/ui/rotaryparallel.png"),
             Icon::Undo => include_bytes!("../../../../assets/ui/arrow-back-up.png"),
             Icon::Redo => include_bytes!("../../../../assets/ui/arrow-forward-up.png"),
             Icon::Delete => include_bytes!("../../../../assets/ui/trash.png"),
@@ -163,6 +174,8 @@ impl Icon {
             Icon::Parallel5D => "icon-parallel5d",
             Icon::Swarf => "icon-swarf",
             Icon::AdvancedSwarf => "icon-advanced-swarf",
+            Icon::RotaryContour => "icon-rotary-contour",
+            Icon::RotaryParallel => "icon-rotary-parallel",
             Icon::Undo => "icon-undo",
             Icon::Redo => "icon-redo",
             Icon::Delete => "icon-delete",

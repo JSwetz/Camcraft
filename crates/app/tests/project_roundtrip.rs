@@ -108,7 +108,9 @@ fn wrong_version_is_refused() {
     // v23_file_steps_to_v24_and_the_5axis_grammar_round_trips v23 -> v24
     // (the `contour5d` / `parallel5d` params tags), and
     // v24_file_steps_to_v25_and_the_swarf_grammar_round_trips v24 -> v25
-    // (the `swarf` / `advanced_swarf` tags and the ladder's `passes`).
+    // (the `swarf` / `advanced_swarf` tags and the ladder's `passes`),
+    // and v25_file_steps_to_v26_and_the_rotary_grammar_round_trips
+    // v25 -> v26 (the `rotary_contour` / `rotary_parallel` tags).
     // Spell the probe from the constant: a rung named by hand goes stale
     // (grey, then red) the day the stamp moves, as it did at v25.
     let future = project::PROJECT_VERSION + 1;
@@ -2824,6 +2826,103 @@ fn v24_file_steps_to_v25_and_the_swarf_grammar_round_trips() {
     assert!(
         matches!(project::open(&world4, &holey), Err(ProjectError::Corrupt(_))),
         "advanced_swarf without passes is a corrupt file, not a silent 1"
+    );
+}
+
+#[test]
+fn v25_file_steps_to_v26_and_the_rotary_grammar_round_trips() {
+    // M5.1 stage E: the rotary twins arrive as two more params tags
+    // (`rotary_contour`, `rotary_parallel`). Nothing existing changed
+    // shape - the fitted axis is model data, so the file gains no key
+    // for it - and step-up is the stamp itself, like every bump
+    // since v6.
+    let world = new_world();
+    project::open(&world, r#"{"version": 25, "entities": []}"#).expect("v25 steps up");
+    let p = tmp_path("v26a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v26 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v26 wire grammar, hand-written so the tags are pinned: the
+    // swarf family's shape with the ruling's word swapped for the
+    // axis - which is to say, no extra word at all. The contour
+    // mints no stepover key (the kind has no such field), and the
+    // parallel's absent retract means hop-to-clearance like every
+    // raster kind's.
+    let text = r#"{
+        "version": 26,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "RC1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"rotary_contour": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 600.0, "plunge_feed": 120.0, "climb": true,
+                 "lead_deg": 15.0, "lag_deg": -5.0, "max_tilt_deg": 40.0}}}},
+            {"name": "RP1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"rotary_parallel": {
+                 "tolerance": 0.1, "stepover": 1.2,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "retract_z": {"reference": "fixed", "offset": 30.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": false,
+                 "lead_deg": 0.0, "lag_deg": 0.0, "max_tilt_deg": 90.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v26 rotary grammar must read");
+    let e = model::find_by_name(&world, "RC1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::RotaryContour { tolerance, retract_z, lead_deg, lag_deg, max_tilt_deg, .. } =
+        &o.params
+    else {
+        panic!("rotary_contour params expected, got {:?}", o.params);
+    };
+    assert_eq!(*tolerance, 0.05);
+    assert!(retract_z.is_none(), "absent retract means hop-to-clearance");
+    assert_eq!((*lead_deg, *lag_deg, *max_tilt_deg), (15.0, -5.0, 40.0));
+    let e = model::find_by_name(&world, "RP1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::RotaryParallel { stepover, retract_z, .. } = &o.params else {
+        panic!("rotary_parallel params expected, got {:?}", o.params);
+    };
+    assert_eq!(*stepover, Some(1.2));
+    assert!(retract_z.is_some(), "the stated hop rides through");
+
+    // Write-parse-write is a fixed point, and `stepover` appears
+    // exactly once: the contour's DTO mints no such key.
+    let p = tmp_path("v26b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the rotary shapes round-trip byte-identically");
+    assert!(first.contains("\"rotary_contour\"") && first.contains("\"rotary_parallel\""), "{first}");
+    assert_eq!(first.matches("\"stepover\"").count(), 1, "the contour kind must not grow a stepover key");
+
+    // The sane door at the loader: a 120-degree lag is past the
+    // quadrant the pose law can state off the radial - a typo about
+    // the machine, refused by name.
+    let bad = text.replace("\"lag_deg\": 0.0", "\"lag_deg\": 120.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v26 file with a 120-degree lag must not load"
     );
 }
 

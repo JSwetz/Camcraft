@@ -88,6 +88,13 @@ pub enum OpType {
     /// The swarf family's tolerance ladder: the same path run
     /// coarse-first, finishing at the nominal tolerance (M5.1 stage D).
     AdvancedSwarf,
+    /// Rotary 4-axis finishing of a turned work: the waterline ring
+    /// ladder about the FITTED axis of revolution, the tool posed
+    /// radially (M5.1 stage E, see [`crate::multiaxis::axis`]).
+    RotaryContour,
+    /// Rotary passes ALONG the fitted axis, stepping around the bar -
+    /// the laid-down sibling of [`Self::RotaryContour`] (M5.1 stage E).
+    RotaryParallel,
 }
 
 impl core::fmt::Display for OpType {

@@ -3511,3 +3511,375 @@ fn advanced_swarf_refuses_passes_nonsense_at_creation() {
     }
     assert!(matches!(mk(zero_tol, "SwTol"), Err(CommandError::Invalid(_))));
 }
+
+// ---------------------------------------------------------------------------
+// M5.1 stage E: the rotary twins through the command chain. The laws
+// under test live in `multiaxis` - the circumcenter-concurrency axis
+// fit, the station height map, the exact identity with the plain
+// waterline and swarf rungs - so at this level the checks are the trip
+// and its signature: an Ok verdict, the RADIAL pose (the line from the
+// fitted axis to the tool, the panel's lead/lag resting at zero here,
+// and the cone measured off that seed so nothing folds) on every cut
+// move, nothing stated in air, and the refusals - each kind naming the
+// stance the OTHER one wants, the flat tool, the model with no axis,
+// the nonsense pose - spoken at the right door.
+// ---------------------------------------------------------------------------
+
+/// Revolve a meridian profile (rho, z pairs) about world z: the fan
+/// at a rho-0 endpoint keeps the solid CLOSED - the footprint law
+/// dangles an open shell's chords and refuses, exactly as blade_mesh's
+/// caps exist for (and the same reason motion's `revolve` does).
+fn revolve(n_circ: usize, meridian: &[(f64, f64)]) -> Vec<camcraft_app::geometry::Triangle> {
+    use camcraft_app::geometry::{Point3, Triangle};
+    const TAU: f64 = std::f64::consts::TAU;
+    let pt = |rho: f64, z: f64, j: usize| {
+        let th = TAU * j as f64 / n_circ as f64;
+        Point3::new(rho * th.cos(), rho * th.sin(), z)
+    };
+    let mut facets = Vec::new();
+    for w in meridian.windows(2) {
+        let (ra, za) = w[0];
+        let (rb, zb) = w[1];
+        for j in 0..n_circ {
+            let k = (j + 1) % n_circ;
+            let (a1, a2) = (pt(ra, za, j), pt(ra, za, k));
+            let (b1, b2) = (pt(rb, zb, j), pt(rb, zb, k));
+            if ra <= 1e-12 {
+                facets.push(Triangle::new(a1, b2, b1));
+            } else if rb <= 1e-12 {
+                facets.push(Triangle::new(a1, a2, b2));
+            } else {
+                // The seam is a DIAGONAL: a wall patch's four corners
+                // are not coplanar, and joining the two triangles
+                // along a side edge (the obvious-looking a2-b2)
+                // leaves the quad split by its two diagonals instead -
+                // a bowtie with slits the footprint law rightly calls
+                // an open mesh.
+                facets.push(Triangle::new(a1, a2, b2));
+                facets.push(Triangle::new(a1, b2, b1));
+            }
+        }
+    }
+    facets
+}
+
+/// The turned bar on its axis: wall r6, a gentle 1-in-4 shoulder,
+/// neck r5, capped both ends, z -16..16. motion's lathe grown to the
+/// app's 6 mm ball (the neck must beat the ball radius or the scallop
+/// law has no wall to speak on) and centered so the box stock holds
+/// it. 16 turns clear the fit's coarseness gate - an honest lathe,
+/// not a pretending polygon.
+fn lathe_mesh() -> camcraft_app::geometry::Mesh {
+    camcraft_app::geometry::Mesh {
+        facets: revolve(
+            16,
+            &[(0.0, -16.0), (6.0, -16.0), (6.0, -2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)],
+        ),
+    }
+}
+
+/// The same bar laid down: its axis is world x, its crown world z.
+fn laid_mesh() -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::{Point3, Triangle};
+    let s = |p: Point3| Point3::new(p.z, p.x, p.y);
+    camcraft_app::geometry::Mesh {
+        facets: lathe_mesh()
+            .facets
+            .into_iter()
+            .map(|t| Triangle::new(s(t.a), s(t.b), s(t.c)))
+            .collect(),
+    }
+}
+
+/// Not a revolve anywhere: a 14x10x20 box. Its normals' second moment
+/// is nowhere near isotropic (so it is no dome), no candidate axis
+/// reaches the 90 % share, and the fit answers with the taxonomy's
+/// generic line - which is exactly the honest door a freeform should
+/// find before any path is planned.
+fn freeform_box() -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::{Point3, Triangle};
+    let p = |i: usize, j: usize, k: usize| {
+        Point3::new(
+            if i == 0 { -7.0 } else { 7.0 },
+            if j == 0 { -5.0 } else { 5.0 },
+            if k == 0 { -10.0 } else { 10.0 },
+        )
+    };
+    let facets = vec![
+        Triangle::new(p(0, 0, 0), p(1, 0, 0), p(1, 1, 0)),
+        Triangle::new(p(0, 0, 0), p(1, 1, 0), p(0, 1, 0)),
+        Triangle::new(p(0, 0, 1), p(1, 1, 1), p(1, 0, 1)),
+        Triangle::new(p(0, 0, 1), p(0, 1, 1), p(1, 1, 1)),
+        Triangle::new(p(0, 0, 0), p(0, 0, 1), p(1, 0, 1)),
+        Triangle::new(p(0, 0, 0), p(1, 0, 1), p(1, 0, 0)),
+        Triangle::new(p(0, 1, 0), p(1, 1, 1), p(0, 1, 1)),
+        Triangle::new(p(0, 1, 0), p(1, 1, 0), p(1, 1, 1)),
+        Triangle::new(p(0, 0, 0), p(0, 1, 1), p(0, 1, 0)),
+        Triangle::new(p(0, 0, 0), p(0, 0, 1), p(0, 1, 1)),
+        Triangle::new(p(1, 0, 0), p(1, 1, 0), p(1, 1, 1)),
+        Triangle::new(p(1, 0, 0), p(1, 1, 1), p(1, 0, 1)),
+    ];
+    camcraft_app::geometry::Mesh { facets }
+}
+
+fn rotary_contour_params(top_z: f64, bottom_z: f64) -> OpParams {
+    OpParams::RotaryContour {
+        tolerance: 0.1,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+    }
+}
+
+fn rotary_parallel_params(top_z: f64, bottom_z: f64) -> OpParams {
+    OpParams::RotaryParallel {
+        tolerance: 0.1,
+        stepover: Some(2.0),
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+    }
+}
+
+/// The rotary twins' signature at this level: every move that cuts
+/// poses the RADIAL itself - the perpendicular from the fitted axis
+/// meeting the tool point - because the lean rests at zero and the
+/// cone folds only what the seed already answers. `axial` names the
+/// axis' world component (z for the standing bar, x for the laid
+/// one); the fitted origin sits on the axis to well within 1e-6 of
+/// the origin, so the perpendicular is spelled off the raw point.
+/// Rapids state nothing; on the axis (rho under half a mm) the radial
+/// IS the travel and holds no claim - a turned bar's rings do not go
+/// there anyway.
+fn radial_pose_law(name: &str, path: &camcraft_app::cl::Toolpath, axial: usize) {
+    let mut body = 0usize;
+    for m in &path.moves {
+        if m.kind == MoveKind::Rapid {
+            assert!(m.axis.is_none(), "{name}: a rapid states a pose");
+            continue;
+        }
+        let Some(a) = m.axis else { continue };
+        assert!(a.iter().all(|v| v.is_finite()), "{name}: a non-finite pose on a move");
+        let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+        assert!((l - 1.0).abs() < 1e-6, "{name}: a pose of length {l}");
+        let mut d = [m.to.x, m.to.y, m.to.z];
+        d[axial] = 0.0;
+        let dn = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if dn < 0.5 {
+            continue;
+        }
+        let want = [d[0] / dn, d[1] / dn, d[2] / dn];
+        let dot = a[0] * want[0] + a[1] * want[1] + a[2] * want[2];
+        assert!(
+            dot > 1.0 - 1e-7,
+            "{name}: a pose off the radial at {:?}: {a:?} vs {want:?}",
+            m.to
+        );
+        body += 1;
+    }
+    assert!(body >= 8, "{name}: only {body} radial-posed cut moves over a whole turned bar");
+}
+
+#[test]
+fn rotary_contour_generates_radial_axes_and_verifies_clean() {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 40.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "RC1",
+            "BN-0600",
+            SrcRef::Entity("lathe".into()),
+            rotary_contour_params(14.0, -14.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "RC1").expect("generate"));
+    assert_eq!(status(&world, "RC1"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    let t = cache(&world, "RC1").expect("cached").path;
+    radial_pose_law("rotary contour", &t, 2);
+    let plunges: Vec<f64> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .map(|m| m.to.z)
+        .collect();
+    assert!(plunges.last() == Some(&-14.0), "the bottom ring snaps to the bottom: {plunges:?}");
+}
+
+#[test]
+fn rotary_parallel_generates_radial_axes_and_verifies_clean() {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 40.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("laid", laid_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "RP1",
+            "BN-0600",
+            SrcRef::Entity("laid".into()),
+            rotary_parallel_params(4.0, -4.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "RP1").expect("generate"));
+    assert_eq!(status(&world, "RP1"), OpStatus::Ok);
+    let t = cache(&world, "RP1").expect("cached").path;
+    radial_pose_law("rotary parallel", &t, 0);
+    // The raster's heights are world z in the laid frame (an exact
+    // reading for a flat-lying bar): the ladder never sinks below its
+    // Bottom, and its last line IS the Bottom.
+    let lowest = t
+        .moves
+        .iter()
+        .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
+        .map(|m| m.to.z)
+        .fold(f64::INFINITY, f64::min);
+    assert!(lowest >= -4.0 - 1e-9, "the raster sank below its Bottom plane: {lowest}");
+    let on_bottom = t
+        .moves
+        .iter()
+        .any(|m| m.kind == MoveKind::Feed && (m.to.z + 4.0).abs() < 1e-9);
+    assert!(on_bottom, "nothing reached the Bottom plane - the flank went uncut");
+}
+
+#[test]
+fn the_rotary_twins_refuse_each_other_stances_by_name() {
+    // The pair cannot disagree about where the boundary sits: one
+    // sine for both refusals, each naming the kind the stance wants.
+    for (mname, name, mesh, params, wants) in [
+        ("lathe", "RPx", lathe_mesh(), rotary_parallel_params(4.0, -4.0), "Rotary Contour"),
+        ("laid", "RCx", laid_mesh(), rotary_contour_params(14.0, -14.0), "Rotary Parallel"),
+    ] {
+        let world = new_world();
+        let mut history = History::default();
+        box_stock(&world, &mut history, 40.0, 40.0, 40.0);
+        add_tool(&world, &mut history, "BN-0600");
+        history.execute(&world, ImportModel::from_mesh(mname, mesh));
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity(mname.into()), params)
+                .expect("create"),
+        );
+        let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
+            .err()
+            .expect("a wrong-stance twin must refuse")
+        else {
+            panic!("expected a machining refusal");
+        };
+        assert!(msg.contains(wants), "{msg} should point at {wants}");
+        assert_eq!(status(&world, name), OpStatus::Never, "the refusal leaves no path behind");
+    }
+}
+
+#[test]
+fn rotary_twins_refuse_a_flat_bottomed_tool_by_name() {
+    // The same law as every ball-nose kind's, and the refusal says
+    // WHICH twin: a flat corner cannot stand square to a wall along
+    // its whole side, and pretending otherwise is the gouge.
+    for (name, params, label) in [
+        ("RCe", rotary_contour_params(14.0, -14.0), "Rotary Contour"),
+        ("RPe", rotary_parallel_params(4.0, -4.0), "Rotary Parallel"),
+    ] {
+        let world = new_world();
+        let mut history = History::default();
+        box_stock(&world, &mut history, 40.0, 40.0, 40.0);
+        add_tool(&world, &mut history, "EM-0600-4FL");
+        history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "EM-0600-4FL", SrcRef::Entity("lathe".into()), params)
+                .expect("create"),
+        );
+        let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
+            .err()
+            .expect("the rotary twins must refuse a flat tool")
+        else {
+            panic!("expected a machining refusal");
+        };
+        assert!(msg.contains("ball-nose"), "{msg}");
+        assert!(msg.contains(label), "{msg} should name {label}");
+        assert_eq!(status(&world, name), OpStatus::Never, "the refusal leaves no path behind");
+    }
+}
+
+#[test]
+fn rotary_refuses_a_freeform_by_name() {
+    // No meridian anywhere: the fit answers before any path is planned.
+    // (The taxonomy's other arms - the isotropic dome, the empty model,
+    // the pretending polygon - are axis.rs's and the motion-side rotary
+    // tests', not double-spent here.)
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 40.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("boxy", freeform_box()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "RCb",
+            "BN-0600",
+            SrcRef::Entity("boxy".into()),
+            rotary_contour_params(8.0, -8.0),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) =
+        GenerateOperation::new(&world, "RCb").err().expect("a box must refuse rotary")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("share no rotation axis"), "{msg}");
+    assert_eq!(status(&world, "RCb"), OpStatus::Never);
+}
+
+#[test]
+fn rotary_twins_refuse_nonsense_pose_at_creation() {
+    // Validate early at the command door: the twins ride the 5-axis
+    // kinds' doors - a zero deviation budget, a 91-degree lean, and a
+    // cone the spindle cannot enter never reach a generator.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
+    let mk = |op: OpParams, name: &str| {
+        CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("lathe".into()), op)
+    };
+    let mut zero_tol = rotary_contour_params(14.0, -14.0);
+    if let OpParams::RotaryContour { tolerance, .. } = &mut zero_tol {
+        *tolerance = 0.0;
+    }
+    assert!(matches!(mk(zero_tol, "RcTol"), Err(CommandError::Invalid(_))));
+    let mut flat_lean = rotary_parallel_params(4.0, -4.0);
+    if let OpParams::RotaryParallel { lead_deg, .. } = &mut flat_lean {
+        *lead_deg = 91.0;
+    }
+    assert!(matches!(mk(flat_lean, "RpLd"), Err(CommandError::Invalid(_))));
+    let mut no_cone = rotary_contour_params(14.0, -14.0);
+    if let OpParams::RotaryContour { max_tilt_deg, .. } = &mut no_cone {
+        *max_tilt_deg = 0.0;
+    }
+    assert!(matches!(mk(no_cone, "RcCn"), Err(CommandError::Invalid(_))));
+}

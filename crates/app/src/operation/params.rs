@@ -338,12 +338,44 @@ impl OpParams {
                 lag_deg,
                 max_tilt_deg,
                 ..
+            }
+            // The rotary twins (M5.1 stage E, tags 12/13): the same
+            // door's bytes - the axis the fit reads is model data,
+            // not a parameter, so it enters through the facets' own
+            // stamp. Only the stepover split keeps them apart.
+            | OpParams::RotaryContour {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+            }
+            | OpParams::RotaryParallel {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
             } => {
                 // The or-pattern cannot bind the optional stepover
                 // (E0642: the contour has none) - read it back below.
                 w(h, *tolerance);
                 if let OpParams::Parallel5D { stepover, .. }
-                | OpParams::Swarf { stepover, .. } = self
+                | OpParams::Swarf { stepover, .. }
+                | OpParams::RotaryParallel { stepover, .. } = self
                 {
                     match stepover {
                         Some(s) => {

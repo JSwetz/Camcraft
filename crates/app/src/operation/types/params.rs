@@ -376,6 +376,53 @@ pub enum OpParams {
         /// Coarse-to-fine passes, 1..4; 1 is the plain ladder alone.
         passes: u32,
     },
+    /// Rotary 4-axis finishing of a turned work (M5.1 stage E): the
+    /// waterline ring ladder about the axis [`crate::multiaxis::axis`]
+    /// reads off the mesh, with the tool posed RADIAL - standing
+    /// square to the turned wall, its axis meeting the rotation axis,
+    /// the defining posture of rotary work. The heights read as axial
+    /// STATIONS, so the part may stand or lean on the table; the lean
+    /// trio rotates the pose off the radial along the travel, exactly
+    /// as the 5-axis kinds lean off the normal. A mesh with no axis of
+    /// revolution refuses by name and points at the 5-Axis kinds; a
+    /// part lying flat on its axis points at Rotary Parallel.
+    RotaryContour {
+        tolerance: f64,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// Lean off the radial pose, degrees along the travel (the
+        /// same author as the 5-axis kinds': [`crate::multiaxis`]).
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
+    /// The laid-down sibling of [`Self::RotaryContour`]: generatrix
+    /// passes ALONG the fitted axis, stepping around the bar - the
+    /// swarf raster in a frame that lays the axis down. On a bar
+    /// lying on its side this is the ladder whose rings the contour
+    /// kind cannot read; a part standing on its axis points back at
+    /// Rotary Contour by name.
+    RotaryParallel {
+        tolerance: f64,
+        /// Spacing around the bar, mm; `None` follows the stepover
+        /// cos-law from the tolerance instead.
+        stepover: Option<f64>,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
 }
 
 impl OpParams {
@@ -394,6 +441,8 @@ impl OpParams {
             OpParams::Parallel5D { .. } => OpType::Parallel5D,
             OpParams::Swarf { .. } => OpType::Swarf,
             OpParams::AdvancedSwarf { .. } => OpType::AdvancedSwarf,
+            OpParams::RotaryContour { .. } => OpType::RotaryContour,
+            OpParams::RotaryParallel { .. } => OpType::RotaryParallel,
         }
     }
 
@@ -419,7 +468,12 @@ impl OpParams {
             | OpParams::Contour5D { .. }
             | OpParams::Parallel5D { .. }
             | OpParams::Swarf { .. }
-            | OpParams::AdvancedSwarf { .. } => None,
+            | OpParams::AdvancedSwarf { .. }
+            // Rotary is the same answer for the same reason (M5.1 E):
+            // the axis fit frames the path, and the pose law answers
+            // per move - an index would fight both.
+            | OpParams::RotaryContour { .. }
+            | OpParams::RotaryParallel { .. } => None,
         }
     }
 
@@ -438,7 +492,9 @@ impl OpParams {
             | OpParams::Contour5D { clearance_z, .. }
             | OpParams::Parallel5D { clearance_z, .. }
             | OpParams::Swarf { clearance_z, .. }
-            | OpParams::AdvancedSwarf { clearance_z, .. } => *clearance_z,
+            | OpParams::AdvancedSwarf { clearance_z, .. }
+            | OpParams::RotaryContour { clearance_z, .. }
+            | OpParams::RotaryParallel { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -460,7 +516,9 @@ impl OpParams {
             | OpParams::Contour5D { top_z, .. }
             | OpParams::Parallel5D { top_z, .. }
             | OpParams::Swarf { top_z, .. }
-            | OpParams::AdvancedSwarf { top_z, .. } => *top_z,
+            | OpParams::AdvancedSwarf { top_z, .. }
+            | OpParams::RotaryContour { top_z, .. }
+            | OpParams::RotaryParallel { top_z, .. } => *top_z,
         }
     }
 
@@ -521,7 +579,9 @@ impl OpParams {
             | OpParams::Contour5D { clearance_z, retract_z, top_z, bottom_z, .. }
             | OpParams::Parallel5D { clearance_z, retract_z, top_z, bottom_z, .. }
             | OpParams::Swarf { clearance_z, retract_z, top_z, bottom_z, .. }
-            | OpParams::AdvancedSwarf { clearance_z, retract_z, top_z, bottom_z, .. } => {
+            | OpParams::AdvancedSwarf { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::RotaryContour { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::RotaryParallel { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);

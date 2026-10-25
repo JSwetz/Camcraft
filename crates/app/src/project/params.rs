@@ -332,6 +332,44 @@ pub enum ParamsDto {
         max_tilt_deg: f64,
         passes: u32,
     },
+    /// Declared at v26 with the rotary twins (M5.1 stage E). The
+    /// contour's shape field for field - the axis of revolution is a
+    /// reading of the model, not a parameter, and the automatic
+    /// snake_case needs no rename here: the names were never awkward.
+    RotaryContour {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// Absent means hop-to-clearance, the pocket family's law.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
+    /// The parallel twin's shape: the raster's optional stepover,
+    /// absent-means-derived exactly as the finish's (M5.1 stage E).
+    RotaryParallel {
+        tolerance: f64,
+        /// Absent follows the stepover cos-law from the tolerance.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stepover: Option<f64>,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

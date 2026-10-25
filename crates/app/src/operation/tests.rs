@@ -172,9 +172,10 @@ fn stamp_follows_every_input() {
     // The registry law (M5.0.2): one row per kind, table order ==
     // OpType::ordinal == digest tag, labels exactly as Display quotes
     // them. The tags are digest bytes - drift here greys every cache.
-    // (Stage C added its two rows and never moved this pin; the lane
-    // has been red since that commit and is honest again here.)
-    assert_eq!(KindInfo::ALL.len(), 12);
+    // (Stage E moved this pin with its two rows: the registry law is
+    // checked from the table itself, so the count is the only stale
+    // number a stage can leave behind.)
+    assert_eq!(KindInfo::ALL.len(), 14);
     for (i, row) in KindInfo::ALL.iter().enumerate() {
         assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
         assert_eq!(row.tag as usize, i, "digest tag must equal table order");
@@ -259,4 +260,49 @@ fn advanced_swarf_stamp_moves_with_passes() {
         max_tilt_deg: 90.0,
     };
     assert_ne!(digest(&plain), digest(&ladder(1)), "the family's rows must digest apart");
+}
+
+#[test]
+fn rotary_twins_stamp_apart_and_with_their_stepover() {
+    // M5.1 stage E, the registry's law at the digest: rows 12 and 13
+    // differ from every earlier row by their tag byte, the twins
+    // differ from each other (the contour mints no stepover bytes at
+    // all), and the parallel's Some-or-derived spacing must never
+    // digest as the number 0 - the raster kinds' split, ride again.
+    let world = crate::world::new_world();
+    let contour = OpParams::RotaryContour {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(10.0),
+        bottom_z: Height::fixed(-5.0),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    };
+    let parallel = |stepover: Option<f64>| OpParams::RotaryParallel {
+        tolerance: 0.05,
+        stepover,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(10.0),
+        bottom_z: Height::fixed(-5.0),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+    };
+    let digest = |p: &OpParams| {
+        let mut h = std::hash::DefaultHasher::new();
+        p.stamp_with(&world, None, &mut h);
+        h.finish()
+    };
+    assert_ne!(digest(&contour), digest(&parallel(None)), "the twins are different rows");
+    assert_ne!(digest(&parallel(None)), digest(&parallel(Some(1.5))), "a derived spacing is not the number 0");
+    assert_eq!(digest(&parallel(Some(1.5))), digest(&parallel(Some(1.5))));
 }

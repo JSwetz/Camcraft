@@ -252,6 +252,10 @@ pub(super) fn region_for_src(
                     // the picked loop could only contradict (M5.1 D).
                     | OpParams::Swarf { .. }
                     | OpParams::AdvancedSwarf { .. }
+                    // The rotary twins ride the fitted axis, not a pick:
+                    // the turn's own geometry authors the path (M5.1 E).
+                    | OpParams::RotaryContour { .. }
+                    | OpParams::RotaryParallel { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -303,11 +307,15 @@ pub(super) fn region_for(
         // twins, whose paths ARE the finish's paths with a stamped
         // pose: the rings chase the mesh at every plane, the region
         // only says where the model shadows.
+        // The rotary twins chase the mesh around the fitted axis, so
+        // the same shadow answers for them (stage E).
         OpParams::Finish3D { .. }
         | OpParams::Contour5D { .. }
         | OpParams::Parallel5D { .. }
         | OpParams::Swarf { .. }
-        | OpParams::AdvancedSwarf { .. } => {
+        | OpParams::AdvancedSwarf { .. }
+        | OpParams::RotaryContour { .. }
+        | OpParams::RotaryParallel { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

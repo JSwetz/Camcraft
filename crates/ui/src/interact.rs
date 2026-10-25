@@ -1147,6 +1147,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Parallel5D { retract_z, .. }
         | operation::OpParams::Swarf { retract_z, .. }
         | operation::OpParams::AdvancedSwarf { retract_z, .. }
+        // The rotary twins store the hop the same way (M5.1 stage E).
+        | operation::OpParams::RotaryContour { retract_z, .. }
+        | operation::OpParams::RotaryParallel { retract_z, .. }
         | operation::OpParams::Slot { retract_z, .. }
         | operation::OpParams::Trace { retract_z, .. }
         | operation::OpParams::Drill { retract_z, .. } => *retract_z,
@@ -1214,9 +1217,14 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Finish3D { top_z, bottom_z, .. }
         | operation::OpParams::Contour5D { top_z, bottom_z, .. }
         | operation::OpParams::Parallel5D { top_z, bottom_z, .. }
-        // The swarf family draws the same ladder planes (M5.1 stage D).
+        // The swarf family draws the same ladder planes (M5.1 stage D),
+        // and the rotary twins' are the stations' own top and bottom
+        // (stage E): first and last axial rung, the rungs between are
+        // the model's, like every ladder here.
         | operation::OpParams::Swarf { top_z, bottom_z, .. }
         | operation::OpParams::AdvancedSwarf { top_z, bottom_z, .. }
+        | operation::OpParams::RotaryContour { top_z, bottom_z, .. }
+        | operation::OpParams::RotaryParallel { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
         | operation::OpParams::Trace { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {

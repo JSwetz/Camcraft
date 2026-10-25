@@ -208,6 +208,38 @@ impl OpParams {
                 lag_deg,
                 max_tilt_deg,
                 ..
+            }
+            // The rotary door (M5.1 stage E) is the same door: the
+            // leans now pose off the RADIAL instead of the normal,
+            // but a quadrant is just as far as a tool may ever look
+            // along the wall it rides. The axis the fit reads is
+            // model data - it refuses at generation, by name, and
+            // needs no number here.
+            | OpParams::RotaryContour {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
+            }
+            | OpParams::RotaryParallel {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
             } => {
                 // The finish door's shape (no stepdown - the scallop
                 // law authors it), plus the pose door (M5.1 stage C):
@@ -236,7 +268,8 @@ impl OpParams {
                     && *max_tilt_deg <= 180.0
                     && (match self {
                         OpParams::Parallel5D { stepover, .. }
-                        | OpParams::Swarf { stepover, .. } => stepover.is_none_or(pos),
+                        | OpParams::Swarf { stepover, .. }
+                        | OpParams::RotaryParallel { stepover, .. } => stepover.is_none_or(pos),
                         _ => true,
                     })
             }

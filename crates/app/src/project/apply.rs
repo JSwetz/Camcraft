@@ -201,6 +201,15 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // anything is written. No existing shape changed.
         file.version = 25;
     }
+    if file.version == 25 {
+        // v25 -> v26: the rotary twins arrive as two new params
+        // variants (`rotary_contour`, `rotary_parallel`, M5.1 stage
+        // E), under the same law: no v25 file can contain them, and
+        // `validate_kind` already refuses the tags before anything is
+        // written. No existing shape changed - the fitted axis is
+        // model data, so the file gains no key for it.
+        file.version = 26;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
