@@ -107,7 +107,7 @@ fn positions_are_the_prismatic_ladders_bit_for_bit() {
     let f = slab_with_boss();
     let region = silhouette(&f);
     let base = pocket3d(&f, &region, &params()).unwrap();
-    let rough = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0))).unwrap();
+    let rough = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0)), None).unwrap();
     assert_eq!(base.moves.len(), rough.moves.len());
     for (b, r) in base.moves.iter().zip(&rough.moves) {
         assert_eq!((b.kind, b.to), (r.kind, r.to), "the stamp moved a position");
@@ -139,7 +139,7 @@ fn rapids_and_floors_hold_no_pose_and_flanks_do() {
     // normals both claim it).
     let f = slab_with_boss();
     let region = silhouette(&f);
-    let rough = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0))).unwrap();
+    let rough = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0)), None).unwrap();
     for m in &rough.moves {
         if m.kind == MoveKind::Rapid {
             assert_eq!(m.axis, None, "a rapid states an angle");
@@ -180,7 +180,7 @@ fn every_pose_stays_inside_its_cone() {
     let region = silhouette(&f);
     let seeds = [p(0.0, 0.0, 1.0), p(1.0, 0.0, 0.0), p(-1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, -1.0, 0.0)];
     for c in [control(0.0, 0.0, Some(60.0)), control(20.0, 10.0, Some(45.0))] {
-        let rough = multiaxis_rough(&f, &region, &params(), &c).unwrap();
+        let rough = multiaxis_rough(&f, &region, &params(), &c, None).unwrap();
         let budget = c.max_tilt_deg.unwrap();
         for m in rough.moves.iter().filter(|m| m.kind != MoveKind::Rapid) {
             if let Some(a) = m.axis {
@@ -204,7 +204,7 @@ fn a_wall_buys_a_lean() {
     // wrong answer the Prime Directive forbids.
     let f = slab_with_boss();
     let region = silhouette(&f);
-    let rough = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0))).unwrap();
+    let rough = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0)), None).unwrap();
     let leaned = rough.moves.iter().any(|m| {
         m.kind != MoveKind::Rapid
             && m.axis.is_some_and(|a| tilt_from_up(p(a[0], a[1], a[2])) > 10.0)
@@ -219,6 +219,6 @@ fn the_ladders_refusals_pass_straight_through() {
     let region = silhouette(&f);
     let mut p_bad = params();
     p_bad.stepover = 0.0;
-    let e = multiaxis_rough(&f, &region, &p_bad, &control(0.0, 0.0, Some(60.0)));
+    let e = multiaxis_rough(&f, &region, &p_bad, &control(0.0, 0.0, Some(60.0)), None);
     assert!(e.is_err(), "the stamp swallowed the ladder's refusal");
 }

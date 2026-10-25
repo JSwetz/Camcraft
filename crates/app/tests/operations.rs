@@ -3040,6 +3040,7 @@ fn contour5d_params(top_z: f64, bottom_z: f64) -> OpParams {
         lead_deg: 15.0,
         lag_deg: 0.0,
         max_tilt_deg: 60.0,
+        shank_avoid: false,
     }
 }
 
@@ -3103,6 +3104,7 @@ fn parallel5d_params(top_z: f64, bottom_z: f64) -> OpParams {
         lead_deg: 15.0,
         lag_deg: 0.0,
         max_tilt_deg: 60.0,
+        shank_avoid: false,
     }
 }
 
@@ -4131,6 +4133,7 @@ fn multiaxis_rough_params() -> OpParams {
         lead_deg: 0.0,
         lag_deg: 0.0,
         max_tilt_deg: 90.0,
+        shank_avoid: false,
     }
 }
 
@@ -4324,4 +4327,257 @@ fn multiaxis_rough_refuses_nonsense_at_creation() {
         *max_tilt_deg = 0.0;
     }
     assert!(matches!(mk(no_cone, "MaCn"), Err(CommandError::Invalid(_))));
+}
+
+// ---------------------------------------------------------------------------
+// M5.1 stage F: collision-aware orientation through the command chain. The
+// dodge kernel proved its laws in motion (multiaxis_avoid); what rides at
+// this level is the seam: the flag reaches the stamp through params, the
+// document's tool stack (not the verifier's guess) is what the kernel
+// measures, a flipped flag ages the path through the digest, and the
+// refusal - a wall no cone clears - names itself at generate instead of
+// posting a known-rubbing program. Positions never move: law (f) again.
+// ---------------------------------------------------------------------------
+
+/// A stub that MEANS business beside the boss: an r=4 ball on a 6-long
+/// flute, a 10-wide shank, a 16-wide holder. Its vertical floor rows
+/// stand 4 off a wall with a 5-radius band - a real graze the 90-degree
+/// cone can clear (the rim stays off the pocket floor around 21 deg),
+/// and its holder is narrower than the catalog's 44 so the ladder's
+/// walls are the only voice the shank gets.
+fn stub_tool() -> Tool {
+    Tool {
+        kind: camcraft_app::tools::ToolKind::BallNose,
+        diameter: 8.0,
+        corner_r: 4.0,
+        tip_angle: 0.0,
+        pitch: 0.0,
+        flute_len: 6.0,
+        shank_d: 10.0,
+        shank_len: 20.0,
+        holder_d: 16.0,
+        holder_len: 10.0,
+        material_group: "aluminum".into(),
+        rpm: 4000.0,
+        feed: 800.0,
+    }
+}
+
+/// The F job: box stock, the stub, the slab with a boss, one Multi-Axis
+/// Rough whose only difference is the flag. Lone worlds, the ladder law
+/// from stage E3 (the mask must not see a sibling).
+fn avoid_job(tag: &str, dodging: bool) -> camcraft_app::cl::Toolpath {
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 20.0);
+    history.execute(&world, AddTool::new(&world, tag, stub_tool()).expect("stub"));
+    history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
+    let mut params = multiaxis_rough_params();
+    if let OpParams::MultiAxisRough { shank_avoid, .. } = &mut params {
+        *shank_avoid = dodging;
+    }
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "OP",
+            tag,
+            SrcRef::Entity("slabboss".into()),
+            params,
+        )
+        .expect("create"),
+    );
+    let cmd = GenerateOperation::new(&world, "OP").expect("generate");
+    history.execute(&world, cmd);
+    assert_eq!(status(&world, "OP"), OpStatus::Ok, "{tag} refused a dodgeable boss");
+    cache(&world, "OP").expect("cached").path
+}
+
+#[test]
+fn multiaxis_rough_poses_around_the_shank_and_moves_nothing() {
+    let off = avoid_job("MAQ", false);
+    let on = avoid_job("MAR", true);
+    assert_eq!(off.moves.len(), on.moves.len(), "the dodge added a move");
+    let mut escaped = 0usize;
+    let mut plus: Vec<[f64; 3]> = Vec::new();
+    for (i, (a, b)) in off.moves.iter().zip(&on.moves).enumerate() {
+        assert!(a.axis.is_none() || b.axis == a.axis, "F overrode the surface law at {i}");
+        assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z), "the ladder moved at {i}");
+        if b.kind == MoveKind::Rapid {
+            assert!(b.axis.is_none(), "a rapid states an angle");
+            continue;
+        }
+        if b.to.z == -10.0 && 8.0 < b.to.x.abs() && b.to.x.abs() < 10.0 {
+            let v = b.axis.unwrap_or_else(|| panic!("floor row {i} lets the shank rub: {:?}", b.to));
+            let tilt = v[2].clamp(-1.0, 1.0).acos().to_degrees();
+            assert!(tilt > 1e-6 && tilt <= 85.0001, "an escape outside the posed cone: {v:?}");
+            assert!(v[0] * b.to.x + v[1] * b.to.y > 0.0, "an escape leaned INTO the boss: {v:?}");
+            if b.to.x > 8.4 && b.to.y.abs() <= 4.0 {
+                plus.push(v);
+            }
+            escaped += 1;
+        }
+        if b.to.z == -10.0 && b.to.x.abs() >= 12.0 {
+            assert!(b.axis.is_none(), "a clean floor row got posed anyway at {i}");
+        }
+    }
+    assert!(escaped >= 4, "the shank never spoke on a boss-adjacent ladder: {escaped}");
+    // The calm law, stated as the shortest-travel rule really is: the
+    // AMOUNT of lean is geometry's answer (the smallest grid tilt the
+    // whole cone agrees is clear, so it is the same for every row of
+    // one wall), while the azimuth is free to rotate - the A/C head
+    // enters each escape from its held pose by the shortest road.
+    assert!(plus.len() >= 2, "no repeats to compare on the +x wall");
+    let t0 = plus[0][2].clamp(-1.0, 1.0).acos().to_degrees();
+    for v in &plus[1..] {
+        let t = v[2].clamp(-1.0, 1.0).acos().to_degrees();
+        assert!((t - t0).abs() < 1e-6, "the same wall escaped by two tilts: {t} vs {t0}");
+    }
+}
+
+#[test]
+fn flipping_shank_avoid_ages_the_path() {
+    // The flag changes the POSES the stamp states, so it rides the
+    // params digest: a flipped flag must invalidate the cached path
+    // (staleness is derived, never stored) and the regenerate must
+    // find the escape.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 20.0);
+    history.execute(&world, AddTool::new(&world, "STUB", stub_tool()).expect("stub"));
+    history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "MAH",
+            "STUB",
+            SrcRef::Entity("slabboss".into()),
+            multiaxis_rough_params(),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "MAH").expect("generate"));
+    assert_eq!(status(&world, "MAH"), OpStatus::Ok);
+    let plain = cache(&world, "MAH").expect("cached").path;
+    assert!(plain
+        .moves
+        .iter()
+        .all(|m| m.to.z != -10.0 || m.to.x.abs() <= 8.0 || m.axis.is_none()));
+
+    let mut dodging = multiaxis_rough_params();
+    if let OpParams::MultiAxisRough { shank_avoid, .. } = &mut dodging {
+        *shank_avoid = true;
+    }
+    history.execute(&world, EditOperationParams::new(&world, "MAH", dodging).expect("edit"));
+    assert_eq!(
+        status(&world, "MAH"),
+        OpStatus::Stale,
+        "the digest missed stage F's flag - a stale posed path survives its flip"
+    );
+    history.execute(&world, GenerateOperation::new(&world, "MAH").expect("regenerate"));
+    assert_eq!(status(&world, "MAH"), OpStatus::Ok);
+    let posed = cache(&world, "MAH").expect("cached").path;
+    assert!(
+        posed.moves.iter().any(|m| m.kind != MoveKind::Rapid
+            && m.to.z == -10.0
+            && (8.0 < m.to.x.abs() && m.to.x.abs() < 10.0)
+            && m.axis.is_some()),
+        "the regenerated ladder never dodged"
+    );
+}
+
+#[test]
+fn multiaxis_rough_refuses_a_slot_the_cone_cannot_clear() {
+    // The Prime Directive's shape for F: where no pose inside the cone
+    // clears, generate refuses BY NAME (no path cached, status Never) -
+    // it never posts a program whose shank is already known to rub. The
+    // same job with the flag off stays E3's behavior: it generates, and
+    // post-time judgment is the verifier's.
+    let slot = || {
+        let mut facets = cube(Point3::new(-20.0, -20.0, -20.0), Point3::new(20.0, 20.0, -10.0)).facets;
+        facets
+            .extend(cube(Point3::new(-20.0, -20.0, -11.0), Point3::new(-4.5, 20.0, 5.0)).facets);
+        facets.extend(cube(Point3::new(4.5, -20.0, -11.0), Point3::new(20.0, 20.0, 5.0)).facets);
+        Mesh { facets }
+    };
+    let job = |dodging: bool| {
+        let world = new_world();
+        let mut history = History::default();
+        box_stock(&world, &mut history, 40.0, 40.0, 20.0);
+        history.execute(&world, AddTool::new(&world, "STUB", stub_tool()).expect("stub"));
+        history.execute(&world, ImportModel::from_mesh("slot", slot()));
+        let mut params = multiaxis_rough_params();
+        if let OpParams::MultiAxisRough { shank_avoid, .. } = &mut params {
+            *shank_avoid = dodging;
+        }
+        history.execute(
+            &world,
+            CreateOperation::new(
+                &world,
+                "SLOT",
+                "STUB",
+                SrcRef::Entity("slot".into()),
+                params,
+            )
+            .expect("create"),
+        );
+        (world, history)
+    };
+    let (world, _history) = job(true);
+    let cmd = GenerateOperation::new(&world, "SLOT");
+    let CommandError::Machining(msg) =
+        cmd.err().expect("a 10-wide shank must refuse a 9-wide slot")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("shank"), "{msg}");
+    assert!(msg.contains("cone"), "{msg}");
+    assert_eq!(status(&world, "SLOT"), OpStatus::Never, "a refusal leaves no path behind");
+    let (world, mut history) = job(false);
+    let cmd = GenerateOperation::new(&world, "SLOT").expect("flag off stays E3");
+    history.execute(&world, cmd);
+    assert_eq!(status(&world, "SLOT"), OpStatus::Ok);
+}
+
+#[test]
+fn a_quiet_shank_leaves_the_contour_twin_alone() {
+    // Opt-in means EXACTLY opt-in at the twins' seam too: the catalog
+    // ball's shank stands a long flute clear of the hill, so posing
+    // with the flag on must reproduce the flag-off path move for move,
+    // axes included.
+    let off = contour5d_params(18.0, HILL_RIM_Z);
+    let mut on = contour5d_params(18.0, HILL_RIM_Z);
+    if let OpParams::Contour5D { shank_avoid, .. } = &mut on {
+        *shank_avoid = true;
+    }
+    let run = |params: OpParams, tag: &str| {
+        let world = new_world();
+        let mut history = History::default();
+        box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+        add_tool(&world, &mut history, "BN-0600");
+        history.execute(&world, ImportModel::from_mesh("hill", hill_mesh()));
+        history.execute(
+            &world,
+            CreateOperation::new(
+                &world,
+                tag,
+                "BN-0600",
+                SrcRef::Entity("hill".into()),
+                params,
+            )
+            .expect("create"),
+        );
+        let cmd = GenerateOperation::new(&world, tag).expect("generate");
+        history.execute(&world, cmd);
+        assert_eq!(status(&world, tag), OpStatus::Ok);
+        cache(&world, tag).expect("cached").path
+    };
+    let pa = run(off, "C5Q");
+    let pb = run(on, "C5R");
+    assert_eq!(pa.moves.len(), pb.moves.len());
+    for (i, (a, b)) in pa.moves.iter().zip(&pb.moves).enumerate() {
+        assert_eq!(a.axis, b.axis, "a shank that reaches nothing moved a pose at {i}");
+        assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z));
+    }
 }

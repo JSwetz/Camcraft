@@ -21,7 +21,14 @@ use crate::finishing3d::closest_pt_tri;
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
+use super::avoid::{Shank, escape_axis, shank_hits};
 use super::tilt::{command_axis, AxisControl};
+
+/// The search ceiling shank avoidance tilts within when the control
+/// states no cone (`max_tilt_deg: None` = "as far as the geometry
+/// asks"): a horizontal spindle is the last pose anyone means, and
+/// the cone's own law is a cone, not a plane.
+pub(super) const ESCAPE_CAP: f64 = 85.0;
 
 /// Read a ball-center path back as an oriented one: same positions,
 /// same order, same arc intents - only the pose each move holds is
@@ -31,14 +38,18 @@ use super::tilt::{command_axis, AxisControl};
 /// whole radius of slack. Facets are scanned with an AABB shell
 /// reject; these paths have thousands of moves and models have tens
 /// of thousands of facets, so the cheap box answer must gate the
-/// Voronoi solve.
+/// Voronoi solve. `shank` (M5.1 stage F) is the tool above the ball:
+/// where `Some`, a pose whose shank column touches the part tilts to
+/// the nearest clear angle inside the cone, and a move no cone angle
+/// clears refuses the path by name.
 pub(super) fn stamp_axes(
     path: &Toolpath,
     facets: &[Triangle],
     r: f64,
     c: &AxisControl,
+    shank: Option<&Shank>,
 ) -> Result<Toolpath, GenError> {
-    stamp_inner(path, facets, r, c, None)
+    stamp_inner(path, facets, r, c, None, shank)
 }
 
 /// The same pass with the swarf law: on the facets the ruling
@@ -56,7 +67,10 @@ pub(super) fn stamp_axes_ruled(
     dir: Point3,
     ruled: &[bool],
 ) -> Result<Toolpath, GenError> {
-    stamp_inner(path, facets, r, c, Some((dir, ruled)))
+    // The ruled reads stay out of stage F: on a ruled facet the tool
+    // lies WITH the blade - that direction is surface truth, not a
+    // free axis to dodge with (RECOMMENDED.md).
+    stamp_inner(path, facets, r, c, Some((dir, ruled)), None)
 }
 
 fn stamp_inner(
@@ -65,6 +79,7 @@ fn stamp_inner(
     r: f64,
     c: &AxisControl,
     ruling: Option<(Point3, &[bool])>,
+    shank: Option<&Shank>,
 ) -> Result<Toolpath, GenError> {
     if !path.cycles.is_empty() {
         return Err(GenError::Invalid(
@@ -87,11 +102,21 @@ fn stamp_inner(
         .collect();
     let mesh = Mesh { facets, boxes: &boxes };
     let mut b = PathBuilder::new(path.start().unwrap_or(Point3::ZERO));
+    // The smoothing memory (stage F): the axis the machine actually
+    // holds entering a move. It starts vertical (the home the post
+    // wakes at), keeps the last pose stated through rapids (air moves
+    // command no angle), and drops back to vertical on a cut that
+    // states none - which is what verify's law (c) already reads an
+    // unposed move as.
+    let mut held = [0.0, 0.0, 1.0];
     for (i, mv) in path.moves.iter().enumerate() {
         let axis = match mv.kind {
             MoveKind::Rapid => None,
-            _ => cut_axis(mv, &mesh, r, band, &path.moves[i + 1..], c, ruling),
+            _ => cut_axis(mv, &mesh, r, band, &path.moves[i + 1..], c, ruling, shank, held, i)?,
         };
+        if axis.is_some() || mv.kind != MoveKind::Rapid {
+            held = axis.unwrap_or([0.0, 0.0, 1.0]);
+        }
         b.set_axis(axis);
         match &mv.arc {
             Some(a) => b.push_arc(mv.kind, mv.to, mv.feed, a.center, a.ccw),
@@ -111,9 +136,15 @@ struct Mesh<'a> {
     boxes: &'a [[f64; 6]],
 }
 
-/// The pose one cutting move holds: None in air, the surface normal
-/// with lead/lag/clamp folded in wherever the move's endpoint rests
-/// on a facet at the ball's tangent distance.
+/// The pose one cutting move holds, before and after the shank speaks:
+/// None in air, the surface normal with lead/lag/clamp folded in
+/// wherever the move's endpoint rests on a facet at the ball's tangent
+/// distance. With a `shank` (stage F) a pose that touches is re-aimed
+/// by the escape search; a move nothing inside the cone clears
+/// refuses the whole path by name. `seed` is the cone's axis the
+/// search tilts around: the contact normal where there is one,
+/// vertical wherever the pose is an answer to air or a level floor.
+#[allow(clippy::too_many_arguments)] // the stamp's flat read of one move
 fn cut_axis(
     mv: &Move,
     mesh: &Mesh,
@@ -122,7 +153,44 @@ fn cut_axis(
     rest: &[Move],
     c: &AxisControl,
     ruling: Option<(Point3, &[bool])>,
-) -> Option<[f64; 3]> {
+    shank: Option<&Shank>,
+    held: [f64; 3],
+    i: usize,
+) -> Result<Option<[f64; 3]>, GenError> {
+    let (a0, seed, skip) = pose_law(mv, mesh, r, band, rest, c, ruling);
+    let Some(s) = shank.filter(|_| !skip) else {
+        return Ok(a0);
+    };
+    let p = mv.to;
+    let a = a0.unwrap_or([0.0, 0.0, 1.0]);
+    if !shank_hits(p, a, r, s, mesh.facets, mesh.boxes) {
+        return Ok(a0);
+    }
+    let cone = c.max_tilt_deg.unwrap_or(ESCAPE_CAP).min(ESCAPE_CAP);
+    match escape_axis(p, a, seed, held, cone, r, s, mesh.facets, mesh.boxes) {
+        Some(b) => Ok(Some(b)),
+        None => Err(GenError::Invalid(format!(
+            "the shank of the tool touches the part at move {i} of the posed path, and no \
+             pose inside the max-tilt cone ({cone:.0} deg) clears it - widen the cone, \
+             shorten the tool, or turn shank avoidance off"
+        ))),
+    }
+}
+
+/// Stage C's pose law alone - the angle the surface commands before
+/// the shank has an opinion. The `bool` says the law refused to state
+/// a direction (garbage in a sane door's shadow): vertical it stays,
+/// and no escape invents an angle the law itself would not compute.
+fn pose_law(
+    mv: &Move,
+    mesh: &Mesh,
+    r: f64,
+    band: f64,
+    rest: &[Move],
+    c: &AxisControl,
+    ruling: Option<(Point3, &[bool])>,
+) -> (Option<[f64; 3]>, Point3, bool) {
+    let up = Point3::new(0.0, 0.0, 1.0);
     let p = mv.to;
     let mut best: Option<(f64, Point3, usize)> = None;
     for (fi, (f, bx)) in mesh.facets.iter().zip(mesh.boxes.iter()).enumerate() {
@@ -143,12 +211,17 @@ fn cut_axis(
             best = Some((d2, q, fi));
         }
     }
-    let (d2, q, fi) = best?;
+    let Some((d2, q, fi)) = best else {
+        return (None, up, false);
+    };
     let d = d2.sqrt();
     // Contact (or a bite - verify is the law that judges a bite, the
     // normal here is still the honest direction out of the surface).
+    // A floor reads d = 0: the ball's contact stands under the center
+    // itself, there is no direction out of the surface to lean off,
+    // and the honest pose for a floor is the one it always had.
     if d > r + band || d <= 1e-9 {
-        return None;
+        return (None, up, false);
     }
     let n = Point3::new((p.x - q.x) / d, (p.y - q.y) / d, (p.z - q.z) / d);
     // The swarf law (M5.1 D): on a facet the ruling analysis marked
@@ -176,7 +249,7 @@ fn cut_axis(
                     break;
                 }
             }
-            return Some([a.x, a.y, a.z]);
+            return (Some([a.x, a.y, a.z]), n, false);
         }
     }
     // The feed direction: this move's travel; a vertical entry has
@@ -191,16 +264,17 @@ fn cut_axis(
     }
     if tl(t) <= 1e-9 {
         // Nowhere to lead: the path ends here; hold the normal.
-        return Some([n.x, n.y, n.z]);
+        return (Some([n.x, n.y, n.z]), n, false);
     }
     match command_axis(n, t, c) {
-        Some(a) => Some([a.x, a.y, a.z]),
+        Some(a) => (Some([a.x, a.y, a.z]), n, false),
         None => {
             // A control that states no direction (a NaN the sane
             // door somehow missed): hold vertical, say so - never
-            // invent an angle the law refused to compute.
+            // invent an angle the law refused to compute, and never
+            // let the escape speak for a law that stayed silent.
             eprintln!("multiaxis: the axis law stated no direction at {p:?}; the move holds vertical");
-            None
+            (None, up, true)
         }
     }
 }

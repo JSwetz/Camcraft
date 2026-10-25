@@ -391,6 +391,7 @@ fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
         lead_deg: lead,
         lag_deg: lag,
         max_tilt_deg: tilt,
+        shank_avoid: false,
     };
     let digest = |p: &OpParams| {
         let mut h = std::hash::DefaultHasher::new();

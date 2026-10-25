@@ -24,6 +24,7 @@
 //! axis-of-revolution detection from the published normal-concurrency
 //! law; written from those sources and our own design notes only.
 
+mod avoid;
 mod linalg;
 mod stamp;
 #[cfg(test)]
@@ -39,6 +40,7 @@ pub mod ruling;
 pub mod swarf;
 pub mod tilt;
 
+pub use avoid::Shank;
 pub use contour5d::contour5d;
 pub use parallel5d::parallel5d;
 pub use rough::{multiaxis_rough, multiaxis_rough_prev};

@@ -114,7 +114,7 @@ const MESH_BAND: f64 = 0.22; // rad, generous for 16 longitudes at this cap
 fn contour5d_positions_are_the_waterlines_bit_for_bit() {
     let facets = dome(15.0, 0.9, 8, 16);
     let base = waterline(&facets, &finish(12.0, 9.8)).unwrap();
-    let got = contour5d(&facets, &finish(12.0, 9.8), &control(20.0, 0.0, Some(45.0))).unwrap();
+    let got = contour5d(&facets, &finish(12.0, 9.8), &control(20.0, 0.0, Some(45.0)), None).unwrap();
     assert_eq!(got.moves.len(), base.moves.len());
     for (g, b) in got.moves.iter().zip(&base.moves) {
         assert_eq!((g.from.x, g.from.y, g.from.z), (b.from.x, b.from.y, b.from.z));
@@ -130,7 +130,7 @@ fn contour5d_positions_are_the_waterlines_bit_for_bit() {
 #[test]
 fn rapids_hold_no_angle() {
     let facets = dome(15.0, 0.9, 8, 16);
-    let got = contour5d(&facets, &finish(12.0, 9.8), &control(30.0, 0.0, None)).unwrap();
+    let got = contour5d(&facets, &finish(12.0, 9.8), &control(30.0, 0.0, None), None).unwrap();
     assert!(
         got.moves.iter().all(|m| m.kind != MoveKind::Rapid || m.axis.is_none()),
         "a rapid stated a tool angle"
@@ -153,7 +153,7 @@ fn zero_lean_holds_the_contact_normal_radial_to_the_budget() {
     // contact normals are not radial; that is no one's law, so the
     // fixture keeps every ring on the face.
     let facets = dome(15.0, 0.9, 8, 16);
-    let got = contour5d(&facets, &finish(12.0, 11.9), &control(0.0, 0.0, Some(90.0))).unwrap();
+    let got = contour5d(&facets, &finish(12.0, 11.9), &control(0.0, 0.0, Some(90.0)), None).unwrap();
     let axes = cut_axes(&got);
     assert!(axes.len() > 10, "only {} poses on a whole ladder", axes.len());
     for (c, a) in axes {
@@ -172,7 +172,7 @@ fn the_cone_holds_at_generator_scale() {
     // normal - which here is radial (both rings ride the cap's face,
     // above its rim), plus the mesh band.
     let facets = dome(15.0, 0.9, 8, 16);
-    let got = contour5d(&facets, &finish(12.0, 11.4), &control(75.0, 30.0, Some(40.0))).unwrap();
+    let got = contour5d(&facets, &finish(12.0, 11.4), &control(75.0, 30.0, Some(40.0)), None).unwrap();
     let axes = cut_axes(&got);
     assert!(!axes.is_empty());
     for (c, a) in axes {
@@ -190,7 +190,7 @@ fn parallel5d_poses_a_followed_raster() {
     let facets = dome(15.0, 1.1, 8, 16);
     let p = finish(12.0, 6.0);
     let base = camcraft_motion::finishing3d::parallel(&facets, &p).unwrap();
-    let got = parallel5d(&facets, &p, &control(15.0, 10.0, Some(60.0))).unwrap();
+    let got = parallel5d(&facets, &p, &control(15.0, 10.0, Some(60.0)), None).unwrap();
     assert_eq!(got.moves.len(), base.moves.len());
     for (g, b) in got.moves.iter().zip(&base.moves) {
         assert_eq!(g.to, b.to);
@@ -212,7 +212,7 @@ fn a_broken_control_holds_vertical_never_garbage() {
     // param first): a NaN lead states no direction, and no move may
     // carry a guessed one - the path stays prismatic.
     let facets = dome(15.0, 0.9, 8, 16);
-    let got = contour5d(&facets, &finish(12.0, 9.8), &control(f64::NAN, 0.0, None)).unwrap();
+    let got = contour5d(&facets, &finish(12.0, 9.8), &control(f64::NAN, 0.0, None), None).unwrap();
     assert!(got.is_prismatic());
     assert!(got.all_finite());
 }
@@ -221,6 +221,6 @@ fn a_broken_control_holds_vertical_never_garbage() {
 fn an_empty_model_refuses_like_the_waterline() {
     // The wrapper adds no generation of its own, so the waterline's
     // own refusal is the refusal - by its own name.
-    let e = contour5d(&[], &finish(1.0, 0.0), &control(0.0, 0.0, None)).err();
+    let e = contour5d(&[], &finish(1.0, 0.0), &control(0.0, 0.0, None), None).err();
     assert!(matches!(e, Some(GenError::Empty(_))), "got {e:?}");
 }

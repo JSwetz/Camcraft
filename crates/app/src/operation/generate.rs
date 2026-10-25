@@ -405,6 +405,7 @@ pub fn generate(
             lead_deg,
             lag_deg,
             max_tilt_deg,
+            shank_avoid,
             ..
         }
         | OpParams::Parallel5D {
@@ -415,6 +416,7 @@ pub fn generate(
             lead_deg,
             lag_deg,
             max_tilt_deg,
+            shank_avoid,
             ..
         } => {
             let is_contour = matches!(&op.params, OpParams::Contour5D { .. });
@@ -459,10 +461,14 @@ pub fn generate(
                 lag_deg: *lag_deg,
                 max_tilt_deg: Some(*max_tilt_deg),
             };
+            // Stage F's dodge is opt-in and adds nothing when off:
+            // None means the stamp never measures the shank, so the
+            // paths of every v28 document regenerate byte-identical.
+            let shank = (*shank_avoid).then(|| shank_of(&tool));
             let path = if is_contour {
-                crate::multiaxis::contour5d(&material.facets, &fp, &axis)?
+                crate::multiaxis::contour5d(&material.facets, &fp, &axis, shank.as_ref())?
             } else {
-                crate::multiaxis::parallel5d(&material.facets, &fp, &axis)?
+                crate::multiaxis::parallel5d(&material.facets, &fp, &axis, shank.as_ref())?
             };
             (region, path)
         }
@@ -698,6 +704,7 @@ pub fn generate(
             lead_deg,
             lag_deg,
             max_tilt_deg,
+            shank_avoid,
             ..
         } => {
             if tool.kind != crate::tools::ToolKind::BallNose {
@@ -732,8 +739,11 @@ pub fn generate(
             let _ = tolerance;
             let prior = crate::rest::prior_state(world, op_name, setup, d * 0.5)?;
             let mask = prior.grid.as_ref();
+            // Same opt-in law as the twins' arm above: off, the ladder
+            // stamps exactly as stage E3 shipped it.
+            let shank = (*shank_avoid).then(|| shank_of(&tool));
             let path = match crate::multiaxis::multiaxis_rough_prev(
-                &material.facets, &region, &pp, &axis, mask,
+                &material.facets, &region, &pp, &axis, mask, shank.as_ref(),
             ) {
                 Ok(path) => path,
                 // The pocket arm's Empty remap, verbatim: with a mask
@@ -1007,5 +1017,20 @@ pub fn generate(
             }
             Ok((path_world, warns))
         }
+    }
+}
+
+/// The tool above the ball, as stage F's dodge reads it: the same
+/// stack `verify`'s law (c) measures the posted path against, built
+/// here at the seam where the ToolDef's diameters halve to radii.
+/// One builder for all three axis-law kinds, so the generator and the
+/// post-time verifier can never disagree about what the shank is.
+fn shank_of(tool: &crate::tools::Tool) -> crate::multiaxis::Shank {
+    crate::multiaxis::Shank {
+        flute_len: tool.flute_len,
+        shank_r: tool.shank_d * 0.5,
+        shank_len: tool.shank_len,
+        holder_r: tool.holder_d * 0.5,
+        holder_len: tool.holder_len,
     }
 }

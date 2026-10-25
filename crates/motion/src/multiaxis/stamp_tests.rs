@@ -82,6 +82,7 @@ fn the_stamp_poses_every_cut_move_at_the_exact_lead() {
             lag_deg: 0.0,
             max_tilt_deg: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(out.moves.len(), 4);
@@ -111,6 +112,7 @@ fn the_stamp_folds_an_overlean_onto_the_cone_exactly() {
             lag_deg: 0.0,
             max_tilt_deg: Some(40.0),
         },
+        None,
     )
     .unwrap();
     for mv in &out.moves {
@@ -135,6 +137,7 @@ fn the_stamp_leans_side_with_the_lag_exactly() {
             lag_deg: 25.0,
             max_tilt_deg: None,
         },
+        None,
     )
     .unwrap();
     for mv in &out.moves {
@@ -169,6 +172,7 @@ fn the_stamp_poses_only_moves_that_touch() {
             lag_deg: 0.0,
             max_tilt_deg: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(out.moves.len(), 4);
@@ -192,6 +196,6 @@ fn drill_cycles_refuse_the_stamp_by_name() {
         dwell: 0.0,
         first_move: 0,
     });
-    let e = stamp_axes(&path, &pitched_plane(), r, &AxisControl::default()).err();
+    let e = stamp_axes(&path, &pitched_plane(), r, &AxisControl::default(), None).err();
     assert!(matches!(e, Some(GenError::Invalid(_))), "got {e:?}");
 }

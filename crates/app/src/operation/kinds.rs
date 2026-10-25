@@ -450,6 +450,7 @@ fn seed_contour5d(c: &Carried) -> OpParams {
         lead_deg: 0.0,
         lag_deg: 0.0,
         max_tilt_deg: 90.0,
+        shank_avoid: false,
     }
 }
 
@@ -469,6 +470,7 @@ fn seed_parallel5d(c: &Carried) -> OpParams {
         lead_deg: 0.0,
         lag_deg: 0.0,
         max_tilt_deg: 90.0,
+        shank_avoid: false,
     }
 }
 
@@ -581,6 +583,7 @@ fn seed_multiaxis_rough(c: &Carried) -> OpParams {
         lead_deg: 0.0,
         lag_deg: 0.0,
         max_tilt_deg: 90.0,
+        shank_avoid: false,
     }
 }
 

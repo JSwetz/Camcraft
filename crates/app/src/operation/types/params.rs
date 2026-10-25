@@ -308,6 +308,12 @@ pub enum OpParams {
         /// The cone half-angle the pose may never leave, degrees -
         /// the machine's tilt reach stated by the operation.
         max_tilt_deg: f64,
+        /// Collide-aware orientation (M5.1 stage F): where the
+        /// commanded pose would drive the shank into the part, tilt
+        /// to the nearest clear angle inside the cone. The cut is the
+        /// same path either way - a sphere has no opinion about its
+        /// own axis - so this is safety, never shape.
+        shank_avoid: bool,
     },
     /// The raster sibling of [`Self::Contour5D`]: the Z-following
     /// parallel pass with the same axis law. No `pattern` field - the
@@ -328,6 +334,9 @@ pub enum OpParams {
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,
+        /// See [`Self::Contour5D`]: the shank dodges within the cone,
+        /// the raster's positions standing still.
+        shank_avoid: bool,
     },
     /// Ruled-surface (bladed) finishing (M5.1 stage D): the raster run
     /// ALONG the direction [`crate::multiaxis::ruling`] reads off the
@@ -486,6 +495,10 @@ pub enum OpParams {
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,
+        /// See [`Self::Contour5D`]: the stamped ladder dodges with its
+        /// shank too - and the floors it left unposed take a pose when
+        /// (only when) the shank speaks (M5.1 stage F).
+        shank_avoid: bool,
     },
 }
 

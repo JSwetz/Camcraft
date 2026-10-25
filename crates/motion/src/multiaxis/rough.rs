@@ -28,6 +28,7 @@ use crate::machining2d::GenError;
 use crate::machining3d::Pocket3DParams;
 use crate::stock_sim::Dexel;
 
+use super::avoid::Shank;
 use super::stamp::stamp_axes;
 use super::tilt::AxisControl;
 
@@ -35,13 +36,17 @@ use super::tilt::AxisControl;
 /// spindle leaned wherever the tangency law finds a surface to lean
 /// off. `r` is read from the params' diameter; the stamp's tangency
 /// band is the same micron-lattice law the finishing trio rides.
+/// With a `shank` (stage F), the pose law gets its refinement here:
+/// moves whose shank would touch tilt to the nearest clear angle in
+/// the cone - and floors pose nothing until the shank speaks.
 pub fn multiaxis_rough(
     facets: &[Triangle],
     footprint: &Region,
     p: &Pocket3DParams,
     c: &AxisControl,
+    shank: Option<&Shank>,
 ) -> Result<Toolpath, GenError> {
-    multiaxis_rough_prev(facets, footprint, p, c, None)
+    multiaxis_rough_prev(facets, footprint, p, c, None, shank)
 }
 
 /// The re-machining sibling, same law as [`crate::machining3d::pocket3d_prev`]:
@@ -54,7 +59,8 @@ pub fn multiaxis_rough_prev(
     p: &Pocket3DParams,
     c: &AxisControl,
     mask: Option<&Dexel>,
+    shank: Option<&Shank>,
 ) -> Result<Toolpath, GenError> {
     let base = crate::machining3d::pocket3d_prev(facets, footprint, p, mask)?;
-    stamp_axes(&base, facets, p.tool_diameter * 0.5, c)
+    stamp_axes(&base, facets, p.tool_diameter * 0.5, c, shank)
 }

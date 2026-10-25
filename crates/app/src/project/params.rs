@@ -265,6 +265,10 @@ pub enum ParamsDto {
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,
+        /// Absent means off - the pose law every v28 file ran (M5.1
+        /// stage F).
+        #[serde(default)]
+        shank_avoid: bool,
     },
     /// Declared at v24, the parallel twin (M5.1 stage C). The one
     /// extra field is the raster's optional stepover, absent-means-
@@ -286,6 +290,9 @@ pub enum ParamsDto {
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,
+        /// Absent means off, the contour's twin above.
+        #[serde(default)]
+        shank_avoid: bool,
     },
     /// Declared at v25 with the swarf family (M5.1 stage D). The
     /// parallel's shape field for field - the ruling is not a
@@ -431,6 +438,10 @@ pub enum ParamsDto {
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,
+        /// Absent means off, the twins' law - here it is the ladder's
+        /// floors that answer to it, posed only when the shank speaks.
+        #[serde(default)]
+        shank_avoid: bool,
     },
 }
 

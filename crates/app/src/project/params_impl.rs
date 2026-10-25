@@ -192,6 +192,7 @@ impl ParamsDto {
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
+                shank_avoid,
             }
             | OpParams::Parallel5D {
                 tolerance,
@@ -205,6 +206,7 @@ impl ParamsDto {
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
+                shank_avoid,
                 ..
             } => {
                 let stepover = match p {
@@ -231,6 +233,7 @@ impl ParamsDto {
                         lead_deg: *lead_deg,
                         lag_deg: *lag_deg,
                         max_tilt_deg: *max_tilt_deg,
+                        shank_avoid: *shank_avoid,
                     },
                     None => ParamsDto::Contour5D {
                         tolerance: *tolerance,
@@ -244,6 +247,7 @@ impl ParamsDto {
                         lead_deg: *lead_deg,
                         lag_deg: *lag_deg,
                         max_tilt_deg: *max_tilt_deg,
+                        shank_avoid: *shank_avoid,
                     },
                 }
             }
@@ -435,6 +439,7 @@ impl ParamsDto {
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
+                shank_avoid,
             } => ParamsDto::MultiAxisRough {
                 tolerance: *tolerance,
                 stepover: *stepover,
@@ -463,6 +468,7 @@ impl ParamsDto {
                 lead_deg: *lead_deg,
                 lag_deg: *lag_deg,
                 max_tilt_deg: *max_tilt_deg,
+                shank_avoid: *shank_avoid,
             },
             OpParams::Slot {
                 a,
@@ -740,6 +746,7 @@ impl ParamsDto {
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
+                shank_avoid,
             } => OpParams::Contour5D {
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
@@ -752,6 +759,7 @@ impl ParamsDto {
                 lead_deg: *lead_deg,
                 lag_deg: *lag_deg,
                 max_tilt_deg: *max_tilt_deg,
+                shank_avoid: *shank_avoid,
             },
             ParamsDto::Parallel5D {
                 tolerance,
@@ -766,6 +774,7 @@ impl ParamsDto {
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
+                shank_avoid,
             } => OpParams::Parallel5D {
                 tolerance: *tolerance,
                 stepover: *stepover,
@@ -779,6 +788,7 @@ impl ParamsDto {
                 lead_deg: *lead_deg,
                 lag_deg: *lag_deg,
                 max_tilt_deg: *max_tilt_deg,
+                shank_avoid: *shank_avoid,
             },
             // The swarf family (M5.1 stage D), straight mirrors; the
             // ladder's count is validated by the params door, not
@@ -964,6 +974,7 @@ impl ParamsDto {
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
+                shank_avoid,
             } => OpParams::MultiAxisRough {
                 tolerance: *tolerance,
                 stepover: *stepover,
@@ -992,6 +1003,7 @@ impl ParamsDto {
                 lead_deg: *lead_deg,
                 lag_deg: *lag_deg,
                 max_tilt_deg: *max_tilt_deg,
+                shank_avoid: *shank_avoid,
             },
             ParamsDto::Slot {
                 a,

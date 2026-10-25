@@ -1358,6 +1358,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             lead_deg,
             lag_deg,
             max_tilt_deg,
+            shank_avoid,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1391,6 +1392,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             }
             if tab == SEC_PASSES {
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+                shank_avoid_editor(ui, shank_avoid);
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
                 ui.label("the finish budget: levels drop by 2 x sqrt(tool radius x tolerance), so the cusp under the ball stays within it");
@@ -1417,6 +1419,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             lead_deg,
             lag_deg,
             max_tilt_deg,
+            shank_avoid,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1465,6 +1468,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
                 }
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+                shank_avoid_editor(ui, shank_avoid);
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
                 ui.label("the finish budget: lines are spaced and levels drop from it, so the cusp under the ball stays within it");
@@ -1739,6 +1743,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             lead_deg,
             lag_deg,
             max_tilt_deg,
+            shank_avoid,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1825,6 +1830,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the verify budget: the swept envelope is judged against the model within it");
                 ui.label("the ladder is move for move the 3-D pocket's; the spindle adds a pose where a wall or corner needs one, and stands vertical where a floor does not ask");
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+                shank_avoid_editor(ui, shank_avoid);
             }
             if tab == SEC_FEEDS {
                 field(ui, &format!("Feed ({})", u.feed_suffix()));
@@ -1857,6 +1863,20 @@ fn axis_editor(ui: &mut Ui, lead_deg: &mut f64, lag_deg: &mut f64, max_tilt_deg:
     field(ui, "Max tilt (deg)");
     num_plain(ui, max_tilt_deg);
     ui.label("the cone the spindle may open from the normal; where the surface demands more, the lean folds onto the cone's edge");
+}
+
+/// Stage F's one switch (M5.1): where the posed axis would drive the
+/// shank into the part, the spindle tilts to the nearest clear angle
+/// inside the max-tilt cone - the shortest travel from the pose it
+/// held, so neighboring cuts do not swing the head back and forth.
+/// The ball's envelope is rotation-invariant, so this can only ever
+/// change which way the spindle stands, never where the cut lands;
+/// and where no angle inside the cone clears, the operation refuses
+/// by name rather than post a path the verifier would warn on.
+fn shank_avoid_editor(ui: &mut Ui, shank_avoid: &mut bool) {
+    field(ui, "Shank avoidance");
+    ui.checkbox(shank_avoid, "Avoid shank collisions");
+    ui.label("tilt the spindle off a leaning pose that would rub the shank; positions never move, and a wall no tilt clears refuses the job");
 }
 
 /// The swarf family's panel (M5.1 stage D): the raster's sections

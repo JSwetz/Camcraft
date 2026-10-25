@@ -310,6 +310,7 @@ impl OpParams {
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
+                ..
             }
             | OpParams::Parallel5D {
                 tolerance,
@@ -396,6 +397,15 @@ impl OpParams {
                 for v in [*lead_deg, *lag_deg, *max_tilt_deg] {
                     w(h, v);
                 }
+                // The or-pattern cannot bind stage F's flag (the
+                // swarf and rotary twins answer shank contact with
+                // surface truth, not a free axis - it is not their
+                // field to omit) - read it back the stepover's way.
+                if let OpParams::Contour5D { shank_avoid, .. }
+                | OpParams::Parallel5D { shank_avoid, .. } = self
+                {
+                    h.write_u8(u8::from(*shank_avoid));
+                }
             }
             // The wrap ladder (M5.1 stage E2, tag 14): the Pocket3D
             // door's bytes without the fields the kernel overrides or
@@ -471,6 +481,7 @@ impl OpParams {
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
+                shank_avoid,
             } => {
                 w(h, *stepover);
                 w(h, *stock_to_leave);
@@ -496,6 +507,10 @@ impl OpParams {
                 for v in [*tolerance, *lead_deg, *lag_deg, *max_tilt_deg] {
                     w(h, v);
                 }
+                // The dodge rides the digest: the flag changes the
+                // poses the stamp states, and a stale path must not
+                // survive its flip (stage F).
+                h.write_u8(u8::from(*shank_avoid));
             }
             // The ladder is the swarf door's bytes plus the rung count
             // (an integer on the digest rides `write_u32` like the tab

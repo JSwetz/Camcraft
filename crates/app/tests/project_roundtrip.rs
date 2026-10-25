@@ -3174,3 +3174,101 @@ fn v27_file_steps_to_v28_and_the_stamped_ladder_grammar_round_trips() {
         "a v28 file with a 200-degree cone must not load"
     );
 }
+
+#[test]
+fn v28_file_steps_to_v29_and_shank_avoid_round_trips() {
+    // M5.1 stage F: shank avoidance arrives as ONE new params key
+    // (`shank_avoid`) inside the three axis-law kinds - a serde
+    // default of false, which is exactly the pose law every v28 file
+    // ran. Pure step-up, like every bump since v6: no v28 file means
+    // anything else by omitting the key.
+    let world = new_world();
+    project::open(&world, r#"{"version": 28, "entities": []}"#).expect("v28 steps up");
+    let p = tmp_path("v29a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v29 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v29 wire grammar, hand-written so the tags are pinned: the
+    // rough states nothing new (absent means off), the contour says
+    // the dodge is on. One tool wide in the shank so both reads mean
+    // a real stack to measure.
+    let text = r#"{
+        "version": 29,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 8.0, "corner_r": 4.0,
+                      "flute_len": 6.0, "shank_d": 10.0, "shank_len": 20.0,
+                      "holder_d": 16.0, "holder_len": 10.0,
+                      "material_group": "general", "rpm": 4000.0, "feed": 800.0}},
+            {"name": "MR1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"multi_axis_rough": {
+                 "tolerance": 0.05, "stepover": 4.0, "stock_to_leave": 0.0,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "fixed", "offset": 0.0},
+                 "bottom_z": {"reference": "fixed", "offset": -10.0},
+                 "stepdown": 5.0, "feed": 800.0, "plunge_feed": 150.0, "climb": true,
+                 "strategy": "zigzag", "entry": "plunge", "helix_radius": 2.0,
+                 "lead_deg": 0.0, "lag_deg": 0.0, "max_tilt_deg": 60.0}}}
+            },
+            {"name": "C5", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"contour5d": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 600.0, "plunge_feed": 120.0, "climb": true,
+                 "lead_deg": 15.0, "lag_deg": -5.0, "max_tilt_deg": 40.0,
+                 "shank_avoid": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v29 axis-law grammar must read");
+    let e = model::find_by_name(&world, "MR1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::MultiAxisRough { shank_avoid, .. } = &o.params else {
+        panic!("multi_axis_rough params expected, got {:?}", o.params);
+    };
+    assert!(!*shank_avoid, "an absent key must mean the v28 pose law");
+    let e = model::find_by_name(&world, "C5").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Contour5D { shank_avoid, .. } = &o.params else {
+        panic!("contour5d params expected, got {:?}", o.params);
+    };
+    assert!(*shank_avoid, "a stated dodge must read back stated");
+
+    // Write-parse-write is a fixed point, and the stated flag rides
+    // the file (it is always written - an always-on dodge must not
+    // degrade to a silent default on its way through disk).
+    let p = tmp_path("v29b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the flagged shape round-trips byte-identically");
+    assert_eq!(
+        first.matches("\"shank_avoid\"").count(),
+        2,
+        "both axis-law kinds state the flag: {first}"
+    );
+
+    // The same grammar one version down: a v28 file whose contours
+    // carry NO shank_avoid key still reads (the default), steps up,
+    // and lands on the off pose law it always had.
+    let v28 = text.replace("\"version\": 29", "\"version\": 28").replace(",\n                 \"shank_avoid\": true", "");
+    let world3 = new_world();
+    project::open(&world3, &v28).expect("a v28 file must step up");
+    let e = model::find_by_name(&world3, "C5").expect("op");
+    let o = model::operation_of(&world3, &e).expect("operation");
+    let OpParams::Contour5D { shank_avoid, .. } = &o.params else {
+        panic!("contour5d params expected");
+    };
+    assert!(!*shank_avoid, "the v28 contour ran with the dodge off - the step-up must agree");
+}

@@ -227,6 +227,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // toolpath, not the file.
         file.version = 28;
     }
+    if file.version == 28 {
+        // v28 -> v29: shank avoidance arrives as one new params key
+        // (`shank_avoid`, M5.1 stage F) inside the three axis-law
+        // kinds, whose serde default (false) is exactly what v28 ran.
+        // Pure step-up, like every bump since v6: no v28 file means
+        // anything else by omitting it.
+        file.version = 29;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

@@ -20,15 +20,20 @@ use crate::finishing3d::{self, Finish3DParams};
 use crate::geometry::Triangle;
 use crate::machining2d::GenError;
 
+use super::avoid::Shank;
 use super::stamp::stamp_axes;
 use super::tilt::AxisControl;
 
-/// The ring ladder with the tool leaning where the law says.
+/// The ring ladder with the tool leaning where the law says - and,
+/// with a `shank` (M5.1 stage F), dodging the part inside the cone
+/// where the law's pose would touch. The positions are the
+/// waterline's either way: law (f) makes the dodge exact.
 pub fn contour5d(
     facets: &[Triangle],
     p: &Finish3DParams,
     c: &AxisControl,
+    shank: Option<&Shank>,
 ) -> Result<Toolpath, GenError> {
     let base = finishing3d::waterline(facets, p)?;
-    stamp_axes(&base, facets, p.tool_diameter * 0.5, c)
+    stamp_axes(&base, facets, p.tool_diameter * 0.5, c, shank)
 }
