@@ -26,9 +26,14 @@ pub fn from_json(text: &str) -> Result<Value, serde_json::Error> {
 /// did when the bridge carried none. Stage D brought the rotaries
 /// across - as geometry, kept out of `axes` where the traverse and
 /// the rate ceilings live: their direction and degree travel join
-/// the script under `kinematics.static.rotaries`, and their deg/min
-/// rates join nothing, because a rate mirrored into an mm/min field
-/// would be the unit lie stage C named and this file keeps its word.
+/// the script under `kinematics.static.rotaries`. Stage G added a
+/// `speeds` object to those entries - deg/min under the rotary's own
+/// roof, where the sim's timeline reads the pace an angle travels
+/// at - and the unit law stands exactly as stage C set it: a rotary
+/// rate crosses into no mm/min field, no ceiling sum, no script
+/// property (the post's rotary inventory still carries name,
+/// direction, and travel only; a script cannot feed off a number it
+/// cannot unit-check).
 #[must_use]
 pub fn mirror(m: &crate::machine::Machine) -> Value {
     let mut axes: Vec<Value> = Vec::new();
@@ -36,11 +41,18 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
     for a in &m.axes {
         if a.rotary {
             // The stage D door: a rotary mirrors as GEOMETRY - its
-            // letter, its stated direction, its travel in degrees -
-            // never as speeds. A deg/min rate in an mm/min field
-            // would be the unit lie stage C refused, and the RTCP
+            // letter, its stated direction, its travel in degrees.
+            // M5.1 stage G added its speeds - in a `speeds` object of
+            // the rotary's OWN, stating degrees per minute under keys
+            // the sim's rotary law reads as degrees. The unit lie
+            // stage C refused was a deg/min rate absorbed into an
+            // mm/min ceiling field, and that refusal stands: the
+            // rotary joins no `axes` array, and `rapidRate`/
+            // `feedRateMax` stay linear-only sums below. The RTCP
             // question a post asks ("does this machine tilt?") is
-            // answered by the direction, not by the rate.
+            // still answered by the direction, not the rate; the
+            // rate exists now because the timeline turns angles, and
+            // a paced simulation has to know how fast.
             let mut r = serde_json::Map::new();
             r.insert("letter".to_owned(), json!(a.name));
             r.insert("type".to_owned(), json!("rotary"));
@@ -49,6 +61,16 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
             }
             if let Some((lo, hi)) = a.travel {
                 r.insert("travel".to_owned(), json!([lo, hi]));
+            }
+            let mut speeds = serde_json::Map::new();
+            if let Some(f) = a.feed {
+                speeds.insert("normal".to_owned(), json!(f));
+            }
+            if let Some(rap) = a.rapid {
+                speeds.insert("rapid".to_owned(), json!(rap));
+            }
+            if !speeds.is_empty() {
+                r.insert("speeds".to_owned(), Value::Object(speeds));
             }
             rotaries.push(Value::Object(r));
             continue;

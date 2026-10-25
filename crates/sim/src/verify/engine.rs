@@ -260,6 +260,10 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         // tip cuts, tilt or no tilt. Over-report a graze, never hide a
         // gouge. The prismatic branch is the law's own history: same
         // h0, same r2, point p unshifted.
+        // Moves law (c) convicted, for law (c3) below: a mid-turn
+        // sweep of the same band on the same move is the same event
+        // reported twice, and (c)'s verdict stands.
+        let mut shanked: Vec<usize> = Vec::new();
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;
@@ -303,9 +307,37 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                     }
                 }
                 if let Some(part) = hit {
+                    shanked.push(i);
                     warns.push(Warning::ShankHit { at: i, part });
                 }
             }
+        }
+
+        // (c3) The mid-turn sweep (M5.1 stage G): the reachable set
+        // between a move's commanded poses, on the grid and column
+        // laws of [`super::sweep`]. It runs exactly where its twin (c)
+        // runs - the same domain, the turn-aware reading - and the
+        // price stays honest because every posed kind verifies as
+        // Envelope: law (f) measures the BALL, rotation-invariant and
+        // pose-blind, and the POSE question of those programs is the
+        // band stack's, (c) and (c3) together. The sweep's per-move
+        // sample-union filter keeps the grid from costing twenty times
+        // on far-field samples. Engrave never poses. Paths no posed
+        // generator ever touched hold every pose at home and convict
+        // nothing, exactly as before this law existed.
+        if cx.mode != Mode::Engrave {
+            warns.extend(super::sweep::mid_turn_sweeps(
+                path,
+                &bands,
+                r,
+                cx.gouge_tol,
+                chord_tol,
+                &shanked,
+                &samples,
+                &in_stock,
+                &surface,
+                &part_at,
+            ));
         }
     }
 

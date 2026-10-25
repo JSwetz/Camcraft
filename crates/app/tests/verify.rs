@@ -271,6 +271,97 @@ fn holder_hits_a_part_island_when_the_flute_is_short() {
 }
 
 #[test]
+fn a_swinging_head_sweeps_the_island_wall_mid_turn() {
+    // Law (c3), M5.1 stage G: the plant the endpoint laws cannot see.
+    // The island wall stands at x=10, the tool column at x=4: the
+    // shank (r 7 over an 8 mm flute) reaches 11 - a hair from the
+    // wall's sampled column (10.05) when vertical, clear of it when
+    // leaning away, excused by the flute-kerf fiction when leaning
+    // into it. Both commanded poses pass law (c). The turns between
+    // them are the problem:
+    //  - the plunge runs home to B-30 while descending to z=-20: mid
+    //    path at turn fraction 0.0 the head is still vertical and the
+    //    shank grazes the wall (law (c) only ever sees the -30 pose,
+    //    and only at the to-points, where it misses);
+    //  - the lateral creeps toward the wall while swinging B-30 to
+    //    B+18: through fractions 0.25-0.75 the leaning column walks
+    //    across the wall's annulus, while the stated pose at the
+    //    to-point stands inside the kerf's reach.
+    let r = {
+        let mut loops = vec![rect(0.0, 0.0, 30.0, 30.0).loops()[0].clone()];
+        loops.push(
+            Loop::new(vec![p2(10.0, 5.0), p2(20.0, 5.0), p2(20.0, 25.0), p2(10.0, 25.0)]).unwrap(),
+        );
+        Region::new(loops).unwrap()
+    };
+    let stock = rect(0.0, 0.0, 30.0, 30.0);
+    let tool = ToolGeom {
+        radius: 4.0,
+        flute_len: 8.0,
+        shank_radius: 7.0,
+        shank_len: 6.0,
+        holder_radius: 0.0,
+        holder_len: 0.0,
+    };
+    let tilt = |deg: f64| [deg.to_radians().sin(), 0.0, deg.to_radians().cos()];
+    let t = Toolpath::new(vec![
+        Move::new(MoveKind::Rapid, p(-20.0, -20.0, 5.0), p(4.0, 15.0, 5.0), None),
+        Move::new(MoveKind::Plunge, p(4.0, 15.0, 5.0), p(4.0, 15.0, -20.0), Some(80.0))
+            .with_axis(tilt(-30.0)),
+        Move::new(MoveKind::Feed, p(4.0, 15.0, -20.0), p(6.0, 15.0, -26.0), Some(200.0))
+            .with_axis(tilt(18.0)),
+    ]);
+    let warns = verify(&t, &ctx(&r, Some(&stock), &tool, Mode::Boundary));
+    assert_eq!(
+        warns,
+        vec![
+            Warning::SweepHit { at: 1, part: true },
+            Warning::SweepHit { at: 2, part: true },
+        ],
+        "{warns:?}"
+    );
+}
+
+#[test]
+fn the_same_path_without_a_turn_convicts_under_c_not_c3() {
+    // The twin: every pose stays home, so the identical geometry is
+    // convicted by the endpoint law itself (the vertical shank does
+    // reach the wall at the to-points) - and gains no SweepHit,
+    // because a path that never changes pose has no mid-turn to
+    // sweep. The kinematic law is blind when there is no kinematics.
+    let r = {
+        let mut loops = vec![rect(0.0, 0.0, 30.0, 30.0).loops()[0].clone()];
+        loops.push(
+            Loop::new(vec![p2(10.0, 5.0), p2(20.0, 5.0), p2(20.0, 25.0), p2(10.0, 25.0)]).unwrap(),
+        );
+        Region::new(loops).unwrap()
+    };
+    let stock = rect(0.0, 0.0, 30.0, 30.0);
+    let tool = ToolGeom {
+        radius: 4.0,
+        flute_len: 8.0,
+        shank_radius: 7.0,
+        shank_len: 6.0,
+        holder_radius: 0.0,
+        holder_len: 0.0,
+    };
+    let t = Toolpath::new(vec![
+        Move::new(MoveKind::Rapid, p(-20.0, -20.0, 5.0), p(4.0, 15.0, 5.0), None),
+        Move::new(MoveKind::Plunge, p(4.0, 15.0, 5.0), p(4.0, 15.0, -20.0), Some(80.0)),
+        Move::new(MoveKind::Feed, p(4.0, 15.0, -20.0), p(6.0, 15.0, -26.0), Some(200.0)),
+    ]);
+    let warns = verify(&t, &ctx(&r, Some(&stock), &tool, Mode::Boundary));
+    assert_eq!(
+        warns,
+        vec![
+            Warning::ShankHit { at: 1, part: true },
+            Warning::ShankHit { at: 2, part: true },
+        ],
+        "{warns:?}"
+    );
+}
+
+#[test]
 fn low_rapid_through_stock_is_flagged() {
     // A lateral rapid 1 mm under the stock top crossing the plate.
     let t = Toolpath {

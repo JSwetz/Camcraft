@@ -3272,3 +3272,76 @@ fn v28_file_steps_to_v29_and_shank_avoid_round_trips() {
     };
     assert!(!*shank_avoid, "the v28 contour ran with the dodge off - the step-up must agree");
 }
+
+#[test]
+fn v29_file_steps_to_v30_and_a_sweep_warning_round_trips() {
+    // M5.1 stage G: the entity grammar does not move at all - the wire
+    // change is one new word in the cached warnings, `sweep_hit`. The
+    // step is pure: no v29 file can contain a tag its build never
+    // knew, and there is nothing to rewrite. The bump's job is the
+    // OTHER direction - a v30 file's sweep verdict is a word an older
+    // reader must refuse whole (the version gate) rather than fail
+    // serde over inside an entity.
+    let world = new_world();
+    project::open(&world, r#"{"version": 29, "entities": []}"#).expect("v29 steps up");
+    let p = tmp_path("v30a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v30 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v30 warning alphabet, hand-written so the tag is pinned: a
+    // contour whose cached path carries the mid-turn verdict. The
+    // moves are the v10 test's chain (rapid to the XY, plunge down);
+    // the pose that swung lives in the WARNING, not the moves - law
+    // (c3) judges the swing the generator recorded, and the cache
+    // keeps its verdict.
+    let text = r#"{
+        "version": 30,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "end_mill", "diameter": 4.0, "corner_r": 0.0,
+                      "flute_len": 12.0, "shank_d": 6.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 10000.0, "feed": 1200.0}},
+            {"name": "C1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"contour": {
+                 "stock_to_leave": 0.0, "clearance_z": 10.0, "retract_z": 8.0,
+                 "top_z": 5.0, "bottom_z": 3.0, "stepdown": 8.0,
+                 "feed": 800.0, "plunge_feed": 200.0, "climb": true,
+                 "lead": "none", "tolerance": 0.01,
+                 "tab_count": 0, "tab_width": 0.0, "tab_height": 0.0}},
+                 "cache": {"moves": [
+                     {"kind": "rapid", "from": [-50.0, -50.0, 10.0], "to": [0.0, 0.0, 10.0]},
+                     {"kind": "plunge", "from": [0.0, 0.0, 10.0], "to": [0.0, 0.0, 3.0]}
+                 ], "warnings": [{"sweep_hit": {"at": 1, "part": false}}]}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v30 warning grammar must read");
+    let e = model::find_by_name(&world, "C1").expect("op");
+    let tp = model::toolpath_of(&world, &e).expect("cached");
+    assert_eq!(
+        tp.warnings,
+        vec![camcraft_app::verify::Warning::SweepHit { at: 1, part: false }],
+        "the mid-turn verdict rides the cache"
+    );
+
+    // Write-parse-write stays a fixed point, the new word and all.
+    let p = tmp_path("v30b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        first.contains("\"sweep_hit\""),
+        "a stated verdict is never dropped on its way through disk: {first}"
+    );
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the sweep-flagged cache round-trips byte-identically");
+}

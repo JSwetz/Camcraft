@@ -9,7 +9,7 @@
 //! approximation, stated in full where it is used. No vendor source was
 //! consulted.
 //!
-//! Seven checks, each with the exact condition that raises it:
+//! Eight checks, each with the exact condition that raises it:
 //!
 //! - [`Warning::Crossing`] - two Feed moves whose Z ranges overlap cross
 //!   in XY. Proper crossings only: touching at a shared vertex (a closed
@@ -30,6 +30,14 @@
 //!   `cut_z + flute_len + shank_len` (holder) with radius above the
 //!   flute's to q, with material still above it, collides. Sampling at
 //!   vertices and edge midpoints is conservative, not exact.
+//! - [`Warning::SweepHit`] - the assembly meets material DURING a pose
+//!   change (M5.1 stage G, law (c3) in [`sweep`]): a coordinated block
+//!   drives table and head at once, so the reachable set between the
+//!   move's commanded letters includes every lerp of them at every
+//!   point along (and down) the path. Both endpoints pass (c); the
+//!   grid in between may not. Area/Boundary paths only; moves (c)
+//!   already convicted are skipped; advisory by nature - the same
+//!   angles the replay timeline turns on screen.
 //! - [`Warning::RapidInStock`] - a *lateral* rapid below the clearance
 //!   plane whose XY path still has material above it. Vertical rapids
 //!   are the tool retracting through its own kerf and stay exempt.
@@ -84,6 +92,7 @@ pub use crate::tools::ToolGeom;
 
 mod engine;
 mod laws;
+mod sweep;
 mod types;
 
 pub use types::{FixturePart, Mode, VerifyContext, Warning};

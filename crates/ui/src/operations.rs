@@ -156,6 +156,10 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             // shank against a vise reads differently from a rapid into
             // the table, and the fixes differ too.
             Warning::FixtureHit { fixture_part, .. } => (6 + *fixture_part as u8, false),
+            // Sweep hits (M5.1 stage G) split stock from part like the
+            // shank law's two flavors; the key space starts clear of
+            // the fixture range's worst case.
+            Warning::SweepHit { part, .. } => (200 + *part as u8, false),
         }
     }
     fn last_move(w: &Warning) -> usize {
@@ -163,6 +167,7 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             Warning::Crossing { moves } => moves[1],
             Warning::Gouge { at }
             | Warning::ShankHit { at, .. }
+            | Warning::SweepHit { at, .. }
             | Warning::RapidInStock { at }
             | Warning::FixtureHit { at, .. }
             | Warning::NonFinite { at }

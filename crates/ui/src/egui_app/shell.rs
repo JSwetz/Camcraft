@@ -705,7 +705,7 @@ fn viewport_panel(
     // draws only while the ribbon cell is armed: a snapshot with no
     // simulation running sees zero churn. The playhead is immediate-mode
     // view state (AGENTS.md's explicit exemption), never a command.
-    let mut sim_marker: Option<[f64; 3]> = None;
+    let mut sim_marker: Option<([f64; 3], [f64; 3])> = None;
     if state.sim.is_some() {
         let sc = sim_script(state);
         let total = sc.total.max(0.0);
@@ -764,8 +764,8 @@ fn viewport_panel(
         } else if !sc.is_empty()
             && let Some(sim) = &state.sim
         {
-            let p = sc.at(sim.t).pos;
-            sim_marker = Some([p.x, p.y, p.z]);
+            let f = sc.at(sim.t);
+            sim_marker = Some(([f.pos.x, f.pos.y, f.pos.z], f.axis));
         }
         ui.separator();
     }
@@ -972,7 +972,7 @@ fn viewport_panel(
         // as the labels. Stubs keep screen-space length (a zoomed-out view
         // must not lose the marker) and drop when they project away, so a
         // behind-the-camera point never draws garbage.
-        if let Some(p) = sim_marker {
+        if let Some((p, axis)) = sim_marker {
             let mvp = state.cam.mvp(aspect);
             if let Some(u) = interact::project_uv(&mvp, p) {
                 let c = egui::pos2(rx0 + u[0] * rw, ry0 + u[1] * rh);
@@ -995,6 +995,28 @@ fn viewport_panel(
                                 ),
                             );
                         }
+                    }
+                }
+                // The tool axis (M5.1 stage G): a white stub up the
+                // spindle, so a leaning head LEANS in the viewport and
+                // the mid-turn law has a visible referent. It points
+                // tip-to-spindle, standing in where the tool's real
+                // body would be; on a prismatic path it is the Z stub
+                // a hair longer and reads as before.
+                let tip = [
+                    p[0] + axis[0] * 10.0,
+                    p[1] + axis[1] * 10.0,
+                    p[2] + axis[2] * 10.0,
+                ];
+                if let Some(v) = interact::project_uv(&mvp, tip) {
+                    let dir = egui::pos2(rx0 + v[0] * rw, ry0 + v[1] * rh) - c;
+                    let len = dir.length();
+                    if len > 0.5 {
+                        let k = len.min(26.0) / len;
+                        ui.painter().line_segment(
+                            [c, c + dir * k],
+                            egui::Stroke::new(2.0, egui::Color32::from_gray(225)),
+                        );
                     }
                 }
                 ui.painter().circle_stroke(
@@ -1079,11 +1101,12 @@ fn viewport_panel(
     }
 }
 
-/// The transport bar's right-hand text: `{op} · {verb} · {t}/{total} s`,
-/// the verb the current segment reports (RAPID, the live feed through the
-/// units lens, DWELL n s, END at the finish, STANDBY before the first
-/// move). Pure and `pub(crate)` so the tests pin the string law without a
-/// window.
+/// The transport bar's right-hand text: `{op} · {verb}[ · A/B/C] ·
+/// {t}/{total} s`, the verb the current segment reports (RAPID, the live
+/// feed through the units lens, DWELL n s, END at the finish, STANDBY
+/// before the first move), and - since M5.1 stage G - the commanded
+/// letters whenever the head is off home. Pure and `pub(crate)` so the
+/// tests pin the string law without a window.
 pub(crate) fn sim_readout(
     sc: &camcraft_app::sim::Script,
     t: f64,
@@ -1103,7 +1126,18 @@ pub(crate) fn sim_readout(
         .op
         .and_then(|i| sc.ops.get(i))
         .map_or("(none)", |s| s.as_str());
-    format!("{op} · {verb} · {t:.1}/{:.1} s", sc.total.max(0.0))
+    // The head's letters (M5.1 stage G), stated only while it is off
+    // home: a prismatic program's readout is the exact string it
+    // always was (the transport-law tests pin it), and the moment
+    // the timeline carries a tilt, the numbers the post wrote and
+    // the mid-turn law judged become readable mid-swing.
+    let pose = if camcraft_app::cl::is_vertical(&f.axis) {
+        String::new()
+    } else {
+        let [a, b, c] = camcraft_app::cl::axis_to_angles(f.axis);
+        format!(" · A{a:.0} B{b:.0} C{c:.0}")
+    };
+    format!("{op} · {verb}{pose} · {t:.1}/{:.1} s", sc.total.max(0.0))
 }
 
 /// Rebuild the timeline from the live world, every frame: the same

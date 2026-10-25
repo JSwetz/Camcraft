@@ -16,6 +16,7 @@ fn tr() -> Traverse {
     Traverse {
         xy: 6000.0,
         z: 4000.0,
+        ..Default::default()
     }
 }
 
@@ -212,4 +213,46 @@ fn two_operations_form_one_continuous_timeline() {
     let f = sc.at(sc.cum[op1_start] - conn.secs / 2.0);
     assert_eq!(f.readout, Readout::Rapid);
     assert_eq!(f.op, Some(1));
+}
+
+#[test]
+fn a_posed_move_paces_on_its_rotary_slot_through_app_sim() {
+    // The app seam of M5.1 stage G: the machine file's B rate reaches
+    // the timeline through `app::sim`'s own Traverse, and a move
+    // paced by its turn shows both clocks - XY holding at arrival
+    // while the head is still mid-swing.
+    use camcraft_app::cl::{Move, MoveKind};
+    use camcraft_app::geometry::Point3;
+    use camcraft_app::sim::RotRate;
+    let mut t = tr();
+    t.rot[1] = RotRate {
+        normal: Some(1000.0),
+        rapid: None,
+    };
+    let path = Toolpath::new(vec![
+        Move::new(
+            MoveKind::Rapid,
+            Point3::new(-20.0, -20.0, 5.0),
+            Point3::new(0.0, 0.0, 5.0),
+            None,
+        ),
+        Move::new(
+            MoveKind::Feed,
+            Point3::new(0.0, 0.0, 5.0),
+            Point3::new(30.0, 0.0, 5.0),
+            Some(6000.0),
+        )
+        .with_axis([1.0, 0.0, 0.0]), // B = 90
+    ]);
+    let sc = script([("Tilt1", &path)], &t);
+    assert!((sc.segs[1].secs - 5.4).abs() < 1e-9, "60*90/1000 paces it, not 60*30/6000");
+    // Half a turn in, the table has long held at its destination.
+    let f = sc.at(sc.cum[0] + 2.7);
+    assert!((f.pos.x - 30.0).abs() < 1e-9, "XY holds at arrival");
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    assert!(
+        (f.axis[0] - s).abs() < 1e-9 && (f.axis[2] - s).abs() < 1e-9,
+        "the head is exactly mid-swing: {:?}",
+        f.axis
+    );
 }

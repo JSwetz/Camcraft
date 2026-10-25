@@ -111,6 +111,14 @@ pub enum Warning {
     /// whether the offended material is the part/an island (never to be
     /// cut) rather than stock the op simply has not cleared yet.
     ShankHit { at: usize, part: bool },
+    /// The assembly swept through material DURING a turn (M5.1 stage
+    /// G): the move commands a new pose, and somewhere in the swing -
+    /// with the table partway along and the head partway round, in
+    /// either family's order of arrival - a band meets steel, though
+    /// both endpoint poses pass law (c) clean. Advisory, one per
+    /// move, at most: moves law (c) already convicted are not
+    /// re-tried here, and `part` reads like (c)'s.
+    SweepHit { at: usize, part: bool },
     /// Rapid `move` travels under the clearance plane through stock.
     RapidInStock { at: usize },
     /// Move `move` runs the named `fixture_part` of the machine through
@@ -147,6 +155,11 @@ impl core::fmt::Display for Warning {
             Warning::ShankHit { at, part } => write!(
                 f,
                 "shank/holder at move {at} collides with the {}",
+                if *part { "part or an island" } else { "uncut stock" }
+            ),
+            Warning::SweepHit { at, part } => write!(
+                f,
+                "shank swept through the {} mid-turn at move {at}",
                 if *part { "part or an island" } else { "uncut stock" }
             ),
             Warning::RapidInStock { at } => {

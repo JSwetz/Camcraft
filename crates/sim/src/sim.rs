@@ -10,7 +10,14 @@
 //! The chain is the truth (M1.6's law): the sim walks the expanded
 //! moves - rapids, feeds, plunge hops, tapping retracts - never the
 //! cycle records, and so it sees exactly what verify saw and the
-//! overlay draws. Cycles contribute one thing only: their dwell, the
+//! overlay draws. Since M5.1 stage G the chain carries its ORIENTATIONS
+//! too: every seg knows the A/B/C letters it starts and ends with
+//! (`cl::pose`'s canonical convention - the same letters the post
+//! commands), the machine's deg/min rates pace the turning legs, and
+//! a frame's tool axis interpolates by each family's own clock. A
+//! prismatic document - every one this sim ever ran before stage G -
+//! holds `home` letters throughout: identical totals, identical
+//! frames. Cycles contribute one thing only: their dwell, the
 //! seconds the machine waits at the bottom, which the move chain
 //! cannot express (a zero-length move would poison the distance
 //! laws). Between operations the sim inserts the connector rapid the
@@ -24,11 +31,27 @@ use std::f64::consts::PI;
 
 /// Axis traverse rates, mm/min, read off the machine's X/Y/Z rapids.
 /// The default stands in when a machine file names no usable axis:
-/// the shipped 3-axis VMC's own numbers.
+/// the shipped 3-axis VMC's own numbers. The rotary rates (M5.1
+/// stage G) are degrees per minute under their OWN roof - an angle's
+/// pace never crosses into the mm/min fields above (stage C's unit
+/// law, kept) - indexed by RS-274 address: `[0]` is A, `[1]` is B,
+/// `[2]` is C. `None` is the unstated-limit law again: a machine that
+/// states no rate for a letter is given no wait for it; the timeline
+/// never invents a pause the file did not promise.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Traverse {
     pub xy: f64,
     pub z: f64,
+    pub rot: [RotRate; 3],
+}
+
+/// One rotary's stated rates, degrees per minute.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RotRate {
+    /// Coordinated (G1) pace - what turns the head while the cut runs.
+    pub normal: Option<f64>,
+    /// Positioning (G0) pace - what turns the head through the air.
+    pub rapid: Option<f64>,
 }
 
 impl Default for Traverse {
@@ -36,6 +59,7 @@ impl Default for Traverse {
         Self {
             xy: 6000.0,
             z: 4000.0,
+            rot: [RotRate::default(); 3],
         }
     }
 }
@@ -45,14 +69,52 @@ fn rate(v: Option<&Value>) -> Option<f64> {
     (v.is_finite() && v > 0.0).then_some(v)
 }
 
+/// The RS-274 rotary address as its timeline slot: A turns about X,
+/// B about Y, C about Z - everything else is not a letter the post's
+/// motion model commands (`pose.rs`'s convention, same inventory
+/// `machine::is_rotary_letter` keeps).
+fn rot_slot(letter: &str) -> Option<usize> {
+    match letter {
+        "A" => Some(0),
+        "B" => Some(1),
+        "C" => Some(2),
+        _ => None,
+    }
+}
+
 impl Traverse {
     /// The rapid rates from a parsed `.mch`: XY takes the *slowest*
     /// horizontal rapid (a simultaneous two-axis move is paced by its
     /// slowest axis), Z its own. Unreadable files leave the defaults
-    /// standing.
+    /// standing. Since stage G the rotary entries carry the same
+    /// `speeds` shape under `kinematics.static.rotaries`, in degrees
+    /// per minute, and land in the letter's own slot (an A/B/C letter
+    /// that is not an address - a Q slide - is not a rotation the
+    /// post's motion model commands, and joins nothing).
     #[must_use]
     pub fn from_machine(m: &Value) -> Self {
         let mut t = Self::default();
+        for r in m
+            .get("kinematics")
+            .and_then(|k| k.get("static"))
+            .and_then(|s| s.get("rotaries"))
+            .and_then(|a| a.as_array())
+            .map(|v| v.iter())
+            .unwrap_or_default()
+        {
+            let Some(i) = r
+                .get("letter")
+                .and_then(Value::as_str)
+                .and_then(rot_slot)
+            else {
+                continue;
+            };
+            let sp = r.get("speeds");
+            t.rot[i] = RotRate {
+                normal: sp.and_then(|s| rate(s.get("normal"))),
+                rapid: sp.and_then(|s| rate(s.get("rapid"))),
+            };
+        }
         let Some(axes) = m
             .get("kinematics")
             .and_then(|k| k.get("static"))
@@ -87,7 +149,10 @@ impl Traverse {
     }
 
     /// Simultaneous-axis rapid time: each axis travels on its own
-    /// rate; the move ends when its slowest axis arrives.
+    /// rate; the move ends when its slowest axis arrives. The rotary
+    /// legs' time joins through [`Traverse::rot_secs`] at the move
+    /// law, so this stays the linear story - and the prismatic guard
+    /// (no usable traverse rates, no time) its history had.
     fn rapid_secs(&self, d: Point3) -> f64 {
         if !(self.xy > 0.0 && self.z > 0.0) {
             return 0.0;
@@ -95,6 +160,26 @@ impl Traverse {
         60.0 * (d.x.abs() / self.xy)
             .max(d.y.abs() / self.xy)
             .max(d.z.abs() / self.z)
+    }
+
+    /// The rotary leg: each commanded letter arrives on its own rate
+    /// and the axis group waits for its slowest. An unstated rate is
+    /// no wait at all (the timeline will not invent a pause the file
+    /// did not promise), and a letter with no motion contributes zero
+    /// - the same totals the linear law would take on a zero leg.
+    fn rot_secs(&self, dabc: [f64; 3], rapid: bool) -> f64 {
+        let mut best: f64 = 0.0;
+        for (i, d) in dabc.iter().enumerate() {
+            let r = if rapid {
+                self.rot[i].rapid.or(self.rot[i].normal)
+            } else {
+                self.rot[i].normal.or(self.rot[i].rapid)
+            };
+            if let Some(r) = r.filter(|r| r.is_finite() && *r > 0.0) {
+                best = best.max(60.0 * d.abs() / r);
+            }
+        }
+        best
     }
 }
 
@@ -114,6 +199,20 @@ pub struct Seg {
     pub feed: Option<f64>,
     /// Index into [`Script::ops`].
     pub op: usize,
+    /// The commanded A/B/C letters (canonical degrees, `cl::pose`'s
+    /// convention) at the move's start and end (M5.1 stage G).
+    /// `(X, X)` is a no-turn move - and every move ever scripted
+    /// before stage G has `X = [0, 0, 0]` at both ends.
+    pub abc: ([f64; 3], [f64; 3]),
+    /// The linear legs' own travel time and the rotary legs' (stage
+    /// G): a coordinated move drives every axis at once and waits for
+    /// its slowest, so `secs == pl.max(rl)` (dwell-free) and `at()`
+    /// advances each family's fraction by its own clock, arriving and
+    /// holding early exactly like the axes do. `rl = 0` and `pl =
+    /// secs` on every prismatic move - bit-identical to the law that
+    /// walked one shared fraction before stage G.
+    pub pl: f64,
+    pub rl: f64,
 }
 
 /// What the readout says at a point in time.
@@ -138,6 +237,11 @@ pub struct Frame {
     pub readout: Readout,
     /// The timeline is spent (t at or past total).
     pub done: bool,
+    /// The commanded tool axis (unit, tip-to-spindle, `cl::pose`'s
+    /// convention) at this instant - the letters mid-travel while a
+    /// turning move runs, its endpoints otherwise. Every frame of a
+    /// prismatic program is exactly `[0.0, 0.0, 1.0]`.
+    pub axis: [f64; 3],
 }
 
 /// A whole document's timeline. `cum[i]` is the *end* of `segs[i]`'s
@@ -171,12 +275,14 @@ impl Script {
     /// final point with `done`.
     #[must_use]
     pub fn at(&self, t: f64) -> Frame {
+        let home = || [0.0, 0.0, 1.0];
         let Some(first) = self.segs.first() else {
             return Frame {
                 pos: Point3::new(0.0, 0.0, 0.0),
                 op: None,
                 readout: Readout::Idle,
                 done: true,
+                axis: home(),
             };
         };
         if !t.is_finite() {
@@ -188,6 +294,7 @@ impl Script {
                 op: Some(first.op),
                 readout: Readout::Idle,
                 done: false,
+                axis: seg_axis(first, 0.0),
             };
         }
         if t >= self.total {
@@ -200,6 +307,7 @@ impl Script {
                 op: Some(last.op),
                 readout: Readout::Idle,
                 done: true,
+                axis: seg_axis(last, 1.0),
             };
         }
         // The first segment whose window ends after t; nothing past
@@ -215,13 +323,14 @@ impl Script {
                 1.0
             };
             Frame {
-                pos: at_seg(s, f),
+                pos: at_seg(s, leg_frac(s.pl, f, s.secs)),
                 op: Some(s.op),
                 readout: match s.feed {
                     Some(v) => Readout::Feed(v),
                     None => Readout::Rapid,
                 },
                 done: false,
+                axis: seg_axis(s, leg_frac(s.rl, f, s.secs)),
             }
         } else if local - s.secs < s.dwell {
             Frame {
@@ -229,6 +338,7 @@ impl Script {
                 op: Some(s.op),
                 readout: Readout::Dwell(s.dwell),
                 done: false,
+                axis: seg_axis(s, 1.0),
             }
         } else {
             // Past every window (or a float whisper of one at the
@@ -240,9 +350,53 @@ impl Script {
                 op: Some(s.op),
                 readout: Readout::Idle,
                 done: t >= self.total,
+                axis: seg_axis(s, 1.0),
             }
         }
     }
+}
+
+/// One axis family's fraction at shared-time fraction `f` of a move
+/// of `secs` whose family leg needs `leg` of them: the family runs
+/// its own clock at full stroke and holds at 1.0 once arrived -
+/// stage G's coordinated-motion law in one line. `leg == 0` (a
+/// family nothing moves in, every family before stage G) arrives at
+/// the start and holds; a zero-length move (`secs == 0`) is at its
+/// end by definition.
+fn leg_frac(leg: f64, f: f64, secs: f64) -> f64 {
+    if secs <= 0.0 {
+        return 1.0;
+    }
+    if leg <= 0.0 {
+        return 1.0;
+    }
+    if leg >= secs {
+        // The pace-setting family: exact on the shared clock.
+        return f;
+    }
+    (f * secs / leg).min(1.0)
+}
+
+/// The tool axis at letters-fraction `g` of a segment's turn, by
+/// `cl::pose`'s own composition: the letters interpolate linearly
+/// (each rotary runs its own stroke - the straight line between two
+/// commanded addresses IS the machine's motion), and the vector is
+/// rebuilt FROM the letters, never round-tripped through floats the
+/// way the pose law demands. Both endpoints vertical - every
+/// prismatic move - gives the home vector bit-for-bit.
+fn seg_axis(s: &Seg, g: f64) -> [f64; 3] {
+    let [a0, b0, c0] = s.abc.0;
+    let [a1, b1, c1] = s.abc.1;
+    if (a0, b0, c0) == (a1, b1, c1) {
+        // No turn at all: the endpoint letters ARE the held pose.
+        return crate::cl::angles_to_axis([a1, b1, c1]).unwrap_or([0.0, 0.0, 1.0]);
+    }
+    let lerp = [
+        a0 + (a1 - a0) * g,
+        b0 + (b1 - b0) * g,
+        c0 + (c1 - c0) * g,
+    ];
+    crate::cl::angles_to_axis(lerp).unwrap_or([0.0, 0.0, 1.0])
 }
 
 /// The point at fraction `f` along a segment (arc-aware; the angle
@@ -321,18 +475,26 @@ fn delta(a: Point3, b: Point3) -> Point3 {
     Point3::new(b.x - a.x, b.y - a.y, b.z - a.z)
 }
 
-/// One move's travel time: feeds divide through the feed word, G0
-/// divides through the axis rapids, and a move with nothing to say
-/// (no usable feed where a feed belongs) falls back to the rapid law
-/// - never zero, never a hang.
-fn move_secs(m: &Move, tr: &Traverse) -> f64 {
-    match m.kind {
+/// One move's two leg times (stage G): the linear legs' time and the
+/// rotary legs', feeds dividing the path through the feed word, G0
+/// dividing through the axis rapids, letters dividing through the
+/// machine's deg/min rates, and a move with nothing to say (no
+/// usable feed where a feed belongs) falls back to the rapid law on
+/// its linear legs - never zero, never a hang. The move takes the
+/// longer leg and waits for it: coordinated motion.
+fn move_legs(m: &Move, tr: &Traverse, dabc: [f64; 3]) -> (f64, f64) {
+    let rl = match m.kind {
+        MoveKind::Rapid => tr.rot_secs(dabc, true),
+        MoveKind::Feed | MoveKind::Plunge => tr.rot_secs(dabc, false),
+    };
+    let pl = match m.kind {
         MoveKind::Rapid => tr.rapid_secs(delta(m.from, m.to)),
         MoveKind::Feed | MoveKind::Plunge => match m.feed {
             Some(f) if f.is_finite() && f > 0.0 => 60.0 * path_len(m) / f,
             _ => tr.rapid_secs(delta(m.from, m.to)),
         },
-    }
+    };
+    (pl, rl)
 }
 
 /// The timeline for a run of operations: `(name, path)` pairs in
@@ -346,6 +508,12 @@ pub fn script<'a>(
     let mut sc = Script::default();
     let mut cum: f64 = 0.0;
     let mut last: Option<Point3> = None;
+    // The letters the controller is holding when this move's block is
+    // read (M5.1 stage G): canonical form, home vertical, stated by
+    // each cut move's axis and unchanged through rapids and op
+    // connectors - the same modal law the post writes A/B/C words by
+    // and `verify` reads an unposed move as vertical with.
+    let mut held = [0.0f64; 3];
     for (name, t) in ops {
         let Some(path_start) = t.start() else {
             continue; // an empty path contributes no time and no name
@@ -368,6 +536,8 @@ pub fn script<'a>(
         if let Some(prev) = last
             && prev != path_start
         {
+            // The connector commands no angle: the head holds its
+            // pose through the air (the modal law, once more).
             let secs = tr.rapid_secs(delta(prev, path_start));
             sc.segs.push(Seg {
                 from: prev,
@@ -377,6 +547,9 @@ pub fn script<'a>(
                 dwell: 0.0,
                 feed: None,
                 op: oi,
+                abc: (held, held),
+                pl: secs,
+                rl: 0.0,
             });
             cum += secs;
             sc.cum.push(cum);
@@ -400,11 +573,30 @@ pub fn script<'a>(
                 (here, here)
             };
             here = to;
-            let secs = if m.is_finite() {
-                move_secs(m, tr)
+            // The letters this move ends holding (the modal law with
+            // verify's reading: a rapid commands no angle and keeps
+            // the held pose; a cut that states one turns to it; a cut
+            // that states none is vertical, which is what law (c)
+            // already cuts it as). A corrupt move's axis is a non-
+            // direction - vertical is the honest read of that too.
+            let next = if m.is_finite() {
+                match m.kind {
+                    MoveKind::Rapid => held,
+                    MoveKind::Feed | MoveKind::Plunge => m
+                        .axis
+                        .and_then(crate::cl::normalize_axis)
+                        .map_or([0.0; 3], crate::cl::axis_to_angles),
+                }
             } else {
-                0.0
+                held
             };
+            let dabc = [next[0] - held[0], next[1] - held[1], next[2] - held[2]];
+            let (pl, rl) = if m.is_finite() {
+                move_legs(m, tr, dabc)
+            } else {
+                (0.0, 0.0)
+            };
+            let secs = pl.max(rl);
             sc.segs.push(Seg {
                 from,
                 to,
@@ -417,7 +609,11 @@ pub fn script<'a>(
                     m.feed
                 },
                 op: oi,
+                abc: (held, next),
+                pl,
+                rl,
             });
+            held = next;
             cum += secs;
             sc.cum.push(cum);
         }
@@ -479,6 +675,7 @@ mod tests {
         let tr = Traverse {
             xy: 6000.0,
             z: 4000.0,
+            ..Default::default()
         };
         // 60 mm XY arrives at 0.6 s; the 10 mm Z leg at 0.15 s - the
         // move is over at 0.6.
@@ -492,10 +689,12 @@ mod tests {
     fn feed_time_is_distance_over_feed() {
         let tr = Traverse::default();
         let m = Move::new(MoveKind::Feed, p(0.0, 0.0, 0.0), p(30.0, 0.0, 0.0), Some(500.0));
-        assert!((move_secs(&m, &tr) - 3.6).abs() < 1e-9); // 30 mm at 500 mm/min
+        let (pl, rl) = move_legs(&m, &tr, [0.0; 3]);
+        assert!((pl.max(rl) - 3.6).abs() < 1e-9); // 30 mm at 500 mm/min
         // A feed move that lost its feed word falls back to G0 pace.
         let lost = Move::new(MoveKind::Feed, p(0.0, 0.0, 0.0), p(60.0, 0.0, 0.0), None);
-        assert!((move_secs(&lost, &tr) - 0.6).abs() < 1e-9);
+        let (pl, rl) = move_legs(&lost, &tr, [0.0; 3]);
+        assert!((pl.max(rl) - 0.6).abs() < 1e-9);
     }
 
     #[test]
@@ -632,7 +831,8 @@ mod tests {
             Some(100.0 * 10.0 * PI / 2.0), // arc length × 100: secs = 0.6
         )
         .with_arc(Point2::new(0.0, 0.0), true);
-        assert!((move_secs(&m, &tr) - 0.6).abs() < 1e-9);
+        let (pl, rl) = move_legs(&m, &tr, [0.0; 3]);
+        assert!((pl.max(rl) - 0.6).abs() < 1e-9);
         t.moves.push(m);
         let sc = script([("A", &t)], &tr);
         let a = sc.at(0.0);
@@ -705,9 +905,272 @@ mod tests {
             tr,
             Traverse {
                 xy: 6000.0,
-                z: 4000.0
+                z: 4000.0,
+                rot: [RotRate::default(); 3],
             }
         );
         assert_eq!(Traverse::from_machine(&Value::Null), Traverse::default());
+    }
+
+    // ---- M5.1 stage G: the kinematic timeline ----------------------------
+
+    #[test]
+    fn a_tilthead_file_turns_the_rotary_slots() {
+        // The parts-tree machine: A and B state 5000 deg/min rapid,
+        // 2000 normal, through the mirror's rotary speeds block -
+        // parsed here in the same static grammar the mirror emits.
+        let m = serde_json::json!({
+            "kinematics": { "static": { "axes": [], "rotaries": [
+                {"letter": "A", "type": "rotary", "direction": [1.0, 0.0, 0.0],
+                 "speeds": {"normal": 2000.0, "rapid": 5000.0}},
+                {"letter": "B", "type": "rotary", "direction": [0.0, 1.0, 0.0],
+                 "speeds": {"normal": 2000.0, "rapid": 5000.0}},
+                {"letter": "U", "type": "rotary"},
+            ] } }
+        });
+        let tr = Traverse::from_machine(&m);
+        assert_eq!(tr.rot[0].rapid, Some(5000.0));
+        assert_eq!(tr.rot[0].normal, Some(2000.0));
+        assert_eq!(tr.rot[1].rapid, Some(5000.0), "B turns too");
+        assert_eq!(tr.rot[2], RotRate::default(), "no C on this head");
+    }
+
+    #[test]
+    fn a_rapid_never_turns_the_head() {
+        // The modal law the post writes by and stamp.rs keeps: an A/B/C
+        // word rides the CUT block that changes the pose, never a G0 -
+        // even a rapid whose cache entry carries an axis (which the
+        // generators never write, but the timeline must not invent a
+        // turn from) turns nothing and takes only its linear time.
+        let tr = Traverse {
+            rot: [
+                RotRate::default(),
+                RotRate {
+                    normal: Some(2000.0),
+                    rapid: Some(5000.0),
+                },
+                RotRate::default(),
+            ],
+            ..Default::default()
+        };
+        let mut t = Toolpath::default();
+        t.moves.push(
+            Move::new(MoveKind::Rapid, p(0.0, 0.0, 10.0), p(30.0, 0.0, 10.0), None)
+                .with_axis(crate::cl::angles_to_axis([0.0, 90.0, 0.0]).unwrap()),
+        );
+        let sc = script([("A", &t)], &tr);
+        assert!((sc.segs[0].secs - 0.3).abs() < 1e-9, "a rapid turns nothing");
+        assert_eq!(sc.segs[0].abc, ([0.0; 3], [0.0; 3]));
+        assert!(sc.segs[0].rl == 0.0);
+        assert_eq!(sc.at(0.15).axis, [0.0, 0.0, 1.0], "the pose never left home");
+    }
+
+    #[test]
+    fn the_head_turns_on_the_move_that_commands_it() {
+        // The post's own motion model (fanuc_post's RTCP test): the
+        // letters ride the block of the move that changes them, so a
+        // coordinated G1 that ends posed 90 deg of B spends its turn
+        // leg at the NORMAL rate - 90 deg at 2000 deg/min is 2.7 s,
+        // pacing the whole move if the linear legs are quicker.
+        let tr = Traverse {
+            rot: [
+                RotRate::default(),
+                RotRate {
+                    normal: Some(2000.0),
+                    rapid: Some(5000.0),
+                },
+                RotRate::default(),
+            ],
+            ..Default::default()
+        };
+        let mut t = Toolpath::default();
+        t.moves.push(
+            Move::new(
+                MoveKind::Feed,
+                p(0.0, 0.0, 0.0),
+                p(30.0, 0.0, 0.0),
+                Some(6000.0),
+            )
+            .with_axis(crate::cl::angles_to_axis([0.0, 90.0, 0.0]).unwrap()),
+        );
+        let sc = script([("A", &t)], &tr);
+        assert!((sc.segs[0].secs - 2.7).abs() < 1e-9, "the head paced the line");
+        // Each family runs its own clock: the XY legs need 0.3 s of
+        // the 2.7 s the head takes, so halfway through their leg the
+        // table is at x = 15, and from 0.3 s on the position HOLDS at
+        // the endpoint while B keeps turning - arrival, then a wait
+        // for the slowest axis, exactly as the real axes do.
+        let q = sc.at(0.15);
+        assert!((q.pos.x - 15.0).abs() < 1e-9, "the linear legs pace themselves");
+        assert!(
+            (q.axis[0] - (90.0f64 * (0.15 / 2.7)).to_radians().sin()).abs() < 1e-12,
+            "the head barely started"
+        );
+        let f = sc.at(0.5);
+        assert!((f.pos.x - 30.0).abs() < 1e-9, "the fast legs hold");
+        let g = sc.at(2.7 * 0.5);
+        assert!((g.axis[0] - (45.0f64).to_radians().sin()).abs() < 1e-9, "B at 45 mid-turn");
+        assert!((g.axis[2] - (45.0f64).to_radians().cos()).abs() < 1e-9);
+        let e = sc.at(2.7);
+        assert!(
+            e.axis[0] > 1.0 - 1e-12 && e.axis[1].abs() < 1e-12 && e.axis[2].abs() < 1e-12,
+            "the endpoint pose is the commanded one: {:?}",
+            e.axis
+        );
+    }
+
+    #[test]
+    fn prismatic_programs_never_learn_the_head_moved() {
+        // Stage G's purity law, the same shape every earlier stage
+        // kept: no letters, no turn legs, no frame tilt - the axis
+        // reads EXACTLY home through a whole 2.5-D program, and the
+        // timelines are what they always were.
+        let tr = Traverse {
+            rot: [
+                RotRate {
+                    normal: Some(2000.0),
+                    rapid: Some(5000.0),
+                },
+                RotRate::default(),
+                RotRate::default(),
+            ],
+            ..Default::default()
+        };
+        let mut t = Toolpath::default();
+        t.moves.push(Move::new(MoveKind::Rapid, p(0.0, 0.0, 10.0), p(0.0, 0.0, 2.0), None));
+        t.moves.push(Move::new(
+            MoveKind::Feed,
+            p(0.0, 0.0, 2.0),
+            p(20.0, 0.0, 2.0),
+            Some(1000.0),
+        ));
+        t.moves.push(Move::new(
+            MoveKind::Feed,
+            p(20.0, 0.0, 2.0),
+            p(20.0, 10.0, 2.0),
+            Some(1000.0),
+        ));
+        let sc = script([("P", &t)], &tr);
+        for k in 0..=20 {
+            let f = sc.at(sc.total * k as f64 / 20.0);
+            assert_eq!(f.axis, [0.0, 0.0, 1.0], "a prismatic frame tilted at t={k}");
+        }
+        // The totals are the M1.6 arithmetic, untouched by the
+        // rotary rates the same machine states: 8 mm Z rapid at 4000,
+        // 20 mm and 10 mm feeds at 1000.
+        let want = 60.0 * 8.0 / 4000.0 + 60.0 * 20.0 / 1000.0 + 60.0 * 10.0 / 1000.0;
+        assert!((sc.total - want).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_unposed_cut_sends_the_letters_home() {
+        // The modal law the post writes and verify reads: a cut that
+        // states no axis IS vertical to the machine model - so the
+        // move after a tilted row turns back through the head's leg,
+        // and the turn is paced (and a pose change between the two
+        // is what the sweep law of stage G's verify half exists for).
+        let tr = Traverse {
+            rot: [
+                RotRate::default(),
+                RotRate {
+                    normal: Some(3000.0),
+                    rapid: None,
+                },
+                RotRate::default(),
+            ],
+            ..Default::default()
+        };
+        let mut t = Toolpath::default();
+        t.moves.push(
+            Move::new(
+                MoveKind::Feed,
+                p(0.0, 0.0, 0.0),
+                p(10.0, 0.0, 0.0),
+                Some(1000.0),
+            )
+            .with_axis(crate::cl::angles_to_axis([0.0, 60.0, 0.0]).unwrap()),
+        );
+        t.moves.push(Move::new(
+            MoveKind::Rapid,
+            p(10.0, 0.0, 0.0),
+            p(10.0, 5.0, 0.0),
+            None,
+        ));
+        t.moves.push(Move::new(
+            MoveKind::Feed,
+            p(10.0, 5.0, 0.0),
+            p(20.0, 5.0, 0.0),
+            Some(1000.0),
+        ));
+        let sc = script([("P", &t)], &tr);
+        // The letters ride an axis round-trip (60 deg -> vector ->
+        // letters), so they speak with float accents: tolerance in,
+        // exactness out of the comparison.
+        let close = |a: [f64; 3], b: [f64; 3]| {
+            a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9)
+        };
+        assert_eq!(sc.segs[0].abc.0, [0.0; 3], "home at the start of program");
+        assert!(close(sc.segs[0].abc.1, [0.0, 60.0, 0.0]));
+        // The rapid carries the tilt (post modal: no new word).
+        assert!(close(sc.segs[1].abc.0, [0.0, 60.0, 0.0]) && sc.segs[1].abc.0 == sc.segs[1].abc.1);
+        // The unposed cut returns home: 60 deg back at 3000 is 1.2 s,
+        // inside the 0.6 s of 10 mm at 1000 - the turn paces it.
+        assert!(close(sc.segs[2].abc.0, [0.0, 60.0, 0.0]));
+        assert_eq!(sc.segs[2].abc.1, [0.0; 3], "home is home, exactly");
+        assert!((sc.segs[2].secs - 1.2).abs() < 1e-9, "the way home was the slow leg");
+    }
+
+    #[test]
+    fn leg_windows_meet_at_the_boundary_letters() {
+        // Continuity, frame by frame: the pose at the last breath of
+        // one seg is the pose at the first of the next, across turns,
+        // holds, and resets - the chain a real controller walks.
+        let tr = Traverse {
+            rot: [
+                RotRate::default(),
+                RotRate {
+                    normal: Some(2000.0),
+                    rapid: Some(2000.0),
+                },
+                RotRate::default(),
+            ],
+            ..Default::default()
+        };
+        let mut t = Toolpath::default();
+        t.moves.push(
+            Move::new(MoveKind::Feed, p(0.0, 0.0, 0.0), p(5.0, 0.0, 0.0), Some(500.0))
+                .with_axis(crate::cl::angles_to_axis([30.0, 30.0, 0.0]).unwrap()),
+        );
+        t.moves.push(Move::new(
+            MoveKind::Rapid,
+            p(5.0, 0.0, 0.0),
+            p(5.0, 0.0, 8.0),
+            None,
+        ));
+        t.moves.push(Move::new(
+            MoveKind::Feed,
+            p(5.0, 0.0, 8.0),
+            p(9.0, 0.0, 8.0),
+            Some(500.0),
+        ));
+        let sc = script([("C", &t)], &tr);
+        for i in 0..sc.segs.len() - 1 {
+            let a = sc.at(sc.cum[i] - 1e-9);
+            let b = sc.at(sc.cum[i]);
+            let d = (a.axis[0] * b.axis[0]
+                + a.axis[1] * b.axis[1]
+                + a.axis[2] * b.axis[2])
+                .clamp(-1.0, 1.0)
+                .acos()
+                .to_degrees();
+            assert!(d < 0.01, "the head jumped {d} deg across the seg boundary {i}");
+        }
+        // And every frame states a UNIT vector - the contract pose.rs
+        // demands of any axis the stream carries.
+        for k in 0..=40 {
+            let f = sc.at(sc.total * k as f64 / 40.0);
+            let len = f.axis[0] * f.axis[0] + f.axis[1] * f.axis[1] + f.axis[2] * f.axis[2];
+            assert!((len - 1.0).abs() < 1e-12, "a non-unit axis at t={k}");
+        }
     }
 }

@@ -235,6 +235,16 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // anything else by omitting it.
         file.version = 29;
     }
+    if file.version == 29 {
+        // v29 -> v30: the cache's warning alphabet gains one variant
+        // (`sweep_hit`, M5.1 stage G's law (c3)). Nothing to rewrite:
+        // no v29 file can contain a tag its generator never knew, and
+        // a cached verdict from the old laws re-derives stale the
+        // moment its op regenerates. The bump is the reader's
+        // protection: a v30 file's `sweep_hit` cache is a word a v29
+        // build cannot spell, and serde would fail closed anyway.
+        file.version = 30;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
