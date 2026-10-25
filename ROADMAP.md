@@ -1497,7 +1497,20 @@ Phase-5 shape law.
       only to a machine with the letters. Position commands between
       cuts ride A; 3+2 ROUGHING strategies (the helical/adaptive
       families on the plane) continue below
-- **Collision-aware orientation**: auto-tilt to avoid shank contact, with shortest-travel smoothing
+- ✅ **Collision-aware orientation** (stage F, this commit): auto-tilt
+      to avoid shank contact, with shortest-travel smoothing - the
+      spindle dodges the wall WITHOUT moving the path: the three
+      axis-law kinds (5-axis contour and parallel, multi-axis
+      roughing) take an opt-in `shank_avoid`, hand the stamp the
+      tool's real stack (flute, shank, holder), and where the
+      surface-law pose would drive the shank into material the axis
+      tilts to the nearest clear angle inside the max-tilt cone -
+      the pose-only freedom is law (f)'s, so positions stay
+      bit-for-bit the flag-off path's; where no cone angle clears,
+      generation REFUSES by name rather than post a program known to
+      rub. Kernel `crates/motion/src/multiaxis/avoid.rs` (`Shank`,
+      `shank_hits` mirroring verify's law (c), `escape_axis`),
+      project v29 - RECOMMENDED.md, M5.1 F.
 - **Drive curves**: machine to a curve on a surface with orientation rules
 - **Machine simulation**: full kinematic simulation of the post's A/B/C motion model, not just the toolpath
 

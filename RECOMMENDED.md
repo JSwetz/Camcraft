@@ -3640,6 +3640,83 @@ d = 0, pose None, vertical - holds empirically, and because the
 stamped kind's positions are the pocket's bit for bit, the twin
 inherits the verdict rather than earning it separately.
 
+## M5.1 stage F - collision-aware orientation (this commit)
+
+**The dodge is pose-only, and law (f) is the license.** A sphere's
+envelope is rotation-invariant about its own center, so at a fixed
+CL point the cut is fixed and the axis is free: leaning the spindle
+cannot gouge a micron the vertical pose did not already own. Stage F
+spends exactly that freedom - it changes NOTHING but the axis
+fields. The test proves the claim and not a weaker one: positions
+bit-for-bit identical to the flag-off path, surface-stated poses
+untouched wherever the shank stays quiet, floors posed ONLY where
+the shank speaks. Considered and dropped: re-running the escape
+search on the surface-stated poses themselves - F never overrides
+the contact law, it only overrules it where the tool above the ball
+disagrees with it.
+
+**The collision test is verify's law (c), not a new one.** The
+enclosure mirrors `camcraft_sim::verify` band for band: a vertical
+band's column floor stands AT the band's lower end, a leaning band's
+dips to the lower axis end minus the band radius (only its swept
+rim reaches below the axis-plane end), and the annulus inside the
+cutting radius is the flute's own kerf, excused - with the strict
+`box_top > h0` gate so the floor being cut can never report itself.
+The motion side tests the CONTINUOUS facets where verify samples
+them, so a graze may be over-reported here and stay clean there:
+over-report a graze, never hide a gouge, and verify remains the
+post-time law. One builder (`shank_of`) feeds generator and
+verifier from the same Tool stack, so they can never disagree about
+what the shank is. Considered and dropped: a continuous
+swept-volume collision test - cost with no verdict the endpoint
+enclosure plus verify doesn't already give, and the house law is
+conservative, not exact.
+
+**The tilt amount is geometry's answer; the azimuth is what the
+head pays.** Discovered by the law tests and encoded in them: every
+row of a flat wall gets the SAME tilt regardless of the previous
+pose - the escape candidate net (tilts {0, cap/4, cap/3, cap/2,
+2cap/3, 3cap/4, cap, th0} x 8 azimuths 45 deg about the contact
+normal, cap = max(cone, nominal lean) clamped to 85) is sorted by
+angle from the HELD pose, so shortest axis travel decides which
+clear azimuth wins, ties broken by the nominal's own lean. The held
+state resets to home after an unposed feed and holds through rapids
+- the smoothing is what stops an escape oscillating between
+neighboring moves. The refusal contract is the flag: off, the path
+generates exactly as in E3 and the verifier warns at post time; on,
+generation REFUSES by name ("the shank of the tool touches the part
+at move i...", naming the cone's remedies) - the Prime Directive
+favors refusing to ship a known rub.
+
+**A tool with no clear angle must refuse, never thrash.** The
+narrow-slot fixture states the design law its doc-comment carries:
+a stub clears only if its flute is short enough that its rim
+reaches the wall's z-span AND a nonzero cone window exists - for
+the 6 mm-flute fixture, theta in (9.6, 33.6] degrees. When the
+geometry leaves NO clear angle inside the cone, the honest answer
+is a refusal naming the shank and the cone, not a spindle flipping
+between poses; that fixture pins the escape-vs-refusal boundary.
+Considered and dropped: offering the dodge on the rotary kinds -
+their radial axis IS the surface's answer, there is no free axis
+left to spend.
+
+**The wire is a pure step-up: v28 -> v29, `shank_avoid` inside the
+three axis-law DTOs.** `#[serde(default)]` means an absent key is
+exactly the v28 pose law (dodge off), so a v28 file rides up with
+nothing to translate; the flag is always written on save. It rides
+the params digest, so flipping it ages the cached path - staleness
+stays derived, never tracked. The UI is one checkbox, "Shank
+avoidance (5-axis)", shown in the params panel for the three
+axis-law kinds only - the kinds the law actually reaches.
+
+**Gate notes:** 23/23 test binaries green, the 13 goldens
+byte-identical (the flag defaults off, so nothing's path changes);
+`crates/motion/tests/multiaxis_avoid.rs` carries the five law tests
+(never-moves-path, floors-only-where-shank-speaks,
+escape-inside-cone-and-calm, slot-refuses-by-name,
+quiet-shank-purity), the app seam four, `project_roundtrip` the v29
+step-up.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
