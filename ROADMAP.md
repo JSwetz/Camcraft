@@ -107,7 +107,7 @@ home.
 | 5-Axis Contour (waterline ladder, posed axis) | ✅ | M5.1 |
 | 5-Axis Parallel (raster ladder, posed axis) | ✅ | M5.1 |
 | Rotary offset roughing | ✅ | M5.1 |
-| Multi-axis roughing | 📋 | M5.1 |
+| Multi-axis roughing | ✅ | M5.1 |
 | Swarf | ✅ | M5.1 |
 | Advanced swarf | ✅ | M5.1 |
 | Multi-axis contour | 📋 | M5.1 |
@@ -1469,11 +1469,25 @@ Phase-5 shape law.
       project v27), Envelope verify (law (f)), ball-nose refused by
       name; the ribbon glyph assets/ui/rotaryoffset.png is drawn
       original - RECOMMENDED.md, M5.1 E2.
-- **The rotary family**: multi-axis roughing, multi-axis contour,
-      multi-axis finishing (the parallel and contour twins landed
-      with stage E, rotary offset roughing with stage E2) - the
-      catalog's multi-axis block lands here, each riding the
-      orientation and machine-sim laws below
+- ✅ **Multi-axis roughing** (stage E3, this commit): the pocket
+      ladder with the spindle posed - the positions ride the 3-D
+      pocket's ladder bit for bit through the `multiaxis_rough_prev`
+      mask seam, and stage C's stamp writes the axis over the
+      finished path: a move ending in wall or corner tangency poses
+      the cone about the contact normal (lead/lag folded onto the
+      max-tilt cone as in finishing), floors and air stand honest
+      vertical; the ball-nose gate refuses a flat end at generate,
+      the editor carries the pose trio - kernel
+      `crates/motion/src/multiaxis/rough.rs`; app kind
+      MultiAxisRough (ordinal/tag 15, project v28, tag
+      `multi_axis_rough`), Envelope verify (law (f) restated for the
+      rough: a sphere's envelope is pose-invariant, so the verify
+      sees the pocket's volume) - RECOMMENDED.md, M5.1 E3.
+- **The rotary family**: multi-axis contour, multi-axis finishing
+      (the parallel and contour twins landed with stage E, rotary
+      offset roughing with stage E2, multi-axis roughing with stage
+      E3) - the catalog's multi-axis block lands here, each riding
+      the orientation and machine-sim laws below
 - 🔄 **3+2 tilted-plane indexing** (stage B, this commit): the five
       plane kinds carry a `Tilt`; generation runs them in the frame's
       LOCAL coordinates and leaves through `TiltedFrame::world_path` -

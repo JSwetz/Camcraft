@@ -3561,7 +3561,86 @@ assets/ui/rotaryoffset.png is drawn original - a stepped shaft with
 the ladder wrapping it radially; no generic set says rotary
 roughing, and LICENSES.md notes it as original.
 
-## How this file ends
+## M5.1 stage E3 - multi-axis roughing (this commit)
+
+**The composition law: MultiAxisRough = pocket3d_prev + stamp_axes,
+and nothing else.** The kernel builds the prismatic ladder move for
+move - same lattice, same mask seam, same Empty remap - and then
+runs stage C's stamp over the finished path. That is the whole kind.
+It buys the verify posture for free: a sphere's envelope is
+rotation-invariant about its own center, so the Envelope scan of the
+posed path encloses exactly the volume of the vertical one - stage
+C's law (f) restated for the rough. Considered and dropped: a
+roughing kernel of its own that searched poses while it cut - it
+would move positions, and a ladder whose positions differ from the
+3-D pocket's is a different operation, not the pocket with the
+spindle posed; the identity IS the safety argument.
+
+**Floors pose nothing: a degenerate contact normal yields pose None,
+which posts as honest vertical.** The stamp reads the axis off the
+contact normal at a move's end; on a floor the contact is the ball's
+bottom pole and its normal is the tool axis itself - the search
+returns d = 0, poses None, and the move runs vertical. Wall
+tangencies are the only posed moves the ladder ever makes. The probe
+agrees: on the slab+boss job all 12 poses of the stamped ladder come
+out horizontal where walls ask for them and vertical everywhere else
+- the floors are silent, exactly as the law says they must be.
+
+**The ball-nose gate sits at generate, and names kind and tool.**
+The stamp's tangency search reads contact off a sphere; a flat
+end's flank is a cylinder the law does not own - there is no centre
+to place off a wall, so a leaned end mill is a gouge waiting for its
+verdict. The refusal is "Multi-Axis Rough needs a ball-nose tool,
+'<name>' is a <kind>": same posture as the wrap's gate (E2), refuse
+by name rather than verify a path through an envelope the tool
+doesn't have.
+
+**rest_rough and feed_opt are deferred, and their absence is stated
+rather than faked.** The pocket's bridge carries two switches the
+stamped ladder ships without - the kernel reads neither, so the DTO
+mints neither. The honest reason: both features are specced against
+a vertical-only tool, and the stamp has never been shown to commute
+with either (a rest scan under a leaned ladder, a feed modulated by
+an engagement the poses redistribute). A switch that changes
+nothing under poses is a lie with a UI; absence is truer. Considered
+and dropped: wiring the flags to the pocket arm and hoping - hoping
+is not a verification.
+
+**The wire is a pure step-up: v27 -> v28, tag `multi_axis_rough`,
+"step-up is the stamp itself".** Serde snake_case mints the tag
+from the variant name; the version steps with one new params tag and
+no key renames, so a v27 file rides up with nothing new to store.
+Unlike the wrap ladder, which computes its rapids plane and mints no
+hop key, this ladder's retract_z is the pocket's own stated hop and
+rides the file via `skip_serializing_if` - absent at the default,
+present once named, bit-identical to the Pocket3D bridge's shape.
+
+**The registry law re-confirmed from the inside: KindInfo::ALL grew
+15 -> 16 and the UI followed without being told.** ALL_LABELS and
+KIND_COUNT feed the pickers dynamically, so the new kind appeared in
+every menu for free; only the four files that must spell each kind
+by hand grew arms - icons.rs, panes.rs, pages.rs, interact.rs. M5.0
+and M5.1 kinds since then keep the claim honest: a new operation is
+a params struct, a generator fn, a table row and four hands.
+
+**A law found by this stage's own test: GenerateOperation::new()
+generates at construction, so program order is masking order.** The
+identity test that wants a stamped ladder and a plain pocket side by
+side in one world fails for a reason no one wrote: names sort, a
+later-generated op digests the prior program (Pocket3D reads the
+re-machining mask from it), and the earlier op's stamp is masked
+away - the twins go Stale against each other. The test therefore
+runs two lone worlds, mirroring the remachining tests' law that a
+mask is a statement about the program, not about the part.
+
+**Discovery on the way: the shipped Pocket3D with a ball tool over a
+finished floor verifies CLEAN.** No app test had exercised that pair
+before E3's twin needed it as the vertical baseline. The floor law -
+d = 0, pose None, vertical - holds empirically, and because the
+stamped kind's positions are the pocket's bit for bit, the twin
+inherits the verdict rather than earning it separately.
+
+
 
 When the roadmap's open items are exhausted, this file gets its final
 entry summarizing what "done" meant, and the discussion happens over it.
