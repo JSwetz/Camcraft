@@ -1512,7 +1512,24 @@ Phase-5 shape law.
       `shank_hits` mirroring verify's law (c), `escape_axis`),
       project v29 - RECOMMENDED.md, M5.1 F.
 - **Drive curves**: machine to a curve on a surface with orientation rules
-- **Machine simulation**: full kinematic simulation of the post's A/B/C motion model, not just the toolpath
+- ✅ **Machine simulation** (stage G, this commit): full kinematic
+      simulation of the post's A/B/C motion model, not just the
+      toolpath - the head turns on its own clock and a tilt that
+      sweeps into steel is named: every move splits into a linear
+      leg and a rotary leg, secs = max(the two), each family paced
+      by its own rate and holding at arrival - XY frozen at its
+      spot while the head swings, equal legs bit-exact prismatic -
+      rotary rates under the rotaries' own roof (`Traverse.rot`,
+      fed from the .mch mirror), the post's modal pose law (rapids
+      hold, unposed cut = home) threading each segment's
+      [from,to] letters; and verify's law (c3), kernel
+      `crates/sim/src/verify/sweep.rs`: the band's law-(c) column
+      tested on a grid of 4 path x 5 pose fractions for every cut
+      move whose commanded pose CHANGES - pose endpoints in, path
+      endpoints out, plunges never skipped, moves (c) convicted
+      left to (c) - a graze only the swing reaches is now
+      `Warning::SweepHit`, forcing project v30 (a pure step-up) -
+      RECOMMENDED.md, M5.1 G.
 
 ### M5.2 - Turning & Mill-Turn
 **Goal: lathe parts and C-axis parts from the same system.**

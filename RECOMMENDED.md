@@ -3717,6 +3717,84 @@ escape-inside-cone-and-calm, slot-refuses-by-name,
 quiet-shank-purity), the app seam four, `project_roundtrip` the v29
 step-up.
 
+## M5.1 stage G - machine simulation (this commit)
+
+**The head turns on its own clock: every move is a linear leg and a
+rotary leg, secs = max(the two), and a family HOLDS at arrival.**
+The timeline paces XY at the feed and A/B/C at the rotary rate;
+the slower leg keeps running while the faster one freezes at its
+spot - XY parked in air while the head swings, the head settling
+after the path has arrived. When the two legs take equal seconds
+the axis is bit-exact prismatic, so the split costs nothing the
+old sim did not already do, and the sim viewer shows the arc the
+machine actually takes, not the straightened version of it.
+
+**Rotary rates live under the rotaries' own roof, not in one
+shared "angular feed": `Traverse.rot` is per-axis deg/min with
+normal/rapid pairs, fed from the .mch mirror** (machine.rs mirrors
+them), rapid falling back to normal, feed to normal-or-rapid.
+Considered and dropped: a single angular rate - the .mch format
+names rates per axis family, so a law invented at one family's
+granularity gets refought at every call site, and one rate would
+have to guess which letter it speaks for.
+
+**The hold-at-arrival law is behavior-only provenance.** Public
+G-code manuals' coordinated-motion blocks: each commanded axis
+family travels at its own rate and holds when its part is done,
+the program waiting on the rest. Nothing of HSMWorks was read for
+this; it is the manuals' law in our own code, per the Clean-Room
+Protocol.
+
+**The sim threads the post's modal pose law, it does not re-derive
+it.** sim.rs carries each segment's [from,to] letter pair from the
+same law the post writes - rapids hold the pose, an unposed cut
+returns home. A second copy of that law in the verifier is the
+classic way for poster and sim to disagree about where the head
+was; one law, threaded.
+
+**Law (c3) tests the arc law (c) can't see: 4 path fractions x 5
+pose fractions, pose endpoints in, path endpoints out.** The
+to-point at the to-pose is law (c) verbatim, so path endpoints are
+excluded; but "at the to-pose, not yet at the to-point" is
+reachable - when the head's arc is the short leg it finishes its
+swing while XY is still in transit - so the pose endpoints stay
+on the grid. And a zero-XY plunge that turns while it descends is
+never skipped: its lean column slides through a Z window that is
+a superset of both endpoints', so neither endpoint sees what the
+middle does.
+
+**One verdict per band: (c3) speaks only where (c) is clean.** The
+moves law (c) convicted are skipped via the shanked list rather
+than merged into a combined verdict - (c)'s same-band warning
+keeps its wording and a band never reports twice.
+
+**The cost is paid with a sample filter, not a narrower gate: (c3)
+runs where its twin (c) runs, mode != Engrave.** The obvious gate
+- Area | Boundary - would have been inert on every generated
+posed program: every posed 5-axis kind verifies as Mode::Envelope
+(`crates/app/src/operation/kinds.rs`, rows 728-802), and a law
+that never runs is decoration. The 20-state grid therefore costs
+against the nearby columns only: the 40 states are collected with
+a union-bounding-box filter over the boundary samples. Considered
+and dropped: the Area | Boundary gate, inert - see above.
+
+**The wire is a pure step-up: v29 -> v30, `Warning::SweepHit` the
+reason.** A v29 file cannot carry the new tag, so the serde
+ladder just raises the number and there is nothing to translate;
+the lossy-JSON mirror fallback pattern from M3.3 A was considered
+and dropped as unnecessary here - it guards a round-trip an
+absent tag can never make lossy. The UI keys the tag at 200+part
+in fold_warnings, clear of FixtureHit's range, and the status
+line reaches it through the last_move or-pattern.
+
+**Gate notes:** 51/51 app integration, 131/131 UI, 68/68 unit,
+clippy -D warnings clean on all four crates; the 13 .nc goldens
+byte-identical (stage G warns, it never edits a path);
+`crates/sim/src/sim.rs` carries the 22 leg-split unit tests and
+the app seam (`crates/app/tests/sim.rs`,
+a_posed_move_paces_on_its_rotary_slot_through_app_sim) proves the
+family clock through app::sim.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
