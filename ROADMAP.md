@@ -1582,6 +1582,162 @@ Provenance: architecture studied from a sibling project's own source, at the
 user's direction; no HSMWorks material involved. All numbers, colours, icons,
 and asset names are ours, drawn from public machining-UI convention.
 
+## Phase 7 — Implicit preview: the SDF stock engine.
+
+The M1.7 open question - "adaptive dexel vs. sparse voxel octree vs.
+signed distance field" - was settled for dexel because the work of
+Phases 1-2 was 2.5D and 3-axis Z-plunge cutting, where a column of
+material under the spindle is exactly the right grid. The engine's own
+header admits the premise (`stock_sim/dexel.rs`: "a Z-plunge world
+whose tools never machine under an overhang... undercuts would need a
+voxel octree"), and Phases 5-6 break it: the rotary families machine
+radially into an axis that may lie anywhere in space, M5.2's lathe work
+is a solid of revolution whose "top" is its radius, and simultaneous
+5-axis cuts sweep in every direction a heightfield cannot read without
+stair-steps. So the simulation's preview is revisited: not a finer
+voxel grid, but the voxel preview engine replaced by an **implicit
+Signed Distance Function** - the machined volume IS the stock's
+distance field MINUS the distance field of the tool's swept envelope,
+and it RENDERS as that function: sphere-traced in the 3D view,
+resolution-independent, exact corners where voxels round them off. The
+mesh stays the source of truth - the verification-layer law survives
+this rewrite untouched; the field is preview and verdict display, never
+geometry.
+
+### M7.1 - The field and the subtraction kernel
+**Goal: a signed-distance representation of remaining material behind
+the existing `stock_sim` seam, where subtracting a tool sweep is one
+`max()` per sample and every "what is left here" query in the codebase
+answers with a real distance, not a column top.**
+
+- **The stock field**: a closed triangle mesh → a narrow-band SDF grid.
+  Generation from the boundary by feature-extrusion scan conversion
+  (each face/edge/vertex extrudes along its own normal region, nearest
+  distance wins - the characteristic/scan-conversion method, GPU
+  single-pass T4 variant), or by the multi-source BFS distance
+  transform (Barilla's - simple, linear, CPU-honest). The sign is
+  ray-parity against the watertight shell (the M2.2 parity law already
+  in this codebase). The band truncates a few cells wide - a level-set
+  field throughout; nothing is stored far from the surface.
+- **Sparse by brick, not octree**: the grid is fixed-size bricks (8³ or
+  16³ cells) under a flat brick map; only near-surface bricks are
+  allocated (a part's band is ~1-5% of the nominal grid), dirty ranges
+  come from a sweep's AABB, and the shallow structure keeps GPU cache
+  coherence and update speed - deep octrees only pay off in static
+  scenes. Same conclusion the streaming/voxel-hashing line reached
+  independently: hash or brick, don't pointer-chase.
+- **The swept-tool law**: every CL move's envelope has a closed-form
+  distance IF the move is a segment or arc and the tool is a profile of
+  revolution - and that is every move the generators emit. Evaluate
+  in the TOOL's frame, never carry the tool's geometry to the world
+  (the inverted-trajectory law: the sample point rides the inverse
+  pose, one 3x3 + translation, and the axis stamp every CL move has
+  carried since stage A IS that pose): ball nose sweep over a segment
+  = capsule (point-to-segment distance minus R, exact); flat endmill =
+  swept capped cylinder; bull-nose = swept rounded-rect profile;
+  taper = frustum; a lathe or rotary cut = torus/annular-sector
+  sweeps - all closed forms from the published primitive-distance
+  catalogue. A general profile is the min of its few profile primitives
+  (a revolution profile is a stack of capsules and frusta); general
+  motion of general geometry falls back to the sampled-pose minimum
+  (the swept-volume SDF construction) - DISPLAY ONLY, never a verdict
+  source: pose-sampling of a true field is not conservative, and this
+  codebase does not ship non-conservative answers to safety questions.
+- **The subtraction law**: φ_new(p) = max(φ_old(p), −χ_sweep(p)) -
+  difference is max-with-negation, exact outside and slightly
+  underestimated in the pseudo-SDF regions CSG and sweeps create.
+  The direction is chosen ON PURPOSE: an underestimated distance means
+  clearance queries round toward danger, which rest/gouge verdicts read
+  as over-reported material and never a hidden gouge - the dexel
+  header's "over-reporting rest is honest noise" law, promoted to a
+  field. Where sphere tracing wants the gradient honest, re-normalize
+  the band with one eikonal sweep before the render pass (fast, local).
+  Sequential cuts accumulate as a running minimum over the sweep
+  fields - order-independent and seam-free by construction (the
+  one-authoritative-distance law of the distance-accumulating digital
+  twins).
+- **Same API as today**: construct from (mesh, stock box); `subtract`
+  per CL move; `query(p) → signed distance`; `measure/deviate/envelope`
+  equivalents - so the gouge check, the deviation map, rest material
+  (M3.1 D) and `machining3d::material_above`'s sim twin all get real
+  distances at their existing call sites. Drill cycles pose nothing
+  and stop, and a stopped tool is a solid of revolution at a station -
+  a field subtracts them exactly where the dexel cannot.
+
+### M7.2 - The preview render - seeing the machined volume
+**Goal: the 3D view draws the implicit field directly. The viewport
+sphere-traces stock-minus-tool-sweeps each frame; a marching-cubes mesh
+becomes a derivation for consumers that need triangles, not the thing
+being previewed.**
+
+- **The viewport pass**: a wgpu compute shader writes a depth+material
+  image the existing egui-wgpu stack (M1.4.2's graduated pipeline, no
+  new render engine) composites beside the model and tool chrome.
+  Per-pixel sphere tracing (Hart's law: step by the returned distance
+  - the nearest surface can be no closer): start at the stock AABB
+  entry via the brick map's HDDA walk so empty space costs a table
+  lookup, not a sample; ~64 steps; surface normal = the field's own
+  gradient (the distance field's gradient IS the normal - shading is
+  free); cheap AO by one secondary march. The machined look is the
+  feature: the scallop steps, the radii, the shine on the finished
+  floor, with no voxel staircase in sight.
+- **Progressive playback**: the sim scrub becomes "subtract this move,
+  re-render" - playback is the field's truth unfolding. Backward seek
+  re-applies from a checkpoint; dirty-brick snapshots every N moves are
+  the undo journal, and the brick is its natural unit.
+- **The deviation color map, continuous**: sample the TARGET part's
+  field at each hit point - the signed value IS the deviation, exact
+  and located wherever the eye lands. Replaces the dexel column-top
+  differencing (M2.3) with the same located-not-just-counted verdict
+  law, NaN where either body is absent, never a zero dressed as a
+  clean bill of health.
+- **A mesh when asked**: iso-surface extraction (marching cubes; dual
+  contouring where sharp interior corners must survive) regenerates
+  triangles for the G-code viewer's stock display, picking, and STL
+  export of "what the program leaves". The law: the mesh is a cache of
+  the field, never a second truth (rebuild on any cut appended, keyed
+  like the cached toolpaths are).
+- **CPU fallback, because "never crash" includes "never black-screen"**:
+  the same field ray-marched at low resolution and upsampled, or
+  extract-and-shade through the existing mesh path - every machine that
+  runs the app today runs the preview; the GPU path is a speedup, never
+  a dependency.
+
+### M7.3 - Retirement and reconciliation
+**Goal: the SDF engine answers verdict-for-verdict like the dexel on
+every golden, then the voxel preview engine retires.**
+
+- **Both backends side by side behind the trait** until agreement: the
+  heavy `--ignored` lane runs the same programs through both engines
+  and demands rest/gouge/deviation verdicts agree within the field's
+  declared epsilon - a disagreement is a bug in the new engine, never
+  a rounding to accept (the same law the M4.2b dome goldens taught).
+  The 10M-triangle M5.3 fixtures measure the claim; they don't assume it.
+- **Cost law**: an update touches only the sweep's dirty bricks - work
+  per program is proportional to material removed, not to grid size ×
+  move count; moves batch per frame so a 100k-move program never
+  re-throots the same brick a thousand times.
+- **The retirement**: `stock_sim`'s column engine goes when its last
+  consumer (the feed-engagement sampler included) proves verdict-
+  identical - one clean commit, goldens byte-comparable where the
+  verdicts are, and the Open-questions note below closed with a link.
+
+Provenance: composite adaptively-sampled distance fields for NC milling
+simulation (MERL TR2012-025 - the swept-tool Boolean difference, the
+inverted-trajectory evaluation, the octree-BVH localization); GPU SDF
+subtractive ops with real-time marching-cubes iso-surfaces for
+material-removal digital twins (Purdue MMRL-CMS 2026 - ~105 FPS, ~35x
+mesh booleans); distance-accumulating scalar voxel twins (arXiv
+2608.29955); narrow-band generation by characteristic scan conversion
+(GPU Gems 3 ch. 34) and BFS distance transforms (arXiv 1807.07111);
+sphere tracing (Hart 1996, the ray-marching teaching literature);
+closed-form primitive and swept-primitive distances
+(iquilezles.org/distfunctions); swept-volume SDF for arbitrary motion
+(libigl); brick-map sparsity for real-time fields (voxel hashing,
+NVIDIA sparse distance fields). Everything composed from these public
+sources; all Rust/wgpu/WGSL code here is ours; no HSMWorks or vendor
+material of any kind.
+
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units (IGES deferred) | ⚠️ |
@@ -1612,6 +1768,9 @@ and asset names are ours, drawn from public machining-UI convention.
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
 | **M6.1** | Token architecture | Adopt the solidcraft `Tokens`/`theme_files` design: one named table drives widgets + painted chrome, radii/spacing/sizes themeable, command-law switcher | 📋 |
+| **M7.1** | Stock becomes a field | Narrow-band brick SDF from the mesh; closed-form swept-tool subtraction (`max` with the tool-frame distance, inverted-trajectory law); same stock_sim API, real distances at every verdict call site | 📋 |
+| **M7.2** | The machined volume in the 3D view | Sphere-traced viewport render on the egui-wgpu stack, progressive per-move playback, continuous deviation color map, on-demand marching-cubes mesh (a cache, never a truth), CPU fallback | 📋 |
+| **M7.3** | Dexel retirement | Both engines verdict-identical on the heavy lane (rest/gouge/deviation within declared epsilon), per-brick update cost law, column engine retires | 📋 |
 
 ## Open questions & deferred
 
@@ -1635,10 +1794,11 @@ and asset names are ours, drawn from public machining-UI convention.
   implementation hints either way (clean-room cuts both ways)
 - **Post scripting runtime**: which embedded language (QuickJS / Lua / Rust-native DSL) -
   decide before M3.3; must be sandboxed like other scripts
-- **Simulation stock representation**: adaptive dexel vs. sparse voxel octree vs. signed distance field - decide before M1.7.
-  The voxel grid models the *machined block for simulation only*: operation geometry and tolerance checks still evaluate against
-  B-rep/mesh, so discretized stock is the verification layer, not the source of truth (an SDF is the closest cousin to a particle
-  approach and keeps the exact remaining-material queries gouge checks need)
+- **Simulation stock representation** (answered, revisited by design): decided dexel before M1.7 - right for the Z-plunge work of
+  Phases 1-2 - and the multi-axis phases broke the column model's premise. Phase 7 answers the question the way the parenthetical
+  always suspected: an implicit SDF engine replaces the voxel/dexel preview, keeps the exact remaining-material queries gouge
+  checks need, and renders the machined volume directly. The grid models the *machined block for simulation only* - operation
+  geometry and tolerance checks still evaluate against B-rep/mesh; that law is Phase 7's load-bearing premise, not its casualty
 - **Cutting data**: no licensed handbook is affordable long-term - grow a homegrown
   materials/tools database under an open license, seeded from public vendor catalogs
 - **Patent check (FTO)**: high-efficiency milling and some 5-axis orientation techniques

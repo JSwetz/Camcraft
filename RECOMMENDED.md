@@ -3443,6 +3443,46 @@ no Tabler mark says 4-axis rotary, and the ball is deliberately off
 the surface on the radial line, the kind's whole claim; LICENSES.md
 names both.
 
+**Phase 7 - the SDF preview engine: what the research decided.** The
+user's directive (replace the voxel preview with an implicit
+signed-distance rendering of the machined volume) fixed the goal; the
+shape was ours to take, specced from a Perplexity sweep of the public
+literature: MERL's composite-ADF milling simulation gave the two
+cornerstones - machined volume = Boolean difference of distance fields,
+and the inverted-trajectory law (evaluate in the tool frame, so a
+5-axis pose is one matrix inverse, not a swept geometry); the 2026
+GPU-SDF + Marching-Cubes material-removal twin paper (~105 FPS, ~35x
+mesh booleans) proved real-time feasibility on exactly our hardware
+class; the distance-accumulating voxel twin supplied the
+running-minimum accumulation that makes overlapping cuts
+order-independent and seam-free. Choices taken unattended: **(1)** the
+field is sparse BRICKS under a flat brick map, not an octree - the
+streaming/voxel-hashing line keeps reaching this for updatable fields
+(deep trees lose cache coherence; updates want shallow), reconsider if
+a part's band ever outgrows the brick map's memory law; **(2)**
+direct sphere-traced rendering in the viewport is the primary path and
+marching cubes is a DERIVATION for triangle consumers (picking, STL
+export) - the mesh-extract-only alternative was dropped because it
+re-imposes a resolution choice at every frame, which is the voxel sin
+Phase 7 exists to leave behind; **(3)** the pseudo-SDF pessimism of
+CSG/sweeps is kept as a FEATURE, in the direction that underestimates
+clearance - rest over-reports, gouges never hide, the dexel's own
+honest-noise law promoted to a field - with eikonal re-normalization
+owed only to the render's shading; **(4)** the sampled-pose
+swept-volume fallback is display-only by law - a verdict query needs a
+closed form or it refuses; **(5)** the dexel retires only after
+M7.3's dual-engine verdict agreement on the heavy lane, so the phase
+is additive, reversible, and the existing gouge/rest/deviation goldens
+stay the refusable oracle throughout. Considered and dropped: hybrid
+dexel+SDF forever (two truths to reconcile in every verdict - the
+verification-layer law forbids a second source of truth, and a second
+verification layer doubles the agreement surface); sparse voxel
+octree as the field store (the middle option the M1.7 question offered
+- strictly dominated by brick maps for dynamic narrow-band fields).
+Slotting it as Phase 7 after Phase 6 (UI theming) rather than between
+5 and 6 is ours: nothing in it blocks Phase 5's kinds, and the
+renderer wants Phase 6's engine settled first.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final
