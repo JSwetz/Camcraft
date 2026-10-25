@@ -28,6 +28,12 @@ afterwards - the work must not bother them.
   the roadmap is done (idle after a gate, waiting on nothing, end-of-turn
   with open items), spawn a continuation nudge subagent to remind the
   session to pick up the next ROADMAP item. A stall is a bug.
+- **Side work rides subagents.** All testing, documentation, and knowledge
+  graphing (the graphify updates) are done by subagents dispatched as
+  subtasks, never inline: their completion notification is what triggers
+  the progression to the next ROADMAP item. This keeps the main agent
+  running continuously, as "Never stop" above mandates - the main session
+  plans, codes, and decides; the subagents verify, record, and graph.
 
 ## Clean-Room Protocol
 
@@ -175,7 +181,11 @@ test binaries the diff touches (`target\debug\deps\<name>-<hash>.exe`, in
 parallel - they take no cargo lock). Each suite's header carries the module
 map (`Gate map (M4.4): covers app::x, app::y...`) - pick binaries from it,
 not from the whole tree. The debug ladder's budget is under ~5 min wall;
-everything slower is in the heavy lane below, not in yours.
+everything slower is in the heavy lane below, not in yours. Under "Side
+work rides subagents" this ladder is run BY a gate subagent: it reports
+pass/fail per binary with failure output, and its report is what lets the
+main session commit. Never hand the subagent both the code change and its
+verification - the main session owns the code and the commit decision.
 
 Laws and verdicts run in different lanes (M4.4): tests that MEASURE geometry
 clean (envelope scans, full-precision projections) or generate over the big
