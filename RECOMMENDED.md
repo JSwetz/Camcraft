@@ -3483,6 +3483,84 @@ Slotting it as Phase 7 after Phase 6 (UI theming) rather than between
 5 and 6 is ours: nothing in it blocks Phase 5's kinds, and the
 renderer wants Phase 6's engine settled first.
 
+## M5.1 stage E2 - rotary offset roughing (this commit)
+
+**The pocket ladder runs in wrap space, and stepdown is the RADIAL
+infeed.** A turned solid has no z-staircase worth roughing - its
+levels ARE its stations, already laid along the axis - so the kernel
+develops the part one full period into (s, v, rho) (circumference
+arc length, axial station, radius) and runs pocket3d's staircase law
+there with the infeed along rho. The consequence is a fixture
+lesson, recorded rather than padded: the staircase reads each
+column's stock off its own part surface, so a part step WIDER than
+the infeed can't be shaved by one radial plunge - the turned bar's
+6.0→5.0 step leaves that whole annular shelf to the finishing kinds
+at infeeds ≥ 1.0, and the tests budget a sub-1.0 infeed to peel it
+honestly instead of inventing levels the geometry doesn't have.
+Considered and dropped: a z-direction ladder on the wrapped body -
+it re-reads the same law but pretends a revolve has floor-to-floor
+heights it does not have.
+
+**tolerance is verify budget only; stock_to_leave folds into the
+plan.** The kernel never consumes tolerance (`let _ = tolerance;`):
+the wrap development is exact, there is no sampler for a tolerance
+to bound. It rides outward solely as the Envelope verify's
+finish_tol. stock_to_leave gets no separate offset pass either - it
+folds into the plan's center offset, so the ladder peels down to
+finish-plus-leave exactly once. Both still ride the params tag: a
+parameter that moves no point on the path still rides the digest,
+so a re-run with changed numbers is never mistaken for an
+identical one.
+
+**No retract_z parameter: the kernel names its own rapids plane.**
+A round bar has one honest air plane - one infeed clear of the
+biggest radius plus two tool radii, rho_max + stepdown + 2r,
+computed off the wrap. The twins' user-named z retract belongs to a
+prismatic stock whose top is a plane; ported here it would be a
+dial with exactly one safe setting, which is a law, not a
+parameter. Considered and dropped: retract_z with a default - the
+safe default IS the computed plane, so the parameter adds only ways
+to set it low and gouge.
+
+**The verify posture is law (f) plus a named gate: Mode::Envelope,
+finish_tol = tolerance, ball-nose refused at generate.** The swept
+sphere is pose-invariant about its own axis, so stage C's envelope
+argument holds verbatim for radial poses - no pose-respecting sweep
+tax. An end mill's flat profile is not pose-invariant in the sense
+the law needs, so the ball-nose gate refuses by NAME at generate
+rather than verifying a path through an envelope it doesn't
+enclose.
+
+**The wrap mesh is one period deep, with seam walls at the station
+table.** The developed body is the 2·pi·rho_max duplication, seam
+walls closing every band at the station table, so islands crossing
+the seam are one island, not two, and the ladder never sees a
+phantom wall at the period boundary. The facet law is by vertex
+count: a facet with exactly TWO off-axis vertices (its apex on the
+axis) sweeps the full developed rectangle - its wedge - because its
+radius spans 0..rho along the developed arc linearly; everything
+else sweeps its station patch. That is what lets cone flanks rough
+clean instead of leaving an uncut hub band.
+
+**The caller's top_z/bottom_z window STATIONS when the fitted axis
+leans.** pocket3d's z-window reads as world heights; on a leaned
+revolve the band between two z-planes is not a band of the part, so
+the kernel overrides the semantics: top/bottom bound axial stations
+on the fitted axis, and the radial ladder spans rho_max..rho_min
+regardless - the window selects LENGTH along the bar, never DEPTH
+into it. The parameter mirror says so, so the panel speaks stations
+too.
+
+**Additive kind, no renumbering: RotaryOffset at ordinal/tag 14,
+PROJECT_VERSION 27.** The variant lands after the twins (12/13);
+the project file steps v26→v27 with the one new params tag and no
+key renames - a v26 file rides up with nothing new to store. The
+fitted axis stays MODEL data, stage E's law unchanged: the digest
+names the pattern, not the axis. Ribbon glyph
+assets/ui/rotaryoffset.png is drawn original - a stepped shaft with
+the ladder wrapping it radially; no generic set says rotary
+roughing, and LICENSES.md notes it as original.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

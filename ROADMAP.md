@@ -106,7 +106,7 @@ home.
 |-----------|--------|------|
 | 5-Axis Contour (waterline ladder, posed axis) | ✅ | M5.1 |
 | 5-Axis Parallel (raster ladder, posed axis) | ✅ | M5.1 |
-| Rotary offset roughing | 📋 | M5.1 |
+| Rotary offset roughing | ✅ | M5.1 |
 | Multi-axis roughing | 📋 | M5.1 |
 | Swarf | ✅ | M5.1 |
 | Advanced swarf | ✅ | M5.1 |
@@ -1456,11 +1456,24 @@ Phase-5 shape law.
       the same trio as stage C); wrong stances refuse each other by
       name, domed ground points at the 5-axis kinds, freeforms name
       the taxonomy - RECOMMENDED.md, M5.1 E.
-- **The rotary family**: rotary offset roughing, multi-axis roughing,
-      multi-axis contour, multi-axis finishing (the parallel and
-      contour twins landed with stage E) - the catalog's multi-axis
-      block lands here, each riding the orientation and machine-sim
-      laws below
+- ✅ **Rotary offset roughing** (stage E2, this commit): the pocket
+      ladder on a turned part - pocket3d's staircase law run in
+      developed wrap space (s, v, rho) over one full period, the
+      stepdown RADIAL, each column's stock read off its own part
+      surface so a part step wider than the infeed is left whole to
+      the finishing kinds (honest, not padded); facets with on-axis
+      vertices sweep their wedge, seam walls close the bands at the
+      station table, and world exits wrap back radially via
+      wrap_exit - kernel `crates/motion/src/multiaxis/rotary_offset.rs`
+      + `wrap_exit.rs`; app kind RotaryOffset (ordinal/tag 14,
+      project v27), Envelope verify (law (f)), ball-nose refused by
+      name; the ribbon glyph assets/ui/rotaryoffset.png is drawn
+      original - RECOMMENDED.md, M5.1 E2.
+- **The rotary family**: multi-axis roughing, multi-axis contour,
+      multi-axis finishing (the parallel and contour twins landed
+      with stage E, rotary offset roughing with stage E2) - the
+      catalog's multi-axis block lands here, each riding the
+      orientation and machine-sim laws below
 - 🔄 **3+2 tilted-plane indexing** (stage B, this commit): the five
       plane kinds carry a `Tilt`; generation runs them in the frame's
       LOCAL coordinates and leaves through `TiltedFrame::world_path` -
