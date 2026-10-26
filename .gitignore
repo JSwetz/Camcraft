@@ -8,4 +8,5 @@
 /*.cnc
 /*.png
 /*.mch
-/tests/
+/tests/raw/*.m4a
+raw/*.mp4
