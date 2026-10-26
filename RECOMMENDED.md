@@ -3878,9 +3878,15 @@ a reading restamps what every v30 parallel file says about itself).
 Seeds walk the shallow footprint's bounding box on a lattice
 `SEED_FRAC` = 0.5 of the stepover apart (`crates/motion/src/
 finishing3d/flow.rs`), and a seed whose column lies within
-`CLAIM_FRAC` = 0.5 stepover of an already-traced segment (or a
+`CLAIM_FRAC` = 0.25 stepover of an already-traced segment (or a
 spent seed point) is spent WITHOUT tracing - the traced set is
-maximal under the claim radius. A ground point is never farther
+maximal under the claim radius. (`CLAIM_FRAC` shipped at 0.5 with
+stage I's code; commit d597201 halved it to 0.25 so the kernel
+doc's law `CLAIM_FRAC + SEED_FRAC/2 <= 0.5` holds as an identity -
+at 0.5 a diverging field left ground 0.56 of a step from every
+traced line, past the half-step promise, and straight ground,
+whose rows answer to `SEED_FRAC`, was never the law's worry.) A
+ground point is never farther
 from a line than its nearest seed plus the seed's claim, so
 turning ground keeps the CLAIM + half-seed bound (the swirl test
 pins 1.1 stepovers, where the circles' radial spacing quantizes);
@@ -3963,6 +3969,81 @@ on `//! - text` dash clauses and `unnecessary_map_or` in stage I's
 new code.** Fixed in-flight (`is_none_or` is the spelling; the
 module docs were reflowed); the law for future module docs is an
 opening parenthetical, not a dash list.
+
+## M5.1 stage J - multi-axis contour on drive curves (code caaab7a + this docs)
+
+**The picks ARE the source: chain picks ride the existing
+`SrcRef::Selection(Chain)` field, not a params field.** The path
+this kind machines is the user's selection, so it is stored where
+every other selection lives, and the digest staleness machinery
+follows for free - the stamp's `b'L'` arm (`stamp.rs`) already
+re-stamps on model edits, so moving the model re-flags the
+operation without any new plumbing. Considered: chains in params
+(dropped: it duplicates the selection plumbing and breaks the
+Geometry section's single source of truth - two fields would then
+claim to say what the machine goes to, and only one would be
+stamped).
+
+**The region is the model's silhouette, not the picked loops** -
+`region_for` answers with `slice::project` over the whole model
+through the exclusion-list arm in `region_for_src`. The chains
+ride the surface, so depth and preview must show what the whole
+model cuts, not a hairline trace of the picks; and the 2D walk's
+"is an open run" refusal never applies to this kind - the picks
+were never asked to enclose anything, they asked to be walked.
+Considered: region = picked loops (dropped: a preview of the
+curves alone hides the model standing under the ball, and the
+open-run law would refuse the kind's own honest input).
+
+**The window law refuses BY VERTEX, never clips.** Every chain
+vertex must stand within [bottom_z, top_z] or generation refuses
+("picked chain N stands at z ..., outside the window"); it never
+clips a chain to the window and never silently trims. Refuse-
+loudly is the Prime Directive's shape: a clipped chain posts a
+program that abandons the user's pick somewhere invisible, which
+is exactly the silent wrong answer the law forbids. Considered:
+clip-to-window (dropped: same reason, in the worst possible
+dress).
+
+**`tolerance` is the verify budget only** - the kernel's
+deviation check, the envelope scan's chord allowance. It is NOT
+a resample step: resampling the chain into stations is the
+kernel's own arc-length law, and borrowing tolerance for it
+would make a verify knob silently change where the tool goes.
+
+**v32 is a PURE step-up.** One new tag, `multi_axis_contour`,
+auto-derived by serde - unlike `Flow5D` (whose snake_case needed
+the explicit `flow5d` rename to dodge `flow5_d`) the variant
+name already snake-cases cleanly, so no rename was needed.
+`retract_z` is an `Option`, skip-serialized when absent (the
+kernel's own rapids plane answers); `shank_avoid` carries
+`#[serde(default)]` and is always WRITTEN, surface truth as in
+stages F/I. No migration code: a v31 file cannot carry the tag,
+PROJECT_VERSION 32.
+
+**Kernel station law** (`crates/motion/src/multiaxis/curve.rs`):
+each chain vertex is a station read through the FAN of model
+planes meeting there - smooth fans merge to one plane, an edge
+is two planes, a corner is three. The ball rests on the
+bisector at h = r/max|cos|, and the pass side (which way is
+down) resolves by winding - edge-pairing closure plus signed
+volume - with air/sink bids as the fallback vote; a floating
+chain, one whose points find no model under them, refuses "off
+the model". CLAIM: the pose law is stage C's lead/lag tilt then
+max-tilt rejection, shared with flow5d's AxisControl - the same
+trio, read station by station off the fan rather than off a
+raster's surface normal.
+
+**The glyph is original:** `assets/ui/multiaxiscontour.png` -
+the dome with the picked chain's dots on it and a leaning
+ball-end tool, drawn from scratch; no vendor material, no
+HSMWorks reference (clean-room protocol, assets clause).
+
+**UI: the two height planes ARE the machining window.** They
+draw the same ladder pair as flow's, but documented as "what
+may be cut" rather than cut depths - for this kind an outside
+vertex is refused, not clamped, so the pair states the
+refusal's bounds.
 
 ## How this file ends
 

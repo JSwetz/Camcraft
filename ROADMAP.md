@@ -110,7 +110,7 @@ home.
 | Multi-axis roughing | ✅ | M5.1 |
 | Swarf | ✅ | M5.1 |
 | Advanced swarf | ✅ | M5.1 |
-| Multi-axis contour | 📋 | M5.1 |
+| Multi-axis contour | ✅ | M5.1 |
 | Rotary parallel | ✅ | M5.1 |
 | Rotary contour | ✅ | M5.1 |
 | Multi-axis finishing | ✅ | M5.1 |
@@ -1483,11 +1483,12 @@ Phase-5 shape law.
       `multi_axis_rough`), Envelope verify (law (f) restated for the
       rough: a sphere's envelope is pose-invariant, so the verify
       sees the pocket's volume) - RECOMMENDED.md, M5.1 E3.
-- **The rotary family**: multi-axis contour, multi-axis finishing
+- ✅ **The rotary family**: multi-axis contour, multi-axis finishing
       (the parallel and contour twins landed with stage E, rotary
       offset roughing with stage E2, multi-axis roughing with stage
-      E3) - the catalog's multi-axis block lands here, each riding
-      the orientation and machine-sim laws below
+      E3, the flowline finish with stage I, the drive-curve contour
+      with stage J) - the catalog's multi-axis block lands here,
+      each riding the orientation and machine-sim laws below
 - ✅ **5-axis flowline finishing** (stage I, commit 378184a): the
       finishing pass that CURVES with the part - the per-facet
       shape-operator fit claims each facet's least-curving direction
@@ -1537,7 +1538,28 @@ Phase-5 shape law.
       rub. Kernel `crates/motion/src/multiaxis/avoid.rs` (`Shank`,
       `shank_hits` mirroring verify's law (c), `escape_axis`),
       project v29 - RECOMMENDED.md, M5.1 F.
-- **Drive curves**: machine to a curve on a surface with orientation rules
+- ✅ **Multi-axis contour on drive curves** (stage J, commit caaab7a):
+      machine to a curve on a surface with orientation rules, said
+      literally - the 18th kind machines the picked edge chains WHERE
+      THEY STAND: no pattern is asked of the model, the curve IS the
+      path, so there is no stepover and no ladder to author spacing
+      with, and `tolerance` is only the verify budget (the envelope
+      scan's chord allowance, law (f)); kernel
+      `crates/motion/src/multiaxis/curve.rs` makes every chain
+      vertex a station - the fan of planes meeting there (smooth
+      fans merge, an edge is two planes, a corner three), the ball
+      resting on the bisector at h = r/max|cos| with the pass side
+      resolved by winding (edge-pairing closure + signed volume,
+      air/sink bids as fallback), the pose stage C's lead/lag-then-
+      max-tilt law; the window law refuses any vertex standing
+      outside [bottom, top] BY VERTEX, never clips, and an open run
+      or a chain standing off the model refuses by name; app kind
+      MultiAxisContour (ordinal/tag 17, wire tag `multi_axis_contour`
+      auto-derived, project v32 a pure step-up), the picks ride the
+      existing `SrcRef::Selection(Chain)` field so the digest's
+      stamp law covers model edits for free, and the dome-and-chain
+      glyph `assets/ui/multiaxiscontour.png` is drawn original -
+      RECOMMENDED.md, M5.1 J.
 - ✅ **Machine simulation** (stage G, this commit): full kinematic
       simulation of the post's A/B/C motion model, not just the
       toolpath - the head turns on its own clock and a tilt that
