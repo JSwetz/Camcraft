@@ -4061,3 +4061,126 @@ refusal's bounds.
 
 When the roadmap's open items are exhausted, this file gets its final
 entry summarizing what "done" meant, and the discussion happens over it.
+
+## M5.2 stage A - the turning substrate and the facing ladder (code 1648ce9 + this docs)
+
+**The door moved from the ribbon into the command.** M3.2 stage E's
+machine-kind law only darkened UI cells; since stage A
+`CreateOperation` itself refuses a kind whose family the document's
+machine cannot run - turning work on a mill, milling work on a
+lathe, nothing refused on a mill-turn - BY NAME, naming the kind,
+the family and the mount that opens the door. The table is data:
+one new `family: Family {Mill, Turn}` field on the KindInfo registry
+row, so M5.2's ~20 remaining turning kinds land the gate for free.
+Considered and dropped: refusing at GENERATE only - a created-but-
+never-generatable operation is a ghost in the tree, and the law
+says validate early. The ribbon's darkening stays as a courtesy
+reading the same table; the command door is the law.
+
+**An unstated machine is a mill.** The admits law
+`(_, MillTurn) | (Mill, Mill) | (Turn, Lathe)` defaults the missing
+document to today's world - every existing test, project file and
+golden keeps its meaning, and only mounted `.mch` files can open
+the turning door. Dropped: `Machine::kind` defaulting to MillTurn
+("it can probably do both") - a guess about steel is exactly the
+silent wrong answer the directive bans.
+
+**The facing kernel is a construction, not a check.** The CL point
+is the insert nose CIRCLE'S CENTER held at `station + nose_radius`
+along the axis, so the ball is tangent to the facing plane at every
+point of the pass - it cuts exactly the flat it is aimed at and can
+never cross it. No gouge test is load-bearing for this kind, and
+the envelope verifier still judges the path like every other. The
+ridge that set the parameter law: a pass removes precisely the band
+`[s, s+2r]`, so an infeed over twice the nose would leave an
+untouched sheet between stations - the kernel REFUSES
+`stepdown > 2r` at the door instead of trusting a later scan
+(a scan that measures the path against the model, and a standing
+sheet is not in the model).
+
+**No stepover is authored because none is missed.** The Facing
+params carry tolerance, three heights, stepdown and two feeds -
+one pass per station runs the profile's whole width, so the
+stepdown IS the spacing. HSMWorks' facing has a stepover field
+too; ours drops it as noise the moment the pass is a full-radius
+line (the Trace kind's no-stepover precedent).
+
+**Passes run inward only; the descent between rungs is a feed move
+in air.** The spun work presents a fresh face only on the cut move,
+the retract slides the ball tangentially off the flat it just made,
+and the axial stationing move at clear radius travels at
+`plunge_feed` (it is motion toward the spinning part, not over a
+finished face). Rapids ride `r_max + stepdown + nose` - the rotary
+rough's clearance law read radially, exact from convexity of the
+distance-to-axis. Considered: retract-hop-plunge per rung like the
+mills - dropped, a lathe turret does not Z-hop over a chuck.
+
+**"Facing Plane Z" is the bottom height's word.** The panel reuses
+the shared height editor under a kind-scoped tag; the name says
+what the plane is (the face the last pass leaves), matching the
+refusal texts that name it. The heights seam resolves it exactly
+like every kind's Bottom Z - one law, one label per audience.
+
+**`nose_radius` rides `Tool` as the inert-field pattern's third
+member** (after `tip_angle`, `pitch`): every kind carries it, only
+`Turning` reads it, and the BOUNDS are kind-scoped in `is_sane`
+(`0 < nose <= d/2` for Turning, `true` elsewhere) so a retype never
+refuses a mill for geometry it ignores. Dropped: `Option<f64>` -
+the drill's `tip_angle` precedent showed the Some/None dance buys
+nothing over "0.0 means the field is inert here", and the file
+grammar keeps its flat numbers.
+
+**The seed breaks the fold for one number.** `seed_facing` takes
+every shared value from the `Carried` fold like its siblings, EXCEPT
+stepdown: the mill's folded default (5.0) would meet the house
+insert's 2r = 1.6 ceiling and refuse the fresh operation on its
+first Generate. The seed authors the handbook rough-facing infeed
+0.5, which stands under 2r of every TN row in the catalog. The fold
+stays honest for every other retype target.
+
+**The band radius is asked of triangles, not vertices - the
+stubble bug, caught by reasoning before any test ran.** The first
+kernel read each rung's infeed radius off the vertices inside the
+window `[s, s+2r]`. A cylinder wall's triangles span the window
+with ALL their vertices outside it - both rim rings elsewhere -
+and the rung then started at the nose off the axis, cut its little
+disk, and left a full-radius annulus of stubble STANDING ABOVE the
+facing plane. No envelope verdict catches an under-cut: the path
+never touched forbidden material, the material it failed to remove
+is invisible to a program-vs-model judge. Silent wrong, the worst
+class. The fix is a reach sweep: a triangle whose stations span
+`[lo, top]` occupies a pass's window iff the rung start lies in
+`[lo - 2r, top]`; its widest VERTEX bounds the whole triangle
+(convexity of distance-to-axis over the hull of its own corners -
+exact, not a heuristic), so the sweep is events-by-rung into a
+max-heap of (radius, life) and overshoot is safe (starting further
+in air costs a shorter feed, never a gouge). `profile_of`'s doc
+now states where its own convexity promise ends: exact for the
+WHOLE-BODY max, silent per station. The law test pins the
+signature: every pass ends on the axis and starts beyond
+`R + nose` - the wall's tangency - over a drum whose wall has no
+vertex in the rung's window at all.
+
+**The ribbon tip order: the tool list speaks first.** A Create
+cell's tip checks the empty tool list before the family darkening
+(imgui's swap, and the deeper trouble - nothing lights until a
+tool exists, whatever the machine says). The lathe-darkening proof
+runs on the demo document, which carries tools, so both laws stay
+visible where each is true; the command door keeps refusing for
+both reasons whatever the ribbon guessed.
+
+**The door tests declare the kind by word.** The turning suite mounts
+`Machine { kind: Some("lathe"), .. }` instead of an X/Z-only axis
+table: the axis-inventory inference is the .mch's own truth (pinned
+in the machine suite), while the family door only cares what the
+document IS - declaring it keeps the door tests honest about the
+table, not about a fixture's axis list someone may later extend.
+
+**v33 is a pure step-up.** One new params tag (`facing`), one new
+tool-kind word (`turning`), one new serde-defaulted key
+(`nose_radius`, 0.0 = the inert every mill already meant) - no v32
+file can carry any of them, no existing shape changed, and the
+sane door refuses the default for the kind that reads it: a
+declared turning tool WITHOUT a nose is a mathematical point, and
+`validate_kind` turns that into a named Corrupt before the world
+is touched.

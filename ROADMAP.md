@@ -1612,6 +1612,28 @@ Phase-5 shape law.
 - **Bar feeder patterns**: catch/transfer support for production turning
 - **Mill-turn**: live tooling operations indexed and continuous (C-axis)
 
+- ✅ **Lathe branch substrate + Facing** (stage A, commit 1648ce9): the
+      door moved from the ribbon into the command - `CreateOperation`
+      now refuses a kind whose family the document's machine cannot
+      run, BY NAME (kind, family, and the mount that opens it), on one
+      new data field `KindInfo.family` with the admits law
+      `(_, MillTurn) | (Mill, Mill) | (Turn, Lathe)` and the
+      unstated-machine-is-a-mill default; new motion domain
+      `crates/motion/src/turning/`: `profile.rs` fits the turned
+      silhouette about the M5.1-E axis and answers band radii of
+      TRIANGLES, not vertices (the stubble law - a rung whose window
+      holds no vertex would else leave a full-radius sheet standing
+      above the plane), `face.rs` holds the CL point at
+      `station + nose_radius` so the insert ball is tangent to the
+      facing plane by construction, rungs at `stepdown <= 2r` (refused
+      at the door past that), passes inward to the axis, rapids at
+      `r_max + stepdown + nose`; new kind Facing (ordinal 18, wire tag
+      `facing`, project v33 - a pure step-up: one params tag, one tool
+      kind word, one serde-defaulted `nose_radius` riding `Tool` as
+      the inert-field pattern's third member), no stepover authored
+      because one full-radius pass per station misses none -
+      RECOMMENDED.md, M5.2 A.
+
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**
 
