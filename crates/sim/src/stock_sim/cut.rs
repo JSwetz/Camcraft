@@ -143,7 +143,12 @@ pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
             )));
         }
     }
-    let chord_tol = (dex.cell * 0.25).max(1e-9); // envelope_scan's law
+    // A display lattice cut: the chord budget follows the cell the
+    // viewer chose, which is honest for what this is - a picture of
+    // stock being removed. The VERDICT scan (`envelope_scan`) keeps
+    // the stricter quarter-tolerance law, because a measurement may
+    // never be coarser than the promise it measures.
+    let chord_tol = (dex.cell * 0.25).max(1e-9);
     for op in ops {
         for m in op.moves {
             if op.ball {

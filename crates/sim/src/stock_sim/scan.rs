@@ -108,8 +108,18 @@ pub fn envelope_scan(
         stock_z: f64::INFINITY,
         top: vec![f64::INFINITY; nx * ny],
     };
+    // The arc tessellation of the measurement: the generator's own
+    // chord law - every XY shortcut keeps tolerance/4 (the march law,
+    // the ring law) - so the scan's discretization error never
+    // outweighs the promise it is measuring. A cell-derived budget
+    // was tried: at the r/8 lattice it shortens an arc by a sagitta
+    // of cell/4, which exceeds the tol + floor gate itself, and a
+    // tangential ring's chords then dig a phantom trench the emitted
+    // G2 arc never cut. This budget only ever tightens the yardstick:
+    // the machine follows the true arc, chord or not.
+    let chord_tol = (tol * 0.25).max(1e-9);
     for m in moves {
-        dex.subtract_ball(m, r, (cell * 0.25).max(1e-9));
+        dex.subtract_ball(m, r, chord_tol);
     }
     let part = part_surface(facets, x0, y0, cell, nx, ny);
     let floor = cell * cell / (2.0 * r); // the sagitta one cell can hide
@@ -144,7 +154,7 @@ pub fn envelope_scan(
     // this path's own failure, while a once-grazed or never-touched
     // point is another op's job (the law above).
     let band = r + tol + floor;
-    let segs = center_segments(moves, r, (cell * 0.25).max(1e-9));
+    let segs = center_segments(moves, r, chord_tol);
     // A far segment's 3D distance cannot stand inside the band, so
     // its XY window rejects it before the distance is paid. A
     // column's dmin only feeds a report when two segments proved
