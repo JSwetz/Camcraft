@@ -540,6 +540,33 @@ pub enum OpParams {
         /// See [`Self::Contour5D`]: the dodge, on curved lines.
         shank_avoid: bool,
     },
+    /// Multi-axis contour on drive curves (M5.1 tail, stage J): the
+    /// edge chains picked off the model in `op.src`, machined WHERE
+    /// THEY STAND - no pattern is asked of the model, the curve IS
+    /// the path, so there is no stepover and no ladder to author
+    /// spacing with. `tolerance` keeps the meaning the other kinds
+    /// have NOT needed here: it is the verify budget, the envelope
+    /// scan's chord allowance, nothing more (as in
+    /// [`Self::RotaryOffset`] and [`Self::MultiAxisRough`]). The ball
+    /// still rests on the model's facets - the selection's geometry,
+    /// the union of the entities named - while the picked chains
+    /// tell it where to go (see [`crate::multiaxis`]).
+    MultiAxisContour {
+        tolerance: f64,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+        /// See [`Self::Contour5D`]: the dodge, on the chain's own
+        /// vertices.
+        shank_avoid: bool,
+    },
 }
 
 impl OpParams {
@@ -563,6 +590,7 @@ impl OpParams {
             OpParams::RotaryOffset { .. } => OpType::RotaryOffset,
             OpParams::MultiAxisRough { .. } => OpType::MultiAxisRough,
             OpParams::Flow5D { .. } => OpType::Flow5D,
+            OpParams::MultiAxisContour { .. } => OpType::MultiAxisContour,
         }
     }
 
@@ -598,8 +626,11 @@ impl OpParams {
             // The stamped ladder is that answer too: the poses ARE
             // the orientation, written per move (M5.1 stage E3).
             | OpParams::MultiAxisRough { .. }
-            // Flow is the stage-C answer spoken on curved lines.
-            | OpParams::Flow5D { .. } => None,
+            // Flow is the stage-C answer spoken on curved lines, and
+            // the drive-curve contour poses the same way - the axis
+            // law reads the vertex's own fan of planes per move.
+            | OpParams::Flow5D { .. }
+            | OpParams::MultiAxisContour { .. } => None,
         }
     }
 
@@ -623,7 +654,8 @@ impl OpParams {
             | OpParams::RotaryParallel { clearance_z, .. }
             | OpParams::RotaryOffset { clearance_z, .. }
             | OpParams::MultiAxisRough { clearance_z, .. }
-            | OpParams::Flow5D { clearance_z, .. } => *clearance_z,
+            | OpParams::Flow5D { clearance_z, .. }
+            | OpParams::MultiAxisContour { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -650,7 +682,8 @@ impl OpParams {
             | OpParams::RotaryParallel { top_z, .. }
             | OpParams::RotaryOffset { top_z, .. }
             | OpParams::MultiAxisRough { top_z, .. }
-            | OpParams::Flow5D { top_z, .. } => *top_z,
+            | OpParams::Flow5D { top_z, .. }
+            | OpParams::MultiAxisContour { top_z, .. } => *top_z,
         }
     }
 
@@ -715,9 +748,13 @@ impl OpParams {
             | OpParams::RotaryContour { clearance_z, retract_z, top_z, bottom_z, .. }
             | OpParams::RotaryParallel { clearance_z, retract_z, top_z, bottom_z, .. }
             // The stamped ladder stores the pocket family's four, the
-            // hop included (M5.1 stage E3), and so does flow (M5.1 I).
+            // hop included (M5.1 stage E3), and so does flow (M5.1 I)
+            // and the drive-curve contour (M5.1 J) - the top and
+            // bottom are its machining window, the bounds the picked
+            // chain's vertices must stand within.
             | OpParams::MultiAxisRough { clearance_z, retract_z, top_z, bottom_z, .. }
-            | OpParams::Flow5D { clearance_z, retract_z, top_z, bottom_z, .. } => {
+            | OpParams::Flow5D { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::MultiAxisContour { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);

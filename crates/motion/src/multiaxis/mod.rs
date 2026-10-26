@@ -6,7 +6,9 @@
 //! posing from the RADIAL of a fitted axis of revolution), and the
 //! stamped pocket ladder of stage E3 (`rough`: the prismatic rough in
 //! freeform ground, posed by the same normal law as the finishing
-//! trio).
+//! trio), and the drive-curve contour of stage J (`curve`: the pass
+//! that walks the caller's picked chains, resting the ball on the
+//! vertex's own fan of planes).
 //!
 //! Where stage B kept the tool vertical and moved the PART (3+2
 //! indexing through a tilted frame), these kinds keep the PART still
@@ -32,6 +34,7 @@ mod stamp;
 mod stamp_tests;
 pub mod axis;
 pub mod contour5d;
+pub mod curve;
 pub mod flow;
 pub mod parallel5d;
 pub mod rough;
@@ -44,6 +47,7 @@ pub mod tilt;
 
 pub use avoid::Shank;
 pub use contour5d::contour5d;
+pub use curve::{contour_curve, CurveParams};
 pub use flow::flow5d;
 pub use parallel5d::parallel5d;
 pub use rough::{multiaxis_rough, multiaxis_rough_prev};

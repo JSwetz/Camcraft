@@ -96,6 +96,71 @@ pub fn contour_auto_side(
     }
 }
 
+/// The drive chains, in WORLD 3D (M5.1 J): the same entity/name/
+/// hash-id resolution [`selection_geometry_impl`]'s walk does, read
+/// through the transform instead of projected to XY - for the
+/// drive-curve contour the chain is the path where it STANDS, and a
+/// shadow of a space curve is not the curve. A closed chain and an
+/// open run are both welcome: the ball rides the points either way,
+/// and the kernel's winding law reads the rest. Face and Patch picks
+/// are refused by name - this kind asks for curves, not boundaries.
+/// Resolution errors quote the same labels the 2D walk quotes, so a
+/// re-pick instruction reads identically in both.
+pub(super) fn drive_chains(world: &World, items: &[GeoSel]) -> Result<Vec<Vec<Point3>>, GenError> {
+    let mut out: Vec<Vec<Point3>> = Vec::new();
+    for g in items {
+        let Some(entity) = model::find_by_name(world, &g.entity) else {
+            return Err(GenError::Invalid(format!(
+                "the selection names '{}', which is gone",
+                g.entity
+            )));
+        };
+        let Some(features) = model::features_of(world, &entity) else {
+            return Err(GenError::Invalid(format!(
+                "'{}' has no geometry to select from",
+                g.entity
+            )));
+        };
+        let loc = model::transform_of(world, &entity).unwrap_or_default();
+        let label = format!("{} of '{}'", g.feature, g.entity);
+        match g.feature {
+            FeatureSel::Chain(cid) => {
+                let cs = feature::chains(&features);
+                let Some(c) = cs.iter().find(|c| c.id == cid) else {
+                    return Err(GenError::Invalid(format!(
+                        "{label} is no longer in the model: re-pick it"
+                    )));
+                };
+                let pts: Vec<Point3> = feature::chain_points(&features, c)
+                    .iter()
+                    .map(|p| transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot))
+                    .collect();
+                if pts.len() < 2 {
+                    // A one-point chain cannot carry a pass: the
+                    // kernel's refusal would speak of drive curves
+                    // while the pick is the one to blame - name it here.
+                    return Err(GenError::Invalid(format!(
+                        "{label} holds a single point - re-pick a real edge"
+                    )));
+                }
+                out.push(pts);
+            }
+            FeatureSel::Face(_) | FeatureSel::Patch(_) => {
+                return Err(GenError::Invalid(format!(
+                    "{label} is a face - Multi-Axis Contour machines the picked EDGE CHAINS where they stand; machine this face's boundary as a chain, or use 5-Axis Contour for the model's own pattern"
+                )));
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(GenError::Empty(
+            "Multi-Axis Contour machines picked edge chains - pick edges in the Geometry section"
+                .into(),
+        ));
+    }
+    Ok(out)
+}
+
 /// [`selection_geometry`] with a human-readable account of what the
 /// selection resolved to (`notes`) accumulated on the side, so the
 /// account can never disagree with the geometry - they are one walk.

@@ -45,6 +45,7 @@ pub(crate) enum Icon {
     RotaryOffset,
     MultiAxisRough,
     Flow5D,
+    MultiAxisContour,
     Undo,
     Redo,
     Delete,
@@ -59,7 +60,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 34] = [
+    pub(crate) const ALL: [Icon; 35] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -84,6 +85,7 @@ impl Icon {
         Icon::RotaryOffset,
         Icon::MultiAxisRough,
         Icon::Flow5D,
+        Icon::MultiAxisContour,
         Icon::Undo,
         Icon::Redo,
         Icon::Delete,
@@ -156,6 +158,12 @@ impl Icon {
             // parallel's chord bent into the blade's own sweep. Ours
             // to give.
             Icon::Flow5D => include_bytes!("../../../../assets/ui/flow5d.png"),
+            // Original drawing (no Tabler drive-curve glyph exists): the
+            // dome with a CHAIN of straight runs riding its shoulder,
+            // dots marking the picked vertices - the path is the picks,
+            // no pattern - and the ball leaning off vertical at the
+            // last one, the pose law the family shares. Ours to give.
+            Icon::MultiAxisContour => include_bytes!("../../../../assets/ui/multiaxiscontour.png"),
             Icon::Undo => include_bytes!("../../../../assets/ui/arrow-back-up.png"),
             Icon::Redo => include_bytes!("../../../../assets/ui/arrow-forward-up.png"),
             Icon::Delete => include_bytes!("../../../../assets/ui/trash.png"),
@@ -200,6 +208,7 @@ impl Icon {
             Icon::RotaryOffset => "icon-rotary-offset",
             Icon::MultiAxisRough => "icon-multiaxis-rough",
             Icon::Flow5D => "icon-flow5d",
+            Icon::MultiAxisContour => "icon-multiaxis-contour",
             Icon::Undo => "icon-undo",
             Icon::Redo => "icon-redo",
             Icon::Delete => "icon-delete",

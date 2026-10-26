@@ -400,6 +400,26 @@ impl OpParams {
                 lag_deg,
                 max_tilt_deg,
                 ..
+            }
+            // The drive-curve contour (M5.1 J, tag 17) is flow's byte
+            // shape with the stepover absent - it binds no stepover
+            // field, so the read-back below simply skips it; the tag
+            // alone separates the two digests. What is NOT a parameter
+            // here is the path itself: the picked chains enter through
+            // op.src's own digest, the selection's law.
+            | OpParams::MultiAxisContour {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
             } => {
                 // The or-pattern cannot bind the optional stepover
                 // (E0642: the contour has none) - read it back below.
@@ -434,7 +454,8 @@ impl OpParams {
                 // field to omit) - read it back the stepover's way.
                 if let OpParams::Contour5D { shank_avoid, .. }
                 | OpParams::Parallel5D { shank_avoid, .. }
-                | OpParams::Flow5D { shank_avoid, .. } = self
+                | OpParams::Flow5D { shank_avoid, .. }
+                | OpParams::MultiAxisContour { shank_avoid, .. } = self
                 {
                     h.write_u8(u8::from(*shank_avoid));
                 }

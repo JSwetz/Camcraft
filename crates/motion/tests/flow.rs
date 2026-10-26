@@ -253,11 +253,13 @@ fn a_wall_only_model_is_left_to_the_rings() {
 
 #[test]
 fn degenerate_ground_refuses_or_stays_whole_never_crashes() {
-    assert!(matches!(flow(&[], &finish(2.0, 0.0), &straight).err(), Some(_)));
+    assert!(flow(&[], &finish(2.0, 0.0), &straight).err().is_some());
     let sliver = vec![Triangle::new(p3(0.0, 0.0, 0.0), p3(1.0, 0.0, 0.0), p3(2.0, 0.0, 0.0))];
-    match flow(&sliver, &finish(2.0, -0.5), &straight) {
-        Ok(t) => assert!(t.all_finite()),
-        Err(_) => {}
+    if let Ok(t) = flow(&sliver, &finish(2.0, -0.5), &straight) {
+        // Tracing a sliver is allowed; half-tracing it is not. The
+        // refusal branch is the other honest answer - either way the
+        // law is that a degenerate model never panics.
+        assert!(t.all_finite());
     }
 }
 

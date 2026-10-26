@@ -86,7 +86,8 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::RotaryParallel { feed, .. }
         | OpParams::RotaryOffset { feed, .. }
         | OpParams::MultiAxisRough { feed, .. }
-        | OpParams::Flow5D { feed, .. } => *feed,
+        | OpParams::Flow5D { feed, .. }
+        | OpParams::MultiAxisContour { feed, .. } => *feed,
     }
 }
 
@@ -108,7 +109,8 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::RotaryParallel { plunge_feed, .. }
         | OpParams::RotaryOffset { plunge_feed, .. }
         | OpParams::MultiAxisRough { plunge_feed, .. }
-        | OpParams::Flow5D { plunge_feed, .. } => *plunge_feed,
+        | OpParams::Flow5D { plunge_feed, .. }
+        | OpParams::MultiAxisContour { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -129,7 +131,8 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::RotaryParallel { climb, .. }
         | OpParams::RotaryOffset { climb, .. }
         | OpParams::MultiAxisRough { climb, .. }
-        | OpParams::Flow5D { climb, .. } => *climb,
+        | OpParams::Flow5D { climb, .. }
+        | OpParams::MultiAxisContour { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
         OpParams::Drill { .. } => true,
@@ -163,8 +166,11 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::RotaryContour { .. }
         | OpParams::RotaryParallel { .. }
         // Flow authors its spacing the twins' way: derived unless a
-        // number is typed over it (M5.1 I).
-        | OpParams::Flow5D { .. } => None,
+        // number is typed over it (M5.1 I). The drive-curve contour
+        // has NO spacing at all - the picked chain is the path, one
+        // pass over it (M5.1 J).
+        | OpParams::Flow5D { .. }
+        | OpParams::MultiAxisContour { .. } => None,
     }
 }
 
@@ -184,7 +190,8 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Contour5D { .. } | OpParams::Parallel5D { .. }
         | OpParams::Swarf { .. } | OpParams::AdvancedSwarf { .. }
         | OpParams::RotaryContour { .. } | OpParams::RotaryParallel { .. }
-        | OpParams::Flow5D { .. } => None,
+        | OpParams::Flow5D { .. }
+        | OpParams::MultiAxisContour { .. } => None,
     }
 }
 
@@ -208,7 +215,8 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryParallel { top_z, .. }
         | OpParams::RotaryOffset { top_z, .. }
         | OpParams::MultiAxisRough { top_z, .. }
-        | OpParams::Flow5D { top_z, .. } => Some(*top_z),
+        | OpParams::Flow5D { top_z, .. }
+        | OpParams::MultiAxisContour { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -232,7 +240,8 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryParallel { bottom_z, .. }
         | OpParams::RotaryOffset { bottom_z, .. }
         | OpParams::MultiAxisRough { bottom_z, .. }
-        | OpParams::Flow5D { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::Flow5D { bottom_z, .. }
+        | OpParams::MultiAxisContour { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -259,7 +268,10 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryParallel { retract_z, .. }
         // The stamped ladder hops like the pocket it stamps (E3).
         | OpParams::MultiAxisRough { retract_z, .. }
-        | OpParams::Flow5D { retract_z, .. } => *retract_z,
+        | OpParams::Flow5D { retract_z, .. }
+        // The drive-curve contour hops between chains like the
+        // raster hops between lines (M5.1 J).
+        | OpParams::MultiAxisContour { retract_z, .. } => *retract_z,
         // No hop plane to carry: the kernel names its own rapids
         // plane (one infeed and a tool radius off the skin), and
         // Face never stored one either.
@@ -503,6 +515,29 @@ fn seed_flow5d(c: &Carried) -> OpParams {
         // None = the stepover cos-law derives spacing from the
         // tolerance, the finish's own law.
         stepover: None,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+        shank_avoid: false,
+    }
+}
+
+/// The drive-curve seed (M5.1 J): the flow's numbers minus the
+/// stepover - the spacing question does not exist when the chain IS
+/// the path. What it DOES need that no seed can know is the
+/// selection: a fresh one cuts nothing until edge chains are picked
+/// in its Geometry section, and generation refuses by name until
+/// then. The tolerance is the verify budget only (variant docs).
+fn seed_multi_axis_contour(c: &Carried) -> OpParams {
+    OpParams::MultiAxisContour {
+        tolerance: 0.05,
         clearance_z: c.clearance,
         retract_z: None,
         top_z: c.top,
@@ -857,6 +892,19 @@ impl KindInfo {
             mode: Mode::Envelope,
             seed: seed_flow5d,
         },
+        KindInfo {
+            ty: OpType::MultiAxisContour,
+            label: "Multi-Axis Contour",
+            caption: "Multi-Axis Contour",
+            tag: 17,
+            // The ball rides the picked chains wherever they stand
+            // (M5.1 J): there is no authored pattern for a law to
+            // distrust, and the verdict is the same sphere-envelope
+            // scan - rest-height errors at a vertex fan and a gouged
+            // chain are exactly what the sweep measures.
+            mode: Mode::Envelope,
+            seed: seed_multi_axis_contour,
+        },
     ];
 }
 
@@ -883,6 +931,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[14].label,
     KindInfo::ALL[15].label,
     KindInfo::ALL[16].label,
+    KindInfo::ALL[17].label,
 ];
 
 impl OpType {
@@ -908,6 +957,7 @@ impl OpType {
             OpType::RotaryOffset => 14,
             OpType::MultiAxisRough => 15,
             OpType::Flow5D => 16,
+            OpType::MultiAxisContour => 17,
         }
     }
 

@@ -114,7 +114,15 @@ fn wrong_version_is_refused() {
     // and v26_file_steps_to_v27_and_the_wrap_ladder_grammar_round_trips
     // v26 -> v27 (the `rotary_offset` tag), and
     // v27_file_steps_to_v28_and_the_stamped_ladder_grammar_round_trips
-    // v27 -> v28 (the `multi_axis_rough` tag).
+    // v27 -> v28 (the `multi_axis_rough` tag), and
+    // v28_file_steps_to_v29_and_shank_avoid_round_trips v28 -> v29
+    // (the `shank_avoid` key on the axis-law kinds), and
+    // v29_file_steps_to_v30_and_a_sweep_warning_round_trips v29 -> v30
+    // (the `sweep_hit` word in the cached warnings), and
+    // v30_file_steps_to_v31_and_the_flow_grammar_round_trips v30 -> v31
+    // (the `flow5d` tag), and
+    // v31_file_steps_to_v32_and_the_drive_curve_grammar_round_trips
+    // v31 -> v32 (the `multi_axis_contour` tag).
     // Spell the probe from the constant: a rung named by hand goes stale
     // (grey, then red) the day the stamp moves, as it did at v25.
     let future = project::PROJECT_VERSION + 1;
@@ -3524,5 +3532,116 @@ fn v30_file_steps_to_v31_and_the_flow_grammar_round_trips() {
     assert!(
         matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
         "a v31 file with a 200-degree cone must not load"
+    );
+}
+
+#[test]
+fn v31_file_steps_to_v32_and_the_drive_curve_grammar_round_trips() {
+    // M5.1 stage J: the drive-curve contour arrives as ONE new params
+    // tag (`multi_axis_contour`) - the flow's field minus the spacing,
+    // whose place the picked chains take; no pattern means no stepover
+    // on the wire at all. Nothing existing changed shape; step-up is
+    // the stamp itself, like every bump since v6. A v31 file can never
+    // carry the tag, and a v32 reader of one loses nothing.
+    let world = new_world();
+    project::open(&world, r#"{"version": 31, "entities": []}"#).expect("v31 steps up");
+    let p = tmp_path("v32a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v32 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v32 wire grammar, hand-written so the tag is pinned: MC1
+    // states the hop and the dodge; MC2 omits both and must land on
+    // the defaults - absent retract means the straight pull-up to
+    // clearance between chains, absent shank_avoid the fan law's own
+    // vertices, unposed.
+    let text = r#"{
+        "version": 32,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "MC1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"multi_axis_contour": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "retract_z": {"reference": "fixed", "offset": 12.0},
+                 "top_z": {"reference": "fixed", "offset": 6.0},
+                 "bottom_z": {"reference": "fixed", "offset": 4.0},
+                 "feed": 500.0, "plunge_feed": 120.0, "climb": true,
+                 "lead_deg": 0.0, "lag_deg": 0.0, "max_tilt_deg": 60.0,
+                 "shank_avoid": true}}}
+            },
+            {"name": "MC2", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"multi_axis_contour": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "fixed", "offset": 6.0},
+                 "bottom_z": {"reference": "fixed", "offset": 4.0},
+                 "feed": 500.0, "plunge_feed": 120.0, "climb": true,
+                 "lead_deg": 0.0, "lag_deg": 0.0, "max_tilt_deg": 60.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v32 drive-curve grammar must read");
+    let e = model::find_by_name(&world, "MC1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::MultiAxisContour {
+        retract_z,
+        shank_avoid,
+        lead_deg,
+        lag_deg,
+        max_tilt_deg,
+        ..
+    } = &o.params
+    else {
+        panic!("multi_axis_contour params expected, got {:?}", o.params);
+    };
+    assert!(retract_z.is_some(), "a stated hop must survive as a hop");
+    assert!(*shank_avoid, "a stated dodge must read back stated");
+    assert_eq!((*lead_deg, *lag_deg, *max_tilt_deg), (0.0, 0.0, 60.0));
+    let e = model::find_by_name(&world, "MC2").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::MultiAxisContour { retract_z, shank_avoid, .. } = &o.params else {
+        panic!("multi_axis_contour params expected, got {:?}", o.params);
+    };
+    assert!(retract_z.is_none(), "an absent hop means the straight pull-up");
+    assert!(!*shank_avoid, "an absent dodge means the fan law's bare vertices");
+
+    // Write-parse-write is a fixed point, and the stated keys ride the
+    // file once each while MC2's silence stays silent (except the
+    // flag, always written like the family's).
+    let p = tmp_path("v32b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the drive-curve shape round-trips byte-identically");
+    assert_eq!(first.matches("\"multi_axis_contour\"").count(), 2, "{first}");
+    assert!(
+        !first.contains("\"stepover\""),
+        "the kind that machines picked curves authors no spacing: {first}"
+    );
+    assert_eq!(first.matches("\"retract_z\"").count(), 1, "only the stated hop rides: {first}");
+    assert_eq!(first.matches("\"shank_avoid\"").count(), 2, "the flag is always stated: {first}");
+
+    // The sane door at the loader: a 200-degree cone is past the
+    // hemisphere the stamp may open into - a typo about the machine,
+    // refused by name, the family's law read by the newest sibling.
+    let bad = text.replace("\"max_tilt_deg\": 60.0,\n                 \"shank_avoid\": true", "\"max_tilt_deg\": 200.0,\n                 \"shank_avoid\": true");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v32 file with a 200-degree cone must not load"
     );
 }

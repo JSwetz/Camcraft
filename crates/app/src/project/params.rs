@@ -485,6 +485,28 @@ pub enum ParamsDto {
         #[serde(default)]
         shank_avoid: bool,
     },
+    /// Declared at v32 with the drive-curve contour (M5.1 stage J).
+    /// Flow's shape minus the stepover - the picked chains ARE the
+    /// path, there is no spacing to author - and the automatic
+    /// snake_case needs no rename here: `multi_axis_contour` is
+    /// already the tag.
+    MultiAxisContour {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+        /// Absent means off, the twins' law.
+        #[serde(default)]
+        shank_avoid: bool,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

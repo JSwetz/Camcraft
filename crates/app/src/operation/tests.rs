@@ -177,9 +177,10 @@ fn stamp_follows_every_input() {
     // them. The tags are digest bytes - drift here greys every cache.
     // (Stage E moved this pin with its two rows, stage E2 with the
     // wrap ladder's, stage E3 with the stamped one, stage I with the
-    // flowline's: the registry law is checked from the table itself,
-    // so the count is the only stale number a stage can leave behind.)
-    assert_eq!(KindInfo::ALL.len(), 17);
+    // flowline's, stage J with the drive-curve's: the registry law is
+    // checked from the table itself, so the count is the only stale
+    // number a stage can leave behind.)
+    assert_eq!(KindInfo::ALL.len(), 18);
     for (i, row) in KindInfo::ALL.iter().enumerate() {
         assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
         assert_eq!(row.tag as usize, i, "digest tag must equal table order");

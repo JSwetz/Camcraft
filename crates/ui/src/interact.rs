@@ -1151,9 +1151,11 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::RotaryContour { retract_z, .. }
         | operation::OpParams::RotaryParallel { retract_z, .. }
         // The stamped ladder keeps the pocket-family hop (M5.1 E3),
-        // and flow stores the finish's (M5.1 I).
+        // flow stores the finish's (M5.1 I), and the drive-curve
+        // contour hops between its chain runs the same way (M5.1 J).
         | operation::OpParams::MultiAxisRough { retract_z, .. }
         | operation::OpParams::Flow5D { retract_z, .. }
+        | operation::OpParams::MultiAxisContour { retract_z, .. }
         | operation::OpParams::Slot { retract_z, .. }
         | operation::OpParams::Trace { retract_z, .. }
         | operation::OpParams::Drill { retract_z, .. } => *retract_z,
@@ -1238,7 +1240,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::MultiAxisRough { top_z, bottom_z, .. }
         // Flow draws the raster's ladder: first and last line planes,
         // the turning of the lines in between needs no plane (M5.1 I).
+        // The drive-curve contour draws the same two planes, but its
+        // pair is no ladder - it is the machining window: a picked
+        // chain standing outside it is refused, so the planes say
+        // exactly what may be cut (M5.1 J).
         | operation::OpParams::Flow5D { top_z, bottom_z, .. }
+        | operation::OpParams::MultiAxisContour { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
         | operation::OpParams::Trace { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {

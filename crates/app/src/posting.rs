@@ -627,6 +627,14 @@ impl HeightRefs for OpParams {
                 top_z,
                 bottom_z,
                 ..
+            }
+            // The drive-curve contour states the same four (M5.1 J).
+            | OpParams::MultiAxisContour {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
             } => {
                 let mut v = vec![clearance_z, top_z, bottom_z];
                 v.extend(retract_z.iter());

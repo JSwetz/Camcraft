@@ -255,8 +255,25 @@ impl OpParams {
             }
             // Flow's door (M5.1 I) is the raster twins' - the field
             // that bends the lines is model data, refused or honored
-            // at generation, and needs no number here.
+            // at generation, and needs no number here. The
+            // drive-curve contour stands in the same doorway (M5.1 J):
+            // no stepover to question - the chain is the path - so it
+            // falls to the inner match's `_` arm, and its top/bottom
+            // are the window the picked vertices must live in.
             | OpParams::Flow5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
+            }
+            | OpParams::MultiAxisContour {
                 tolerance,
                 clearance_z,
                 retract_z,

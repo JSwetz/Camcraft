@@ -820,6 +820,68 @@ pub fn generate(
             let path = crate::multiaxis::flow5d(&material.facets, &fp, &axis, shank.as_ref())?;
             (region, path)
         }
+        // The drive-curve contour (M5.1 J): the picked chains, in
+        // world 3D, machined WHERE THEY STAND. No pattern is asked of
+        // the model - the curve is the path - so there is no stepover
+        // to derive, no ladder to author, and the tolerance is not
+        // even read here: it belongs to the verify pass below, the
+        // envelope budget. The facets are the union `material_of`
+        // collected from the selected entities, whole: the ball rests
+        // on the model while the chain tells it where to go.
+        OpParams::MultiAxisContour {
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            shank_avoid,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::BallNose {
+                return Err(GenError::Invalid(format!(
+                    "Multi-Axis Contour needs a ball-nose tool, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let top = req_z(hl.top, "Top of Part Z")?;
+            let bottom = req_z(hl.bottom, "Bottom of Part Z")?;
+            let chains = drive_chains_of(world, op)?;
+            // The window applies to the curve itself: a picked chain
+            // standing outside the operation's top/bottom is a
+            // disagreement between the pick and the heights that no
+            // pose can fix - refused by vertex, never quietly
+            // clipped (the Prime Directive's kind of wrong).
+            for (ci, ch) in chains.iter().enumerate() {
+                if let Some(v) = ch.iter().find(|v| v.z < bottom - Z_TOL || v.z > top + Z_TOL) {
+                    return Err(GenError::Invalid(format!(
+                        "picked chain {} stands at z {:.3}, outside the window [{:.3}, {:.3}] - widen Top/Bottom of Part Z or re-pick",
+                        ci + 1,
+                        v.z,
+                        bottom,
+                        top
+                    )));
+                }
+            }
+            let cp = crate::multiaxis::CurveParams {
+                tool_diameter: d,
+                clearance_z: hl.clearance,
+                retract_z: hl.retract,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+            };
+            let axis = crate::multiaxis::AxisControl {
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: Some(*max_tilt_deg),
+            };
+            let shank = (*shank_avoid).then(|| shank_of(&tool));
+            let path =
+                crate::multiaxis::contour_curve(&chains, &material.facets, &cp, &axis, shank.as_ref())?;
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -922,8 +984,11 @@ pub fn generate(
         // finish's path, the axis fit adds no material law.
         | OpParams::RotaryContour { .. }
         | OpParams::RotaryParallel { .. }
-        // Flow bends the lines, not the material law.
-        | OpParams::Flow5D { .. } => 0.0,
+        // Flow bends the lines, not the material law. The drive-curve
+        // contour removes what the chain says, nothing more - the
+        // ball's envelope at the curve's stations is the whole law.
+        | OpParams::Flow5D { .. }
+        | OpParams::MultiAxisContour { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -958,6 +1023,10 @@ pub fn generate(
                             | OpParams::RotaryOffset { .. }
                             | OpParams::MultiAxisRough { .. }
                             | OpParams::Flow5D { .. }
+                            // The chain rides the model: the scan
+                            // measures the rest against these facets,
+                            // the same depth-dependent law (M5.1 J).
+                            | OpParams::MultiAxisContour { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -990,8 +1059,12 @@ pub fn generate(
                         | OpParams::MultiAxisRough { tolerance, .. }
                         // Flow is the finish's law on turning lines:
                         // the tolerance is the envelope budget, as
-                        // always in this group (M5.1 I).
-                        | OpParams::Flow5D { tolerance, .. } => Some(*tolerance),
+                        // always in this group (M5.1 I). The
+                        // drive-curve contour reads it the same way -
+                        // its ONLY reading, the path itself comes from
+                        // the picks (M5.1 J).
+                        | OpParams::Flow5D { tolerance, .. }
+                        | OpParams::MultiAxisContour { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

@@ -1590,6 +1590,69 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
+        // The drive-curve contour (M5.1 J): flow's panel minus the
+        // stepover - the PASSES page has no pattern to author,
+        // because the GEOMETRY page's picked chains ARE the path.
+        OpParams::MultiAxisContour {
+            tolerance,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            shank_avoid,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "multi_axis_contour.clearance");
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "multi_axis_contour.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "multi_axis_contour.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "multi_axis_contour.bottom");
+                ui.label("the machining window: a picked chain standing outside it is refused by name, never clipped");
+            }
+            if tab == SEC_PASSES {
+                ui.label("no pattern - the picked edge chains are the path, machined where they stand; see Geometry");
+                axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+                shank_avoid_editor(ui, shank_avoid);
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the verify budget: it authors nothing here - the envelope scan measures the chain-riding path against it");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
         // The swarf family (M5.1 stage D): the raster's panel, because
         // the path is the raster run along the ruling. Two arms like
         // the twins' - the ladder's extra word has no name for the

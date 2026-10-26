@@ -4641,3 +4641,308 @@ fn a_quiet_shank_leaves_the_contour_twin_alone() {
         assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z));
     }
 }
+
+// ---------------------------------------------------------------------------
+// M5.1 stage J: the drive-curve contour through the command chain. The
+// geometry laws live in `multiaxis::curve` - the rest at a fan of planes,
+// the winding law, the axis leaned off the fold - and that file's own
+// unit tests measure them. At this level the checks are the TRIP: the
+// picked chains of a real model walk the cutter around a real solid and
+// lean at the corners, staleness rides the picks through the src
+// digest (the one kind whose source IS the path), and every refusal
+// says who - the face pick, the chain outside its window, the wrong
+// source, the flat tool, the nonsense pose - at the right door, with no
+// path left behind.
+// ---------------------------------------------------------------------------
+
+/// The box the drive-curve tests ride: a 10x10x5 solid at the origin,
+/// so its four top edges are horizontal chains at z = 5, its corner
+/// posts are vertical ones spanning the whole height, and a ball-nose
+/// riding an edge stands a radius off BOTH faces it touches - the
+/// 45-degree fold this kind exists to cut.
+fn mac_part_world() -> (World, History) {
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    (world, history)
+}
+
+/// The four top edges, as one selection - the pick a user makes by
+/// clicking the rim of the box's top face.
+fn mac_top_edges(world: &World) -> SrcRef {
+    let e = model::find_by_name(world, "part").expect("part");
+    let f = model::features_of(world, &e).expect("features");
+    let items: Vec<GeoSel> = feature::chains(&f)
+        .into_iter()
+        .filter(|c| {
+            let pts = feature::chain_points(&f, c);
+            pts.len() >= 2 && pts.iter().all(|p| (p[2] - 5.0).abs() < 1e-9)
+        })
+        .map(|c| GeoSel {
+            entity: "part".into(),
+            feature: FeatureSel::Chain(c.id),
+        })
+        .collect();
+    assert_eq!(items.len(), 4, "a box has exactly four top edges");
+    SrcRef::Selection(items)
+}
+
+/// One vertical corner post, as a pick - two points, z 0 to z 5: the
+/// chain no window can straddle from both sides.
+fn mac_corner_post(world: &World) -> SrcRef {
+    let e = model::find_by_name(world, "part").expect("part");
+    let f = model::features_of(world, &e).expect("features");
+    let post = feature::chains(&f)
+        .into_iter()
+        .find(|c| {
+            let pts = feature::chain_points(&f, c);
+            pts.iter().all(|p| (p[0] - pts[0][0]).abs() < 1e-9 && (p[1] - pts[0][1]).abs() < 1e-9)
+                && pts.iter().any(|p| p[2] < 1.0)
+                && pts.iter().any(|p| p[2] > 4.0)
+        })
+        .expect("a box has vertical corner posts");
+    sel("part", FeatureSel::Chain(post.id))
+}
+
+fn multiaxis_contour_params(top_z: f64, bottom_z: f64) -> OpParams {
+    OpParams::MultiAxisContour {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 120.0,
+        climb: true,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+        shank_avoid: false,
+    }
+}
+
+#[test]
+fn multiaxis_contour_walks_the_picked_edges_and_leans_at_the_fold() {
+    // The killer trip: four picked chains, eight stations, every cut
+    // point a ball's radius OUTSIDE the solid - the centre of a ball
+    // tangent to the top plane (z = 5) and one side plane stands at
+    // z = 8 and reach 8 off the footprint centre. And the axes are
+    // not vertical: the fold leans them 45 degrees off the Z, which
+    // is the whole reason the kind exists.
+    let (world, mut history) = mac_part_world();
+    let src = mac_top_edges(&world);
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "MAC", "BN-0600", src, multiaxis_contour_params(6.0, 4.0))
+            .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "MAC").expect("generate"));
+    assert_eq!(status(&world, "MAC"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    let t = cache(&world, "MAC").expect("cached").path;
+    pose_law("multiaxis_contour", &t);
+    let mut cut = 0usize;
+    for m in t.moves.iter().filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge)) {
+        cut += 1;
+        assert!(
+            (m.to.z - 8.0).abs() < 1e-6,
+            "a ball riding the z = 5 plane stands at 8.0, not {:?}",
+            m.to
+        );
+        let reach = (m.to.x - 5.0).abs().max((m.to.y - 5.0).abs());
+        assert!(reach >= 8.0 - 1e-6, "a cut point fell inside the footprint: {:?}", m.to);
+    }
+    assert!(cut >= 4, "the pass skipped picked stations: {cut} cut moves");
+}
+
+#[test]
+fn multiaxis_contour_goes_stale_when_the_picked_model_moves() {
+    // The one kind whose source IS the path: staleness must ride the
+    // picks through the src digest, not the pattern - a model slid
+    // four mm takes its chains with it, and a cached path would cut
+    // thin air where the edge was.
+    let (world, mut history) = mac_part_world();
+    let src = mac_top_edges(&world);
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "MS1", "BN-0600", src.clone(), multiaxis_contour_params(6.0, 4.0))
+            .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "MS1").expect("generate"));
+    assert_eq!(status(&world, "MS1"), OpStatus::Ok);
+    let part = model::find_by_name(&world, "part").expect("part");
+    model::set_transform(&world, &part, at(4.0, 0.0, 0.0));
+    assert_eq!(status(&world, "MS1"), OpStatus::Stale, "the chains moved with the model");
+    model::set_transform(&world, &part, at(0.0, 0.0, 0.0));
+    assert_eq!(status(&world, "MS1"), OpStatus::Ok, "back where it was, the cache is honest again");
+
+    // A different pick is a different path, counts or no counts: the
+    // digest reads the chain ids, so swapping one edge for a post
+    // moves the stamp the same way swapping a face does for the 2D
+    // kinds.
+    let sa = operation::current_stamp(&world, "BN-0600", &src, &multiaxis_contour_params(6.0, 4.0), "MS1", None);
+    let sb = operation::current_stamp(
+        &world,
+        "BN-0600",
+        &mac_corner_post(&world),
+        &multiaxis_contour_params(6.0, 4.0),
+        "MS1",
+        None,
+    );
+    assert_ne!(sa, sb, "a different selection is a different path");
+}
+
+#[test]
+fn multiaxis_contour_refuses_a_face_pick_by_name() {
+    // The picks are curves; a face is a boundary. The refusal names
+    // the kind's own law and points at the fix - the face's edge
+    // chain, or the mesh-driven twin - never the 2D walk's wording.
+    let (world, mut history) = mac_part_world();
+    let top = FeatureSel::Face(top_face_of(&world, "part"));
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "MF1", "BN-0600", sel("part", top), multiaxis_contour_params(6.0, 4.0))
+            .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "MF1")
+        .err()
+        .expect("a face is not a drive curve")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("is a face"), "{msg}");
+    assert!(msg.contains("Multi-Axis Contour"), "{msg}");
+    assert_eq!(status(&world, "MF1"), OpStatus::Never);
+}
+
+#[test]
+fn multiaxis_contour_refuses_a_chain_outside_its_window_by_name() {
+    // A corner post spans z 0..5; the window [4, 6] cannot hold it,
+    // and no pose can shorten a curve that stands where it stands.
+    // The refusal quotes the vertex and the window - a quietly
+    // clipped chain would be the gouge this kind was designed to
+    // avoid.
+    let (world, mut history) = mac_part_world();
+    let src = mac_corner_post(&world);
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "MW1", "BN-0600", src, multiaxis_contour_params(6.0, 4.0))
+            .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "MW1")
+        .err()
+        .expect("the post stands through the window floor")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("outside the window"), "{msg}");
+    assert_eq!(status(&world, "MW1"), OpStatus::Never, "a refusal leaves no path behind");
+}
+
+#[test]
+fn multiaxis_contour_refuses_the_wrong_source_by_name() {
+    // Stock and whole-entity sources are what the MESH-driven 5-axis
+    // kinds are for; here they would silently invent a path the user
+    // never picked. Both refusals point at the same two fixes.
+    let mk = |src: SrcRef, tag: &str| {
+        let world = new_world();
+        let mut history = History::default();
+        box_stock(&world, &mut history, 40.0, 40.0, 20.0);
+        add_tool(&world, &mut history, "BN-0600");
+        history.execute(
+            &world,
+            ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+        );
+        let cmd = CreateOperation::new(&world, tag, "BN-0600", src, multiaxis_contour_params(6.0, 4.0));
+        history.execute(&world, cmd.expect("create"));
+        (world, history)
+    };
+    let (world, _history) = mk(SrcRef::Stock, "MJ1");
+    let CommandError::Machining(msg) =
+        GenerateOperation::new(&world, "MJ1").err().expect("stock is not a pick list")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("pick them in the Geometry section"), "{msg}");
+    let (world, _history) = mk(SrcRef::Entity("part".into()), "MJ2");
+    let CommandError::Machining(msg) =
+        GenerateOperation::new(&world, "MJ2").err().expect("a whole model is not a pick list")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("not a whole entity"), "{msg}");
+}
+
+#[test]
+fn multiaxis_contour_refuses_a_flat_tool_and_nonsense_pose_by_name() {
+    // The twins' standing refusals, at this kind's doors: an end mill
+    // has no ball to rest on a fold (generation), and a zero budget
+    // or an impossible cone never reaches a generator (creation).
+    let (world, mut history) = box_part_world();
+    add_tool(&world, &mut history, "BN-0600");
+    let src = mac_top_edges(&world);
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "MT1", "EM-0600-4FL", src.clone(), multiaxis_contour_params(6.0, 4.0))
+            .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "MT1")
+        .err()
+        .expect("a flat tool cannot ride a chain")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("ball-nose"), "{msg}");
+    assert_eq!(status(&world, "MT1"), OpStatus::Never);
+
+    let mk = |p: OpParams| CreateOperation::new(&world, "MT2", "BN-0600", src.clone(), p);
+    let mut zero_tol = multiaxis_contour_params(6.0, 4.0);
+    if let OpParams::MultiAxisContour { tolerance, .. } = &mut zero_tol {
+        *tolerance = 0.0;
+    }
+    assert!(matches!(mk(zero_tol), Err(CommandError::Invalid(_))), "tol 0 is no budget");
+    let mut flat_lean = multiaxis_contour_params(6.0, 4.0);
+    if let OpParams::MultiAxisContour { lead_deg, .. } = &mut flat_lean {
+        *lead_deg = 91.0;
+    }
+    assert!(matches!(mk(flat_lean), Err(CommandError::Invalid(_))));
+    let mut no_cone = multiaxis_contour_params(6.0, 4.0);
+    if let OpParams::MultiAxisContour { max_tilt_deg, .. } = &mut no_cone {
+        *max_tilt_deg = 0.0;
+    }
+    assert!(matches!(mk(no_cone), Err(CommandError::Invalid(_))), "a 0 cone allows no lean at all");
+}
+
+#[test]
+fn multiaxis_contour_quiet_shank_moves_nothing() {
+    // Opt-in means EXACTLY opt-in at the chain's seam too: the catalog
+    // ball's shank stays a full flute above the rim, so posing with
+    // the dodge on must reproduce the dodge-off path move for move,
+    // axes included - the fan law's vertices are not a suggestion the
+    // shank pass is free to re-pose.
+    let run = |dodging: bool, tag: &str| {
+        let (world, mut history) = mac_part_world();
+        let mut params = multiaxis_contour_params(6.0, 4.0);
+        if let OpParams::MultiAxisContour { shank_avoid, .. } = &mut params {
+            *shank_avoid = dodging;
+        }
+        history.execute(
+            &world,
+            CreateOperation::new(&world, tag, "BN-0600", mac_top_edges(&world), params).expect("create"),
+        );
+        let cmd = GenerateOperation::new(&world, tag).expect("generate");
+        history.execute(&world, cmd);
+        assert_eq!(status(&world, tag), OpStatus::Ok);
+        cache(&world, tag).expect("cached").path
+    };
+    let pa = run(false, "MQ1");
+    let pb = run(true, "MQ2");
+    assert_eq!(pa.moves.len(), pb.moves.len());
+    for (i, (a, b)) in pa.moves.iter().zip(&pb.moves).enumerate() {
+        assert_eq!(a.axis, b.axis, "a shank that reaches nothing moved a pose at {i}");
+        assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z));
+    }
+}

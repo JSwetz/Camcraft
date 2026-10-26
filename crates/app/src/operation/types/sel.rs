@@ -115,6 +115,13 @@ pub enum OpType {
     /// steep flanks are still the waterline rings' (see
     /// [`crate::multiaxis`]).
     Flow5D,
+    /// Multi-axis contour on drive curves (M5.1 tail, stage J): the
+    /// picked edge chains, machined WHERE THEY STAND - no pattern is
+    /// asked of the model, the curve is the path. At every vertex the
+    /// ball rests on the fan of planes the mesh shows there (the
+    /// bisector of an edge, the seat of a corner) and the axis poses
+    /// by the same lean law the family uses (see [`crate::multiaxis`]).
+    MultiAxisContour,
 }
 
 impl core::fmt::Display for OpType {

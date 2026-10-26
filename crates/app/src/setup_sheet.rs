@@ -609,6 +609,17 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             top_z,
             bottom_z,
             ..
+        }
+        // The drive-curve contour states the same four rows; its
+        // TOP/BOT are the window the picked chain must stand in, and
+        // the Geometry column already spells the chain by its picks
+        // (M5.1 J).
+        | OpParams::MultiAxisContour {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
         } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", *retract_z),

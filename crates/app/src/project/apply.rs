@@ -256,6 +256,16 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // axis before theirs.
         file.version = 31;
     }
+    if file.version == 31 {
+        // v31 -> v32: the drive-curve contour arrives as one new
+        // params variant (`multi_axis_contour`, M5.1 stage J), under
+        // the twins' law: no v31 file can contain it - the kind tag
+        // did not exist - and `validate_kind` already refuses an
+        // unknown params tag before anything is written. No existing
+        // shape changed - the chains it rides live in the geometry
+        // source every kind already files, so the format gains no key.
+        file.version = 32;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

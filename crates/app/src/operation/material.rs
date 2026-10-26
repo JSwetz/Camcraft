@@ -174,6 +174,13 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
                 | OpParams::Drill { .. }
                 | OpParams::Pocket3D { .. }
                 | OpParams::Finish3D { .. }
+                // The drive-curve contour's picks are the PATH, not a
+                // boundary: the 2D selection walk below would try to
+                // bound an area with them (and refuse an open run),
+                // where the honest preview is the material's shadow -
+                // what the ball rides is the 3D chain itself, visible
+                // once generated (M5.1 J).
+                | OpParams::MultiAxisContour { .. }
         )
     {
         return selection_region(world, op.setup.as_deref(), items, &op.params).ok();
@@ -208,6 +215,31 @@ pub fn chains_of(world: &World, op: &Operation) -> Vec<Vec<Point2>> {
     match selection_geometry(world, op.setup.as_deref(), items, &op.params) {
         Ok((_, chains)) => chains,
         Err(_) => Vec::new(),
+    }
+}
+
+/// The drive chains of one operation as the world stands now, in
+/// WORLD 3D (M5.1 J): the Multi-Axis Contour's source must be a
+/// selection of edge-chain picks - the picks ARE the path, machined
+/// where they stand. Any other source is a named refusal, never a
+/// silent whole-model guess: a Stock or Entity source spells "cut
+/// the model's own pattern", which is what the mesh-driven 5-axis
+/// kinds exist for. The facet geometry the ball rests ON is NOT read
+/// here: it is `material_of`'s union of the picked entities, whole -
+/// the curve tells the ball where to go, the model says how high it
+/// sits there.
+pub(super) fn drive_chains_of(world: &World, op: &Operation) -> Result<Vec<Vec<Point3>>, GenError> {
+    match &op.src {
+        SrcRef::Selection(items) => drive_chains(world, items),
+        SrcRef::Stock => Err(GenError::Invalid(
+            "Multi-Axis Contour machines picked edge chains - pick them in the Geometry section, \
+             or use 5-Axis Contour to machine the stock's own pattern"
+                .into(),
+        )),
+        SrcRef::Entity(name) => Err(GenError::Invalid(format!(
+            "Multi-Axis Contour machines picked edge chains, not a whole entity ('{name}') - \
+             pick edges in its Geometry section, or use 5-Axis Contour for that model's pattern"
+        ))),
     }
 }
 
@@ -266,6 +298,12 @@ pub(super) fn region_for_src(
                     // loop could only contradict it (M5.1 I).
                     | OpParams::MultiAxisRough { .. }
                     | OpParams::Flow5D { .. }
+                    // The drive-curve contour is the one kind whose
+                    // picks ARE the path: the region is still the
+                    // material's shadow - a picked loop could not
+                    // disagree with the pattern because the picks
+                    // ARE it (M5.1 J).
+                    | OpParams::MultiAxisContour { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -333,7 +371,11 @@ pub(super) fn region_for(
         // spindle moves no position, so no footprint moves either -
         // and flow turns the lines inside the same shadow (M5.1 I).
         | OpParams::MultiAxisRough { .. }
-        | OpParams::Flow5D { .. } => {
+        | OpParams::Flow5D { .. }
+        // The drive-curve contour's ball rests on this same shadow's
+        // solid; the chains it rides are resolved separately, in 3D,
+        // at generation (M5.1 J).
+        | OpParams::MultiAxisContour { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }
