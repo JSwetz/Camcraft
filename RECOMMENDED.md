@@ -3795,6 +3795,70 @@ the app seam (`crates/app/tests/sim.rs`,
 a_posed_move_paces_on_its_rotary_slot_through_app_sim) proves the
 family clock through app::sim.
 
+## M5.1 stage H - entry family and real engagement stepping on the planar pocket (code 1544b16 + this docs)
+
+**One engagement law, one home: the dive/helix/engagement family
+lifted into `crates/motion/src/entry.rs`, where both ladders call
+it.** The laws specced at M2.1 for the 3-D ladder read only planar
+geometry and the move chain, which the 2-D ladder shares, so
+`machining2d` reaches `dive_point`, `helix_down`, `engagement_step`
+and `chord_hits_plan` there instead of machining3d re-exporting
+them for a second copy to shadow; the legality arguments that are
+ladder-specific (the islands superset) stay with each ladder.
+Considered: separate 2-D copies of each law (dropped: the laws are
+identical, and two copies of an engagement law drift - drift is a
+gouge risk).
+
+**`run_levels` stays infallible: an entry-shaping failure degrades
+to the plain vertical plunge at that level.** A failed offset or a
+dive scan that finds no legal midpoint gives that level the motion
+the pre-H ladder always took; the rest of the path is unaffected
+and still honest. Considered: Result plumbing through the ladder
+(dropped for now - the geometry itself is fine, an honest coarse
+path beats a refused job, and the verify laws still catch real
+collisions).
+
+**Adaptive stops being a relabeled Zigzag: rings step by `tool_r x
+(1 - cos(max_engagement))` - the 3-D side's constant-engagement
+law, now on the plane - and the reach door asks the EFFECTIVE
+step.** Raw stepover stays bounded even at tight engagement angles
+because the door measures what the rings actually do, not what the
+field says. Zigzag, Waterline and Auto emit their pre-H bytes
+untouched: the 13 `.nc` goldens are byte-identical.
+
+**The wire is three additive `#[serde(default)]` fields on the
+existing Pocket DTO arm; PROJECT_VERSION stays at v30.** A file
+without `entry` reads Plunge, the seed's 1.0 mm helix radius and
+the law's 45 degrees - the pre-H behavior - and re-saves complete;
+an unknown entry tag refuses as Corrupt rather than guessing.
+Considered: a version bump plus migration (dropped: additive
+defaults are a lossless step-up, the same precedent as `rest_rough`
+and `feed_opt`).
+
+**The stamp digest gains the two floats, then the strategy byte,
+then the entry byte.** Fixed order so every path to the hash agrees;
+pre-H operations come up Stale exactly ONCE and regenerate
+byte-identically - the staleness is one-time and provably cosmetic.
+
+**The tilted-helix test law: a tilted pocket's cached path is
+already world-expressed, so axial depth is a plain dot with the
+axis letter.** The tilt door ran at generate; mapping the stored
+path through the frame again invented a phantom slope of stepover x
+sin(belt) - the new tilt test caught it in development, and the law
+is pinned there so the next reader dots instead of transforms.
+
+**Toolchain lint drift rode this commit: rust 1.99's `manual_find`
+and `collapsible_if`/let-chain lints newly fired on committed stage
+F/G code.** sim's `sweep.rs` and motion's `avoid.rs` take the fixes
+here because a red clippy lane blocks every gate; the walk guard
+keeps NaN semantics through the NaN-honest form (`total <= 0.0 ||
+!total.is_finite()`), so the lint fix changed no verdict.
+
+**Gate note, recorded so nobody hunts it: a gate lane reported a
+compile error citing a `cutter_axis` field on `MultiAxisContour` -
+verified false.** No such identifier exists anywhere in the tree;
+a transient mid-edit state, not chased.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

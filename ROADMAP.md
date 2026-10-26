@@ -91,7 +91,7 @@ home.
 | Corner | 📋 | M2.5 |
 | Flow (flowline; ruled-surface flow waits for M5.1) | 📋 | M2.5 |
 | Deburr | 📋 | M2.5 |
-| 3+2 roughing (tilted plane, indexed) | 🔄 | M5.1 |
+| 3+2 roughing (tilted plane, indexed) | ✅ | M5.1 |
 
 ### Milling — Drilling
 
@@ -1488,7 +1488,7 @@ Phase-5 shape law.
       offset roughing with stage E2, multi-axis roughing with stage
       E3) - the catalog's multi-axis block lands here, each riding
       the orientation and machine-sim laws below
-- 🔄 **3+2 tilted-plane indexing** (stage B, this commit): the five
+- ✅ **3+2 tilted-plane indexing** (stage B, this commit): the five
       plane kinds carry a `Tilt`; generation runs them in the frame's
       LOCAL coordinates and leaves through `TiltedFrame::world_path` -
       the tilted path is the rotated flat path, move for move, with the
