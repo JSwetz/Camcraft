@@ -47,9 +47,14 @@ use super::support::{build_sups, support_at};
 /// lands at a QUARTER of tolerance there, and the denser promise
 /// is the price of a field that turns (where line families
 /// converge, the exclusion keeps them at least `CLAIM_FRAC`
-/// apart, so the count cannot run away).
+/// apart, so the count cannot run away). The measure behind the
+/// law: a diverging (radial) family, the worst the lattice can
+/// quantize, leaves ground 0.56 of a step from every line at
+/// `CLAIM_FRAC = 0.5` - past the promise - and within it at 0.25,
+/// where straight ground is untouched (its rows, a half-step
+/// apart, answer to `SEED_FRAC`, not to the claim).
 const SEED_FRAC: f64 = 0.5;
-const CLAIM_FRAC: f64 = 0.5;
+const CLAIM_FRAC: f64 = 0.25;
 /// A raster family's line-count roof, in seeds: the guard that
 /// keeps a stepover asking for hours of path a named refusal.
 const MAX_SEEDS: f64 = 65536.0;

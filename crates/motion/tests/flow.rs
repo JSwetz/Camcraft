@@ -193,6 +193,45 @@ fn flow_lines_turn_with_a_turning_field() {
     }
 }
 
+/// The radial field: lines through the origin, both ways. The
+/// DIVERGING family - the convergence law's dual, and the one the
+/// straight-line tests cannot see: rays fan out as they run, so
+/// the seed lattice alone decides how many of them survive, and
+/// the gaps between them grow with radius.
+fn radial(q: Point2) -> (f64, f64) {
+    let l = q.x.hypot(q.y);
+    if l < 1e-12 {
+        (1.0, 0.0)
+    } else {
+        (q.x / l, q.y / l)
+    }
+}
+
+#[test]
+fn flow_keeps_its_cusp_over_a_diverging_field() {
+    let plate = graph_grid(16, 40.0, |_, _| 0.0);
+    let p = finish(2.0, -0.5);
+    let step = scallop_stepover(R, p.tolerance);
+    let t = flow(&plate, &p, &radial).expect("flow over a radial field");
+    assert!(t.all_finite());
+    let cs = chords(&t);
+    assert!(cs.len() > 40, "only {} chords over a radial field", cs.len());
+    let mut worst = 0.0f64;
+    let n = 24;
+    for i in 0..=n {
+        for j in 0..=n {
+            let q = Point2::new(-38.0 + 76.0 * i as f64 / n as f64, -38.0 + 76.0 * j as f64 / n as f64);
+            let d = cs.iter().map(|(a, b)| dist2_seg(q, *a, *b)).fold(f64::INFINITY, f64::min);
+            worst = worst.max(d);
+        }
+    }
+    assert!(
+        worst <= 0.6 * step,
+        "the diverging family left {worst:.3} uncovered - past the raster's promise ({:.3})",
+        0.5 * step
+    );
+}
+
 #[test]
 fn a_stepover_asking_for_hours_refuses_by_name() {
     let plate = graph_grid(4, 100.0, |_, _| 0.0);
