@@ -594,8 +594,16 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             ..
         }
         // The stamped ladder states the pocket family's four rows,
-        // the optional hop among them (M5.1 stage E3).
+        // the optional hop among them (M5.1 stage E3), and so does
+        // flow (M5.1 I).
         | OpParams::MultiAxisRough {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::Flow5D {
             clearance_z,
             retract_z,
             top_z,

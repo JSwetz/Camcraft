@@ -25,12 +25,14 @@
 //! law; written from those sources and our own design notes only.
 
 mod avoid;
+mod curv;
 mod linalg;
 mod stamp;
 #[cfg(test)]
 mod stamp_tests;
 pub mod axis;
 pub mod contour5d;
+pub mod flow;
 pub mod parallel5d;
 pub mod rough;
 pub mod rotary;
@@ -42,6 +44,7 @@ pub mod tilt;
 
 pub use avoid::Shank;
 pub use contour5d::contour5d;
+pub use flow::flow5d;
 pub use parallel5d::parallel5d;
 pub use rough::{multiaxis_rough, multiaxis_rough_prev};
 pub use rotary::{rotary_contour, rotary_parallel};

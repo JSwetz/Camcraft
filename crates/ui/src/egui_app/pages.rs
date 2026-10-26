@@ -1511,6 +1511,85 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
+        // Flow (M5.1 I): the parallel's panel, field for field - the
+        // direction the lines follow is read off the model, so the
+        // only difference is the wording that says so.
+        OpParams::Flow5D {
+            tolerance,
+            stepover,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            shank_avoid,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "flow5d.clearance");
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "flow5d.retract");
+                    if let (Some(rz), Some(cz)) =
+                        (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "flow5d.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "flow5d.bottom");
+                ui.label("Top is the first line's plane, Bottom the last one's");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Stepover");
+                let mut over = stepover.is_some();
+                if ui.checkbox(&mut over, "Set line spacing").changed() {
+                    *stepover = if over {
+                        Some((24.0 * tolerance.max(1e-9)).sqrt())
+                    } else {
+                        None
+                    };
+                }
+                if let Some(s) = stepover {
+                    num(ui, u, s);
+                    ui.label("flat-ground spacing; on a slope it follows the terrain's cosine");
+                } else {
+                    ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
+                }
+                axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
+                shank_avoid_editor(ui, shank_avoid);
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the finish budget: lines are spaced and levels drop from it, so the cusp under the ball stays within it");
+                ui.label("the lines follow the surface's own least-curving direction; flat ground is cut in straight passes");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
         // The swarf family (M5.1 stage D): the raster's panel, because
         // the path is the raster run along the ruling. Two arms like
         // the twins' - the ladder's extra word has no name for the

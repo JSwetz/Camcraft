@@ -765,6 +765,61 @@ pub fn generate(
             };
             (region, path)
         }
+        // M5.1 tail, stage I: flowline finishing. The pass is the
+        // parallel's law run on lines that TURN - the direction read
+        // off the model's own least-curving field, with the fallback
+        // law degrading plain ground to straight raster passes so
+        // flat interiors are never left uncut. The pose is stage C's
+        // lean law with stage F's dodge, and the numbers are the
+        // twins', field for field.
+        OpParams::Flow5D {
+            tolerance,
+            stepover,
+            feed,
+            plunge_feed,
+            climb,
+            lead_deg,
+            lag_deg,
+            max_tilt_deg,
+            shank_avoid,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::BallNose {
+                return Err(GenError::Invalid(format!(
+                    "5-Axis Flow needs a ball-nose tool, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let fp = Finish3DParams {
+                // The field replaces the pattern's choice of lines;
+                // the geometry that remains is the raster's exactly.
+                pattern: finishing3d::FinishPattern::Parallel,
+                stepover: *stepover,
+                tool_diameter: d,
+                tolerance: *tolerance,
+                clearance_z: hl.clearance,
+                retract_z: hl.retract,
+                top_z: req_z(hl.top, "Top of Part Z")?,
+                bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                ramp: false,
+                min_step: None,
+                ramp_angle: 45.0,
+            };
+            let axis = crate::multiaxis::AxisControl {
+                lead_deg: *lead_deg,
+                lag_deg: *lag_deg,
+                max_tilt_deg: Some(*max_tilt_deg),
+            };
+            // Stage F's law again, opt-in: None stamps the flow lines
+            // with the plain lean, as every v30 path regenerates.
+            let shank = (*shank_avoid).then(|| shank_of(&tool));
+            let path = crate::multiaxis::flow5d(&material.facets, &fp, &axis, shank.as_ref())?;
+            (region, path)
+        }
         OpParams::Slot {
             a,
             b,
@@ -866,7 +921,9 @@ pub fn generate(
         // Rotary leaves no stock either: the posed path is the
         // finish's path, the axis fit adds no material law.
         | OpParams::RotaryContour { .. }
-        | OpParams::RotaryParallel { .. } => 0.0,
+        | OpParams::RotaryParallel { .. }
+        // Flow bends the lines, not the material law.
+        | OpParams::Flow5D { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -900,6 +957,7 @@ pub fn generate(
                             | OpParams::RotaryParallel { .. }
                             | OpParams::RotaryOffset { .. }
                             | OpParams::MultiAxisRough { .. }
+                            | OpParams::Flow5D { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -929,7 +987,11 @@ pub fn generate(
                         // (E3): the positions are the pocket's, the
                         // verdict measures them under the pose.
                         | OpParams::RotaryOffset { tolerance, .. }
-                        | OpParams::MultiAxisRough { tolerance, .. } => Some(*tolerance),
+                        | OpParams::MultiAxisRough { tolerance, .. }
+                        // Flow is the finish's law on turning lines:
+                        // the tolerance is the envelope budget, as
+                        // always in this group (M5.1 I).
+                        | OpParams::Flow5D { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

@@ -85,7 +85,8 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::RotaryContour { feed, .. }
         | OpParams::RotaryParallel { feed, .. }
         | OpParams::RotaryOffset { feed, .. }
-        | OpParams::MultiAxisRough { feed, .. } => *feed,
+        | OpParams::MultiAxisRough { feed, .. }
+        | OpParams::Flow5D { feed, .. } => *feed,
     }
 }
 
@@ -106,7 +107,8 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::RotaryContour { plunge_feed, .. }
         | OpParams::RotaryParallel { plunge_feed, .. }
         | OpParams::RotaryOffset { plunge_feed, .. }
-        | OpParams::MultiAxisRough { plunge_feed, .. } => *plunge_feed,
+        | OpParams::MultiAxisRough { plunge_feed, .. }
+        | OpParams::Flow5D { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -126,7 +128,8 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::RotaryContour { climb, .. }
         | OpParams::RotaryParallel { climb, .. }
         | OpParams::RotaryOffset { climb, .. }
-        | OpParams::MultiAxisRough { climb, .. } => *climb,
+        | OpParams::MultiAxisRough { climb, .. }
+        | OpParams::Flow5D { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
         OpParams::Drill { .. } => true,
@@ -158,7 +161,10 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Swarf { .. }
         | OpParams::AdvancedSwarf { .. }
         | OpParams::RotaryContour { .. }
-        | OpParams::RotaryParallel { .. } => None,
+        | OpParams::RotaryParallel { .. }
+        // Flow authors its spacing the twins' way: derived unless a
+        // number is typed over it (M5.1 I).
+        | OpParams::Flow5D { .. } => None,
     }
 }
 
@@ -177,7 +183,8 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
         | OpParams::Contour5D { .. } | OpParams::Parallel5D { .. }
         | OpParams::Swarf { .. } | OpParams::AdvancedSwarf { .. }
-        | OpParams::RotaryContour { .. } | OpParams::RotaryParallel { .. } => None,
+        | OpParams::RotaryContour { .. } | OpParams::RotaryParallel { .. }
+        | OpParams::Flow5D { .. } => None,
     }
 }
 
@@ -200,7 +207,8 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryContour { top_z, .. }
         | OpParams::RotaryParallel { top_z, .. }
         | OpParams::RotaryOffset { top_z, .. }
-        | OpParams::MultiAxisRough { top_z, .. } => Some(*top_z),
+        | OpParams::MultiAxisRough { top_z, .. }
+        | OpParams::Flow5D { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -223,7 +231,8 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryContour { bottom_z, .. }
         | OpParams::RotaryParallel { bottom_z, .. }
         | OpParams::RotaryOffset { bottom_z, .. }
-        | OpParams::MultiAxisRough { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::MultiAxisRough { bottom_z, .. }
+        | OpParams::Flow5D { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -249,7 +258,8 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryContour { retract_z, .. }
         | OpParams::RotaryParallel { retract_z, .. }
         // The stamped ladder hops like the pocket it stamps (E3).
-        | OpParams::MultiAxisRough { retract_z, .. } => *retract_z,
+        | OpParams::MultiAxisRough { retract_z, .. }
+        | OpParams::Flow5D { retract_z, .. } => *retract_z,
         // No hop plane to carry: the kernel names its own rapids
         // plane (one infeed and a tool radius off the skin), and
         // Face never stored one either.
@@ -463,6 +473,32 @@ fn seed_contour5d(c: &Carried) -> OpParams {
 
 fn seed_parallel5d(c: &Carried) -> OpParams {
     OpParams::Parallel5D {
+        tolerance: 0.05,
+        // None = the stepover cos-law derives spacing from the
+        // tolerance, the finish's own law.
+        stepover: None,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        lead_deg: 0.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 90.0,
+        shank_avoid: false,
+    }
+}
+
+/// The flowline seed (M5.1 I): the parallel's numbers whole - a flow
+/// pass IS the raster's law on lines that turn, so what a fresh one
+/// starts with is what a fresh parallel starts with. The direction
+/// field is not a parameter: the generator reads the surface's own
+/// least-curving direction off the model, and plain ground degrades
+/// to the straight passes silently (the kernel's fallback law).
+fn seed_flow5d(c: &Carried) -> OpParams {
+    OpParams::Flow5D {
         tolerance: 0.05,
         // None = the stepover cos-law derives spacing from the
         // tolerance, the finish's own law.
@@ -809,6 +845,18 @@ impl KindInfo {
             mode: Mode::Envelope,
             seed: seed_multiaxis_rough,
         },
+        KindInfo {
+            ty: OpType::Flow5D,
+            label: "5-Axis Flow",
+            caption: "5-Axis Flow",
+            tag: 16,
+            // The parallel's verdict law on lines that turn (M5.1 I):
+            // a sphere's envelope is rotation-invariant, so the field
+            // decides where the lines GO and the lean law where the
+            // spindle points, and the measured scan judges both.
+            mode: Mode::Envelope,
+            seed: seed_flow5d,
+        },
     ];
 }
 
@@ -834,6 +882,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[13].label,
     KindInfo::ALL[14].label,
     KindInfo::ALL[15].label,
+    KindInfo::ALL[16].label,
 ];
 
 impl OpType {
@@ -858,6 +907,7 @@ impl OpType {
             OpType::RotaryParallel => 13,
             OpType::RotaryOffset => 14,
             OpType::MultiAxisRough => 15,
+            OpType::Flow5D => 16,
         }
     }
 

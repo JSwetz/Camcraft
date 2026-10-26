@@ -261,8 +261,11 @@ pub(super) fn region_for_src(
                     | OpParams::RotaryOffset { .. }
                     // The stamped ladder is the 3-D pocket's islands
                     // verbatim - mesh sections at every plane, and the
-                    // stamp only ever writes poses onto them.
+                    // stamp only ever writes poses onto them. Flow
+                    // chases the mesh's own direction field; a picked
+                    // loop could only contradict it (M5.1 I).
                     | OpParams::MultiAxisRough { .. }
+                    | OpParams::Flow5D { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -327,8 +330,10 @@ pub(super) fn region_for(
         | OpParams::RotaryParallel { .. }
         | OpParams::RotaryOffset { .. }
         // The stamped ladder shadows the same silhouette: leaning the
-        // spindle moves no position, so no footprint moves either.
-        | OpParams::MultiAxisRough { .. } => {
+        // spindle moves no position, so no footprint moves either -
+        // and flow turns the lines inside the same shadow (M5.1 I).
+        | OpParams::MultiAxisRough { .. }
+        | OpParams::Flow5D { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

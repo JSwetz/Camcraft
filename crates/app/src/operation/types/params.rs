@@ -513,6 +513,33 @@ pub enum OpParams {
         /// (only when) the shank speaks (M5.1 stage F).
         shank_avoid: bool,
     },
+    /// Flowline finishing (M5.1 tail): [`Self::Parallel5D`]'s numbers
+    /// run on a direction that TURNS - each pass follows the
+    /// surface's own least-curving direction (the same curvature fit
+    /// the swarf reading uses, per facet instead of one global
+    /// ruling), seeded so no ground stands farther from a traced
+    /// line than half a stepover. Facets that make no directional
+    /// claim - flat shelves, isotropic domes - take the region's
+    /// dominant fallback direction, so plain ground flows exactly
+    /// like the parallel raster and nothing is ever left uncovered.
+    Flow5D {
+        tolerance: f64,
+        /// Line spacing across the field, mm; `None` follows the
+        /// stepover cos-law from the tolerance, the raster's law.
+        stepover: Option<f64>,
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+        /// See [`Self::Contour5D`]: the dodge, on curved lines.
+        shank_avoid: bool,
+    },
 }
 
 impl OpParams {
@@ -535,6 +562,7 @@ impl OpParams {
             OpParams::RotaryParallel { .. } => OpType::RotaryParallel,
             OpParams::RotaryOffset { .. } => OpType::RotaryOffset,
             OpParams::MultiAxisRough { .. } => OpType::MultiAxisRough,
+            OpParams::Flow5D { .. } => OpType::Flow5D,
         }
     }
 
@@ -569,7 +597,9 @@ impl OpParams {
             | OpParams::RotaryOffset { .. }
             // The stamped ladder is that answer too: the poses ARE
             // the orientation, written per move (M5.1 stage E3).
-            | OpParams::MultiAxisRough { .. } => None,
+            | OpParams::MultiAxisRough { .. }
+            // Flow is the stage-C answer spoken on curved lines.
+            | OpParams::Flow5D { .. } => None,
         }
     }
 
@@ -592,7 +622,8 @@ impl OpParams {
             | OpParams::RotaryContour { clearance_z, .. }
             | OpParams::RotaryParallel { clearance_z, .. }
             | OpParams::RotaryOffset { clearance_z, .. }
-            | OpParams::MultiAxisRough { clearance_z, .. } => *clearance_z,
+            | OpParams::MultiAxisRough { clearance_z, .. }
+            | OpParams::Flow5D { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -618,7 +649,8 @@ impl OpParams {
             | OpParams::RotaryContour { top_z, .. }
             | OpParams::RotaryParallel { top_z, .. }
             | OpParams::RotaryOffset { top_z, .. }
-            | OpParams::MultiAxisRough { top_z, .. } => *top_z,
+            | OpParams::MultiAxisRough { top_z, .. }
+            | OpParams::Flow5D { top_z, .. } => *top_z,
         }
     }
 
@@ -683,8 +715,9 @@ impl OpParams {
             | OpParams::RotaryContour { clearance_z, retract_z, top_z, bottom_z, .. }
             | OpParams::RotaryParallel { clearance_z, retract_z, top_z, bottom_z, .. }
             // The stamped ladder stores the pocket family's four, the
-            // hop included (M5.1 stage E3).
-            | OpParams::MultiAxisRough { clearance_z, retract_z, top_z, bottom_z, .. } => {
+            // hop included (M5.1 stage E3), and so does flow (M5.1 I).
+            | OpParams::MultiAxisRough { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::Flow5D { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);

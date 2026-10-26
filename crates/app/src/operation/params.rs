@@ -383,13 +383,31 @@ impl OpParams {
                 lag_deg,
                 max_tilt_deg,
                 ..
+            }
+            // Flow (M5.1 I, tag 16) is the parallel's numbers whole,
+            // the field read off the model and not a parameter: the
+            // byte shape is the raster twins', one tag apart.
+            | OpParams::Flow5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                climb,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
             } => {
                 // The or-pattern cannot bind the optional stepover
                 // (E0642: the contour has none) - read it back below.
                 w(h, *tolerance);
                 if let OpParams::Parallel5D { stepover, .. }
                 | OpParams::Swarf { stepover, .. }
-                | OpParams::RotaryParallel { stepover, .. } = self
+                | OpParams::RotaryParallel { stepover, .. }
+                | OpParams::Flow5D { stepover, .. } = self
                 {
                     match stepover {
                         Some(s) => {
@@ -415,7 +433,8 @@ impl OpParams {
                 // surface truth, not a free axis - it is not their
                 // field to omit) - read it back the stepover's way.
                 if let OpParams::Contour5D { shank_avoid, .. }
-                | OpParams::Parallel5D { shank_avoid, .. } = self
+                | OpParams::Parallel5D { shank_avoid, .. }
+                | OpParams::Flow5D { shank_avoid, .. } = self
                 {
                     h.write_u8(u8::from(*shank_avoid));
                 }

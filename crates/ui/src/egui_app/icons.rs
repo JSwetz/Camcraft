@@ -44,6 +44,7 @@ pub(crate) enum Icon {
     RotaryParallel,
     RotaryOffset,
     MultiAxisRough,
+    Flow5D,
     Undo,
     Redo,
     Delete,
@@ -58,7 +59,7 @@ pub(crate) enum Icon {
 
 impl Icon {
     /// Every slot, ribbon order - the table and the store share this list.
-    pub(crate) const ALL: [Icon; 33] = [
+    pub(crate) const ALL: [Icon; 34] = [
         Icon::New,
         Icon::OpenModel,
         Icon::OpenProject,
@@ -82,6 +83,7 @@ impl Icon {
         Icon::RotaryParallel,
         Icon::RotaryOffset,
         Icon::MultiAxisRough,
+        Icon::Flow5D,
         Icon::Undo,
         Icon::Redo,
         Icon::Delete,
@@ -148,6 +150,12 @@ impl Icon {
             // stepped block with a LEANING tool - the ladder, posed.
             // Ours to give.
             Icon::MultiAxisRough => include_bytes!("../../../../assets/ui/multiaxisrough.png"),
+            // Original drawing (no Tabler flowline glyph exists): the
+            // dome cross-section with the leaning ball-end - the lines
+            // CURVING with the surface instead of crossing it, the
+            // parallel's chord bent into the blade's own sweep. Ours
+            // to give.
+            Icon::Flow5D => include_bytes!("../../../../assets/ui/flow5d.png"),
             Icon::Undo => include_bytes!("../../../../assets/ui/arrow-back-up.png"),
             Icon::Redo => include_bytes!("../../../../assets/ui/arrow-forward-up.png"),
             Icon::Delete => include_bytes!("../../../../assets/ui/trash.png"),
@@ -191,6 +199,7 @@ impl Icon {
             Icon::RotaryParallel => "icon-rotary-parallel",
             Icon::RotaryOffset => "icon-rotary-offset",
             Icon::MultiAxisRough => "icon-multiaxis-rough",
+            Icon::Flow5D => "icon-flow5d",
             Icon::Undo => "icon-undo",
             Icon::Redo => "icon-redo",
             Icon::Delete => "icon-delete",

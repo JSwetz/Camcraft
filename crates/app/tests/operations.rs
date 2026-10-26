@@ -3030,6 +3030,24 @@ fn pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
     assert!(leaned > 0, "{name}: no move holds a leaning axis");
 }
 
+fn flow5d_params(top_z: f64, bottom_z: f64) -> OpParams {
+    OpParams::Flow5D {
+        tolerance: 0.1,
+        stepover: Some(2.0),
+        clearance_z: Height::fixed(25.0),
+        retract_z: None,
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        lead_deg: 15.0,
+        lag_deg: 0.0,
+        max_tilt_deg: 60.0,
+        shank_avoid: false,
+    }
+}
+
 fn contour5d_params(top_z: f64, bottom_z: f64) -> OpParams {
     OpParams::Contour5D {
         tolerance: 0.1,
@@ -3184,12 +3202,51 @@ fn parallel5d_generates_leaning_axes_and_verifies_clean() {
 }
 
 #[test]
+fn flow5d_generates_following_axes_and_verifies_clean() {
+    // The flowline over the same hill the parallel twin finishes: the
+    // field bends the rungs, the raster's contract (planes, cone, no
+    // sink below Bottom) is unchanged - that is the point of the kind.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 40.0, 40.0, 15.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("hill", hill_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "F5A",
+            "BN-0600",
+            SrcRef::Entity("hill".into()),
+            flow5d_params(10.0, HILL_RIM_Z),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "F5A").expect("generate"));
+    assert_eq!(status(&world, "F5A"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    let t = cache(&world, "F5A").expect("cached").path;
+    pose_law("flow5d", &t);
+    let lowest = t
+        .moves
+        .iter()
+        .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
+        .map(|m| m.to.z)
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        lowest >= HILL_RIM_Z - 1e-9,
+        "the flowline sank below its Bottom plane: {lowest}"
+    );
+}
+
+#[test]
 fn axis_twins_refuse_a_flat_bottomed_tool_by_name() {
-    // Same law as the finish's, and the refusal says WHICH twin: a
+    // Same law as the finish's, and the refusal says WHICH kind: a
     // silent fallback to a ball dressed as an end mill is the gouge.
+    // The flowline is the twins' third sibling and obeys it whole.
     for (name, params) in [
         ("TwinC", contour5d_params(18.0, DOME_RIM_Z)),
         ("TwinP", parallel5d_params(18.0, DOME_RIM_Z)),
+        ("FlowF", flow5d_params(18.0, DOME_RIM_Z)),
     ] {
         let world = new_world();
         let mut history = History::default();

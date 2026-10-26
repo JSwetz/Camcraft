@@ -107,6 +107,14 @@ pub enum OpType {
     /// TOOL AXIS moves; one 3+2 index cannot hold these poses (see
     /// [`crate::multiaxis`]).
     MultiAxisRough,
+    /// Flowline finishing (M5.1 tail): the raster's laws with a
+    /// direction that turns - each pass follows the surface's own
+    /// least-curving direction field, so lines stay WITH a vane or
+    /// channel instead of crossing it. Plain ground makes no
+    /// directional claim and degrades to the parallel raster; the
+    /// steep flanks are still the waterline rings' (see
+    /// [`crate::multiaxis`]).
+    Flow5D,
 }
 
 impl core::fmt::Display for OpType {

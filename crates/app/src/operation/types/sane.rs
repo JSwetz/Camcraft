@@ -252,6 +252,22 @@ impl OpParams {
                 lag_deg,
                 max_tilt_deg,
                 ..
+            }
+            // Flow's door (M5.1 I) is the raster twins' - the field
+            // that bends the lines is model data, refused or honored
+            // at generation, and needs no number here.
+            | OpParams::Flow5D {
+                tolerance,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+                lead_deg,
+                lag_deg,
+                max_tilt_deg,
+                ..
             } => {
                 // The finish door's shape (no stepdown - the scallop
                 // law authors it), plus the pose door (M5.1 stage C):
@@ -281,7 +297,8 @@ impl OpParams {
                     && (match self {
                         OpParams::Parallel5D { stepover, .. }
                         | OpParams::Swarf { stepover, .. }
-                        | OpParams::RotaryParallel { stepover, .. } => stepover.is_none_or(pos),
+                        | OpParams::RotaryParallel { stepover, .. }
+                        | OpParams::Flow5D { stepover, .. } => stepover.is_none_or(pos),
                         _ => true,
                     })
             }

@@ -458,6 +458,33 @@ pub enum ParamsDto {
         #[serde(default)]
         shank_avoid: bool,
     },
+    /// Declared at v31 with flowline finishing (M5.1 stage I). The
+    /// parallel's shape field for field - the direction field is a
+    /// reading of the model, not a parameter, exactly as the ruling
+    /// and the rotary axis before it; the rename states the tag for
+    /// the familiar reason - the automatic snake_case of `Flow5D`
+    /// would be `flow5_d`.
+    #[serde(rename = "flow5d")]
+    Flow5D {
+        tolerance: f64,
+        /// Absent follows the stepover cos-law from the tolerance.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stepover: Option<f64>,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        lead_deg: f64,
+        lag_deg: f64,
+        max_tilt_deg: f64,
+        /// Absent means off, the twins' law.
+        #[serde(default)]
+        shank_avoid: bool,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

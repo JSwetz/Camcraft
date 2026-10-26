@@ -1150,8 +1150,10 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // The rotary twins store the hop the same way (M5.1 stage E).
         | operation::OpParams::RotaryContour { retract_z, .. }
         | operation::OpParams::RotaryParallel { retract_z, .. }
-        // The stamped ladder keeps the pocket-family hop (M5.1 E3).
+        // The stamped ladder keeps the pocket-family hop (M5.1 E3),
+        // and flow stores the finish's (M5.1 I).
         | operation::OpParams::MultiAxisRough { retract_z, .. }
+        | operation::OpParams::Flow5D { retract_z, .. }
         | operation::OpParams::Slot { retract_z, .. }
         | operation::OpParams::Trace { retract_z, .. }
         | operation::OpParams::Drill { retract_z, .. } => *retract_z,
@@ -1234,6 +1236,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // and so does the stamped one - it IS the pocket ladder (E3).
         | operation::OpParams::RotaryOffset { top_z, bottom_z, .. }
         | operation::OpParams::MultiAxisRough { top_z, bottom_z, .. }
+        // Flow draws the raster's ladder: first and last line planes,
+        // the turning of the lines in between needs no plane (M5.1 I).
+        | operation::OpParams::Flow5D { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
         | operation::OpParams::Trace { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {

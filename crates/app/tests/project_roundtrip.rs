@@ -3414,3 +3414,115 @@ fn v29_file_steps_to_v30_and_a_sweep_warning_round_trips() {
     let _ = std::fs::remove_file(&p);
     assert_eq!(first, second, "the sweep-flagged cache round-trips byte-identically");
 }
+
+#[test]
+fn v30_file_steps_to_v31_and_the_flow_grammar_round_trips() {
+    // M5.1 stage I: the flowline arrives as ONE new params tag
+    // (`flow5d`) - the parallel twin's field minus the line choice,
+    // whose place the surface's own direction takes. Nothing existing
+    // changed shape; step-up is the stamp itself, like every bump
+    // since v6. A v30 file can never carry the tag, and a v31 reader
+    // of one loses nothing: every key it adds has a default that IS
+    // the old document's behavior.
+    let world = new_world();
+    project::open(&world, r#"{"version": 30, "entities": []}"#).expect("v30 steps up");
+    let p = tmp_path("v31a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v31 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v31 wire grammar, hand-written so the tag is pinned: FL1
+    // states the spacing, the hop and the dodge; FL2 omits all three
+    // and must land on the derived law - absent stepover means the
+    // spacing the tolerance cos-law gives, absent retract means no
+    // hop, absent shank_avoid means the pose law stage F left.
+    let text = r#"{
+        "version": 31,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "FL1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"flow5d": {
+                 "tolerance": 0.05, "stepover": 4.0,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "retract_z": {"reference": "fixed", "offset": 12.0},
+                 "top_z": {"reference": "fixed", "offset": 0.0},
+                 "bottom_z": {"reference": "fixed", "offset": -10.0},
+                 "feed": 800.0, "plunge_feed": 150.0, "climb": true,
+                 "lead_deg": 3.0, "lag_deg": 2.0, "max_tilt_deg": 60.0,
+                 "shank_avoid": true}}}
+            },
+            {"name": "FL2", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"flow5d": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "fixed", "offset": 0.0},
+                 "bottom_z": {"reference": "fixed", "offset": -10.0},
+                 "feed": 800.0, "plunge_feed": 150.0, "climb": true,
+                 "lead_deg": 3.0, "lag_deg": 2.0, "max_tilt_deg": 60.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v31 flow grammar must read");
+    let e = model::find_by_name(&world, "FL1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Flow5D {
+        stepover,
+        retract_z,
+        shank_avoid,
+        lead_deg,
+        lag_deg,
+        max_tilt_deg,
+        ..
+    } = &o.params
+    else {
+        panic!("flow5d params expected, got {:?}", o.params);
+    };
+    assert_eq!(*stepover, Some(4.0), "a stated spacing must survive as stated");
+    assert!(retract_z.is_some(), "a stated hop must survive as a hop");
+    assert!(*shank_avoid, "a stated dodge must read back stated");
+    assert_eq!((*lead_deg, *lag_deg, *max_tilt_deg), (3.0, 2.0, 60.0));
+    let e = model::find_by_name(&world, "FL2").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Flow5D { stepover, retract_z, shank_avoid, .. } = &o.params else {
+        panic!("flow5d params expected, got {:?}", o.params);
+    };
+    assert_eq!(*stepover, None, "an absent key means the derived law");
+    assert!(retract_z.is_none(), "an absent hop means the straight pull-up");
+    assert!(!*shank_avoid, "an absent dodge means the stage-F pose law");
+
+    // Write-parse-write is a fixed point, and the stated keys ride the
+    // file once each while FL2's silence stays silent (except the
+    // flag, always written like the twins').
+    let p = tmp_path("v31b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the flow shape round-trips byte-identically");
+    assert_eq!(first.matches("\"flow5d\"").count(), 2, "{first}");
+    assert_eq!(first.matches("\"stepover\"").count(), 1, "only the stated spacing rides: {first}");
+    assert_eq!(first.matches("\"retract_z\"").count(), 1, "only the stated hop rides: {first}");
+    assert_eq!(first.matches("\"shank_avoid\"").count(), 2, "the flag is always stated: {first}");
+
+    // The sane door at the loader: a 200-degree cone is past the
+    // hemisphere the stamp may open into - a typo about the machine,
+    // refused by name, the twins' law read by the third sibling.
+    let bad = text.replace("\"max_tilt_deg\": 60.0,\n                 \"shank_avoid\": true", "\"max_tilt_deg\": 200.0,\n                 \"shank_avoid\": true");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &bad), Err(ProjectError::Corrupt(_))),
+        "a v31 file with a 200-degree cone must not load"
+    );
+}

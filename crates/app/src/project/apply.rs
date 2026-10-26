@@ -245,6 +245,17 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // build cannot spell, and serde would fail closed anyway.
         file.version = 30;
     }
+    if file.version == 30 {
+        // v30 -> v31: flowline finishing arrives as one new params
+        // variant (`flow5d`, M5.1 stage I), under the twins' law: no
+        // v30 file can contain it - the kind tag did not exist - and
+        // `validate_kind` already refuses an unknown params tag
+        // before anything is written. No existing shape changed -
+        // the direction field is a reading of the model, so the file
+        // gains no key for it, exactly as the ruling and the rotary
+        // axis before theirs.
+        file.version = 31;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

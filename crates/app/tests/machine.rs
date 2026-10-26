@@ -848,14 +848,18 @@ fn a_garbled_direction_refuses_by_name() {
 }
 
 #[test]
-fn rotaries_mirror_as_geometry_never_as_speeds() {
-    // Stage C's unit law, kept across the seam: the mirror's `axes`
-    // array feeds the sim's traverse and the script's mm/min
-    // ceilings, so a rotary lives in its own `rotaries` section -
-    // letter, direction, degrees of travel - and its deg/min rates
-    // join NOTHING. (The ceiling fold pre-stage-D absorbed a rotary
-    // rapid into rapidRate: a 9000 deg/min table out-rating a 7000
-    // mm/min slide would have been a lie in the mirror itself.)
+fn rotaries_mirror_as_geometry_and_rates_never_as_the_ceiling() {
+    // Stage C's unit law through stage G: a rotary lives in its own
+    // `rotaries` section - letter, direction, degrees of travel -
+    // and since G, its deg/min rates ride there too, under the
+    // rotary's own roof, because the paced head swing
+    // (`sim::Traverse::rot`) has to know how fast. What the law
+    // still forbids is the leak INTO the prismatic numbers: the
+    // ceiling fold pre-stage-D absorbed a rotary rapid into
+    // rapidRate, and a 9000 deg/min table out-rating a 7000 mm/min
+    // slide would be a lie in the mirror itself. The rapidRate pin
+    // below is that part of the law; G (this lane's blind spot,
+    // recorded in RECOMMENDED.md) added the rates half.
     let m = Machine {
         model: "TiltMill".into(),
         axes: vec![
@@ -887,7 +891,11 @@ fn rotaries_mirror_as_geometry_never_as_speeds() {
     assert_eq!(rots[0]["letter"], "A");
     assert_eq!(rots[0]["direction"], serde_json::json!([1.0, 0.0, 0.0]));
     assert_eq!(rots[0]["travel"], serde_json::json!([-120.0, 120.0]));
-    assert!(rots[0].get("speeds").is_none(), "geometry, never speeds");
+    assert_eq!(
+        rots[0]["speeds"],
+        serde_json::json!({"normal": 1500.0, "rapid": 9000.0}),
+        "the head swing paces itself off the rotary's own rates"
+    );
 
     let p = camcraft_app::post::machine::script_props(&v);
     assert_eq!(p["rtcp"], serde_json::json!(true), "an A about X tilts");
