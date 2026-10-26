@@ -1579,6 +1579,20 @@ Phase-5 shape law.
       left to (c) - a graze only the swing reaches is now
       `Warning::SweepHit`, forcing project v30 (a pure step-up) -
       RECOMMENDED.md, M5.1 G.
+- ✅ **Close-out - the family's envelope verdicts, measured** (this
+      commit): the dome flow read 0.088 mm of "gouge" where the path
+      provably never penetrates past 0.012 and the ring tail's arcs
+      stand tangential with clearance - the fault was the yardstick:
+      `envelope_scan` cut arcs to chords with a sagitta budget of
+      cell/4, larger than the tol+floor gate it feeds, so chords
+      corner-cut every tangential ring into a phantom trench. The
+      measurement now keeps the generator's own chord law - every XY
+      shortcut keeps tolerance/4 - one budget for the Dexel truth and
+      the distance truth; it only ever TIGHTENS the verdict (0.094 to
+      0.0125), because the machine follows the commanded arc: dome
+      flow 0.08238 to 0.01656 mm (gate 0.07344), rest unchanged, all
+      goldens byte-free, the verify law (f) shares the honest
+      yardstick - RECOMMENDED.md, M5.1 close-out.
 
 ### M5.2 - Turning & Mill-Turn
 **Goal: lathe parts and C-axis parts from the same system.**
@@ -1929,7 +1943,7 @@ material of any kind.
 | **M4.4** | Test cost shape | Done: law/verdict split - finish3d 39 tests (27 `#[ignore]`d), verify's two envelope verdicts moved; release heavy lane 30 min → 3.4 min (CI runs it); Gate-map headers in every suite; debug ladder ~2 s where it was a 30-min tail | ✅ |
 | **M4.2b** | Dome-golden fix | Done: the drift was never the sampler's rates - it was float-bit ties in the facet scan's argmax at mathematically-exact tangencies, resolved differently by each platform's libm. Fix: scan points born on the micron lattice, support compared on the lattice, convex hull in exact i64/i128 integers, arc splits `(lattice(q)+1e-12).ceil()`. Windows goldens regenerated once (7 files, coarser by 8-24 moves; envelope + verify lanes prove no tolerance broke); both named CI `--skip`s retired; Linux parity 20/20 (RECOMMENDED: law override) | ✅ |
 | **M5.0** | Structure prelude | Done: the kind-fan-out collapse (M5.0.2 `KindInfo::ALL` registry - labels, captions, digest tags, verify modes, retype seeds in one table; three silent UI catch-alls removed) + seven oversized-file splits (operation/types, machining2d, finishing3d, verify, stock_sim, drilling, machining3d) + M4.2b paid; lets M5.1/M5.2 add ~25 op kinds at one-table-row cost. Goldens byte-identical (structure, not behavior). Coverage 793==793, 29 ignores kept. See docs/M5-PHASE5-PLAN.md. | ✅ |
-| **M5.1** | Five axes | Swarf, tilt control, collision-aware orientation, machine sim | 📋 |
+| **M5.1** | Five axes | Done: the pose seam - `Move.axis` rides every move, prismatic byte-for-byte (A); 3+2 tilted-plane indexing on the five plane kinds (B); lead/lag/max-tilt over the waterline and raster ladders (C); swarf and advanced swarf off the ruling fit (D); rotary contour/parallel on the fitted axis (E), rotary offset roughing in developed wrap (E2), multi-axis roughing (E3); collision-aware shank dodge (F); kinematic machine sim with the pose-grid sweep law (G); flowline finish that curves with the part (I); drive-curve multi-axis contour (J); the envelope yardstick measures arcs at the generator's own tol/4 chord law, every family verdict green (close-out) | ✅ |
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
 | **M6.1** | Token architecture | Adopt the solidcraft `Tokens`/`theme_files` design: one named table drives widgets + painted chrome, radii/spacing/sizes themeable, command-law switcher | 📋 |
