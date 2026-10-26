@@ -170,6 +170,7 @@ fn verify_finish(
     let region: Region = slice::project(facets, 64).expect("fixture silhouette");
     let tool = ToolGeom {
         radius: R,
+        nose_radius: 0.0,
         flute_len: 10.0,
         shank_radius: 2.9,
         shank_len: 40.0,

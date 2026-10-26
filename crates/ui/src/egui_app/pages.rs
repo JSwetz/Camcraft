@@ -77,7 +77,15 @@ use super::panes::{TYPES, kind_name, retype};
 use super::theme::Palette;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
-const TOOL_KINDS: [&str; 6] = ["End mill", "Ball nose", "Bull nose", "Drill", "Tap", "Bore"];
+const TOOL_KINDS: [&str; 7] = [
+    "End mill",
+    "Ball nose",
+    "Bull nose",
+    "Drill",
+    "Tap",
+    "Bore",
+    "Turning insert",
+];
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
 const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
@@ -2012,6 +2020,48 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
+        // Turning face (M5.2 A): the ladder runs at axial stations, so
+        // the heights trio is clearance / stock top / the plane to face
+        // - the words match the generator's refusals, one truth. The
+        // passes tab carries only the radial stepdown (the ridge law:
+        // the kernel refuses past twice the insert nose) and the
+        // tolerance; there is no stepover to show - the passes spiral
+        // through the axis by construction - and no climb: a lathe cut
+        // runs one way.
+        OpParams::Facing {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "facing.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "facing.top");
+                field(ui, "Facing Plane Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "facing.face");
+                ui.label("the bar faces the spindle: stock is read between the facing plane and the part top; the ladder steps down from the top, one stepdown per rung");
+                field(ui, "Stepdown");
+                num(ui, u, stepdown);
+                ui.label("axial infeed per rung - the kernel refuses past twice the insert nose radius, the ridge it would leave");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the verify budget: the swept envelope is judged against the model within it");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the descent between rungs travels in air at the plunge feed");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);
@@ -3381,8 +3431,8 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                     combo(ui, "tool_kind", &mut k, &TOOL_KINDS);
                     state.tool_ui.kind = k.min(TOOL_KINDS.len() - 1);
                     if state.tool_ui.kind != before {
-                        // A draft inherited from a mill carries both
-                        // specialty fields inert (0.0); moving to a kind
+                        // A draft inherited from a mill carries every
+                        // specialty field inert (0.0); moving to a kind
                         // that READS them seeds the standard value, so
                         // flipping the combo alone never leaves the Add
                         // button refusing on a half-built tool.
@@ -3395,6 +3445,11 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                             && (state.tool_ui.pitch.is_nan() || state.tool_ui.pitch <= 0.0)
                         {
                             state.tool_ui.pitch = 1.0;
+                        }
+                        if state.tool_ui.kind == 6
+                            && (state.tool_ui.nose_radius.is_nan() || state.tool_ui.nose_radius <= 0.0)
+                        {
+                            state.tool_ui.nose_radius = 0.8;
                         }
                     }
                     field(ui, "Diameter");
@@ -3412,6 +3467,11 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         field(ui, "Thread pitch");
                         num(ui, u, &mut state.tool_ui.pitch);
                         ui.label("distance advanced per turn - M6 is 1.0, M8 is 1.25");
+                    }
+                    if state.tool_ui.kind == 6 {
+                        field(ui, "Insert nose radius");
+                        num(ui, u, &mut state.tool_ui.nose_radius);
+                        ui.label("the corner circle ground into the tip - it IS the cutting ball");
                     }
                     if state.tool_ui.kind != 4 {
                         field(ui, "Corner radius");

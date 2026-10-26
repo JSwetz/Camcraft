@@ -102,6 +102,7 @@ fn params(entry: Entry3D, helix_radius: f64) -> Pocket3DParams {
 fn tool() -> ToolGeom {
     ToolGeom {
         radius: 4.0,
+        nose_radius: 0.0,
         flute_len: 30.0,
         shank_radius: 9.0,
         shank_len: 40.0,

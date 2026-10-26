@@ -1125,3 +1125,25 @@ fn regenerate_all_on_a_current_job_writes_no_history() {
     state.drain_actions();
     assert_eq!(status(&state, "Face1"), OpStatus::Never);
 }
+
+#[test]
+fn the_tool_editor_carries_the_insert_nose_both_ways() {
+    // M5.2 stage A at the ui seam: the draft mirrors the app's own
+    // law - the Turning row (kind 6) rides the insert's circle both
+    // directions, and every mill draft keeps the inert 0.0 the field
+    // has always meant for it. An editor round-trip that dropped the
+    // nose would hand AddTool a point insert the sane door refuses;
+    // the mirroring here is what the pages' "Insert nose radius"
+    // field edits.
+    let tn = catalog_tool("TN-1600-0R8");
+    let draft = ToolUi::from_tool("TN-1600-0R8", &tn, true);
+    assert_eq!(draft.kind, 6, "the turning insert is the sixth row");
+    assert_eq!(draft.nose_radius, tn.nose_radius, "the draft mirrors the circle");
+    let back = draft.to_tool();
+    assert_eq!(back.kind, camcraft_app::tools::ToolKind::Turning);
+    assert_eq!(back.nose_radius, 0.8, "and writes it back");
+    let em = catalog_tool("EM-0400-2FL");
+    let mill = ToolUi::from_tool("EM-0400-2FL", &em, true);
+    assert_eq!(mill.nose_radius, 0.0, "a mill draft carries the inert zero");
+    assert_eq!(mill.to_tool().nose_radius, 0.0, "still inert on the way back");
+}

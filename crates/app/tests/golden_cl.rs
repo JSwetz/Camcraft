@@ -339,6 +339,7 @@ fn cycle_tool(kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64) -> Tool
         corner_r: 0.0,
         tip_angle,
         pitch,
+        nose_radius: 0.0,
         flute_len: 40.0,
         shank_d: diameter.min(10.0),
         shank_len: 30.0,

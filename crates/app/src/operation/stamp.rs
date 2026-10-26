@@ -47,10 +47,15 @@ pub fn current_stamp(
         crate::tools::ToolKind::Drill => 3,
         crate::tools::ToolKind::Tap => 4,
         crate::tools::ToolKind::Bore => 5,
+        crate::tools::ToolKind::Turning => 6,
     });
     for v in [
         tool.diameter,
         tool.corner_r,
+        // The nose circle rides the digest from its first build
+        // (M5.2 A): it is the envelope ball, so an edit re-marks the
+        // verdict Stale through here, exactly like the diameter does.
+        tool.nose_radius,
         tool.flute_len,
         tool.shank_d,
         tool.shank_len,

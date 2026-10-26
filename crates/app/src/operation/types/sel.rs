@@ -122,6 +122,13 @@ pub enum OpType {
     /// bisector of an edge, the seat of a corner) and the axis poses
     /// by the same lean law the family uses (see [`crate::multiaxis`]).
     MultiAxisContour,
+    /// Turning facing (M5.2 stage A): the work spins, the insert
+    /// travels - radial passes at Z stations stepping down the
+    /// fitted axis toward the facing plane, the turned profile's
+    /// own silhouette as the limit at every station (see
+    /// [`crate::turning`]). The first kind of the TURN family: the
+    /// family gate is what keeps it off a mill.
+    Facing,
 }
 
 impl core::fmt::Display for OpType {

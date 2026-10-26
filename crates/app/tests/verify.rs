@@ -45,6 +45,7 @@ fn plate_with_island() -> Region {
 fn deep_tool() -> ToolGeom {
     ToolGeom {
         radius: 4.0,
+        nose_radius: 0.0,
         flute_len: 30.0,
         shank_radius: 9.0,
         shank_len: 40.0,
@@ -378,6 +379,7 @@ fn a_swinging_head_sweeps_the_island_wall_mid_turn() {
     let stock = rect(0.0, 0.0, 30.0, 30.0);
     let tool = ToolGeom {
         radius: 4.0,
+        nose_radius: 0.0,
         flute_len: 8.0,
         shank_radius: 7.0,
         shank_len: 6.0,
@@ -420,6 +422,7 @@ fn the_same_path_without_a_turn_convicts_under_c_not_c3() {
     let stock = rect(0.0, 0.0, 30.0, 30.0);
     let tool = ToolGeom {
         radius: 4.0,
+        nose_radius: 0.0,
         flute_len: 8.0,
         shank_radius: 7.0,
         shank_len: 6.0,

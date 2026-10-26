@@ -87,7 +87,11 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::RotaryOffset { feed, .. }
         | OpParams::MultiAxisRough { feed, .. }
         | OpParams::Flow5D { feed, .. }
-        | OpParams::MultiAxisContour { feed, .. } => *feed,
+        | OpParams::MultiAxisContour { feed, .. }
+        // The facing pass feeds along X at the station's Z - the
+        // retype's feed number means the same distance-per-minute
+        // here as on a mill (M5.2 A).
+        | OpParams::Facing { feed, .. } => *feed,
     }
 }
 
@@ -110,7 +114,11 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::RotaryOffset { plunge_feed, .. }
         | OpParams::MultiAxisRough { plunge_feed, .. }
         | OpParams::Flow5D { plunge_feed, .. }
-        | OpParams::MultiAxisContour { plunge_feed, .. } => *plunge_feed,
+        | OpParams::MultiAxisContour { plunge_feed, .. }
+        // Facing's plunge is the radial approach off the rapids plane
+        // onto the station - the same number the ladder's first move
+        // posts at (M5.2 A).
+        | OpParams::Facing { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -135,7 +143,10 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::MultiAxisContour { climb, .. } => *climb,
         // A drill has no climb notion - re-typing one to a milling kind
         // starts from the fresh default instead of inventing a carry.
-        OpParams::Drill { .. } => true,
+        // Facing's neither: the work spins and the insert traverses;
+        // which flank meets the cut is the spindle's direction, not a
+        // number this ladder authors (M5.2 A).
+        OpParams::Drill { .. } | OpParams::Facing { .. } => true,
     }
 }
 
@@ -170,7 +181,11 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         // has NO spacing at all - the picked chain is the path, one
         // pass over it (M5.1 J).
         | OpParams::Flow5D { .. }
-        | OpParams::MultiAxisContour { .. } => None,
+        // The drive-curve contour has NO spacing at all, and facing
+        // none either: one radial pass per station runs the profile's
+        // whole width - the stepdown IS the spacing (M5.2 A).
+        | OpParams::MultiAxisContour { .. }
+        | OpParams::Facing { .. } => None,
     }
 }
 
@@ -184,6 +199,9 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::RotaryOffset { stepdown, .. }
         // Z infeed here, the pocket's law (M5.1 stage E3).
         | OpParams::MultiAxisRough { stepdown, .. }
+        // Radial infeed here, the wrap ladder's law, read down the
+        // axis instead of out of the skin (M5.2 A).
+        | OpParams::Facing { stepdown, .. }
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
@@ -216,7 +234,10 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryOffset { top_z, .. }
         | OpParams::MultiAxisRough { top_z, .. }
         | OpParams::Flow5D { top_z, .. }
-        | OpParams::MultiAxisContour { top_z, .. } => Some(*top_z),
+        | OpParams::MultiAxisContour { top_z, .. }
+        // Facing's top is the first station above the shoulder the
+        // ladder steps down from (M5.2 A).
+        | OpParams::Facing { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -241,7 +262,10 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryOffset { bottom_z, .. }
         | OpParams::MultiAxisRough { bottom_z, .. }
         | OpParams::Flow5D { bottom_z, .. }
-        | OpParams::MultiAxisContour { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::MultiAxisContour { bottom_z, .. }
+        // Facing's finished plane: the facing Z every station
+        // steps toward (M5.2 A).
+        | OpParams::Facing { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -273,9 +297,10 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         // raster hops between lines (M5.1 J).
         | OpParams::MultiAxisContour { retract_z, .. } => *retract_z,
         // No hop plane to carry: the kernel names its own rapids
-        // plane (one infeed and a tool radius off the skin), and
-        // Face never stored one either.
-        OpParams::Face { .. } | OpParams::RotaryOffset { .. } => None,
+        // plane (one infeed and a tool radius off the skin - the
+        // facing ladder states it one infeed clear of the profile,
+        // the axis way), and Face never stored one either.
+        OpParams::Face { .. } | OpParams::RotaryOffset { .. } | OpParams::Facing { .. } => None,
     }
 }
 
@@ -552,6 +577,29 @@ fn seed_multi_axis_contour(c: &Carried) -> OpParams {
     }
 }
 
+/// The M5.2 stage A seed: the facing ladder's numbers, read the
+/// wrap's way - `stepdown` is the AXIAL infeed one station takes off
+/// the end. The carried window is the station range: whatever way
+/// the machine stands the bar, the face to cut lies between top and
+/// bottom heights.
+fn seed_facing(c: &Carried) -> OpParams {
+    OpParams::Facing {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        // The one number NOT folded: an infeed is bounded by twice
+        // the nose's reach (the kernel's law), and the mill default
+        // the fold carries would refuse against the house insert's
+        // 0.8 mm nose the moment a user created the op. 0.5 is the
+        // handbook rough-facing infeed, and it stands under 2r of
+        // every TN row in the catalog.
+        stepdown: 0.5,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
 /// The stage D seeds: the raster's numbers whole - a swarf path IS
 /// the raster run along the surface's own ruling, so what a fresh
 /// one starts with is what a fresh parallel starts with, pose at
@@ -707,7 +755,22 @@ pub struct KindInfo {
     pub caption: &'static str,
     pub tag: u8,
     pub mode: Mode,
+    /// Whose machine this kind drives (M5.2 stage A): the family the
+    /// document's machine kind must admit for the op to exist at all -
+    /// the command-level gate reads this row, never a hand-typed list.
+    pub family: Family,
     pub seed: fn(&Carried) -> OpParams,
+}
+
+/// The two machine families a document's `.mch` kind can belong to
+/// (M5.2 stage A): a mill and its live tooling speak Mill, a lathe
+/// speaks Turn, and a mill-turn's machine kind admits both. The
+/// ribbon's darkening is a courtesy; this pairing, enforced at the
+/// command door, is the law.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Family {
+    Mill,
+    Turn,
 }
 
 impl KindInfo {
@@ -719,6 +782,7 @@ impl KindInfo {
             tag: 0,
             // Face trims the footprint silhouette: boundary laws rule.
             mode: Mode::Boundary,
+            family: Family::Mill,
             seed: seed_face,
         },
         KindInfo {
@@ -727,6 +791,7 @@ impl KindInfo {
             caption: "Contour",
             tag: 1,
             mode: Mode::Boundary,
+            family: Family::Mill,
             seed: seed_contour,
         },
         KindInfo {
@@ -736,6 +801,7 @@ impl KindInfo {
             tag: 2,
             // The pocket hollows the region's inside: area laws rule.
             mode: Mode::Area,
+            family: Family::Mill,
             seed: seed_pocket,
         },
         KindInfo {
@@ -744,6 +810,7 @@ impl KindInfo {
             caption: "Slot",
             tag: 3,
             mode: Mode::Area,
+            family: Family::Mill,
             seed: seed_slot,
         },
         KindInfo {
@@ -753,6 +820,7 @@ impl KindInfo {
             tag: 4,
             // The center runs ON the line: tangency laws stand down.
             mode: Mode::Engrave,
+            family: Family::Mill,
             seed: seed_trace,
         },
         KindInfo {
@@ -768,6 +836,7 @@ impl KindInfo {
             // sampling never fires) the cycle reach law in `verify`
             // checks over `path.cycles`.
             mode: Mode::Boundary,
+            family: Family::Mill,
             seed: seed_drill,
         },
         KindInfo {
@@ -780,6 +849,7 @@ impl KindInfo {
             // is its silhouette, the per-level islands come from the
             // facets.
             mode: Mode::Area,
+            family: Family::Mill,
             seed: seed_pocket3d,
         },
         KindInfo {
@@ -791,6 +861,7 @@ impl KindInfo {
             // tangency: law (f) of `verify` scans the swept ball against
             // the mesh (the `finish_tol` field carries the budget).
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_finish3d,
         },
         KindInfo {
@@ -804,6 +875,7 @@ impl KindInfo {
             // ball leaves - and the shank's question is the stage-A
             // leaning band law's, run on the stamped moves.
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_contour5d,
         },
         KindInfo {
@@ -812,6 +884,7 @@ impl KindInfo {
             caption: "5-Axis Parallel",
             tag: 9,
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_parallel5d,
         },
         KindInfo {
@@ -824,6 +897,7 @@ impl KindInfo {
             // law is the finish's - the pose question (the blade lies
             // under a leaning shank) is the stage-A band law again.
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_swarf,
         },
         KindInfo {
@@ -832,6 +906,7 @@ impl KindInfo {
             caption: "Adv. Swarf",
             tag: 11,
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_advanced_swarf,
         },
         KindInfo {
@@ -843,6 +918,7 @@ impl KindInfo {
             // E): the ball's path decides the verdict, the fitted
             // axis and the lean answer only where the spindle points.
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_rotary_contour,
         },
         KindInfo {
@@ -851,6 +927,7 @@ impl KindInfo {
             caption: "Rotary Parallel",
             tag: 13,
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_rotary_parallel,
         },
         KindInfo {
@@ -863,6 +940,7 @@ impl KindInfo {
             // cannot lie to it on a bar lying or standing, and the
             // kind's tolerance is exactly that law's budget.
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_rotary_offset,
         },
         KindInfo {
@@ -878,6 +956,7 @@ impl KindInfo {
             // reading - the ladder itself chords by the pocket's own
             // lattice laws.
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_multiaxis_rough,
         },
         KindInfo {
@@ -890,6 +969,7 @@ impl KindInfo {
             // decides where the lines GO and the lean law where the
             // spindle points, and the measured scan judges both.
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_flow5d,
         },
         KindInfo {
@@ -903,7 +983,23 @@ impl KindInfo {
             // scan - rest-height errors at a vertex fan and a gouged
             // chain are exactly what the sweep measures.
             mode: Mode::Envelope,
+            family: Family::Mill,
             seed: seed_multi_axis_contour,
+        },
+        KindInfo {
+            ty: OpType::Facing,
+            label: "Facing",
+            caption: "Facing",
+            tag: 18,
+            // The facing verdict is measured like the finish's (law
+            // f): the ball is the insert nose circle swept true - and
+            // a meridian circle revolved IS a sphere about the axis,
+            // so the scan reads the lathe's own cut wherever the fit
+            // stands it. Law g's revolved-solid sim replaces the
+            // approximation when the profile kinds arrive (M5.2 B).
+            mode: Mode::Envelope,
+            family: Family::Turn,
+            seed: seed_facing,
         },
     ];
 }
@@ -932,6 +1028,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[15].label,
     KindInfo::ALL[16].label,
     KindInfo::ALL[17].label,
+    KindInfo::ALL[18].label,
 ];
 
 impl OpType {
@@ -958,6 +1055,7 @@ impl OpType {
             OpType::MultiAxisRough => 15,
             OpType::Flow5D => 16,
             OpType::MultiAxisContour => 17,
+            OpType::Facing => 18,
         }
     }
 

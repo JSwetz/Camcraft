@@ -477,7 +477,8 @@ fn fit_circle(pts: &[[f64; 3]]) -> Option<([f64; 2], f64)> {
 pub struct ToolUi {
     pub name: String,
     pub exists: bool,
-    /// 0 end mill, 1 ball nose, 2 bull nose, 3 drill, 4 tap, 5 bore.
+    /// 0 end mill, 1 ball nose, 2 bull nose, 3 drill, 4 tap, 5 bore,
+    /// 6 turning insert.
     pub kind: usize,
     pub diameter: f64,
     pub corner_r: f64,
@@ -486,6 +487,9 @@ pub struct ToolUi {
     pub tip_angle: f64,
     /// Thread pitch, mm per turn; the tap cycle feeds at rpm x pitch.
     pub pitch: f64,
+    /// Insert nose radius; the turning kind's cutting ball, inert on
+    /// the mills (the app's `Tool` field's law, mirrored).
+    pub nose_radius: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -518,11 +522,13 @@ impl ToolUi {
                 ToolKind::Drill => 3,
                 ToolKind::Tap => 4,
                 ToolKind::Bore => 5,
+                ToolKind::Turning => 6,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
             tip_angle: t.tip_angle,
             pitch: t.pitch,
+            nose_radius: t.nose_radius,
             flute_len: t.flute_len,
             shank_d: t.shank_d,
             shank_len: t.shank_len,
@@ -543,12 +549,14 @@ impl ToolUi {
                 3 => ToolKind::Drill,
                 4 => ToolKind::Tap,
                 5 => ToolKind::Bore,
+                6 => ToolKind::Turning,
                 _ => ToolKind::EndMill,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,
             tip_angle: self.tip_angle,
             pitch: self.pitch,
+            nose_radius: self.nose_radius,
             flute_len: self.flute_len,
             shank_d: self.shank_d,
             shank_len: self.shank_len,

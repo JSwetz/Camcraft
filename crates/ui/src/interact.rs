@@ -1162,7 +1162,13 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // The wrap ladder stores no hop at all - its rapids ride
         // the kernel's law off the skin (M5.1 stage E2) - exactly
         // Face's answer of "hop at clearance, say nothing extra".
-        operation::OpParams::Face { .. } | operation::OpParams::RotaryOffset { .. } => None,
+        // Facing is the same answer for the same reason (M5.2 A):
+        // its rapids slide tangentially off the fresh face at the
+        // clear radius, and the descent between rungs is a feed
+        // move in air - no plane to name.
+        operation::OpParams::Face { .. }
+        | operation::OpParams::RotaryOffset { .. }
+        | operation::OpParams::Facing { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1247,7 +1253,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Flow5D { top_z, bottom_z, .. }
         | operation::OpParams::MultiAxisContour { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
-        | operation::OpParams::Trace { top_z, bottom_z, .. } => {
+        // The facing ladder reads the same two rungs (M5.2 A): stock
+        // top above, the facing plane below - world Z planes standing
+        // as stations on the fitted axis, the rungs between them the
+        // stepdown's own, like every ladder here.
+        | operation::OpParams::Trace { top_z, bottom_z, .. }
+        | operation::OpParams::Facing { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,

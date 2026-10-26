@@ -203,6 +203,20 @@ fn text_of(c: Cmd) -> String {
     }
 }
 
+/// Which operation families a machine kind runs (M5.2 stage A): the
+/// registry's own pair, read - never re-derived - by the ribbon's
+/// darkening and tips. `CreateOperation` enforces the same table at
+/// the command door (the law); this is the courtesy that tells the
+/// truth about it. An unstated machine is a mill, per `kind_of`.
+fn admits(machine: camcraft_app::machine::Kind, family: camcraft_app::operation::Family) -> bool {
+    use camcraft_app::machine::Kind;
+    use camcraft_app::operation::Family;
+    matches!(
+        (family, machine),
+        (_, Kind::MillTurn) | (Family::Mill, Kind::Mill) | (Family::Turn, Kind::Lathe)
+    )
+}
+
 /// The tip table, imgui's strings verbatim (ribbon.rs:140-222) - the
 /// test `tips_match_the_imgui_table` keeps it that way. Every advertised
 /// key is live: `shortcuts` implements them all.
@@ -217,20 +231,34 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Origin => "Work offset (WCS)".into(),
         Cmd::Tools => "Tool library".into(),
         Cmd::Create(i) => {
-            // imgui's swap: the buttons sit disabled over an empty tool
-            // list, and the tip says what to do about it (ribbon.rs:138).
-            if camcraft_app::machine::kind_of(&state.world)
-                == camcraft_app::machine::Kind::Lathe
-            {
-                "The document's machine is a lathe - turning operations \
-                 land with M4.2; these milling cells do not drive it"
-                    .into()
-            } else if state.tool_names().is_empty() {
+            // imgui's swap first - it is what the startup ribbon
+            // shows, and an empty tool list is the deeper trouble:
+            // nothing lights until a tool exists, whatever the
+            // machine is (ribbon.rs:138). Then the family truth
+            // (M5.2 stage A): a cell whose kinds the document's
+            // machine cannot run says so and names the fix - the
+            // same pair CreateOperation enforces at the door.
+            if state.tool_names().is_empty() {
                 "No tool yet - add one (Setup > Tools)".into()
-            } else if i == 0 {
-                "Add a Face mill operation".into()
             } else {
-                format!("Add a {} operation", TYPES[i])
+                let machine = camcraft_app::machine::kind_of(&state.world);
+                let dark = camcraft_app::operation::KindInfo::ALL
+                    .get(i)
+                    .is_some_and(|k| !admits(machine, k.family));
+                if dark {
+                    let (fword, mword) = match camcraft_app::operation::KindInfo::ALL[i].family {
+                        camcraft_app::operation::Family::Mill => ("milling", "mill"),
+                        camcraft_app::operation::Family::Turn => ("turning", "lathe"),
+                    };
+                    format!(
+                        "The document's machine is a {} - {fword} operations do not drive it; mount a {mword} or a mill-turn (Setup > Machine)",
+                        machine.word()
+                    )
+                } else if i == 0 {
+                    "Add a Face mill operation".into()
+                } else {
+                    format!("Add a {} operation", TYPES[i])
+                }
             }
         }
         Cmd::Undo => "Undo\tCtrl+Z".into(),
@@ -252,13 +280,16 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
         Cmd::Redo => state.history.can_redo(),
         Cmd::Run => state.selected_operation().is_some(),
         Cmd::Delete => state.has_selection(),
-        // Workspaces by machine kind (M3.2 stage E): the mill families
-        // drive a mill and a mill-turn's live tooling, and nothing
-        // else - a lathe document darkens every Create cell honestly
-        // instead of offering mill paths its machine cannot run.
-        Cmd::Create(_) => {
-            camcraft_app::machine::kind_of(&state.world) != camcraft_app::machine::Kind::Lathe
-                && !state.tool_names().is_empty()
+        // Workspaces by machine kind (M3.2 stage E), by family since
+        // M5.2 A: the registry's own pair, not a blanket rule - a
+        // lathe document darkens the mill cells and lights the
+        // turning ones, and the tip says which is which.
+        Cmd::Create(i) => {
+            let machine = camcraft_app::machine::kind_of(&state.world);
+            let kind_admits = camcraft_app::operation::KindInfo::ALL
+                .get(i)
+                .is_none_or(|k| admits(machine, k.family));
+            kind_admits && !state.tool_names().is_empty()
         }
         Cmd::Simulate => state.has_toolpaths(),
         // The same gate as Simulate: a program with no generated move
@@ -339,6 +370,10 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::MultiAxisRough => Icon::MultiAxisRough,
         OpType::Flow5D => Icon::Flow5D,
         OpType::MultiAxisContour => Icon::MultiAxisContour,
+        // The face mill's glyph, reused (the no-new-asset law, and the
+        // Pocket3D precedent above): what the cell makes is a face -
+        // spun rather than swept, same word, same pixels.
+        OpType::Facing => Icon::Face,
     }
 }
 
@@ -591,6 +626,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::Drill => "drill",
         ToolKind::Tap => "tap",
         ToolKind::Bore => "boring bar",
+        ToolKind::Turning => "turning insert",
     }
 }
 

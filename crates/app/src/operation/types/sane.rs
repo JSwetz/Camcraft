@@ -520,6 +520,29 @@ impl OpParams {
                     && *dwell >= 0.0
                     && holes.iter().all(|h| h.is_usable())
             }
+            // The facing ladder's door (M5.2 stage A): the wrap
+            // ladder's numbers without the pattern's - a positive
+            // verify budget, heights, feeds, and an axial infeed
+            // that must be a positive distance. Which radii the
+            // stations meet is the axis fit's and the profile's
+            // question: refused at generation, by name.
+            OpParams::Facing {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
         }
     }
 

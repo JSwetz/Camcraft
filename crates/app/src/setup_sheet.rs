@@ -639,6 +639,21 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             ("TOP", "Top of Part Z", Some(*top_z)),
             ("BOT", "Bottom of Part Z", Some(*bottom_z)),
         ],
+        // The facing ladder states the sheet the wrap's way - three
+        // rows, no RET: the station rapids are one infeed off the
+        // profile, a law and not a height. Its bottom names itself
+        // for the axis: every station steps TOWARD it (M5.2 A).
+        OpParams::Facing {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        } => [
+            ("CLR", "Clearance Z", Some(*clearance_z)),
+            ("RET", "Retract Z", None),
+            ("TOP", "Top of Part Z", Some(*top_z)),
+            ("BOT", "Facing Plane Z", Some(*bottom_z)),
+        ],
         OpParams::Drill {
             clearance_z,
             retract_z,

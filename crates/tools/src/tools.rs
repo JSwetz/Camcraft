@@ -27,6 +27,13 @@ pub enum ToolKind {
     /// Boring bar: single-point, hole-sized by the slide, profiled as a
     /// plain cylinder. Geometry beyond the diameter is not modeled.
     Bore,
+    /// Turning insert (M5.2 stage A): the lathe's single-point cutter -
+    /// the WORK spins, the insert traverses. `nose_radius` (inert for
+    /// every other kind) is the circle the cut rides: the facing verdict
+    /// sweeps it about the axis, and on a revolved work that revolved
+    /// disk IS the cut volume (a sphere's and a disk's revolve share
+    /// their meridian section). Only `Turning` reads it.
+    Turning,
 }
 
 impl core::fmt::Display for ToolKind {
@@ -38,6 +45,7 @@ impl core::fmt::Display for ToolKind {
             ToolKind::Drill => "drill",
             ToolKind::Tap => "tap",
             ToolKind::Bore => "boring bar",
+            ToolKind::Turning => "turning insert",
         };
         f.write_str(s)
     }
@@ -48,6 +56,11 @@ impl core::fmt::Display for ToolKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolGeom {
     pub radius: f64,
+    /// The envelope law's ball (M5.2 A): the turning insert's nose
+    /// circle, or 0.0 when the tool has no separate cut circle and the
+    /// radius above IS it (every mill kind). Inert for the rest of the
+    /// laws - the shank bands read the stack below unchanged.
+    pub nose_radius: f64,
     /// Usable flute length below the shank.
     pub flute_len: f64,
     pub shank_radius: f64,
@@ -74,6 +87,11 @@ pub struct Tool {
     /// Thread pitch in mm per turn (ISO coarse for the catalog taps).
     /// Inert unless kind is Tap, where the cycle feeds at rpm x pitch.
     pub pitch: f64,
+    /// Insert nose radius in mm (the ISO corner circle ground into the
+    /// tip): 0.8 is common roughing stock. Inert unless kind is
+    /// Turning, where it is the circle the facing verdict sweeps -
+    /// every other kind reads it as 0.0 and rolls its own radius.
+    pub nose_radius: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -98,6 +116,7 @@ impl Tool {
             self.corner_r,
             self.tip_angle,
             self.pitch,
+            self.nose_radius,
             self.flute_len,
             self.shank_d,
             self.shank_len,
@@ -114,6 +133,7 @@ impl Tool {
             && self.corner_r <= self.diameter * 0.5
             && self.tip_angle < 180.0
             && self.pitch >= 0.0
+            && self.nose_radius >= 0.0
             && self.flute_len > 0.0
             && self.shank_d >= 0.0
             && self.shank_len >= 0.0
@@ -127,6 +147,17 @@ impl Tool {
                 // derive. Other kinds carry both fields inert.
                 ToolKind::Drill => self.tip_angle > 60.0,
                 ToolKind::Tap => self.pitch > 0.0,
+                // A turning insert with no nose is a mathematical
+                // point - it would cut a knife line and verify with a
+                // zero-ball refusal - and a nose wider than half the
+                // shank is not the ball any insert body could hold.
+                // The bounds live HERE, kind-scoped, the drill's and
+                // tap's own law: an inert field may carry any sane
+                // number through a retype without refusing for
+                // geometry the kind never reads.
+                ToolKind::Turning => {
+                    self.nose_radius > 0.0 && self.nose_radius <= self.diameter * 0.5
+                }
                 _ => true,
             }
     }
@@ -137,6 +168,10 @@ impl Tool {
     pub fn geom(&self) -> ToolGeom {
         ToolGeom {
             radius: self.diameter * 0.5,
+            nose_radius: match self.kind {
+                ToolKind::Turning => self.nose_radius,
+                _ => 0.0,
+            },
             flute_len: self.flute_len,
             shank_radius: self.shank_d * 0.5,
             shank_len: self.shank_len,
@@ -191,7 +226,12 @@ impl Tool {
                 }
                 add_pt(&mut p, cr, r);
             }
-            ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore => add_pt(&mut p, 0.0, r),
+            // The insert's nose circle lives in the MERIDIAN of the
+            // work's spin, not this side view - the facing verdict
+            // reads it through `geom` - so the picture is the plain
+            // envelope the shank laws collide with.
+            ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore | ToolKind::Turning =>
+                add_pt(&mut p, 0.0, r),
             ToolKind::Drill => {
                 // The point cone: apex at the tip center, opening at
                 // half the included angle, meeting the full radius at
@@ -249,6 +289,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         corner_r,
         tip_angle: 0.0,
         pitch: 0.0,
+        nose_radius: 0.0,
         flute_len,
         shank_d,
         shank_len: 40.0,
@@ -262,7 +303,16 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     // own diameter), no corner radius, 118-degree points, ISO coarse
     // pitches; a tap's feed number is the rpm x pitch starting value.
     let cy = |kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| {
-        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed }
+        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, nose_radius: 0.0, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed }
+    };
+    // Turning (M5.2 A): the facing insert - a plain toolholder shank,
+    // no holder stack (the turret IS the holder), an 0.8 nose like the
+    // ISO roughing inserts. Feeds are the handbook's starting values
+    // for aluminum facing with carbide.
+    let tn = |diameter: f64, nose_radius: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
+        kind: ToolKind::Turning, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
+        nose_radius, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
+        material_group: "aluminum".into(), rpm, feed,
     };
     vec![
         ("EM-0200-2FL", em(2.0, 0.0, ToolKind::EndMill, 6.0, 4.0, 18000.0, 600.0)),
@@ -282,6 +332,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("TAP-M4", cy(ToolKind::Tap, 4.0, 0.0, 0.7, 18.0, 4.5, 800.0, 560.0)),
         ("TAP-M6", cy(ToolKind::Tap, 6.0, 0.0, 1.0, 20.0, 6.0, 600.0, 600.0)),
         ("BR-1000", cy(ToolKind::Bore, 10.0, 0.0, 0.0, 20.0, 10.0, 4000.0, 400.0)),
+        ("TN-1600-0R8", tn(16.0, 0.8, 8.0, 16.0, 3000.0, 150.0)),
     ]
 }
 

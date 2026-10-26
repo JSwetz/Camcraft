@@ -952,6 +952,39 @@ pub fn generate(
             })?;
             (region, path)
         }
+        // M5.2 stage A: the first turning kind. Which documents may
+        // HOLD a Facing is the family door in CreateOperation; the
+        // door in this arm is the TOOL - the kernel's no-gouge
+        // construction IS the nose ball, so a mill cutter named
+        // here is refused by name before a move is computed. The
+        // facets are the world's (no tilt: the height laws below
+        // already read the planes the axis fit walks).
+        OpParams::Facing { stepdown, feed, plunge_feed, tolerance, .. } => {
+            if tool.kind != crate::tools::ToolKind::Turning {
+                return Err(GenError::Invalid(format!(
+                    "Facing needs a turning insert, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            // `tolerance` is the VERIFY budget (the envelope law's,
+            // as in RotaryOffset) - the kernel itself chords the
+            // profile by that law's own tol/4 promise.
+            let _ = tolerance;
+            let path = crate::turning::facing(
+                &material.facets,
+                &crate::turning::FacingParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    facing_z: req_z(hl.bottom, "Facing Plane Z")?,
+                    stepdown: *stepdown,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    nose_radius: tool.nose_radius,
+                },
+            )?;
+            (region, path)
+        }
     };
 
     // M3.2 stage B: what the program clamps to. The op's setup context
@@ -988,7 +1021,11 @@ pub fn generate(
         // contour removes what the chain says, nothing more - the
         // ball's envelope at the curve's stations is the whole law.
         | OpParams::Flow5D { .. }
-        | OpParams::MultiAxisContour { .. } => 0.0,
+        | OpParams::MultiAxisContour { .. }
+        // Facing leaves no shelf: the ladder steps to the facing
+        // plane and stops - the tolerance measures the finish, a
+        // stock-to-leave number would only move the verdict (M5.2 A).
+        | OpParams::Facing { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -1027,6 +1064,11 @@ pub fn generate(
                             // measures the rest against these facets,
                             // the same depth-dependent law (M5.1 J).
                             | OpParams::MultiAxisContour { .. }
+                            // Facing rides the fitted axis and its
+                            // stations stop at the profile's own
+                            // radius: the rest is what the facets
+                            // say, measured of revolution (M5.2 A).
+                            | OpParams::Facing { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -1064,7 +1106,11 @@ pub fn generate(
                         // its ONLY reading, the path itself comes from
                         // the picks (M5.1 J).
                         | OpParams::Flow5D { tolerance, .. }
-                        | OpParams::MultiAxisContour { tolerance, .. } => Some(*tolerance),
+                        | OpParams::MultiAxisContour { tolerance, .. }
+                        // Facing reads it the same way - its ONLY
+                        // reading: the stations come from the
+                        // profile, the budget judges them (M5.2 A).
+                        | OpParams::Facing { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

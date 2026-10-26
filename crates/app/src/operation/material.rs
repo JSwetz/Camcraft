@@ -304,6 +304,12 @@ pub(super) fn region_for_src(
                     // disagree with the pattern because the picks
                     // ARE it (M5.1 J).
                     | OpParams::MultiAxisContour { .. }
+                    // The facing ladder's limit is the turned
+                    // profile's own silhouette at every station:
+                    // the meridian projection authors it from the
+                    // mesh, and a pick could only disagree with
+                    // the turn (M5.2 A).
+                    | OpParams::Facing { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -375,7 +381,11 @@ pub(super) fn region_for(
         // The drive-curve contour's ball rests on this same shadow's
         // solid; the chains it rides are resolved separately, in 3D,
         // at generation (M5.1 J).
-        | OpParams::MultiAxisContour { .. } => {
+        | OpParams::MultiAxisContour { .. }
+        // Facing rides the same shadow for the panels: the station
+        // limits are the meridian profile's own, computed in the
+        // axis frame by the kernel (M5.2 A).
+        | OpParams::Facing { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

@@ -507,6 +507,20 @@ pub enum ParamsDto {
         #[serde(default)]
         shank_avoid: bool,
     },
+    /// Declared at v33 with the turning substrate (M5.2 stage A).
+    /// Three heights, a radial infeed and two feeds - the whole
+    /// authored shape of the facing ladder; the axis it rides is
+    /// model data and needs no key. The automatic snake_case is
+    /// already the tag.
+    Facing {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

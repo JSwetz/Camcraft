@@ -2002,6 +2002,51 @@ fn a_lathe_machine_darkens_the_mill_cells() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// M5.2 stage A, the same table read from the Turn side: the demo
+/// document carries tools, so the darkening is the machine - and a
+/// mounted lathe LIGHTS the turning cell, its tip introducing the
+/// operation instead of refusing it, while the mill cells go dark.
+/// The ribbon and the command door read the one registry, so the
+/// ordinal here is the enum's, not a remembered number.
+#[test]
+fn a_lathe_document_lights_the_turning_cell() {
+    let mut harness = shell_harness();
+    harness.run();
+    let turn = camcraft_app::operation::OpType::Facing as usize;
+    assert!(
+        !panes::enabled(Cmd::Create(turn), &harness.state().state),
+        "an unmachined document is a mill document: the turning cell is dark"
+    );
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::LoadBuiltinMachine("Lathe".to_string()));
+    harness.run();
+    let st = &harness.state().state;
+    assert!(
+        panes::enabled(Cmd::Create(turn), st),
+        "the mounted lathe lights the ladder"
+    );
+    assert_eq!(
+        panes::tip_of(Cmd::Create(turn), st),
+        format!("Add a {} operation", panes::TYPES[turn]),
+        "a lit turning cell offers the op, it does not refuse it"
+    );
+    assert!(
+        !panes::enabled(Cmd::Create(0), st),
+        "and the same mount darkens the mill cells the doc used to light"
+    );
+    // (the undo law at this level: one command, both doors - put the
+    // mount back through the history and the ribbon follows.)
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    assert!(
+        !panes::enabled(Cmd::Create(turn), &harness.state().state),
+        "undoing the mount shuts the turning door again"
+    );
+}
+
 /// M3.3 stage C, the Setup pane's machine group headless: the built-in
 /// library mounts by name, and the editor's Apply is a `LoadMachine`
 /// at the mount's own path - so undo puts back the exact numbers the

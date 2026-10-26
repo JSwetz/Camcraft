@@ -697,6 +697,30 @@ impl OpParams {
                     h.write_u8(u8::from(hole.through));
                 }
             }
+            // The facing ladder (M5.2 stage A, tag 18): three heights,
+            // a radial infeed and two feeds - the whole authored shape.
+            // The tolerance rides like the rotary twins' (the verify
+            // budget a stamped path was measured under must not
+            // survive a budget edit), and the axis the stations ride
+            // is model data: it moves the stamp through the source
+            // digest, never through a number here.
+            OpParams::Facing {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
         }
     }
 }

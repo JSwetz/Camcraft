@@ -110,7 +110,8 @@ pub fn region_z(
         | OpParams::RotaryOffset { top_z, .. }
         | OpParams::MultiAxisRough { top_z, .. }
         | OpParams::Flow5D { top_z, .. }
-        | OpParams::MultiAxisContour { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::MultiAxisContour { top_z, .. }
+        | OpParams::Facing { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -211,6 +212,17 @@ pub fn resolve_params(
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),
+            None,
+            None,
+        ),
+        // The facing ladder is the wrap ladder's height shape spoken
+        // on the axis instead of the skin: the same three, no hop -
+        // the station rapid names itself one infeed clear of the
+        // profile (M5.2 stage A).
+        OpParams::Facing { clearance_z, top_z, bottom_z, .. } => (
+            req("Clearance Z", *clearance_z)?,
+            Some(req("Top of Part Z", *top_z)?),
+            Some(req("Facing Plane Z", *bottom_z)?),
             None,
             None,
         ),

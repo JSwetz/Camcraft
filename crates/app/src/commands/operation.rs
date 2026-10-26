@@ -83,6 +83,42 @@ fn check_tool(world: &World, tool: &str) -> Result<(), CommandError> {
     }
 }
 
+/// The family gate (M5.2 stage A): which machine a kind lives on is
+/// registry data - the row's [`Family`] read against the document's
+/// machine kind - so the door opens on the table in `kinds.rs`, not
+/// on a hand-typed list that forgets the twenty-second kind. A
+/// mill-turn admits both families; an unstated machine is a mill
+/// (the kind_of law the whole app already reads the document by).
+/// The ribbon's darkening is a courtesy; this door is the law - an
+/// op whose family the steel cannot spin never enters the document,
+/// and the refusal names both sides by name.
+fn family_gate(world: &World, params: &OpParams) -> Result<(), CommandError> {
+    use crate::machine::Kind;
+    use crate::operation::Family;
+    let family = params.kind().info().family;
+    let machine = crate::machine::kind_of(world);
+    let admits = matches!(
+        (family, machine),
+        (_, Kind::MillTurn) | (Family::Mill, Kind::Mill) | (Family::Turn, Kind::Lathe)
+    );
+    if admits {
+        return Ok(());
+    }
+    Err(CommandError::Invalid(format!(
+        "a {} operation is {} work; the document's machine is a {} - mount a {} (or a mill-turn) first",
+        params.kind(),
+        match family {
+            Family::Mill => "milling",
+            Family::Turn => "turning",
+        },
+        machine.word(),
+        match family {
+            Family::Mill => "mill",
+            Family::Turn => "lathe",
+        }
+    )))
+}
+
 /// Create an operation entity. Deliberately does not generate: a new
 /// operation reads "never generated" until `GenerateOperation` runs, the
 /// same lifecycle the tree and status surface are built around.
@@ -130,6 +166,7 @@ impl CreateOperation {
         if let Some(msg) = crate::operation::side_sane(&params, &src) {
             return Err(CommandError::Invalid(msg));
         }
+        family_gate(world, &params)?;
         Ok(CreateOperation {
             name: name.to_string(),
             operation: Operation {

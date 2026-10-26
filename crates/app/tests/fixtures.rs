@@ -106,6 +106,7 @@ fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
 fn deep_tool() -> ToolGeom {
     ToolGeom {
         radius: 4.0,
+        nose_radius: 0.0,
         flute_len: 30.0,
         shank_radius: 9.0,
         shank_len: 40.0,

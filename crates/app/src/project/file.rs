@@ -1,6 +1,6 @@
 use super::*;
 
-pub const PROJECT_VERSION: u32 = 32;
+pub const PROJECT_VERSION: u32 = 33;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -142,6 +142,11 @@ pub struct ToolDto {
     pub tip_angle: f64,
     #[serde(default)]
     pub pitch: f64,
+    /// M5.2 addition (v33): absent from any older file, serde-defaults
+    /// to the inert 0.0 every mill kind already meant - the `tip_angle`
+    /// / `pitch` law restated.
+    #[serde(default)]
+    pub nose_radius: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -161,6 +166,10 @@ pub enum ToolKindDto {
     Drill,
     Tap,
     Bore,
+    /// The turning insert (M5.2 A): a new word in the kind grammar -
+    /// v32 files never carried it, so no migration is needed, exactly
+    /// as `bore` needed none at its arrival.
+    Turning,
 }
 
 impl ToolDto {
@@ -173,11 +182,13 @@ impl ToolDto {
                 ToolKind::Drill => ToolKindDto::Drill,
                 ToolKind::Tap => ToolKindDto::Tap,
                 ToolKind::Bore => ToolKindDto::Bore,
+                ToolKind::Turning => ToolKindDto::Turning,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
             tip_angle: t.tip_angle,
             pitch: t.pitch,
+            nose_radius: t.nose_radius,
             flute_len: t.flute_len,
             shank_d: t.shank_d,
             shank_len: t.shank_len,
@@ -198,11 +209,13 @@ impl ToolDto {
                 ToolKindDto::Drill => ToolKind::Drill,
                 ToolKindDto::Tap => ToolKind::Tap,
                 ToolKindDto::Bore => ToolKind::Bore,
+                ToolKindDto::Turning => ToolKind::Turning,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,
             tip_angle: self.tip_angle,
             pitch: self.pitch,
+            nose_radius: self.nose_radius,
             flute_len: self.flute_len,
             shank_d: self.shank_d,
             shank_len: self.shank_len,

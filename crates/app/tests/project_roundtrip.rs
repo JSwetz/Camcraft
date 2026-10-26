@@ -3645,3 +3645,111 @@ fn v31_file_steps_to_v32_and_the_drive_curve_grammar_round_trips() {
         "a v32 file with a 200-degree cone must not load"
     );
 }
+
+#[test]
+fn v32_file_steps_to_v33_and_the_facing_grammar_round_trips() {
+    // M5.2 stage A: the turning substrate arrives as one new params
+    // tag (`facing`), one new tool-kind word (`turning`) and the
+    // inert-defaulted `nose_radius` key - no existing shape changed,
+    // so the step-up is the stamp itself. The law's edge is the
+    // default: `nose_radius` absent reads 0.0, which every mill kind
+    // already meant - but a TURNING tool with no nose is a point
+    // that cannot face, and the sane door refuses the default for
+    // that kind alone. A v32 file can never carry either tag; a v33
+    // reader of one loses nothing.
+    let world = new_world();
+    project::open(&world, r#"{"version": 32, "entities": []}"#).expect("v32 steps up");
+    let p = tmp_path("v33a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v33 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v33 wire grammar, hand-written so the tags are pinned: T0
+    // is a v32-shaped ball (no nose key - it must read inert), T1 is
+    // the insert with its circle stated, FC1 is the ladder.
+    let text = r#"{
+        "version": 33,
+        "entities": [
+            {"name": "T0", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "turning", "diameter": 16.0, "corner_r": 0.0,
+                      "nose_radius": 0.8,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 3000.0, "feed": 150.0}},
+            {"name": "FC1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"facing": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "fixed", "offset": 16.0},
+                 "bottom_z": {"reference": "fixed", "offset": 14.0},
+                 "stepdown": 0.5, "feed": 150.0, "plunge_feed": 80.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v33 facing grammar must read");
+    let e = model::find_by_name(&world, "T0").expect("tool");
+    let t = model::tool_of(&world, &e).expect("definition");
+    assert_eq!(
+        t.nose_radius, 0.0,
+        "the absent key lands on the inert default the mills always meant"
+    );
+    let e = model::find_by_name(&world, "T1").expect("tool");
+    let t = model::tool_of(&world, &e).expect("definition");
+    assert_eq!(t.kind, camcraft_app::tools::ToolKind::Turning);
+    assert_eq!(t.nose_radius, 0.8, "the insert's circle rides the file");
+    let e = model::find_by_name(&world, "FC1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Facing {
+        stepdown,
+        feed,
+        plunge_feed,
+        tolerance,
+        ..
+    } = &o.params
+    else {
+        panic!("facing params expected, got {:?}", o.params);
+    };
+    assert_eq!((*stepdown, *feed, *plunge_feed), (0.5, 150.0, 80.0));
+    assert_eq!(*tolerance, 0.05);
+
+    // Write-parse-write is a fixed point, and both new tags are
+    // stated wherever a turning number lives.
+    let p = tmp_path("v33b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the facing shape round-trips byte-identically");
+    assert_eq!(first.matches("\"facing\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"nose_radius\"").count(), 2, "every tool writes the circle - inert or not: {first}");
+
+    // The sane door at the loader: a turning tool that omits the
+    // nose reads the 0.0 default, and for THAT kind the default is a
+    // point - refused, not silently mounted. A zero infeed is the
+    // same lie on the operation's side.
+    let point_insert = text.replace("\n                      \"nose_radius\": 0.8,", "");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &point_insert), Err(ProjectError::Corrupt(_))),
+        "a turning tool with no stated nose must not load"
+    );
+    let no_infeed = text.replace("\"stepdown\": 0.5", "\"stepdown\": 0.0");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &no_infeed), Err(ProjectError::Corrupt(_))),
+        "a facing ladder with no infeed is not a ladder"
+    );
+}

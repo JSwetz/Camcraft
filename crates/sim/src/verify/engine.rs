@@ -426,6 +426,16 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // nothing, and proves-not reports as a gouge at the first cut,
     // never as silence (the law (b) slice-proof precedent).
     if cx.mode == Mode::Envelope {
+        // The envelope ball is the CUT CIRCLE the path rolls: a
+        // ground ball's great circle - the tool radius - or a turning
+        // insert's smaller nose circle when the tool states one
+        // (M5.2 A; `ToolGeom::nose_radius` is 0.0 for every mill
+        // kind, so this reads unchanged for all pre-turning paths).
+        let r = if cx.tool.nose_radius.is_finite() && cx.tool.nose_radius > 0.0 {
+            cx.tool.nose_radius
+        } else {
+            cx.tool.radius
+        };
         let first_cut = path
             .moves
             .iter()

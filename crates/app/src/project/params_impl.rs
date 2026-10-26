@@ -543,6 +543,27 @@ impl ParamsDto {
                 max_tilt_deg: *max_tilt_deg,
                 shank_avoid: *shank_avoid,
             },
+            // The facing ladder (M5.2 A): three heights, an infeed
+            // and two feeds - no hop, no lean, no climb to state.
+            // The axis the stations ride is model data; the source
+            // DTO already carries the geometry behind it.
+            OpParams::Facing {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+            } => ParamsDto::Facing {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+            },
             OpParams::Slot {
                 a,
                 b,
@@ -1149,6 +1170,25 @@ impl ParamsDto {
                 lag_deg: *lag_deg,
                 max_tilt_deg: *max_tilt_deg,
                 shank_avoid: *shank_avoid,
+            },
+            // Read back whole, the same law; `validate_kind` has
+            // already refused anything the door would fail (M5.2 A).
+            ParamsDto::Facing {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+            } => OpParams::Facing {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
             },
             ParamsDto::Slot {
                 a,

@@ -4412,6 +4412,7 @@ fn stub_tool() -> Tool {
         corner_r: 4.0,
         tip_angle: 0.0,
         pitch: 0.0,
+        nose_radius: 0.0,
         flute_len: 6.0,
         shank_d: 10.0,
         shank_len: 20.0,

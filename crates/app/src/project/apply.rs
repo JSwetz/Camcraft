@@ -266,6 +266,18 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // source every kind already files, so the format gains no key.
         file.version = 32;
     }
+    if file.version == 32 {
+        // v32 -> v33: the turning substrate arrives (M5.2 stage A) -
+        // one new params variant (`facing`), one new tool-kind word
+        // (`turning`) and the inert-defaulted `nose_radius` key, under
+        // the twins' law: no v32 file can contain them - the tags did
+        // not exist - and `validate_kind` already refuses an unknown
+        // params tag before anything is written. The new key
+        // serde-defaults to the 0.0 every mill tool already meant,
+        // exactly as `tip_angle` did at v9; the turned profile the
+        // ladder reads is the mesh every kind already files.
+        file.version = 33;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

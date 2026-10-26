@@ -567,6 +567,26 @@ pub enum OpParams {
         /// vertices.
         shank_avoid: bool,
     },
+    /// Turning facing (M5.2 stage A): the lathe's answer to
+    /// [`Self::Face`]. The stations ride the FITTED axis (same
+    /// revolution read as the rotary kinds): `top_z`/`bottom_z`
+    /// bound the station ladder along it, `stepdown` is the axial
+    /// infeed, and at each station one radial pass runs from clear
+    /// of the turned profile straight THROUGH the axis - the sweep
+    /// that leaves the flat. No stepover is authored because none
+    /// is missed: the pass covers every radius in one line.
+    /// `tolerance` is the verify budget alone (the envelope law's,
+    /// as in [`Self::RotaryOffset`]) - the kernel itself chords the
+    /// profile by that law's own tol/4 promise.
+    Facing {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 impl OpParams {
@@ -591,6 +611,7 @@ impl OpParams {
             OpParams::MultiAxisRough { .. } => OpType::MultiAxisRough,
             OpParams::Flow5D { .. } => OpType::Flow5D,
             OpParams::MultiAxisContour { .. } => OpType::MultiAxisContour,
+            OpParams::Facing { .. } => OpType::Facing,
         }
     }
 
@@ -630,7 +651,11 @@ impl OpParams {
             // the drive-curve contour poses the same way - the axis
             // law reads the vertex's own fan of planes per move.
             | OpParams::Flow5D { .. }
-            | OpParams::MultiAxisContour { .. } => None,
+            | OpParams::MultiAxisContour { .. }
+            // Turning is the rotary answer spoken on a lathe: the WORK
+            // spins and the fitted axis frames the path - an index
+            // would command a pose the kinematics already own.
+            | OpParams::Facing { .. } => None,
         }
     }
 
@@ -655,7 +680,8 @@ impl OpParams {
             | OpParams::RotaryOffset { clearance_z, .. }
             | OpParams::MultiAxisRough { clearance_z, .. }
             | OpParams::Flow5D { clearance_z, .. }
-            | OpParams::MultiAxisContour { clearance_z, .. } => *clearance_z,
+            | OpParams::MultiAxisContour { clearance_z, .. }
+            | OpParams::Facing { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -683,7 +709,8 @@ impl OpParams {
             | OpParams::RotaryOffset { top_z, .. }
             | OpParams::MultiAxisRough { top_z, .. }
             | OpParams::Flow5D { top_z, .. }
-            | OpParams::MultiAxisContour { top_z, .. } => *top_z,
+            | OpParams::MultiAxisContour { top_z, .. }
+            | OpParams::Facing { top_z, .. } => *top_z,
         }
     }
 
@@ -763,6 +790,14 @@ impl OpParams {
             // The rough ladder carries no retract to visit - the
             // kernel names its own rapids plane (variant docs).
             OpParams::RotaryOffset { clearance_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            // The facing ladder is that shape in the axis frame: the
+            // station rapids live one infeed clear of the profile,
+            // so no authored retract exists to visit (variant docs).
+            OpParams::Facing { clearance_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 f(*top_z);
                 f(*bottom_z);
