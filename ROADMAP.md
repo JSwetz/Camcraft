@@ -490,7 +490,8 @@ Latin-first fine; no built-in animation easing; egui-minor churn is
 bounded by the kittest snapshots.
 
 ### M1.4.3 - Structured Ribbon - a home for every operation
-**Goal: the whole catalog is reachable without drowning the ribbon.** — 📋
+**Goal: the whole catalog is reachable without drowning the ribbon.** — ⏸ (deferred;
+lands as M6.2 in Phase 6 - the home law below was overtaken by events, see there)
 
 - **Sections by family**: the ribbon divides into labeled sections - Milling
       2D, Milling 3D, Drilling, Multi-axis, Turning - mirroring the
@@ -1687,6 +1688,54 @@ Provenance: architecture studied from a sibling project's own source, at the
 user's direction; no HSMWorks material involved. All numbers, colours, icons,
 and asset names are ours, drawn from public machining-UI convention.
 
+### M6.2 - The structured ribbon, redux - a home for every operation
+**Goal: M1.4.3's promise, kept late - every kind the registry holds has a
+ribbon home, and the ribbon's shape says which family it belongs to.** — 📋
+
+The honest state, verified at the M5.1 close-out (commit caaab7a): the
+registry carries 18 milling kinds, but the ribbon's Create row is eight
+cells (panes.rs, `Cmd::Create(0..=7)` - the imgui-era Face-through-3D-Finish
+set). The ten M5.x kinds (5-axis contour/parallel, swarf and advanced
+swarf, rotary contour/parallel/offset, multi-axis rough, flowline, the
+drive-curve contour) have no cell at all: they are reachable only by
+creating some operation and switching its Type in the page's flat
+18-row combo. Nothing is grouped - no family labels anywhere in the
+UI, and `KindInfo` carries no family field, though the Operation
+Catalog at the head of this roadmap has always known the taxonomy.
+M1.4.3's home law ("an operation with no ribbon home is a bug, not a
+backlog item", landing before the M5.1 ops) was overtaken: M5.1 landed
+first. This milestone is that debt, paid with the M5.2 turning kinds
+arriving behind it.
+
+- **Sections by family**: the ribbon divides into labeled sections -
+      Milling 2D, Milling 3D, Drilling, Multi-axis, Turning - mirroring
+      the catalog; a `Family` field on `KindInfo` is the registry-side
+      seed (the same table the tree, sheet and combo quote - no second
+      truth).
+- **Machine-kind gating, made real**: M3.2 stage E darkens every Create
+      cell on a lathe document and M5.2 stage A moves the refusal into
+      the command; the ribbon then HIDES what the machine cannot run
+      (a lathe setup never shows waterline; a mill-turn shows both
+      families) instead of darkening eighteen cells.
+- **Overflow dropdowns**: kinds beyond a section's width fold into a
+      dropdown carrying the section's label - never an iconless
+      chevron. The 5.x set will not fit one row; the law is reach, not
+      row count.
+- **Pin to ribbon**: any catalog item can be pinned/unpinned by the
+      user; pins are a document setting persisted with the project
+      (like panel docking), not an undoable command - undo replays
+      cuts, not layout.
+- **The combo earns the same shape**: the operations page's type picker
+      groups by family the way the ribbon does - one taxonomy, two
+      surfaces.
+
+No new glyphs are needed (every shipped kind carries its original icon
+already); the work is the registry field, the ribbon's group model, the
+overflow control, and the gates M1.4.3 specified. Test law: the existing
+tips/enablement tables (`tips_match_the_imgui_table` and kin) move with
+the new shape deliberately, with the verbatim-imgui promise retired in
+RECOMMENDED.md the day this lands.
+
 ## Phase 7 — Implicit preview: the SDF stock engine.
 
 The M1.7 open question - "adaptive dexel vs. sparse voxel octree vs.
@@ -1862,7 +1911,7 @@ material of any kind.
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview; display modes, the tabbed-panels overhaul and the graphical tool editor window all done - riding the graduated egui stack | ⚠️ |
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
-| **M1.4.3** | A home for every operation | Family-sectioned ribbon per the Operation Catalog, overflow dropdowns, user pinning (a document setting); lands before any new-family op - the home law | 📋 |
+| **M1.4.3** | A home for every operation | Family-sectioned ribbon per the Operation Catalog, overflow dropdowns, user pinning (a document setting); the home law was overtaken by M5.1's ten ribbon-less kinds - the promise moves to M6.2 | ⏸ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
@@ -1884,6 +1933,7 @@ material of any kind.
 | **M5.2** | Lathes too | Lathe machine model, turning cycles, bar feeder, mill-turn | 📋 |
 | **M5.3** | Shop scale | 10M tri performance, Lua, CLI, regression CI, 0.4.0 | 📋 |
 | **M6.1** | Token architecture | Adopt the solidcraft `Tokens`/`theme_files` design: one named table drives widgets + painted chrome, radii/spacing/sizes themeable, command-law switcher | 📋 |
+| **M6.2** | A home for every operation, kept | M1.4.3's debt: family-sectioned ribbon (`Family` on `KindInfo`), machine-kind hiding, overflow dropdowns, user pinning, grouped type combo - every registry kind gets a cell, the M5.1 set first | 📋 |
 | **M7.1** | Stock becomes a field | Narrow-band brick SDF from the mesh; closed-form swept-tool subtraction (`max` with the tool-frame distance, inverted-trajectory law); same stock_sim API, real distances at every verdict call site | 📋 |
 | **M7.2** | The machined volume in the 3D view | Sphere-traced viewport render on the egui-wgpu stack, progressive per-move playback, continuous deviation color map, on-demand marching-cubes mesh (a cache, never a truth), CPU fallback | 📋 |
 | **M7.3** | Dexel retirement | Both engines verdict-identical on the heavy lane (rest/gouge/deviation within declared epsilon), per-brick update cost law, column engine retires | 📋 |
