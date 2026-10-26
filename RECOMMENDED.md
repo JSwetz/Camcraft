@@ -3859,6 +3859,111 @@ compile error citing a `cutter_axis` field on `MultiAxisContour` -
 verified false.** No such identifier exists anywhere in the tree;
 a transient mid-edit state, not chased.
 
+## M5.1 stage I - 5-axis flowline finishing (code 378184a + this docs)
+
+**Two kinds, not one table: Flow5D takes its own `OpType` arm and
+its own params struct rather than a mode flag on
+`Contour5D`/`Parallel5D`.** Its source is the whole model surface -
+the direction field is a reading of the mesh, not a pattern choice
+- and its geometry is a curved-line family with its own seeding
+law. A mode flag would have forked both twins' signatures: every
+or-pattern the twins already share (`kinds.rs` carry, `sane.rs`
+door, `params.rs` digest) becomes a two-shape read and the
+parallel's pattern field starts lying about which lines it picked.
+Considered: `pattern: Flow` on Parallel5D (dropped: the raster
+twins' DTO and digest author LINE CHOICE as a parameter; making it
+a reading restamps what every v30 parallel file says about itself).
+
+**The SEED/CLAIM cusp law: half-step seeds, half-step claims.**
+Seeds walk the shallow footprint's bounding box on a lattice
+`SEED_FRAC` = 0.5 of the stepover apart (`crates/motion/src/
+finishing3d/flow.rs`), and a seed whose column lies within
+`CLAIM_FRAC` = 0.5 stepover of an already-traced segment (or a
+spent seed point) is spent WITHOUT tracing - the traced set is
+maximal under the claim radius. A ground point is never farther
+from a line than its nearest seed plus the seed's claim, so
+turning ground keeps the CLAIM + half-seed bound (the swirl test
+pins 1.1 stepovers, where the circles' radial spacing quantizes);
+straight ground, where the half-step rows are ALL traced, keeps
+the straight raster's own promise exactly - every interior point
+within half a stepover (plus the march's lattice quantum) of a
+chord, scallop a QUARTER of tolerance. The spacing promise is the
+seeding's; the envelope verdict, never the spacing, is what says
+nothing gouges. Considered: seeding one line per full stepover and
+claiming at half (dropped: a turning family converges as well as
+diverges, and the half-step lattice is what keeps the promise
+inside the grid's quantization).
+
+**The direction field has a global fallback, so unclaimed columns
+still cut.** Flat interiors make no directional claim and the
+waterline rings do not machine them - a flow pass that stalled
+there would be silently unfinished, the Prime Directive's own
+worst shape. So the field answers an unclaimed column with the
+region's dominant direction: the double-angle (2theta) vote
+weighted by facet area, theta and theta+PI casting ONE vote for
+the line they share, and +x when nothing claims at all. On plain
+ground the whole path IS the parallel raster's answer, said in the
+geometry and not in a warning - flow never fails to cut.
+
+**`curv.rs`: one curvature kernel, two readers.** The shape-
+operator fit lifted out of `ruling.rs` (stage D's machinery), so
+the ruling scan (swarf) and the direction field (flow) solve the
+SAME least-squares normal-difference systems per facet - the field
+the two kinds see cannot drift apart, and a fit corrected fixes
+both. `min_dir_xy` states the flow reader's refusals: a starved
+neighbourhood (< 6 answerable facets), an isotropic facet (a
+sphere's eigenpair is numerical noise, and noise must never steer
+a spindle) and a claim lying along Z all answer None - no claim,
+never a guessed claim.
+
+**v31 is a PURE step-up.** Flow5D rides the existing component DTO
+grammar as one new tag, `flow5d` (the serde rename states it -
+the automatic snake_case of `Flow5D` would be `flow5_d`), and the
+migration arm only raises the number: a v30 file cannot carry the
+tag and every key v31 adds has a default that IS the old
+document's behavior. The stepover-None derivation law is the
+raster twins' cos law restated -
+`p.stepover.unwrap_or(scallop_stepover(r, tol) * mz_min)` - and
+absent `retract_z` means the kernel's own rapids plane.
+`shank_avoid` is surface truth, not a free axis: absent reads as
+off, but the flag is always WRITTEN - the digest and none-key
+handling joined the raster twins' or-patterns so hash, file and
+world agree. The loader's sane door (a 200-degree cone refuses as
+Corrupt) is the twins' door read by the third sibling.
+
+**The field's lookup: nearest facet centre over 3x3 buckets with a
+two-cell reach cutoff.** Buckets are one cell per two mean facet
+edges, so a 3x3 query sees the centre whose Voronoi cell the
+column stands in on any near-uniform mesh; past two cells' reach
+the column is over ground no facet answers for, and the fallback's
+straight lines are the honest answer there. Considered:
+point-in-triangle lookup (dropped: a centre's claim standing over
+its cell is the same quantization the ruling scan already trusts,
+and the nearest-centroid walk never races a Delaunay structure).
+
+**The glyph is original: no Tabler flowline icon exists**, so
+`assets/ui/flow5d.png` is drawn here - the dome cross-section with
+the leaning ball-end, the parallel's chord bent into the blade's
+own sweep ("ours to give", the house glyph law).
+
+**GATE NOTE, recorded so nobody hunts it: the rotary-mirror law
+test in `crates/app/tests/machine.rs` had rotted at HEAD since
+stage G** - G moved the rotary rates under the rotaries' own roof
+(`Traverse.rot`, fed from the .mch mirror), but G's gate never ran
+the app machine binary lane, so the old "geometry, never speeds"
+assert survived asserting a law the code no longer spoke. Stage
+I's gate ran the lane and caught it; the test now states the
+stage-G law truthfully: speeds ride under the rotary's own roof
+for the paced head swing, and the prohibition is only deg/min
+LEAKING INTO the prismatic `rapidRate` (the ceiling pin stays).
+Renamed `rotaries_mirror_as_geometry_and_rates_never_as_the_ceiling`.
+
+**GATE NOTE 2: clippy on rust 1.99 flagged `doc_lazy_continuation`
+on `//! - text` dash clauses and `unnecessary_map_or` in stage I's
+new code.** Fixed in-flight (`is_none_or` is the spelling; the
+module docs were reflowed); the law for future module docs is an
+opening parenthetical, not a dash list.
+
 ## How this file ends
 
 When the roadmap's open items are exhausted, this file gets its final

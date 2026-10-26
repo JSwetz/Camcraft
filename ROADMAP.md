@@ -113,7 +113,7 @@ home.
 | Multi-axis contour | 📋 | M5.1 |
 | Rotary parallel | ✅ | M5.1 |
 | Rotary contour | ✅ | M5.1 |
-| Multi-axis finishing | 📋 | M5.1 |
+| Multi-axis finishing | ✅ | M5.1 |
 
 ### Turning — Operations
 
@@ -1488,6 +1488,32 @@ Phase-5 shape law.
       offset roughing with stage E2, multi-axis roughing with stage
       E3) - the catalog's multi-axis block lands here, each riding
       the orientation and machine-sim laws below
+- ✅ **5-axis flowline finishing** (stage I, commit 378184a): the
+      finishing pass that CURVES with the part - the per-facet
+      shape-operator fit claims each facet's least-curving direction
+      (`curv.rs`, split out of `ruling.rs` so swarf and flow read
+      ONE curvature kernel and the field the two kinds see cannot
+      drift apart); the direction field answers a column with the
+      nearest facet centre's claim, on a grid two mean facet edges
+      wide and within a two-cell reach, and with the region's
+      dominant fallback where the column's facet claims nothing -
+      the double-angle (2theta) area-weighted vote, since theta and
+      theta+PI are one ruling, +x when the vote is silent: flat
+      ground degrades to the parallel raster's answer and CUTS,
+      never silently unfinished; the geometry is the raster's laws
+      on turning lines (`finishing3d::flow` - the curved-line
+      family on the shallow ground, the waterline rings the flanks'
+      jurisdiction, half-step seeding keeping every point within
+      half a stepover of a traced line); stage C's lean law and
+      stage F's shank dodge pose every cut move; app kind Flow5D
+      (ordinal/tag 16, wire tag `flow5d`, project v31 a pure
+      step-up; `stepover` and `retract_z` are `Option` - an absent
+      stepover is the cos-law scallop derived from the tolerance,
+      an absent retract the kernel's own rapids plane - and
+      `shank_avoid` is always stated in the file), Envelope verify,
+      the refusal trio inherited from the 5-axis twins (the FlowF
+      case), and the ribbon glyph `assets/ui/flow5d.png` drawn
+      original - RECOMMENDED.md, M5.1 I.
 - ✅ **3+2 tilted-plane indexing** (stage B, this commit): the five
       plane kinds carry a `Tilt`; generation runs them in the frame's
       LOCAL coordinates and leaves through `TiltedFrame::world_path` -
@@ -1660,6 +1686,17 @@ resolution-independent, exact corners where voxels round them off. The
 mesh stays the source of truth - the verification-layer law survives
 this rewrite untouched; the field is preview and verdict display, never
 geometry.
+
+> Reference on the graph: the video "Making a game engine with signed
+> distance fields" (https://www.youtube.com/watch?v=il-TXbn5iMA, creator
+> "Mike") was transcribed to `raw/yt_5c0a63a714c5.transcript.txt` and
+> extracted into the knowledge graph (public reference material; nothing
+> from HSMWorks). It validates this phase's architecture from an adjacent
+> domain - a world entirely represented as an editable SDF, rendered fast
+> by caching distances on a grid, stored sparse in 8x8x8 brick maps,
+> level-of-detail'd with nested clip maps, and kept live by BVH-tracked
+> incremental brick regeneration: the same four pillars M7.1 proposes,
+> proven at interactive rates on dynamic geometry.
 
 ### M7.1 - The field and the subtraction kernel
 **Goal: a signed-distance representation of remaining material behind
