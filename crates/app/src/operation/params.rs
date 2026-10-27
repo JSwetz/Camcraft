@@ -721,6 +721,44 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The profile kinds (M5.2 stage B, tags 19, 20): the same
+            // law, and here the tolerance is load-bearing TWICE -
+            // the kernel chords its own silhouette and ride at it,
+            // so a budget edit moves the path, not just the verdict.
+            OpParams::ProfileRough {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                stock_to_leave,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *stock_to_leave, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
+            OpParams::ProfileFinish {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
         }
     }
 }

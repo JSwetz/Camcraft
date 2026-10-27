@@ -1,5 +1,6 @@
-//! M5.2 stage A turning tests at the app level: the family door and
-//! the facing operation's whole life through the document. What
+//! M5.2 turning tests at the app level: the family door and the
+//! turned kinds' whole life through the document - stage A's facing
+//! ladder (stage B's profile rides are in turning_profile.rs). What
 //! "right" means here: a turning op on a mill document is REFUSED by
 //! name at the command door (not generated then warned about), a
 //! mounted lathe opens the turning door and shuts the mill one, the
@@ -13,8 +14,9 @@
 //!
 //! Gate map (M4.4): covers camcraft_app::commands (family gate,
 //! CreateOperation/GenerateOperation), camcraft_app::machine (kind
-//! read), camcraft_app::operation (Facing arm of generate/heights,
-//! the seed), camcraft_app::posting-free generation path.
+//! read), camcraft_app::operation (the Facing arm of
+//! generate/heights/material, the seed), camcraft_app::posting-free
+//! generation path.
 //! Lane shape (M4.4): all tests here run in seconds.
 
 use flecs_ecs::prelude::World;

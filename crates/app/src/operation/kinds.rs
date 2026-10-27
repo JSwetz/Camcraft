@@ -90,8 +90,11 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::MultiAxisContour { feed, .. }
         // The facing pass feeds along X at the station's Z - the
         // retype's feed number means the same distance-per-minute
-        // here as on a mill (M5.2 A).
-        | OpParams::Facing { feed, .. } => *feed,
+        // here as on a mill (M5.2 A). The profile rides feed along
+        // the offset curve: the nose's own travel, same units.
+        | OpParams::Facing { feed, .. }
+        | OpParams::ProfileRough { feed, .. }
+        | OpParams::ProfileFinish { feed, .. } => *feed,
     }
 }
 
@@ -117,8 +120,12 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::MultiAxisContour { plunge_feed, .. }
         // Facing's plunge is the radial approach off the rapids plane
         // onto the station - the same number the ladder's first move
-        // posts at (M5.2 A).
-        | OpParams::Facing { plunge_feed, .. } => *plunge_feed,
+        // posts at (M5.2 A). The profile kinds plunge the same way:
+        // radially in to the rung's ride, radially out at the end
+        // (M5.2 B).
+        | OpParams::Facing { plunge_feed, .. }
+        | OpParams::ProfileRough { plunge_feed, .. }
+        | OpParams::ProfileFinish { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -145,8 +152,12 @@ fn climb_of(p: &OpParams) -> bool {
         // starts from the fresh default instead of inventing a carry.
         // Facing's neither: the work spins and the insert traverses;
         // which flank meets the cut is the spindle's direction, not a
-        // number this ladder authors (M5.2 A).
-        OpParams::Drill { .. } | OpParams::Facing { .. } => true,
+        // number this ladder authors (M5.2 A) - and neither do the
+        // profile rides, which are the same kinematic (M5.2 B).
+        OpParams::Drill { .. }
+        | OpParams::Facing { .. }
+        | OpParams::ProfileRough { .. }
+        | OpParams::ProfileFinish { .. } => true,
     }
 }
 
@@ -183,9 +194,13 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Flow5D { .. }
         // The drive-curve contour has NO spacing at all, and facing
         // none either: one radial pass per station runs the profile's
-        // whole width - the stepdown IS the spacing (M5.2 A).
+        // whole width - the stepdown IS the spacing (M5.2 A). The
+        // profile kinds say the same: the rungs' spacing is the
+        // stepdown, the finish's pattern is the skin itself.
         | OpParams::MultiAxisContour { .. }
-        | OpParams::Facing { .. } => None,
+        | OpParams::Facing { .. }
+        | OpParams::ProfileRough { .. }
+        | OpParams::ProfileFinish { .. } => None,
     }
 }
 
@@ -202,6 +217,9 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // Radial infeed here, the wrap ladder's law, read down the
         // axis instead of out of the skin (M5.2 A).
         | OpParams::Facing { stepdown, .. }
+        // The rung ladder's spacing is radial too - the same number
+        // read as a shell width off the skin (M5.2 B).
+        | OpParams::ProfileRough { stepdown, .. }
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
@@ -209,6 +227,8 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Swarf { .. } | OpParams::AdvancedSwarf { .. }
         | OpParams::RotaryContour { .. } | OpParams::RotaryParallel { .. }
         | OpParams::Flow5D { .. }
+        // One ride is the whole finish - there is no infeed to carry.
+        | OpParams::ProfileFinish { .. }
         | OpParams::MultiAxisContour { .. } => None,
     }
 }
@@ -236,8 +256,11 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Flow5D { top_z, .. }
         | OpParams::MultiAxisContour { top_z, .. }
         // Facing's top is the first station above the shoulder the
-        // ladder steps down from (M5.2 A).
-        | OpParams::Facing { top_z, .. } => Some(*top_z),
+        // ladder steps down from (M5.2 A); the profile kinds' is the
+        // high end of the window their rungs ride (M5.2 B).
+        | OpParams::Facing { top_z, .. }
+        | OpParams::ProfileRough { top_z, .. }
+        | OpParams::ProfileFinish { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -264,8 +287,12 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Flow5D { bottom_z, .. }
         | OpParams::MultiAxisContour { bottom_z, .. }
         // Facing's finished plane: the facing Z every station
-        // steps toward (M5.2 A).
-        | OpParams::Facing { bottom_z, .. } => Some(*bottom_z),
+        // steps toward (M5.2 A); the profile kinds' is the low end
+        // of the station window, the plunge-in end of the ride
+        // (M5.2 B).
+        | OpParams::Facing { bottom_z, .. }
+        | OpParams::ProfileRough { bottom_z, .. }
+        | OpParams::ProfileFinish { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -299,8 +326,14 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         // No hop plane to carry: the kernel names its own rapids
         // plane (one infeed and a tool radius off the skin - the
         // facing ladder states it one infeed clear of the profile,
-        // the axis way), and Face never stored one either.
-        OpParams::Face { .. } | OpParams::RotaryOffset { .. } | OpParams::Facing { .. } => None,
+        // the axis way; the profile rungs state theirs the same way,
+        // a chord-tolerance clear of the ride's reach), and Face
+        // never stored one either.
+        OpParams::Face { .. }
+        | OpParams::RotaryOffset { .. }
+        | OpParams::Facing { .. }
+        | OpParams::ProfileRough { .. }
+        | OpParams::ProfileFinish { .. } => None,
     }
 }
 
@@ -595,6 +628,39 @@ fn seed_facing(c: &Carried) -> OpParams {
         // handbook rough-facing infeed, and it stands under 2r of
         // every TN row in the catalog.
         stepdown: 0.5,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The M5.2 stage B rough seed: the facing ladder's shape spoken
+/// radially - the same stepdown 0.5 (under twice the house insert's
+/// nose, the same law read as a shell width), plus the leave the
+/// finish takes off. 0.25 is the handbook finish allowance: a whole
+/// nose's worth of chord sag at tolerance 0.05 leaves far less, so
+/// the ride's own budget, not this number, shapes the finish.
+fn seed_profile_rough(c: &Carried) -> OpParams {
+    OpParams::ProfileRough {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        stepdown: 0.5,
+        stock_to_leave: 0.25,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The M5.2 stage B finish seed: the window and the feeds - there is
+/// no infeed to answer for. The carried stepdown is deliberately
+/// dropped: one ride IS the pattern.
+fn seed_profile_finish(c: &Carried) -> OpParams {
+    OpParams::ProfileFinish {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
         feed: c.feed,
         plunge_feed: c.plunge,
     }
@@ -1001,6 +1067,33 @@ impl KindInfo {
             family: Family::Turn,
             seed: seed_facing,
         },
+        KindInfo {
+            ty: OpType::ProfileRough,
+            label: "Profile Rough",
+            caption: "Profile Rough",
+            tag: 19,
+            // The rungs' verdict is the same sphere-envelope law
+            // (M5.2 B): a nose circle revolved IS a sphere about the
+            // axis, so the scan measures each rung's shell exactly -
+            // and the standing leave the verdict reports is what the
+            // finish pass owns.
+            mode: Mode::Envelope,
+            family: Family::Turn,
+            seed: seed_profile_rough,
+        },
+        KindInfo {
+            ty: OpType::ProfileFinish,
+            label: "Profile Finish",
+            caption: "Profile Finish",
+            tag: 20,
+            // The ride is the pattern: no authored spacing for a law
+            // to distrust, and the tolerance is exactly the
+            // envelope's budget - the chord law the kernel settled
+            // the ride with is the same promise the scan checks.
+            mode: Mode::Envelope,
+            family: Family::Turn,
+            seed: seed_profile_finish,
+        },
     ];
 }
 
@@ -1029,6 +1122,8 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[16].label,
     KindInfo::ALL[17].label,
     KindInfo::ALL[18].label,
+    KindInfo::ALL[19].label,
+    KindInfo::ALL[20].label,
 ];
 
 impl OpType {
@@ -1056,6 +1151,8 @@ impl OpType {
             OpType::Flow5D => 16,
             OpType::MultiAxisContour => 17,
             OpType::Facing => 18,
+            OpType::ProfileRough => 19,
+            OpType::ProfileFinish => 20,
         }
     }
 

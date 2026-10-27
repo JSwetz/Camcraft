@@ -374,6 +374,10 @@ fn op_icon(kind: OpType) -> Icon {
         // Pocket3D precedent above): what the cell makes is a face -
         // spun rather than swept, same word, same pixels.
         OpType::Facing => Icon::Face,
+        // The profile kinds keep the same glyph for the same reason:
+        // what they leave is the turned surface - the bar's own
+        // skin, roughed to a wall or finished to tolerance (M5.2 B).
+        OpType::ProfileRough | OpType::ProfileFinish => Icon::Face,
     }
 }
 

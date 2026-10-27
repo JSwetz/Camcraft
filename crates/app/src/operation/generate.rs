@@ -985,6 +985,59 @@ pub fn generate(
             )?;
             (region, path)
         }
+        // M5.2 stage B: the profile kinds. The same tool door as
+        // facing's - the no-gouge construction IS the nose ball
+        // rolled along the silhouette's offset - and the same height
+        // law: world Z planes read as stations on the fitted axis.
+        // `tolerance` is NOT ignored here: the kernel chords the
+        // silhouette and the ride at it (quarter budgets each), so
+        // it shapes the path exactly as the verdict measures it.
+        OpParams::ProfileRough { stepdown, stock_to_leave, feed, plunge_feed, tolerance, .. } => {
+            if tool.kind != crate::tools::ToolKind::Turning {
+                return Err(GenError::Invalid(format!(
+                    "Profile Rough needs a turning insert, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::profile_rough(
+                &material.facets,
+                &crate::turning::ProfileRoughParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    stepdown: *stepdown,
+                    stock_to_leave: *stock_to_leave,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    nose_radius: tool.nose_radius,
+                    tolerance: *tolerance,
+                },
+            )?;
+            (region, path)
+        }
+        OpParams::ProfileFinish { feed, plunge_feed, tolerance, .. } => {
+            if tool.kind != crate::tools::ToolKind::Turning {
+                return Err(GenError::Invalid(format!(
+                    "Profile Finish needs a turning insert, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::profile_finish(
+                &material.facets,
+                &crate::turning::ProfileFinishParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    nose_radius: tool.nose_radius,
+                    tolerance: *tolerance,
+                },
+            )?;
+            (region, path)
+        }
     };
 
     // M3.2 stage B: what the program clamps to. The op's setup context
@@ -1025,7 +1078,11 @@ pub fn generate(
         // Facing leaves no shelf: the ladder steps to the facing
         // plane and stops - the tolerance measures the finish, a
         // stock-to-leave number would only move the verdict (M5.2 A).
-        | OpParams::Facing { .. } => 0.0,
+        // The finish ride is that answer on the skin: the tolerance
+        // IS its chord budget, and a leave would only move the
+        // verdict (M5.2 B).
+        | OpParams::Facing { .. }
+        | OpParams::ProfileFinish { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -1035,7 +1092,11 @@ pub fn generate(
         // so the wrap reads this number as a radial wall (E2).
         | OpParams::RotaryOffset { stock_to_leave, .. }
         // The stamped ladder leaves the pocket's shelf, same law.
-        | OpParams::MultiAxisRough { stock_to_leave, .. } => *stock_to_leave,
+        | OpParams::MultiAxisRough { stock_to_leave, .. }
+        // The rung ladder leaves a radial wall read as a distance to
+        // the part - which is exactly what the scan measures
+        // (M5.2 B): every feed point must stand nose+leave off.
+        | OpParams::ProfileRough { stock_to_leave, .. } => *stock_to_leave,
     };
     match &frame {
         None => {
@@ -1069,6 +1130,12 @@ pub fn generate(
                             // radius: the rest is what the facets
                             // say, measured of revolution (M5.2 A).
                             | OpParams::Facing { .. }
+                            // The profile rungs and the ride read
+                            // the same revolution's rest - the
+                            // silhouette IS the model's own envelope
+                            // (M5.2 B).
+                            | OpParams::ProfileRough { .. }
+                            | OpParams::ProfileFinish { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -1110,7 +1177,12 @@ pub fn generate(
                         // Facing reads it the same way - its ONLY
                         // reading: the stations come from the
                         // profile, the budget judges them (M5.2 A).
-                        | OpParams::Facing { tolerance, .. } => Some(*tolerance),
+                        // The profile kinds read it TWICE (the
+                        // kernel chords its ride at it) and stand
+                        // before this same budget (M5.2 B).
+                        | OpParams::Facing { tolerance, .. }
+                        | OpParams::ProfileRough { tolerance, .. }
+                        | OpParams::ProfileFinish { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

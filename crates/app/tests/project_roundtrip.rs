@@ -3753,3 +3753,107 @@ fn v32_file_steps_to_v33_and_the_facing_grammar_round_trips() {
         "a facing ladder with no infeed is not a ladder"
     );
 }
+
+#[test]
+fn v33_file_steps_to_v34_and_the_profile_grammar_round_trips() {
+    // M5.2 stage B: the profile kinds arrive as two new params tags
+    // (`profile_rough`, `profile_finish`) and nothing else - the
+    // turning tool, its nose and the height DTOs all came with v33,
+    // so the step-up is the stamp itself and a v33 file loses
+    // nothing being read by a v34 reader.
+    let world = new_world();
+    project::open(&world, r#"{"version": 33, "entities": []}"#).expect("v33 steps up");
+    let p = tmp_path("v34a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v34 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v34 wire grammar, hand-written so the tags are pinned:
+    // PR1 is the rung ladder (the only kind that states a leave),
+    // PF1 is one ride - the window and the feeds, nothing more.
+    let text = r#"{
+        "version": 34,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "turning", "diameter": 16.0, "corner_r": 0.0,
+                      "nose_radius": 0.8,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 3000.0, "feed": 150.0}},
+            {"name": "PR1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"profile_rough": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "fixed", "offset": 16.0},
+                 "bottom_z": {"reference": "fixed", "offset": -16.0},
+                 "stepdown": 0.8, "stock_to_leave": 0.25,
+                 "feed": 150.0, "plunge_feed": 80.0}}}
+            },
+            {"name": "PF1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"profile_finish": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "fixed", "offset": 16.0},
+                 "bottom_z": {"reference": "fixed", "offset": 2.0},
+                 "feed": 120.0, "plunge_feed": 60.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v34 profile grammar must read");
+    let e = model::find_by_name(&world, "PR1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::ProfileRough {
+        stepdown,
+        stock_to_leave,
+        feed,
+        plunge_feed,
+        ..
+    } = &o.params
+    else {
+        panic!("rough params expected, got {:?}", o.params);
+    };
+    assert_eq!((*stepdown, *stock_to_leave, *feed, *plunge_feed), (0.8, 0.25, 150.0, 80.0));
+    let e = model::find_by_name(&world, "PF1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::ProfileFinish { feed, plunge_feed, .. } = &o.params else {
+        panic!("finish params expected, got {:?}", o.params);
+    };
+    assert_eq!((*feed, *plunge_feed), (120.0, 60.0));
+
+    // Write-parse-write is a fixed point, and the leave is stated
+    // exactly once - the finish ride authors no wall to leave.
+    let p = tmp_path("v34b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the profile shapes round-trip byte-identically");
+    assert_eq!(first.matches("\"profile_rough\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"profile_finish\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"stock_to_leave\"").count(), 1, "only the ladder leaves stock: {first}");
+
+    // The sane door at the loader, both kinds' edges: a rung ladder
+    // with no radial infeed is one rung lying about being many, and
+    // a NEGATIVE leave is stock to remove - the kernel's own words
+    // at the door, not a surprise at Generate.
+    let no_infeed = text.replace("\"stepdown\": 0.8", "\"stepdown\": 0.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &no_infeed), Err(ProjectError::Corrupt(_))),
+        "a profile rough ladder with no infeed is not a ladder"
+    );
+    let took_stock = text.replace("\"stock_to_leave\": 0.25", "\"stock_to_leave\": -1.0");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &took_stock), Err(ProjectError::Corrupt(_))),
+        "a negative leave must not load"
+    );
+}

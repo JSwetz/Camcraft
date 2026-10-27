@@ -129,6 +129,17 @@ pub enum OpType {
     /// [`crate::turning`]). The first kind of the TURN family: the
     /// family gate is what keeps it off a mill.
     Facing,
+    /// Profile roughing (M5.2 stage B): the concentric rung ladder on
+    /// the turned silhouette — the nose's ride at distance
+    /// nose+stock+j·stepdown, rungs outermost first, each eating a
+    /// radial shell down to the leave the finish takes off (see
+    /// [`crate::turning`]).
+    ProfileRough,
+    /// Profile finishing (M5.2 stage B): one ride of the nose along
+    /// the offset of the turned silhouette — the bar's own skin
+    /// within the chord budget, lead in and slide out radially (see
+    /// [`crate::turning`]).
+    ProfileFinish,
 }
 
 impl core::fmt::Display for OpType {

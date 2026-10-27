@@ -587,6 +587,38 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Profile roughing (M5.2 stage B): the RADIAL ladder on the
+    /// turned silhouette. `top_z`/`bottom_z` bound the station
+    /// window the rungs ride, `stepdown` is the shell width one rung
+    /// eats (bounded by twice the nose — the same ridge law facing
+    /// states axially), and `stock_to_leave` is what the last rung
+    /// stands off the skin for the finish to take off. `tolerance`
+    /// is both the verify budget and the chord budget the silhouette
+    /// and its ride settle at (unlike [`Self::Facing`], this kernel
+    /// READS it — the ride is the pattern).
+    ProfileRough {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        stock_to_leave: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// Profile finishing (M5.2 stage B): one ride of the nose along
+    /// the offset of the silhouette, between the two heights. No
+    /// stepdown exists to author — the whole skin is one pass; the
+    /// window IS the ladder. `tolerance` again the kernel's own
+    /// chord budget and the verify budget at once.
+    ProfileFinish {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 impl OpParams {
@@ -612,6 +644,8 @@ impl OpParams {
             OpParams::Flow5D { .. } => OpType::Flow5D,
             OpParams::MultiAxisContour { .. } => OpType::MultiAxisContour,
             OpParams::Facing { .. } => OpType::Facing,
+            OpParams::ProfileRough { .. } => OpType::ProfileRough,
+            OpParams::ProfileFinish { .. } => OpType::ProfileFinish,
         }
     }
 
@@ -655,7 +689,9 @@ impl OpParams {
             // Turning is the rotary answer spoken on a lathe: the WORK
             // spins and the fitted axis frames the path - an index
             // would command a pose the kinematics already own.
-            | OpParams::Facing { .. } => None,
+            | OpParams::Facing { .. }
+            | OpParams::ProfileRough { .. }
+            | OpParams::ProfileFinish { .. } => None,
         }
     }
 
@@ -681,7 +717,9 @@ impl OpParams {
             | OpParams::MultiAxisRough { clearance_z, .. }
             | OpParams::Flow5D { clearance_z, .. }
             | OpParams::MultiAxisContour { clearance_z, .. }
-            | OpParams::Facing { clearance_z, .. } => *clearance_z,
+            | OpParams::Facing { clearance_z, .. }
+            | OpParams::ProfileRough { clearance_z, .. }
+            | OpParams::ProfileFinish { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -710,7 +748,11 @@ impl OpParams {
             | OpParams::MultiAxisRough { top_z, .. }
             | OpParams::Flow5D { top_z, .. }
             | OpParams::MultiAxisContour { top_z, .. }
-            | OpParams::Facing { top_z, .. } => *top_z,
+            | OpParams::Facing { top_z, .. }
+            // The profile window: the heights bound the length of bar
+            // the rungs and the ride walk (M5.2 B).
+            | OpParams::ProfileRough { top_z, .. }
+            | OpParams::ProfileFinish { top_z, .. } => *top_z,
         }
     }
 
@@ -797,7 +839,12 @@ impl OpParams {
             // The facing ladder is that shape in the axis frame: the
             // station rapids live one infeed clear of the profile,
             // so no authored retract exists to visit (variant docs).
-            OpParams::Facing { clearance_z, top_z, bottom_z, .. } => {
+            OpParams::Facing { clearance_z, top_z, bottom_z, .. }
+            // The profile kinds are the same three: the rapids plane
+            // names itself off the ride's own reach, no hop authored
+            // (variant docs, M5.2 B).
+            | OpParams::ProfileRough { clearance_z, top_z, bottom_z, .. }
+            | OpParams::ProfileFinish { clearance_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 f(*top_z);
                 f(*bottom_z);

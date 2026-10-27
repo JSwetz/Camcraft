@@ -654,6 +654,26 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             ("TOP", "Top of Part Z", Some(*top_z)),
             ("BOT", "Facing Plane Z", Some(*bottom_z)),
         ],
+        // The profile kinds state the same three rows with the plain
+        // names: their bottom is the low end of the station window,
+        // not a plane the ladder faces toward (M5.2 B).
+        OpParams::ProfileRough {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::ProfileFinish {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        } => [
+            ("CLR", "Clearance Z", Some(*clearance_z)),
+            ("RET", "Retract Z", None),
+            ("TOP", "Top of Part Z", Some(*top_z)),
+            ("BOT", "Bottom of Part Z", Some(*bottom_z)),
+        ],
         OpParams::Drill {
             clearance_z,
             retract_z,

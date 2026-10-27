@@ -2028,6 +2028,18 @@ fn a_lathe_document_lights_the_turning_cell() {
         panes::enabled(Cmd::Create(turn), st),
         "the mounted lathe lights the ladder"
     );
+    // Stage B's kinds ride the same table row - the family field,
+    // not a remembered list: the two profile cells light with it.
+    for word in [
+        camcraft_app::operation::OpType::ProfileRough as usize,
+        camcraft_app::operation::OpType::ProfileFinish as usize,
+    ] {
+        assert!(
+            panes::enabled(Cmd::Create(word), st),
+            "the mounted lathe lights the {} cell too",
+            panes::TYPES[word]
+        );
+    }
     assert_eq!(
         panes::tip_of(Cmd::Create(turn), st),
         format!("Add a {} operation", panes::TYPES[turn]),

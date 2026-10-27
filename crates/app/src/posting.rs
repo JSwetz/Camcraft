@@ -650,8 +650,12 @@ impl HeightRefs for OpParams {
                 ..
             }
             // The facing ladder states the same three: the station
-            // rapids ride the profile, not a hop height (M5.2 A).
-            | OpParams::Facing { clearance_z, top_z, bottom_z, .. } =>
+            // rapids ride the profile, not a hop height (M5.2 A) -
+            // and so do the profile rungs, whose rapids clear the
+            // ride's reach (M5.2 B).
+            | OpParams::Facing { clearance_z, top_z, bottom_z, .. }
+            | OpParams::ProfileRough { clearance_z, top_z, bottom_z, .. }
+            | OpParams::ProfileFinish { clearance_z, top_z, bottom_z, .. } =>
                 vec![clearance_z, top_z, bottom_z],
             OpParams::Drill {
                 clearance_z,

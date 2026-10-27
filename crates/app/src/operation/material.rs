@@ -308,8 +308,11 @@ pub(super) fn region_for_src(
                     // profile's own silhouette at every station:
                     // the meridian projection authors it from the
                     // mesh, and a pick could only disagree with
-                    // the turn (M5.2 A).
+                    // the turn (M5.2 A). The profile kinds ride
+                    // that very silhouette - same answer (M5.2 B).
                     | OpParams::Facing { .. }
+                    | OpParams::ProfileRough { .. }
+                    | OpParams::ProfileFinish { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -384,8 +387,12 @@ pub(super) fn region_for(
         | OpParams::MultiAxisContour { .. }
         // Facing rides the same shadow for the panels: the station
         // limits are the meridian profile's own, computed in the
-        // axis frame by the kernel (M5.2 A).
-        | OpParams::Facing { .. } => {
+        // axis frame by the kernel (M5.2 A) - and so are the
+        // profile kinds' rungs, the same silhouette read as skin
+        // instead of as a floor (M5.2 B).
+        | OpParams::Facing { .. }
+        | OpParams::ProfileRough { .. }
+        | OpParams::ProfileFinish { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

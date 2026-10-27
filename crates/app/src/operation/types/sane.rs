@@ -543,6 +543,48 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
             }
+            // The profile ladders' doors (M5.2 stage B): the facing
+            // numbers plus a leave that may be zero (the ride owns
+            // the skin then) but never negative - the kernel refuses
+            // stock to REMOVE past the door it stands behind, and so
+            // does this one, by name; the stepdown ceiling against
+            // the nose is the TOOL's question and stays the
+            // generator's to ask.
+            OpParams::ProfileRough {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                stock_to_leave,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && stock_to_leave.is_finite()
+                    && *stock_to_leave >= 0.0
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
+            OpParams::ProfileFinish {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
         }
     }
 

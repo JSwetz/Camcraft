@@ -2062,6 +2062,80 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the descent between rungs travels in air at the plunge feed");
             }
         }
+        // Profile turning (M5.2 B): the window trio names the bar
+        // the rungs ride, not a plane they face toward; the passes
+        // tab carries the RADIAL stepdown (the same ridge law read
+        // as a shell width - twice the insert nose at the most) and
+        // the leave the finish takes off. No stepover, no climb:
+        // the ride IS the pattern and the work spins one way.
+        OpParams::ProfileRough {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            stock_to_leave,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "profile_rough.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "profile_rough.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "profile_rough.bottom");
+                ui.label("the rungs ride the bar between these heights; the window's ends are where the tool plunges in and slides out");
+                field(ui, "Stepdown");
+                num(ui, u, stepdown);
+                ui.label("radial shell one rung eats - the kernel refuses past twice the insert nose radius, the sheet the next rung in would miss");
+                field(ui, "Stock to leave");
+                num(ui, u, stock_to_leave);
+                ui.label("the wall the last rung stands off the skin - the finish pass takes it off");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the chord budget the silhouette and each rung's ride settle at, and the envelope the verdict measures - one number, both sides");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the radial lead onto each rung feeds at the plunge number; along the rung, at the feed");
+            }
+        }
+        OpParams::ProfileFinish {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "profile_finish.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "profile_finish.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "profile_finish.bottom");
+                ui.label("one ride of the nose along the bar's offset, bottom of the window up to top - the whole finish is one pass");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the chord budget the ride settles at, and the envelope the verdict measures - the surface left stands within it");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the radial lead in and slide out feed at the plunge number; along the profile, at the feed");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);

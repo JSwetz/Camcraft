@@ -521,6 +521,30 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Declared at v34 with the profile kinds (M5.2 stage B): the
+    /// station window's three heights, the radial rung spacing, the
+    /// leave and two feeds - the whole authored shape of the rough
+    /// ladder; the silhouette it eats is model data.
+    ProfileRough {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        stock_to_leave: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// Declared at v34 (M5.2 stage B): the window and the feeds -
+    /// one ride is the whole pattern.
+    ProfileFinish {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

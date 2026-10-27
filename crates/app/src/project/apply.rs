@@ -278,6 +278,16 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // ladder reads is the mesh every kind already files.
         file.version = 33;
     }
+    if file.version == 33 {
+        // v33 -> v34: the profile kinds arrive (M5.2 stage B) as two
+        // new params variants (`profile_rough`, `profile_finish`),
+        // under the same law: no v33 file can contain them - the kind
+        // tags did not exist - and `validate_kind` already refuses an
+        // unknown params tag before anything is written. No existing
+        // shape changed - the silhouette the rungs eat is the mesh
+        // every kind already files.
+        file.version = 34;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

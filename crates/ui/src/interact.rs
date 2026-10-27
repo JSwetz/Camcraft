@@ -1165,10 +1165,15 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // Facing is the same answer for the same reason (M5.2 A):
         // its rapids slide tangentially off the fresh face at the
         // clear radius, and the descent between rungs is a feed
-        // move in air - no plane to name.
+        // move in air - no plane to name. The profile kinds say it
+        // again (M5.2 B): their rungs slide radially in and out at
+        // the window's ends, and the air between rungs is a rapid
+        // at the clear radius, not a plane.
         operation::OpParams::Face { .. }
         | operation::OpParams::RotaryOffset { .. }
-        | operation::OpParams::Facing { .. } => None,
+        | operation::OpParams::Facing { .. }
+        | operation::OpParams::ProfileRough { .. }
+        | operation::OpParams::ProfileFinish { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1256,9 +1261,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // The facing ladder reads the same two rungs (M5.2 A): stock
         // top above, the facing plane below - world Z planes standing
         // as stations on the fitted axis, the rungs between them the
-        // stepdown's own, like every ladder here.
+        // stepdown's own, like every ladder here. The profile kinds
+        // bound their window the same two planes (M5.2 B).
         | operation::OpParams::Trace { top_z, bottom_z, .. }
-        | operation::OpParams::Facing { top_z, bottom_z, .. } => {
+        | operation::OpParams::Facing { top_z, bottom_z, .. }
+        | operation::OpParams::ProfileRough { top_z, bottom_z, .. }
+        | operation::OpParams::ProfileFinish { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,
