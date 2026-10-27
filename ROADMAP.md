@@ -119,9 +119,9 @@ home.
 
 | Operation | Status | Home |
 |-----------|--------|------|
-| Facing | 📋 | M5.2 |
-| Profile roughing | 📋 | M5.2 |
-| Profile finishing | 📋 | M5.2 |
+| Facing | ✅ | M5.2 A |
+| Profile roughing | ✅ | M5.2 B |
+| Profile finishing | ✅ | M5.2 B |
 | Roughing groove | 📋 | M5.2 |
 | Finishing groove | 📋 | M5.2 |
 | Adaptive roughing (turning) | 📋 | M5.2 |
@@ -1633,6 +1633,30 @@ Phase-5 shape law.
       the inert-field pattern's third member), no stepover authored
       because one full-radius pass per station misses none -
       RECOMMENDED.md, M5.2 A.
+- ✅ **Profile roughing and finishing** (stage B, commit d6f10ad): the
+      kinds that machine the silhouette itself. `offset.rs` rides the
+      MAX OF CLAIMS - every boundary piece of the profile states a
+      radius its distance-d neighbors must stand outside (parallel
+      line raised by `d*sqrt(1+b^2)`, circle of radius d about every
+      vertex within d of its station) and the offset curve is the
+      maximum of those claims, so no-gouge is a theorem of the
+      construction rather than a corner-case table, and step shadows
+      and narrow grooves bridge exactly as a real nose rolls over
+      them; `profile.rs` samples the turned silhouette itself - the
+      envelope asked OF EDGES (a vertex-only sweep leaves a step
+      face's wider endpoint invisible), bisection on the convex
+      sagitta law, shoulder stations kept as their descending
+      vertical pair in walk order; `prof.rs` is both rides: the
+      finish ONE pass at d = nose (radial plunge at the window's
+      foot, ascending station, radial slide-off), the rough the
+      concentric ladder d_j = nose + leave + j*stepdown eaten
+      OUTERMOST FIRST - facing's ridge law read radially, a stepdown
+      past 2*nose leaves a shell nothing touches and is refused at
+      the door; new kinds ProfileRough (ordinal 19) and
+      ProfileFinish (20), wire v34 (pure step-up: two params tags),
+      the envelope verdict judging both with `stock_to_leave` as its
+      own threshold, so the wall the ladder leaves is the wall the
+      verdict lets stand - RECOMMENDED.md, M5.2 B.
 
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**

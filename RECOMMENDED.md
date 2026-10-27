@@ -4184,3 +4184,95 @@ sane door refuses the default for the kind that reads it: a
 declared turning tool WITHOUT a nose is a mathematical point, and
 `validate_kind` turns that into a named Corrupt before the world
 is touched.
+
+## M5.2 B - profile roughing and finishing (decisions taken unattended)
+
+**The rung ladder is radial, not axial.** G71-style concentric
+roughing reads in handbooks as a sequence of offset passes; we state
+it as distance-to-part: rung j rides at d_j = nose + leave +
+j*stepdown, outermost first. The alternative - facing's axial band
+ladder reused along the station - was dropped: on a profile with
+steps it leaves a standing shell in the shadow of every shoulder
+(the same silhouette-blindness that stage A's stubble law caught on
+the drum), while a radial shell is eaten by theorem: rung j's nose
+clears exactly the band [d_j - nose, d_j] of distance-to-part.
+
+**stepdown past 2 * nose is refused, leave past zero is required -
+and the division of the two doors is deliberate.** The kernel owns
+the geometric law (a ball of radius r clears a shell 2r thick,
+facing's ridge ceiling read radially); the sane door owns only
+"finite, positive, and a leave that is not negative", because a
+negative leave is stock to REMOVE and only the finish pass owns the
+profile. Putting the 2*nose ceiling in the sane door too would have
+tied file-corruption language to a TOOL fact (the nose lives on the
+rack, not in the params) - the refusal names the number and the
+remedy either way.
+
+**Tolerance is load-bearing twice here, and the budget splits
+tol/4 + tol/4.** Facing `let _ = tolerance`; a profile ride cannot:
+the silhouette's sampling and the offset's settling are BOTH chords
+of promises the surface keeps, so each takes a quarter and the
+surface left stands within tol wherever the nose reaches (two-sided
+error, counted). The verdict reads the same tol, which is what makes
+the finish path's `r_min` assert honest rather than decorative.
+
+**The plunge-vs-traverse classifier is "same station, starting
+above the ride's skyline" - copied from the motion suite down to
+the app tests.** A ride legitimately spends radius at one station
+when it steps over a shoulder's shadow; counting those as plunges
+would make the wiring tests lie about the kernel. The clearance
+lead is the only feed that starts ABOVE the path's own maximum
+ride-radius, so that is the discriminator; an epsilon on
+world-z alone was tried first and miscounted the shoulder
+traverses - the motion suite's law was right and we adopted it
+rather than inventing a second one.
+
+**The profile kinds do not face bottoms.** With the window open at
+the bar's foot, the ride hugs the cap arc and climbs the wall - it
+never crosses the bottom flat. That is stage A's kind's ground
+(Facing), and letting two kinds own the same cut would make the
+document's op list lie about who removed the material; the wiring
+test asserts the leave WALL (nose + stock off the neck) instead of
+the disk traversal we first wrote. A user wanting the bottom faced
+adds a Facing - the ribbon now lights both cells from the one
+registry row each.
+
+**The rough fixture is a flanged bar with a 3.5 neck, chosen against
+the axis fit's ISO domed-ground gate.** A revolved test bar's flats
+(a flange's faces) contribute their areas to the AXIAL eigenvalue
+of the fit's covariance while the walls contribute W/2 each to the
+transverse pair, so a fixture with too little wall and too much
+flange gets its axis inferred as a dome and is refused before the
+kernel ever runs. r6 wall / r3.5 neck / z -16..16 lands at
+flats 223 vs half-wall 246.5 - inside, and the numbers are recorded
+here so a future resize can check them instead of re-deriving.
+
+**v34 is a pure step-up, like v33 before it** - two new params tags
+(`profile_rough`, `profile_finish`), no existing shape touched: the
+turning tool kind and its `nose_radius` arrived with v33, the
+height DTOs are old news. A v33 file loses nothing being read by a
+v34 writer, and the round-trip test mirrors stage A's grammar test
+exactly so the next stage has the same pair to compare.
+
+**Both profile kinds borrow Icon::Face in the browser tree.** The
+no-new-asset law says drawn originals only when a generic glyph
+does not fit; a silhouette ride IS facing's picture - the same ball
+on the same bar, walking the wall instead of the cap - and Pocket3D
+set the reuse precedent. An original profile glyph is a stage-C
+decision if the groove kinds want their own.
+
+**The bottoms are "Bottom of Part Z", not a new name.** Facing says
+"Facing Plane Z" because its bottom is a plane it faces toward; the
+profile window's bottom is where the ride PLUNGES IN and the
+heights machinery (setup sheet, page editors, resolver errors)
+reads one label list per Height slot - inventing "Profile Bottom Z"
+would split the resolver's words for no user gain.
+
+**A registry-count correction rode this commit: stage A added
+Facing without bumping `stamp_follows_every_input`'s
+`KindInfo::ALL.len()` pin (18 where it was already 19), and stage
+B's gate caught the stale number at 21.** The comment in that test
+always said the count is "the only stale number a stage can leave
+behind" - it just happened to be true of the stage that wrote the
+sentence's own era. Updated to 21 with the miss recorded, since an
+honest count beats a quiet one.
