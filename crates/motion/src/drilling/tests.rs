@@ -58,6 +58,7 @@ fn drill_tool(d: f64) -> Tool {
         tip_angle: 118.0,
         pitch: 0.0,
         nose_radius: 0.0,
+        width: 0.0,
         flute_len: 40.0,
         shank_d: d,
         shank_len: 40.0,

@@ -655,7 +655,13 @@ impl HeightRefs for OpParams {
             // ride's reach (M5.2 B).
             | OpParams::Facing { clearance_z, top_z, bottom_z, .. }
             | OpParams::ProfileRough { clearance_z, top_z, bottom_z, .. }
-            | OpParams::ProfileFinish { clearance_z, top_z, bottom_z, .. } =>
+            | OpParams::ProfileFinish { clearance_z, top_z, bottom_z, .. }
+            // The blade kinds carry the same three heights - the
+            // parting plane is one of them, spelled `bottom_z`
+            // (M5.2 C).
+            | OpParams::GrooveRough { clearance_z, top_z, bottom_z, .. }
+            | OpParams::GrooveFinish { clearance_z, top_z, bottom_z, .. }
+            | OpParams::Part { clearance_z, top_z, bottom_z, .. } =>
                 vec![clearance_z, top_z, bottom_z],
             OpParams::Drill {
                 clearance_z,

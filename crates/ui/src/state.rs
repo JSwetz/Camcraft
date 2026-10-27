@@ -478,7 +478,7 @@ pub struct ToolUi {
     pub name: String,
     pub exists: bool,
     /// 0 end mill, 1 ball nose, 2 bull nose, 3 drill, 4 tap, 5 bore,
-    /// 6 turning insert.
+    /// 6 turning insert, 7 grooving blade.
     pub kind: usize,
     pub diameter: f64,
     pub corner_r: f64,
@@ -490,6 +490,10 @@ pub struct ToolUi {
     /// Insert nose radius; the turning kind's cutting ball, inert on
     /// the mills (the app's `Tool` field's law, mirrored).
     pub nose_radius: f64,
+    /// Blade width; the groove kind's cutting edge along the axis -
+    /// the kerf's width IS the tool, inert on the others (the app's
+    /// `Tool` field's law, mirrored a fourth time).
+    pub width: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -523,12 +527,14 @@ impl ToolUi {
                 ToolKind::Tap => 4,
                 ToolKind::Bore => 5,
                 ToolKind::Turning => 6,
+                ToolKind::Groove => 7,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
             tip_angle: t.tip_angle,
             pitch: t.pitch,
             nose_radius: t.nose_radius,
+            width: t.width,
             flute_len: t.flute_len,
             shank_d: t.shank_d,
             shank_len: t.shank_len,
@@ -550,6 +556,7 @@ impl ToolUi {
                 4 => ToolKind::Tap,
                 5 => ToolKind::Bore,
                 6 => ToolKind::Turning,
+                7 => ToolKind::Groove,
                 _ => ToolKind::EndMill,
             },
             diameter: self.diameter,
@@ -557,6 +564,7 @@ impl ToolUi {
             tip_angle: self.tip_angle,
             pitch: self.pitch,
             nose_radius: self.nose_radius,
+            width: self.width,
             flute_len: self.flute_len,
             shank_d: self.shank_d,
             shank_len: self.shank_len,

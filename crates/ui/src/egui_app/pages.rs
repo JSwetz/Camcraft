@@ -77,7 +77,7 @@ use super::panes::{TYPES, kind_name, retype};
 use super::theme::Palette;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
-const TOOL_KINDS: [&str; 7] = [
+const TOOL_KINDS: [&str; 8] = [
     "End mill",
     "Ball nose",
     "Bull nose",
@@ -85,6 +85,7 @@ const TOOL_KINDS: [&str; 7] = [
     "Tap",
     "Bore",
     "Turning insert",
+    "Grooving blade",
 ];
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
@@ -2136,6 +2137,113 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the radial lead in and slide out feed at the plunge number; along the profile, at the feed");
             }
         }
+        // Grooving rough (M5.2 C): the blade eats a BAND, so the
+        // heights are the window's axial ends - between them the
+        // kerfs tile one blade width apart, floor depth read off
+        // the model's own silhouette. No stepover: the tile step IS
+        // the width. No climb: the work spins one way.
+        OpParams::GrooveRough {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            stock_to_leave,
+            feed: _,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "groove_rough.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "groove_rough.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "groove_rough.bottom");
+                ui.label("the band's axial ends: the kerfs tile between these heights, one blade width apart, and the window must be at least a blade wide");
+                field(ui, "Stepdown");
+                num(ui, u, stepdown);
+                ui.label("radial infeed per rung - each center's ladder steps from the window's shell down to the leave line under it");
+                field(ui, "Stock to leave");
+                num(ui, u, stock_to_leave);
+                ui.label("the skin the floor stands off - the finish groove takes it off");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the chord budget the band settles at, and the meridian the verdict measures the swept blade against");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the blade's only feed is radial, at this number; the step from center to center and every retract travel rapid at the bar's widest radius - the Feed the parameter carries is inert here, so the page says nothing with it (the tool page's law, M5.2 C)");
+            }
+        }
+        // Grooving finish (M5.2 C): one full-depth plunge per center,
+        // leave-free - the band walked once, at depth.
+        OpParams::GrooveFinish {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            feed: _,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "groove_finish.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "groove_finish.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "groove_finish.bottom");
+                ui.label("one plunge per center between these heights, to the model's own floor - the whole finish is one walk of the band");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the chord budget the band settles at, and the meridian the verdict measures - the groove left stands within it");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("one full-depth plunge at this feed per center, to the model's floor - everything else on this path is a rapid");
+            }
+        }
+        // Parting (M5.2 C): one center, the plane the part is cut
+        // off at. The kerf's column comes from the model - the
+        // ladder falls through the bar's full height and the last
+        // rung stands ON the axis - so the page names just the
+        // plane and the clearance; the Top of Part the parameter
+        // carries shapes nothing here and stays unshown.
+        OpParams::Part {
+            tolerance,
+            clearance_z,
+            stepdown,
+            feed: _,
+            plunge_feed,
+            bottom_z,
+            ..
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "part.clearance");
+                field(ui, "Parting Plane Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "part.plane");
+                ui.label("where a part gets cut off from the bar it was turned on: the blade stands one center deep at this plane and its kerf falls through the model's whole column");
+                field(ui, "Stepdown");
+                num(ui, u, stepdown);
+                ui.label("radial infeed per rung of the ladder down through the bar - the last rung severs, tip on the axis");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the chord budget the kerf band settles at; through-axis cuts are the cut, not a gouge - the verdict reads the separation");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the ladder down the column plunges at this feed; every retract off the kerf is a rapid back to the clear radius at the same station");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);
@@ -3525,6 +3633,11 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         {
                             state.tool_ui.nose_radius = 0.8;
                         }
+                        if state.tool_ui.kind == 7
+                            && (state.tool_ui.width.is_nan() || state.tool_ui.width <= 0.0)
+                        {
+                            state.tool_ui.width = 2.0;
+                        }
                     }
                     field(ui, "Diameter");
                     num(ui, u, &mut state.tool_ui.diameter);
@@ -3546,6 +3659,11 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         field(ui, "Insert nose radius");
                         num(ui, u, &mut state.tool_ui.nose_radius);
                         ui.label("the corner circle ground into the tip - it IS the cutting ball");
+                    }
+                    if state.tool_ui.kind == 7 {
+                        field(ui, "Blade width");
+                        num(ui, u, &mut state.tool_ui.width);
+                        ui.label("the cutting edge along the axis - the kerf's width IS the tool");
                     }
                     if state.tool_ui.kind != 4 {
                         field(ui, "Corner radius");

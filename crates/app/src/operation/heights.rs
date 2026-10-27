@@ -113,7 +113,10 @@ pub fn region_z(
         | OpParams::MultiAxisContour { top_z, .. }
         | OpParams::Facing { top_z, .. }
         | OpParams::ProfileRough { top_z, .. }
-        | OpParams::ProfileFinish { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::ProfileFinish { top_z, .. }
+        | OpParams::GrooveRough { top_z, .. }
+        | OpParams::GrooveFinish { top_z, .. }
+        | OpParams::Part { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -232,10 +235,29 @@ pub fn resolve_params(
         // heights, no hop; the rapids plane of the ride names itself
         // a tolerance clear of the rungs' reach (M5.2 stage B).
         OpParams::ProfileRough { clearance_z, top_z, bottom_z, .. }
-        | OpParams::ProfileFinish { clearance_z, top_z, bottom_z, .. } => (
+        | OpParams::ProfileFinish { clearance_z, top_z, bottom_z, .. }
+        // The blade windows state the same trio: three heights, no
+        // hop - the rapids ride the whole bar's radius, a law and not
+        // a height (M5.2 stage C).
+        | OpParams::GrooveRough { clearance_z, top_z, bottom_z, .. }
+        | OpParams::GrooveFinish { clearance_z, top_z, bottom_z, .. } => (
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),
+            None,
+            None,
+        ),
+        // Parting names its bottom for what it is - the plane the
+        // blade sinks through, facing's law read as a sever (M5.2 C).
+        OpParams::Part {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        } => (
+            req("Clearance Z", *clearance_z)?,
+            Some(req("Top of Part Z", *top_z)?),
+            Some(req("Parting Plane Z", *bottom_z)?),
             None,
             None,
         ),

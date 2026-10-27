@@ -288,6 +288,19 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // every kind already files.
         file.version = 34;
     }
+    if file.version == 34 {
+        // v34 -> v35: the blade kinds arrive (M5.2 stage C) as three
+        // new params variants (`groove_rough`, `groove_finish`,
+        // `part`), one new tool-kind word (`groove`) and the
+        // inert-defaulted `width` key, under the twins' law: no v34
+        // file can contain them - the tags did not exist - and
+        // `validate_kind` already refuses an unknown params tag
+        // before anything is written. The new key serde-defaults to
+        // the 0.0 every non-blade tool already meant, exactly as
+        // `nose_radius` did at v33; the groove the blade rides is the
+        // mesh every kind already files.
+        file.version = 35;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

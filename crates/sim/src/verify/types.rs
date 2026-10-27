@@ -19,6 +19,14 @@ pub enum Mode {
     /// flag every ring. It stands down in favor of the measured sweep
     /// envelope below, gated by `finish_tol`.
     Envelope,
+    /// The turned family (M5.2): the work spins, the tool traverses
+    /// the meridian. The XY-plane laws below read a lathe's chords
+    /// as degenerate - radial plunges "cross" at the axis, tangency
+    /// fills the section - so (a) and (b) stand down in favor of the
+    /// turning branch's meridian scan (motion's `turning::revolve`),
+    /// which judges the revolved cut volume exactly. The reach laws
+    /// stay: they are pose-independent.
+    Revolve,
 }
 
 #[derive(Clone, Debug, PartialEq)]

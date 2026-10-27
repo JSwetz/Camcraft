@@ -48,6 +48,7 @@ pub fn current_stamp(
         crate::tools::ToolKind::Tap => 4,
         crate::tools::ToolKind::Bore => 5,
         crate::tools::ToolKind::Turning => 6,
+        crate::tools::ToolKind::Groove => 7,
     });
     for v in [
         tool.diameter,
@@ -69,9 +70,14 @@ pub fn current_stamp(
     // never make an operation look stale - the same law the profile and
     // the cycles draw by. It also keeps every pre-M1.6 stamp value
     // unchanged: no one-time churn for the milling kinds.
+    // The blade's width rides the digest from its first build
+    // (M5.2 C): the kerf's width IS the tool, so a re-ground blade
+    // is a different cut - marked Stale through here, never through
+    // the params stamp, which never reads it.
     match tool.kind {
         crate::tools::ToolKind::Drill => w(&mut h, tool.tip_angle),
         crate::tools::ToolKind::Tap => w(&mut h, tool.pitch),
+        crate::tools::ToolKind::Groove => w(&mut h, tool.width),
         _ => {}
     }
     params.stamp_with(world, setup, &mut h);

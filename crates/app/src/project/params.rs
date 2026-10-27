@@ -545,6 +545,42 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Declared at v35 with the blade kinds (M5.2 stage C): the
+    /// window's three heights, the rung infeed, the leave and two
+    /// feeds - the blade's width rides the TOOL row, not a number
+    /// here; the kerf's width IS the tool.
+    GrooveRough {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        stock_to_leave: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// Declared at v35 (M5.2 stage C): the window and the feeds -
+    /// one plunge per center is the whole pattern.
+    GrooveFinish {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// Declared at v35 (M5.2 stage C): the bar's top and the parting
+    /// plane (`bottom_z`'s name in this variant), the rung infeed
+    /// and the feeds.
+    Part {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

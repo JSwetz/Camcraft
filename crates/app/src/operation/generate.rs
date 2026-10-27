@@ -1038,6 +1038,100 @@ pub fn generate(
             )?;
             (region, path)
         }
+        // M5.2 stage C: the blade kinds. The tool door names the
+        // grooving blade - the kerf's width IS the tool, so a
+        // turning insert could no more groove than an end mill
+        // part off a bar. The heights read the axis stations the
+        // twins ride; `tolerance` is load-bearing twice, the
+        // profile kinds' law - the silhouette chords at it and the
+        // verdict gates at it.
+        OpParams::GrooveRough {
+            stepdown,
+            stock_to_leave,
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Groove {
+                return Err(GenError::Invalid(format!(
+                    "Groove Rough needs a grooving blade, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::groove_rough(
+                &material.facets,
+                &crate::turning::GrooveRoughParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    stepdown: *stepdown,
+                    stock_to_leave: *stock_to_leave,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    blade_width: tool.width,
+                    tolerance: *tolerance,
+                },
+            )?;
+            (region, path)
+        }
+        OpParams::GrooveFinish {
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Groove {
+                return Err(GenError::Invalid(format!(
+                    "Groove Finish needs a grooving blade, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::groove_finish(
+                &material.facets,
+                &crate::turning::GrooveFinishParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    blade_width: tool.width,
+                    tolerance: *tolerance,
+                },
+            )?;
+            (region, path)
+        }
+        OpParams::Part {
+            stepdown,
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Groove {
+                return Err(GenError::Invalid(format!(
+                    "Parting needs a grooving blade, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::part(
+                &material.facets,
+                &crate::turning::PartParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    parting_z: req_z(hl.bottom, "Parting Plane Z")?,
+                    stepdown: *stepdown,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    blade_width: tool.width,
+                    tolerance: *tolerance,
+                },
+            )?;
+            (region, path)
+        }
     };
 
     // M3.2 stage B: what the program clamps to. The op's setup context
@@ -1082,7 +1176,13 @@ pub fn generate(
         // IS its chord budget, and a leave would only move the
         // verdict (M5.2 B).
         | OpParams::Facing { .. }
-        | OpParams::ProfileFinish { .. } => 0.0,
+        // The finish plunge is the floor itself - the leave would
+        // only move the rest verdict, and the verdict already reads
+        // it (M5.2 C). Parting leaves nothing: the bar that stands
+        // past the kerf is the scrap, and it goes.
+        | OpParams::ProfileFinish { .. }
+        | OpParams::GrooveFinish { .. }
+        | OpParams::Part { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -1096,11 +1196,15 @@ pub fn generate(
         // The rung ladder leaves a radial wall read as a distance to
         // the part - which is exactly what the scan measures
         // (M5.2 B): every feed point must stand nose+leave off.
-        | OpParams::ProfileRough { stock_to_leave, .. } => *stock_to_leave,
+        // The blade ladder leaves the same skin on the groove floor,
+        // and the meridian verdict gates REST by exactly tol+leave
+        // (M5.2 C).
+        | OpParams::ProfileRough { stock_to_leave, .. }
+        | OpParams::GrooveRough { stock_to_leave, .. } => *stock_to_leave,
     };
     match &frame {
         None => {
-            let warns = verify::verify(
+            let mut warns = verify::verify(
                 &path,
                 &VerifyContext {
                     region: &region,
@@ -1136,6 +1240,13 @@ pub fn generate(
                             // (M5.2 B).
                             | OpParams::ProfileRough { .. }
                             | OpParams::ProfileFinish { .. }
+                            // The blades judge against the same
+                            // facets - the meridian scan reads this
+                            // very silhouette as E(s), the finished
+                            // part's own chord polyline (M5.2 C).
+                            | OpParams::GrooveRough { .. }
+                            | OpParams::GrooveFinish { .. }
+                            | OpParams::Part { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -1189,6 +1300,27 @@ pub fn generate(
                     spindle,
                 },
             );
+            // The revolved-blade verdict (M5.2 C): the meridian
+            // scan of what the bands leave. No sphere can speak it
+            // - a grooved part is undercut BY DESIGN, material
+            // standing beside the kerf out of every ball's reach
+            // along Z - so the envelope law stands the family down
+            // and the truth is measured here, against these very
+            // facets, move-attributed into the same vocabulary.
+            if let Some(tol) = match &op.params {
+                OpParams::GrooveRough { tolerance, .. }
+                | OpParams::GrooveFinish { tolerance, .. }
+                | OpParams::Part { tolerance, .. } => Some(*tolerance),
+                _ => None,
+            } {
+                warns.extend(crate::turning::blade_warnings(
+                    &material.facets,
+                    &path,
+                    tool.width,
+                    tol,
+                    stl,
+                ));
+            }
             Ok((path, warns))
         }
         Some(f) => {

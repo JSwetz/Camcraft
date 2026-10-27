@@ -313,6 +313,12 @@ pub(super) fn region_for_src(
                     | OpParams::Facing { .. }
                     | OpParams::ProfileRough { .. }
                     | OpParams::ProfileFinish { .. }
+                    // The blade stands in the turned part's own
+                    // silhouette - the band is model-bounded, not
+                    // pick-bounded (M5.2 C).
+                    | OpParams::GrooveRough { .. }
+                    | OpParams::GrooveFinish { .. }
+                    | OpParams::Part { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -392,7 +398,12 @@ pub(super) fn region_for(
         // instead of as a floor (M5.2 B).
         | OpParams::Facing { .. }
         | OpParams::ProfileRough { .. }
-        | OpParams::ProfileFinish { .. } => {
+        | OpParams::ProfileFinish { .. }
+        // The blade's shadow is the bar's own disc - the kerf's
+        // width lives in the meridian, not the footprint (M5.2 C).
+        | OpParams::GrooveRough { .. }
+        | OpParams::GrooveFinish { .. }
+        | OpParams::Part { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

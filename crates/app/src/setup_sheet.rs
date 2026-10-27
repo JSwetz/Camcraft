@@ -668,11 +668,37 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             top_z,
             bottom_z,
             ..
+        }
+        // The blade windows state the same four rows (M5.2 C)...
+        | OpParams::GrooveRough {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::GrooveFinish {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
         } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", None),
             ("TOP", "Top of Part Z", Some(*top_z)),
             ("BOT", "Bottom of Part Z", Some(*bottom_z)),
+        ],
+        // ...and parting's bottom names the plane the blade severs at,
+        // facing's naming law read as a cutoff (M5.2 C).
+        OpParams::Part {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        } => [
+            ("CLR", "Clearance Z", Some(*clearance_z)),
+            ("RET", "Retract Z", None),
+            ("TOP", "Top of Part Z", Some(*top_z)),
+            ("BOT", "Parting Plane Z", Some(*bottom_z)),
         ],
         OpParams::Drill {
             clearance_z,

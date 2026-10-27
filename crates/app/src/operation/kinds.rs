@@ -94,7 +94,14 @@ fn feed_of(p: &OpParams) -> f64 {
         // the offset curve: the nose's own travel, same units.
         | OpParams::Facing { feed, .. }
         | OpParams::ProfileRough { feed, .. }
-        | OpParams::ProfileFinish { feed, .. } => *feed,
+        | OpParams::ProfileFinish { feed, .. }
+        // A blade path never feeds axially at all - every feed move
+        // is a radial plunge at the plunge number, every traverse a
+        // rapid - so this number rides the trio and the stamp only,
+        // inert but named (M5.2 C).
+        | OpParams::GrooveRough { feed, .. }
+        | OpParams::GrooveFinish { feed, .. }
+        | OpParams::Part { feed, .. } => *feed,
     }
 }
 
@@ -125,7 +132,12 @@ fn plunge_of(p: &OpParams) -> f64 {
         // (M5.2 B).
         | OpParams::Facing { plunge_feed, .. }
         | OpParams::ProfileRough { plunge_feed, .. }
-        | OpParams::ProfileFinish { plunge_feed, .. } => *plunge_feed,
+        | OpParams::ProfileFinish { plunge_feed, .. }
+        // The blade's plunge IS its cut - the radial sink every rung
+        // eats at (M5.2 C).
+        | OpParams::GrooveRough { plunge_feed, .. }
+        | OpParams::GrooveFinish { plunge_feed, .. }
+        | OpParams::Part { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -157,7 +169,13 @@ fn climb_of(p: &OpParams) -> bool {
         OpParams::Drill { .. }
         | OpParams::Facing { .. }
         | OpParams::ProfileRough { .. }
-        | OpParams::ProfileFinish { .. } => true,
+        | OpParams::ProfileFinish { .. }
+        // Nor the blades: the band's two edges meet the walls
+        // alike - which flank shears is again the spindle's
+        // direction (M5.2 C).
+        | OpParams::GrooveRough { .. }
+        | OpParams::GrooveFinish { .. }
+        | OpParams::Part { .. } => true,
     }
 }
 
@@ -200,7 +218,12 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::MultiAxisContour { .. }
         | OpParams::Facing { .. }
         | OpParams::ProfileRough { .. }
-        | OpParams::ProfileFinish { .. } => None,
+        | OpParams::ProfileFinish { .. }
+        // A blade has no spacing either: its width IS the pattern's
+        // step, tiled by the kernel's tangency law (M5.2 C).
+        | OpParams::GrooveRough { .. }
+        | OpParams::GrooveFinish { .. }
+        | OpParams::Part { .. } => None,
     }
 }
 
@@ -220,6 +243,10 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // The rung ladder's spacing is radial too - the same number
         // read as a shell width off the skin (M5.2 B).
         | OpParams::ProfileRough { stepdown, .. }
+        // The blade's infeed is radial too - the rung's sink, and
+        // the parting ladder's (M5.2 C).
+        | OpParams::GrooveRough { stepdown, .. }
+        | OpParams::Part { stepdown, .. }
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
@@ -227,8 +254,10 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Swarf { .. } | OpParams::AdvancedSwarf { .. }
         | OpParams::RotaryContour { .. } | OpParams::RotaryParallel { .. }
         | OpParams::Flow5D { .. }
-        // One ride is the whole finish - there is no infeed to carry.
+        // One ride is the whole finish - there is no infeed to carry,
+        // and one plunge per center is the groove finish's answer too.
         | OpParams::ProfileFinish { .. }
+        | OpParams::GrooveFinish { .. }
         | OpParams::MultiAxisContour { .. } => None,
     }
 }
@@ -260,7 +289,12 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         // high end of the window their rungs ride (M5.2 B).
         | OpParams::Facing { top_z, .. }
         | OpParams::ProfileRough { top_z, .. }
-        | OpParams::ProfileFinish { top_z, .. } => Some(*top_z),
+        | OpParams::ProfileFinish { top_z, .. }
+        // The blade windows' high end; parting's is the bar's own
+        // top the ladder rises from (M5.2 C).
+        | OpParams::GrooveRough { top_z, .. }
+        | OpParams::GrooveFinish { top_z, .. }
+        | OpParams::Part { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -292,7 +326,12 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         // (M5.2 B).
         | OpParams::Facing { bottom_z, .. }
         | OpParams::ProfileRough { bottom_z, .. }
-        | OpParams::ProfileFinish { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::ProfileFinish { bottom_z, .. }
+        // The blade windows' low end - and parting's plane itself,
+        // the station every rung sinks toward (M5.2 C).
+        | OpParams::GrooveRough { bottom_z, .. }
+        | OpParams::GrooveFinish { bottom_z, .. }
+        | OpParams::Part { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -333,7 +372,13 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::RotaryOffset { .. }
         | OpParams::Facing { .. }
         | OpParams::ProfileRough { .. }
-        | OpParams::ProfileFinish { .. } => None,
+        | OpParams::ProfileFinish { .. }
+        // The blades name their rapids plane too: the whole bar's
+        // radius plus tolerance, clear of every shoulder the band
+        // traverses over (M5.2 C).
+        | OpParams::GrooveRough { .. }
+        | OpParams::GrooveFinish { .. }
+        | OpParams::Part { .. } => None,
     }
 }
 
@@ -661,6 +706,55 @@ fn seed_profile_finish(c: &Carried) -> OpParams {
         clearance_z: c.clearance,
         top_z: c.top,
         bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The M5.2 stage C rough seed: the profile rough's shape on a
+/// blade. The stepdown is the same 0.5 - under twice the blade's
+/// tip reaches nothing here (the band has no nose to chord), but it
+/// is the handbook grooving infeed, and it stays far under any
+/// real bar's column. The leave is the same 0.25: a full skin the
+/// finish plunge takes off.
+fn seed_groove_rough(c: &Carried) -> OpParams {
+    OpParams::GrooveRough {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        stepdown: 0.5,
+        stock_to_leave: 0.25,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The stage C finish seed: the window and the feeds - one plunge
+/// per center is the whole pattern, so there is no infeed to
+/// answer for (and no leave: the floor IS the model).
+fn seed_groove_finish(c: &Carried) -> OpParams {
+    OpParams::GrooveFinish {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The parting seed: the bar's top and the parting plane carried
+/// as the window pair, the rung ladder's 0.5 infeed, the feeds.
+/// The plane defaults to the document's bottom - where a part gets
+/// cut off from the bar it was turned on.
+fn seed_part(c: &Carried) -> OpParams {
+    OpParams::Part {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        stepdown: 0.5,
         feed: c.feed,
         plunge_feed: c.plunge,
     }
@@ -1061,8 +1155,9 @@ impl KindInfo {
             // f): the ball is the insert nose circle swept true - and
             // a meridian circle revolved IS a sphere about the axis,
             // so the scan reads the lathe's own cut wherever the fit
-            // stands it. Law g's revolved-solid sim replaces the
-            // approximation when the profile kinds arrive (M5.2 B).
+            // stands it. The nose kinds keep this law after stage C:
+            // the revolve verdict is the BLADE's, where no sphere
+            // stands - the band is the tool.
             mode: Mode::Envelope,
             family: Family::Turn,
             seed: seed_facing,
@@ -1094,6 +1189,47 @@ impl KindInfo {
             family: Family::Turn,
             seed: seed_profile_finish,
         },
+        KindInfo {
+            ty: OpType::GrooveRough,
+            label: "Groove Rough",
+            caption: "Groove Rough",
+            tag: 21,
+            // No sphere can judge a band: a grooved part is undercut
+            // BY DESIGN, and material standing beside the groove is
+            // out of every ball's reach along Z. The verdict is the
+            // meridian scan of `turning::revolve` - the boxcar min
+            // of the cuts against the silhouette, exact on E's own
+            // lattice (M5.2 C).
+            mode: Mode::Revolve,
+            family: Family::Turn,
+            seed: seed_groove_rough,
+        },
+        KindInfo {
+            ty: OpType::GrooveFinish,
+            label: "Groove Finish",
+            caption: "Groove Finish",
+            tag: 22,
+            // The same meridian law, leave-free: one plunge per
+            // center to the band's floor, and the floor no band
+            // reached rests by the window shell - silence is what a
+            // missed pass must never buy (M5.2 C).
+            mode: Mode::Revolve,
+            family: Family::Turn,
+            seed: seed_groove_finish,
+        },
+        KindInfo {
+            ty: OpType::Part,
+            label: "Parting",
+            caption: "Part",
+            tag: 23,
+            // Separation as a band cut: the through-axis kerf is
+            // judged silent inside its own kerf and right of it
+            // (the workpiece left with the scrap), and the verdict
+            // that reads it is the same meridian scan (M5.2 C).
+            mode: Mode::Revolve,
+            family: Family::Turn,
+            seed: seed_part,
+        },
     ];
 }
 
@@ -1124,6 +1260,9 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[18].label,
     KindInfo::ALL[19].label,
     KindInfo::ALL[20].label,
+    KindInfo::ALL[21].label,
+    KindInfo::ALL[22].label,
+    KindInfo::ALL[23].label,
 ];
 
 impl OpType {
@@ -1153,6 +1292,9 @@ impl OpType {
             OpType::Facing => 18,
             OpType::ProfileRough => 19,
             OpType::ProfileFinish => 20,
+            OpType::GrooveRough => 21,
+            OpType::GrooveFinish => 22,
+            OpType::Part => 23,
         }
     }
 

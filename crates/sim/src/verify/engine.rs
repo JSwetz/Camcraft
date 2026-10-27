@@ -37,7 +37,12 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // the predicate's limits. What a harmful chord would be - one
     // biting into the surface or sailing above it - law (f) measures
     // directly, on the swept ball against the model, move by move.
-    if cx.mode != Mode::Envelope {
+    // Mode::Revolve stands it down too (M5.2 C): a turning path's
+    // radial plunges all share the axis in XY, so every pair of
+    // centers in a groove's ladder "crosses" at the very line the
+    // part spins on - the XY reading of the predicate says nothing
+    // true about a meridian path, which the revolve verdict judges.
+    if !matches!(cx.mode, Mode::Envelope | Mode::Revolve) {
         let mut feeds: Vec<(usize, Point2, Point2, f64, f64)> = Vec::new();
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind != MoveKind::Feed {
@@ -122,8 +127,12 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // is tangent - its centers hold exactly r to the model at the
     // tangent line while sitting nearer than r to the level silhouette
     // elsewhere - and tangency is not gouging. Law (f) measures the
-    // swept ball instead.
-    if cx.mode != Mode::Engrave && cx.mode != Mode::Envelope {
+    // swept ball instead. Mode::Revolve stands down for the same
+    // reason read the other way: a lathe's centers sit ON the
+    // section's silhouette by design - the tool tip traces the
+    // meridian - so "inside the section" is where a turned path
+    // legitimately lives; the revolve verdict owns that geometry.
+    if !matches!(cx.mode, Mode::Engrave | Mode::Envelope | Mode::Revolve) {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;

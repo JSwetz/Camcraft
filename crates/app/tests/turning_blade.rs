@@ -1,0 +1,323 @@
+//! M5.2 stage C blade tests at the app level: the wiring - a blade
+//! kind's whole life through the document. What "right" means here:
+//! a grooving op on a mounted lathe generates, verifies through the
+//! revolved-blade verdict (no sphere speaks it) and reads Ok; the
+//! cached path carries the kernel's signature seen from the world
+//! (radial plunges, one station each, landing on the model's own
+//! floor, rapids above the skin); the wrong tool on a blade kind is
+//! refused by name at generation; a re-ground blade (width edited on
+//! the tool entity) marks every op that rides it Stale - through
+//! the TOOL digest, not the params one - and reads fresh again after
+//! regenerate, in both directions of undo. The kernels' own laws
+//! are pinned one crate down (camcraft-motion's turning_blade
+//! suite); this file is the document.
+//!
+//! Gate map (M4.4): covers camcraft_app::operation (the blade arms
+//! of generate/heights, the revolved verdict wiring, the stamp's
+//! kind-scoped width digest), camcraft_app::commands (Create/
+//! GenerateOperation, ChangeTool undo).
+//! Lane shape (M4.4): all tests here run in seconds.
+
+use flecs_ecs::prelude::World;
+
+use camcraft_app::commands::{
+    AddTool, ChangeTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine,
+    SetStock,
+};
+use camcraft_app::geometry::{Mesh, Point3, Triangle};
+use camcraft_app::machine::Machine;
+use camcraft_app::model;
+use camcraft_app::operation::{Carried, Height, KindInfo, OpParams, OpStatus, OpType, SrcRef};
+use camcraft_app::schema::Location;
+use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::world::new_world;
+
+const TAU: f64 = std::f64::consts::TAU;
+
+fn catalog_tool(name: &str) -> Tool {
+    catalog()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, t)| t)
+        .expect("catalog entry")
+}
+
+fn add_tool(world: &World, history: &mut History, name: &str) {
+    let cmd = AddTool::new(world, name, catalog_tool(name));
+    history.execute(world, cmd.expect("catalog tool"));
+}
+
+fn status(world: &World, name: &str) -> OpStatus {
+    let e = model::find_by_name(world, name).expect("entity exists");
+    camcraft_app::operation::status_of(world, &e)
+}
+
+fn cache(world: &World, name: &str) -> Option<camcraft_app::schema::Toolpath> {
+    model::find_by_name(world, name).and_then(|e| model::toolpath_of(world, &e))
+}
+
+fn rho(q: Point3) -> f64 {
+    (q.x * q.x + q.y * q.y).sqrt()
+}
+
+/// The grooved bar, app-sized: wall r 6 from z -16 to 28 with a
+/// 3.2-wide groove (floor r 4, stations -6.8 .. -3.6) - wide enough
+/// for both catalog blades to tile it, the numbers the staleness
+/// test's re-grind rides on, and long enough that its end caps
+/// cannot tip the axis fit's eigen balance past the dome guard
+/// (a stubby capped cylinder reads isotropic there - the motion
+/// fixtures' revolve builder gives its bars the same room).
+fn bar_mesh() -> Mesh {
+    let v = |j: usize, r: f64, z: f64| {
+        let th = TAU * j as f64 / 16.0;
+        Point3::new(r * th.cos(), r * th.sin(), z)
+    };
+    let mut facets = Vec::new();
+    for seg in [
+        (0.0, -16.0),
+        (6.0, -16.0),
+        (6.0, -6.8),
+        (4.0, -6.8),
+        (4.0, -3.6),
+        (6.0, -3.6),
+        (6.0, 28.0),
+        (0.0, 28.0),
+    ]
+    .windows(2)
+    {
+        let ((ra, za), (rb, zb)) = (seg[0], seg[1]);
+        for j in 0..16 {
+            let (a1, a2, b1, b2) = (v(j, ra, za), v(j + 1, ra, za), v(j, rb, zb), v(j + 1, rb, zb));
+            if ra <= 1e-12 {
+                facets.push(Triangle::new(a1, b2, b1));
+            } else if rb <= 1e-12 {
+                facets.push(Triangle::new(a1, a2, b2));
+            } else {
+                facets.push(Triangle::new(a1, a2, b2));
+                facets.push(Triangle::new(a1, b2, b1));
+            }
+        }
+    }
+    Mesh { facets }
+}
+
+fn machine(word: &str) -> Machine {
+    Machine {
+        model: format!("TestBench {word}"),
+        kind: Some(word.to_string()),
+        ..Default::default()
+    }
+}
+
+/// A document the blade kinds live in: bar in plain box stock, the
+/// lathe mounted, both catalog blades on the rack.
+fn blade_world() -> (World, History) {
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(
+        &world,
+        SetStock::new(
+            &world,
+            camcraft_app::stock::StockShape::Box {
+                dx: 40.0,
+                dy: 40.0,
+                dz: 40.0,
+            },
+            Location::default(),
+        )
+        .expect("box stock"),
+    );
+    let cmd = LoadMachine::new(&world, "lathe.mch".into(), Some(machine("lathe")));
+    history.execute(&world, cmd.expect("lathe"));
+    add_tool(&world, &mut history, "GT-0200");
+    add_tool(&world, &mut history, "GT-0300");
+    add_tool(&world, &mut history, "TN-1600-0R8");
+    add_tool(&world, &mut history, "EM-0400-2FL");
+    history.execute(&world, ImportModel::from_mesh("bar", bar_mesh()));
+    (world, history)
+}
+
+fn groove_finish_params() -> OpParams {
+    OpParams::GrooveFinish {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(20.0),
+        top_z: Height::fixed(-3.6),
+        bottom_z: Height::fixed(-6.8),
+        feed: 150.0,
+        plunge_feed: 60.0,
+    }
+}
+
+fn part_params(plane_z: f64) -> OpParams {
+    OpParams::Part {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(20.0),
+        top_z: Height::fixed(28.0),
+        bottom_z: Height::fixed(plane_z),
+        stepdown: 0.5,
+        feed: 150.0,
+        plunge_feed: 60.0,
+    }
+}
+
+fn create(world: &World, history: &mut History, name: &str, tool: &str, params: OpParams) {
+    history.execute(
+        world,
+        CreateOperation::new(world, name, tool, SrcRef::Entity("bar".into()), params)
+            .expect("create"),
+    );
+    history.execute(world, GenerateOperation::new(world, name).expect("generate"));
+}
+
+#[test]
+fn a_groove_finish_runs_clean_in_the_document() {
+    // The document's whole life: create, generate, and the revolved
+    // verdict - the one no sphere can speak - comes back silent, so
+    // the op reads Ok. The cached path from the world's side: two
+    // radial plunges (the 3.2 window tiles exactly two 2.0 kerfs),
+    // each landing on the model's own floor at r 4, every traverse
+    // above the skin.
+    let (world, mut history) = blade_world();
+    create(&world, &mut history, "G1", "GT-0200", groove_finish_params());
+    assert_eq!(status(&world, "G1"), OpStatus::Ok, "the meridian verdict is silent");
+    let t = cache(&world, "G1").expect("cached").path;
+    let mut feeds = 0;
+    for m in &t.moves {
+        if m.kind == camcraft_app::cl::MoveKind::Feed {
+            assert!(
+                (m.from.z - m.to.z).abs() < 1e-9 && rho(m.to) <= rho(m.from) + 1e-9,
+                "a blade feed holds its station and sinks inward: {m:?}"
+            );
+            assert!(
+                (m.to.x * m.to.x + m.to.y * m.to.y).sqrt() < 4.0 + 1e-9
+                    && (m.to.x * m.to.x + m.to.y * m.to.y + m.to.z * m.to.z).sqrt() > 3.9,
+                "the plunge lands on the floor: {:?}",
+                m.to
+            );
+            assert!((m.to.z + 5.8).abs() < 1e-9 || (m.to.z + 4.6).abs() < 1e-9, "on a center: {:?}", m.to);
+            feeds += 1;
+        } else {
+            assert!(rho(m.to) > 6.0 - 1e-9 || m.to.z > 19.9, "a traverse clears the bar: {:?}", m.to);
+        }
+    }
+    assert_eq!(feeds, 2, "a 3.2 window eats two 2.0-wide kerfs");
+}
+
+#[test]
+fn a_part_op_severs_the_bar_in_the_document() {
+    // Parting at z -10: one center, a rung ladder to the axis - the
+    // LAST feed stands on it (the kerf's through cut, snapped exact,
+    // not a hair off), and the verdict reads the separation silent.
+    let (world, mut history) = blade_world();
+    create(&world, &mut history, "P1", "GT-0300", part_params(-10.0));
+    assert_eq!(status(&world, "P1"), OpStatus::Ok, "the kerf is a cut, not a verdict");
+    let t = cache(&world, "P1").expect("cached").path;
+    let feeds: Vec<_> = t.moves.iter().filter(|m| m.kind == camcraft_app::cl::MoveKind::Feed).collect();
+    assert_eq!(feeds.len(), 12, "the 6 of column at 0.5 rungs");
+    for m in &feeds {
+        assert!((m.to.z + 10.0).abs() < 1e-9 && (m.from.z + 10.0).abs() < 1e-9, "one center: {m:?}");
+    }
+    assert!(rho(feeds[0].to) > 5.4, "the first rung steps the column: {:?}", feeds[0].to);
+    assert!(rho(feeds[11].to) < 1e-12, "the last rung stands ON the axis: {:?}", feeds[11].to);
+}
+
+#[test]
+fn a_blade_kind_refuses_the_wrong_tool_by_name() {
+    // The family door admits the KIND; the tool door is the
+    // generator's, and the kerf's width IS the tool - so a turning
+    // insert on a Part names the op, the tool and what the tool is.
+    let (world, mut history) = blade_world();
+    history.execute(
+        &world,
+        CreateOperation::new(&world, "T1", "TN-1600-0R8", SrcRef::Entity("bar".into()), part_params(-10.0))
+            .expect("the door is family-only"),
+    );
+    let Err(err) = GenerateOperation::new(&world, "T1") else {
+        panic!("a round nose cannot cut a band");
+    };
+    let msg = err.to_string();
+    assert!(
+        msg.contains("needs a grooving blade") && msg.contains("TN-1600-0R8")
+            && msg.contains("turning insert"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn an_empty_window_refuses_by_name() {
+    // top == bottom is a window with no downward span: the create
+    // door says so by those words (validate early - the kernel's
+    // own "holds no length of the bar" is the same law's second
+    // line, pinned in the motion suite), never an empty path
+    // dressed as success.
+    let (world, _history) = blade_world();
+    let params = OpParams::GrooveFinish {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(20.0),
+        top_z: Height::fixed(-5.0),
+        bottom_z: Height::fixed(-5.0),
+        feed: 150.0,
+        plunge_feed: 60.0,
+    };
+    let Err(err) =
+        CreateOperation::new(&world, "G1", "GT-0200", SrcRef::Entity("bar".into()), params)
+    else {
+        panic!("a window with no downward span is no window");
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("must cut downward"), "{msg}");
+}
+
+#[test]
+fn the_blade_seeds_stand() {
+    // Registry end to end: pick the kind, accept the seed, press
+    // Generate - rough, finish and part all path on the document
+    // bar with the seeds' own numbers.
+    let (world, mut history) = blade_world();
+    let c = Carried {
+        feed: 150.0,
+        plunge: 80.0,
+        climb: true,
+        clearance: Height::fixed(20.0),
+        stepover: 3.0,
+        stepdown: 5.0, // the mill's fold: the seeds must NOT carry it
+        top: Height::fixed(-3.6),
+        bottom: Height::fixed(-6.8),
+        retract: Height::fixed(18.0),
+        tilt: None,
+    };
+    let rough = (KindInfo::ALL[OpType::GrooveRough as usize].seed)(&c);
+    create(&world, &mut history, "SR", "GT-0200", rough);
+    assert_eq!(status(&world, "SR"), OpStatus::Ok, "the rough seed's numbers stand");
+    let fin = (KindInfo::ALL[OpType::GrooveFinish as usize].seed)(&c);
+    create(&world, &mut history, "SF", "GT-0200", fin);
+    assert_eq!(status(&world, "SF"), OpStatus::Ok, "the finish seed's numbers stand");
+    let c2 = Carried {
+        bottom: Height::fixed(-10.0),
+        top: Height::fixed(28.0),
+        ..c
+    };
+    let part = (KindInfo::ALL[OpType::Part as usize].seed)(&c2);
+    create(&world, &mut history, "SP", "GT-0300", part);
+    assert_eq!(status(&world, "SP"), OpStatus::Ok, "the part seed's numbers stand");
+}
+
+#[test]
+fn a_reground_blade_marks_every_op_stale_both_ways() {
+    // The width rides the TOOL digest (M5.2 C): re-grind the blade
+    // in the tool list and the op cannot know its cached path from
+    // a different steel - regenerate, and undoing the grind reads
+    // Stale again (the digest is a question about NOW, never a
+    // remembered verdict).
+    let (world, mut history) = blade_world();
+    create(&world, &mut history, "G1", "GT-0200", groove_finish_params());
+    assert_eq!(status(&world, "G1"), OpStatus::Ok);
+    let mut wide = catalog_tool("GT-0200");
+    wide.width = 3.0; // re-ground, same name
+    history.execute(&world, ChangeTool::new(&world, "GT-0200", wide).expect("a sane blade"));
+    assert_eq!(status(&world, "G1"), OpStatus::Stale, "a re-ground blade is a different cut");
+    history.execute(&world, GenerateOperation::new(&world, "G1").expect("regenerate"));
+    assert_eq!(status(&world, "G1"), OpStatus::Ok, "the 3.0 blade tiles the 3.2 window too");
+    assert!(history.undo(&world), "undo the grind");
+    assert_eq!(status(&world, "G1"), OpStatus::Stale, "and the cached 3.0 path reads stale now");
+}

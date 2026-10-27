@@ -1169,11 +1169,17 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // again (M5.2 B): their rungs slide radially in and out at
         // the window's ends, and the air between rungs is a rapid
         // at the clear radius, not a plane.
+        // The blades say it a third time (M5.2 C): their rapids ride
+        // the clear radius over the bar too, and Part's kerf ladder
+        // lifts out and back at the same height - no hop plane.
         operation::OpParams::Face { .. }
         | operation::OpParams::RotaryOffset { .. }
         | operation::OpParams::Facing { .. }
         | operation::OpParams::ProfileRough { .. }
-        | operation::OpParams::ProfileFinish { .. } => None,
+        | operation::OpParams::ProfileFinish { .. }
+        | operation::OpParams::GrooveRough { .. }
+        | operation::OpParams::GrooveFinish { .. }
+        | operation::OpParams::Part { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1266,7 +1272,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Trace { top_z, bottom_z, .. }
         | operation::OpParams::Facing { top_z, bottom_z, .. }
         | operation::OpParams::ProfileRough { top_z, bottom_z, .. }
-        | operation::OpParams::ProfileFinish { top_z, bottom_z, .. } => {
+        | operation::OpParams::ProfileFinish { top_z, bottom_z, .. }
+        // The groove kinds bound their window the same two planes
+        // (M5.2 C): Top is where the blade may enter, Bottom the
+        // floor or finished groove it walks to.
+        | operation::OpParams::GrooveRough { top_z, bottom_z, .. }
+        | operation::OpParams::GrooveFinish { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,
@@ -1283,6 +1294,23 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                     src: *bottom_z,
                     rgb: CUT_RGB,
                     name: "Bottom",
+                    corner: 3,
+                    skip_rect: false,
+                });
+            }
+        }
+        // Parting draws one plane: the parting station itself, the
+        // kerf's only promise (M5.2 C). Its Top of Part bound is a
+        // sanity gate on the parameter, not geometry - the column the
+        // blade severs comes from the model, so painting a Top the
+        // path never walks to would advertise a window it cuts past.
+        operation::OpParams::Part { bottom_z, .. } => {
+            if let Some(z) = bottom_z.z(world) {
+                out.push(HeightPlane {
+                    z,
+                    src: *bottom_z,
+                    rgb: CUT_RGB,
+                    name: "Parting",
                     corner: 3,
                     skip_rect: false,
                 });

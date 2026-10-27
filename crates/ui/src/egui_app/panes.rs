@@ -378,6 +378,10 @@ fn op_icon(kind: OpType) -> Icon {
         // what they leave is the turned surface - the bar's own
         // skin, roughed to a wall or finished to tolerance (M5.2 B).
         OpType::ProfileRough | OpType::ProfileFinish => Icon::Face,
+        // Same reuse for the blade kinds: the kerf and the severed
+        // column are both the turned surface giving way to the
+        // tool's width (M5.2 C).
+        OpType::GrooveRough | OpType::GrooveFinish | OpType::Part => Icon::Face,
     }
 }
 
@@ -631,6 +635,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::Tap => "tap",
         ToolKind::Bore => "boring bar",
         ToolKind::Turning => "turning insert",
+        ToolKind::Groove => "grooving blade",
     }
 }
 

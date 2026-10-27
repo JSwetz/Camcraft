@@ -619,6 +619,48 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Grooving roughing (M5.2 stage C): the blade window on the
+    /// bar. `top_z`/`bottom_z` bound the station range the band
+    /// owns, `stepdown` is the radial infeed of each rung, and
+    /// `stock_to_leave` the skin above the floor the finish takes
+    /// off. `tolerance` is the verify budget and the silhouette's
+    /// chord budget at once - the twins' law, now with edges
+    /// ([`Self::ProfileRough`]).
+    GrooveRough {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        stock_to_leave: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// Grooving finishing (M5.2 stage C): one full-depth plunge per
+    /// center - the floor is the model's own, so no infeed exists
+    /// to author and no leave to stand off.
+    GrooveFinish {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// Parting (M5.2 stage C): `bottom_z` is the PARTING PLANE -
+    /// the station the blade sinks through - and `top_z` names the
+    /// bar's top for the panel. The cut itself is the bar's whole
+    /// column at the plane: the model, not these numbers, sets the
+    /// ladder's depth, and the last rung passes the axis to sever.
+    Part {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 impl OpParams {
@@ -646,6 +688,9 @@ impl OpParams {
             OpParams::Facing { .. } => OpType::Facing,
             OpParams::ProfileRough { .. } => OpType::ProfileRough,
             OpParams::ProfileFinish { .. } => OpType::ProfileFinish,
+            OpParams::GrooveRough { .. } => OpType::GrooveRough,
+            OpParams::GrooveFinish { .. } => OpType::GrooveFinish,
+            OpParams::Part { .. } => OpType::Part,
         }
     }
 
@@ -691,7 +736,12 @@ impl OpParams {
             // would command a pose the kinematics already own.
             | OpParams::Facing { .. }
             | OpParams::ProfileRough { .. }
-            | OpParams::ProfileFinish { .. } => None,
+            | OpParams::ProfileFinish { .. }
+            // The blade kinds are the same kinematic: the work spins,
+            // the band sinks radially (M5.2 C).
+            | OpParams::GrooveRough { .. }
+            | OpParams::GrooveFinish { .. }
+            | OpParams::Part { .. } => None,
         }
     }
 
@@ -719,7 +769,10 @@ impl OpParams {
             | OpParams::MultiAxisContour { clearance_z, .. }
             | OpParams::Facing { clearance_z, .. }
             | OpParams::ProfileRough { clearance_z, .. }
-            | OpParams::ProfileFinish { clearance_z, .. } => *clearance_z,
+            | OpParams::ProfileFinish { clearance_z, .. }
+            | OpParams::GrooveRough { clearance_z, .. }
+            | OpParams::GrooveFinish { clearance_z, .. }
+            | OpParams::Part { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -752,7 +805,12 @@ impl OpParams {
             // The profile window: the heights bound the length of bar
             // the rungs and the ride walk (M5.2 B).
             | OpParams::ProfileRough { top_z, .. }
-            | OpParams::ProfileFinish { top_z, .. } => *top_z,
+            | OpParams::ProfileFinish { top_z, .. }
+            // The band window's high end; for parting it is the
+            // bar's own top the blade rises from (M5.2 C).
+            | OpParams::GrooveRough { top_z, .. }
+            | OpParams::GrooveFinish { top_z, .. }
+            | OpParams::Part { top_z, .. } => *top_z,
         }
     }
 
@@ -844,7 +902,13 @@ impl OpParams {
             // names itself off the ride's own reach, no hop authored
             // (variant docs, M5.2 B).
             | OpParams::ProfileRough { clearance_z, top_z, bottom_z, .. }
-            | OpParams::ProfileFinish { clearance_z, top_z, bottom_z, .. } => {
+            | OpParams::ProfileFinish { clearance_z, top_z, bottom_z, .. }
+            // The blade kinds state the same trio - for parting the
+            // third names the plane the blade sinks through, and it
+            // is still a Height to visit (M5.2 C).
+            | OpParams::GrooveRough { clearance_z, top_z, bottom_z, .. }
+            | OpParams::GrooveFinish { clearance_z, top_z, bottom_z, .. }
+            | OpParams::Part { clearance_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 f(*top_z);
                 f(*bottom_z);

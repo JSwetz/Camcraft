@@ -3857,3 +3857,145 @@ fn v33_file_steps_to_v34_and_the_profile_grammar_round_trips() {
         "a negative leave must not load"
     );
 }
+
+#[test]
+fn v34_file_steps_to_v35_and_the_blade_grammar_round_trips() {
+    // M5.2 stage C: the blade kinds arrive as three new params tags
+    // (`groove_rough`, `groove_finish`, `part`), one new tool-kind
+    // word (`groove`) and the inert-defaulted `width` key - the
+    // nose_radius law restated a third time: absent reads 0.0,
+    // which every non-blade tool already meant, and for the Groove
+    // kind alone the 0.0 is a blade that cuts no band and the sane
+    // door refuses it. No v34 file can carry the new tags; a v35
+    // reader of one loses nothing.
+    let world = new_world();
+    project::open(&world, r#"{"version": 34, "entities": []}"#).expect("v34 steps up");
+    let p = tmp_path("v35a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v35 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v35 wire grammar, hand-written so the tags are pinned: T0
+    // is the v34-shaped insert (no width key - it must read inert),
+    // T1 is the blade with its kerf stated, and the three kinds
+    // stand on the numbers the app suite generates with.
+    let text = r#"{
+        "version": 35,
+        "entities": [
+            {"name": "T0", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "turning", "diameter": 16.0, "corner_r": 0.0,
+                      "nose_radius": 0.8,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 3000.0, "feed": 150.0}},
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "groove", "diameter": 16.0, "corner_r": 0.0,
+                      "width": 2.0,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 2000.0, "feed": 150.0}},
+            {"name": "GR1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"groove_rough": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 20.0},
+                 "top_z": {"reference": "fixed", "offset": -3.6},
+                 "bottom_z": {"reference": "fixed", "offset": -6.8},
+                 "stepdown": 0.5, "stock_to_leave": 0.25,
+                 "feed": 150.0, "plunge_feed": 60.0}}}
+            },
+            {"name": "GF1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"groove_finish": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 20.0},
+                 "top_z": {"reference": "fixed", "offset": -3.6},
+                 "bottom_z": {"reference": "fixed", "offset": -6.8},
+                 "feed": 150.0, "plunge_feed": 60.0}}}
+            },
+            {"name": "PT1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"part": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 20.0},
+                 "top_z": {"reference": "fixed", "offset": 16.0},
+                 "bottom_z": {"reference": "fixed", "offset": -10.0},
+                 "stepdown": 0.5, "feed": 150.0, "plunge_feed": 60.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v35 blade grammar must read");
+    let e = model::find_by_name(&world, "T0").expect("tool");
+    let t = model::tool_of(&world, &e).expect("definition");
+    assert_eq!(
+        t.width, 0.0,
+        "the absent width key lands on the inert default every non-blade tool always meant"
+    );
+    let e = model::find_by_name(&world, "T1").expect("tool");
+    let t = model::tool_of(&world, &e).expect("definition");
+    assert_eq!(t.kind, camcraft_app::tools::ToolKind::Groove);
+    assert_eq!(t.width, 2.0, "the kerf's width rides the file - the blade IS its tool row");
+    let e = model::find_by_name(&world, "GR1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::GrooveRough {
+        stepdown,
+        stock_to_leave,
+        feed,
+        plunge_feed,
+        ..
+    } = &o.params
+    else {
+        panic!("rough params expected, got {:?}", o.params);
+    };
+    assert_eq!((*stepdown, *stock_to_leave, *feed, *plunge_feed), (0.5, 0.25, 150.0, 60.0));
+    let e = model::find_by_name(&world, "GF1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::GrooveFinish { feed, plunge_feed, .. } = &o.params else {
+        panic!("finish params expected, got {:?}", o.params);
+    };
+    assert_eq!((*feed, *plunge_feed), (150.0, 60.0));
+    let e = model::find_by_name(&world, "PT1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Part { stepdown, .. } = &o.params else {
+        panic!("part params expected, got {:?}", o.params);
+    };
+    assert_eq!(*stepdown, 0.5, "the parting ladder's infeed rides the file");
+
+    // Write-parse-write is a fixed point, and the new keys are
+    // stated wherever a blade number lives: the width on EVERY tool
+    // row (inert or not, the nose_radius way), the three tags once
+    // each, the leave only where a ladder leaves stock.
+    let p = tmp_path("v35b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the blade shapes round-trip byte-identically");
+    assert_eq!(first.matches("\"groove_rough\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"groove_finish\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"part\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"width\"").count(), 2, "every tool writes the band - inert or not: {first}");
+    assert_eq!(first.matches("\"stock_to_leave\"").count(), 1, "only the rough ladder leaves stock: {first}");
+
+    // The sane doors at the loader: a blade that states no width is
+    // a point that cannot groove (the nose's law, refused for that
+    // kind alone), and a parting plane with no infeed is one rung
+    // lying about being a ladder.
+    let dull_blade = text.replace("\n                      \"width\": 2.0,", "");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &dull_blade), Err(ProjectError::Corrupt(_))),
+        "a groove tool with no stated width must not load"
+    );
+    let no_infeed = text.replace("\"stepdown\": 0.5, \"feed\"", "\"stepdown\": 0.0, \"feed\"");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &no_infeed), Err(ProjectError::Corrupt(_))),
+        "a parting ladder with no infeed is not a ladder"
+    );
+}

@@ -585,6 +585,64 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
             }
+            // The blade kinds' doors (M5.2 stage C): the profile
+            // numbers again - the blade's width is the TOOL's
+            // question (the catalog and the tool editor answer it),
+            // and the window-vs-blade fit is the generator's, refused
+            // there by name. Parting's third height is a plane, not a
+            // window end - same sanity law, different name.
+            OpParams::GrooveRough {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                stock_to_leave,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && stock_to_leave.is_finite()
+                    && *stock_to_leave >= 0.0
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
+            OpParams::GrooveFinish {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
+            OpParams::Part {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
         }
     }
 

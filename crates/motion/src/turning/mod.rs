@@ -14,8 +14,11 @@
 //! adds the profile kinds: [`profile`]'s silhouette of the bar in
 //! (station, radius), [`offset`]'s ride of the nose on it, and
 //! [`prof`]'s finish and concentric roughing ladders built from that
-//! pair. Grooving, threading and the rest join as their own files
-//! (stages C..); the axis frame below is what they all share.
+//! pair. Stage C adds the blade: [`revolve`]'s meridian verdict of
+//! what a banded cut leaves, and [`blade`]'s grooving, groove-
+//! finish and parting sweeps built on the same silhouette.
+//! Threading and the rest join as their own files (stages D..);
+//! the axis frame below is what they all share.
 //!
 //! Provenance: lathe facing as a radial-pass ladder at axial
 //! stations - standard turning practice from machine-tool handbooks
@@ -23,12 +26,18 @@
 //! and station mathematics are our own, composed on this codebase's
 //! axis-fit law. No vendor strategy or post output was inspected.
 
+pub mod blade;
 pub mod face;
 pub mod offset;
 pub mod prof;
 pub mod profile;
+pub mod revolve;
 
+pub use blade::{
+    groove_finish, groove_rough, part, GrooveFinishParams, GrooveRoughParams, PartParams,
+};
 pub use face::{facing, FacingParams};
 pub use offset::profile_offset;
 pub use prof::{profile_finish, profile_rough, ProfileFinishParams, ProfileRoughParams};
 pub use profile::{profile_of, silhouette, Profile};
+pub use revolve::{blade_warnings, BandMove};

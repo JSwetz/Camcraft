@@ -759,6 +759,63 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The blade kinds (M5.2 stage C, tags 21, 22, 23): the
+            // profile law again, tolerance load-bearing twice (the
+            // silhouette chords at it, the meridian verdict gates at
+            // it). The blade's width rides the tool digest, not a
+            // number here - a re-ground blade is a different cut,
+            // and the stamp says so through the TOOL row.
+            OpParams::GrooveRough {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                stock_to_leave,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *stock_to_leave, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
+            OpParams::GrooveFinish {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
+            OpParams::Part {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
         }
     }
 }

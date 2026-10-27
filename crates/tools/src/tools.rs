@@ -34,6 +34,14 @@ pub enum ToolKind {
     /// disk IS the cut volume (a sphere's and a disk's revolve share
     /// their meridian section). Only `Turning` reads it.
     Turning,
+    /// Grooving/parting blade (M5.2 stage C): a full-width cutter whose
+    /// meridian footprint is a rectangle - `width` (inert for every
+    /// other kind) is the band it occupies along the axis, and its cut
+    /// is every radius OUTSIDE the tip across that band. The blade
+    /// verdict reads the band, not a swept ball: a grooved part is
+    /// undercut by design and no sphere can judge one honestly (see
+    /// `crate::turning::revolve`). Only `Groove` reads `width`.
+    Groove,
 }
 
 impl core::fmt::Display for ToolKind {
@@ -46,6 +54,7 @@ impl core::fmt::Display for ToolKind {
             ToolKind::Tap => "tap",
             ToolKind::Bore => "boring bar",
             ToolKind::Turning => "turning insert",
+            ToolKind::Groove => "grooving blade",
         };
         f.write_str(s)
     }
@@ -92,6 +101,11 @@ pub struct Tool {
     /// Turning, where it is the circle the facing verdict sweeps -
     /// every other kind reads it as 0.0 and rolls its own radius.
     pub nose_radius: f64,
+    /// Blade width in mm along the axis (the grooving/parting insert's
+    /// ground side-to-side size): 3.0 is common cutoff stock. Inert
+    /// unless kind is Groove, where it is the band the blade owns -
+    /// every other kind reads it as 0.0 and sweeps its own circle.
+    pub width: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -117,6 +131,7 @@ impl Tool {
             self.tip_angle,
             self.pitch,
             self.nose_radius,
+            self.width,
             self.flute_len,
             self.shank_d,
             self.shank_len,
@@ -134,6 +149,7 @@ impl Tool {
             && self.tip_angle < 180.0
             && self.pitch >= 0.0
             && self.nose_radius >= 0.0
+            && self.width >= 0.0
             && self.flute_len > 0.0
             && self.shank_d >= 0.0
             && self.shank_len >= 0.0
@@ -158,6 +174,12 @@ impl Tool {
                 ToolKind::Turning => {
                     self.nose_radius > 0.0 && self.nose_radius <= self.diameter * 0.5
                 }
+                // A blade with no width is a mathematical plane - it
+                // would part a knife line and judge a zero-band scan -
+                // and a blade as wide as its own body is not the edge
+                // any toolholder could ground. The same kind-scoped law
+                // as the insert's nose (the note above).
+                ToolKind::Groove => self.width > 0.0 && self.width < self.diameter,
                 _ => true,
             }
     }
@@ -229,9 +251,12 @@ impl Tool {
             // The insert's nose circle lives in the MERIDIAN of the
             // work's spin, not this side view - the facing verdict
             // reads it through `geom` - so the picture is the plain
-            // envelope the shank laws collide with.
-            ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore | ToolKind::Turning =>
-                add_pt(&mut p, 0.0, r),
+            // envelope the shank laws collide with - and so it is for
+            // the blade: its truth is the band `width` in the work's
+            // meridian, which the turning verdicts read off `Tool`,
+            // not off this cylinder.
+            ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore | ToolKind::Turning
+            | ToolKind::Groove => add_pt(&mut p, 0.0, r),
             ToolKind::Drill => {
                 // The point cone: apex at the tip center, opening at
                 // half the included angle, meeting the full radius at
@@ -290,6 +315,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         tip_angle: 0.0,
         pitch: 0.0,
         nose_radius: 0.0,
+        width: 0.0,
         flute_len,
         shank_d,
         shank_len: 40.0,
@@ -303,7 +329,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     // own diameter), no corner radius, 118-degree points, ISO coarse
     // pitches; a tap's feed number is the rpm x pitch starting value.
     let cy = |kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| {
-        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, nose_radius: 0.0, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed }
+        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, nose_radius: 0.0, width: 0.0, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed }
     };
     // Turning (M5.2 A): the facing insert - a plain toolholder shank,
     // no holder stack (the turret IS the holder), an 0.8 nose like the
@@ -311,7 +337,17 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     // for aluminum facing with carbide.
     let tn = |diameter: f64, nose_radius: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Turning, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
-        nose_radius, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
+        nose_radius, width: 0.0, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
+        material_group: "aluminum".into(), rpm, feed,
+    };
+    // Grooving (M5.2 C): the blade insert on the same toolholder body -
+    // the ground WIDTH is the tool, the nose and the taper are not
+    // modeled (the blade cuts a kerf, not a rolled circle). Feeds are
+    // the handbook's starting values for aluminum: grooving rides a
+    // facing-like feed, cutoff plunges slow.
+    let gt = |diameter: f64, width: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
+        kind: ToolKind::Groove, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
+        nose_radius: 0.0, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
         material_group: "aluminum".into(), rpm, feed,
     };
     vec![
@@ -333,6 +369,8 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("TAP-M6", cy(ToolKind::Tap, 6.0, 0.0, 1.0, 20.0, 6.0, 600.0, 600.0)),
         ("BR-1000", cy(ToolKind::Bore, 10.0, 0.0, 0.0, 20.0, 10.0, 4000.0, 400.0)),
         ("TN-1600-0R8", tn(16.0, 0.8, 8.0, 16.0, 3000.0, 150.0)),
+        ("GT-0200", gt(16.0, 2.0, 8.0, 16.0, 2500.0, 90.0)),
+        ("GT-0300", gt(16.0, 3.0, 8.0, 16.0, 2000.0, 60.0)),
     ]
 }
 

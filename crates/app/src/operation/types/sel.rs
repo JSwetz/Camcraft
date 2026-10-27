@@ -140,6 +140,19 @@ pub enum OpType {
     /// within the chord budget, lead in and slide out radially (see
     /// [`crate::turning`]).
     ProfileFinish,
+    /// Grooving roughing (M5.2 stage C): the band ladder on a turned
+    /// part — a full-width blade stepping down each center it tiles
+    /// across the window, to the floor plus the leave the finish
+    /// takes off (see [`crate::turning`]).
+    GrooveRough,
+    /// Grooving finishing (M5.2 stage C): one full-depth plunge per
+    /// center to the band's floor — the model's own surface,
+    /// tangentially, at every station the blade stands in.
+    GrooveFinish,
+    /// Parting (M5.2 stage C): the bar severed at one plane — a
+    /// depth ladder at the parting station and the through-axis
+    /// rung that lets the scrap go.
+    Part,
 }
 
 impl core::fmt::Display for OpType {

@@ -1,6 +1,6 @@
 use super::*;
 
-pub const PROJECT_VERSION: u32 = 34;
+pub const PROJECT_VERSION: u32 = 35;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -147,6 +147,11 @@ pub struct ToolDto {
     /// / `pitch` law restated.
     #[serde(default)]
     pub nose_radius: f64,
+    /// M5.2 addition (v35): absent from any older file, serde-defaults
+    /// to the inert 0.0 every non-blade kind already meant - the same
+    /// law a third time.
+    #[serde(default)]
+    pub width: f64,
     pub flute_len: f64,
     pub shank_d: f64,
     pub shank_len: f64,
@@ -170,6 +175,10 @@ pub enum ToolKindDto {
     /// v32 files never carried it, so no migration is needed, exactly
     /// as `bore` needed none at its arrival.
     Turning,
+    /// The grooving/parting blade (M5.2 C): the same arrival law -
+    /// v34 files never carried the word, and the `width` key it
+    /// needs serde-defaults to the inert 0.0 every other kind means.
+    Groove,
 }
 
 impl ToolDto {
@@ -183,12 +192,14 @@ impl ToolDto {
                 ToolKind::Tap => ToolKindDto::Tap,
                 ToolKind::Bore => ToolKindDto::Bore,
                 ToolKind::Turning => ToolKindDto::Turning,
+                ToolKind::Groove => ToolKindDto::Groove,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
             tip_angle: t.tip_angle,
             pitch: t.pitch,
             nose_radius: t.nose_radius,
+            width: t.width,
             flute_len: t.flute_len,
             shank_d: t.shank_d,
             shank_len: t.shank_len,
@@ -210,12 +221,14 @@ impl ToolDto {
                 ToolKindDto::Tap => ToolKind::Tap,
                 ToolKindDto::Bore => ToolKind::Bore,
                 ToolKindDto::Turning => ToolKind::Turning,
+                ToolKindDto::Groove => ToolKind::Groove,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,
             tip_angle: self.tip_angle,
             pitch: self.pitch,
             nose_radius: self.nose_radius,
+            width: self.width,
             flute_len: self.flute_len,
             shank_d: self.shank_d,
             shank_len: self.shank_len,
