@@ -1657,6 +1657,36 @@ Phase-5 shape law.
       the envelope verdict judging both with `stock_to_leave` as its
       own threshold, so the wall the ladder leaves is the wall the
       verdict lets stand - RECOMMENDED.md, M5.2 B.
+- ✅ **Grooving, parting and the revolved blade verdict** (stage C,
+      commit e880d56): the kinds where a full-width blade, not a nose
+      circle, owns the cut. `revolve.rs` judges them in the MERIDIAN -
+      no swept sphere can speak a groove (the part is undercut BY
+      DESIGN and the height-field law reads every correct floor as a
+      phantom trench) - with the boxcar MIN of the covering tips as
+      the cut C(s) against the silhouette's own chord polyline E(s):
+      gouge where C < E, rest where C > E, silence inside a cutoff
+      kerf, and a floor no band reached resting by the whole window
+      shell so a missed pass never buys silence. The tangency promise
+      rides the lattice's INTERVALS by a spelled-once HAIR (1e-9): a
+      band edge ON a wall station is the flush groove wall, a graze
+      is noise and cuts nothing - and the same hair snaps a
+      noise-pushed rung to its floor, so feed counts cannot flip on a
+      float's whim. `blade.rs` holds the three kernels: rough steps
+      centers one width apart and ladders each from the window shell
+      to `floor + leave`, finish plunges each center once to its
+      band's floor, part drops one stepped ladder through the axis at
+      the parting plane (the last feed standing ON the axis IS the
+      severance); rapids ride the whole bar's widest radius because a
+      mid-bar window still traverses standing shoulders. New kinds
+      GrooveRough/GrooveFinish/Part (ordinals 21-23, wire v35 - a
+      pure step-up carrying a serde-defaulted `width` on every tool
+      row, inert except on `ToolKind::Groove`; the kerf's width IS
+      the tool and rides the TOOL digest, so re-grinding the steel
+      marks every op that rides it Stale through undo both ways), the
+      catalog's GT blades, the sim's `Mode::Revolve` standing its
+      XY-plane laws down to the meridian scan, and a wrong tool on a
+      blade kind refused at generation by three names - op, tool, and
+      what the tool is - RECOMMENDED.md, M5.2 C.
 
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**

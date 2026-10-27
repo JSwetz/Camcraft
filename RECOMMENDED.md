@@ -4276,3 +4276,148 @@ always said the count is "the only stale number a stage can leave
 behind" - it just happened to be true of the stage that wrote the
 sentence's own era. Updated to 21 with the miss recorded, since an
 honest count beats a quiet one.
+
+## M5.2 stage C - grooving and the revolved blade verdict (code e880d56 + this docs)
+
+**The blade kinds are THREE kinds, not one "Grooving" with a mode
+switch** - GrooveRough (21), GrooveFinish (22), Part (23), wire tags
+`groove_rough`/`groove_finish`/`part`. Considered and dropped: one kind
+with a roughing flag (the ribbon cell and the seed would have to lie -
+the finish carries no stepdown and no leave at all) and folding parting
+into grooving (its bottom IS the parting plane and its verdict clause -
+separation - is a different law; the family rows in `KindInfo` stay the
+UI's truth without special cases).
+
+**A grooving path is judged in the MERIDIAN, never by the envelope
+scan** (`turning/revolve.rs`). A grooved part is undercut by design:
+material stands beside the groove above the floor, out of every ball's
+reach along Z, and the height-field law reads a ball riding the floor
+as if the bar's own top were stock to remove - a phantom trench on
+every correct groove. The blade's footprint is a BAND (everything
+outside the tip radius, across the kerf's axial width); revolved, that
+footprint IS the cut volume, and the question goes one-dimensional:
+E(s) = the silhouette's own chord polyline, C(s) = the MINIMUM tip over
+the moves whose open band contains s (the boxcar min-of-cuts: one pass
+at the deepest floor removed everything above it, and a shallower blade
+covering the same station added nothing). Where C < E the blade
+gouged; where C > E a floor rests. The revolved verdict rides only the
+blade kinds: facing and profile keep `Mode::Envelope` - the sphere
+still speaks them correctly.
+
+**The tangency promise is kept on the lattice's INTERVALS, not its
+points, and real overlap means more than one HAIR (1e-9 mm).**
+Projection noise lands at 1e-13 and no steel is that thin; a point law
+made a parameter edge grazing a model lip a phantom floor (a graze
+raised the interval's E to the shell and plunged the blade in air),
+while a band edge standing exactly ON a wall station IS the flush
+groove wall and must judge nothing there. One number, spelled once as
+`revolve::HAIR`, serves the scan, the boxcar `span_max` and the
+kernels' `rung` snap; between adjacent lattice events E is linear and
+the covering set constant, so the scan takes its clause extremes at
+each interval's two ends and is EXACT beyond the silhouette's own
+chord budget.
+
+**The separation law dropped its old clamp.** A through-axis plunge
+(tip <= 0) silences the verdict only INSIDE its kerf band - what
+stands there was meant to go - and everything right of the kerf keeps
+standing, because the verdict's job is to check the path, not the
+scrap that leaves with the cutoff. An earlier form clamped the whole
+section right of any kerf, which went blind to a groove that was never
+cut standing past the parting plane.
+
+**A floor no band reached rests by the window's own shell - the
+over-report law.** A missing pass must never buy silence: the whole
+window's top stands as rest, blamed on the nearest move. Considered
+and dropped: reporting "nothing covered" as a separate diagnostic -
+the envelope scan's precedent (a judge that cannot measure reports the
+gouge at the first cut, never silence) says one vocabulary, and
+`Warning::Envelope { gouge_mm, rest_mm }` already carries the shape.
+
+**The rung snap is a law, not a tolerance: a rung the noise left
+within a HAIR of the floor IS the floor rung.** Without it the
+ladder's `ceil` counts a rung the noise pushed a hair off the floor and
+the FEED COUNT flips on the same coincidence the meridian law refuses
+to judge by - the count tests then disagree with the verdict on which
+floats are steel.
+
+**Centers tile tangentially - step exactly one width - and the tail
+closes on the window's own high end**, so the last center stands flush
+to the upper wall even when the step does not divide the run (a 3.2
+window with the 2.0 blade cuts two stations whose bands cover it
+exactly; a 3.0 blade tiles the same window two as well). When a window
+end coincides with a bar end the first or last center stands there
+outright, spilling half a width into the part's own end air (air cuts
+nothing; a center pulled inward would leave the shoulder's annulus
+standing). Refused by name when narrower than the blade: "a groove
+cannot fit where it was asked".
+
+**Rapids travel the WHOLE BAR's widest radius plus tolerance**
+(`profile_of`'s r_max, not the window's span-max) - the window may be
+a groove in mid-bar, and a clearance plane computed only over the
+groove would drag the blade through every standing shoulder it
+traverses over. Considered: honoring a user clearance_z as the rapid
+plane through the cut; the start point already rides it, but no
+in-window height can promise clearance ALONG the bar, and a blade
+through a shoulder is a crash.
+
+**`top_z` on a Part is inert-but-carried** - it rides the trio purely
+to keep the heights machinery (setup sheet, resolver, HeightRefs)
+uniform; the parting plane is `bottom_z` and the kerf's column is the
+model's own (its top is the span over the band, its bottom the axis),
+pinned by a comment at both the params row and the kernel so "why is
+there an unused top?" never becomes a bug report.
+
+**The blade's width rides the TOOL digest, kind-scoped** in
+`stamp::digest_tool` (`ToolKind::Groove => w(&mut h, tool.width)`),
+not the params digest - a re-ground blade is a different cut whatever
+the params say, and `status_of` reads Stale through it in both
+directions of undo (the digest is a question about NOW, never a
+remembered verdict). Mill tools keep an inert `width: 0.0` field
+(`ToolDto` always serializes it - the inert-field pattern's fourth
+member) so the file shape never branches on kind.
+
+**The wrong-tool refusal lives at GENERATION, and names three things**
+- the op kind, the tool and what the tool is ("... needs a grooving
+blade", "'TN-1600-0R8' is a turning insert"). The CREATE door stays
+family-only (any Turn tool may be attached before it is edited, as
+with every kind) because the kerf's width IS the tool and only the
+generator can say the geometry is impossible; validate-early still
+catches what the params alone can state (a zero-height window:
+`depth_sane` refuses at CREATE with "must cut downward" - the kernel's
+"the height window holds no length of the bar" is the same law's
+second line, reached only by callers that skip the door).
+
+**Feed speeds must be positive at the sanity door even where the
+kernel is inert to them** - a blade kernel's rapids carry no feed, but
+`is_sane` is the FILE's truth too (validate.rs runs the same door at
+load) and a 0.0 feed on a GrooveFinish row would load a file whose
+numbers cannot post. The fixture tests discovered this as a refused
+CREATE; the door is right and the tests carry the numbers.
+
+**v35 is a pure step-up** - three params tags, one always-present
+serde-defaulted `width` on the tool row, chained v34 -> v35; a v34
+file loses nothing (blade kinds did not exist; every other tool reads
+the inert 0.0) and no DTO shape was touched. The round-trip test pins
+the grammar twice over: a byte-identical write-parse-write fixed point
+and both loader refusal doors (a groove tool row with the `width` key
+deleted, a part row with `stepdown: 0.0` - Corrupt, both, by name).
+
+**The sim's `Mode::Revolve` stands the XY-plane laws down, not the
+reach laws up.** A lathe path read by the envelope laws is all
+degenerate contact - radial plunges "cross" at the axis, tangency
+fills the section - so clauses (a) and (b) defer to the meridian scan
+(motion's `revolve::blade_warnings`), while the pose-independent reach
+laws (rapid heights, travel limits) stay exactly as the mill reads
+them.
+
+**The app-level blade fixture bar runs z -16..28 because the axis fit
+is a gate the test must clear BEFORE the kernel speaks.** A stubby
+capped cylinder is near-isotropic in the fit's normal-second-moment
+eigen balance - the end caps and shoulders feed m_z until
+`vals[0] > 0.5*vals[2]` trips the dome guard and "every axis fits this
+model equally" refuses the whole suite. The ratio lands at 0.435 with
+the extra 12 mm of tail (motion's revolve fixtures give their bars the
+same room); recorded so a future resize checks it instead of
+re-deriving. Related: a blade feed is asserted at CONSTANT STATION
+with decreasing radius - it is a radial plunge - and the draft's
+inverted form (constant rho) passed nothing it claimed.
