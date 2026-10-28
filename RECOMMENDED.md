@@ -4856,3 +4856,111 @@ same reason the band door keeps half <= R.
 re-checked against the shipped kernel - the multi-pass ladder
 (`blade::rungs`, spring-pass midpoints) is what the row points at;
 no adaptive clause lives anywhere else in `turning/`.
+
+## M5.2 stage F - boring on the inside twin of the envelope law (code edf562c + this docs)
+
+**Stage F's offset law is stage B's theorem through the mirror, and the
+verdict is the E scan unchanged.** `profile_offset_in` folds the wall's
+claims with MIN where `profile_offset` folds the silhouette's with MAX:
+a center curve standing at distance >= d BELOW every piece of the hole's
+inner wall is a bar whose swept ball never enters the steel, by the same
+construction-proof that carries every OD ride - no new warning type, no
+second envelope code path, because an envelope scan already measures a
+ball about points and does not care which side the material is on. The
+considered alternative, a `BoreEnvelope` verdict of the revolve family
+(undercut-free the way a blade's is), was dropped for the reason the
+twin rides state: a bored wall is not undercut by design - it is a
+single offset surface of the model's own wall, and the E-configured
+facet distance measures exactly that relation from inside or out.
+`ToolGeom::nose_radius` now speaks for `Bore` as it does for `Turning`,
+which is what makes the scan read the kernel's centers as centers.
+
+**The axis-vertex filter at the inside offset, with its vacuity proof.**
+`inner_wall` answers a solid station with its axis end (radius ~0) -
+that is what makes the doors able to name a bar with no hole - and
+handing those points to the vertex-circle claim would let its <=-branch
+apply to a wall at radius 0 standing a nose's distance off the ride
+window: a false fit refusal ("the wall runs at radius 5.885" when the
+bar is legal). The filter (`q.1 > HAIR`) drops the points, and the
+theorem that makes it LOSSLESS is the floor door's own: a rejection at
+an axis vertex guarantees the nose can reach that vertex from inside
+the window, i.e. the doors passing means every axis vertex stands at
+least a nose beyond it, i.e. its sqrt(d^2 - ds^2) claim is never real
+where the ride lives. What was considered and dropped: branching on
+rv ~ 0 inside `profile_offset_in` - the mirror function has no business
+knowing which of its caller's points are on the spindle centerline;
+and skipping the <=-disjunct entirely - it is exactly the claim that
+holds a rim's tangency exact at the window ends (the through-hole test
+leans on it).
+
+**Reach-door numbers name the obstacle, not the window.** A floor the
+nose cannot clear refuses with "raise bottom Z to at least fl + d" where
+fl is the closest AXIS VERTEX at or below the window's bottom - the
+floor face's own station - falling back to s_lo + d only when the solid
+names no axis vertex. The earlier window-edge-plus-nose wording was
+conservative but wrong about which number is the tangency: typed into
+the pane, s_lo + d leaves an unexplained gap, and at a tangent bottom
+it refuses a legal touch. Same law mirrored for the ceiling
+(`>= s_hi`-closest axis vertex minus d). Proof the vertex exists in
+every rejection: the steel region containing the test point is a face's
+interior whose axis-crossing boundary face ENDS on the axis, and every
+revolve vertex station is a wall point by construction.
+
+**The axis-parity doors: three-angle MOELLER-TRUMBORE vote, never an
+edge-count parity.** A 16-gon tessellation's station polygon crosses a
+ray an even number of times whether the axis stands in the hole's air
+or in solid metal (the chords close), so the first instinct - count the
+wall's claims at the station - is a fallacy the suite proves out loud:
+a PLAIN BAR's min-envelope reads its own skin as a wall, the offset
+would happily ride tangent IN steel, and the E verdict measures
+nothing wrong there (tangency is not gouging). The doors therefore ask
+the mesh itself - odd/even crossings from the axis point, voted at
+0/120/240 degrees so a ray grazing a vertex rim cannot swing the answer
+alone, majority 2-of-3 - at the window ends, its middle, every vertex
+inside, and at the ball's axial reach past both ends. Every failure
+mode this stage could ship - a silent ride in a bar with no hole, a
+window punched through steel, an unreachable floor - is a refusal with
+a station number before a path exists to be wrong.
+
+**BR-1000's holder: the catalog's lathe law, stated in data.** The
+first bore runs convicted every ride move with a ShankHit from law (c):
+cy() (the cycle-tool builder, drilling-era) gave the boring bar a MILL
+holder stack - a Ø44 x 35 column at flute+shank above the tip - and
+(c) reads bands as columns along Z about the move's XY, while a boring
+bar's steel lies RADIAL on a lathe: an OD column 22 above the tip is a
+collision no bar has. Chosen fix: bring the catalog row into the tn
+family's stated convention (`holder 0/0 - the turret IS the holder`),
+which is already why every other turning kind verifies silent; law (c)
+itself stands unchanged, because a REAL mill-side boring head (M1.6's
+cycles, live-tooling F2) genuinely does have that stack and genuinely
+does collide with a deep hole's wall. Considered and dropped: gating
+(c) down for Turn-family modes - a data row's wrong steel is not the
+law's fault, and the gate would blind the mill-turn machine that
+drills bores on a live tool. The honest cost, owned: reach law (e) now
+reads 60, not 95, for a cycle drilled with BR-1000 specifically -
+deeper mill bores with that catalog entry report ShankHit where the
+phantom holder once excused them; over-reporting, never a hidden gouge.
+
+**Wire tag `boring_turning` while the label is "Boring" - the arrival
+law states itself.** The tag is the variant's snake name, not the
+ribbon's word (the round-trip door refuses `bore_turning` and any
+label-derived guess, as it has since `facing`); ordinal 29, no new kind
+word beyond ToolKind::Bore's filed `bore`, no new Tool keys - the
+global nose_radius row (v33) already convicts a re-ground bar through
+the TOOL digest, which is the stage's one genuinely new digest edge:
+ride radius is TOOL steel, so a re-grind marks the op Stale by itself
+and the regenerated ride stands deeper, flush with the MODEL's wall -
+verdict silent both ways, and undo of the grind marks it Stale again.
+
+**v1 scope, once more honestly clipped:** one ascending ride, no rough
+ladder inside the hole (spring passes on a bore are stage G-or-later
+work if the ROADMAP ever asks), single hole per op (the split-tube
+refusal says it by name), and the radial lead-out at plunge feed - a
+second feed dial for the lead was considered and dropped: the kernel's
+one-plunge shape makes plunge_feed exactly that dial already. The file
+seam law too: the kernel arrived as a flat 489-line `bore.rs` over the
+~400-line ceiling, so it ships as `turning/bore/{mod,doors,wall}.rs` -
+the split is a pure code move landed in the stage's own commit, before
+the tree ever saw a release: the kernel entry and the ride, the parity
+doors, and the MIN-fold wall are three subjects, and `revolve.rs`'s
+487 lines are the cautionary tale, not the precedent.

@@ -128,7 +128,7 @@ home.
 | Turning groove | ✅ | M5.2 C |
 | Turning single groove | ✅ | M5.2 C |
 | Turning threading | ✅ | M5.2 D |
-| Turning boring | 📋 | M5.2 |
+| Turning boring | ✅ | M5.2 F |
 | Turning parting | ✅ | M5.2 C |
 | Turning chamfering | ✅ | M5.2 E |
 | Taper turning | ✅ | M5.2 E |
@@ -1799,6 +1799,31 @@ Phase-5 shape law.
       E1 fallout found because E2 ran the binary E1's Gate map
       never named; RECOMMENDED.md records the law and the gate-map
       lesson.
+
+- ✅ **Turning boring** (stage F, commit edf562c): the inside twin
+      of the profile ride - the nose walking a hole's wall, judged
+      by the same envelope law stage E gave the OD rides (`Mode::
+      Envelope`, `ToolGeom::nose_radius` speaking for `Bore`): a
+      center curve at distance >= d BELOW every piece of the hole's
+      inner wall (the min-of-claims twin `profile_offset_in` -
+      stage B's theorem read through the mirror) is a bar whose
+      swept ball never enters the steel. What is new is what the
+      wall IS - the silhouette's edge sweep folded with MIN - and
+      the doors that ask the MESH (three-angle Möller–Trumbore
+      parity vote from the axis point, Ericson ch. 5) whether a
+      hole stands open at all, at every window station and at the
+      ball's own axial reach: a plain bar rides tangent IN steel
+      and the facet verdict measures nothing wrong there, so the
+      silent-tangency failure this stage could ship is refused by
+      name before a path exists. The axis-vertex filter's vacuity
+      proof, the obstacle-named reach suggestions, and BR-1000's
+      catalog holder (a lathe bar's steel lies radial - the turret
+      IS the holder, like every tn row) are RECOMMENDED.md, M5.2 F.
+      New kind BoringTurning (ordinal 29, wire v39 - the arrival
+      law an eighth time; the global nose row already convicts a
+      re-ground bar through the TOOL digest), one ascending ride in
+      v1, the kernel shipping split at its seam as `turning/bore/
+      {mod,doors,wall}.rs`.
 
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**
