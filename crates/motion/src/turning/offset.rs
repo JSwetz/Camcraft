@@ -131,6 +131,102 @@ pub fn profile_offset(
     Ok(out)
 }
 
+/// The ride of a ball of radius `d` INSIDE a hole whose wall is
+/// `pts` (M5.2 F): the max-of-claims offset read through the
+/// mirror. Every wall piece now says "stand BELOW me by d": a
+/// segment's parallel lowered by d*sqrt(1 + b^2), a vertex's
+/// circle near side rv - sqrt(d^2 - ds^2) - and the center curve
+/// is the MINIMUM of those claims, the tightest position that is
+/// legal against every piece at once. The same Minkowski theorem
+/// as the OD ride keeps it gouge-free, and the same candidate set
+/// and settle law sample it. The seed is +INFINITY, not the axis:
+/// reusing `profile_offset` on station-flipped points would pin
+/// every negative claim at its r = 0.0 floor and walk the bar down
+/// the axis - the inside ride is its own curve, not a mirror
+/// image of the outside one.
+pub fn profile_offset_in(
+    pts: &[SR],
+    d: f64,
+    tol: f64,
+    s_lo: f64,
+    s_hi: f64,
+) -> Result<Vec<SR>, GenError> {
+    if pts.len() < 2 {
+        return Err(GenError::Empty("the hole's wall has nothing to ride".into()));
+    }
+    if d <= 0.0 || !d.is_finite() {
+        return Err(GenError::Invalid(format!(
+            "an offset of {d} is not a size a ball can ride"
+        )));
+    }
+    if tol <= 0.0 || !tol.is_finite() {
+        return Err(GenError::Invalid(format!(
+            "the offset's chord tolerance must be a positive finite size, not {tol}"
+        )));
+    }
+    if s_hi <= s_lo || !s_lo.is_finite() || !s_hi.is_finite() {
+        return Err(GenError::Empty(
+            "the hole's wall has no station window to ride".into(),
+        ));
+    }
+    if pts[0].0 > s_lo || pts[pts.len() - 1].0 < s_hi {
+        return Err(GenError::Empty(
+            "the hole's wall does not span the window".into(),
+        ));
+    }
+    let segs: Vec<(f64, f64, f64, f64)> = pts
+        .windows(2)
+        .filter(|w| w[0].0 < w[1].0)
+        .map(|w| (w[0].0, w[1].0, w[0].1, (w[1].1 - w[0].1) / (w[1].0 - w[0].0)))
+        .collect();
+    let d2 = d * d;
+    let val = |s: f64| -> f64 {
+        let mut r: f64 = f64::INFINITY;
+        let clo = pts.partition_point(|&(sv, _)| sv < s - d);
+        let chi = pts.partition_point(|&(sv, _)| sv <= s + d);
+        for &(sv, rv) in &pts[clo..chi] {
+            let q = d2 - (s - sv) * (s - sv);
+            if q >= 0.0 {
+                r = r.min(rv - q.sqrt());
+            }
+        }
+        let i = segs.partition_point(|&(s0, _, _, _)| s0 <= s);
+        for &(s0, s1, a, b) in &segs[i.saturating_sub(1)..(i + 2).min(segs.len())] {
+            if s0 <= s && s <= s1 {
+                r = r.min(a + b * (s - s0) - d * (1.0 + b * b).sqrt());
+            }
+        }
+        // A station no piece claims would have to lie off the wall
+        // polyline, which the spanning door above rules out.
+        debug_assert!(r.is_finite());
+        r
+    };
+
+    let mut cs: Vec<f64> = vec![s_lo, s_hi];
+    for &(sv, _) in pts {
+        for c in [sv - d, sv, sv + d] {
+            if s_lo < c && c < s_hi {
+                cs.push(c);
+            }
+        }
+    }
+    cs.sort_unstable_by(f64::total_cmp);
+    cs.dedup();
+
+    let mut out: Vec<SR> = Vec::with_capacity(cs.len());
+    let mut budget = MAX_OFFSET_PTS;
+    let mut prev = (cs[0], val(cs[0]));
+    out.push(prev);
+    for &c in &cs[1..] {
+        let here = (c, val(c));
+        settle(&val, prev, here, tol, &mut out, &mut budget)?;
+        out.push(here);
+        prev = here;
+    }
+    out.dedup();
+    Ok(out)
+}
+
 /// Bisect a candidate gap until its chord stands within `tol` of
 /// the curve (the max of flats and circle tops is C0 and
 /// piecewise smooth, so the test converges), left half first so

@@ -386,8 +386,11 @@ fn op_icon(kind: OpType) -> Icon {
         // promised face (M5.2 E).
         OpType::GrooveRough | OpType::GrooveFinish | OpType::Part | OpType::Threading => Icon::Face,
         OpType::Chamfering | OpType::TaperTurning | OpType::MultiPassTurning => Icon::Face,
-        // So is the formed surface the gauge stamps (M5.2 E2).
-        OpType::FormTurning => Icon::Face,
+        // So is the formed surface the gauge stamps (M5.2 E2), and
+        // the wall the bar rides - the turned surface held to size
+        // from the inside (M5.2 F), same glyph by the no-new-asset
+        // law the whole family keeps.
+        OpType::FormTurning | OpType::BoringTurning => Icon::Face,
     }
 }
 

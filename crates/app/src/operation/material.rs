@@ -328,9 +328,12 @@ pub(super) fn region_for_src(
                     | OpParams::TaperTurning { .. }
                     // So is a crown plunge: the window says which
                     // valleys the gauge stamps, and the model says
-                    // it too (M5.2 E2).
+                    // it too (M5.2 E2). So is a bore: the hole the
+                    // bar rides is in the model, and a pick could
+                    // only disagree with it (M5.2 F).
                     | OpParams::MultiPassTurning { .. }
                     | OpParams::FormTurning { .. }
+                    | OpParams::BoringTurning { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -424,9 +427,12 @@ pub(super) fn region_for(
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
         // The crown gauge stands on the same disc: a face of
-        // revolution casts the turned part's shadow (M5.2 E2).
+        // revolution casts the turned part's shadow (M5.2 E2). The
+        // boring bar too - conservative by the bar's OD, which is
+        // exactly the law the family keeps, and never a hide.
         | OpParams::MultiPassTurning { .. }
-        | OpParams::FormTurning { .. } => {
+        | OpParams::FormTurning { .. }
+        | OpParams::BoringTurning { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

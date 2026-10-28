@@ -29,7 +29,11 @@ pub enum ToolKind {
     /// tapping cycle feeds at - rpm x pitch. Only `Tap` reads `pitch`.
     Tap,
     /// Boring bar: single-point, hole-sized by the slide, profiled as a
-    /// plain cylinder. Geometry beyond the diameter is not modeled.
+    /// plain cylinder. On a drilling cycle the diameter is the whole
+    /// tool (the G86 family sizes by the slide); from M5.2 F the
+    /// turning kind also reads `nose_radius` - the ground nose the bar
+    /// rides a hole's wall on, exactly the number the OD kinds carry
+    /// in the same field.
     Bore,
     /// Turning insert (M5.2 stage A): the lathe's single-point cutter -
     /// the WORK spins, the insert traverses. `nose_radius` (inert for
@@ -123,7 +127,10 @@ pub struct Tool {
     /// tip): 0.8 is common roughing stock. Inert unless kind is
     /// Turning, where it is the circle the facing verdict sweeps, or
     /// Form, where it is the crown's arc radius the revolve verdict
-    /// bends its floor by - every other kind reads it as 0.0 and
+    /// bends its floor by, or Bore, where it is the ground nose the
+    /// bar rides a hole's wall on (M5.2 F: the envelope verdict
+    /// rolls THIS circle about the centers, as law (f) reads it for
+    /// every turning steel) - every other kind reads it as 0.0 and
     /// rolls its own radius.
     pub nose_radius: f64,
     /// Blade width in mm along the axis (the grooving/parting insert's
@@ -241,7 +248,16 @@ impl Tool {
         ToolGeom {
             radius: self.diameter * 0.5,
             nose_radius: match self.kind {
-                ToolKind::Turning => self.nose_radius,
+                // The envelope law rolls the CENTER path with this
+                // circle: the turning insert's nose (stage A) and,
+                // from M5.2 F, the boring bar's - a bore ride walks
+                // the nose center just like the OD rides, so the
+                // verdict must roll the same ball. The blade kinds
+                // (Groove, Thread, Form) are judged on the
+                // meridian, not by a rolled ball: their ground
+                // geometry rides the op params, and their ToolGeom
+                // nose stays 0.0 by law.
+                ToolKind::Turning | ToolKind::Bore => self.nose_radius,
                 _ => 0.0,
             },
             flute_len: self.flute_len,
@@ -439,7 +455,17 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("DR-0600", cy(ToolKind::Drill, 6.0, 118.0, 0.0, 18.0, 6.0, 7500.0, 115.0)),
         ("TAP-M4", cy(ToolKind::Tap, 4.0, 0.0, 0.7, 18.0, 4.5, 800.0, 560.0)),
         ("TAP-M6", cy(ToolKind::Tap, 6.0, 0.0, 1.0, 20.0, 6.0, 600.0, 600.0)),
-        ("BR-1000", cy(ToolKind::Bore, 10.0, 0.0, 0.0, 20.0, 10.0, 4000.0, 400.0)),
+        // The catalog boring bar, with the ground nose a boring tip
+        // is bought with (0.4 is the handbook's usual for a Ø10 bar)
+        // - inert for the drilling cycles, the ride radius for the
+        // boring kernel (M5.2 F). The mill holder stack cy gives is
+        // stripped, the tn family's rule: the turret IS the holder.
+        // Law (c) reads a band's column along Z about the move's XY,
+        // and a bar's steel lies RADIAL on a lathe - an OD column 22
+        // over the tip convicts every bore ride for a collision no
+        // boring bar has. Its kerf excuses the rest: Ø10 body on a
+        // Ø10 shank, the shank band skipped as the inserts' is.
+        ("BR-1000", Tool { nose_radius: 0.4, holder_d: 0.0, holder_len: 0.0, ..cy(ToolKind::Bore, 10.0, 0.0, 0.0, 20.0, 10.0, 4000.0, 400.0) }),
         ("TN-1600-0R8", tn(16.0, 0.8, 8.0, 16.0, 3000.0, 150.0)),
         ("GT-0200", gt(16.0, 2.0, 8.0, 16.0, 2500.0, 90.0)),
         ("GT-0300", gt(16.0, 3.0, 8.0, 16.0, 2000.0, 60.0)),

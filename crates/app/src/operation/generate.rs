@@ -1310,6 +1310,39 @@ pub fn generate(
             )?;
             (region, path)
         }
+        // M5.2 stage F: turning boring. The tool door names the boring
+        // bar - the ground nose IS the size the hole is held to, and
+        // the kernel's doors read the modeled hole against the window
+        // and refuse a solid bar, a blocked axis and an unreachable
+        // floor by name. The ride is stage B's offset law through the
+        // mirror: in on the axis, out to the wall, up the hole.
+        OpParams::BoringTurning {
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Bore {
+                return Err(GenError::Invalid(format!(
+                    "Boring needs a boring bar, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::bore(
+                &material.facets,
+                &crate::turning::BoreParams {
+                    tolerance: *tolerance,
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    nose_radius: tool.nose_radius,
+                },
+            )?;
+            (region, path)
+        }
     };
 
     // M3.2 stage B: what the program clamps to. The op's setup context
@@ -1376,7 +1409,11 @@ pub fn generate(
         // A crown plunge leaves no shelf either: the valley IS the
         // promise, and the deepest legal sink stands in it exactly -
         // a leave number could only move the rest verdict (M5.2 E2).
-        | OpParams::FormTurning { .. } => 0.0,
+        // The bore ride owns its wall outright: the nose stands ON
+        // the skin it offsets, and a leave would only move the
+        // envelope's pass band (M5.2 F).
+        | OpParams::FormTurning { .. }
+        | OpParams::BoringTurning { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -1453,8 +1490,13 @@ pub fn generate(
                             | OpParams::MultiPassTurning { .. }
                             // The crown sinks on the same silhouette:
                             // the modeled formed surface IS what the
-                            // plunge must land in (M5.2 E2).
+                            // plunge must land in (M5.2 E2). The
+                            // boring bar rides the same facets from
+                            // the inside: the wall's own envelope,
+                            // rolled about the centers, IS what the
+                            // ride must stand on (M5.2 F).
                             | OpParams::FormTurning { .. }
+                            | OpParams::BoringTurning { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -1511,6 +1553,13 @@ pub fn generate(
                         // an unmeasurable Envelope op refuses.
                         | OpParams::Chamfering { tolerance, .. }
                         | OpParams::TaperTurning { tolerance, .. }
+                        // The boring bar reads it the contour twins'
+                        // way - TWICE, and from the inside: the
+                        // kernel chords the wall and the center curve
+                        // at quarters of it, and the envelope scan
+                        // measures the ride against the same
+                        // promise (M5.2 F).
+                        | OpParams::BoringTurning { tolerance, .. }
                         | OpParams::MultiPassTurning { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },

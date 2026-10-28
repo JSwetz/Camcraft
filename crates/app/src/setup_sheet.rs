@@ -715,6 +715,14 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             top_z,
             bottom_z,
             ..
+        }
+        // The boring bar names the same trio - the rapids plane and
+        // the window of wall the ride walks (M5.2 F).
+        | OpParams::BoringTurning {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
         } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", None),

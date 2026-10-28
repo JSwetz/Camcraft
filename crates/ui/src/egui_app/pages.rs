@@ -2460,6 +2460,41 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the sink to each crown's depth is this kind's whole cut, and it rides this feed");
             }
         }
+        // Turning boring (M5.2 F): the page names the window and the
+        // budget and nothing else - the wall is in the model and the
+        // size is TOOL steel, the ground nose the tool page edits.
+        OpParams::BoringTurning {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "bore.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "bore.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "bore.bottom");
+                ui.label("the length of wall the bar rides - the bar enters along the axis, so the window must stand inside one open hole");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("how far the nose's ride may stand off the wall before the verdict speaks, and the chord budget the wall is sampled at");
+                ui.label("the ground nose that holds the hole to size rides the mounted boring bar - the tool page states it");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                ui.label("the wall is walked tangentially, station by station, at this feed");
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the bar's lead-out: the radial move from the axis onto the wall, and the slide back off it");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);
@@ -3849,6 +3884,16 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         {
                             state.tool_ui.nose_radius = 0.8;
                         }
+                        // The boring bar's nose (M5.2 F): the same
+                        // corner circle, read by the turning kind now -
+                        // seed it the way the insert's row is, so a
+                        // combo flip alone never leaves the bore op
+                        // refusing at the kernel's point-tip door.
+                        if state.tool_ui.kind == 5
+                            && (state.tool_ui.nose_radius.is_nan() || state.tool_ui.nose_radius <= 0.0)
+                        {
+                            state.tool_ui.nose_radius = 0.4;
+                        }
                         if state.tool_ui.kind == 7
                             && (state.tool_ui.width.is_nan() || state.tool_ui.width <= 0.0)
                         {
@@ -3903,6 +3948,11 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         field(ui, "Insert nose radius");
                         num(ui, u, &mut state.tool_ui.nose_radius);
                         ui.label("the corner circle ground into the tip - it IS the cutting ball");
+                    }
+                    if state.tool_ui.kind == 5 {
+                        field(ui, "Bar nose radius");
+                        num(ui, u, &mut state.tool_ui.nose_radius);
+                        ui.label("the ground tip circle the bar rides the hole wall on (M5.2 F) - inert on drilling cycles, which size by the slide");
                     }
                     if state.tool_ui.kind == 7 {
                         field(ui, "Blade width");

@@ -748,6 +748,22 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Turning boring (M5.2 stage F): one ascending ride of the
+    /// nose offset INSIDE a MODELED hole in the window
+    /// `top_z`/`bottom_z` bound - the bar runs in on the axis,
+    /// leads out radially at `plunge_feed`, and holds the wall to
+    /// size at `feed`, the contour twins' numbers read inward.
+    /// The nose radius is TOOL steel (the bar's ground tip, the
+    /// field every turning kind carries there); the hole itself is
+    /// the model's, and a window with none in it refuses by name.
+    BoringTurning {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 impl OpParams {
@@ -783,6 +799,7 @@ impl OpParams {
             OpParams::TaperTurning { .. } => OpType::TaperTurning,
             OpParams::MultiPassTurning { .. } => OpType::MultiPassTurning,
             OpParams::FormTurning { .. } => OpType::FormTurning,
+            OpParams::BoringTurning { .. } => OpType::BoringTurning,
         }
     }
 
@@ -846,7 +863,10 @@ impl OpParams {
             // the work spins, the band holds one station still
             // (M5.2 E2).
             | OpParams::MultiPassTurning { .. }
-            | OpParams::FormTurning { .. } => None,
+            | OpParams::FormTurning { .. }
+            // The boring bar is that kinematic inside a hole: the
+            // work spins, the nose walks the wall (M5.2 F).
+            | OpParams::BoringTurning { .. } => None,
         }
     }
 
@@ -882,7 +902,8 @@ impl OpParams {
             | OpParams::Chamfering { clearance_z, .. }
             | OpParams::TaperTurning { clearance_z, .. }
             | OpParams::MultiPassTurning { clearance_z, .. }
-            | OpParams::FormTurning { clearance_z, .. } => *clearance_z,
+            | OpParams::FormTurning { clearance_z, .. }
+            | OpParams::BoringTurning { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -931,7 +952,10 @@ impl OpParams {
             // The form window's high station: the topmost valley's
             // crown stands at or below it (M5.2 E2).
             | OpParams::MultiPassTurning { top_z, .. }
-            | OpParams::FormTurning { top_z, .. } => *top_z,
+            | OpParams::FormTurning { top_z, .. }
+            // The bore window's high station: the wall the ride
+            // ends at stands at or below it (M5.2 F).
+            | OpParams::BoringTurning { top_z, .. } => *top_z,
         }
     }
 
@@ -1040,6 +1064,9 @@ impl OpParams {
             // The gauge states the same trio - the rapids plane and
             // the window the formed surfaces stand in (M5.2 E2).
             | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. }
+            // The bar states the same trio - the rapids plane and
+            // the window of wall the ride walks (M5.2 F).
+            | OpParams::BoringTurning { clearance_z, top_z, bottom_z, .. }
             | OpParams::FormTurning { clearance_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 f(*top_z);

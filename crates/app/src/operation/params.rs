@@ -928,6 +928,28 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The boring bar (M5.2 stage F, tag 29): the same
+            // shape - the wall is in the model and the nose is
+            // TOOL steel, so what moves here is the window the
+            // ride walks and the verdict's budget; a re-ground
+            // bar makes this op Stale through the global nose row
+            // on its own.
+            OpParams::BoringTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
         }
     }
 }

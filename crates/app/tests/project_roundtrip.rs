@@ -4328,3 +4328,101 @@ fn v37_file_steps_to_v38_and_the_form_grammar_round_trips() {
         "a form op that never plunges is not an op"
     );
 }
+
+#[test]
+fn v38_file_steps_to_v39_and_the_bore_grammar_round_trips() {
+    // M5.2 stage F: the boring kind arrives as ONE new params tag
+    // (`boring_turning`) and no new tool-kind word - `bore` has
+    // filed since the drilling days, and its ground nose rides the
+    // `nose_radius` key v33 files already carry. The hole the bar
+    // rides is the mesh every kind already files, so there is
+    // nothing else to name. The step-up is the arrival law restated
+    // an eighth time.
+    let world = new_world();
+    project::open(&world, r#"{"version": 38, "entities": []}"#).expect("v38 steps up");
+    let p = tmp_path("v39a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v39 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v39 wire grammar, hand-written so the names are pinned:
+    // one boring bar (the ride is all TOOL steel - the ground nose
+    // 0.4) and the bore op on the numbers the app suite generates
+    // with (the hole's wall, notably, is NOT among them - it is
+    // geometry, and geometry lives in the model).
+    let text = r#"{
+        "version": 39,
+        "entities": [
+            {"name": "T0", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "bore", "diameter": 10.0, "corner_r": 0.0,
+                      "nose_radius": 0.4,
+                      "flute_len": 20.0, "shank_d": 10.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 4000.0, "feed": 400.0}},
+            {"name": "BR1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T0", "src": "stock", "params": {"boring_turning": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 60.0},
+                 "top_z": {"reference": "fixed", "offset": 40.0},
+                 "bottom_z": {"reference": "fixed", "offset": -10.0},
+                 "feed": 120.0, "plunge_feed": 40.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v39 bore grammar must read");
+    let e = model::find_by_name(&world, "T0").expect("tool");
+    let t = model::tool_of(&world, &e).expect("definition");
+    assert_eq!(t.kind, camcraft_app::tools::ToolKind::Bore);
+    assert_eq!(t.nose_radius, 0.4, "the bar IS its tool row - the ground nose");
+    let e = model::find_by_name(&world, "BR1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::BoringTurning { feed, plunge_feed, .. } = &o.params else {
+        panic!("boring turning params expected, got {:?}", o.params);
+    };
+    assert_eq!((*feed, *plunge_feed), (120.0, 40.0));
+
+    // Write-parse-write is a fixed point, and each new name is
+    // stated exactly once - the OLD word (`bore`) counts too: the
+    // arrival law is "one new tag, no new kind word", and this is
+    // where that is pinned.
+    let p = tmp_path("v39b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the bar shapes round-trip byte-identically");
+    assert_eq!(first.matches("\"boring_turning\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"kind\": \"bore\"").count(), 1, "the kind word is the old one: {first}");
+
+    // The sane doors at the loader: a bar that rides on a point is
+    // the kernel's door, not the loader's (a drilling cycle's bore
+    // files the same 0.0 and is honest steel), so the doors here
+    // are the op's own numbers - no sink, no tolerance - and the
+    // tag grammar: a name guessed from the label is no name.
+    let no_sink = text.replace("\"plunge_feed\": 40.0", "\"plunge_feed\": 0.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &no_sink), Err(ProjectError::Corrupt(_))),
+        "a bore op that never leads out is not an op"
+    );
+    let no_tol = text.replace("\"tolerance\": 0.05", "\"tolerance\": 0.0");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &no_tol), Err(ProjectError::Corrupt(_))),
+        "a bore ride with no chord tolerance is no ride"
+    );
+    let guessed = text.replace("\"boring_turning\"", "\"bore_turning\"");
+    let world5 = new_world();
+    assert!(
+        matches!(project::open(&world5, &guessed), Err(ProjectError::Corrupt(_))),
+        "the tag is the variant's snake name, not a guess from the label"
+    );
+}

@@ -2032,8 +2032,9 @@ fn a_lathe_document_lights_the_turning_cell() {
     // not a remembered list: the two profile cells light with it,
     // stage C's three blade cells ride the very same row (M5.2 C),
     // stage D's threading cell arrives on it too (M5.2 D), so do
-    // stage E's three contour rides (M5.2 E), and so does stage
-    // E2's form gauge cell (M5.2 E2).
+    // stage E's three contour rides (M5.2 E), so does stage E2's
+    // form gauge cell (M5.2 E2), and so does stage F's boring bar
+    // cell (M5.2 F).
     for word in [
         camcraft_app::operation::OpType::ProfileRough as usize,
         camcraft_app::operation::OpType::ProfileFinish as usize,
@@ -2045,6 +2046,7 @@ fn a_lathe_document_lights_the_turning_cell() {
         camcraft_app::operation::OpType::TaperTurning as usize,
         camcraft_app::operation::OpType::MultiPassTurning as usize,
         camcraft_app::operation::OpType::FormTurning as usize,
+        camcraft_app::operation::OpType::BoringTurning as usize,
     ] {
         assert!(
             panes::enabled(Cmd::Create(word), st),

@@ -646,6 +646,19 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
     },
+    /// See [`Self::Chamfering`] - the boring bar's way (M5.2 stage
+    /// F): the window, the tolerance and the two feeds, and no
+    /// size to file, because the hole's wall is in the model and
+    /// the nose that holds it to size is TOOL steel - `nose_radius`,
+    /// a key v38 files already carry.
+    BoringTurning {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

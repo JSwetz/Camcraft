@@ -762,6 +762,26 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
             }
+            // The boring door (M5.2 F): the form's set again - the
+            // wall the nose rides is MODEL steel, and the bar's
+            // ground nose is TOOL steel; what stands authored here
+            // is the window, the tolerance and the two feeds, and
+            // the kernel's doors do the rest.
+            OpParams::BoringTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
         }
     }
 

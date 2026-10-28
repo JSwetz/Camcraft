@@ -19,8 +19,10 @@
 //! finish and parting sweeps built on the same silhouette. Stage D
 //! added [`thread`]'s helical ladder; stage E adds [`contour`]'s
 //! promised-face rides - chamfer, taper, multi-pass - and stage E2
-//! [`form`]'s crown gauges. The rest join as their own files; the
-//! axis frame below is what they all share.
+//! [`form`]'s crown gauges. Stage F adds [`bore`]: the profile
+//! ride's inside twin, the nose walking a hole's inner wall. The
+//! rest join as their own files; the axis frame below is what they
+//! all share.
 //!
 //! Provenance: lathe facing as a radial-pass ladder at axial
 //! stations - standard turning practice from machine-tool handbooks
@@ -29,6 +31,7 @@
 //! axis-fit law. No vendor strategy or post output was inspected.
 
 pub mod blade;
+pub mod bore;
 pub mod contour;
 pub mod face;
 pub mod form;
@@ -41,6 +44,7 @@ pub mod thread;
 pub use blade::{
     groove_finish, groove_rough, part, GrooveFinishParams, GrooveRoughParams, PartParams,
 };
+pub use bore::{bore, BoreParams};
 pub use contour::{
     chamfer, multi_pass, taper, ChamferParams, MultiPassParams, TaperParams,
 };

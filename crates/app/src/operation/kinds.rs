@@ -113,6 +113,10 @@ fn feed_of(p: &OpParams) -> f64 {
         // number, stated but inert, the blade trio's precedent
         // (M5.2 E2).
         | OpParams::MultiPassTurning { feed, .. }
+        // The boring bar rides the wall tangentially station by
+        // station - the contour twins' pace, read inside out
+        // (M5.2 F).
+        | OpParams::BoringTurning { feed, .. }
         | OpParams::FormTurning { feed, .. } => *feed,
     }
 }
@@ -160,6 +164,9 @@ fn plunge_of(p: &OpParams) -> f64 {
         // feed is the only move the gauge makes under power
         // (M5.2 E2).
         | OpParams::MultiPassTurning { plunge_feed, .. }
+        // The bar's plunge is its radial lead-out off the axis -
+        // the same in-to-out approach read inward (M5.2 F).
+        | OpParams::BoringTurning { plunge_feed, .. }
         | OpParams::FormTurning { plunge_feed, .. } => *plunge_feed,
     }
 }
@@ -211,6 +218,10 @@ fn climb_of(p: &OpParams) -> bool {
         // work turns - which face of the skin the band rests on is
         // the spindle's whole story (M5.2 E2).
         | OpParams::MultiPassTurning { .. }
+        // Nor the boring bar: the nose stands on the wall while the
+        // work turns - which flank of the ball carries the chip is
+        // the spindle's whole story, inward as outward (M5.2 F).
+        | OpParams::BoringTurning { .. }
         | OpParams::FormTurning { .. } => true,
     }
 }
@@ -269,9 +280,12 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
         // A gauge tiles nothing: one crown stands on one modeled
-        // valley, the model's own spacing (M5.2 E2).
+        // valley, the model's own spacing (M5.2 E2). The boring bar
+        // tiles nothing either - the wall it rides is one continuous
+        // hole, and the ride is the pattern (M5.2 F).
         | OpParams::MultiPassTurning { .. }
-        | OpParams::FormTurning { .. } => None,
+        | OpParams::FormTurning { .. }
+        | OpParams::BoringTurning { .. } => None,
     }
 }
 
@@ -318,8 +332,12 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
         // A gauge plunge is one sink: the crown's shape, not a
-        // stepped infeed, is the whole descent (M5.2 E2).
+        // stepped infeed, is the whole descent (M5.2 E2). One ride
+        // of the wall is the boring answer too - no rough ladder
+        // exists yet between the hole's present size and its own
+        // skin (M5.2 F).
         | OpParams::FormTurning { .. }
+        | OpParams::BoringTurning { .. }
         | OpParams::MultiAxisContour { .. } => None,
     }
 }
@@ -364,9 +382,11 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Chamfering { top_z, .. }
         | OpParams::TaperTurning { top_z, .. }
         // The form window's top: the highest crown the gauge sinks
-        // stands at or below this station (M5.2 E2).
+        // stands at or below this station (M5.2 E2). The bore
+        // window's top: where the bar's nose stops riding the wall.
         | OpParams::MultiPassTurning { top_z, .. }
-        | OpParams::FormTurning { top_z, .. } => Some(*top_z),
+        | OpParams::FormTurning { top_z, .. }
+        | OpParams::BoringTurning { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -412,9 +432,12 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Chamfering { bottom_z, .. }
         | OpParams::TaperTurning { bottom_z, .. }
         // The form window's bottom: the lowest valley run's station
-        // stands at or above it (M5.2 E2).
+        // stands at or above it (M5.2 E2). The bore window's bottom:
+        // the station the bar plunges in at, floor-reach refused
+        // below it (M5.2 F).
         | OpParams::MultiPassTurning { bottom_z, .. }
-        | OpParams::FormTurning { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::FormTurning { bottom_z, .. }
+        | OpParams::BoringTurning { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -472,9 +495,14 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::TaperTurning { .. }
         // The gauge rapids plane is the whole bar's radius plus
         // tolerance, clear of every crest the crowns pass over
-        // under rapids (M5.2 E2).
+        // under rapids (M5.2 E2). The boring bar names its own:
+        // it comes OFF the wall to the axis between the lead-out
+        // and the lead-back-in, and travels home at the clearance
+        // height - no hop plane exists between the ride's ends
+        // (M5.2 F).
         | OpParams::MultiPassTurning { .. }
-        | OpParams::FormTurning { .. } => None,
+        | OpParams::FormTurning { .. }
+        | OpParams::BoringTurning { .. } => None,
     }
 }
 
@@ -936,6 +964,21 @@ fn seed_multi_pass(c: &Carried) -> OpParams {
 /// TOOL steel (M5.2 E2).
 fn seed_form(c: &Carried) -> OpParams {
     OpParams::FormTurning {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The boring seed: the window and feeds carried, the house
+/// finishing tolerance, and nothing else - the wall the nose rides
+/// is the hole the model already has, and the size it holds is
+/// TOOL steel, the ground nose the bar carries (M5.2 F).
+fn seed_bore(c: &Carried) -> OpParams {
+    OpParams::BoringTurning {
         tolerance: 0.05,
         clearance_z: c.clearance,
         top_z: c.top,
@@ -1489,6 +1532,23 @@ impl KindInfo {
             family: Family::Turn,
             seed: seed_form,
         },
+        KindInfo {
+            ty: OpType::BoringTurning,
+            label: "Boring",
+            caption: "Bore",
+            tag: 29,
+            // The profile finish's inside twin (M5.2 F): the nose
+            // stands ON the wall and the bar rides it, so the
+            // envelope scan - rolled about the centers with the
+            // tool's own ground nose - measures the ride against
+            // the very skin the kernel offset. The hole-existence
+            // doors are what make this safe: a plain bar's
+            // min-envelope is its own skin, and only the axis
+            // parity knows whether the nose stands in air.
+            mode: Mode::Envelope,
+            family: Family::Turn,
+            seed: seed_bore,
+        },
     ];
 }
 
@@ -1527,6 +1587,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[26].label,
     KindInfo::ALL[27].label,
     KindInfo::ALL[28].label,
+    KindInfo::ALL[29].label,
 ];
 
 impl OpType {
@@ -1564,6 +1625,7 @@ impl OpType {
             OpType::TaperTurning => 26,
             OpType::MultiPassTurning => 27,
             OpType::FormTurning => 28,
+            OpType::BoringTurning => 29,
         }
     }
 

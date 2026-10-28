@@ -185,6 +185,15 @@ pub enum OpType {
     /// (see [`crate::turning`]). The depth is not authored: the
     /// model states it.
     FormTurning,
+    /// Turning boring (M5.2 stage F): the inside twin of the profile
+    /// ride — the bar enters along the hole's axis, a radial
+    /// lead-out sets the nose on the wall, and one ascending ride of
+    /// the nose-center offset holds the hole to size (see
+    /// [`crate::turning`]). The verdict is [`Self::TaperTurning`]'s
+    /// envelope, rolled about the centers with the bar's own ground
+    /// nose; a window that stands on no open hole is refused at the
+    /// door by name.
+    BoringTurning,
 }
 
 impl core::fmt::Display for OpType {

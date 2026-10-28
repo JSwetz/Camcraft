@@ -741,6 +741,21 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
             },
+            OpParams::BoringTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => ParamsDto::BoringTurning {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+            },
             OpParams::FormTurning {
                 tolerance,
                 clearance_z,
@@ -1550,6 +1565,25 @@ impl ParamsDto {
                 stepdown: *stepdown,
                 stock_to_leave: *stock_to_leave,
                 passes: *passes,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+            },
+            // Read back whole, the bar's way too - the window, the
+            // tolerance and the feeds, the nose living on the TOOL
+            // row as ever, and the hole standing in the model, not
+            // in the file (M5.2 F).
+            ParamsDto::BoringTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => OpParams::BoringTurning {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 feed: *feed,
                 plunge_feed: *plunge_feed,
             },

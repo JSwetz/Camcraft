@@ -334,6 +334,17 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // already files.
         file.version = 38;
     }
+    if file.version == 38 {
+        // v38 -> v39: the boring kind arrives (M5.2 stage F) as one
+        // new params variant (`boring_turning`) and no new tool-kind
+        // word - the `bore` kind has filed since the drilling days,
+        // and its ground nose rides the `nose_radius` key v33 files
+        // already carry. Same arrival law: a v38 file cannot contain
+        // the new tag, and `validate_kind` refuses an unknown params
+        // tag before anything is written. The hole the bar rides is
+        // the mesh every kind already files.
+        file.version = 39;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

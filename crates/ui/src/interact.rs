@@ -1190,7 +1190,11 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Chamfering { .. }
         | operation::OpParams::TaperTurning { .. }
         | operation::OpParams::MultiPassTurning { .. }
-        | operation::OpParams::FormTurning { .. } => None,
+        // The boring bar hops to the axis, not to a plane - the
+        // rapids in and out are the lead-off and lead-back, and the
+        // travel home rides the clearance height (M5.2 F).
+        | operation::OpParams::FormTurning { .. }
+        | operation::OpParams::BoringTurning { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1299,7 +1303,10 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Chamfering { top_z, bottom_z, .. }
         | operation::OpParams::TaperTurning { top_z, bottom_z, .. }
         | operation::OpParams::MultiPassTurning { top_z, bottom_z, .. }
-        | operation::OpParams::FormTurning { top_z, bottom_z, .. } => {
+        | operation::OpParams::FormTurning { top_z, bottom_z, .. }
+        // The bore window is the same pair of planes: the length of
+        // wall the ride walks (M5.2 F).
+        | operation::OpParams::BoringTurning { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,
