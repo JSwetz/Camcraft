@@ -4552,3 +4552,152 @@ Considered and dropped: minting duplicate kinds for the phrasings
 flips "Turning parting", Threading flips "Turning threading";
 adaptive roughing, boring, chamfer/taper/form/multi-pass, radial
 drilling and hole recognition stay open for stages E-G as planned.
+
+## M5.2 stage E - the promised-face rides (code 9f38881 + this docs)
+
+**A contour op is a promise over a MODELED contour - the ride
+follows the model, never the authored numbers.** Chamfering and
+taper turning state a cone (an angle, two diameters) and the kernel
+feeds it to the DOOR, not the path: every silhouette segment
+strictly inside the window must stand within tolerance of the
+authored line or the op refuses by name; inside the window the ride
+is the profile finish's offset walk along the model's own skin. Why:
+the verdict measures the pass against the MODEL - a ride that
+chased a cone authored BELOW the skin would gouge and print an
+honest-looking program, and silence about that is the Prime
+Directive's worst case; a ride above it just leaves rest. Considered
+and dropped: generating the surface from the numbers and riding that
+(what threading's phase door already refused for the V - the model
+is the truth the parameters promise), and refusing on vertex samples
+alone (a short window on a straight wall holds no sample; the door
+walks SEGMENTS - a chord differs from a line only at an overlap's
+ends, read at both).
+
+**A vertical silhouette segment (a face, a shoulder wall) deviates
+from the authored line only as far as the line stands OUTSIDE the
+radius interval the face sweeps.** A chamfer window that clips a
+shoulder is not a lying model - the tool visits that face
+tangentially at its plunge, and the S_IN band (0.1 mm) keeps
+tangent-touching end faces out of the promise. Cost to change: one
+clause in `worst_dev`.
+
+**The chamfer's angle states the slope's size; the FALL comes from
+the model.** Both readings (down toward either window end) are
+measured and the honest one judged. Why: the parameters never said
+which way the cone faces, and pretending they did would refuse
+half the honest programs. Considered: a signed angle or a direction
+enum in params (a number the model overrides anyway - noise).
+
+**A straight taper (equal diameters) is allowed and rides as a
+cylinder skim.** The law forbids lying about the model, not boring
+about it; the door still judges, and a square promise over a square
+bar is true. Cost to change: one if at the taper door.
+
+**The multi-pass ladder is the spring-pass midpoint formula - ride
+k of n at `d = nose + stock*(n-k)/n` - capped at 64.** Half of what
+the previous pass sprang back is the handbook's own finishing rule
+and makes every earlier ride strictly inside the last one by
+construction; passes >= 1 is the create door (a program with no
+finishing ride leaves the stock standing - the profile is the
+finish's to own), the cap is the kernel's (past 64 it is a polishing
+sequence). Stock to leave >= 0 with the same reasoning (negative
+leave is stock to remove, and the ladder eats to the leave, not
+through it). Considered: an authored per-ride distance schedule (a
+UI for people who want it, not the default law).
+
+**`Mode::Envelope` for all three, and that is not the blade
+stand-down in disguise.** The envelope scan's own law counts rest
+only where a pass PROMISED to roll over (two band contacts; single
+grazes and untouched columns are law, not rest) - so on a windowed
+face ride it measures exactly the skin the door judged, and the
+bar's untouched shoulders outside the window buy their silence from
+the LAW, not from a verdict weakening. The gate is the usual
+tol + cell^2/(2r). Cost to change: a Revolve-style meridian clause
+if a contour kind ever needs undercut judgment (it does not: no
+contour ride undercuts - the offset stands outside the skin).
+
+**Adaptive roughing (turning) - row 127 - ships ABSORBED by the
+multi-pass ladder, not as a duplicate kernel.** Audit: adaptive
+clearing exists because in MILLING, constant XY steps are wildly
+uneven LOAD. On a lathe the work spins: the chip is the feed and
+the radial step, and a constant rung step IS constant load; the
+only turning engagement variability is contour-driven dwell, which
+the rung ladder's per-station spans already equalize. A separate
+"adaptive turning" kind would differ from multi-pass only in how
+the rung depths are chosen - a strategy dial, not a law.
+Considered and dropped: minting the kind anyway (two registry rows,
+one verdict), and deferring to M6 (the row would stay open at Phase
+5 close for a feature the ladder already is). If a user needs
+area-paced rungs, the honest place is a stepdown POLICY inside
+multi_pass - RECOMMENDED flag for discussion.
+
+**v37 is the arrival law restated a sixth time - three params tags
+and nothing else.** No tool-kind word (the Turning insert is the
+whole steel), no new key on any row (the nose was filed since v33),
+unknown tags refused by validate_kind; a v36 file steps up with one
+apply.rs clause. Cost to change: none - it shipped.
+
+**Form turning stays OPEN (E2), and it is a TOOL-kind decision.**
+A form gauge is a crown - a meridian arc of its own - so the honest
+implementation is `ToolKind::Form` + the revolve verdict's floor
+bending from the wave's linear cot to the arc's sagitta (the wave
+clause is the special case); riding it on the Turning nose would
+let the envelope ball convict a correct crown cut or waive a gouge,
+the phantom-trench law's other half. Chosen: do it as stage E2 with
+its own commit, not stretched into E1's - the registry row 135
+stays 📋 until then. (Decision revisited at E2 close if that stage
+lands differently.)
+
+**The envelope's gouge law moved from a column floor to a facet
+distance - the M5.2 E phantom made the case and the geometry closes
+it.** `facet_gouge` measures each model triangle against each
+ball-center instant as the distance of two convex sets minus `r`
+(Ericson's reduction, public literature), where the verdict scan
+used to read "Dexel floor below the column's model height". Why: a
+height field CANNOT be honest about three things a lathe part is
+made of - a tilted flank (the vertical reading is inflated by 1/cos
+of the surface's tilt), a vertical wall (its columns carry no height
+at all, so a floor never "falls below" one), and an under-pass (a
+tangent chamfer ride stands the bar's whole length under its own end
+cap in columns the cap legitimately overhangs - the old law printed
+56 mm of gouge on a path no ball ever cut into). The distance law
+reads 0 on every flush ride BY CONSTRUCTION (distance == r, an
+exact sqrt on the suite's floors), keeps the r/2 mixup's ~3 mm, and
+keeps the dome meshes inside the gate (chord sagitta tol/4 < gate).
+The lattice no longer speaks in this verdict at all; the discretiza-
+tion left is the generator's own chords. Considered and dropped
+first: a span/island law (sweep-span overlapped against a second
+surface per column - it fixed the overhang and made the tilt WORSE:
+a 45-degree graze's span ∩ island is the ball's own crown depth,
+nonzero and phantom; worked counterexample, then reverted), and a
+min() of the two laws (keeps every false conviction of either).
+Pair discovery is a thick-line band walk over facet bins (slice
+window grown by r, cross extent grown by r - proof in the module
+doc), over-budget is a stated refusal the engine turns into a
+proves-nothing warning, never silence. The Dexel sweep stays exactly
+where it was: the display sim; it is dead only in the verdict.
+
+**Turning CL positions are NOSE CENTERS, and the envelope now says
+so per kind (`envelope_scan_centers`, lift 0).** The scan lifted
+every stored move by `+r` in Z - true for a ball nose (tip directly
+under center), a lie for a turning insert (the generator's offset
+walk stores the nose center, as the taper tests' `10 + nose` radii
+prove). On the chamfer's cone the lie walked the ball r(1-1/√2)
+into the skin and read r/√2 = 0.57 mm of gouge that never happened;
+on faces tilting the other way (a taper's, a flat's) the same lift
+walked the ball OUT and made the verdict vacuously blind - passing
+tests proved neither, because a silent clean and a true clean print
+the same line. Why the seam is a function choice and not a Move
+field: the convention is a KIND property (a stated nose_radius
+means the generator walked centers; `ToolGeom::nose_radius` is 0.0
+for every mill), so law (f) picks the scan by the same boolean that
+picks the ball - one fact, read once. Considered and dropped:
+lifting moves at the verify call site before the scan (two owners
+of one offset), and a tip-convention rewrite of the turning
+generators (every lead-in, slide-out and post writer in the turning
+files positions centers; the G-code is right BECAUSE they are).
+
+**Seeds: 45 degrees / dia 20->16 / stepdown 0.5 + leave 0.25 + 3
+rides, tolerance 0.05, heights carried.** The two-click defaults
+must run clean on the suite's bars, and the app suite proves it
+(the_seeds_of_the_contour_kinds_stand).

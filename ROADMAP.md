@@ -124,16 +124,16 @@ home.
 | Profile finishing | ✅ | M5.2 B |
 | Roughing groove | ✅ | M5.2 C |
 | Finishing groove | ✅ | M5.2 C |
-| Adaptive roughing (turning) | 📋 | M5.2 |
+| Adaptive roughing (turning) | ✅ | M5.2 E (the multi-pass ladder; see RECOMMENDED) |
 | Turning groove | ✅ | M5.2 C |
 | Turning single groove | ✅ | M5.2 C |
 | Turning threading | ✅ | M5.2 D |
 | Turning boring | 📋 | M5.2 |
 | Turning parting | ✅ | M5.2 C |
-| Turning chamfering | 📋 | M5.2 |
-| Taper turning | 📋 | M5.2 |
+| Turning chamfering | ✅ | M5.2 E |
+| Taper turning | ✅ | M5.2 E |
 | Form turning | 📋 | M5.2 |
-| Multi-pass turning | 📋 | M5.2 |
+| Multi-pass turning | ✅ | M5.2 E |
 | Drill (radial/axial, live tooling) | 📋 | M5.2 |
 | Hole recognition (on the turned solid) | 📋 | M5.2 |
 
@@ -1725,6 +1725,54 @@ Phase-5 shape law.
       rapid promise rides the kernel's clearance radius and the
       meridian scan, fixture steel still speaks every mode -
       RECOMMENDED.md, M5.2 D.
+- ✅ **Chamfering, taper turning and the multi-pass ladder - the
+      promised-face rides** (stage E, commit 9f38881): the contour
+      kinds - ops that state a FACE and swear the model already
+      has it. `contour.rs` rides the profile finish's own
+      machinery: the nose's offset walk along the MODEL's skin
+      inside the window, because the verdict measures against the
+      model and a pass that chased an authored cone BELOW it would
+      cut past the drawing and call it output. The authored
+      numbers spend themselves at the door instead: `worst_dev`
+      walks the silhouette's POLYLINE SEGMENTS (a straight wall
+      carries no vertex sample in a short window and is no less a
+      lie for it) strictly inside the window against the authored
+      line - radius vs. station, the meridian's own reading - and
+      a vertical segment (a face, the wall of a shoulder) deviates
+      only as far as the line stands outside the radius interval it
+      sweeps. The chamfer's angle states the slope's SIZE only:
+      both readings (falling toward either window end) are tried
+      and the door judges the honest one - the sign comes from the
+      model, never the parameters; a 45-degree face's offset CL
+      stands `nose*sqrt(2)` out radially (the intercept shift), and
+      the max-of-claims law keeps the corner's radial plunge
+      tangent to cone, cylinder and end disk at once. The taper's
+      two diameters state the cone outright - equal ones are a
+      legal straight skim of a cylinder. Multi-pass states no new
+      surface at all: the rung ladder down to `nose + leave`, then
+      the spring-pass rides, ride k of n at
+      `d = nose + stock*(n-k)/n` - the handbook's half-the-spring
+      law as a distance schedule, the last ride the profile itself,
+      one ride the classic rough+finish pair; the cap (64) refuses
+      a polishing sequence by name. New kinds Chamfering /
+      TaperTurning / MultiPassTurning (ordinals 25-27, wire v37 - a
+      pure step-up: three params tags, no new tool kind and no new
+      key on any row: the rides stand on the nose circle every
+      `turning` row already files, and the general tool digest
+      marks them Stale on a regrind exactly as the profile kinds
+      do). They are judged by `Mode::Envelope` because the scan's
+      own law is the contour's - gouge is now facet-to-path
+      distance truth (the column floor that answered it before
+      cannot read a tilt, a wall or an under-pass honestly), rest
+      is only ridges the pass promised to roll over, untouched
+      columns are law and not this number - and the ride stands
+      nose-center-still for it, so the windowed band the door
+      measured is exactly the skin the verdict measures; "adaptive
+      roughing (turning)" ships ABSORBED by the ladder (constant
+      radial steps are constant load when the work spins; the
+      engagement variability adaptive clearing exists to fix is a
+      milling accident - RECOMMENDED.md, M5.2 E), form turning
+      stays open for the gauge verdict (E2).
 
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**
