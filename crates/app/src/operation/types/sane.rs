@@ -643,6 +643,33 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
             }
+            // The threading door (M5.2 stage D): three positive helix
+            // numbers - pitch, depth, infeed - beside the twins'
+            // heights and feeds. Whether the V FITS the pitch it is
+            // asked to cut is the TOOL's question and stays the
+            // generator's, refused there by name (the kernel's
+            // width-vs-pitch door).
+            OpParams::Threading {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                pitch,
+                depth,
+                infeed,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*pitch)
+                    && pos(*depth)
+                    && pos(*infeed)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
         }
     }
 

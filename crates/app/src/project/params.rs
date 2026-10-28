@@ -581,6 +581,21 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Declared at v36 with the threading kind (M5.2 stage D): the
+    /// window of turns' three heights and the wave's own numbers -
+    /// pitch, depth, ladder infeed, feeds. The insert's V rides the
+    /// TOOL row, the blade's width law again.
+    Threading {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        pitch: f64,
+        depth: f64,
+        infeed: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

@@ -81,12 +81,14 @@ pub struct PartParams {
 
 /// A plunge cap with room to spare - facing's number, the same
 /// promise.
-const MAX_RUNGS: f64 = 100_000.0;
+pub(crate) const MAX_RUNGS: f64 = 100_000.0;
 
-/// What a blade kernel walks on: the frame, the chord windows, the
-/// window's station pair and the bar's domain ends.
+/// What a blade kernel walks on: the frame, the silhouette samples
+/// and their chord windows, the window's station pair and the bar's
+/// domain ends.
 type Blade = (
     profile::Frame,
+    Vec<(f64, f64)>,
     revolve::Segs,
     (f64, f64),
     (f64, f64),
@@ -96,8 +98,11 @@ type Blade = (
 /// The shared door: the numbers are numbers, the blade has width,
 /// the model revolves, and the height window holds bar. Blades
 /// carry no nose promise, so this stands on its own beside
-/// [`super::prof`]'s setup.
-fn setup(
+/// [`super::prof`]'s setup. `tool_word` names the steel the refusal
+/// asks for - the threading kernel reads bar through the same door
+/// a blade does (M5.2 D), and its insert is not a blade.
+#[allow(clippy::too_many_arguments)] // the whole door is flat reads, like prof::setup
+pub(crate) fn setup(
     facets: &[Triangle],
     clearance_z: f64,
     top_z: f64,
@@ -105,6 +110,7 @@ fn setup(
     width: f64,
     tol: f64,
     what: &str,
+    tool_word: &str,
 ) -> Result<Blade, GenError> {
     if facets.is_empty() {
         return Err(GenError::Invalid(format!("no facets to {what}")));
@@ -120,7 +126,7 @@ fn setup(
     if width <= 0.0 {
         return Err(GenError::Invalid(format!(
             "a blade of width {width:.3} cuts no band - the kerf's width IS the tool; \
-             mount a grooving blade with a real width"
+             mount a {tool_word} with a real width"
         )));
     }
     if tol <= 0.0 {
@@ -140,7 +146,8 @@ fn setup(
         )));
     }
     let rho_clear = prof.r_max + tol;
-    Ok((f, revolve::segs(&pts), (s_lo, s_hi), (d_lo, d_hi), rho_clear))
+    let sg = revolve::segs(&pts);
+    Ok((f, pts, sg, (s_lo, s_hi), (d_lo, d_hi), rho_clear))
 }
 
 /// The centers that tile the window: spaced one blade width apart,
@@ -215,7 +222,12 @@ fn rung(v: f64, floor: f64) -> f64 {
 /// The roughing rungs at one center: from the window shell inward,
 /// stopped by `B + leave` - the floor the blade may reach without
 /// eating what the model keeps, plus the skin it was told to leave.
-fn rungs(b: f64, ref_top: f64, stepdown: f64, leave: f64) -> Result<Vec<f64>, GenError> {
+pub(crate) fn rungs(
+    b: f64,
+    ref_top: f64,
+    stepdown: f64,
+    leave: f64,
+) -> Result<Vec<f64>, GenError> {
     let floor = b + leave;
     if ref_top > floor + stepdown * MAX_RUNGS {
         return Err(GenError::Invalid(format!(
@@ -239,7 +251,7 @@ pub fn groove_rough(
     facets: &[Triangle],
     p: &GrooveRoughParams,
 ) -> Result<Toolpath, GenError> {
-    let (f, sg, win, dom, rho_clear) = setup(
+    let (f, _, sg, win, dom, rho_clear) = setup(
         facets,
         p.clearance_z,
         p.top_z,
@@ -247,6 +259,7 @@ pub fn groove_rough(
         p.blade_width,
         p.tolerance,
         "groove",
+        "grooving blade",
     )?;
     if p.stepdown <= 0.0 {
         return Err(GenError::Invalid(
@@ -283,7 +296,7 @@ pub fn groove_finish(
     facets: &[Triangle],
     p: &GrooveFinishParams,
 ) -> Result<Toolpath, GenError> {
-    let (f, sg, win, dom, rho_clear) = setup(
+    let (f, _, sg, win, dom, rho_clear) = setup(
         facets,
         p.clearance_z,
         p.top_z,
@@ -291,6 +304,7 @@ pub fn groove_finish(
         p.blade_width,
         p.tolerance,
         "groove",
+        "grooving blade",
     )?;
     let cs = centers(win, dom, p.blade_width * 0.5)?;
     let mut b = PathBuilder::new(f.point(rho_clear, f.station_of(p.clearance_z)));

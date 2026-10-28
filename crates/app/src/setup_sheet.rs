@@ -681,6 +681,14 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             top_z,
             bottom_z,
             ..
+        }
+        // Threading states the same four rows - the window of turns
+        // by its plain names (M5.2 D).
+        | OpParams::Threading {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
         } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", None),

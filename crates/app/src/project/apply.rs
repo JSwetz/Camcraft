@@ -301,6 +301,17 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // mesh every kind already files.
         file.version = 35;
     }
+    if file.version == 35 {
+        // v35 -> v36: the threading kind arrives (M5.2 stage D) as one
+        // new params variant (`threading`) and one new tool-kind word
+        // (`thread`), under the same arrival law: no v35 file can
+        // contain them - the tags did not exist - and `validate_kind`
+        // already refuses an unknown params tag before anything is
+        // written. The thread's V rides the tool's `width` +
+        // `tip_angle` keys, both already inert-defaulted; the modeled
+        // thread is the mesh every kind already files.
+        file.version = 36;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

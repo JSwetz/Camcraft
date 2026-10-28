@@ -101,7 +101,11 @@ fn feed_of(p: &OpParams) -> f64 {
         // inert but named (M5.2 C).
         | OpParams::GrooveRough { feed, .. }
         | OpParams::GrooveFinish { feed, .. }
-        | OpParams::Part { feed, .. } => *feed,
+        | OpParams::Part { feed, .. }
+        // Threading's feed is the helix's own travel per minute -
+        // the synchronized spindle carries the distance-per-minute
+        // meaning unchanged (M5.2 D).
+        | OpParams::Threading { feed, .. } => *feed,
     }
 }
 
@@ -137,7 +141,10 @@ fn plunge_of(p: &OpParams) -> f64 {
         // eats at (M5.2 C).
         | OpParams::GrooveRough { plunge_feed, .. }
         | OpParams::GrooveFinish { plunge_feed, .. }
-        | OpParams::Part { plunge_feed, .. } => *plunge_feed,
+        // Threading's plunge is the rung's radial sink - the blade's
+        // law, one ladder deeper (M5.2 D).
+        | OpParams::Part { plunge_feed, .. }
+        | OpParams::Threading { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -175,7 +182,10 @@ fn climb_of(p: &OpParams) -> bool {
         // direction (M5.2 C).
         | OpParams::GrooveRough { .. }
         | OpParams::GrooveFinish { .. }
-        | OpParams::Part { .. } => true,
+        // Nor the wave: the V's two flanks alternate with the spin,
+        // and which one leads is the spindle's direction (M5.2 D).
+        | OpParams::Part { .. }
+        | OpParams::Threading { .. } => true,
     }
 }
 
@@ -220,10 +230,14 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::ProfileRough { .. }
         | OpParams::ProfileFinish { .. }
         // A blade has no spacing either: its width IS the pattern's
-        // step, tiled by the kernel's tangency law (M5.2 C).
+        // step, tiled by the kernel's tangency law (M5.2 C) - and a
+        // threading pass has no spacing a number could name: the
+        // helix's PITCH is the lattice, authored here as the thread's
+        // own lead, not a stepover (M5.2 D).
         | OpParams::GrooveRough { .. }
         | OpParams::GrooveFinish { .. }
-        | OpParams::Part { .. } => None,
+        | OpParams::Part { .. }
+        | OpParams::Threading { .. } => None,
     }
 }
 
@@ -258,6 +272,9 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // and one plunge per center is the groove finish's answer too.
         | OpParams::ProfileFinish { .. }
         | OpParams::GrooveFinish { .. }
+        // Threading's ladder spacing is INFEED, its own field - the
+        // retype carries no stepover number for it (M5.2 D).
+        | OpParams::Threading { .. }
         | OpParams::MultiAxisContour { .. } => None,
     }
 }
@@ -294,7 +311,10 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         // top the ladder rises from (M5.2 C).
         | OpParams::GrooveRough { top_z, .. }
         | OpParams::GrooveFinish { top_z, .. }
-        | OpParams::Part { top_z, .. } => Some(*top_z),
+        | OpParams::Part { top_z, .. }
+        // The threading window's high end: the first turn's station
+        // the lattice begins from (M5.2 D).
+        | OpParams::Threading { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -331,7 +351,10 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         // the station every rung sinks toward (M5.2 C).
         | OpParams::GrooveRough { bottom_z, .. }
         | OpParams::GrooveFinish { bottom_z, .. }
-        | OpParams::Part { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::Part { bottom_z, .. }
+        // The threading window's low end - the last center's station
+        // and the whole turns whose lattice it completes (M5.2 D).
+        | OpParams::Threading { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -378,7 +401,11 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         // traverses over (M5.2 C).
         | OpParams::GrooveRough { .. }
         | OpParams::GrooveFinish { .. }
-        | OpParams::Part { .. } => None,
+        // Threading's rapids plane is the clearance height itself -
+        // the whole bar's radius clears every turn's crest the pass
+        // traverses over (M5.2 D).
+        | OpParams::Part { .. }
+        | OpParams::Threading { .. } => None,
     }
 }
 
@@ -755,6 +782,25 @@ fn seed_part(c: &Carried) -> OpParams {
         top_z: c.top,
         bottom_z: c.bottom,
         stepdown: 0.5,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The threading seed: the window and feeds carried, and the
+/// commonest thread in the shop as the modeled numbers - a 2 mm
+/// pitch, its ISO 0.541 x P depth, and a quarter-pitch-of-depth
+/// infeed ladder (three or four rungs to the root). The V itself
+/// comes from the tool, never authored here (M5.2 D).
+fn seed_threading(c: &Carried) -> OpParams {
+    OpParams::Threading {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        pitch: 2.0,
+        depth: 1.08,
+        infeed: 0.4,
         feed: c.feed,
         plunge_feed: c.plunge,
     }
@@ -1230,6 +1276,22 @@ impl KindInfo {
             family: Family::Turn,
             seed: seed_part,
         },
+        KindInfo {
+            ty: OpType::Threading,
+            label: "Threading",
+            caption: "Threading",
+            tag: 24,
+            // The blade verdict with the wave clause (M5.2 D): the
+            // tool's V, not a boxcar, is the footprint - at every
+            // center's station the floor stands deeper by the flank
+            // slope's cotangent times the distance along the axis.
+            // The lattice is the helix's own, so the scan judges
+            // every `pitch` of station on the model's phase, and
+            // the shell owns the crest above the thread.
+            mode: Mode::Revolve,
+            family: Family::Turn,
+            seed: seed_threading,
+        },
     ];
 }
 
@@ -1263,6 +1325,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[21].label,
     KindInfo::ALL[22].label,
     KindInfo::ALL[23].label,
+    KindInfo::ALL[24].label,
 ];
 
 impl OpType {
@@ -1295,6 +1358,7 @@ impl OpType {
             OpType::GrooveRough => 21,
             OpType::GrooveFinish => 22,
             OpType::Part => 23,
+            OpType::Threading => 24,
         }
     }
 

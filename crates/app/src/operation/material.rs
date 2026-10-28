@@ -319,6 +319,9 @@ pub(super) fn region_for_src(
                     | OpParams::GrooveRough { .. }
                     | OpParams::GrooveFinish { .. }
                     | OpParams::Part { .. }
+                    // The lattice is the modeled thread's own - a
+                    // pick could only disagree with the helix (D).
+                    | OpParams::Threading { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -403,7 +406,10 @@ pub(super) fn region_for(
         // width lives in the meridian, not the footprint (M5.2 C).
         | OpParams::GrooveRough { .. }
         | OpParams::GrooveFinish { .. }
-        | OpParams::Part { .. } => {
+        // Threading's shadow is the bar's own disc too - the wave
+        // lives in the meridian, not the footprint (M5.2 D).
+        | OpParams::Part { .. }
+        | OpParams::Threading { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

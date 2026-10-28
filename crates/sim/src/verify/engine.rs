@@ -364,23 +364,35 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     }
 
     // (d) Rapids: lateral travel under the clearance plane inside stock.
-    for (i, m) in path.moves.iter().enumerate() {
-        if m.kind != MoveKind::Rapid {
-            continue;
-        }
-        let (a, b) = (xy(&m.from), xy(&m.to));
-        let (dx, dy) = (b.x - a.x, b.y - a.y);
-        if dx * dx + dy * dy <= cx.z_tol * cx.z_tol {
-            continue; // vertical retract through the tool's own kerf
-        }
-        let low = m.from.z.min(m.to.z);
-        if low >= cx.clearance_z - cx.z_tol {
-            continue;
-        }
-        let mid = Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-        let bad = [a, mid, b].into_iter().any(|q| in_stock(q) && low < surface(q));
-        if bad {
-            warns.push(Warning::RapidInStock { at: i });
+    // Mode::Revolve stands this law down (M5.2 D): the XY column is the
+    // mill's geometry - a turning insert is a POINT in XY and its whole
+    // form lives in the meridian plane. The pull-out from a thread's
+    // last V slides along flanks that coincide with the cut's own
+    // surfaces, yet the column above the tip circle is solid core
+    // forever - so this law convicts every full-depth threading retract
+    // for a collision the meridian scan knows cannot happen. The
+    // turning rapids' safety promise is the kernel's own: radial exits
+    // from cut stations and traverses at rho_clear, asserted by each
+    // family's tests. Fixture steel (d2) still stands - it is a box.
+    if cx.mode != Mode::Revolve {
+        for (i, m) in path.moves.iter().enumerate() {
+            if m.kind != MoveKind::Rapid {
+                continue;
+            }
+            let (a, b) = (xy(&m.from), xy(&m.to));
+            let (dx, dy) = (b.x - a.x, b.y - a.y);
+            if dx * dx + dy * dy <= cx.z_tol * cx.z_tol {
+                continue; // vertical retract through the tool's own kerf
+            }
+            let low = m.from.z.min(m.to.z);
+            if low >= cx.clearance_z - cx.z_tol {
+                continue;
+            }
+            let mid = Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+            let bad = [a, mid, b].into_iter().any(|q| in_stock(q) && low < surface(q));
+            if bad {
+                warns.push(Warning::RapidInStock { at: i });
+            }
         }
     }
 

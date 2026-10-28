@@ -3999,3 +3999,122 @@ fn v34_file_steps_to_v35_and_the_blade_grammar_round_trips() {
         "a parting ladder with no infeed is not a ladder"
     );
 }
+
+#[test]
+fn v35_file_steps_to_v36_and_the_thread_grammar_round_trips() {
+    // M5.2 stage D: the threading kind arrives as one new params tag
+    // (`threading`) and one new tool-kind word (`thread`), under the
+    // arrival law restated a fifth time: no v35 file can carry them,
+    // the V's `width` + `tip_angle` keys already ride every row
+    // (inert-defaulted for everything else), and the modeled thread
+    // is the mesh every kind already files. A v36 reader of a v35
+    // file loses nothing.
+    let world = new_world();
+    project::open(&world, r#"{"version": 35, "entities": []}"#).expect("v35 steps up");
+    let p = tmp_path("v36a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v36 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v36 wire grammar, hand-written so the tags are pinned: T0
+    // is the round insert stating neither V key (both must read
+    // inert), T1 is the threading insert with its profile stated,
+    // and TH1 stands on the numbers the app suite generates with.
+    let text = r#"{
+        "version": 36,
+        "entities": [
+            {"name": "T0", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "turning", "diameter": 16.0, "corner_r": 0.0,
+                      "nose_radius": 0.8,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 3000.0, "feed": 150.0}},
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "thread", "diameter": 16.0, "corner_r": 0.0,
+                      "width": 1.732, "tip_angle": 60.0,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 800.0, "feed": 120.0}},
+            {"name": "TH1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"threading": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 24.0},
+                 "top_z": {"reference": "fixed", "offset": 14.3},
+                 "bottom_z": {"reference": "fixed", "offset": 7.7},
+                 "pitch": 2.0, "depth": 1.2, "infeed": 0.4,
+                 "feed": 120.0, "plunge_feed": 40.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v36 thread grammar must read");
+    let e = model::find_by_name(&world, "T0").expect("tool");
+    let t = model::tool_of(&world, &e).expect("definition");
+    assert_eq!(
+        (t.width, t.tip_angle),
+        (0.0, 0.0),
+        "the absent V keys land on the inert default every non-thread tool always meant"
+    );
+    let e = model::find_by_name(&world, "T1").expect("tool");
+    let t = model::tool_of(&world, &e).expect("definition");
+    assert_eq!(t.kind, camcraft_app::tools::ToolKind::Thread);
+    assert_eq!(
+        (t.width, t.tip_angle),
+        (1.732, 60.0),
+        "the wave's profile rides the file - the thread IS its tool row"
+    );
+    let e = model::find_by_name(&world, "TH1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Threading {
+        pitch,
+        depth,
+        infeed,
+        feed,
+        plunge_feed,
+        ..
+    } = &o.params
+    else {
+        panic!("threading params expected, got {:?}", o.params);
+    };
+    assert_eq!(
+        (*pitch, *depth, *infeed, *feed, *plunge_feed),
+        (2.0, 1.2, 0.4, 120.0, 40.0)
+    );
+
+    // Write-parse-write is a fixed point, and the new word is stated
+    // exactly where the wave lives: the `threading` tag once, the
+    // kind word once, the width on EVERY tool row (inert or not, the
+    // nose_radius way restated a fourth time).
+    let p = tmp_path("v36b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the thread shapes round-trip byte-identically");
+    assert_eq!(first.matches("\"threading\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"thread\"").count(), 1, "the kind word rides the one V tool: {first}");
+    assert_eq!(first.matches("\"width\"").count(), 2, "every tool writes the band - inert or not: {first}");
+
+    // The sane doors at the loader: a threading insert that states
+    // no width is a point that cannot carry a V (the blade law for
+    // that kind alone), and a thread with no pitch is no helix.
+    let dull_insert = text.replace("\n                      \"width\": 1.732,", "");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &dull_insert), Err(ProjectError::Corrupt(_))),
+        "a threading insert with no stated width must not load"
+    );
+    let no_pitch = text.replace("\"pitch\": 2.0,", "\"pitch\": 0.0,");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &no_pitch), Err(ProjectError::Corrupt(_))),
+        "a thread with no pitch is no helix"
+    );
+}

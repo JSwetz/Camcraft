@@ -655,6 +655,31 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
             },
+            // The threading kind (M5.2 stage D): the wave's own three
+            // numbers beside the blade trio of heights - and the
+            // insert's V deliberately NOT here, because width and
+            // tip_angle belong to the tool the row mounts.
+            OpParams::Threading {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                pitch,
+                depth,
+                infeed,
+                feed,
+                plunge_feed,
+            } => ParamsDto::Threading {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                pitch: *pitch,
+                depth: *depth,
+                infeed: *infeed,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+            },
             OpParams::Slot {
                 a,
                 b,
@@ -1367,6 +1392,29 @@ impl ParamsDto {
                 top_z: (*top_z).into(),
                 bottom_z: (*bottom_z).into(),
                 stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+            },
+            // Read back whole, the threading kind's way too - sane or
+            // nothing, `validate_kind`'s door again first (M5.2 D).
+            ParamsDto::Threading {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                pitch,
+                depth,
+                infeed,
+                feed,
+                plunge_feed,
+            } => OpParams::Threading {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                pitch: *pitch,
+                depth: *depth,
+                infeed: *infeed,
                 feed: *feed,
                 plunge_feed: *plunge_feed,
             },

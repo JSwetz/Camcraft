@@ -71,12 +71,29 @@ pub(crate) const HAIR: f64 = 1e-9;
 /// The blade moves the verdict reads: a station span (`a` and `b` -
 /// the same point for a straight plunge) and the tip radius the move
 /// reaches. Feed moves only: a rapids' band moves air, not edges.
+///
+/// A threading insert is a blade cut to a V, and says so in `wave`:
+/// the floor it holds is not its tip but the wedge the flank sweeps,
+/// `tip + |s - c| * cot` around its center (M5.2 D). The scan's laws
+/// do not change - the boxcar still unions, the interval still
+/// judges at its two ends - only the floor now BENDS, linearly,
+/// between the centers the lattice already holds.
 pub struct BandMove {
     pub a: f64,
     pub b: f64,
     pub tip: f64,
     /// Index into the judged path, for the warning's attribution.
     pub at: usize,
+    /// `Some(cot(A/2))` for a form tool's band - the wave climbs
+    /// from the tip around the center `(a + b) * 0.5`; `None` for
+    /// the flat-tipped blade.
+    pub wave: Option<f64>,
+}
+
+/// The floor a move holds at a station: its tip, plus the flank's
+/// climb where the move carries a form.
+fn floor_at(m: &BandMove, s: f64) -> f64 {
+    m.tip + m.wave.map_or(0.0, |cot| (s - (m.a + m.b) * 0.5).abs() * cot)
 }
 
 /// The silhouette read as chord windows: (s0, s1, r0, slope) per
@@ -205,10 +222,17 @@ pub struct Alert {
 /// bands overlap each interval for real (a move appears at its
 /// band's left edge and stands to its right - the tangency promise
 /// read on the interval, not the point), and judge every clause at
-/// the interval's two ends off the DEEPEST standing tip. E is
-/// linear and the cover set constant between adjacent events, so
-/// the ends are the interval's extremes; intervals thinner than a
-/// [`HAIR`] own no surface and are skipped.
+/// the interval's two ends off the DEEPEST standing FLOOR (a form
+/// move's floor read AT that end - [`floor_at`]). E is linear and
+/// the cover set constant between adjacent events, and so is every
+/// floor between a center and the next, which is why the lattice
+/// holds the centers: the ends are still the interval's extremes.
+/// Intervals thinner than a [`HAIR`] own no surface and are skipped.
+/// `clip_shell` is the thread's crest law: a form floor standing
+/// above the blank's own surface ([`span_max`] over the window)
+/// measures nothing - the crest is where the passes never reach,
+/// and there the shell, not the floor, is the part.
+#[allow(clippy::too_many_arguments)] // the scan's whole meridian frame, threaded once
 pub fn scan(
     sg: &Segs,
     moves: &[BandMove],
@@ -217,6 +241,7 @@ pub fn scan(
     lat: &[f64],
     tol: f64,
     leave: f64,
+    clip_shell: bool,
 ) -> (Option<Alert>, Option<Alert>) {
     let mut order: Vec<(f64, usize)> = Vec::new();
     let mut kerfs: Vec<(f64, f64)> = Vec::new();
@@ -234,9 +259,10 @@ pub fn scan(
     kerfs.sort_unstable_by(|x, y| x.0.total_cmp(&y.0));
     let ref_top = window.map(|(w0, w1)| span_max(sg, w0, w1)).unwrap_or(0.0);
 
-    // Standing covers as (right edge, tip, move index), sorted by
-    // right edge descending, so expiration pops from the back.
-    let mut heap: Vec<(f64, f64, usize)> = Vec::new();
+    // Standing covers as (right edge, move index), sorted by right
+    // edge descending, so expiration pops from the back; the floor
+    // each one holds is read off the move itself at each end.
+    let mut heap: Vec<(f64, usize)> = Vec::new();
     let mut next = 0usize;
     let mut ki = 0usize;
     let mut gouge: Option<Alert> = None;
@@ -249,10 +275,10 @@ pub fn scan(
             continue; // no surface lives in a hair of lattice
         }
         while next < order.len() && order[next].0 < v {
-            let m = &moves[order[next].1];
-            let hi = raw_band(m, half).1;
+            let mi = order[next].1;
+            let hi = raw_band(&moves[mi], half).1;
             let k = heap.partition_point(|e| e.0.total_cmp(&hi) == std::cmp::Ordering::Greater);
-            heap.insert(k, (hi, m.tip, m.at));
+            heap.insert(k, (hi, mi));
             next += 1;
         }
         while heap.last().is_some_and(|e| e.0 <= u) {
@@ -277,29 +303,35 @@ pub fn scan(
             e_v = e_v.max(a + b * (v.min(s1) - s0));
         }
         if !heap.is_empty() {
-            let (mut floor, mut at) = (f64::INFINITY, usize::MAX);
-            for &(_, t, a) in &heap {
-                if t < floor || (t == floor && a < at) {
-                    floor = t;
-                    at = a;
+            let (mut floor_u, mut at_u) = (f64::INFINITY, usize::MAX);
+            let (mut floor_v, mut at_v) = (f64::INFINITY, usize::MAX);
+            for &(_, mi) in &heap {
+                let m = &moves[mi];
+                let cu = floor_at(m, u);
+                if cu < floor_u || (cu == floor_u && m.at < at_u) {
+                    floor_u = cu;
+                    at_u = m.at;
+                }
+                let cv = floor_at(m, v);
+                if cv < floor_v || (cv == floor_v && m.at < at_v) {
+                    floor_v = cv;
+                    at_v = m.at;
                 }
             }
-            let g = (e_u - floor).max(e_v - floor);
-            let r = (floor - e_u).max(floor - e_v);
+            if clip_shell {
+                floor_u = floor_u.min(ref_top);
+                floor_v = floor_v.min(ref_top);
+            }
+            let g = (e_u - floor_u).max(e_v - floor_v);
+            let r = (floor_u - e_u).max(floor_v - e_v);
             if g > gouge_gate {
-                let (x, e) = if e_u >= e_v { (u, e_u) } else { (v, e_v) };
-                keep(&mut gouge, Alert {
-                    mm: g,
-                    at: (x, e),
-                    move_i: at,
-                });
+                let (x, e, move_i) =
+                    if e_u - floor_u >= e_v - floor_v { (u, e_u, at_u) } else { (v, e_v, at_v) };
+                keep(&mut gouge, Alert { mm: g, at: (x, e), move_i });
             } else if r > rest_gate {
-                let (x, e) = if e_u <= e_v { (u, e_u) } else { (v, e_v) };
-                keep(&mut rest, Alert {
-                    mm: r,
-                    at: (x, e),
-                    move_i: at,
-                });
+                let (x, e, move_i) =
+                    if floor_u - e_u >= floor_v - e_v { (u, e_u, at_u) } else { (v, e_v, at_v) };
+                keep(&mut rest, Alert { mm: r, at: (x, e), move_i });
             }
         } else if window.is_some_and(|(w0, w1)| w0 < v && u < w1) {
             // A floor no band reached rests by the window shell -
@@ -381,12 +413,28 @@ pub fn blade_warnings(
                 b: sb,
                 tip: ra.min(rb),
                 at: i,
+                wave: None,
             }
         })
         .collect();
-    let sg = segs(&pts);
-    let (window, lat) = lattice(&pts, &moves, width * 0.5);
-    let (gouge, rest) = scan(&sg, &moves, width * 0.5, window, &lat, tol, leave);
+    judge(&pts, moves, width * 0.5, tol, leave, false)
+}
+
+/// The shared close: scan what the moves leave and speak it in the
+/// vocabulary the verifier already owns. `clip_shell` belongs to the
+/// form tools (the thread's crest law, M5.2 D); the blade judges
+/// flat floors and passes false.
+pub(crate) fn judge(
+    pts: &[SR],
+    moves: Vec<BandMove>,
+    half: f64,
+    tol: f64,
+    leave: f64,
+    clip_shell: bool,
+) -> Vec<Warning> {
+    let sg = segs(pts);
+    let (window, lat) = lattice(pts, &moves, half);
+    let (gouge, rest) = scan(&sg, &moves, half, window, &lat, tol, leave, clip_shell);
     let g = gouge.as_ref().map(|a| a.mm).unwrap_or(0.0);
     let r = rest.as_ref().map(|a| a.mm).unwrap_or(0.0);
     if g <= 0.0 && r <= 0.0 {

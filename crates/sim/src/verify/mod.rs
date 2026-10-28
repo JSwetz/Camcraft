@@ -41,6 +41,12 @@
 //! - [`Warning::RapidInStock`] - a *lateral* rapid below the clearance
 //!   plane whose XY path still has material above it. Vertical rapids
 //!   are the tool retracting through its own kerf and stay exempt.
+//!   `Mode::Revolve` stands this law down too (M5.2 D): a lathe insert
+//!   is a point in XY and its whole form lives in the meridian, so the
+//!   column law misreads every threading pull-out - which slides along
+//!   the flanks of its own cut V - as a plunge through solid. The
+//!   turning rapids' safety rides the kernel's clearance radius and
+//!   the meridian scan; fixture steel (d2) still speaks every mode.
 //! - [`Warning::ShankHit`] again, from the cycle list: a hole whose
 //!   entry-to-bottom span exceeds flute + shank + holder pushes the
 //!   assembly below the entry surface no matter what the path looks

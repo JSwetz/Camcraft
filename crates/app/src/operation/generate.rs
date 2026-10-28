@@ -1132,6 +1132,47 @@ pub fn generate(
             )?;
             (region, path)
         }
+        // M5.2 stage D: threading. The tool door names the V-form
+        // insert - the wave's profile IS the tool, so a grooving
+        // blade (rectangular footprint, no flanks) could no more
+        // cut a thread than an end mill could. The kernel's own
+        // doors read the pair against the pitch (fit, full-form
+        // reach) and refuse by name; the heights frame the window
+        // of turns the lattice fills.
+        OpParams::Threading {
+            pitch,
+            depth,
+            infeed,
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Thread {
+                return Err(GenError::Invalid(format!(
+                    "Threading needs a threading insert, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::thread(
+                &material.facets,
+                &crate::turning::ThreadParams {
+                    tolerance: *tolerance,
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    pitch: *pitch,
+                    depth: *depth,
+                    infeed: *infeed,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    insert_width: tool.width,
+                    form_angle: tool.tip_angle,
+                },
+            )?;
+            (region, path)
+        }
     };
 
     // M3.2 stage B: what the program clamps to. The op's setup context
@@ -1182,7 +1223,12 @@ pub fn generate(
         // past the kerf is the scrap, and it goes.
         | OpParams::ProfileFinish { .. }
         | OpParams::GrooveFinish { .. }
-        | OpParams::Part { .. } => 0.0,
+        | OpParams::Part { .. }
+        // Threading leaves no shelf either: the full-form pass owns
+        // the whole wave, and the shallower rungs before it only
+        // widen it - what stands is what the wave scan measures,
+        // with nothing added to the floor (M5.2 D).
+        | OpParams::Threading { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -1247,6 +1293,10 @@ pub fn generate(
                             | OpParams::GrooveRough { .. }
                             | OpParams::GrooveFinish { .. }
                             | OpParams::Part { .. }
+                            // The wave rides the same facets: the
+                            // modeled thread's silhouette IS what the
+                            // lattice must land in (M5.2 D).
+                            | OpParams::Threading { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -1319,6 +1369,22 @@ pub fn generate(
                     tool.width,
                     tol,
                     stl,
+                ));
+            }
+            // The threading verdict (M5.2 D): the path's own helix
+            // states the lattice - every second arc endpoint is a
+            // meridian crossing, where the V's floor belongs - and
+            // the same meridian scan reads it with the WAVE clause:
+            // the tool's V, not a boxcar, says what stands between
+            // the turns. The insert's crest width and included
+            // angle ride from the tool, the blade's law again.
+            if let OpParams::Threading { tolerance, .. } = &op.params {
+                warns.extend(crate::turning::thread_warnings(
+                    &material.facets,
+                    &path,
+                    tool.width,
+                    tool.tip_angle,
+                    *tolerance,
                 ));
             }
             Ok((path, warns))

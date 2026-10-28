@@ -380,8 +380,9 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::ProfileRough | OpType::ProfileFinish => Icon::Face,
         // Same reuse for the blade kinds: the kerf and the severed
         // column are both the turned surface giving way to the
-        // tool's width (M5.2 C).
-        OpType::GrooveRough | OpType::GrooveFinish | OpType::Part => Icon::Face,
+        // tool's width (M5.2 C) - and so is the threaded wall, the
+        // same surface recut one helix at a time (M5.2 D).
+        OpType::GrooveRough | OpType::GrooveFinish | OpType::Part | OpType::Threading => Icon::Face,
     }
 }
 
@@ -636,6 +637,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::Bore => "boring bar",
         ToolKind::Turning => "turning insert",
         ToolKind::Groove => "grooving blade",
+        ToolKind::Thread => "threading insert",
     }
 }
 

@@ -816,6 +816,31 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The threading ladder (M5.2 stage D, tag 24): the wave's
+            // own three numbers ride beside the twins' - pitch, depth
+            // and infeed all MOVE the path, the first by naming the
+            // lattice, the second and third by what stands between
+            // crest and root. The insert's V digests through the
+            // TOOL row, the blade's law again.
+            OpParams::Threading {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                pitch,
+                depth,
+                infeed,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*pitch, *depth, *infeed, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
         }
     }
 }

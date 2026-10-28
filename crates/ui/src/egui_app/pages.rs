@@ -77,7 +77,7 @@ use super::panes::{TYPES, kind_name, retype};
 use super::theme::Palette;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
-const TOOL_KINDS: [&str; 8] = [
+const TOOL_KINDS: [&str; 9] = [
     "End mill",
     "Ball nose",
     "Bull nose",
@@ -86,6 +86,7 @@ const TOOL_KINDS: [&str; 8] = [
     "Bore",
     "Turning insert",
     "Grooving blade",
+    "Threading insert",
 ];
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
@@ -2244,6 +2245,53 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the ladder down the column plunges at this feed; every retract off the kerf is a rapid back to the clear radius at the same station");
             }
         }
+        // Threading (M5.2 D): the wave the model already carries, cut
+        // one turn per pitch. The insert's V is the tool's own two
+        // numbers (width and included angle) and never appears here -
+        // the page names the thread, the tool names the cutter.
+        OpParams::Threading {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            pitch,
+            depth,
+            infeed,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "threading.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "threading.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "threading.bottom");
+                ui.label("the helix runs between these heights, one turn per pitch - the whole thread walks past the bar's floor in the model");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the chord budget the helix settles at, and the play the verdict measures between insert and modeled flank");
+                field(ui, "Pitch");
+                num(ui, u, pitch);
+                ui.label("axis travel per turn - the thread's own number, and the lattice the passes walk along");
+                field(ui, "Depth");
+                num(ui, u, depth);
+                ui.label("radial depth of the groove, crest to root - the deepest rung stands this far under the turned skin");
+                field(ui, "Infeed");
+                num(ui, u, infeed);
+                ui.label("radial growth per pass of the growing wave; the last pass reaches full depth and the turns between them are the spring pass");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                ui.label("the synchronized helix cuts at this feed - the spindle turns once as the axis rises one pitch");
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the lead-in arc swings into the first turn at this feed; every pass after the first rides the ladder in rapids");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);
@@ -3638,6 +3686,20 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         {
                             state.tool_ui.width = 2.0;
                         }
+                        // The threading V (M5.2 D): crest width 0.866 x
+                        // the seed op's pitch 2.0, and the 60-degree
+                        // metric/unified flank angle - the two numbers
+                        // the generator fits against the thread it cuts.
+                        if state.tool_ui.kind == 8 {
+                            if state.tool_ui.width.is_nan() || state.tool_ui.width <= 0.0 {
+                                state.tool_ui.width = 1.732;
+                            }
+                            if state.tool_ui.tip_angle.is_nan()
+                                || !(0.0..180.0).contains(&state.tool_ui.tip_angle)
+                            {
+                                state.tool_ui.tip_angle = 60.0;
+                            }
+                        }
                     }
                     field(ui, "Diameter");
                     num(ui, u, &mut state.tool_ui.diameter);
@@ -3664,6 +3726,14 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         field(ui, "Blade width");
                         num(ui, u, &mut state.tool_ui.width);
                         ui.label("the cutting edge along the axis - the kerf's width IS the tool");
+                    }
+                    if state.tool_ui.kind == 8 {
+                        field(ui, "Blade width");
+                        num(ui, u, &mut state.tool_ui.width);
+                        ui.label("the V's crest width across the axis - 0.866 x the pitch it threads, and it must fit inside that pitch");
+                        field(ui, "Form angle (deg)");
+                        num_plain(ui, &mut state.tool_ui.tip_angle);
+                        ui.label("the included angle of the V's flanks - 60 for the metric and unified forms, 55 for Whitworth");
                     }
                     if state.tool_ui.kind != 4 {
                         field(ui, "Corner radius");

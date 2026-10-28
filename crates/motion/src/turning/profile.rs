@@ -113,6 +113,33 @@ impl Frame {
             self.origin.z + self.dir.z * station + self.radial.z * rho,
         )
     }
+
+    /// The axis's own point at a station - the helical arc's center
+    /// line (M5.2 D: threading's XY circles stand on it).
+    pub(crate) fn axis_point(&self, station: f64) -> Point3 {
+        Point3::new(
+            self.origin.x + self.dir.x * station,
+            self.origin.y + self.dir.y * station,
+            self.origin.z + self.dir.z * station,
+        )
+    }
+
+    /// The frame's angle-0 point, seen from the axis's other side:
+    /// the half-turn endpoint of a threading arc, exact about the
+    /// axis line whatever the lean (the plumb door still refuses a
+    /// tilted bar for the XY-circle law, not this mirror's).
+    pub(crate) fn antipode(&self, rho: f64, station: f64) -> Point3 {
+        let a = self.point(rho, station);
+        let x = self.axis_point(station);
+        Point3::new(2.0 * x.x - a.x, 2.0 * x.y - a.y, 2.0 * x.z - a.z)
+    }
+
+    /// How far the axis leans off world Z in the XY sense - |dir.xy|
+    /// of the unit direction. Facing and the twins tolerate the fit's
+    /// LEAN_MIN degrees; a helix of XY circles cannot (M5.2 D).
+    pub(crate) fn lean(&self) -> f64 {
+        (self.dir.x * self.dir.x + self.dir.y * self.dir.y).sqrt()
+    }
 }
 
 impl Frame {
@@ -199,6 +226,12 @@ pub fn silhouette(facets: &[Triangle], f: &Frame, tol: f64) -> Result<Vec<(f64, 
     // One pass: every edge gets its station window; an edge whose
     // two stations coincide is the boundary of a STEP FACE (or a rim
     // ring) and answers only AT that station, with its wider vertex.
+    // A stored edge keeps its lo-station endpoint FIRST: rho_at
+    // measures t from lo along a to b, and an edge stored the other
+    // way round reads the mirror profile - both orientations used
+    // to ride in from the two triangles sharing an edge, and the
+    // envelope's max made every slanted line a W (invisible on the
+    // blade fixtures, whose varying edges are all constant radius).
     let mut edges: Vec<(Point3, Point3, f64, f64)> = Vec::with_capacity(facets.len() * 3);
     let mut stations: Vec<f64> = Vec::with_capacity(facets.len() * 6);
     let mut verticals: Vec<(f64, f64)> = Vec::new();
@@ -217,8 +250,10 @@ pub fn silhouette(facets: &[Triangle], f: &Frame, tol: f64) -> Result<Vec<(f64, 
             stations.push(sb);
             if sa == sb {
                 verticals.push((sa, ra.max(rb)));
+            } else if sa < sb {
+                edges.push((a, b, sa, sb));
             } else {
-                edges.push((a, b, sa.min(sb), sa.max(sb)));
+                edges.push((b, a, sb, sa));
             }
         }
     }

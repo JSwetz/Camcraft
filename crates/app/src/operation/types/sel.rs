@@ -153,6 +153,14 @@ pub enum OpType {
     /// depth ladder at the parting station and the through-axis
     /// rung that lets the scrap go.
     Part,
+    /// Threading (M5.2 stage D): the synchronized spindle walking a
+    /// helix — a V-form insert's wave ladder in the meridian, one
+    /// full turn per pitch of the modeled thread across the window
+    /// of turns the helix imposes (see [`crate::turning`]). The
+    /// verdict is [`Self::GrooveFinish`]'s meridian scan with the
+    /// wave clause: the tool's V, not a boxcar, says what stands
+    /// between the grooves.
+    Threading,
 }
 
 impl core::fmt::Display for OpType {

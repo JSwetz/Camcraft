@@ -32,6 +32,7 @@ pub mod offset;
 pub mod prof;
 pub mod profile;
 pub mod revolve;
+pub mod thread;
 
 pub use blade::{
     groove_finish, groove_rough, part, GrooveFinishParams, GrooveRoughParams, PartParams,
@@ -41,3 +42,4 @@ pub use offset::profile_offset;
 pub use prof::{profile_finish, profile_rough, ProfileFinishParams, ProfileRoughParams};
 pub use profile::{profile_of, silhouette, Profile};
 pub use revolve::{blade_warnings, BandMove};
+pub use thread::{thread, thread_warnings, ThreadParams};

@@ -9,6 +9,10 @@
 //! numbers, set for aluminum with carbide tooling at typical chip loads -
 //! general published practice, no vendor library copied.
 //!
+//! The threading insert's crest width (0.866 x pitch) and 60-degree
+//! included V are the published metric thread profile's own geometry
+//! read as blade practice - machine-tool handbook threading chapters.
+//!
 //! Pure module: no flecs, no I/O. Commands persist a `Tool` on a `ToolDef`
 //! component; the operation layer reads radii and lengths out of it for
 //! generation and the shank-reach law in `verify`.
@@ -42,6 +46,13 @@ pub enum ToolKind {
     /// undercut by design and no sphere can judge one honestly (see
     /// `crate::turning::revolve`). Only `Groove` reads `width`.
     Groove,
+    /// Threading insert (M5.2 stage D): the V-form blade cut to one
+    /// thread's profile. `width` is the V's opening at its crest
+    /// line and `tip_angle` the flanks' INCLUDED angle (60 for the
+    /// metric forms) - the same two fields the drill's cone and the
+    /// tap's pitch ride, now read as the form the helical pass
+    /// revolves. Only `Threading` reads either.
+    Thread,
 }
 
 impl core::fmt::Display for ToolKind {
@@ -55,6 +66,7 @@ impl core::fmt::Display for ToolKind {
             ToolKind::Bore => "boring bar",
             ToolKind::Turning => "turning insert",
             ToolKind::Groove => "grooving blade",
+            ToolKind::Thread => "threading insert",
         };
         f.write_str(s)
     }
@@ -90,8 +102,10 @@ pub struct Tool {
     /// for a bull.
     pub corner_r: f64,
     /// Point angle in degrees, included across the cone: 118 is the
-    /// general-purpose twist-drill standard. Inert unless kind is Drill -
-    /// every other kind reads it as 0.0 and draws flat.
+    /// general-purpose twist-drill standard. On a threading insert it
+    /// is the flanks' INCLUDED angle of the V (60 for the metric
+    /// forms); inert for the rest - every other kind reads it as 0.0
+    /// and draws flat.
     pub tip_angle: f64,
     /// Thread pitch in mm per turn (ISO coarse for the catalog taps).
     /// Inert unless kind is Tap, where the cycle feeds at rpm x pitch.
@@ -102,9 +116,11 @@ pub struct Tool {
     /// every other kind reads it as 0.0 and rolls its own radius.
     pub nose_radius: f64,
     /// Blade width in mm along the axis (the grooving/parting insert's
-    /// ground side-to-side size): 3.0 is common cutoff stock. Inert
-    /// unless kind is Groove, where it is the band the blade owns -
-    /// every other kind reads it as 0.0 and sweeps its own circle.
+    /// ground side-to-side size): 3.0 is common cutoff stock. On a
+    /// threading insert it is the V's opening width at its crest line
+    /// (the handbook's 0.866 x pitch for the metric forms); inert for
+    /// the rest - every other kind reads it as 0.0 and sweeps its own
+    /// circle.
     pub width: f64,
     pub flute_len: f64,
     pub shank_d: f64,
@@ -180,6 +196,18 @@ impl Tool {
                 // any toolholder could ground. The same kind-scoped law
                 // as the insert's nose (the note above).
                 ToolKind::Groove => self.width > 0.0 && self.width < self.diameter,
+                // A thread form that is not a V (no opening, or a
+                // full flat) is not steel any grinder cuts, and a V
+                // as wide as the body is the insert no holder clamps
+                // - the blade's width law with the drill's angle
+                // bound, both fields read at once (kind-scoped, as
+                // every arm above).
+                ToolKind::Thread => {
+                    self.width > 0.0
+                        && self.width < self.diameter
+                        && self.tip_angle > 0.0
+                        && self.tip_angle < 180.0
+                }
                 _ => true,
             }
     }
@@ -256,7 +284,7 @@ impl Tool {
             // meridian, which the turning verdicts read off `Tool`,
             // not off this cylinder.
             ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore | ToolKind::Turning
-            | ToolKind::Groove => add_pt(&mut p, 0.0, r),
+            | ToolKind::Groove | ToolKind::Thread => add_pt(&mut p, 0.0, r),
             ToolKind::Drill => {
                 // The point cone: apex at the tip center, opening at
                 // half the included angle, meeting the full radius at
@@ -350,6 +378,17 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         nose_radius: 0.0, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
         material_group: "aluminum".into(), rpm, feed,
     };
+    // Threading (M5.2 D): the V-form insert on the same toolholder
+    // body - the GROUND PROFILE (width across the crest, the flanks'
+    // included angle) is the tool, the pitch is the THREAD's and lives
+    // in the operation. Crest widths are the handbook's 0.866 x P for
+    // the two ordinary metric coarse ladders; feeds are the starting
+    // values for single-point thread whirling in aluminum.
+    let td = |diameter: f64, width: f64, form_angle: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
+        kind: ToolKind::Thread, diameter, corner_r: 0.0, tip_angle: form_angle, pitch: 0.0,
+        nose_radius: 0.0, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
+        material_group: "aluminum".into(), rpm, feed,
+    };
     vec![
         ("EM-0200-2FL", em(2.0, 0.0, ToolKind::EndMill, 6.0, 4.0, 18000.0, 600.0)),
         ("EM-0300-2FL", em(3.0, 0.0, ToolKind::EndMill, 9.0, 4.0, 15000.0, 900.0)),
@@ -371,6 +410,8 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("TN-1600-0R8", tn(16.0, 0.8, 8.0, 16.0, 3000.0, 150.0)),
         ("GT-0200", gt(16.0, 2.0, 8.0, 16.0, 2500.0, 90.0)),
         ("GT-0300", gt(16.0, 3.0, 8.0, 16.0, 2000.0, 60.0)),
+        ("TD-0866-60", td(16.0, 0.866, 60.0, 8.0, 16.0, 1200.0, 90.0)),
+        ("TD-1732-60", td(16.0, 1.732, 60.0, 8.0, 16.0, 800.0, 120.0)),
     ]
 }
 

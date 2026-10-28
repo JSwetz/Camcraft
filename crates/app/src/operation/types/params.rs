@@ -661,6 +661,26 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Threading (M5.2 stage D): the helical ladder on a MODELED
+    /// thread. `pitch` is that thread's lead - the lattice of V's
+    /// stands pitched by it across the window `top_z`/`bottom_z`
+    /// bound - `depth` the radial drop from crest to root, and
+    /// `infeed` the rung of the ladder that grows one groove from
+    /// the blank. The V itself (crest width, flank angle) is TOOL
+    /// geometry, the blade's width law again; the feeds are mm/min
+    /// with the spindle turning one rev per pitch of the
+    /// synchronized pass.
+    Threading {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        pitch: f64,
+        depth: f64,
+        infeed: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 impl OpParams {
@@ -691,6 +711,7 @@ impl OpParams {
             OpParams::GrooveRough { .. } => OpType::GrooveRough,
             OpParams::GrooveFinish { .. } => OpType::GrooveFinish,
             OpParams::Part { .. } => OpType::Part,
+            OpParams::Threading { .. } => OpType::Threading,
         }
     }
 
@@ -741,7 +762,10 @@ impl OpParams {
             // the band sinks radially (M5.2 C).
             | OpParams::GrooveRough { .. }
             | OpParams::GrooveFinish { .. }
-            | OpParams::Part { .. } => None,
+            // Threading is the same kinematic spoken on a helix: the
+            // spindle itself is the C axis the pass walks (M5.2 D).
+            | OpParams::Part { .. }
+            | OpParams::Threading { .. } => None,
         }
     }
 
@@ -772,7 +796,8 @@ impl OpParams {
             | OpParams::ProfileFinish { clearance_z, .. }
             | OpParams::GrooveRough { clearance_z, .. }
             | OpParams::GrooveFinish { clearance_z, .. }
-            | OpParams::Part { clearance_z, .. } => *clearance_z,
+            | OpParams::Part { clearance_z, .. }
+            | OpParams::Threading { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -810,7 +835,10 @@ impl OpParams {
             // bar's own top the blade rises from (M5.2 C).
             | OpParams::GrooveRough { top_z, .. }
             | OpParams::GrooveFinish { top_z, .. }
-            | OpParams::Part { top_z, .. } => *top_z,
+            // The window of turns: the lattice stands between these
+            // two heights and nowhere outside them (M5.2 D).
+            | OpParams::Part { top_z, .. }
+            | OpParams::Threading { top_z, .. } => *top_z,
         }
     }
 
@@ -908,7 +936,10 @@ impl OpParams {
             // is still a Height to visit (M5.2 C).
             | OpParams::GrooveRough { clearance_z, top_z, bottom_z, .. }
             | OpParams::GrooveFinish { clearance_z, top_z, bottom_z, .. }
-            | OpParams::Part { clearance_z, top_z, bottom_z, .. } => {
+            | OpParams::Part { clearance_z, top_z, bottom_z, .. }
+            // Threading states the same trio - the rapids plane and
+            // the window pair the lattice of turns fills (M5.2 D).
+            | OpParams::Threading { clearance_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 f(*top_z);
                 f(*bottom_z);

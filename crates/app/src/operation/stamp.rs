@@ -49,6 +49,7 @@ pub fn current_stamp(
         crate::tools::ToolKind::Bore => 5,
         crate::tools::ToolKind::Turning => 6,
         crate::tools::ToolKind::Groove => 7,
+        crate::tools::ToolKind::Thread => 8,
     });
     for v in [
         tool.diameter,
@@ -78,6 +79,14 @@ pub fn current_stamp(
         crate::tools::ToolKind::Drill => w(&mut h, tool.tip_angle),
         crate::tools::ToolKind::Tap => w(&mut h, tool.pitch),
         crate::tools::ToolKind::Groove => w(&mut h, tool.width),
+        // The threading insert digests BOTH its profile numbers
+        // (M5.2 D): the crest width and the flanks' angle are the
+        // wave's footprint - a recut V is a different thread even
+        // when the operation's pitch and depth never moved.
+        crate::tools::ToolKind::Thread => {
+            w(&mut h, tool.width);
+            w(&mut h, tool.tip_angle);
+        }
         _ => {}
     }
     params.stamp_with(world, setup, &mut h);

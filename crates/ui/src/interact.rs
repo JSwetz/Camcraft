@@ -1171,7 +1171,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // at the clear radius, not a plane.
         // The blades say it a third time (M5.2 C): their rapids ride
         // the clear radius over the bar too, and Part's kerf ladder
-        // lifts out and back at the same height - no hop plane.
+        // lifts out and back at the same height - no hop plane. The
+        // wave says it a fourth (M5.2 D): a thread's rungs pass over
+        // the crest radius in the clear, never lifting to a plane.
         operation::OpParams::Face { .. }
         | operation::OpParams::RotaryOffset { .. }
         | operation::OpParams::Facing { .. }
@@ -1179,7 +1181,8 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::ProfileFinish { .. }
         | operation::OpParams::GrooveRough { .. }
         | operation::OpParams::GrooveFinish { .. }
-        | operation::OpParams::Part { .. } => None,
+        | operation::OpParams::Part { .. }
+        | operation::OpParams::Threading { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1275,9 +1278,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::ProfileFinish { top_z, bottom_z, .. }
         // The groove kinds bound their window the same two planes
         // (M5.2 C): Top is where the blade may enter, Bottom the
-        // floor or finished groove it walks to.
+        // floor or finished groove it walks to. The threading window
+        // is the same promise (M5.2 D): Top is the first turn's
+        // plane, Bottom the last rungs' - the helix lives between.
         | operation::OpParams::GrooveRough { top_z, bottom_z, .. }
-        | operation::OpParams::GrooveFinish { top_z, bottom_z, .. } => {
+        | operation::OpParams::GrooveFinish { top_z, bottom_z, .. }
+        | operation::OpParams::Threading { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,

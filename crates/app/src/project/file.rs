@@ -1,6 +1,6 @@
 use super::*;
 
-pub const PROJECT_VERSION: u32 = 35;
+pub const PROJECT_VERSION: u32 = 36;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -179,6 +179,11 @@ pub enum ToolKindDto {
     /// v34 files never carried the word, and the `width` key it
     /// needs serde-defaults to the inert 0.0 every other kind means.
     Groove,
+    /// The threading insert (M5.2 D): the same arrival law again -
+    /// v35 files never carried the word, and the `width` +
+    /// `tip_angle` keys it reads both serde-default to the inert
+    /// 0.0 every other kind means.
+    Thread,
 }
 
 impl ToolDto {
@@ -193,6 +198,7 @@ impl ToolDto {
                 ToolKind::Bore => ToolKindDto::Bore,
                 ToolKind::Turning => ToolKindDto::Turning,
                 ToolKind::Groove => ToolKindDto::Groove,
+                ToolKind::Thread => ToolKindDto::Thread,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -222,6 +228,7 @@ impl ToolDto {
                 ToolKindDto::Bore => ToolKind::Bore,
                 ToolKindDto::Turning => ToolKind::Turning,
                 ToolKindDto::Groove => ToolKind::Groove,
+                ToolKindDto::Thread => ToolKind::Thread,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,
