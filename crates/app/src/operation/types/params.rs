@@ -681,6 +681,57 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Chamfer turning (M5.2 stage E): one ride across the cone
+    /// face the window `top_z`/`bottom_z` bounds. `angle_deg` is
+    /// the cone's slope off the cylinder - a PROMISE the model
+    /// must keep, spent at the door, never a surface to chase:
+    /// the ride follows the modeled skin and refuses by name when
+    /// the skin stands further off the authored line than
+    /// `tolerance`. The direction the face falls comes from the
+    /// model, not these numbers.
+    Chamfering {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        angle_deg: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// Taper turning (M5.2 stage E): the ride of the cone the two
+    /// diameters state - `bottom_dia` at the window's low station,
+    /// `top_dia` at its high one. The same promise law as
+    /// [`Self::Chamfering`]: the model is the surface the ride
+    /// chases and the verdict measures; equal diameters state the
+    /// straight turn of a cylinder.
+    TaperTurning {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        bottom_dia: f64,
+        top_dia: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// Multi-pass turning (M5.2 stage E): stage B's concentric
+    /// ladder down to `stock_to_leave`, then `passes` finishing
+    /// rides sharing the leave out by the spring-pass midpoint
+    /// law - ride k stands a shell `stock * (n - k) / n` off the
+    /// skin, so the last ride IS the profile. `passes` is a count
+    /// the ladder spends, not a depth: 1 makes the classic rough-
+    /// plus-finish pair, and the kernel caps the sequence at 64.
+    MultiPassTurning {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        stock_to_leave: f64,
+        passes: u32,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 impl OpParams {
@@ -712,6 +763,9 @@ impl OpParams {
             OpParams::GrooveFinish { .. } => OpType::GrooveFinish,
             OpParams::Part { .. } => OpType::Part,
             OpParams::Threading { .. } => OpType::Threading,
+            OpParams::Chamfering { .. } => OpType::Chamfering,
+            OpParams::TaperTurning { .. } => OpType::TaperTurning,
+            OpParams::MultiPassTurning { .. } => OpType::MultiPassTurning,
         }
     }
 
@@ -765,7 +819,13 @@ impl OpParams {
             // Threading is the same kinematic spoken on a helix: the
             // spindle itself is the C axis the pass walks (M5.2 D).
             | OpParams::Part { .. }
-            | OpParams::Threading { .. } => None,
+            | OpParams::Threading { .. }
+            // The contour rides are that kinematic across a face:
+            // the work spins, the nose chases the modeled skin
+            // (M5.2 E).
+            | OpParams::Chamfering { .. }
+            | OpParams::TaperTurning { .. }
+            | OpParams::MultiPassTurning { .. } => None,
         }
     }
 
@@ -797,7 +857,10 @@ impl OpParams {
             | OpParams::GrooveRough { clearance_z, .. }
             | OpParams::GrooveFinish { clearance_z, .. }
             | OpParams::Part { clearance_z, .. }
-            | OpParams::Threading { clearance_z, .. } => *clearance_z,
+            | OpParams::Threading { clearance_z, .. }
+            | OpParams::Chamfering { clearance_z, .. }
+            | OpParams::TaperTurning { clearance_z, .. }
+            | OpParams::MultiPassTurning { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -838,7 +901,12 @@ impl OpParams {
             // The window of turns: the lattice stands between these
             // two heights and nowhere outside them (M5.2 D).
             | OpParams::Part { top_z, .. }
-            | OpParams::Threading { top_z, .. } => *top_z,
+            // The contour window bounds the face the ride walks -
+            // the same promise in a narrower band (M5.2 E).
+            | OpParams::Threading { top_z, .. }
+            | OpParams::Chamfering { top_z, .. }
+            | OpParams::TaperTurning { top_z, .. }
+            | OpParams::MultiPassTurning { top_z, .. } => *top_z,
         }
     }
 
@@ -938,8 +1006,13 @@ impl OpParams {
             | OpParams::GrooveFinish { clearance_z, top_z, bottom_z, .. }
             | OpParams::Part { clearance_z, top_z, bottom_z, .. }
             // Threading states the same trio - the rapids plane and
-            // the window pair the lattice of turns fills (M5.2 D).
-            | OpParams::Threading { clearance_z, top_z, bottom_z, .. } => {
+            // the window pair the lattice of turns fills (M5.2 D) -
+            // and so do the contour rides: the face stands between
+            // the same two stations (M5.2 E).
+            | OpParams::Threading { clearance_z, top_z, bottom_z, .. }
+            | OpParams::Chamfering { clearance_z, top_z, bottom_z, .. }
+            | OpParams::TaperTurning { clearance_z, top_z, bottom_z, .. }
+            | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 f(*top_z);
                 f(*bottom_z);

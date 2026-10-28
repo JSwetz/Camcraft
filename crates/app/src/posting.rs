@@ -662,9 +662,14 @@ impl HeightRefs for OpParams {
             | OpParams::GrooveRough { clearance_z, top_z, bottom_z, .. }
             | OpParams::GrooveFinish { clearance_z, top_z, bottom_z, .. }
             // Threading carries the same three - the rapids plane
-            // and the window of turns (M5.2 D).
+            // and the window of turns (M5.2 D) - and so do the
+            // contour rides: the plane and the face's two stations
+            // (M5.2 E).
             | OpParams::Part { clearance_z, top_z, bottom_z, .. }
-            | OpParams::Threading { clearance_z, top_z, bottom_z, .. } =>
+            | OpParams::Threading { clearance_z, top_z, bottom_z, .. }
+            | OpParams::Chamfering { clearance_z, top_z, bottom_z, .. }
+            | OpParams::TaperTurning { clearance_z, top_z, bottom_z, .. }
+            | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. } =>
                 vec![clearance_z, top_z, bottom_z],
             OpParams::Drill {
                 clearance_z,

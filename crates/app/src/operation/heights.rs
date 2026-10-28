@@ -117,7 +117,11 @@ pub fn region_z(
         | OpParams::GrooveRough { top_z, .. }
         | OpParams::GrooveFinish { top_z, .. }
         | OpParams::Part { top_z, .. }
-        | OpParams::Threading { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::Threading { top_z, .. }
+        // The contour windows name the same high station (M5.2 E).
+        | OpParams::Chamfering { top_z, .. }
+        | OpParams::TaperTurning { top_z, .. }
+        | OpParams::MultiPassTurning { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -243,8 +247,13 @@ pub fn resolve_params(
         | OpParams::GrooveRough { clearance_z, top_z, bottom_z, .. }
         | OpParams::GrooveFinish { clearance_z, top_z, bottom_z, .. }
         // Threading states the same trio - the window of turns the
-        // lattice of V's fills, rapids clear of every crest (D).
-        | OpParams::Threading { clearance_z, top_z, bottom_z, .. } => (
+        // lattice of V's fills, rapids clear of every crest (D) -
+        // and the contour rides state it across a face: the same
+        // three heights, the promise in the kernel's door (E).
+        | OpParams::Threading { clearance_z, top_z, bottom_z, .. }
+        | OpParams::Chamfering { clearance_z, top_z, bottom_z, .. }
+        | OpParams::TaperTurning { clearance_z, top_z, bottom_z, .. }
+        | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. } => (
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),

@@ -104,8 +104,12 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Part { feed, .. }
         // Threading's feed is the helix's own travel per minute -
         // the synchronized spindle carries the distance-per-minute
-        // meaning unchanged (M5.2 D).
-        | OpParams::Threading { feed, .. } => *feed,
+        // meaning unchanged (M5.2 D), and so does a contour ride:
+        // the skin's own tangency pace, station by station (E).
+        | OpParams::Threading { feed, .. }
+        | OpParams::Chamfering { feed, .. }
+        | OpParams::TaperTurning { feed, .. }
+        | OpParams::MultiPassTurning { feed, .. } => *feed,
     }
 }
 
@@ -142,9 +146,13 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::GrooveRough { plunge_feed, .. }
         | OpParams::GrooveFinish { plunge_feed, .. }
         // Threading's plunge is the rung's radial sink - the blade's
-        // law, one ladder deeper (M5.2 D).
+        // law, one ladder deeper (M5.2 D). The contour rides lead
+        // in and out radially by the profile ride's own law (E).
         | OpParams::Part { plunge_feed, .. }
-        | OpParams::Threading { plunge_feed, .. } => *plunge_feed,
+        | OpParams::Threading { plunge_feed, .. }
+        | OpParams::Chamfering { plunge_feed, .. }
+        | OpParams::TaperTurning { plunge_feed, .. }
+        | OpParams::MultiPassTurning { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -185,7 +193,13 @@ fn climb_of(p: &OpParams) -> bool {
         // Nor the wave: the V's two flanks alternate with the spin,
         // and which one leads is the spindle's direction (M5.2 D).
         | OpParams::Part { .. }
-        | OpParams::Threading { .. } => true,
+        // Nor the contour rides: the nose touches a face of
+        // revolution tangentially - which side of the skin it
+        // stands on is the spindle's whole story (M5.2 E).
+        | OpParams::Threading { .. }
+        | OpParams::Chamfering { .. }
+        | OpParams::TaperTurning { .. }
+        | OpParams::MultiPassTurning { .. } => true,
     }
 }
 
@@ -233,11 +247,16 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         // step, tiled by the kernel's tangency law (M5.2 C) - and a
         // threading pass has no spacing a number could name: the
         // helix's PITCH is the lattice, authored here as the thread's
-        // own lead, not a stepover (M5.2 D).
+        // own lead, not a stepover (M5.2 D). A contour ride has none
+        // either: the chord law the tolerance settles spaces the
+        // walk, and the model is the whole pattern (M5.2 E).
         | OpParams::GrooveRough { .. }
         | OpParams::GrooveFinish { .. }
         | OpParams::Part { .. }
-        | OpParams::Threading { .. } => None,
+        | OpParams::Threading { .. }
+        | OpParams::Chamfering { .. }
+        | OpParams::TaperTurning { .. }
+        | OpParams::MultiPassTurning { .. } => None,
     }
 }
 
@@ -261,6 +280,10 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // the parting ladder's (M5.2 C).
         | OpParams::GrooveRough { stepdown, .. }
         | OpParams::Part { stepdown, .. }
+        // The multi-pass ladder is the profile rough's rung law
+        // restated - the same shell width, the same nose-reach
+        // ceiling (M5.2 E).
+        | OpParams::MultiPassTurning { stepdown, .. }
         | OpParams::Slot { stepdown, .. }
         | OpParams::Trace { stepdown, .. } => Some(*stepdown),
         OpParams::Face { .. } | OpParams::Drill { .. } | OpParams::Finish3D { .. }
@@ -273,8 +296,12 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::ProfileFinish { .. }
         | OpParams::GrooveFinish { .. }
         // Threading's ladder spacing is INFEED, its own field - the
-        // retype carries no stepover number for it (M5.2 D).
+        // retype carries no stepover number for it (M5.2 D). A
+        // chamfer and a taper are one ride each: no infeed exists
+        // between the skin and the promise to step (M5.2 E).
         | OpParams::Threading { .. }
+        | OpParams::Chamfering { .. }
+        | OpParams::TaperTurning { .. }
         | OpParams::MultiAxisContour { .. } => None,
     }
 }
@@ -313,8 +340,12 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::GrooveFinish { top_z, .. }
         | OpParams::Part { top_z, .. }
         // The threading window's high end: the first turn's station
-        // the lattice begins from (M5.2 D).
-        | OpParams::Threading { top_z, .. } => Some(*top_z),
+        // the lattice begins from (M5.2 D). The contour window's
+        // high end is the face's own upper corner (M5.2 E).
+        | OpParams::Threading { top_z, .. }
+        | OpParams::Chamfering { top_z, .. }
+        | OpParams::TaperTurning { top_z, .. }
+        | OpParams::MultiPassTurning { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -354,7 +385,12 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Part { bottom_z, .. }
         // The threading window's low end - the last center's station
         // and the whole turns whose lattice it completes (M5.2 D).
-        | OpParams::Threading { bottom_z, .. } => Some(*bottom_z),
+        // The contour window opens at the face's low corner, where
+        // the ride plunges in (M5.2 E).
+        | OpParams::Threading { bottom_z, .. }
+        | OpParams::Chamfering { bottom_z, .. }
+        | OpParams::TaperTurning { bottom_z, .. }
+        | OpParams::MultiPassTurning { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -403,9 +439,14 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::GrooveFinish { .. }
         // Threading's rapids plane is the clearance height itself -
         // the whole bar's radius clears every turn's crest the pass
-        // traverses over (M5.2 D).
+        // traverses over (M5.2 D). The contour rides name theirs off
+        // the ride's own reach, a tolerance clear of the highest CL
+        // point, and author no hop (M5.2 E).
         | OpParams::Part { .. }
-        | OpParams::Threading { .. } => None,
+        | OpParams::Threading { .. }
+        | OpParams::Chamfering { .. }
+        | OpParams::TaperTurning { .. }
+        | OpParams::MultiPassTurning { .. } => None,
     }
 }
 
@@ -801,6 +842,61 @@ fn seed_threading(c: &Carried) -> OpParams {
         pitch: 2.0,
         depth: 1.08,
         infeed: 0.4,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The chamfer seed: the window and feeds carried, and the common
+/// angle - 45 degrees is what a chamfer is unless the drawing says
+/// otherwise (M5.2 E). The face it promises must BE in the model
+/// within the tolerance; the door, not this number, owns that
+/// question, so a wrong model refuses by name rather than cutting
+/// a cone the drawing never had.
+fn seed_chamfer(c: &Carried) -> OpParams {
+    OpParams::Chamfering {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        angle_deg: 45.0,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The taper seed: the shop's mild cone - a metric-stationary
+/// 20-to-16 across whatever window is carried, which is the
+/// handbooks' commonest taper and the drawing's answer to a
+/// collar. Diameters are the authored promise; the model keeps it
+/// or the ride is refused (M5.2 E).
+fn seed_taper(c: &Carried) -> OpParams {
+    OpParams::TaperTurning {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        bottom_dia: 20.0,
+        top_dia: 16.0,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The multi-pass seed: the rough rung numbers carried whole from
+/// stage B (the same 0.5 under twice the house insert's nose, the
+/// same 0.25 handbook leave) and the handbook's answer for a
+/// finishing sequence - three spring rides, each taking half of
+/// what the last one sprang (M5.2 E).
+fn seed_multi_pass(c: &Carried) -> OpParams {
+    OpParams::MultiPassTurning {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        stepdown: 0.5,
+        stock_to_leave: 0.25,
+        passes: 3,
         feed: c.feed,
         plunge_feed: c.plunge,
     }
@@ -1292,6 +1388,51 @@ impl KindInfo {
             family: Family::Turn,
             seed: seed_threading,
         },
+        KindInfo {
+            ty: OpType::Chamfering,
+            label: "Chamfering",
+            caption: "Chamfer",
+            tag: 25,
+            // The promised-face rides (M5.2 E) judge like the
+            // profile finish, and for the profile finish's reason:
+            // the nose-ball sweeps the MODEL's own offset, so the
+            // envelope scan measures the ride against the very
+            // skin the door judged the authored line against.
+            // Untouched columns outside the face's window are
+            // another op's jurisdiction - the scan's law, not a
+            // silence.
+            mode: Mode::Envelope,
+            family: Family::Turn,
+            seed: seed_chamfer,
+        },
+        KindInfo {
+            ty: OpType::TaperTurning,
+            label: "Taper Turning",
+            caption: "Taper",
+            tag: 26,
+            // The same envelope law across the cone: the authored
+            // diameters spent themselves at the door, and what the
+            // ball rolls over is the modeled skin within the
+            // chord budget - one truth, ride and verdict alike.
+            mode: Mode::Envelope,
+            family: Family::Turn,
+            seed: seed_taper,
+        },
+        KindInfo {
+            ty: OpType::MultiPassTurning,
+            label: "Multi-Pass Turning",
+            caption: "Multi-Pass",
+            tag: 27,
+            // Rough and finish in one program: the rungs' shells
+            // and the spring rides' midpoints all stand at a
+            // nose's distance-or-more from the skin, so the same
+            // envelope law convicts any rung too thin and forgives
+            // the leave it is told to stand - the last ride lands
+            // ON the profile either way.
+            mode: Mode::Envelope,
+            family: Family::Turn,
+            seed: seed_multi_pass,
+        },
     ];
 }
 
@@ -1326,6 +1467,9 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[22].label,
     KindInfo::ALL[23].label,
     KindInfo::ALL[24].label,
+    KindInfo::ALL[25].label,
+    KindInfo::ALL[26].label,
+    KindInfo::ALL[27].label,
 ];
 
 impl OpType {
@@ -1359,6 +1503,9 @@ impl OpType {
             OpType::GrooveFinish => 22,
             OpType::Part => 23,
             OpType::Threading => 24,
+            OpType::Chamfering => 25,
+            OpType::TaperTurning => 26,
+            OpType::MultiPassTurning => 27,
         }
     }
 

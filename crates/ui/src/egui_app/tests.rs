@@ -2031,7 +2031,8 @@ fn a_lathe_document_lights_the_turning_cell() {
     // Stage B's kinds ride the same table row - the family field,
     // not a remembered list: the two profile cells light with it,
     // stage C's three blade cells ride the very same row (M5.2 C),
-    // and stage D's threading cell arrives on it too (M5.2 D).
+    // stage D's threading cell arrives on it too (M5.2 D), and so
+    // do stage E's three contour rides (M5.2 E).
     for word in [
         camcraft_app::operation::OpType::ProfileRough as usize,
         camcraft_app::operation::OpType::ProfileFinish as usize,
@@ -2039,6 +2040,9 @@ fn a_lathe_document_lights_the_turning_cell() {
         camcraft_app::operation::OpType::GrooveFinish as usize,
         camcraft_app::operation::OpType::Part as usize,
         camcraft_app::operation::OpType::Threading as usize,
+        camcraft_app::operation::OpType::Chamfering as usize,
+        camcraft_app::operation::OpType::TaperTurning as usize,
+        camcraft_app::operation::OpType::MultiPassTurning as usize,
     ] {
         assert!(
             panes::enabled(Cmd::Create(word), st),

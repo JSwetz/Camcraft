@@ -670,6 +670,78 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
             }
+            // The contour doors (M5.2 stage E): the twins' heights and
+            // feeds, plus each kind's own promise-number, finite.
+            // Whether the face the number states IS in the model -
+            // and whether 90 degrees of it is really a face - is the
+            // kernel's question and stays the kernel's, refused
+            // there by name (the promise-at-the-door law).
+            OpParams::Chamfering {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                angle_deg,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && angle_deg.is_finite()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
+            // A diameter names a size: the taper door admits zero
+            // only at the axis end of the cone (a point is a legal
+            // small end), and both-zero is refused by the kernel.
+            OpParams::TaperTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                bottom_dia,
+                top_dia,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && bottom_dia.is_finite()
+                    && *bottom_dia >= 0.0
+                    && top_dia.is_finite()
+                    && *top_dia > 0.0
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
+            // The multi-pass door is profile rough's law plus the
+            // ride count - one ride is the classic pair, so the
+            // count must at least be one; the cap is the kernel's.
+            OpParams::MultiPassTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                stock_to_leave,
+                passes,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && stock_to_leave.is_finite()
+                    && *stock_to_leave >= 0.0
+                    && *passes >= 1
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
         }
     }
 

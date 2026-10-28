@@ -428,8 +428,10 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
 
     // (f) Finish envelope - the measured verdict that replaces law (b)
     // for ball-rolling paths (`stock_sim::envelope_scan`): `gouge` is
-    // Dexel truth, material cut below the model wherever a ball's
-    // floor ran under the surface; `rest` is distance truth, model
+    // facet truth (M5.2 E), model surface standing inside the swept
+    // envelope - the exact distance of each triangle to each ball
+    // center, honest on tilts, walls and under-passes where a column
+    // floor was none of those; `rest` is distance truth, model
     // standing outside every ball at ridge points - surface points
     // the center path passed twice inside the promise band, where
     // the stepdown law promised tolerance. The band is `tol` wide,
@@ -452,7 +454,13 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         // insert's smaller nose circle when the tool states one
         // (M5.2 A; `ToolGeom::nose_radius` is 0.0 for every mill
         // kind, so this reads unchanged for all pre-turning paths).
-        let r = if cx.tool.nose_radius.is_finite() && cx.tool.nose_radius > 0.0 {
+        // A stated nose radius marks the turning convention too: the
+        // generator walked the nose CENTER, so the moves are centers
+        // already and the scan must not lift them (M5.2 E; a `+r`
+        // tilt-lift on an outward-facing cone reads a gouge of
+        // r - r/v2 that no ball ever cut).
+        let nose_centers = cx.tool.nose_radius.is_finite() && cx.tool.nose_radius > 0.0;
+        let r = if nose_centers {
             cx.tool.nose_radius
         } else {
             cx.tool.radius
@@ -463,7 +471,11 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
             .position(|m| m.kind != MoveKind::Rapid)
             .unwrap_or(0);
         let verdict = match cx.model.zip(cx.finish_tol) {
-            Some((facets, tol)) => match crate::stock_sim::envelope_scan(facets, &path.moves, r, tol) {
+            Some((facets, tol)) => match if nose_centers {
+                crate::stock_sim::envelope_scan_centers(facets, &path.moves, r, tol)
+            } else {
+                crate::stock_sim::envelope_scan(facets, &path.moves, r, tol)
+            } {
                 Ok(rep) => {
                     let gate = tol + rep.cell * rep.cell / (2.0 * r) + 1e-9;
                     if rep.gouge_mm > gate || rep.rest_mm > gate {

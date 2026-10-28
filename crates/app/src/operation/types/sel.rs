@@ -161,6 +161,23 @@ pub enum OpType {
     /// wave clause: the tool's V, not a boxcar, says what stands
     /// between the grooves.
     Threading,
+    /// Chamfer turning (M5.2 stage E): one ride of the nose across
+    /// a MODELED cone face — the authored angle is a promise the
+    /// model must keep, and the ride chases the skin, not the
+    /// number (see [`crate::turning`]). A face the model does not
+    /// have is refused at the door by name.
+    Chamfering,
+    /// Taper turning (M5.2 stage E): the nose's ride of the cone
+    /// the two authored diameters state — again a promise over a
+    /// MODELED taper, so the pass and the verdict stand on the
+    /// same skin. Equal diameters state the straight turn.
+    TaperTurning,
+    /// Multi-pass turning (M5.2 stage E): the roughing ladder down
+    /// to the leave plus a sequence of finishing rides that share
+    /// it out — the spring-pass law, each ride standing half the
+    /// last one's shell in from it, the last on the profile
+    /// itself. The moves are stages B's own, chained.
+    MultiPassTurning,
 }
 
 impl core::fmt::Display for OpType {

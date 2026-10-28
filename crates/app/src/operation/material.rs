@@ -321,7 +321,12 @@ pub(super) fn region_for_src(
                     | OpParams::Part { .. }
                     // The lattice is the modeled thread's own - a
                     // pick could only disagree with the helix (D).
+                    // So is a face: the window says which cone the
+                    // ride walks, and the model says it too (E).
                     | OpParams::Threading { .. }
+                    | OpParams::Chamfering { .. }
+                    | OpParams::TaperTurning { .. }
+                    | OpParams::MultiPassTurning { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -407,9 +412,14 @@ pub(super) fn region_for(
         | OpParams::GrooveRough { .. }
         | OpParams::GrooveFinish { .. }
         // Threading's shadow is the bar's own disc too - the wave
-        // lives in the meridian, not the footprint (M5.2 D).
+        // lives in the meridian, not the footprint (M5.2 D). The
+        // contour rides stand on the same disc: a face of
+        // revolution casts the turned part's shadow (M5.2 E).
         | OpParams::Part { .. }
-        | OpParams::Threading { .. } => {
+        | OpParams::Threading { .. }
+        | OpParams::Chamfering { .. }
+        | OpParams::TaperTurning { .. }
+        | OpParams::MultiPassTurning { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

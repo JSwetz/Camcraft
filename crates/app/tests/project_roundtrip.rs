@@ -4118,3 +4118,118 @@ fn v35_file_steps_to_v36_and_the_thread_grammar_round_trips() {
         "a thread with no pitch is no helix"
     );
 }
+
+#[test]
+fn v36_file_steps_to_v37_and_the_contour_grammar_round_trips() {
+    // M5.2 stage E: the contour kinds arrive as three new params
+    // tags (`chamfering`, `taper_turning`, `multi_pass_turning`)
+    // and NOTHING ELSE - no new tool kind (the rides stand on the
+    // turning insert's nose, a word v36 already files), no new key
+    // on any other row. A v36 file cannot carry the tags; a v37
+    // reader of one loses nothing. The step-up is the arrival law
+    // restated a sixth time.
+    let world = new_world();
+    project::open(&world, r#"{"version": 36, "entities": []}"#).expect("v36 steps up");
+    let p = tmp_path("v37a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v37 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v37 wire grammar, hand-written so the tags are pinned:
+    // one turning insert (the nose is the whole tool story) and the
+    // three contour operations on the numbers the app suite
+    // generates with.
+    let text = r#"{
+        "version": 37,
+        "entities": [
+            {"name": "T0", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "turning", "diameter": 16.0, "corner_r": 0.0,
+                      "nose_radius": 0.8,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 3000.0, "feed": 150.0}},
+            {"name": "CH1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T0", "src": "stock", "params": {"chamfering": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 24.0},
+                 "top_z": {"reference": "fixed", "offset": -14.0},
+                 "bottom_z": {"reference": "fixed", "offset": -16.0},
+                 "angle_deg": 45.0, "feed": 200.0, "plunge_feed": 50.0}}}
+            },
+            {"name": "TP1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T0", "src": "stock", "params": {"taper_turning": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 48.0},
+                 "top_z": {"reference": "fixed", "offset": 40.0},
+                 "bottom_z": {"reference": "fixed", "offset": -16.0},
+                 "bottom_dia": 20.0, "top_dia": 16.0, "feed": 200.0, "plunge_feed": 50.0}}}
+            },
+            {"name": "MP1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T0", "src": "stock", "params": {"multi_pass_turning": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 30.0},
+                 "top_z": {"reference": "fixed", "offset": 16.0},
+                 "bottom_z": {"reference": "fixed", "offset": -16.0},
+                 "stepdown": 0.5, "stock_to_leave": 0.25, "passes": 3,
+                 "feed": 200.0, "plunge_feed": 50.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v37 contour grammar must read");
+    let e = model::find_by_name(&world, "CH1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Chamfering { angle_deg, feed, plunge_feed, .. } = &o.params else {
+        panic!("chamfering params expected, got {:?}", o.params);
+    };
+    assert_eq!((*angle_deg, *feed, *plunge_feed), (45.0, 200.0, 50.0));
+    let e = model::find_by_name(&world, "TP1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::TaperTurning { bottom_dia, top_dia, .. } = &o.params else {
+        panic!("taper params expected, got {:?}", o.params);
+    };
+    assert_eq!((*bottom_dia, *top_dia), (20.0, 16.0));
+    let e = model::find_by_name(&world, "MP1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::MultiPassTurning { stepdown, stock_to_leave, passes, .. } = &o.params else {
+        panic!("multi-pass params expected, got {:?}", o.params);
+    };
+    assert_eq!((*stepdown, *stock_to_leave, *passes), (0.5, 0.25, 3));
+
+    // Write-parse-write is a fixed point, and each new word is
+    // stated exactly once - the ride's whole tool story is the
+    // nose the T0 row already carries.
+    let p = tmp_path("v37b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the contour shapes round-trip byte-identically");
+    assert_eq!(first.matches("\"chamfering\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"taper_turning\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"multi_pass_turning\"").count(), 1, "{first}");
+
+    // The sane doors at the loader: a cone closed at its TOP end
+    // stands on the axis there - no steel reaches, the door keeps
+    // the axis point for the bottom end only - and a ladder with
+    // no finishing ride leaves the stock standing.
+    let axis_point = text.replace("\"bottom_dia\": 20.0, \"top_dia\": 16.0", "\"bottom_dia\": 20.0, \"top_dia\": 0.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &axis_point), Err(ProjectError::Corrupt(_))),
+        "a taper closed to the axis at its top end must not load"
+    );
+    let no_rides = text.replace("\"passes\": 3,", "\"passes\": 0,");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &no_rides), Err(ProjectError::Corrupt(_))),
+        "a multi-pass program with no finishing ride is not a program"
+    );
+}

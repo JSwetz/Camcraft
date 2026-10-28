@@ -683,8 +683,28 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             ..
         }
         // Threading states the same four rows - the window of turns
-        // by its plain names (M5.2 D).
+        // by its plain names (M5.2 D) - and the contour rides state
+        // them across a face: the window bounds the cone, and the
+        // ride names its own reach (M5.2 E).
         | OpParams::Threading {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::Chamfering {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::TaperTurning {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::MultiPassTurning {
             clearance_z,
             top_z,
             bottom_z,

@@ -1,16 +1,20 @@
 //! Split from `stock_sim.rs` by M5.0.1; structure only.
 
 use super::kernel::{MAX_CELLS_PER_AXIS, StockError, part_surface};
-use super::dexel::{Dexel, fy0};
+use super::dexel::fy0;
 
 use crate::cl::{Move, MoveKind};
 use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
 /// The envelope verdict for a finishing path (M2.2a), on a stated
 /// lattice, measured not assumed. Two truths, each read by the law
-/// that is exact for it. Gouge is Dexel truth: every ball's lowest
-/// point over a column, and a floor below the model surface is depth
-/// removed that must not be. Rest is distance truth at RIDGES: a
+/// that is exact for it. Gouge is facet truth (M5.2 E): the exact
+/// distance from each model triangle to each instant's ball center,
+/// and `r` minus it where positive - a surface standing inside the
+/// swept envelope. A column floor cannot say that honestly (it is
+/// inflated by 1/cos on tilts, blind on walls, and convicts a pass
+/// running legitimately under an overhang); two convex sets can.
+/// Rest is distance truth at RIDGES: a
 /// model surface point that stands within the pass's promise band
 /// (`r + tol + floor` of at least two chords the center path ran
 /// over), and how far outside every ball it stood. Two band contacts
@@ -46,11 +50,41 @@ pub struct EnvelopeReport {
     pub at: Point2,
 }
 
+/// The envelope verdict for a ball-mill path: the moves carry TIP
+/// positions (the whole codebase's convention) and a ball's tip sits
+/// `r` under its center, so the centers are the tips lifted by `r`.
 pub fn envelope_scan(
     facets: &[Triangle],
     moves: &[Move],
     r: f64,
     tol: f64,
+) -> Result<EnvelopeReport, StockError> {
+    envelope_scan_lift(facets, moves, r, tol, r)
+}
+
+/// The same law for a path whose positions ARE the envelope centers
+/// (M5.2 E): a turning generator walks its nose CENTER along the
+/// offset, so the mill's `+r` tip lift would tilt every ball off the
+/// skin it rode - exactly `r·(1 - 1/cos n̂_z)` INTO a face whose
+/// material stands above it (the chamfer's phantom gouge) and the same
+/// depth OUT of every face tilting the other way (a blindness no
+/// passing test showed, because a vacuous clean passes). One
+/// convention per kind, chosen by the caller that knows the kind.
+pub fn envelope_scan_centers(
+    facets: &[Triangle],
+    moves: &[Move],
+    r: f64,
+    tol: f64,
+) -> Result<EnvelopeReport, StockError> {
+    envelope_scan_lift(facets, moves, r, tol, 0.0)
+}
+
+fn envelope_scan_lift(
+    facets: &[Triangle],
+    moves: &[Move],
+    r: f64,
+    tol: f64,
+    center_lift: f64,
 ) -> Result<EnvelopeReport, StockError> {
     if !(r.is_finite() && r > 0.0) {
         return Err(StockError::Invalid(format!(
@@ -94,20 +128,6 @@ pub fn envelope_scan(
             "envelope grid would be {nx}x{ny} cells; at most {MAX_CELLS_PER_AXIS} per axis"
         )));
     }
-    // The grid starts as ALL AIR: the sweep writes every cut it makes
-    // and nothing else, so a finite column top after the sweep is
-    // exactly "the path reached this column". Dexel::block refuses
-    // non-finite tops (a stock surface must be real), hence the
-    // literal - same shape, stated reason.
-    let mut dex = Dexel {
-        x0,
-        y0,
-        cell,
-        nx,
-        ny,
-        stock_z: f64::INFINITY,
-        top: vec![f64::INFINITY; nx * ny],
-    };
     // The arc tessellation of the measurement: the generator's own
     // chord law - every XY shortcut keeps tolerance/4 (the march law,
     // the ring law) - so the scan's discretization error never
@@ -118,9 +138,7 @@ pub fn envelope_scan(
     // G2 arc never cut. This budget only ever tightens the yardstick:
     // the machine follows the true arc, chord or not.
     let chord_tol = (tol * 0.25).max(1e-9);
-    for m in moves {
-        dex.subtract_ball(m, r, chord_tol);
-    }
+    let segs = center_segments(moves, center_lift, chord_tol);
     let part = part_surface(facets, x0, y0, cell, nx, ny);
     let floor = cell * cell / (2.0 * r); // the sagitta one cell can hide
     let mut rep = EnvelopeReport {
@@ -129,24 +147,22 @@ pub fn envelope_scan(
         ..Default::default()
     };
     let mut worst = 0.0f64;
-    // Gouge: the Dexel truth. A column's floor is the lowest point any
-    // ball held over it; below the surface means below means removed.
-    for iy in 0..ny {
-        for ix in 0..nx {
-            let k = ix + iy * nx;
-            let (cut, t) = (dex.top[k], part[k]);
-            if !cut.is_finite() || !t.is_finite() {
-                continue; // never swept, or nothing there to deviate from
-            }
-            let dev = t - cut;
-            if dev > rep.gouge_mm {
-                rep.gouge_mm = dev;
-                if dev > worst {
-                    worst = dev;
-                    rep.at = dex.center(ix, iy);
-                }
-            }
-        }
+    // Gouge: the facet truth (M5.2 E). Every model triangle against
+    // every ball-center instant, by the exact distance of two convex
+    // sets - no column, no floor, no height field in the verdict. A
+    // flush ride reads 0 by construction (distance == r); a tangent
+    // chamfer ride under its own top cap reads 0, because no ball
+    // ever reached inside the cap's facets; and the r/2 mixup still
+    // reads its ~3 mm, because distance is the whole story. The Dexel
+    // sweep that answered this question before is dead in the scan -
+    // it inflated tilts by 1/cos, saw nothing on walls, and convicted
+    // legitimate under-passes, and no column reading can be fixed
+    // into honesty from those.
+    let (gouge, gouge_at) = super::gouge::facet_gouge(facets, &segs, r, x0, y0, cell, nx, ny)?;
+    rep.gouge_mm = gouge;
+    if gouge > worst {
+        worst = gouge;
+        rep.at = gouge_at;
     }
     // Rest: the distance truth at ridges - surface points the center
     // path passed by twice inside the promise band. The band is what
@@ -154,7 +170,6 @@ pub fn envelope_scan(
     // this path's own failure, while a once-grazed or never-touched
     // point is another op's job (the law above).
     let band = r + tol + floor;
-    let segs = center_segments(moves, r, chord_tol);
     // A far segment's 3D distance cannot stand inside the band, so
     // its XY window rejects it before the distance is paid. A
     // column's dmin only feeds a report when two segments proved
@@ -170,7 +185,7 @@ pub fn envelope_scan(
             if !t.is_finite() {
                 continue; // no model surface at this column
             }
-            let q = dex.center(ix, iy);
+            let q = Point2::new(x0 + (ix as f64 + 0.5) * cell, y0 + (iy as f64 + 0.5) * cell);
             let (mut dmin, mut near) = (f64::INFINITY, 0u8);
             for ((a, b), (x0, x1, y0, y1)) in segs.iter().zip(&boxes) {
                 if q.x < x0 - band
@@ -317,10 +332,14 @@ pub(super) fn hidden_rest(
 
 /// The ball-center polyline the path sweeps: rapids excluded, arcs
 /// reduced to their sagitta chords with Z interpolated, everything
-/// lifted by `r` so the stored tip coordinates read as centers - the
-/// exact discretization `subtract_ball` cuts with, so a chord the
-/// Dexel honoured is a chord the distance law sees.
-pub(super) fn center_segments(moves: &[Move], r: f64, chord_tol: f64) -> Vec<(Point3, Point3)> {
+/// lifted by `center_lift` - `r` for a tip-stored ball-mill path (the
+/// exact discretization `subtract_ball` cuts with), 0.0 for a turning
+/// path whose positions are already nose centers (M5.2 E).
+pub(super) fn center_segments(
+    moves: &[Move],
+    center_lift: f64,
+    chord_tol: f64,
+) -> Vec<(Point3, Point3)> {
     let mut segs = Vec::new();
     for m in moves {
         if m.kind == MoveKind::Rapid || !m.is_finite() {
@@ -328,8 +347,8 @@ pub(super) fn center_segments(moves: &[Move], r: f64, chord_tol: f64) -> Vec<(Po
         }
         match m.arc {
             None => segs.push((
-                Point3::new(m.from.x, m.from.y, m.from.z + r),
-                Point3::new(m.to.x, m.to.y, m.to.z + r),
+                Point3::new(m.from.x, m.from.y, m.from.z + center_lift),
+                Point3::new(m.to.x, m.to.y, m.to.z + center_lift),
             )),
             Some(arc) => {
                 let a2 = Point2::new(m.from.x, m.from.y);
@@ -339,8 +358,12 @@ pub(super) fn center_segments(moves: &[Move], r: f64, chord_tol: f64) -> Vec<(Po
                 let dz = m.to.z - m.from.z;
                 for (j, (ca, cb)) in cs.into_iter().enumerate() {
                     segs.push((
-                        Point3::new(ca.x, ca.y, m.from.z + dz * (j as f64 / n) + r),
-                        Point3::new(cb.x, cb.y, m.from.z + dz * ((j + 1) as f64 / n) + r),
+                        Point3::new(ca.x, ca.y, m.from.z + dz * (j as f64 / n) + center_lift),
+                        Point3::new(
+                            cb.x,
+                            cb.y,
+                            m.from.z + dz * ((j + 1) as f64 / n) + center_lift,
+                        ),
                     ));
                 }
             }

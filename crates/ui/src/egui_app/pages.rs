@@ -2292,6 +2292,137 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the lead-in arc swings into the first turn at this feed; every pass after the first rides the ladder in rapids");
             }
         }
+        // Chamfering (M5.2 E): the ride is the profile finish's, so
+        // the page names the window, the promise and the feeds - and
+        // the angle is a PROMISE, spent at the door: the model must
+        // already carry this cone within the tolerance, or the
+        // generation says so by name.
+        OpParams::Chamfering {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            angle_deg,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "chamfer.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "chamfer.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "chamfer.bottom");
+                ui.label("the two stations the chamfered corner spans - the ride walks the face between them and nowhere outside");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("how far the model may stand off the promised cone before the op refuses - and the chord budget the ride settles at");
+                field(ui, "Angle from cylinder (deg)");
+                num_plain(ui, angle_deg);
+                ui.label("the slope the drawing states, measured off the cylinder - the MODEL owns which way the face falls, and its own line is what the tool rides");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                ui.label("the nose tracks the modeled face at this feed");
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the radial lead-in and slide-out at the window ends ride this feed");
+            }
+        }
+        // Taper turning (M5.2 E): the diameters state the cone the
+        // same way the angle does - a promise the model keeps or
+        // the op names. Equal diameters are the straight turn.
+        OpParams::TaperTurning {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            bottom_dia,
+            top_dia,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "taper.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "taper.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "taper.bottom");
+                ui.label("the stations the taper runs between - the diameters stand at these planes");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("how far the model may stand off the authored cone before the op refuses - and the chord budget the ride settles at");
+                field(ui, "Bottom Diameter");
+                num(ui, u, bottom_dia);
+                ui.label("the cone's size at the window's low station");
+                field(ui, "Top Diameter");
+                num(ui, u, top_dia);
+                ui.label("and at its high one - equal diameters state the straight turn of a cylinder");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                ui.label("the nose tracks the modeled cone at this feed");
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the radial lead-in and slide-out at the window ends ride this feed");
+            }
+        }
+        // Multi-pass turning (M5.2 E): the rough page and the finish
+        // page's numbers in one program, plus the ride count - each
+        // spring pass takes about half of what the last one
+        // sprang, and the last of them lands ON the profile.
+        OpParams::MultiPassTurning {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            stock_to_leave,
+            passes,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "multipass.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "multipass.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "multipass.bottom");
+                ui.label("the length of bar the ladder eats and the rides finish, station window and all (M5.2 B's law, one program long)");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the chord budget every ride settles at, and the play the verdict measures");
+                field(ui, "Stepdown");
+                num(ui, u, stepdown);
+                ui.label("radial shell each rung eats - never more than twice the nose, the ladder's own door");
+                field(ui, "Stock to leave");
+                num(ui, u, stock_to_leave);
+                ui.label("what the last rung stands off the skin for the finishing rides to share out");
+                field(ui, "Finishing passes");
+                let mut n = f64::from(*passes);
+                num_plain(ui, &mut n);
+                *passes = n.clamp(1.0, 64.0).round().max(1.0) as u32;
+                ui.label("spring passes after the rough - each removes about half of what the last sprang back; the last one is the profile finish itself");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                ui.label("rung and ride both track the offset at this feed");
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the radial plunge into each block's start, and the slide out of its end");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);

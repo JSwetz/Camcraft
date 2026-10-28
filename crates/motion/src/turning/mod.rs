@@ -16,9 +16,10 @@
 //! [`prof`]'s finish and concentric roughing ladders built from that
 //! pair. Stage C adds the blade: [`revolve`]'s meridian verdict of
 //! what a banded cut leaves, and [`blade`]'s grooving, groove-
-//! finish and parting sweeps built on the same silhouette.
-//! Threading and the rest join as their own files (stages D..);
-//! the axis frame below is what they all share.
+//! finish and parting sweeps built on the same silhouette. Stage D
+//! added [`thread`]'s helical ladder; stage E adds [`contour`]'s
+//! promised-face rides - chamfer, taper, multi-pass. The rest join
+//! as their own files; the axis frame below is what they all share.
 //!
 //! Provenance: lathe facing as a radial-pass ladder at axial
 //! stations - standard turning practice from machine-tool handbooks
@@ -27,6 +28,7 @@
 //! axis-fit law. No vendor strategy or post output was inspected.
 
 pub mod blade;
+pub mod contour;
 pub mod face;
 pub mod offset;
 pub mod prof;
@@ -36,6 +38,9 @@ pub mod thread;
 
 pub use blade::{
     groove_finish, groove_rough, part, GrooveFinishParams, GrooveRoughParams, PartParams,
+};
+pub use contour::{
+    chamfer, multi_pass, taper, ChamferParams, MultiPassParams, TaperParams,
 };
 pub use face::{facing, FacingParams};
 pub use offset::profile_offset;

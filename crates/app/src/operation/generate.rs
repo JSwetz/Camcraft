@@ -1173,6 +1173,108 @@ pub fn generate(
             )?;
             (region, path)
         }
+        // M5.2 stage E: the contour rides. The tool door names the
+        // turning insert again - the ride is the nose's, and the
+        // profile kinds' ball-of-the-nose law is what stands a
+        // tolerance's promise up. The kernel's own door reads the
+        // authored face against the model and refuses the lie by
+        // name; these arms only spend the window and the numbers.
+        OpParams::Chamfering {
+            angle_deg,
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Turning {
+                return Err(GenError::Invalid(format!(
+                    "Chamfering needs a turning insert, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::chamfer(
+                &material.facets,
+                &crate::turning::ChamferParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    angle_deg: *angle_deg,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    nose_radius: tool.nose_radius,
+                    tolerance: *tolerance,
+                },
+            )?;
+            (region, path)
+        }
+        OpParams::TaperTurning {
+            bottom_dia,
+            top_dia,
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Turning {
+                return Err(GenError::Invalid(format!(
+                    "Taper Turning needs a turning insert, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::taper(
+                &material.facets,
+                &crate::turning::TaperParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    bottom_dia: *bottom_dia,
+                    top_dia: *top_dia,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    nose_radius: tool.nose_radius,
+                    tolerance: *tolerance,
+                },
+            )?;
+            (region, path)
+        }
+        // Multi-pass spends stage B's ladder law verbatim: the same
+        // rung numbers into the same door, plus the ride count the
+        // spring law shares the leave over.
+        OpParams::MultiPassTurning {
+            stepdown,
+            stock_to_leave,
+            passes,
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Turning {
+                return Err(GenError::Invalid(format!(
+                    "Multi-Pass Turning needs a turning insert, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::multi_pass(
+                &material.facets,
+                &crate::turning::MultiPassParams {
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    stepdown: *stepdown,
+                    stock_to_leave: *stock_to_leave,
+                    passes: *passes,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    nose_radius: tool.nose_radius,
+                    tolerance: *tolerance,
+                },
+            )?;
+            (region, path)
+        }
     };
 
     // M3.2 stage B: what the program clamps to. The op's setup context
@@ -1227,8 +1329,15 @@ pub fn generate(
         // Threading leaves no shelf either: the full-form pass owns
         // the whole wave, and the shallower rungs before it only
         // widen it - what stands is what the wave scan measures,
-        // with nothing added to the floor (M5.2 D).
-        | OpParams::Threading { .. } => 0.0,
+        // with nothing added to the floor (M5.2 D). The contour
+        // rides own their skin outright: a chamfer and a taper are
+        // finished by definition, and a multi-pass program ends ON
+        // the profile - its leave is spent inside the ladder, not
+        // standing outside the verdict (M5.2 E).
+        | OpParams::Threading { .. }
+        | OpParams::Chamfering { .. }
+        | OpParams::TaperTurning { .. }
+        | OpParams::MultiPassTurning { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -1295,8 +1404,14 @@ pub fn generate(
                             | OpParams::Part { .. }
                             // The wave rides the same facets: the
                             // modeled thread's silhouette IS what the
-                            // lattice must land in (M5.2 D).
+                            // lattice must land in (M5.2 D). The
+                            // contour rides promise the very skin
+                            // this scan measures - door and verdict
+                            // read the same polyline (M5.2 E).
                             | OpParams::Threading { .. }
+                            | OpParams::Chamfering { .. }
+                            | OpParams::TaperTurning { .. }
+                            | OpParams::MultiPassTurning { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -1343,7 +1458,17 @@ pub fn generate(
                         // before this same budget (M5.2 B).
                         | OpParams::Facing { tolerance, .. }
                         | OpParams::ProfileRough { tolerance, .. }
-                        | OpParams::ProfileFinish { tolerance, .. } => Some(*tolerance),
+                        | OpParams::ProfileFinish { tolerance, .. }
+                        // The contour rides read it the same way the
+                        // profile kinds do - TWICE: the kernel chords
+                        // the ride at it, the door judges the promised
+                        // line at it, and the envelope scan measures
+                        // the same skin under this budget (M5.2 E).
+                        // Without it the verdict cannot measure, and
+                        // an unmeasurable Envelope op refuses.
+                        | OpParams::Chamfering { tolerance, .. }
+                        | OpParams::TaperTurning { tolerance, .. }
+                        | OpParams::MultiPassTurning { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
                     fixtures: &fixture_boxes,

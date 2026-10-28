@@ -66,8 +66,9 @@ pub struct ProfileRoughParams {
 }
 
 /// A rung cap with room to spare - facing's number, the same
-/// promise.
-const MAX_RUNGS: f64 = 100_000.0;
+/// promise. `pub(crate)` from M5.2 E: multi-pass turning runs the
+/// same ladder law.
+pub(crate) const MAX_RUNGS: f64 = 100_000.0;
 
 /// What a profile kernel walks on: the frame, the silhouette's
 /// sampled (station, radius) points, the whole profile polyline,
@@ -77,7 +78,9 @@ type Ride = (profile::Frame, Vec<(f64, f64)>, profile::Profile, (f64, f64));
 /// What the two kernels refuse in common before either walks: the
 /// numbers are numbers, the nose is an arc, the model revolves
 /// about a walkable axis, and the height window holds bar.
-fn setup(
+/// `pub(crate)` from M5.2 E: the contour kinds stand the same door
+/// before their rides.
+pub(crate) fn setup(
     facets: &[Triangle],
     clearance_z: f64,
     top_z: f64,
@@ -126,7 +129,9 @@ fn setup(
 
 /// One rung's walk: plunge in radially at the window's bottom,
 /// ride the offset ascending, slide off radially at the top.
-fn ride(
+/// `pub(crate)` from M5.2 E: multi-pass turning chains blocks of
+/// these rides onto one builder.
+pub(crate) fn ride(
     b: &mut PathBuilder,
     f: &profile::Frame,
     cl: &[(f64, f64)],

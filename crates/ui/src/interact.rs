@@ -1182,7 +1182,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::GrooveRough { .. }
         | operation::OpParams::GrooveFinish { .. }
         | operation::OpParams::Part { .. }
-        | operation::OpParams::Threading { .. } => None,
+        // The contour rides name their rapids plane off the ride's
+        // own reach too - no authored hop to draw (M5.2 E).
+        | operation::OpParams::Threading { .. }
+        | operation::OpParams::Chamfering { .. }
+        | operation::OpParams::TaperTurning { .. }
+        | operation::OpParams::MultiPassTurning { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1283,7 +1288,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // plane, Bottom the last rungs' - the helix lives between.
         | operation::OpParams::GrooveRough { top_z, bottom_z, .. }
         | operation::OpParams::GrooveFinish { top_z, bottom_z, .. }
-        | operation::OpParams::Threading { top_z, bottom_z, .. } => {
+        // The contour window is the same promise (M5.2 E): the two
+        // planes the promised face stands between.
+        | operation::OpParams::Threading { top_z, bottom_z, .. }
+        | operation::OpParams::Chamfering { top_z, bottom_z, .. }
+        | operation::OpParams::TaperTurning { top_z, bottom_z, .. }
+        | operation::OpParams::MultiPassTurning { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,

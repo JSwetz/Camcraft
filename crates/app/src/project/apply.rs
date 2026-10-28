@@ -312,6 +312,16 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // thread is the mesh every kind already files.
         file.version = 36;
     }
+    if file.version == 36 {
+        // v36 -> v37: the contour kinds arrive (M5.2 stage E) as
+        // three new params variants (`chamfering`, `taper_turning`,
+        // `multi_pass_turning`) and no new tool-kind word - the
+        // rides stand on the turning insert's nose, which v36
+        // files already carry. Same arrival law: a v36 file cannot
+        // contain the new tags, and `validate_kind` refuses an
+        // unknown params tag before anything is written.
+        file.version = 37;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

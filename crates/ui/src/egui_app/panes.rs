@@ -381,8 +381,11 @@ fn op_icon(kind: OpType) -> Icon {
         // Same reuse for the blade kinds: the kerf and the severed
         // column are both the turned surface giving way to the
         // tool's width (M5.2 C) - and so is the threaded wall, the
-        // same surface recut one helix at a time (M5.2 D).
+        // same surface recut one helix at a time (M5.2 D). The
+        // contour rides leave the same turned skin, finished to a
+        // promised face (M5.2 E).
         OpType::GrooveRough | OpType::GrooveFinish | OpType::Part | OpType::Threading => Icon::Face,
+        OpType::Chamfering | OpType::TaperTurning | OpType::MultiPassTurning => Icon::Face,
     }
 }
 

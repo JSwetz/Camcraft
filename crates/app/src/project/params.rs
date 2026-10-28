@@ -596,6 +596,43 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Declared at v37 with the contour kinds (M5.2 stage E): the
+    /// ride trio of heights and the kind's own promise-numbers -
+    /// the authored angle, the authored diameters, the ladder
+    /// numbers and the ride count. The nose that rides them rides
+    /// the TOOL row, the profile kinds' law again.
+    Chamfering {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        angle_deg: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// See [`Self::Chamfering`] - the taper's way.
+    TaperTurning {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        bottom_dia: f64,
+        top_dia: f64,
+        feed: f64,
+        plunge_feed: f64,
+    },
+    /// See [`Self::Chamfering`] - the multi-pass ladder's way.
+    MultiPassTurning {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        stock_to_leave: f64,
+        passes: u32,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

@@ -841,6 +841,71 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The contour rides (M5.2 stage E, tags 25-27): each
+            // promise-number MOVES the verdict's window or the ride
+            // the door judges - the chamfer's angle re-states which
+            // line the skin is measured against, the taper's
+            // diameters both the line and its stations' reach, the
+            // ladder's numbers and ride count the very blocks the
+            // program walks. The nose spends itself through the
+            // TOOL row, the profile kinds' law again.
+            OpParams::Chamfering {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                angle_deg,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*angle_deg, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
+            OpParams::TaperTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                bottom_dia,
+                top_dia,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*bottom_dia, *top_dia, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
+            OpParams::MultiPassTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                stock_to_leave,
+                passes,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                w(h, *stepdown);
+                w(h, *stock_to_leave);
+                w(h, (*passes) as f64);
+                for v in [*feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
         }
     }
 }
