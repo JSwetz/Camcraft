@@ -18,8 +18,9 @@
 //! what a banded cut leaves, and [`blade`]'s grooving, groove-
 //! finish and parting sweeps built on the same silhouette. Stage D
 //! added [`thread`]'s helical ladder; stage E adds [`contour`]'s
-//! promised-face rides - chamfer, taper, multi-pass. The rest join
-//! as their own files; the axis frame below is what they all share.
+//! promised-face rides - chamfer, taper, multi-pass - and stage E2
+//! [`form`]'s crown gauges. The rest join as their own files; the
+//! axis frame below is what they all share.
 //!
 //! Provenance: lathe facing as a radial-pass ladder at axial
 //! stations - standard turning practice from machine-tool handbooks
@@ -30,6 +31,7 @@
 pub mod blade;
 pub mod contour;
 pub mod face;
+pub mod form;
 pub mod offset;
 pub mod prof;
 pub mod profile;
@@ -43,8 +45,9 @@ pub use contour::{
     chamfer, multi_pass, taper, ChamferParams, MultiPassParams, TaperParams,
 };
 pub use face::{facing, FacingParams};
+pub use form::{form, form_warnings, FormParams};
 pub use offset::profile_offset;
 pub use prof::{profile_finish, profile_rough, ProfileFinishParams, ProfileRoughParams};
 pub use profile::{profile_of, silhouette, Profile};
-pub use revolve::{blade_warnings, BandMove};
+pub use revolve::{blade_warnings, BandMove, Floor};
 pub use thread::{thread, thread_warnings, ThreadParams};

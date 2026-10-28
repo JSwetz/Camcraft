@@ -68,32 +68,55 @@ type SR = (f64, f64);
 /// judge by this one number, spelled once.
 pub(crate) const HAIR: f64 = 1e-9;
 
+/// The shape of a move's floor between its band's edges - the
+/// footprint the steel leaves in the meridian.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Floor {
+    /// The blade's boxcar: every radius outside the tip, flat.
+    Flat,
+    /// The threading V (M5.2 D): the flank's climb, `cot(A/2)` per
+    /// mm of station from the center - a linear floor.
+    Wave(f64),
+    /// The form gauge's crown (M5.2 E2): the meridian arc's sagitta,
+    /// `R - sqrt(R^2 - d^2)` from the center - the wave clause's
+    /// curved sibling, and its own limit as `R` grows.
+    Crown(f64),
+}
+
 /// The blade moves the verdict reads: a station span (`a` and `b` -
 /// the same point for a straight plunge) and the tip radius the move
 /// reaches. Feed moves only: a rapids' band moves air, not edges.
 ///
-/// A threading insert is a blade cut to a V, and says so in `wave`:
-/// the floor it holds is not its tip but the wedge the flank sweeps,
-/// `tip + |s - c| * cot` around its center (M5.2 D). The scan's laws
-/// do not change - the boxcar still unions, the interval still
-/// judges at its two ends - only the floor now BENDS, linearly,
-/// between the centers the lattice already holds.
+/// A threading insert is a blade cut to a V, and a form gauge is one
+/// cut to an arc, and both say so in `floor`: the floor a band holds
+/// is not its tip alone but the shape the steel sweeps around its
+/// center (M5.2 D, E2). The scan's laws do not change - the boxcar
+/// still unions, the interval still judges at its two ends - only
+/// the floor now BENDS between the centers the lattice already
+/// holds, linearly or along the arc.
 pub struct BandMove {
     pub a: f64,
     pub b: f64,
     pub tip: f64,
     /// Index into the judged path, for the warning's attribution.
     pub at: usize,
-    /// `Some(cot(A/2))` for a form tool's band - the wave climbs
-    /// from the tip around the center `(a + b) * 0.5`; `None` for
-    /// the flat-tipped blade.
-    pub wave: Option<f64>,
+    /// The floor's shape around the center `(a + b) * 0.5`;
+    /// [`Floor::Flat`] for the plain-tipped blade.
+    pub floor: Floor,
 }
 
-/// The floor a move holds at a station: its tip, plus the flank's
-/// climb where the move carries a form.
+/// The floor a move holds at a station: its tip, plus the steel's
+/// climb where the move carries a form. A crown reads only inside
+/// its own reach - past `R` from the center the arc has no steel,
+/// and the door's band law says no scan asks; the clamp is the
+/// rounding's, not a license for an over-wide band.
 fn floor_at(m: &BandMove, s: f64) -> f64 {
-    m.tip + m.wave.map_or(0.0, |cot| (s - (m.a + m.b) * 0.5).abs() * cot)
+    let d = (s - (m.a + m.b) * 0.5).abs();
+    m.tip + match m.floor {
+        Floor::Flat => 0.0,
+        Floor::Wave(cot) => d * cot,
+        Floor::Crown(r) => r - (r * r - (d.min(r) * d.min(r))).max(0.0).sqrt(),
+    }
 }
 
 /// The silhouette read as chord windows: (s0, s1, r0, slope) per
@@ -228,10 +251,14 @@ pub struct Alert {
 /// floor between a center and the next, which is why the lattice
 /// holds the centers: the ends are still the interval's extremes.
 /// Intervals thinner than a [`HAIR`] own no surface and are skipped.
-/// `clip_shell` is the thread's crest law: a form floor standing
-/// above the blank's own surface ([`span_max`] over the window)
-/// measures nothing - the crest is where the passes never reach,
-/// and there the shell, not the floor, is the part.
+/// `clip_shell` is the crest law: a form floor standing above the
+/// blank's own surface measures nothing - the crest is where the
+/// passes never reach, and there the shell, not the floor, is the
+/// part. The blank level is [`span_max`] over the passes' window -
+/// the whole thread, where crest and window are the same steel -
+/// unless `crest` says better: a lone crown's band sits INSIDE the
+/// blank it cannot reach past, and clipping that floor to its own
+/// window would hide the rest it stands off the modeled surface.
 #[allow(clippy::too_many_arguments)] // the scan's whole meridian frame, threaded once
 pub fn scan(
     sg: &Segs,
@@ -242,6 +269,7 @@ pub fn scan(
     tol: f64,
     leave: f64,
     clip_shell: bool,
+    crest: Option<f64>,
 ) -> (Option<Alert>, Option<Alert>) {
     let mut order: Vec<(f64, usize)> = Vec::new();
     let mut kerfs: Vec<(f64, f64)> = Vec::new();
@@ -319,8 +347,9 @@ pub fn scan(
                 }
             }
             if clip_shell {
-                floor_u = floor_u.min(ref_top);
-                floor_v = floor_v.min(ref_top);
+                let cap = crest.unwrap_or(ref_top);
+                floor_u = floor_u.min(cap);
+                floor_v = floor_v.min(cap);
             }
             let g = (e_u - floor_u).max(e_v - floor_v);
             let r = (floor_u - e_u).max(floor_v - e_v);
@@ -413,17 +442,21 @@ pub fn blade_warnings(
                 b: sb,
                 tip: ra.min(rb),
                 at: i,
-                wave: None,
+                floor: Floor::Flat,
             }
         })
         .collect();
-    judge(&pts, moves, width * 0.5, tol, leave, false)
+    judge(&pts, moves, width * 0.5, tol, leave, false, None)
 }
 
 /// The shared close: scan what the moves leave and speak it in the
 /// vocabulary the verifier already owns. `clip_shell` belongs to the
 /// form tools (the thread's crest law, M5.2 D); the blade judges
-/// flat floors and passes false.
+/// flat floors and passes false. `crest` names the blank level the
+/// clip reads - None takes the window's own span (the thread's
+/// crest), Some the model's tallest claim (a lone crown's steel
+/// cannot reach past the bar, M5.2 E2).
+#[allow(clippy::too_many_arguments)] // the verdict's whole frame, spelled at the seam
 pub(crate) fn judge(
     pts: &[SR],
     moves: Vec<BandMove>,
@@ -431,10 +464,11 @@ pub(crate) fn judge(
     tol: f64,
     leave: f64,
     clip_shell: bool,
+    crest: Option<f64>,
 ) -> Vec<Warning> {
     let sg = segs(pts);
     let (window, lat) = lattice(pts, &moves, half);
-    let (gouge, rest) = scan(&sg, &moves, half, window, &lat, tol, leave, clip_shell);
+    let (gouge, rest) = scan(&sg, &moves, half, window, &lat, tol, leave, clip_shell, crest);
     let g = gouge.as_ref().map(|a| a.mm).unwrap_or(0.0);
     let r = rest.as_ref().map(|a| a.mm).unwrap_or(0.0);
     if g <= 0.0 && r <= 0.0 {

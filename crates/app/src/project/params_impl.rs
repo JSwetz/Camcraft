@@ -741,6 +741,21 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
             },
+            OpParams::FormTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => ParamsDto::FormTurning {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+            },
             OpParams::Slot {
                 a,
                 b,
@@ -1535,6 +1550,25 @@ impl ParamsDto {
                 stepdown: *stepdown,
                 stock_to_leave: *stock_to_leave,
                 passes: *passes,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+            },
+            // Read back whole, the gauge's way too - sane or
+            // nothing, `validate_kind`'s door again first, and the
+            // valley it promises is the model's, not the file's
+            // (M5.2 E2).
+            ParamsDto::FormTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => OpParams::FormTurning {
+                tolerance: *tolerance,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
                 feed: *feed,
                 plunge_feed: *plunge_feed,
             },

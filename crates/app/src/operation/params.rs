@@ -906,6 +906,28 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The crown gauge (M5.2 stage E2, tag 28): no number
+            // here shapes the cut's DEPTH - the model states it -
+            // so what moves is the window the valleys stand in and
+            // the verdict's budget. The crown and the band digest
+            // through the TOOL row, the blade's law again: a
+            // re-ground gauge makes this op Stale on its own.
+            OpParams::FormTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                w(h, *tolerance);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
         }
     }
 }

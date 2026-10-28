@@ -386,6 +386,8 @@ fn op_icon(kind: OpType) -> Icon {
         // promised face (M5.2 E).
         OpType::GrooveRough | OpType::GrooveFinish | OpType::Part | OpType::Threading => Icon::Face,
         OpType::Chamfering | OpType::TaperTurning | OpType::MultiPassTurning => Icon::Face,
+        // So is the formed surface the gauge stamps (M5.2 E2).
+        OpType::FormTurning => Icon::Face,
     }
 }
 
@@ -641,6 +643,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::Turning => "turning insert",
         ToolKind::Groove => "grooving blade",
         ToolKind::Thread => "threading insert",
+        ToolKind::Form => "form gauge",
     }
 }
 

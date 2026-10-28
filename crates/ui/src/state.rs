@@ -478,7 +478,8 @@ pub struct ToolUi {
     pub name: String,
     pub exists: bool,
     /// 0 end mill, 1 ball nose, 2 bull nose, 3 drill, 4 tap, 5 bore,
-    /// 6 turning insert, 7 grooving blade, 8 threading insert.
+    /// 6 turning insert, 7 grooving blade, 8 threading insert,
+    /// 9 form gauge.
     pub kind: usize,
     pub diameter: f64,
     pub corner_r: f64,
@@ -529,6 +530,7 @@ impl ToolUi {
                 ToolKind::Turning => 6,
                 ToolKind::Groove => 7,
                 ToolKind::Thread => 8,
+                ToolKind::Form => 9,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -559,6 +561,7 @@ impl ToolUi {
                 6 => ToolKind::Turning,
                 7 => ToolKind::Groove,
                 8 => ToolKind::Thread,
+                9 => ToolKind::Form,
                 _ => ToolKind::EndMill,
             },
             diameter: self.diameter,

@@ -32,8 +32,12 @@ use crate::geometry::{Point3, Triangle};
 /// above tolerance. Proved, not observed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EnvelopeReport {
-    /// Worst depth by which the swept envelope cut BELOW the model
-    /// surface (0.0 when nothing was cut too deep).
+    /// Worst depth by which the model surface stood INSIDE the swept
+    /// envelope (`r - distance`, and a path that buried its centers in
+    /// material reads the saturation value `r` - as deep as a distance
+    /// measurement can say). 0.0 when the envelope never reached the
+    /// surface. Not a trench depth: the column's "how far below the
+    /// wanted surface" phrasing died with the column law (M5.2 E).
     pub gouge_mm: f64,
     /// Worst distance the model surface stood OUTSIDE the swept
     /// envelope at a ridge the pass promised to roll over (two band

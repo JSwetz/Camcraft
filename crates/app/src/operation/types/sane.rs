@@ -742,6 +742,26 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
             }
+            // The form door (M5.2 E2): a cut with no authored depth
+            // has no authored numbers to doubt — the crown and the
+            // band are TOOL steel, judged by the tool's own sanity,
+            // and the model owns the plunge. What stands here is
+            // the twins' heights and feeds verbatim.
+            OpParams::FormTurning {
+                tolerance,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
         }
     }
 

@@ -732,6 +732,22 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Form turning (M5.2 stage E2): one plunge of a crown gauge per
+    /// MODELED formed surface in the window `top_z`/`bottom_z`
+    /// bound. The plunge depth is not authored — it is the deepest
+    /// position whose floor stands at or above the material across
+    /// the band, gouge-free by construction. The crown's radius and
+    /// the band's width are TOOL geometry, the blade's width law
+    /// again, read off the mounted gauge; the feeds are mm/min with
+    /// the spindle turning steady.
+    FormTurning {
+        tolerance: f64,
+        clearance_z: Height,
+        top_z: Height,
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 impl OpParams {
@@ -766,6 +782,7 @@ impl OpParams {
             OpParams::Chamfering { .. } => OpType::Chamfering,
             OpParams::TaperTurning { .. } => OpType::TaperTurning,
             OpParams::MultiPassTurning { .. } => OpType::MultiPassTurning,
+            OpParams::FormTurning { .. } => OpType::FormTurning,
         }
     }
 
@@ -825,7 +842,11 @@ impl OpParams {
             // (M5.2 E).
             | OpParams::Chamfering { .. }
             | OpParams::TaperTurning { .. }
-            | OpParams::MultiPassTurning { .. } => None,
+            // The crown gauge is that kinematic sunk straight in:
+            // the work spins, the band holds one station still
+            // (M5.2 E2).
+            | OpParams::MultiPassTurning { .. }
+            | OpParams::FormTurning { .. } => None,
         }
     }
 
@@ -860,7 +881,8 @@ impl OpParams {
             | OpParams::Threading { clearance_z, .. }
             | OpParams::Chamfering { clearance_z, .. }
             | OpParams::TaperTurning { clearance_z, .. }
-            | OpParams::MultiPassTurning { clearance_z, .. } => *clearance_z,
+            | OpParams::MultiPassTurning { clearance_z, .. }
+            | OpParams::FormTurning { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -906,7 +928,10 @@ impl OpParams {
             | OpParams::Threading { top_z, .. }
             | OpParams::Chamfering { top_z, .. }
             | OpParams::TaperTurning { top_z, .. }
-            | OpParams::MultiPassTurning { top_z, .. } => *top_z,
+            // The form window's high station: the topmost valley's
+            // crown stands at or below it (M5.2 E2).
+            | OpParams::MultiPassTurning { top_z, .. }
+            | OpParams::FormTurning { top_z, .. } => *top_z,
         }
     }
 
@@ -1012,7 +1037,10 @@ impl OpParams {
             | OpParams::Threading { clearance_z, top_z, bottom_z, .. }
             | OpParams::Chamfering { clearance_z, top_z, bottom_z, .. }
             | OpParams::TaperTurning { clearance_z, top_z, bottom_z, .. }
-            | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. } => {
+            // The gauge states the same trio - the rapids plane and
+            // the window the formed surfaces stand in (M5.2 E2).
+            | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. }
+            | OpParams::FormTurning { clearance_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 f(*top_z);
                 f(*bottom_z);

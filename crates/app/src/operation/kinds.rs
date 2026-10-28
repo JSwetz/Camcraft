@@ -109,7 +109,11 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Threading { feed, .. }
         | OpParams::Chamfering { feed, .. }
         | OpParams::TaperTurning { feed, .. }
-        | OpParams::MultiPassTurning { feed, .. } => *feed,
+        // A gauge owns no tangential ride: its feed is the plunge's
+        // number, stated but inert, the blade trio's precedent
+        // (M5.2 E2).
+        | OpParams::MultiPassTurning { feed, .. }
+        | OpParams::FormTurning { feed, .. } => *feed,
     }
 }
 
@@ -152,7 +156,11 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Threading { plunge_feed, .. }
         | OpParams::Chamfering { plunge_feed, .. }
         | OpParams::TaperTurning { plunge_feed, .. }
-        | OpParams::MultiPassTurning { plunge_feed, .. } => *plunge_feed,
+        // The crown's sink is this kind's whole program: the plunge
+        // feed is the only move the gauge makes under power
+        // (M5.2 E2).
+        | OpParams::MultiPassTurning { plunge_feed, .. }
+        | OpParams::FormTurning { plunge_feed, .. } => *plunge_feed,
     }
 }
 
@@ -199,7 +207,11 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::Threading { .. }
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
-        | OpParams::MultiPassTurning { .. } => true,
+        // Nor the crown gauge: it stands at one station while the
+        // work turns - which face of the skin the band rests on is
+        // the spindle's whole story (M5.2 E2).
+        | OpParams::MultiPassTurning { .. }
+        | OpParams::FormTurning { .. } => true,
     }
 }
 
@@ -256,7 +268,10 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Threading { .. }
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
-        | OpParams::MultiPassTurning { .. } => None,
+        // A gauge tiles nothing: one crown stands on one modeled
+        // valley, the model's own spacing (M5.2 E2).
+        | OpParams::MultiPassTurning { .. }
+        | OpParams::FormTurning { .. } => None,
     }
 }
 
@@ -302,6 +317,9 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Threading { .. }
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
+        // A gauge plunge is one sink: the crown's shape, not a
+        // stepped infeed, is the whole descent (M5.2 E2).
+        | OpParams::FormTurning { .. }
         | OpParams::MultiAxisContour { .. } => None,
     }
 }
@@ -345,7 +363,10 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Threading { top_z, .. }
         | OpParams::Chamfering { top_z, .. }
         | OpParams::TaperTurning { top_z, .. }
-        | OpParams::MultiPassTurning { top_z, .. } => Some(*top_z),
+        // The form window's top: the highest crown the gauge sinks
+        // stands at or below this station (M5.2 E2).
+        | OpParams::MultiPassTurning { top_z, .. }
+        | OpParams::FormTurning { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -390,7 +411,10 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Threading { bottom_z, .. }
         | OpParams::Chamfering { bottom_z, .. }
         | OpParams::TaperTurning { bottom_z, .. }
-        | OpParams::MultiPassTurning { bottom_z, .. } => Some(*bottom_z),
+        // The form window's bottom: the lowest valley run's station
+        // stands at or above it (M5.2 E2).
+        | OpParams::MultiPassTurning { bottom_z, .. }
+        | OpParams::FormTurning { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
@@ -446,7 +470,11 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         | OpParams::Threading { .. }
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
-        | OpParams::MultiPassTurning { .. } => None,
+        // The gauge rapids plane is the whole bar's radius plus
+        // tolerance, clear of every crest the crowns pass over
+        // under rapids (M5.2 E2).
+        | OpParams::MultiPassTurning { .. }
+        | OpParams::FormTurning { .. } => None,
     }
 }
 
@@ -897,6 +925,21 @@ fn seed_multi_pass(c: &Carried) -> OpParams {
         stepdown: 0.5,
         stock_to_leave: 0.25,
         passes: 3,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+    }
+}
+
+/// The form seed: the window carried whole and the feeds the shop
+/// runs a sink on - there is no depth to author, because the model
+/// states it, and no crown to name here, because the gauge is
+/// TOOL steel (M5.2 E2).
+fn seed_form(c: &Carried) -> OpParams {
+    OpParams::FormTurning {
+        tolerance: 0.05,
+        clearance_z: c.clearance,
+        top_z: c.top,
+        bottom_z: c.bottom,
         feed: c.feed,
         plunge_feed: c.plunge,
     }
@@ -1433,6 +1476,19 @@ impl KindInfo {
             family: Family::Turn,
             seed: seed_multi_pass,
         },
+        KindInfo {
+            ty: OpType::FormTurning,
+            label: "Form Turning",
+            caption: "Form",
+            tag: 28,
+            // The crown floor of the meridian scan: the gauge's
+            // arc, not the nose circle, says what stands between
+            // the band's edges, and the crest law keeps the shell
+            // for what the crown never reaches (M5.2 E2).
+            mode: Mode::Revolve,
+            family: Family::Turn,
+            seed: seed_form,
+        },
     ];
 }
 
@@ -1470,6 +1526,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[25].label,
     KindInfo::ALL[26].label,
     KindInfo::ALL[27].label,
+    KindInfo::ALL[28].label,
 ];
 
 impl OpType {
@@ -1506,6 +1563,7 @@ impl OpType {
             OpType::Chamfering => 25,
             OpType::TaperTurning => 26,
             OpType::MultiPassTurning => 27,
+            OpType::FormTurning => 28,
         }
     }
 

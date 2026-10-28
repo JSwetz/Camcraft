@@ -50,6 +50,7 @@ pub fn current_stamp(
         crate::tools::ToolKind::Turning => 6,
         crate::tools::ToolKind::Groove => 7,
         crate::tools::ToolKind::Thread => 8,
+        crate::tools::ToolKind::Form => 9,
     });
     for v in [
         tool.diameter,
@@ -87,6 +88,11 @@ pub fn current_stamp(
             w(&mut h, tool.width);
             w(&mut h, tool.tip_angle);
         }
+        // The gauge digests its band width - the kerf's span, the
+        // blade's law - and its crown needs no line here: the arc
+        // radius rides the global nose_radius row above, read at
+        // the gate that makes it mean anything (M5.2 E2).
+        crate::tools::ToolKind::Form => w(&mut h, tool.width),
         _ => {}
     }
     params.stamp_with(world, setup, &mut h);

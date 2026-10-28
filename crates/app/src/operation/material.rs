@@ -326,7 +326,11 @@ pub(super) fn region_for_src(
                     | OpParams::Threading { .. }
                     | OpParams::Chamfering { .. }
                     | OpParams::TaperTurning { .. }
+                    // So is a crown plunge: the window says which
+                    // valleys the gauge stamps, and the model says
+                    // it too (M5.2 E2).
                     | OpParams::MultiPassTurning { .. }
+                    | OpParams::FormTurning { .. }
             ) =>
         {
             // The one door's lock (M5.1 B): a picked edge is a world
@@ -419,7 +423,10 @@ pub(super) fn region_for(
         | OpParams::Threading { .. }
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
-        | OpParams::MultiPassTurning { .. } => {
+        // The crown gauge stands on the same disc: a face of
+        // revolution casts the turned part's shadow (M5.2 E2).
+        | OpParams::MultiPassTurning { .. }
+        | OpParams::FormTurning { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         OpParams::Contour { top_z, .. }

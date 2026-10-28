@@ -77,7 +77,7 @@ use super::panes::{TYPES, kind_name, retype};
 use super::theme::Palette;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
-const TOOL_KINDS: [&str; 9] = [
+const TOOL_KINDS: [&str; 10] = [
     "End mill",
     "Ball nose",
     "Bull nose",
@@ -87,6 +87,7 @@ const TOOL_KINDS: [&str; 9] = [
     "Turning insert",
     "Grooving blade",
     "Threading insert",
+    "Form gauge",
 ];
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
@@ -2423,6 +2424,42 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the radial plunge into each block's start, and the slide out of its end");
             }
         }
+        // Form turning (M5.2 E2): the page names the window and the
+        // budget and nothing else - there is no depth to author,
+        // because the model states it, and no crown to author,
+        // because the gauge is TOOL steel the tool page edits.
+        OpParams::FormTurning {
+            tolerance,
+            clearance_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "form.clearance");
+                field(ui, "Top of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "form.top");
+                field(ui, "Bottom of Part Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "form.bottom");
+                ui.label("the stations the formed surfaces stand between - a valley outside the window is another op's promise");
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("how far a floor may stand off the model's valley before the verdict speaks, and the lattice the door reads at");
+                ui.label("the crown's arc and the band's width ride the mounted form gauge - the tool page states them");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                ui.label("the spindle's pace, stated for the sheet - a gauge reads no distance off the skin");
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.label("the sink to each crown's depth is this kind's whole cut, and it rides this feed");
+            }
+        }
     }
     if detect_holes {
         state.detect_holes(&nm);
@@ -3831,6 +3868,20 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                                 state.tool_ui.tip_angle = 60.0;
                             }
                         }
+                        // The form gauge (M5.2 E2): the house row's
+                        // 4-wide band on a 6-radius crown - wide
+                        // enough to state a valley, narrow enough to
+                        // stand inside twice its own arc.
+                        if state.tool_ui.kind == 9 {
+                            if state.tool_ui.width.is_nan() || state.tool_ui.width <= 0.0 {
+                                state.tool_ui.width = 4.0;
+                            }
+                            if state.tool_ui.nose_radius.is_nan()
+                                || state.tool_ui.nose_radius <= 0.0
+                            {
+                                state.tool_ui.nose_radius = 6.0;
+                            }
+                        }
                     }
                     field(ui, "Diameter");
                     num(ui, u, &mut state.tool_ui.diameter);
@@ -3865,6 +3916,14 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         field(ui, "Form angle (deg)");
                         num_plain(ui, &mut state.tool_ui.tip_angle);
                         ui.label("the included angle of the V's flanks - 60 for the metric and unified forms, 55 for Whitworth");
+                    }
+                    if state.tool_ui.kind == 9 {
+                        field(ui, "Band width");
+                        num(ui, u, &mut state.tool_ui.width);
+                        ui.label("the crown's ground edge across the axis - it must stand inside twice the crown radius");
+                        field(ui, "Crown radius");
+                        num(ui, u, &mut state.tool_ui.nose_radius);
+                        ui.label("the arc of the ground edge in the work's meridian - the sagitta the verdict bends by");
                     }
                     if state.tool_ui.kind != 4 {
                         field(ui, "Corner radius");

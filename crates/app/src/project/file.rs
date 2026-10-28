@@ -1,6 +1,6 @@
 use super::*;
 
-pub const PROJECT_VERSION: u32 = 37;
+pub const PROJECT_VERSION: u32 = 38;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -184,6 +184,11 @@ pub enum ToolKindDto {
     /// `tip_angle` keys it reads both serde-default to the inert
     /// 0.0 every other kind means.
     Thread,
+    /// The form gauge (M5.2 E2): the same arrival law - v37 files
+    /// never carried the word, and it reads the `width` +
+    /// `nose_radius` keys both already filed, the crown taking the
+    /// nose circle's place in the row for this kind alone.
+    Form,
 }
 
 impl ToolDto {
@@ -199,6 +204,7 @@ impl ToolDto {
                 ToolKind::Turning => ToolKindDto::Turning,
                 ToolKind::Groove => ToolKindDto::Groove,
                 ToolKind::Thread => ToolKindDto::Thread,
+                ToolKind::Form => ToolKindDto::Form,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -229,6 +235,7 @@ impl ToolDto {
                 ToolKindDto::Turning => ToolKind::Turning,
                 ToolKindDto::Groove => ToolKind::Groove,
                 ToolKindDto::Thread => ToolKind::Thread,
+                ToolKindDto::Form => ToolKind::Form,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,

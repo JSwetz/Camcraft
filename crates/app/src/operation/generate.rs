@@ -1275,6 +1275,41 @@ pub fn generate(
             )?;
             (region, path)
         }
+        // M5.2 stage E2: form turning. The tool door names the form
+        // gauge - the crown IS ground steel, and a nose circle could
+        // no more stamp a formed surface than a flat blade can cut a
+        // thread. The kernel's own doors read the crown, the band and
+        // the modeled valley against each other and refuse a smooth
+        // bar's promise by name; the depths are the model's, never a
+        // number's, and these arms spend only the window it stands in.
+        OpParams::FormTurning {
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Form {
+                return Err(GenError::Invalid(format!(
+                    "Form Turning needs a form gauge, '{}' is a {}",
+                    op.tool, tool.kind
+                )));
+            }
+            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let path = crate::turning::form(
+                &material.facets,
+                &crate::turning::FormParams {
+                    tolerance: *tolerance,
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    band_width: tool.width,
+                    crown_radius: tool.nose_radius,
+                },
+            )?;
+            (region, path)
+        }
     };
 
     // M3.2 stage B: what the program clamps to. The op's setup context
@@ -1337,7 +1372,11 @@ pub fn generate(
         | OpParams::Threading { .. }
         | OpParams::Chamfering { .. }
         | OpParams::TaperTurning { .. }
-        | OpParams::MultiPassTurning { .. } => 0.0,
+        | OpParams::MultiPassTurning { .. }
+        // A crown plunge leaves no shelf either: the valley IS the
+        // promise, and the deepest legal sink stands in it exactly -
+        // a leave number could only move the rest verdict (M5.2 E2).
+        | OpParams::FormTurning { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
@@ -1412,6 +1451,10 @@ pub fn generate(
                             | OpParams::Chamfering { .. }
                             | OpParams::TaperTurning { .. }
                             | OpParams::MultiPassTurning { .. }
+                            // The crown sinks on the same silhouette:
+                            // the modeled formed surface IS what the
+                            // plunge must land in (M5.2 E2).
+                            | OpParams::FormTurning { .. }
                     )
                     .then_some(&material.facets[..]),
                     tool: &geom,
@@ -1509,6 +1552,21 @@ pub fn generate(
                     &path,
                     tool.width,
                     tool.tip_angle,
+                    *tolerance,
+                ));
+            }
+            // The crown verdict (M5.2 E2): the same meridian scan the
+            // blade and the wave ride, read with the CROWN floor - the
+            // gauge's arc, not a boxcar or a flank, says what stands
+            // between the band's edges - and with the crest law the
+            // thread already keeps: what a crown floor stands above
+            // the blank belongs to the shell, not to this cut.
+            if let OpParams::FormTurning { tolerance, .. } = &op.params {
+                warns.extend(crate::turning::form_warnings(
+                    &material.facets,
+                    &path,
+                    tool.width,
+                    tool.nose_radius,
                     *tolerance,
                 ));
             }

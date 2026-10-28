@@ -1,7 +1,7 @@
 //! Verification warnings: clean generated paths stay silent, and each of
 //! the five planted offenders yields exactly its warning class.
 //!
-//! Gate map (M4.4): covers app::cl, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::verify.
+//! Gate map (M4.4): covers app::cl, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::verify - and the ENVELOPE verdict lane of sim::stock_sim (scan/gouge/engine), whose law changes must re-run this binary and its ignored release pair (the E2 lesson: a kernel-law commit that names no suite here goes unchecked through the narrow gate).
 //! Lane shape (M4.4): 15 structural verifies run in milliseconds; the two
 //! cone_facets(96) envelope verdicts are #[ignore]d - heavy lane, run them with
 //! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
@@ -651,37 +651,72 @@ fn envelope_clean_path_verifies_silent() {
     assert_eq!(verify(&t, &env_ctx(&r, Some(&f), &tool, Some(0.1))), Vec::new());
 }
 
+/// The same path, every point dropped by dz - a whole op set to the
+/// wrong z, which is what a planted real deviation looks like.
+fn sink(t: Toolpath, dz: f64) -> Toolpath {
+    // Only the endpoints move: an arc's center is stated in XY (the Z
+    // ride lives in the endpoints), so a pure z shift leaves the arc
+    // - and the pose - exactly as authored. Flattening arcs to their
+    // chords here would sink a path that never existed.
+    Toolpath::new(
+        t.moves
+            .iter()
+            .map(|m| Move {
+                from: p(m.from.x, m.from.y, m.from.z - dz),
+                to: p(m.to.x, m.to.y, m.to.z - dz),
+                ..*m
+            })
+            .collect(),
+    )
+}
+
 #[test]
 #[ignore = "verdict lane: full envelope scan of cone_facets(96); release ~seconds - run at milestone close with -- --ignored"]
 fn envelope_verdict_follows_the_stated_tol() {
-    // The SAME path judged against 0.01: what stands exposed is the
-    // generator's own chord error - the rings are promised within the
-    // 0.1 they were fit at, measured 0.1155 below the surface (the
-    // tol-0.1 gate absorbs it as quantization; the tol-0.01 gate,
-    // ~0.033, cannot). The cusp is the smaller promise here (0.0088
-    // measured): on this cone the ring fit, not the stepdown, is the
-    // loosest law. The verifier judges against the user's budget, not
-    // the generator's mood.
+    // Two halves, one law: the verifier judges against the user's
+    // budget, and never against the measurement's own yardstick.
+    // First half - the clean rings at tol 0.01 stay SILENT. An earlier
+    // draft of this test read 0.1155 here and called it the
+    // generator's chord error; it was the scan's - the cell/4 chord
+    // sagitta E1's tol/4 budget retired (with ~0.010 of 96-gon
+    // planarization). Tightening the yardstick must not invent a
+    // defect, so the silence is the phantom-trench guard, stated.
+    // Second half - what DOES follow the budget is a real deviation:
+    // the same rings sunk 0.09, which on the 45-degree cone stands
+    // ~0.064 of surface inside the envelope. Under the 0.1 promise
+    // they were generated at, that is a kept promise (gate ~0.123);
+    // at 0.01 the quantization floor (~0.033) still resolves it, and
+    // the user's budget says otherwise - the verdict speaks.
     let f = cone_facets(96);
-    let t = cone_waterline();
     let r = rect(-20.0, -20.0, 20.0, 20.0);
     let tool = ball();
-    let warns = verify(&t, &env_ctx(&r, Some(&f), &tool, Some(0.01)));
-    let [Warning::Envelope { at, gouge_mm, rest_mm }] = warns.as_slice() else {
+    let t = cone_waterline();
+    assert_eq!(
+        verify(&t, &env_ctx(&r, Some(&f), &tool, Some(0.01))),
+        Vec::new(),
+        "a tighter yardstick must prove no defect it cannot resolve - and invent none"
+    );
+    let sunk = sink(t, 0.09);
+    let ws = verify(&sunk, &env_ctx(&r, Some(&f), &tool, Some(0.1)));
+    assert!(ws.is_empty(), "0.064 of intrusion under a 0.1 promise is a promise kept: {ws:?}");
+    let warns = verify(&sunk, &env_ctx(&r, Some(&f), &tool, Some(0.01)));
+    let [Warning::Envelope { gouge_mm, at, .. }] = warns.as_slice() else {
         panic!("expected one envelope verdict, got {warns:?}");
     };
-    assert!(*gouge_mm > 0.03, "the 0.1 chord error breaches the 0.01 gate: {warns:?}");
-    assert!(*gouge_mm <= 0.16, "the old budget's error, no structural gouge: {warns:?}");
-    assert!(*rest_mm <= 0.16, "the cusp stays a bystander here: {warns:?}");
+    assert!(*gouge_mm > 0.04, "the sunk ride breaches the 0.01 budget: {warns:?}");
+    assert!(*gouge_mm < 0.12, "0.09 of center drop is ~0.064 of intrusion, not a trench: {warns:?}");
     assert!(*at >= 2, "the nearest cut, not a rapid: {warns:?}");
 }
 
 #[test]
 fn envelope_gouge_names_the_nearest_move() {
     // A planted offender: a feed run straight THROUGH the solid at tip
-    // z 5. The trench a ball leaves in an overhead column is its own
-    // tip plane, so the wanted surface at 10 is cut down to 5 - a 5 mm
-    // gouge on exactly the move that made it.
+    // z 5. Its centre line pierces the cube's side walls, so the facet
+    // distance reads 0 there and the intrusion saturates at the radius
+    // - 3 mm on exactly the move that made it. (The column law this
+    // test was written against called the whole 5 mm trench the ball's
+    // doing; facet distance measures what the envelope itself covers,
+    // and its deepest possible reading is r, never more.)
     let f: Vec<Triangle> = camcraft_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
     let t = Toolpath::new(vec![
         Move::new(MoveKind::Rapid, p(0.0, 0.0, 15.0), p(-15.0, 0.0, 15.0), None),
@@ -696,7 +731,7 @@ fn envelope_gouge_names_the_nearest_move() {
         panic!("expected one envelope verdict, got {warns:?}");
     };
     assert_eq!(*at, 2, "the through-feed owns the gouge");
-    assert!((gouge_mm - 5.0).abs() <= 0.05, "surface 10, trench floor 5: {gouge_mm}");
+    assert!((gouge_mm - 3.0).abs() <= 0.05, "a buried centre reads exactly r: {gouge_mm}");
 }
 
 #[test]

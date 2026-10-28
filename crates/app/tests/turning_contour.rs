@@ -240,7 +240,8 @@ fn a_chamfered_face_rides_clean_in_the_document() {
     for m in &fs {
         let (r, z) = (rho(m.to), m.to.z);
         assert!(
-            z >= -16.0 - NOSE - TOL && z <= -14.0 + NOSE + TOL && r >= 8.0 - TOL && r <= 10.0 + NOSE * 2f64.sqrt() + TOL,
+            (-16.0 - NOSE - TOL..=-14.0 + NOSE + TOL).contains(&z) && r >= 8.0 - TOL
+                && r <= 10.0 + NOSE * 2f64.sqrt() + TOL,
             "the ride stands off the face it was promised: r {r} at z {z}"
         );
     }

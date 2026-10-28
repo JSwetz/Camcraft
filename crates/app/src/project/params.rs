@@ -633,6 +633,19 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
     },
+    /// See [`Self::Chamfering`] - the crown gauge's way: the window
+    /// and the feeds, and no depth to file, because the model
+    /// states it (M5.2 stage E2). The crown and the band ride the
+    /// TOOL row - `nose_radius` and `width`, keys v37 files already
+    /// carry.
+    FormTurning {
+        tolerance: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

@@ -669,7 +669,9 @@ impl HeightRefs for OpParams {
             | OpParams::Threading { clearance_z, top_z, bottom_z, .. }
             | OpParams::Chamfering { clearance_z, top_z, bottom_z, .. }
             | OpParams::TaperTurning { clearance_z, top_z, bottom_z, .. }
-            | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. } =>
+            | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. }
+            // The crown gauge rides the same trio (M5.2 E2).
+            | OpParams::FormTurning { clearance_z, top_z, bottom_z, .. } =>
                 vec![clearance_z, top_z, bottom_z],
             OpParams::Drill {
                 clearance_z,

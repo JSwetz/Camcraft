@@ -322,6 +322,18 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // unknown params tag before anything is written.
         file.version = 37;
     }
+    if file.version == 37 {
+        // v37 -> v38: the form kind arrives (M5.2 stage E2) as one
+        // new params variant (`form_turning`) and one new tool-kind
+        // word (`form`), under the same arrival law: no v37 file can
+        // contain them - the tags did not exist - and
+        // `validate_kind` already refuses an unknown params tag
+        // before anything is written. The crown and the band ride
+        // the tool's `nose_radius` + `width` keys, both already
+        // filed; the modeled formed surface is the mesh every kind
+        // already files.
+        file.version = 38;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

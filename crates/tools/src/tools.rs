@@ -53,6 +53,14 @@ pub enum ToolKind {
     /// tap's pitch ride, now read as the form the helical pass
     /// revolves. Only `Threading` reads either.
     Thread,
+    /// Form gauge (M5.2 stage E2): a blade whose edge is a curve -
+    /// the meridian arc it stamps. `width` is the ground band along
+    /// the axis and `nose_radius` the crown's arc RADIUS in the
+    /// work's meridian plane (the sagitta the revolve verdict
+    /// bends the floor by - not an envelope ball: a gauge is
+    /// judged on the meridian, and `geom` never carries this one).
+    /// Only `Form` reads either.
+    Form,
 }
 
 impl core::fmt::Display for ToolKind {
@@ -67,6 +75,7 @@ impl core::fmt::Display for ToolKind {
             ToolKind::Turning => "turning insert",
             ToolKind::Groove => "grooving blade",
             ToolKind::Thread => "threading insert",
+            ToolKind::Form => "form gauge",
         };
         f.write_str(s)
     }
@@ -112,8 +121,10 @@ pub struct Tool {
     pub pitch: f64,
     /// Insert nose radius in mm (the ISO corner circle ground into the
     /// tip): 0.8 is common roughing stock. Inert unless kind is
-    /// Turning, where it is the circle the facing verdict sweeps -
-    /// every other kind reads it as 0.0 and rolls its own radius.
+    /// Turning, where it is the circle the facing verdict sweeps, or
+    /// Form, where it is the crown's arc radius the revolve verdict
+    /// bends its floor by - every other kind reads it as 0.0 and
+    /// rolls its own radius.
     pub nose_radius: f64,
     /// Blade width in mm along the axis (the grooving/parting insert's
     /// ground side-to-side size): 3.0 is common cutoff stock. On a
@@ -208,6 +219,17 @@ impl Tool {
                         && self.tip_angle > 0.0
                         && self.tip_angle < 180.0
                 }
+                // A gauge with no crown is a flat blade (mount a
+                // Groove), and a band ground wider than the arc's
+                // own reach has corners that are no steel at all -
+                // the kernel's door words it for a run; the tool
+                // says it never got made (kind-scoped, as above).
+                ToolKind::Form => {
+                    self.width > 0.0
+                        && self.width < self.diameter
+                        && self.nose_radius > 0.0
+                        && self.width <= 2.0 * self.nose_radius
+                }
                 _ => true,
             }
     }
@@ -284,7 +306,7 @@ impl Tool {
             // meridian, which the turning verdicts read off `Tool`,
             // not off this cylinder.
             ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore | ToolKind::Turning
-            | ToolKind::Groove | ToolKind::Thread => add_pt(&mut p, 0.0, r),
+            | ToolKind::Groove | ToolKind::Thread | ToolKind::Form => add_pt(&mut p, 0.0, r),
             ToolKind::Drill => {
                 // The point cone: apex at the tip center, opening at
                 // half the included angle, meeting the full radius at
@@ -389,6 +411,17 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         nose_radius: 0.0, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
         material_group: "aluminum".into(), rpm, feed,
     };
+    // Form gauges (M5.2 E2): the crown radius lives in `nose_radius`
+    // (the arc of the ground edge in the work's meridian - the
+    // field the Turning insert uses for its nose circle, read here
+    // as the other ground radius a turning steel carries) and the
+    // band width in `width`. A slow feed: forming is a sink, and
+    // the crown's corners carry the whole width at once.
+    let fg = |diameter: f64, crown_r: f64, width: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
+        kind: ToolKind::Form, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
+        nose_radius: crown_r, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
+        material_group: "aluminum".into(), rpm, feed,
+    };
     vec![
         ("EM-0200-2FL", em(2.0, 0.0, ToolKind::EndMill, 6.0, 4.0, 18000.0, 600.0)),
         ("EM-0300-2FL", em(3.0, 0.0, ToolKind::EndMill, 9.0, 4.0, 15000.0, 900.0)),
@@ -412,6 +445,8 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("GT-0300", gt(16.0, 3.0, 8.0, 16.0, 2000.0, 60.0)),
         ("TD-0866-60", td(16.0, 0.866, 60.0, 8.0, 16.0, 1200.0, 90.0)),
         ("TD-1732-60", td(16.0, 1.732, 60.0, 8.0, 16.0, 800.0, 120.0)),
+        ("FG-0600-04", fg(16.0, 6.0, 4.0, 8.0, 16.0, 1500.0, 40.0)),
+        ("FG-1200-08", fg(16.0, 12.0, 8.0, 8.0, 16.0, 1200.0, 50.0)),
     ]
 }
 

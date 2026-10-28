@@ -1185,9 +1185,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // The contour rides name their rapids plane off the ride's
         // own reach too - no authored hop to draw (M5.2 E).
         | operation::OpParams::Threading { .. }
+        // The gauge rapids plane names itself off the bar's radius
+        // the same way - no authored hop to draw (M5.2 E2).
         | operation::OpParams::Chamfering { .. }
         | operation::OpParams::TaperTurning { .. }
-        | operation::OpParams::MultiPassTurning { .. } => None,
+        | operation::OpParams::MultiPassTurning { .. }
+        | operation::OpParams::FormTurning { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1291,9 +1294,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // The contour window is the same promise (M5.2 E): the two
         // planes the promised face stands between.
         | operation::OpParams::Threading { top_z, bottom_z, .. }
+        // The form window is the same pair of planes: the stations
+        // the formed surfaces stand between (M5.2 E2).
         | operation::OpParams::Chamfering { top_z, bottom_z, .. }
         | operation::OpParams::TaperTurning { top_z, bottom_z, .. }
-        | operation::OpParams::MultiPassTurning { top_z, bottom_z, .. } => {
+        | operation::OpParams::MultiPassTurning { top_z, bottom_z, .. }
+        | operation::OpParams::FormTurning { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,

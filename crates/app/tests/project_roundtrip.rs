@@ -4233,3 +4233,98 @@ fn v36_file_steps_to_v37_and_the_contour_grammar_round_trips() {
         "a multi-pass program with no finishing ride is not a program"
     );
 }
+
+#[test]
+fn v37_file_steps_to_v38_and_the_form_grammar_round_trips() {
+    // M5.2 stage E2: the crown gauge arrives as ONE new tool-kind
+    // word (`form`) and ONE new params tag (`form_turning`) - no
+    // new keys: the band rides the width row every tool already
+    // writes, the crown the nose_radius row every round tool
+    // already writes. A v37 file cannot carry either new name; a
+    // v38 reader of one loses nothing. The step-up is the arrival
+    // law restated a seventh time.
+    let world = new_world();
+    project::open(&world, r#"{"version": 37, "entities": []}"#).expect("v37 steps up");
+    let p = tmp_path("v38a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v38 stamp: {saved}"
+    );
+    let _ = std::fs::remove_file(&p);
+
+    // The v38 wire grammar, hand-written so the names are pinned:
+    // one crown gauge (the story is all TOOL steel - crown 6, band
+    // 4) and the form op on the numbers the app suite generates
+    // with (the gauge geometry, notably, is NOT among them).
+    let text = r#"{
+        "version": 38,
+        "entities": [
+            {"name": "T0", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "form", "diameter": 16.0, "corner_r": 0.0,
+                      "nose_radius": 6.0, "width": 4.0,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 1500.0, "feed": 40.0}},
+            {"name": "FM1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T0", "src": "stock", "params": {"form_turning": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 24.0},
+                 "top_z": {"reference": "fixed", "offset": 13.0},
+                 "bottom_z": {"reference": "fixed", "offset": 7.0},
+                 "feed": 40.0, "plunge_feed": 20.0}}}
+            }
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("the v38 form grammar must read");
+    let e = model::find_by_name(&world, "T0").expect("tool");
+    let t = model::tool_of(&world, &e).expect("definition");
+    assert_eq!(t.kind, camcraft_app::tools::ToolKind::Form);
+    assert_eq!((t.nose_radius, t.width), (6.0, 4.0), "the gauge IS its tool row - crown and band");
+    let e = model::find_by_name(&world, "FM1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::FormTurning { feed, plunge_feed, .. } = &o.params else {
+        panic!("form turning params expected, got {:?}", o.params);
+    };
+    assert_eq!((*feed, *plunge_feed), (40.0, 20.0));
+
+    // Write-parse-write is a fixed point, and each new name is
+    // stated exactly once - the second is contained in the first,
+    // so the WORDS count, not the substrings.
+    let p = tmp_path("v38b");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the gauge shapes round-trip byte-identically");
+    assert_eq!(first.matches("\"form_turning\"").count(), 1, "{first}");
+    assert_eq!(first.matches("\"kind\": \"form\"").count(), 1, "the kind word rides the one gauge: {first}");
+
+    // The sane doors at the loader: a gauge that states no band is
+    // a crown of no width (the Form arm's is_sane), a band ground
+    // past twice its own crown is no steel at the corners, and a
+    // form op with no sink is a promise to touch nothing.
+    let no_band = text.replace("\"nose_radius\": 6.0, \"width\": 4.0", "\"nose_radius\": 6.0");
+    let world3 = new_world();
+    assert!(
+        matches!(project::open(&world3, &no_band), Err(ProjectError::Corrupt(_))),
+        "a form gauge with no stated band must not load"
+    );
+    let over_wide = text.replace("\"width\": 4.0", "\"width\": 14.0");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &over_wide), Err(ProjectError::Corrupt(_))),
+        "a 14-wide band on a crown of radius 6 has no corners"
+    );
+    let no_sink = text.replace("\"plunge_feed\": 20.0", "\"plunge_feed\": 0.0");
+    let world5 = new_world();
+    assert!(
+        matches!(project::open(&world5, &no_sink), Err(ProjectError::Corrupt(_))),
+        "a form op that never plunges is not an op"
+    );
+}

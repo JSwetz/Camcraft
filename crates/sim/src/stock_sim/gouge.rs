@@ -148,16 +148,38 @@ pub(super) fn facet_gouge(
     Ok((best.max(0.0), at))
 }
 
-/// The exact minimum distance between a segment and a triangle: the
-/// closest points of two convex sets sit at an endpoint of one in the
-/// face of the other, or on an edge-to-edge pair (the standard
-/// reduction - Ericson, "Real-Time Collision Detection" 5.1, public
-/// literature).
+/// The exact minimum distance between a segment and a triangle. The
+/// closest pair of two convex sets involves an endpoint of the segment
+/// and a point of the triangle (the two point tests), or a pair of
+/// edges (the three edge tests), or the segment pierces the face -
+/// distance 0, the one configuration no endpoint or edge can witness
+/// (Ericson, "Real-Time Collision Detection" 5.1: the reduction is
+/// complete with all four enumerated - the face test is that fourth).
 fn dist_seg_tri(a: Point3, b: Point3, t: &Triangle) -> f64 {
     let (v0, v1, v2) = (t.a, t.b, t.c);
+    let (e0, e1) = (sub(v1, v0), sub(v2, v0));
+    let n = cross(e0, e1);
+    let nn = dot(n, n);
+    if nn > 1e-24 {
+        // Endpoints strictly on opposite sides of the face's plane:
+        // the crossing point exists and is interior to the segment, so
+        // only the in-face test remains. A coplanar segment that
+        // crosses the triangle crosses an edge too - already covered.
+        let (da, db) = (dot(n, sub(a, v0)), dot(n, sub(b, v0)));
+        if da * db < 0.0 {
+            let s = da / (da - db);
+            let q = sub(a, v0);
+            let r = sub(b, a);
+            let w = (q.0 + r.0 * s, q.1 + r.1 * s, q.2 + r.2 * s);
+            let (u, v) = (dot(cross(w, e1), n) / nn, dot(cross(e0, w), n) / nn);
+            if u >= -1e-9 && v >= -1e-9 && u + v <= 1.0 + 1e-9 {
+                return 0.0;
+            }
+        }
+    }
     let mut d = dist_pt_tri(a, t).min(dist_pt_tri(b, t));
-    for (e0, e1) in [(v0, v1), (v1, v2), (v2, v0)] {
-        d = d.min(dist_seg_seg(a, b, e0, e1));
+    for (p0, p1) in [(v0, v1), (v1, v2), (v2, v0)] {
+        d = d.min(dist_seg_seg(a, b, p0, p1));
     }
     d
 }

@@ -178,6 +178,13 @@ pub enum OpType {
     /// last one's shell in from it, the last on the profile
     /// itself. The moves are stages B's own, chained.
     MultiPassTurning,
+    /// Form turning (M5.2 stage E2): a revolved crown stamped once
+    /// per MODELED formed surface — a ground gauge plunges to the
+    /// deepest position that cuts nothing the model keeps, and the
+    /// crown's own arc says what stands between the band's edges
+    /// (see [`crate::turning`]). The depth is not authored: the
+    /// model states it.
+    FormTurning,
 }
 
 impl core::fmt::Display for OpType {

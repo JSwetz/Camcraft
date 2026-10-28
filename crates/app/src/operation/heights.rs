@@ -121,7 +121,9 @@ pub fn region_z(
         // The contour windows name the same high station (M5.2 E).
         | OpParams::Chamfering { top_z, .. }
         | OpParams::TaperTurning { top_z, .. }
-        | OpParams::MultiPassTurning { top_z, .. } => resolve_height(world, setup, *top_z),
+        // The form window names the same high station (M5.2 E2).
+        | OpParams::MultiPassTurning { top_z, .. }
+        | OpParams::FormTurning { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -253,7 +255,10 @@ pub fn resolve_params(
         | OpParams::Threading { clearance_z, top_z, bottom_z, .. }
         | OpParams::Chamfering { clearance_z, top_z, bottom_z, .. }
         | OpParams::TaperTurning { clearance_z, top_z, bottom_z, .. }
-        | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. } => (
+        // The crown gauge states the same trio across the window
+        // its formed surfaces stand in (M5.2 E2).
+        | OpParams::MultiPassTurning { clearance_z, top_z, bottom_z, .. }
+        | OpParams::FormTurning { clearance_z, top_z, bottom_z, .. } => (
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),
