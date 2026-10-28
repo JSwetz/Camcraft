@@ -122,14 +122,14 @@ home.
 | Facing | ✅ | M5.2 A |
 | Profile roughing | ✅ | M5.2 B |
 | Profile finishing | ✅ | M5.2 B |
-| Roughing groove | 📋 | M5.2 |
-| Finishing groove | 📋 | M5.2 |
+| Roughing groove | ✅ | M5.2 C |
+| Finishing groove | ✅ | M5.2 C |
 | Adaptive roughing (turning) | 📋 | M5.2 |
-| Turning groove | 📋 | M5.2 |
-| Turning single groove | 📋 | M5.2 |
-| Turning threading | 📋 | M5.2 |
+| Turning groove | ✅ | M5.2 C |
+| Turning single groove | ✅ | M5.2 C |
+| Turning threading | ✅ | M5.2 D |
 | Turning boring | 📋 | M5.2 |
-| Turning parting | 📋 | M5.2 |
+| Turning parting | ✅ | M5.2 C |
 | Turning chamfering | 📋 | M5.2 |
 | Taper turning | 📋 | M5.2 |
 | Form turning | 📋 | M5.2 |
@@ -1687,6 +1687,44 @@ Phase-5 shape law.
       XY-plane laws down to the meridian scan, and a wrong tool on a
       blade kind refused at generation by three names - op, tool, and
       what the tool is - RECOMMENDED.md, M5.2 C.
+- ✅ **Threading on the revolved wave verdict** (stage D, commit 2647832):
+      the kind where the insert's V, not a boxcar, is the footprint.
+      `thread.rs` ladders one helical pass per rung from the blank's
+      crest down to the modeled root, and the MODEL states the phase:
+      the kernel scans the silhouette for the first contiguous valley
+      inside the window and centers the run's first V on it, so a
+      threading op is a promise over a MODELED thread (a revolved V
+      section) - a smooth bar's silhouette is a flat crest with
+      nothing to aim at, and is refused by name. Doors at the command:
+      width fit (`insert_width < pitch - 2*tol` - a V wider than its
+      spacing stands its flanks in the neighbouring turn), full-form
+      reach (`half*cot + tol >= depth` - a short form leaves crests no
+      pass can touch), depth against tolerance, through-axis depth
+      ("that is a hole, and holes are boring work"), the run's turn
+      count, and plumb axis (`LEAN_MAX` - one turn per pitch is a
+      CIRCLE law; a tilted spindle is mill-turn work, M5.2 G). Each
+      rung rides: radial plunge at the first center, half-turn arcs
+      advancing `pitch/2` of station each, alternating point and
+      antipode (even ends stand on the frame's meridian, so the wave's
+      V lands where the geometry says it cut), radial retract at the
+      last - clearance radius `r_max + tol` throughout, asserted by
+      construction. The verdict is the `revolve` scan with the new
+      WAVE clause: the floor at distance d along the axis from a
+      center stands deeper by `cot(A/2) * d` - the flank slope itself
+      - on the helix's own lattice, with the crest law on (a form
+      floor above the blank measures nothing; the shell owns the
+      crest) and zero leave. New kind Threading (ordinal 24, wire v36
+      - a pure step-up: one params tag, one tool kind word; the V's
+      width and included angle ride the TOOL digest as
+      `ToolKind::Thread` - byte 8 - so re-ground steel marks every op
+      that rides it Stale both ways, while the lead is WORK intent and
+      rides the params), and the sim's rapid law (d) joined (b) and
+      (c) in the Revolve stand-down - a lathe insert is a point in XY,
+      so the mill's column law convicts every threading pull-out
+      (which slides along the flanks of its own cut V); the lathe's
+      rapid promise rides the kernel's clearance radius and the
+      meridian scan, fixture steel still speaks every mode -
+      RECOMMENDED.md, M5.2 D.
 
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**

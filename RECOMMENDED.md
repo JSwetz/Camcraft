@@ -4421,3 +4421,134 @@ same room); recorded so a future resize checks it instead of
 re-deriving. Related: a blade feed is asserted at CONSTANT STATION
 with decreasing radius - it is a radial plunge - and the draft's
 inverted form (constant rho) passed nothing it claimed.
+
+## M5.2 stage D - threading on the revolved wave verdict (code 2647832 + this docs)
+
+**Threading is the cut ON A MODELED SCREW, and the model owns the
+phase.** The kernel reads the silhouette for the first CONTIGUOUS run
+of samples standing at or inside the model's own floor (deep dip
+tolerance away from the crest) within the window, and centers the
+run's first V on that dip's center: a ground root floor reads as its
+flat's center, a sharp V as its one point - either is the groove the
+lattice must land in. Considered and dropped: a phase parameter (a
+number that can only contradict the drawing - the model is the truth
+the pass is asked to agree with) and threading a smooth bar (a real
+helical thread's silhouette is a FLAT crest, because its flanks twist
+through every phase on the way around; there is nothing to aim at, and
+`thread` refuses by name - "threading cuts a MODELED thread (a
+revolved V section); a smooth bar has none to find"). The verdict
+then judges the thread exactly as its drawing states it - profile
+representation, the same law the turned profile rides. A cut too deep
+or too shallow FOR the model is the verdict's to convict, never a
+reason the phase cannot be read.
+
+**The insert's V, not a boxcar, is the footprint** - the wave clause
+of `revolve::scan` (`BandMove::wave: Some(cot)` with
+`cot = cot(A/2)`). A band of half-width d from a center cuts its floor
+deeper by the flank slope's cotangent times the distance along the
+axis, so at every station the floor stands at `tip + cot * |s - c|`
+inside the crest line - a V, and the scan's boxcar becomes a wedge.
+The lattice is the helix's OWN: every second half-turn arc end returns
+the tool to the frame's meridian, and both endpoints of a
+constant-radius half-turn read the same depth, so the END's station IS
+the center the V belongs to; radial plunges state the run's first
+center and rapids (which cut nothing) reset the parity count.
+Considered and dropped: judging arcs by chord midpoints (an odd-count
+crossing stands at the ANTIPODE - the V there is the neighbor's), and
+running the envelope scan (crests undercut by design; the sphere
+cannot speak a helix). The crest law (`clip_shell`) stands: a form
+floor ABOVE the blank's own surface measures nothing - the crests are
+where the passes never reach, and there the shell, not the floor, is
+the part. A model the judge cannot even frame reports a gouge at the
+first cut - a judge that cannot measure never buys silence.
+
+**Two geometry doors, both named at CREATE.** `insert_width < pitch -
+2*tol` - a V wider than its own turn spacing would stand its flanks in
+the NEIGHBOURING groove's steel ("grind narrower steel for a
+single-point thread"). And `half * cot + tol >= depth` - the
+full-form reach: an insert whose flanks stop short of the crest leaves
+crests standing that NO pass can touch, and the verdict would spend
+the whole thread length reporting one rest ("single-flank passes are
+not this kernel's to speak"). Multi-start, whirling, and single-flank
+threading are all outside this kind by these two lines, stated as
+refusals rather than shipped as silent limits.
+
+**A thread run past the axis is boring work** - `root <= 0` refuses
+("no core is left to stand between the flanks; that is a hole, and
+holes are boring work"), and a `depth` at or under the model tolerance
+refuses too - a valley indistinguishable from its crest is not a
+thread anyone can verify.
+
+**The axis must stand plumb: LEAN_MAX 1e-6** - a helix is circles in
+planes SQUARE to the spindle (that is what "one turn per pitch" means
+as a path), and a bar leaning past a microradian makes the pass an
+elliptical rise this kernel cannot promise. Considered and dropped:
+tilted-frame helices (mill-turn M5.2 G territory) and quietly
+projecting the circles onto the tilted frame (the pitch drifts by
+cos(lean) - a silent wrong answer, the Prime Directive's own words).
+
+**The V is TOOL steel, the lead is WORK intent.** The insert's crest
+`width` and its flanks' included angle (parked on the tool row's
+`tip_angle`, as the drill parks its point angle) ride the TOOL digest
+- kind byte 8, both fields hashed - so re-grinding the steel marks
+every op that rides it Stale through undo both ways. `pitch` is NOT
+infeed geometry, it is the thread being cut, and it rides the PARAMS;
+a Thread tool row carries `pitch: 0.0` inert. The seed numbers are
+handbook numbers: pitch 2.0 with depth 1.08 is the ISO crest-truncation
+relation (`H = 0.866 * P`, depth `5H/8`), and infeed 0.4 puts exactly
+three rungs on it - 30 deg of included V at that depth clears the
+width door (the TD catalog row's crest width is `0.866 * P`).
+
+**v36 is a pure step-up** - one params tag, one tool kind word,
+chained v35 -> v36; no DTO shape was touched, a v35 file loads and
+loses nothing (threading ops did not exist). `Threading` carries the
+trio (clearance/top/bottom as Heights) and no finish_tol - the Revolve
+kinds are judged by the meridian scan, and a tolerance the scan
+already spends on its lattice would be a number that does nothing.
+
+**The sim's law (d) joins laws (b) and (c) in the Revolve stand-down.**
+The rapid law asks, of a lateral rapid's XY column: does material
+STAND ABOVE the tool along it? For a mill that is exactly right. A
+lathe insert is a POINT in XY - its entire form lives in the (rho, z)
+meridian - and the answer the column gives for a thread's final
+retract is structurally wrong: above the tip circle the core stands
+forever, while the actual tool slides OUT OF ITS OWN CUT, flanks
+coincident with the surfaces they made (the wave's slope IS the
+model's slope at the V). The gate caught it at rho = root, theta = a
+polygon vertex of the 16-gon section: every chord covering that point
+lies at a plane whose material disc CONTAINS it (the island clause
+waives the section boundary), so the column surfaced at the box
+stock's top and convicted a physically clean pull-out. Blades never
+tripped it because no blade tip ever stands exactly ON a floor
+cylinder's circle. Considered and dropped: a 3D column for revolved
+paths (the meridian scan already IS the exact law there - two juries
+on one question), and a tolerance patch at the island clause (the
+clause is right, the PROJECTION is the wrong geometry). The turning
+rapids' safety promise is the kernel's own, as it has been since
+stage C: radial exits from cut stations and traverses at
+`rho_clear = r_max + tol`, asserted by every family's path tests; the
+meridian (wave) verdict still judges every cutting move. Fixture
+steel (d2) stands for EVERY mode unchanged - holding steel is a box
+and the XY law speaks boxes truly.
+
+**The post says nothing new** - a threading path is feed arcs and
+rapids, which fanuc.cps already writes with its ordinary circular and
+linear laws; thread-synchronous cycles (G32-family single-point
+motion, lead-word F sync, rigid tapping) are a machine-vocabulary
+question deferred to the M5.3 native CNC-format work, not a reason to
+teach the CPS engine a letter it cannot verify.
+
+**The tool editor's golden regenerated** - the ToolKind list grew its
+ninth row label ("Threading insert"); the pixel diff is the combo,
+verified pure before UPDATE_SNAPSHOTS.
+
+**The catalog's four groove phrasings are the two blade kinds.**
+Rows "Roughing groove"/"Turning groove" are GrooveRough (the stepped
+center ladder, roughing the way a multi-pass groove op roughs);
+"Finishing groove"/"Turning single groove" are GrooveFinish (one
+plunge per center to the band's floor - what a single-groove op IS).
+Considered and dropped: minting duplicate kinds for the phrasings
+(the ribbon cell and the seed would lie, stage C's own words). Part
+flips "Turning parting", Threading flips "Turning threading";
+adaptive roughing, boring, chamfer/taper/form/multi-pass, radial
+drilling and hole recognition stay open for stages E-G as planned.
