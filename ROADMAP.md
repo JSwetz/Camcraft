@@ -132,7 +132,7 @@ home.
 | Turning parting | ✅ | M5.2 C |
 | Turning chamfering | ✅ | M5.2 E |
 | Taper turning | ✅ | M5.2 E |
-| Form turning | 📋 | M5.2 |
+| Form turning | ✅ | M5.2 E2 (the crown floor of the revolve verdict) |
 | Multi-pass turning | ✅ | M5.2 E |
 | Drill (radial/axial, live tooling) | 📋 | M5.2 |
 | Hole recognition (on the turned solid) | 📋 | M5.2 |
@@ -1772,7 +1772,33 @@ Phase-5 shape law.
       radial steps are constant load when the work spins; the
       engagement variability adaptive clearing exists to fix is a
       milling accident - RECOMMENDED.md, M5.2 E), form turning
-      stays open for the gauge verdict (E2).
+      stayed open for the gauge verdict and landed with E2 below.
+
+- ✅ **Form turning** (stage E2, commit 2d38617): the gauge whose
+      edge is a curve - one radial plunge per MODELED valley, the
+      crown centered on the model's own low-floor run and sunk to
+      `tip = max(chord - sag)` over exactly the events the scan
+      judges, so the floor `tip + R - sqrt(R^2 - d^2)` (new
+      `Floor::Crown`, the wave's curved sibling) never dips under
+      the model BY CONSTRUCTION, and a mismatched gauge stands
+      shallow and convicts through `rest_mm`, never a silent Ok.
+      The blank-crest clip (a lone crown sits INSIDE the bar; its
+      own window's span_max is no blank) makes the rest speak.
+      `ToolKind::Form` (byte 9 - crown rides `nose_radius`, band
+      `width`, so the global nose row and the kind-scoped width row
+      convict a re-grind from the tool side alone), new kind
+      FormTurning (ordinal 28, wire v38 - the arrival law a seventh
+      time: one kind word, one params tag, no new keys), doors by
+      name: no-crown "is no arc at all", band past reach, smooth
+      bar "nothing to form", on-axis floor "that is a hole", and
+      the app's family door - RECOMMENDED.md, M5.2 E2. The crown
+      verdict's own judge, the sim envelope, gains the fourth
+      configuration of its facet-distance law (segment pierces
+      face): a path that buries its centers now reads the
+      saturation `r` instead of the crossed wall's edge distance -
+      E1 fallout found because E2 ran the binary E1's Gate map
+      never named; RECOMMENDED.md records the law and the gate-map
+      lesson.
 
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**

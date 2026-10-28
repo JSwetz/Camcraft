@@ -4638,6 +4638,8 @@ unknown tags refused by validate_kind; a v36 file steps up with one
 apply.rs clause. Cost to change: none - it shipped.
 
 **Form turning stays OPEN (E2), and it is a TOOL-kind decision.**
+(Landed at E2 exactly as chosen - see the E2 section at the end of
+this file.)
 A form gauge is a crown - a meridian arc of its own - so the honest
 implementation is `ToolKind::Form` + the revolve verdict's floor
 bending from the wave's linear cot to the arc's sagitta (the wave
@@ -4645,8 +4647,9 @@ clause is the special case); riding it on the Turning nose would
 let the envelope ball convict a correct crown cut or waive a gouge,
 the phantom-trench law's other half. Chosen: do it as stage E2 with
 its own commit, not stretched into E1's - the registry row 135
-stays 📋 until then. (Decision revisited at E2 close if that stage
-lands differently.)
+stays 📋 until then. Landed as chosen at E2: both calls named here
+stand - a new FLOOR clause, not a new judge, and the crown riding
+the TOOL - and the row is ✅.
 
 **The envelope's gouge law moved from a column floor to a facet
 distance - the M5.2 E phantom made the case and the geometry closes
@@ -4701,3 +4704,155 @@ files positions centers; the G-code is right BECAUSE they are).
 rides, tolerance 0.05, heights carried.** The two-click defaults
 must run clean on the suite's bars, and the app suite proves it
 (the_seeds_of_the_contour_kinds_stand).
+
+## M5.2 stage E2 - the crown gauge (code 2d38617 + this docs)
+
+**A form tool's meridian footprint is the sagitta, and the floor
+clause bends for it exactly as the wave's did.** `Floor::Crown(R)`:
+the floor at distance d off the crown's center stands at
+`tip + R - sqrt(R^2 - d^2)`, clamped at d = R (past the arc there is
+no steel - the door says no band stands there). The thread's wave is
+the small-angle special case. Why a new FLOOR and not a new judge:
+stage D's revolve scan already answers "what stands between the
+band's edges", and the only form-specific fact is the shape of that
+answer - one clause in `floor_at`, every law (chord overlap, gate,
+crest) shared. Considered and dropped: stamping the crown as a
+Turning nose circle (the phantom-trench law's other half - E1's own
+entry said so; the ball would convict a correct crown and waive a
+gouge), and a general "profile of the edge" param (the arc is what a
+GAUGE is; a general edge is CBN-form work, not a registry row).
+
+**The plunge depth is READ, never authored: `tip = max(chord - sag)`
+over the events the SCAN judges - and the min/max inversion E2
+caught on the way is the whole lesson.** The first draft sank the
+crown by `min(material(x) - sag(x))` "because chord-minus-arc is
+concave so its minimum lives at the ends". Both halves were wrong
+together: the concavity is right but picks the ENDPOINTS OF THE
+WRONG SIDE - min is the deepest claim-safe tip only if every chord
+is read where the lattice will judge it, and the lattice judges the
+move's own CENTER (lattice() pushes m.a/m.b) - so the law is max
+over each real-overlap chord's clipped ends AND the center when a
+chord spans it, which is exactly the set `scan` will measure, floor
+= tip + sag >= E at every one of them, gouge-free BY CONSTRUCTION.
+With the min, a matched crown gouged at every non-governing event
+and, worse, `material()`'s both-sided vote returned the bar's 10 mm
+skin claim at a wall station, so the crown sank to ~9.66 and never
+reached the valley at all. A gauge that cannot match the model then
+stands shallow and the verdict says so with `rest_mm` - never the
+kernel hiding a rest by sinking blind. Considered: reading model
+vertices (a tessellated arc's vertices miss its belly; the chords
+are the model's own polyline truth).
+
+**The crown rides the TOOL's `nose_radius` and the band its
+`width` - the "specialty field, inert elsewhere" law for the crown,
+and the arrival law for the KIND (`form` in v38 files never
+appeared, so v37 steps up with serde defaults and no migration
+beyond the version row).** Why reuse: a form gauge IS a ground
+radius, and the digest already hashes nose_radius globally - so
+re-grinding the crown marks every form op Stale with no new digest
+byte, and the kind-scoped `width` row (stage C's) does the same for
+the band; the two numbers a gauge is made of are two rows the wire
+already files. The stamp's width row had to become KIND-SCOPED
+(nose_radius was global since v33): an end mill's width is 0.0
+everywhere and a scoped row means re-grinding one gauge never
+stale-marks the mills. Considered: new fields crown_radius/band on
+params (steel belongs on the tool row - a second opinion in the op
+that can disagree with the mount is exactly the drift M4.2's digest
+exists to catch).
+
+**The form verdict clips floors at the BLANK's crest, not the
+window's.** `scan`/`judge` gained an `Option<f64> crest`: the shell
+clause ("a floor above the blank measures nothing - the shell owns
+what the gauge never reaches") needs a blank to compare against,
+and a lone crown's band sits INSIDE the bar: its own span_max is
+the valley's rim, not the skin the crown stands off. Passing the
+max radius of the whole silhouette made the too-steep/too-wide
+mismatches rest OUT LOUD as the kernel doc promises; None keeps the
+thread and blade paths byte-identical (their window IS the crest's
+stage). Cost to change: one parameter through three call sites.
+
+**One plunge per MODELED valley, centers from the model's own
+low-floor runs (threading's phase law, per-run instead of lattice),
+and a smooth bar refuses "nothing to form" by name.** The op
+promises a formed surface; inventing a crown from params over a
+plain bar is the silent-wrong-answer door E/D already shut for
+threads. More runs than MAX_RUNGS refuses to split the window, a
+floor on the axis refuses as "that is a hole, and holes are boring
+work" (boring is stage F). Feed and plunge_feed ride the params
+(feed INERT in the kernel - a radial sink has no programmed
+station-advance - but real to the post, the same honesty rule as
+the blade kinds).
+
+**v38 is the arrival law restated a seventh time** - one tool kind
+word, one params tag, zero new keys; the v38 grammar round-trip and
+three loader doors (a gauge with no band, a band past twice its own
+crown, a form op with no plunge) ride project_roundtrip like every
+prior stage. The tool editor's golden regenerated - the combo grew
+its tenth row and the CATALOG one entry (FG-0600-04); the pixel
+diff was verified as exactly the dock scrollbar nub (2 px x 31 px,
+content one row taller), pure combo/catalog churn before
+UPDATE_SNAPSHOTS.
+
+**The envelope's facet-distance law gains its fourth
+configuration - the segment pierces the face - and a buried path
+now reads the saturation it always deserved (E1 fallout, found
+because E2's gate finally ran the binary E1's Gate map never
+named).** `dist_seg_tri` proposed only endpoint-in-face and
+edge-to-edge candidates; those ARE complete for two SEGMENTS, but
+segment-to-TRIANGLE has one more configuration - the segment
+crossing the face's interior, where no endpoint or edge can
+witness the touch (Ericson 5.1 with the reduction finally
+finished). A feed run straight through the solid therefore read
+its crossed wall's EDGE distance: the through-the-cube fixture
+reported 1.0 (r - 2) where the truth is r itself - 0 distance -
+an under-read, i.e. the one sin. The law now returns 0 on a
+verified in-plane crossing and the verdict saturates at exactly
+`r` for any path that buries its centers; magnitude beyond r
+never claimed. Considered: signed half-space depth (would read
+the 5 mm "trench" the retired column law promised) - dropped: it
+needs consistent winding the scan is nowhere promised, and a
+winding-blind orientation test regrows E1's phantom convictions.
+Same edit aligned `EnvelopeReport.gouge_mm`'s doc to the intrusion
+wording the struct header already carried.
+
+**The cone tol-gate verdict test had been red since E1's birth, in
+the lane no gate ran: its planted 0.1155 was the scan's own yardstick.**
+E1 rewrote the gouge measurement to facet truth AND replaced the
+cell-derived chord budget with tol/4 (killing the phantom trench
+the r/8 lattice dug - cell/4 = 0.094 of pure measurement artifact,
+plus ~0.010 of 96-gon planarization: the very 0.1155 the test
+commented as "the generator's own chord error"). The fix that made
+the law honest made the test's evidence vanish, and the ignored
+release lane it lived in never ran. Rewritten to what the law
+actually promises: the clean rings stay silent at tol 0.01 (the
+phantom-trench guard, stated instead of assumed), while the same
+rings SUNK 0.09 - a real deviation, ~0.064 of surface inside the
+envelope - sit under the 0.1 promise they were generated for and
+convict at the 0.01 budget whose floor still resolves them. The
+sink helper must keep arc payloads (a G2's center is XY-only, so a
+z-shift leaves it authored): flattening the rings to chords made
+"semicircle arcs" into diameter lines through the cone - and the
+new crossing law convicted that fiction at r, loudly and
+correctly. The fiction's conviction is the fix's proof.
+
+**Gate-map blind spot, now law, not lesson: a kernel crate's
+verdict lane must be named in the consuming suite's Gate map.**
+E1 changed sim's envelope law; app's verify header listed only
+app:: modules, so the narrow gate picked no envelope binary -
+debug AND ignored-release lanes - and the regression rode two
+stages home. verify.rs's map now names sim::stock_sim's verdict
+lane explicitly; the same audit applies wherever a stage re-laws
+a crate other suites consume.
+
+**Form-fixture law for the turning suites: bars span z -50..50.**
+A short squat revolve (the D-era 56 mm barrel) tips the axis-fit
+second-moment ratio toward the dome refusal ("every axis fits this
+model equally") as soon as extra annular faces join the meridian;
+lengthening the bar is what makes a 16-gon read as a revolve.
+Twin-valley fixtures keep >= 12 mm of land between crowns for the
+same reason the band door keeps half <= R.
+
+**Adaptive row 127 audit CLOSED here**: E1's ABSORBED entry stands
+re-checked against the shipped kernel - the multi-pass ladder
+(`blade::rungs`, spring-pass midpoints) is what the row points at;
+no adaptive clause lives anywhere else in `turning/`.
