@@ -5257,3 +5257,62 @@ lane ran green in release) and `cargo build --release` on stable into
 dropped: bumping to 0.4.0 now (a number ahead of the milestone that
 delivers it is a version that lies) and a version-less tag (the
 vehicle would point at no named state).
+
+## M5.3 A - Incremental recompute: the digest memo that lives on the entity
+
+**The per-frame wall was the stamp re-deriving whole-mesh digests, and the
+fix is a memo keyed by M3.1's revision counter.** Staleness is a live
+question the UI asks every frame per visible operation: the stamp's
+source arms read `facets_of` (a full Vec clone), hash all triangles for
+the content key, walk the faces, and fold the digest - so a 10M-triangle
+model cost N ops x 2 full traversals per frame just to answer "nothing
+moved." Chosen: a per-entity `GeoSig { rev, sig }` component holding the
+newest derived signature, valid while `rev` equals the live revision
+counter. Considered and dropped: thread-local content cache (entity ids
+alias ACROSS worlds - test binaries build many, and a recycled address
+could hand a stale digest to the wrong world); storing the digest in the
+project file (a stored stale-flag in disguise - the AGENTS law); GPU-side
+digests (that is stage E's terrain, not this bullet's).
+
+**The counter became enforceable by moving the increment INTO
+`set_facets` - the one write path.** It used to be command-side bookkeep-
+ing, and six landing sites (fixture, setup, set_stock, delete-undo) never
+moved it - which is exactly why M3.1 could honestly call it "display and
+save only." A memo keyed on a lying counter is a silent-wrong-answer
+machine, so the increment now rides the write itself: a site cannot
+forget to move a key it never sees. Commands that RESTORE a past revision
+(`UpdateModel::invert`, `ImportModel`'s redo, the project loader) pin the
+counter right after landing, paired with the exact bytes that revision
+carried - the snapshots make that pairing honest, and it is what lets an
+undo/redo oscillation answer with the original digests (values identical
+to the fresh path - asserted, not assumed). The loader's pin became
+UNCONDITIONAL: a file's remembered counter must win over the load-time
+landing's bump, so a pre-v20 document still reads rev 0 at load (the
+roundtrip suite's v19 case, unchanged).
+
+**This is a stored FRESH, not a stored stale - the Prime Directive read
+mechanically.** Staleness is still decided by comparing the stored stamp
+against the live signature; the memo only decides when the signature
+must be re-derived, and every hit is value-identical to the fresh path
+(FEATURES_CACHE's "correctness independent of hits" law). The hit path
+additionally requires the `Facets` component to still be MOUNTED, so even
+a misused pin - a reused revision on unmounted geometry - reads `None`
+like the fresh path does, never a resurrected digest (there is a test for
+exactly that adversarial pairing).
+
+**The hsmw salt went with it: `hsmw-signature-v1` ->
+`camcraft-signature-v2`, plus six test temp-name renames - the last M4.3
+residues.** A signature-salt rename moves every stored digest once, so
+documents saved under the old salt read their operations Stale exactly
+one time and settle for good - the stamp.rs salt-rename precedent ("the
+one-time Stale read... working as designed"). Considered and dropped:
+keeping the old salt as v3-compat (a hash salt is not a compatibility
+contract - the wire magics are, and those stayed); a two-slot memo for
+oscillation (frames read one stable revision; the single slot replays by
+pin, and the second slot measured as dead weight).
+
+Gate notes: all 44 app/ui/post suites green including the .nc/.cl golden
+byte-stability lanes (the salt rename shifted no golden - digests ride
+stamps, not files). `operations` (app) needs ~490 s fully parallel, over
+the old 240 s batch window: contention, not regression - solo rerun
+green; worth remembering when batching ladders.

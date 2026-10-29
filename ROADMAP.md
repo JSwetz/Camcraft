@@ -1863,6 +1863,26 @@ Phase-5 shape law.
 - **CLI**: headless project processing and regression runs
 - **Regression suite**: golden-model CI (import → generate → verify → post) with numerical tolerances
 
+- ✅ **Incremental recompute after model changes** (stage A, commit
+      d11b1e1): the per-frame staleness wall (a facets clone, a full
+      content hash and a face walk per visible operation) becomes an
+      entity-scoped `GeoSig {rev, sig}` memo keyed by M3.1's revision
+      counter - and the counter is now enforceable where it matters,
+      because `set_facets` (the one `Facets` writer) moves it with every
+      landing; six sites used to land geometry without counting, which
+      is why the counter had been demoted to bookkeeping. Restore
+      commands pin a past revision paired with the exact bytes it
+      carried (the command snapshots), the loader's pin became
+      unconditional (a pre-v20 file still reads rev 0), and a hit is
+      gated on the facets still being mounted - a stored fresh, never a
+      stored stale: the stamp's law (compare against live facets) is
+      untouched, the memo only says when re-deriving is owed. The last
+      M4.3 residues went with it (`hsmw-signature-v1` ->
+      `camcraft-signature-v2`, one-time honest Stale per precedent; six
+      test temp names); every .nc/.cl golden byte-identical.
+      RECOMMENDED.md, M5.3 A. The bullet's other half - threaded
+      generation - is stage B.
+
 ---
 
 ## Phase 6 — UI refactoring.
