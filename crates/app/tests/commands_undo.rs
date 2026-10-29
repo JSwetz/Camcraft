@@ -723,3 +723,124 @@ fn update_reports_what_moved() {
     let text = diff.describe();
     assert!(text.ends_with(" changed") && !text.contains("0 "), "honest counts: {text}");
 }
+
+// ===================== M5.2 G: MoveModel - part placement, full rotation =====================
+
+use camcraft_app::commands::{MoveModel, TagFixture};
+use camcraft_app::fixture::MACHINE_TABLE;
+use camcraft_app::geometry::quat_from_euler;
+use camcraft_app::operation::OpStatus;
+use std::f64::consts::FRAC_PI_2;
+
+fn op_status(world: &flecs_ecs::prelude::World, name: &str) -> OpStatus {
+    let e = model::find_by_name(world, name).expect("entity exists");
+    operation::status_of(world, &e)
+}
+
+#[test]
+fn move_model_rotation_roundtrips_exact_and_the_stamp_follows() {
+    let (world, mut history, _top) = selection_fixture();
+    // Stand the 10 x 10 x 5 box on its edge (roll 90 deg) at x = 20:
+    // the quaternion the world stores is a normalized unit, and the
+    // part's own geometry is untouched - only the placement moved.
+    let at = Location {
+        pos: Point3::new(20.0, 0.0, 0.0),
+        rot: quat_from_euler(FRAC_PI_2, 0.0, 0.0),
+    };
+    let e = model::find_by_name(&world, "part").expect("part");
+    history.execute(&world, MoveModel::new(&world, "part", at).expect("placed"));
+    let got = model::transform_of(&world, &e).expect("location");
+    assert_eq!([got.pos.x, got.pos.y, got.pos.z], [20.0, 0.0, 0.0]);
+    for (a, b) in got.rot.iter().zip(at.rot.iter()) {
+        assert!((a - b).abs() < 1e-12, "rotation bytes drift: {:?}", got.rot);
+    }
+    assert!(history.undo(&world));
+    let back = model::transform_of(&world, &e).expect("location");
+    assert_eq!(back.pos, Point3::ZERO, "undo restores the placement");
+    assert!(history.redo(&world));
+    let again = model::transform_of(&world, &e).expect("location");
+    assert_eq!([again.pos.x, again.rot[0]], [20.0, at.rot[0]], "redo replays bytes");
+}
+
+#[test]
+fn a_moved_part_marks_generated_ops_stale_and_undo_clears_it() {
+    let (world, mut history, _top) = selection_fixture();
+    history.execute(
+        &world,
+        EditOperationLinks::new(&world, "G1", None, Some(SrcRef::Entity("part".into())))
+            .expect("retarget"),
+    );
+    let cmd = GenerateOperation::new(&world, "G1").expect("generate");
+    history.execute(&world, cmd);
+    assert_eq!(op_status(&world, "G1"), OpStatus::Ok, "freshly generated");
+
+    // Translation must make it stale; so must PURE ROTATION - the law
+    // M3.2 deferred and stage G keeps: the stamp hashes rot, not just pos.
+    let slide = Location {
+        pos: Point3::new(4.0, 0.0, 0.0),
+        rot: [0.0, 0.0, 0.0, 1.0],
+    };
+    history.execute(&world, MoveModel::new(&world, "part", slide).expect("slide"));
+    assert_eq!(op_status(&world, "G1"), OpStatus::Stale, "translation is in the stamp");
+    assert!(history.undo(&world));
+    assert_eq!(op_status(&world, "G1"), OpStatus::Ok, "undo clears it");
+
+    history.execute(
+        &world,
+        MoveModel::new(
+            &world,
+            "part",
+            Location {
+                pos: Point3::ZERO,
+                rot: quat_from_euler(0.0, 0.0, FRAC_PI_2),
+            },
+        )
+        .expect("yaw in place"),
+    );
+    assert_eq!(op_status(&world, "G1"), OpStatus::Stale, "rotation is in the stamp too");
+}
+
+#[test]
+fn move_model_refuses_other_furniture_and_garbage() {
+    let world = new_world();
+    let mut history = History::default();
+    history.execute(&world, ImportModel::from_mesh("block", cube_mesh()));
+
+    // The named verbs: fixtures and offsets are placed by their pages.
+    assert!(matches!(
+        MoveModel::new(&world, MACHINE_TABLE, Location::default()),
+        Err(CommandError::Invalid(_))
+    ));
+    assert!(matches!(
+        MoveModel::new(&world, "ghost", Location::default()),
+        Err(CommandError::NotFound(_))
+    ));
+    assert!(MoveModel::new(&world, "block", Location::default()).is_ok());
+    history.execute(&world, TagFixture::new(&world, "block", None).expect("tagged"));
+    let why = MoveModel::new(&world, "block", Location::default()).map(drop).err();
+    match why {
+        Some(CommandError::Invalid(m)) => assert!(m.contains("fixture"), "names its reason: {m}"),
+        other => panic!("expected an invalid refusal, got {other:?}"),
+    }
+    // The offset exists once a command has placed it; it is not a part.
+    history.execute(&world, SetWcsOrigin::new(&world, "G54", Location::default()).expect("wcs"));
+    assert!(matches!(
+        MoveModel::new(&world, "G54", Location::default()),
+        Err(CommandError::Invalid(m)) if m.contains("work offset")
+    ));
+
+    // Garbage never enters history: non-finite and degenerate poses.
+    let nan = Location {
+        pos: Point3::new(f64::NAN, 0.0, 0.0),
+        rot: [0.0, 0.0, 0.0, 1.0],
+    };
+    assert!(matches!(MoveModel::new(&world, "block", nan), Err(CommandError::Invalid(_))));
+    let zero_q = Location {
+        pos: Point3::ZERO,
+        rot: [0.0, 0.0, 0.0, 0.0],
+    };
+    assert!(matches!(
+        MoveModel::new(&world, "block", zero_q),
+        Err(CommandError::Invalid(m)) if m.contains("quaternion")
+    ));
+}

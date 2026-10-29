@@ -43,8 +43,10 @@ use crate::setup;
 
 /// The placement validation every pose write shares, in the
 /// `SetStock` voice: a unit quaternion (normalized at the chokepoint)
-/// and a finite position, or the command never exists.
-fn check_location(location: Location, what: &str) -> Result<Location, CommandError> {
+/// and a finite position, or the command never exists. Shared by every
+/// pose-writing command (`MoveFixture`, `MoveModel`) so the placement
+/// validation is one law, not two that drift.
+pub(crate) fn check_location(location: Location, what: &str) -> Result<Location, CommandError> {
     let mut location = location;
     location.rot = normalize_quat(location.rot).ok_or_else(|| {
         CommandError::Invalid(format!("{what} rotation is not a quaternion"))

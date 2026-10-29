@@ -69,7 +69,7 @@ use crate::operations::{
     strategy3d_names, unresolved_note,
 };
 use crate::state::{
-    CommandKind, ErrorScope, FixtureUi, GeoPick, PostView, State, UiTarget, quat_yaw_deg,
+    CommandKind, ErrorScope, FixtureUi, GeoPick, ModelUi, PostView, State, UiTarget, quat_yaw_deg,
 };
 
 use super::panes::{TYPES, kind_name, retype};
@@ -167,7 +167,11 @@ pub fn properties(ui: &mut Ui, state: &mut State, _pal: &Palette) {
                 wcs_page(ui, state, i);
                 setup_error(ui, state);
             }
-            UiTarget::Model(n) => model_page(ui, state, n),
+            UiTarget::Model(n) => {
+                state.sync_setup_ui();
+                model_page(ui, state, n);
+                setup_error(ui, state);
+            }
             UiTarget::Setups => {
                 state.sync_setup_ui();
                 ui.heading("Setups");
@@ -3748,6 +3752,35 @@ fn turn_wcs(state: &mut State, axis: usize, sign: f64) {
     apply_wcs_drafts(state);
 }
 
+/// Queue the Model page's placement draft as a `MoveModel` (M5.2 G) -
+/// the `apply_wcs_drafts` shape, one command kind over.
+fn apply_model_draft(state: &mut State) {
+    state.pending.push_back(CommandKind::MoveModel {
+        name: state.model_ui.name.clone(),
+        pos: [state.model_ui.x, state.model_ui.y, state.model_ui.z],
+        roll_deg: state.model_ui.roll_deg,
+        pitch_deg: state.model_ui.pitch_deg,
+        yaw_deg: state.model_ui.yaw_deg,
+    });
+}
+
+/// Quarter-turn the drafted part about a WORLD axis and write: the
+/// `turn_wcs` law (the turn premultiplies the draft's rotation), on
+/// the page that owns a full placement editor.
+fn turn_model(state: &mut State, axis: usize, sign: f64) {
+    let q = quat_from_euler(
+        state.model_ui.roll_deg.to_radians(),
+        state.model_ui.pitch_deg.to_radians(),
+        state.model_ui.yaw_deg.to_radians(),
+    );
+    let turn = quat_from_axis_angle(axis, sign * 90.0f64.to_radians());
+    let (r, p, y) = quat_to_euler(quat_mul(turn, q));
+    state.model_ui.roll_deg = r.to_degrees();
+    state.model_ui.pitch_deg = p.to_degrees();
+    state.model_ui.yaw_deg = y.to_degrees();
+    apply_model_draft(state);
+}
+
 // --------------------------------------------------------------- setups page
 
 /// The setups list (M3.2 A): the contexts a clamping creates. Clicking a
@@ -4619,6 +4652,60 @@ fn model_page(ui: &mut Ui, state: &mut State, name: String) {
             u.suffix()
         ));
     }
+    // Placement (M5.2 G): the M3.2 flip grew its two missing angles.
+    // The draft mirrors the world whenever the page moves to another
+    // model; typing edits the draft, Apply (or a turn button) writes
+    // through `MoveModel` - the numbers on screen and the geometry in
+    // the viewport are the same Location, one write apart.
+    if state.model_ui.name != name {
+        let loc = model::transform_of(&state.world, &entity).unwrap_or_default();
+        let (roll, pitch, yaw) = quat_to_euler(loc.rot);
+        state.model_ui = ModelUi {
+            name: name.clone(),
+            x: loc.pos.x,
+            y: loc.pos.y,
+            z: loc.pos.z,
+            roll_deg: roll.to_degrees(),
+            pitch_deg: pitch.to_degrees(),
+            yaw_deg: yaw.to_degrees(),
+        };
+    }
+    ui.add_space(6.0);
+    field(ui, "X");
+    num(ui, u, &mut state.model_ui.x);
+    field(ui, "Y");
+    num(ui, u, &mut state.model_ui.y);
+    field(ui, "Z");
+    num(ui, u, &mut state.model_ui.z);
+    field(ui, "Tilt about X (roll)");
+    num_plain(ui, &mut state.model_ui.roll_deg);
+    field(ui, "Tilt about Y (pitch)");
+    num_plain(ui, &mut state.model_ui.pitch_deg);
+    field(ui, "Turn about Z (yaw)");
+    num_plain(ui, &mut state.model_ui.yaw_deg);
+    ui.label("Quarter-turns about world axes (apply immediately):");
+    const TURNS: [(&str, usize, f64); 6] = [
+        ("X+", 0, 1.0),
+        ("X-", 0, -1.0),
+        ("Y+", 1, 1.0),
+        ("Y-", 1, -1.0),
+        ("Z+", 2, 1.0),
+        ("Z-", 2, -1.0),
+    ];
+    for row in [0usize, 3] {
+        ui.horizontal(|ui| {
+            for (label, axis, sign) in TURNS[row..row + 3].iter() {
+                if ui.button(format!("Turn {label}")).clicked() {
+                    turn_model(state, *axis, *sign);
+                }
+            }
+        });
+    }
+    ui.horizontal(|ui| {
+        if ui.button("Apply").clicked() {
+            apply_model_draft(state);
+        }
+    });
     let users: Vec<String> = model::named_entities(&state.world)
         .into_iter()
         .filter(|(_, e)| model::is_operation(&state.world, e))

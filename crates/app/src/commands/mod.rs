@@ -7,6 +7,7 @@ pub mod delete_entity;
 pub mod fixture;
 pub mod import_model;
 pub mod load_machine;
+pub mod move_model;
 pub mod operation;
 pub mod post;
 pub mod select_entity;
@@ -25,6 +26,7 @@ pub use fixture::{
 };
 pub use import_model::ImportModel;
 pub use load_machine::LoadMachine;
+pub use move_model::MoveModel;
 pub use operation::{
     CreateOperation, DeleteOperation, EditOperationLinks, EditOperationParams, GenerateOperation,
     RegenerateAll, SetOperationGeometry,

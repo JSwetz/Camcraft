@@ -18,8 +18,8 @@ use camcraft_app::commands::{
     ActivateSetup, AddTool, ChangeTool, CommandError, CreateOperation, CreateSetup, DeleteEntity,
     DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks,
     EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine, MoveFixture,
-    RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry, SetOperationSetup, SetStock,
-    SetUnits, SetWcsOrigin, TagFixture, UntagFixture, UpdateModel,
+    MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry, SetOperationSetup,
+    SetStock, SetUnits, SetWcsOrigin, TagFixture, UntagFixture, UpdateModel,
 };
 use camcraft_app::geometry::{
     Point3, feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point,
@@ -200,6 +200,17 @@ pub enum CommandKind {
     },
     DeleteFixture(String),
     ImportFixtureDialog,
+    /// Part orientation (M5.2 G): a model's full rigid placement -
+    /// position plus yaw-pitch-roll degrees (R = Rz ⊗ Ry ⊗ Rx, the
+    /// `SetWcs` voice). The world stores a unit quaternion; the
+    /// M3.2 flip is this arm with roll = pitch = 0.
+    MoveModel {
+        name: String,
+        pos: [f64; 3],
+        roll_deg: f64,
+        pitch_deg: f64,
+        yaw_deg: f64,
+    },
     /// Setup sheets (M3.2 stage D): render every setup and write the
     /// flip chart, one page per setup, form feeds as page breaks. The
     /// export is a VIEW of the document - no command, no history, no
@@ -305,6 +316,23 @@ pub struct FixtureUi {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+    pub yaw_deg: f64,
+}
+
+/// The Model page's placement draft (M5.2 G): one part's full rigid
+/// pose - position plus yaw-pitch-roll degrees - editable before Apply
+/// queues the `MoveModel`, the [`FixtureUi`] law with the two angles
+/// the parts page adds. Re-synced from the world whenever the
+/// selection or the document moves under the pane; a draft whose
+/// model vanished retires with it (the pane never edits a ghost).
+#[derive(Clone, Debug, Default)]
+pub struct ModelUi {
+    pub name: String,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub roll_deg: f64,
+    pub pitch_deg: f64,
     pub yaw_deg: f64,
 }
 
@@ -830,6 +858,8 @@ pub struct State {
     pub setups_ui: SetupsUi,
     /// Fixtures section placement draft (ephemeral; see [`FixtureUi`]).
     pub fixture_ui: FixtureUi,
+    /// Model page placement draft (ephemeral; see [`ModelUi`]).
+    pub model_ui: ModelUi,
     /// The setups-page context (setup binding) the next finished import
     /// gets tagged with - `Some` only between ImportFixtureDialog and the
     /// import's finish; discarded with the import itself.
@@ -994,6 +1024,7 @@ impl State {
             },
             setups_ui: SetupsUi::default(),
             fixture_ui: FixtureUi::default(),
+            model_ui: ModelUi::default(),
             import_as_fixture: None,
             // First-launch drafts carry plausible names: an empty Name
             // field made the Add buttons look dead (refused silently).
@@ -1111,6 +1142,23 @@ impl State {
                     self.wcs_ui.placed = false;
                 }
             }
+        }
+        // The Model page's placement draft (M5.2 G) follows the same
+        // law as the WCS one: whenever the document moves under the
+        // pane - an undo, a sibling command - the world's numbers
+        // re-enter the draft for the model actually on screen.
+        if let UiTarget::Model(name) = self.pane_target()
+            && let Some(entity) = model::find_by_name(&self.world, &name)
+            && let Some(loc) = model::transform_of(&self.world, &entity)
+        {
+            self.model_ui.name = name;
+            self.model_ui.x = loc.pos.x;
+            self.model_ui.y = loc.pos.y;
+            self.model_ui.z = loc.pos.z;
+            let (roll, pitch, yaw) = quat_to_euler(loc.rot);
+            self.model_ui.roll_deg = roll.to_degrees();
+            self.model_ui.pitch_deg = pitch.to_degrees();
+            self.model_ui.yaw_deg = yaw.to_degrees();
         }
     }
 
@@ -2177,6 +2225,49 @@ impl State {
                     self.refuse(ErrorScope::Setup, format!("fixture not deleted: {err}"));
                 }
             },
+            CommandKind::MoveModel {
+                name,
+                pos,
+                roll_deg,
+                pitch_deg,
+                yaw_deg,
+            } => {
+                // The `SetWcs` guard: the axis-angle builders quietly
+                // substitute identity for non-finite angles, so refuse
+                // here rather than silently drop a NaN rotation.
+                if !roll_deg.is_finite() || !pitch_deg.is_finite() || !yaw_deg.is_finite() {
+                    self.refuse(
+                        ErrorScope::Setup,
+                        "part not moved: rotation angles must be finite".to_string(),
+                    );
+                    return;
+                }
+                let location = Location {
+                    pos: Point3::new(pos[0], pos[1], pos[2]),
+                    rot: quat_from_euler(
+                        roll_deg.to_radians(),
+                        pitch_deg.to_radians(),
+                        yaw_deg.to_radians(),
+                    ),
+                };
+                match MoveModel::new(&self.world, &name, location) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.model_ui = ModelUi {
+                            name: name.clone(),
+                            x: pos[0],
+                            y: pos[1],
+                            z: pos[2],
+                            roll_deg,
+                            pitch_deg,
+                            yaw_deg,
+                        };
+                        self.status = format!("moved {name}");
+                    }
+                    Err(err) => self.refuse(ErrorScope::Setup, format!("part not moved: {err}")),
+                }
+            }
             CommandKind::ImportFixtureDialog => {
                 if let Some(path) = pick_mesh_file() {
                     // Bind to the context the page shows: the active
