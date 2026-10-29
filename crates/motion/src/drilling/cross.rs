@@ -18,7 +18,9 @@
 //! change inflating the hop plane so the chord's closest approach
 //! (never merely the endpoints) clears the bar - is ours, from the
 //! law that a bar's face is curved and a chord over it dives into
-//! steel.
+//! steel; stage G's opposite-station travel - retract axially,
+//! index, swing above the bar's end face - follows the same law
+//! pushed to the one pair of stations no hop radius can save.
 
 use super::cylinder::coord;
 use super::hole::{auto_kind, CrossHole, CycleChoice, CHIP_BREAK, SPOT_DEPTH, THROUGH_CLEAR};
@@ -56,6 +58,13 @@ pub struct CrossParams<'a> {
     /// Max radial extent of the stock (bar radius for a centered
     /// turned body; the mesh's max of x,y over vertices).
     pub stock_r: f64,
+    /// The stock's Z top (the mesh's max of z over vertices). Known,
+    /// it lets opposite stations travel by the axial DETOUR (M5.2
+    /// G): lift on one station's column, swing above the end face,
+    /// descend on the other's. Unknown (`None`), a 180° pair refuses
+    /// as it did in F2 - no detour can be proven clear of a bar
+    /// whose height is a guess.
+    pub stock_z_max: Option<f64>,
     pub tool: &'a Tool,
     pub holes: &'a [CrossHole],
 }
@@ -132,6 +141,9 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
     if !(p.feed.is_finite() && p.plunge_feed.is_finite() && p.dwell.is_finite() && p.dwell >= 0.0) {
         return Err(GenError::Invalid("cycle parameters not usable".into()));
     }
+    if p.stock_z_max.is_some_and(|z| !z.is_finite()) {
+        return Err(GenError::Invalid("cross-drill stock Z top not usable".into()));
+    }
     if matches!(p.cycle, CycleChoice::Tap | CycleChoice::Bore | CycleChoice::BackBore) {
         return Err(GenError::Invalid(
             "radial tapping and boring are not this cycle's word (M5.2 v1)".into(),
@@ -166,15 +178,23 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
     for (i, h) in hs.iter().enumerate() {
         if i > 0 {
             // The travel rapid rides the OLD station's pose: the
-            // tool swings to the new station after it arrives.
-            let s = traverse_s(hs[i - 1].dir, h.dir, hop_s).ok_or_else(|| {
-                GenError::Invalid(format!(
-                    "cross holes {} and {} stand on opposite stations: a straight traverse would cross the spindle (M5.2 v1)",
-                    i - 1,
-                    i
-                ))
-            })?;
-            b.push(MoveKind::Rapid, along(h, start_d(h, s)), None);
+            // tool swings to the new station after it arrives -
+            // except on the detour, where the index happens above
+            // the bar's end face (stage G).
+            match traverse_s(hs[i - 1].dir, h.dir, hop_s) {
+                Some(s) => b.push(MoveKind::Rapid, along(h, start_d(h, s)), None),
+                None => {
+                    let z_top = p.stock_z_max.map(|z| z + p.clearance_d.max(margin));
+                    let Some(z_top) = z_top else {
+                        return Err(GenError::Invalid(format!(
+                            "cross holes {} and {} stand on opposite stations: a straight traverse would cross the spindle, and the stock Z top is unknown so the over-the-end-face detour cannot be proven clear (M5.2 G)",
+                            i - 1,
+                            i
+                        )));
+                    };
+                    detour(&mut b, &hs[i - 1], h, hop_s, z_top);
+                }
+            }
         }
         // The pose tag states the tool's axis from tip toward
         // shank (the CL law `moves.rs` records) - the live tool
@@ -244,14 +264,11 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
         }
         if i + 1 < hs.len() {
             // Lift to the (station-pair inflated) hop plane before
-            // the turret indexes to the next hole.
-            let s = traverse_s(h.dir, hs[i + 1].dir, hop_s).ok_or_else(|| {
-                GenError::Invalid(format!(
-                    "cross holes {} and {} stand on opposite stations: a straight traverse would cross the spindle (M5.2 v1)",
-                    i,
-                    i + 1
-                ))
-            })?;
+            // the turret indexes to the next hole. An opposite pair
+            // has no inflation factor - stand on the plain plane;
+            // the next round's traverse branch takes the axial
+            // detour, or refuses if the bar's Z top is unknown.
+            let s = traverse_s(h.dir, hs[i + 1].dir, hop_s).unwrap_or(hop_s);
             b.push(MoveKind::Rapid, along(h, start_d(h, s)), None);
         }
     }
@@ -271,10 +288,9 @@ pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
 /// that is `0.707 s`, so the plane inflates by sqrt(2) to keep the
 /// chord's closest approach at the stock-clear radius. Same
 /// station: factor 1, and the chord is the pure-Z slide between
-/// two mouths. Opposite stations: the chord crosses the spindle
-/// itself, and this cycle has no straight word for that - the
-/// machine retracts axially and indexes, which is stage G's path
-/// to model. `from.dot(to)` on unit XY plunges is cos(dtheta).
+/// two mouths. Opposite stations: no finite plane saves the chord -
+/// it crosses the spindle at ANY radius - so `None` says "take the
+/// detour". `from.dot(to)` on unit XY plunges is cos(dtheta).
 fn traverse_s(from: Point3, to: Point3, hop_s: f64) -> Option<f64> {
     let dot = from.x * to.x + from.y * to.y;
     if dot < -0.9 {
@@ -283,11 +299,45 @@ fn traverse_s(from: Point3, to: Point3, hop_s: f64) -> Option<f64> {
     Some(hop_s * (2.0 / (1.0 + dot)).sqrt())
 }
 
-/// The travel `d` at which the hole's point reaches absolute
-/// coordinate `s` on its plunge axis. `dir` is an axis-aligned
-/// unit, so this is exact, not projected.
+/// The axial detour between opposite stations (M5.2 G): lift on the
+/// old column (the caller has the tool standing there, outside
+/// `hop_s`), index the turret in the clear, rapid above the bar's
+/// END FACE - a plane no radial chord could reach - then descend on
+/// the new column. Every leg is provably stock-free: the columns
+/// stand outside the bar's radius by the traverse law, and the
+/// swing plane clears the top by `clearance.max(margin)` - the
+/// margin half is what keeps the horizontal body's own rim
+/// (`d/2` below the tip line) off the end face.
+fn detour(b: &mut PathBuilder, prev: &CrossHole, h: &CrossHole, hop_s: f64, z_top: f64) {
+    let p0 = along(prev, start_d(prev, hop_s));
+    b.push(MoveKind::Rapid, Point3::new(p0.x, p0.y, z_top), None);
+    // The index: the pose flips to the NEW plunge, shank behind
+    // the tip, while the tool hangs above the bar.
+    b.set_axis(Some([-h.dir.x, -h.dir.y, -h.dir.z]));
+    let p1 = along(h, start_d(h, hop_s));
+    b.push(MoveKind::Rapid, Point3::new(p1.x, p1.y, z_top), None);
+    b.push(MoveKind::Rapid, p1, None);
+}
+
+/// The travel `d` at which the hole's point reaches radial distance
+/// `s` from the spindle axis, standing on the mouth's OWN side of
+/// it - a station's hop plane is its column, never the opposite
+/// one (the old signed-coordinate reading parked a negative-side
+/// station on the far column, straight through the spindle). `dir`
+/// is an axis-aligned unit, so this is exact, not projected; the
+/// side is the mouth's coordinate sign (a radial mouth on a centered
+/// stock never sits at 0; if it did, the station stands behind the
+/// tip, `-dir`).
 fn start_d(h: &CrossHole, s: f64) -> f64 {
     let a = plunge_axis(h.dir).unwrap_or(2);
     let dcomp = coord(h.dir, a);
-    (coord(h.origin, a) - s) / dcomp
+    let oc = coord(h.origin, a);
+    let side = if oc < 0.0 {
+        -1.0
+    } else if oc > 0.0 {
+        1.0
+    } else {
+        -dcomp.signum()
+    };
+    (oc - side * s) / dcomp
 }

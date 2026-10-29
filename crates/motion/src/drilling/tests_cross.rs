@@ -249,6 +249,7 @@ fn xparams<'a>(tool: &'a Tool, holes: &'a [CrossHole]) -> CrossParams<'a> {
         feed: 500.0,
         plunge_feed: 100.0,
         stock_r: 15.0,
+        stock_z_max: None,
         tool,
         holes,
     }
@@ -278,9 +279,20 @@ fn cross_drill_refuses_nonsense_by_name() {
         ok,
         cross(15.0, 0.0, 2.0, Point3::new(1.0, 0.0, 0.0), 2.0, -10.0, false),
     ];
+    let why = cross_drill(&xparams(&dt, &across)).map(drop).err();
+    match why {
+        Some(GenError::Invalid(m)) => {
+            assert!(m.contains("opposite stations"), "names the pair: {m}");
+            assert!(m.contains("Z top"), "and names the missing witness: {m}");
+        }
+        other => panic!("expected an invalid refusal, got {other:?}"),
+    }
+    // The witness must be MEASURABLE: a NaN top is no top.
+    let mut p = xparams(&dt, &across);
+    p.stock_z_max = Some(f64::NAN);
     assert!(
-        matches!(cross_drill(&xparams(&dt, &across)), Err(GenError::Invalid(_))),
-        "opposite stations refuse: the chord would cross the spindle"
+        matches!(cross_drill(&p), Err(GenError::Invalid(m)) if m.contains("not usable")),
+        "a NaN stock Z top is refused at the door, not flown blind over"
     );
     let ok_list = [ok];
     for c in [CycleChoice::Tap, CycleChoice::Bore, CycleChoice::BackBore] {
@@ -296,6 +308,95 @@ fn cross_drill_refuses_nonsense_by_name() {
         matches!(cross_drill(&xparams(&tap, &[ok])), Err(GenError::Invalid(_))),
         "auto must not reach for a tap"
     );
+}
+
+#[test]
+fn opposite_stations_take_the_axial_detour_above_the_bar() {
+    let dt = drill_tool(4.0);
+    let hs = [
+        cross(15.0, 0.0, 10.0, nx(), 2.0, -10.0, false), // +X station
+        cross(-15.0, 0.0, 2.0, Point3::new(1.0, 0.0, 0.0), 2.0, -10.0, false), // -X station
+    ];
+    let mut p = xparams(&dt, &hs);
+    p.stock_z_max = Some(30.0);
+    let t = cross_drill(&p).expect("the detour speaks where the chord cannot");
+    assert!(t.is_chained() && t.all_finite());
+    // z_top = 30 + clearance.max(margin) = 30 + max(2.0, 2.1).
+    let z_top = 32.1;
+    // THE LAW: every rapid point stands outside the bar's radius or
+    // rides the swing plane above its end face - nothing dives. An
+    // axial rapid travels a hole's own axis, so its START may sit in
+    // the void just cut (machined truth, the F2 law); a translating
+    // rapid must be clear at BOTH ends.
+    for m in t.moves.iter().filter(|m| m.kind == MoveKind::Rapid) {
+        let axial = (m.to.x - m.from.x).abs() < 1e-9 || (m.to.y - m.from.y).abs() < 1e-9;
+        for pt in [Some(m.to), if axial { None } else { Some(m.from) }]
+            .into_iter()
+            .flatten()
+        {
+            let rad = (pt.x * pt.x + pt.y * pt.y).sqrt();
+            assert!(
+                rad >= p.stock_r - 1e-6 || pt.z >= z_top - 1e-6,
+                "rapid point {pt:?} inside the bar with no license to be"
+            );
+        }
+    }
+    // The swing itself exists: one rapid across the axis at the
+    // plane, and the index is ALREADY the new station's pose - the
+    // turret turns in the clear, not after arriving.
+    let swing = t
+        .moves
+        .iter()
+        .find(|m| {
+            m.kind == MoveKind::Rapid
+                && (m.from.z - z_top).abs() < 1e-6
+                && (m.to.z - z_top).abs() < 1e-6
+                && m.from.x * m.to.x < 0.0
+        })
+        .expect("a rapid crosses the spindle axis ABOVE the bar");
+    assert_eq!(
+        swing.axis,
+        Some([-1.0, 0.0, 0.0]),
+        "the -X station's tip->shank points -X: the index happened on the lift"
+    );
+    // No straight traverse EVER runs at mouth height between the two columns.
+    assert!(
+        !t.moves.iter().any(|m| {
+            m.kind == MoveKind::Rapid
+                && m.from.x * m.to.x < 0.0
+                && m.from.z.abs() < 30.0
+                && (m.from.z - m.to.z).abs() < 1e-9
+        }),
+        "no chord at a low Z crosses the axis"
+    );
+}
+
+#[test]
+fn a_negative_station_hops_on_its_own_column() {
+    // start_d once read the hop plane as a SIGNED coordinate, which
+    // parked every negative-side station on the far column - a rapid
+    // straight through the spindle. The plane is a radial distance
+    // on the mouth's own side; the law holds at endpoints and
+    // mid-chord for the ordinary (quarter-turn) traverse too.
+    let dt = drill_tool(4.0);
+    let hs = [
+        cross(-15.0, 0.0, 10.0, Point3::new(1.0, 0.0, 0.0), 2.0, -4.0, false),
+        cross(0.0, -15.0, 2.0, Point3::new(0.0, 1.0, 0.0), 2.0, -4.0, false),
+    ];
+    let t = cross_drill(&xparams(&dt, &hs)).unwrap();
+    assert!(t.is_chained() && t.all_finite());
+    for m in t.moves.iter().filter(|m| m.kind == MoveKind::Rapid) {
+        let axial = (m.to.x - m.from.x).abs() < 1e-9 || (m.to.y - m.from.y).abs() < 1e-9;
+        for f in if axial { 2..=2 } else { 0..=2 } {
+            let g = f as f64 * 0.5;
+            let r = (m.from.x + (m.to.x - m.from.x) * g).hypot(m.from.y + (m.to.y - m.from.y) * g);
+            assert!(r >= 15.0 - 1e-6, "traverse dives to {r} between the columns");
+        }
+    }
+    // The -X station's own column, not the +X one: its first
+    // approach rapid ENDS at a negative x.
+    let first = t.moves.iter().find(|m| m.kind == MoveKind::Rapid).unwrap();
+    assert!(first.to.x < 0.0, "the hop stands on the mouth's side: {first:?}");
 }
 
 #[test]

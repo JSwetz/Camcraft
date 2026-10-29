@@ -1114,12 +1114,14 @@ pub fn generate(
                     ));
                 }
                 let top = req_z(hl.top, "Top of Part Z")?;
-                let stock_r = material
-                    .facets
-                    .iter()
-                    .flat_map(|t| [t.a, t.b, t.c])
+                let verts = || material.facets.iter().flat_map(|t| [t.a, t.b, t.c]);
+                let stock_r = verts()
                     .map(|p| (p.x * p.x + p.y * p.y).sqrt())
                     .fold(0.0_f64, f64::max);
+                // The bar's Z top: known, the kernel may route an
+                // opposite-station travel over the end face (M5.2
+                // G); a solid with no vertices says so honestly.
+                let stock_z_max = verts().map(|p| p.z).reduce(f64::max);
                 drilling::cross_drill(&drilling::CrossParams {
                     // The clearance/retract planes projected onto the
                     // plunge axis: their Z height above R is exactly
@@ -1136,6 +1138,7 @@ pub fn generate(
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     stock_r: stock_r.max(1.0),
+                    stock_z_max,
                     tool: &tool,
                     holes: cross,
                 })?
