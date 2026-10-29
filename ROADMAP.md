@@ -143,8 +143,8 @@ home.
 |-----------|--------|------|
 | Part orientation | ✅ | M5.2 G.1 (the flip grew full rotation; see RECOMMENDED) |
 | Part clamping | ✅ | M3.2 (fixtures) |
-| Part loading | 📋 | M5.2 (bar feeder) |
-| Part unloading | 📋 | M5.2 (bar feeder) |
+| Part loading | ✅ | M5.2 G.2 (bar feeder events on the stream; see RECOMMENDED) |
+| Part unloading | ✅ | M5.2 G.2 (bar feeder events on the stream; see RECOMMENDED) |
 | Part transfer | 📋 | M5.3 (automation) |
 | Part inspection | 📋 | M5.3 (automation) |
 

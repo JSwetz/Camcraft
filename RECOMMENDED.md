@@ -5159,3 +5159,84 @@ law and the first rapid's side. Considered and dropped: leaving the
 signed reading for positive-only callers - recognition hands
 negative mouths to this code the day a real bar is drilled, and a
 latent through-spindle rapid is a gouge with a calendar on it.
+
+## M5.2 stage G.2 - part load/unload: the stream carries intent, not motion (code ef20e19 + this docs)
+
+**One program is one part.** The lifecycle's scope was settled before
+any field was: a Parting operation's program describes cutting ONE
+part off a bar - load, cut, unload - so the events bracket the
+section (PART LOAD right after it opens, PART UNLOAD right before it
+closes). Considered and dropped: a part-count list on one program
+(bar-fed runs of N parts) - the count is a job-shop/MES number, not
+geometry, and a real feeder brings its own counter; the operation
+answers for this one part only.
+
+**Events are stream records, never moves.** A bar advance puts no
+path into CL and nothing into the sim - a rod sliding is not a
+cutting move, and letting it into the collision model would fake
+metal nothing cuts. So `Record::Part { loading, advance }` joins the
+SECTION family: `onCommand` never sees it, `onPartLoading` /
+`onPartUnloading` are the whole contract, and the PRELUDE defaults
+voice the intent as a comment - visible to the operator, harmless to
+any controller. A script with a real feeder dialect overrides them
+exactly as it overrides any other hook; the engine itself never
+invents an M-code.
+
+**The signals are operation params and they ride the stamp.**
+Considered: a component on the operation (params are where authored
+numbers live, and these change only the POSTED program), and the
+setup level (two parting operations on one document may legitimately
+differ - a second chucking job). They dirty the cache exactly like a
+feed does, even though no geometry reads them: the stamp hashes all
+three numbers. Grown in at v40 with serde defaults and NO version
+bump - absence means silence (`false/0.0/false`), the fixed-point
+pattern `feed_opt` kept since v14: the save states the learned keys,
+so a second open cannot drift them.
+
+**ADVANCE rides the LOAD alone, and the door says so.** The
+serializer writes it only on load lines (microns, the lattice law -
+spaced, joined, or keyed spellings all round-trip identical); the
+parser refuses it on an unload by name, because our writer never
+emits it and a hand-edited stream that does says something confused.
+An advance of 0 is legal and means the ACT alone - feed the bar,
+state no measured number - which is also the seed's shape: a fresh
+Parting operation says nothing the controller wasn't told to expect.
+A negative or unmeasurable advance is refused at the command door,
+not deep in the post.
+
+**The feeder got its own tab, Part-kind only.** No cutting tab names
+a load/unload signal (Geometry/Heights/Passes/Leads & Links/Feeds
+all read wrong for it), and a tab empty for every other kind is the
+dead-tab the section law forbids - so "Machine" follows the
+`Leads & Links`-only-for-Contour precedent exactly. Considered and
+dropped: Feeds (it voices the machine, not a velocity) and the stock
+page (stock is what is there; the feeder is what the machine does
+about it).
+
+**A revolved path is refused, not reinterpreted, by the program sim.**
+The gate's first live posting of a Part op came back "gouge: program
+cuts below the model in 112 cell(s), worst 38.00 mm" - the mill's
+dexel heightfield reading a parting kerf as a plunge far below the
+bar's top (38 = 28 − −10, exactly the misreading). If the gate lied
+about the sever, the feeder signals - the whole point of Part params -
+would be unreachable in the app, so this clause rode G.2 rather than
+a later stage: `simulate_document` refuses any program containing a
+`Family::Turn` op, naming the op and pointing at the revolved verdict
+that generation already made binding (M5.2 C's law, now gate-visible).
+Chosen over teaching the dexel a lathe frame (a real revolved sim is
+M5.3-later work) and over excluding only the turning ops' moves
+(a program is judged whole; half-judged verdicts are the two-agreeing
+laws this repo keeps refusing). The refusal lands in the gate's
+own documented silence arm - nothing judged, nothing claimed - and
+Deviate states the reason on demand.
+
+**The ladder caught a G.1 test bug, fixed at the test.** G.1's
+placement command shipped with `move_model_refuses_other_furniture_
+and_garbage` asserting garbage poses AFTER the test had tagged the
+block a fixture - so the furniture door (the higher truth: it names
+why this entity is placed elsewhere) spoke first and "quaternion"
+was unreachable. The command's law stands as written; the asserts
+moved before the tagging. Considered and dropped: reordering
+`MoveModel::new` to check the pose before the entity doors - it
+would disagree with `MoveFixture`'s identical order for one test's
+convenience.
