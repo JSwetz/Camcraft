@@ -5071,3 +5071,54 @@ the list like any params field: deepening a blind floor's `floor_d`
 marks the op Stale through the params digest alone, and one Ctrl+Z
 restores it.
 
+
+## M5.2 stage G.1 - full part orientation, one placement law (code 0a26f3e + this docs)
+
+**Orientation needed no new schema: a pose IS the model's Location.**
+The ROADMAP row asked to lift the M3.2 placement flip to full
+rotation. Chosen: a `MoveModel` command writing `Location { pos, rot }`
+- the quaternion the geometry reads already transform through. The
+payoff is the free half of every law: `stamp.rs` already hashes pos
+AND rot for an `SrcRef::Entity` source, so a pure spin marks every
+dependent operation Stale with zero new code, and the project round-
+trip already serialized it. Considered and dropped: an `Orientation`
+component beside `Location`, or an orient-specific stamp - both make
+a second truth about where a part stands, and second truths drift.
+
+**One placement validation, not two that drift.** `check_location`
+(the unit-quaternion and finite-position gate) was made crate-public
+in `commands/fixture.rs` and `MoveModel` adopted it verbatim, so
+`MoveFixture` and `MoveModel` refuse the exact same garbage for the
+exact same reason. Considered and dropped: copy-pasting the
+`SetWcsOrigin`-shaped check into the new file - three copies of a
+validation is one bug waiting for someone to fix only two.
+
+**Pages own their verbs: the refusals say who places what.** The
+command constructor refuses `Machine/Table` (derived from the `.mch`
+- not a part you can move), a tagged fixture ("the Fixtures page
+places it"), and a WCS entity ("the Work Offsets page places it"),
+each by name at construction so nothing half-entered the history.
+Considered and dropped: letting the command move anything and having
+each page filter the entity lists - the history would then hold
+mutations the document's own laws contradict, and undo across two
+pages would replay the lie.
+
+**Tait-Bryan degrees at the UI, the quaternion in the world, R = Rz
+⊗ Ry ⊗ Rx.** `CommandKind::MoveModel` carries roll/pitch/yaw in
+degrees because those are the numbers a machinist types; the command
+converts once at the queue arm via `quat_from_euler` and the world
+stores the rotation. The arm refuses non-finite angles BEFORE the
+conversion: the axis-angle builders substitute identity quietly, and
+"your NaN yaw was dropped" is exactly the silent reinterpretation the
+Prime Directive forbids. Considered and dropped: storing Euler angles
+in the world - composition-order-dependent, and byte-exact undo over
+gimbal drift is a trap.
+
+**Quarter-turn buttons are commands, not draft pokes.** The Models
+page's six turn buttons pre-multiply a 90° axis turn onto the current
+quaternion and apply the move immediately; the draft re-syncs from the
+world like every other pane on the document version. Considered and
+dropped: buttons that only edit the draft until Apply - a rotation
+the viewport shows but the history cannot undo is a bug by the
+everything-is-a-command law, and the turn is exactly what a
+mouse-drag orbit would want to become later.

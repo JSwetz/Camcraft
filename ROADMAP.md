@@ -141,7 +141,7 @@ home.
 
 | Operation | Status | Home |
 |-----------|--------|------|
-| Part orientation | 📋 | M3.2 placement flip; full rotation M5.2 |
+| Part orientation | ✅ | M5.2 G.1 (the flip grew full rotation; see RECOMMENDED) |
 | Part clamping | ✅ | M3.2 (fixtures) |
 | Part loading | 📋 | M5.2 (bar feeder) |
 | Part unloading | 📋 | M5.2 (bar feeder) |
