@@ -4964,3 +4964,109 @@ the split is a pure code move landed in the stage's own commit, before
 the tree ever saw a release: the kernel entry and the ride, the parity
 doors, and the MIN-fold wall are three subjects, and `revolve.rs`'s
 487 lines are the cautionary tale, not the precedent.
+## M5.2 stage F2 - radial drilling and the turned solid read sideways (code 32d3f27 + this docs)
+
+**Recognition is the Z pipeline rotated, not a second pipeline.** The
+cylinder primitive (`drilling/cylinder.rs`) states the three
+axis-aligned candidate axes, the transverse plane they induce, the Kasa
+least-squares circle (public fitting lore, Kasa 1979), and the
+edge-weld law: facets join a component only across a shared edge whose
+normals agree within cos(dtheta) >= 0.7, so a tessellated wall welds
+along its length and never bridges the dihedral where it meets a face.
+`classify` then reads EVERY law the Z-only original stated - span,
+rim, fit tolerance, the hole-vs-boss vote - off the candidate's own
+permuted coordinates (`sp(along, u, v, ...)`, one backward `coord`),
+which is the whole of the new doctrine: a drilled hole is a closed
+round wall, wherever its axis points. The fold `merge_z` runs unchanged
+on the snapped holes; a counterbore on a turret axis merges exactly as
+it did on a mill's.
+
+**The doors ask the mesh, and the parity vote is three-angle
+Moeller-Trumbore - never an edge count.** A station open to air
+crosses the wall facets an ODD number of times along its inward ray;
+solid metal answers even. A 24-gon's chords close, so any vertex-
+count parity is a fallacy in both directions (the F stage proved the
+same on the OD side); the ray votes at three orientations, 0/120/240
+degrees, majority 2-of-3, so a grazing vertex cannot swing a door.
+`ray_open` starts OUTSIDE the whole mesh (past `mesh_min`) and counts;
+`hits.is_multiple_of(2)` is the open answer inverted to "covered" -
+stated once, read by every door in the kernel.
+
+**The traverse law is inflation math, not sampling: chord min >=
+hop_s.** Between holes the rapids must clear the turned solid by the
+cutter's own rim plus the machine clearance; the kernel states it in
+closed form - `end_s = stock_r + max(clearance_d, margin)`,
+`hop_s = stock_r + max(hop_d, clearance_d)`, and a traverse segment
+between poses keeps its min distance at `hop_s * sqrt(2/(1+dot))`,
+which for the 90-degree station change is exactly `hop_s * sqrt(2)` -
+so flattening to chords cannot dip a hop inside the clearance tube.
+Considered and dropped: sampling the rapid every 5 mm and checking -
+an approximation that can be tuned into a silent miss, where the
+algebra cannot be. The same law is what the drilling cross tests
+prove by measuring the chord samples OUTSIDE `stock_r`.
+
+**`Mode::Radial` stands (a), (b), (c), (c3) and (d) down - the height
+field cannot see a tunnel.** The vertical-axis reading of a horizontal
+chain is a fiction four times over: XY crossings convict the legitimate
+intersection of two cross-drilled holes (both are kerf); the distance
+law convicts the plunge chord crossing the silhouette head-on (d = 0
+is the hole's MOUTH); the leaning-column enclosure of a fully
+horizontal band is a vertical slab over the part's own walls (the bore
+convicts itself); and a retract sliding out along its own kerf reads
+`low < surface(q)` under solid stock - a RapidInStock that is the
+tunnel, not a plunge. Each law's truth for a posed horizontal move is
+already PROVED by the kernel's construction (doors measured on the
+mesh, the inflation traverse above), exactly as `Mode::Revolve` let
+the meridian scan own the lathe's truth. The fixture laws (c2)/(d2)
+stay in every mode: they are 3-D boxes, no height field in them, and
+steel keeps no tangency courtesies. The cycles stay empty for a
+radial chain, so the reach law (e) is a no-op here by construction -
+the depth truth rides each hole's own `floor_d`.
+
+**The pose tag says tip->shank, so a hole's tag is the NEGATED plunge
+direction - and that sign is a traverse-safety fact, not a label.**
+`cl`'s law (`moves.rs`) states a move's axis as the unit vector from
+TIP toward SHANK; the live tool plunges ALONG `dir`, so its shank
+stands BEHIND the tip and the tag is `-dir`. The station hop's first
+rapids ride the PREVIOUS hole's pose, so a flipped tag aims the
+retract's clearance leg INTO the part instead of out along the way the
+tool came in. The motion cross suite now pins the reading (hole 1's
+inward -X plunge wears +X) and the app test asserts every move in the
+chain carries it.
+
+**The app-side bar mesh is closed by necessity - the slicer convicts
+what the ray laws tolerate.** Motion's `radial_bar` fixture deliberately
+carries coplanar double surfaces (a full -X quad plus a punched annulus
+on the plane): its ray/edge laws ride that fine ("the through hole
+reads through via the edge law at smin == mesh_min"), but the DOCUMENT
+silhouettes the same entity with `slice::project`, and every chord end
+there must be shared by exactly two chords - the double surface is a
+non-manifold contact and the op refuses at once. So `drilling_cross.rs`
+ports the bar as an honest closed singly-punched solid: same walls,
+floors and holes, every face one surface. The UI test's first attempt
+was a PARAPHRASE of that port and detected zero holes through a
+winding drift in its hand-rolled ring/floor helpers (kind_of was
+green; `cross_holes_of` answered `Ok([])`) - the lesson recorded as
+law here: the verified builder is ported verbatim, never retyped.
+
+**v1 scope, stated as refusals.** Mixed lists (Z holes AND cross holes
+on one op), a mill document asked to drive cross holes, and a Bottom
+Z plane over radial holes all refuse BY NAME at command-adjacent
+depth - the family gate itself did NOT move (MillTurn admits any
+family, per stage C's law; the live-tooling question is the machine's
+kind, read once at `machine::kind_of`). Cycle records stay Z-only:
+there is no G8x radial vocabulary yet, so the chain is the single
+truth and the post's cycle hooks see the holes they can honestly
+count. The standoff for a curved entry maps `air = (clearance -
+R).max(1)` from the hole's own rim, and the machine check that gates
+it is the mounted `.mch`, not the default.
+
+**v40: the wire grows an optional `cross` key and pure-Z files stay
+byte-identical.** The DTO carries `#[serde(default)] cross:
+Vec<CrossHole>`; the round-trip test writes the key only when a file
+has radial holes and asserts its ABSENCE for a Z-only document, so
+every pre-F2 golden file still matches byte for byte. Undo/redo ride
+the list like any params field: deepening a blind floor's `floor_d`
+marks the op Stale through the params digest alone, and one Ctrl+Z
+restores it.
+

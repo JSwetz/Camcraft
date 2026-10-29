@@ -134,8 +134,8 @@ home.
 | Taper turning | ✅ | M5.2 E |
 | Form turning | ✅ | M5.2 E2 (the crown floor of the revolve verdict) |
 | Multi-pass turning | ✅ | M5.2 E |
-| Drill (radial/axial, live tooling) | 📋 | M5.2 |
-| Hole recognition (on the turned solid) | 📋 | M5.2 |
+| Drill (radial/axial, live tooling) | ✅ | M5.2 F2 (see RECOMMENDED) |
+| Hole recognition (on the turned solid) | ✅ | M5.2 F2 (the cylinder primitive) |
 
 ### Turning — Part handling
 
@@ -1824,6 +1824,29 @@ Phase-5 shape law.
       re-ground bar through the TOOL digest), one ascending ride in
       v1, the kernel shipping split at its seam as `turning/bore/
       {mod,doors,wall}.rs`.
+
+- ✅ **Radial (cross) drilling + hole recognition on the turned
+      solid** (stage F2, commit 32d3f27): the live tooling's cycle -
+      drill, peck, deep-retract march - plunged from a turret station
+      along X or Y at the spindle axis, its poses riding `cl`'s
+      axis machinery (tag = tip->shank = the negated plunge, so the
+      station hop exits the way the tool entered), its rapids proven
+      outside the silhouette by inflation algebra (the 90-degree
+      traverse chord keeps `hop_s * sqrt(2)` of clearance, never a
+      sampled guess). Verification speaks a new mode: `Mode::Radial`
+      stands laws (a),(b),(c),(c3),(d) down - a height field cannot
+      see a tunnel, and the kernel's construction is the proof the
+      Revolve precedent already owns - while the fixture laws keep
+      their 3-D voice. Recognition grows the cylinder primitive:
+      three candidate axes, dihedral-gated edge weld, the Kasa fit,
+      and the Z pipeline's every law read through the candidate's
+      own coordinates (a hole is a closed round wall wherever its
+      axis points); doors vote three-angle ray parity. Mixed
+      lists, a mill asked to drive live tooling, and a Bottom plane
+      over radial holes all refuse by name; the wire grows an
+      optional `cross` key (v40) with pure-Z files byte-identical.
+      The slicer-versus-ray closed-mesh law and the port-verbatim
+      lesson: RECOMMENDED.md, M5.2 F2.
 
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**
