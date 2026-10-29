@@ -60,8 +60,7 @@ impl Carried {
             stepover: stepover_of(p).unwrap_or(3.0),
             stepdown: stepdown_of(p).unwrap_or(5.0),
             top: top_of(p).unwrap_or_else(|| Height::of(HeightReference::TopOfModel, 0.0)),
-            bottom: bottom_of(p)
-                .unwrap_or_else(|| Height::of(HeightReference::WorkOffset(0), 0.0)),
+            bottom: bottom_of(p).unwrap_or_else(|| Height::of(HeightReference::WorkOffset(0), 0.0)),
             retract: retract_of(p).unwrap_or_else(|| Height::of(HeightReference::TopOfStock, 10.0)),
             tilt: p.tilt(),
         }
@@ -624,6 +623,7 @@ fn seed_drill(c: &Carried) -> OpParams {
         // Creation is legal with an empty list; the generator
         // refuses to run one, and Detect holes fills it.
         holes: Vec::new(),
+        cross: Vec::new(),
     }
 }
 

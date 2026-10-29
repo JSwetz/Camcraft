@@ -1,5 +1,3 @@
-
-
 use super::*;
 
 impl OpParams {
@@ -667,6 +665,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 holes,
+                cross,
             } => {
                 wh(h, *clearance_z);
                 wh(h, *top_z);
@@ -695,6 +694,22 @@ impl OpParams {
                     w(h, hole.entry_z);
                     w(h, hole.floor_z);
                     h.write_u8(u8::from(hole.through));
+                }
+                // The radial list digests too (M5.2 F2): same law -
+                // detection output or a typed edit is params data, and
+                // a turned model that grows a cross hole must mark
+                // the op Stale rather than re-detect silently.
+                h.write_u32(cross.len() as u32);
+                for c in cross {
+                    for p in [c.origin, c.dir] {
+                        w(h, p.x);
+                        w(h, p.y);
+                        w(h, p.z);
+                    }
+                    for v in [c.radius, c.entry_d, c.floor_d] {
+                        w(h, v);
+                    }
+                    h.write_u8(u8::from(c.through));
                 }
             }
             // The facing ladder (M5.2 stage A, tag 18): three heights,

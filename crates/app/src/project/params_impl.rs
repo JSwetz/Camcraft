@@ -13,19 +13,17 @@ impl ParamsDto {
                 plunge_feed,
                 climb,
                 tilt,
-            } => {
-                ParamsDto::Face {
-                    stepover: *stepover,
-                    clearance_z: (*clearance_z).into(),
-                    cut_z: (*cut_z).into(),
-                    feed: *feed,
-                    plunge_feed: *plunge_feed,
-                    climb: *climb,
-                    top_z: (*top_z).map(Into::into),
-                    stepdown: *stepdown,
-                    tilt: (*tilt).map(Into::into),
-                }
-            }
+            } => ParamsDto::Face {
+                stepover: *stepover,
+                clearance_z: (*clearance_z).into(),
+                cut_z: (*cut_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                top_z: (*top_z).map(Into::into),
+                stepdown: *stepdown,
+                tilt: (*tilt).map(Into::into),
+            },
             OpParams::Contour {
                 stock_to_leave,
                 clearance_z,
@@ -834,6 +832,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 holes,
+                cross,
             } => ParamsDto::Drill {
                 clearance_z: (*clearance_z).into(),
                 retract_z: (*retract_z).map(Into::into),
@@ -853,6 +852,7 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 holes: holes.iter().map(HoleDto::from_hole).collect(),
+                cross: cross.iter().map(CrossHoleDto::from_hole).collect(),
             },
         }
     }
@@ -1669,6 +1669,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 holes,
+                cross,
             } => OpParams::Drill {
                 clearance_z: (*clearance_z).into(),
                 retract_z: (*retract_z).map(Into::into),
@@ -1688,6 +1689,7 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 holes: holes.iter().copied().map(HoleDto::to_hole).collect(),
+                cross: cross.iter().copied().map(CrossHoleDto::to_hole).collect(),
             },
         }
     }

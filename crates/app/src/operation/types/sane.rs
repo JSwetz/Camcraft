@@ -5,7 +5,6 @@ use crate::machining2d::PocketStrategy;
 use crate::operation::types::params::OpParams;
 use crate::operation::types::sel::lead_sane;
 
-
 impl OpParams {
     /// Shallow sanity for command construction, no world: finite numbers,
     /// positive increments, in-range slots. Ordering needs resolved
@@ -502,6 +501,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 holes,
+                cross,
                 ..
             } => {
                 // An empty hole list is sane here: a new Drill op exists
@@ -519,6 +519,7 @@ impl OpParams {
                     && dwell.is_finite()
                     && *dwell >= 0.0
                     && holes.iter().all(|h| h.is_usable())
+                    && cross.iter().all(|h| h.is_usable())
             }
             // The facing ladder's door (M5.2 stage A): the wrap
             // ladder's numbers without the pattern's - a positive
@@ -784,5 +785,4 @@ impl OpParams {
             }
         }
     }
-
 }

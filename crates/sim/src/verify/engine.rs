@@ -42,7 +42,11 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // centers in a groove's ladder "crosses" at the very line the
     // part spins on - the XY reading of the predicate says nothing
     // true about a meridian path, which the revolve verdict judges.
-    if !matches!(cx.mode, Mode::Envelope | Mode::Revolve) {
+    // Mode::Radial stands it down too (M5.2 F2): two live-tool holes
+    // drilled at one height across one another ARE the cross-drilled
+    // intersection the part asks for - the crossing point is kerf in
+    // both bores, not a collision.
+    if !matches!(cx.mode, Mode::Envelope | Mode::Revolve | Mode::Radial) {
         let mut feeds: Vec<(usize, Point2, Point2, f64, f64)> = Vec::new();
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind != MoveKind::Feed {
@@ -132,7 +136,12 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // section's silhouette by design - the tool tip traces the
     // meridian - so "inside the section" is where a turned path
     // legitimately lives; the revolve verdict owns that geometry.
-    if !matches!(cx.mode, Mode::Engrave | Mode::Envelope | Mode::Revolve) {
+    // Mode::Radial stands down the same way read again (M5.2 F2): a
+    // radial plunge's centers RUN THROUGH the silhouette wall - head
+    // on, d = 0, every feed point of the bore inside the finish
+    // circle it came to make. Tangency is the mill's law; the door
+    // the kernel measured on the mesh is the radial one.
+    if !matches!(cx.mode, Mode::Engrave | Mode::Envelope | Mode::Revolve | Mode::Radial) {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;
@@ -227,8 +236,15 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         ),
     ];
 
-    // (c) Shank/holder reach against rest material.
-    if cx.mode != Mode::Engrave {
+    // (c) Shank/holder reach against rest material. Mode::Radial
+    // stands it down (M5.2 F2) for the reason Revolve's doctrine
+    // names inverted: a horizontal shank lives in the meridian's
+    // world, and the enclosure built for it is a vertical column -
+    // it over-reports a graze into the bore's own walls, steel the
+    // door law already measured as the hole. (c3)'s sweeps ride the
+    // same column and stand with it; the kernel's chain self-check
+    // and door margins are the band law here.
+    if !matches!(cx.mode, Mode::Engrave | Mode::Radial) {
         // Both boundaries matter: the region's loops carry the part
         // islands (holes in the region), the stock's carry its outer
         // walls wherever they stand beyond the region. A model-driven
@@ -374,7 +390,13 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // turning rapids' safety promise is the kernel's own: radial exits
     // from cut stations and traverses at rho_clear, asserted by each
     // family's tests. Fixture steel (d2) still stands - it is a box.
-    if cx.mode != Mode::Revolve {
+    // Mode::Radial stands down on the same reading (M5.2 F2): the
+    // bore is a tunnel a height field cannot see, so the retract
+    // sliding out along its own kerf reads as lateral travel under
+    // solid stock; the exit-the-hole-along-its-axis and outside-
+    // stock_r traverse promises are the kernel's, asserted in
+    // drilling's cross tests.
+    if !matches!(cx.mode, Mode::Revolve | Mode::Radial) {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind != MoveKind::Rapid {
                 continue;

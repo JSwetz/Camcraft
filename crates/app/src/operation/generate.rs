@@ -1,5 +1,3 @@
-
-
 use super::*;
 
 /// Generate the path for an operation as the world stands now, and verify
@@ -45,16 +43,25 @@ pub fn generate(
         .as_deref()
         .and_then(|f| slice::project(f, FOOTPRINT_SAMPLES).ok())
         .filter(|r| !r.is_empty());
-    let stock_top_z = material.top
-       .max(
-            model::stock_world_aabb_for(world, setup)
-                .map(|b| b.max.z)
-                .unwrap_or(f64::NEG_INFINITY),
-        );
+    let stock_top_z = material.top.max(
+        model::stock_world_aabb_for(world, setup)
+            .map(|b| b.max.z)
+            .unwrap_or(f64::NEG_INFINITY),
+    );
 
     // Which verify laws the path answers to is registry data (M5.0.2):
-    // the row's comment explains each choice.
-    let mode = op.params.kind().info().mode;
+    // the row's comment explains each choice. One seam-side override:
+    // a drill op carrying radial holes runs the live-tooling kernel,
+    // whose chain is horizontal in world XY - `Mode::Radial` stands
+    // the vertical-axis laws down for exactly that geometry (the
+    // sim-side comment is the doctrine; the registry row stays the
+    // Z-hole truth).
+    let mode = match &op.params {
+        OpParams::Drill { cross, .. } if !cross.is_empty() => {
+            crate::verify::Mode::Radial
+        }
+        _ => op.params.kind().info().mode,
+    };
 
     // The height seam: the params' From+offset expressions become the
     // generators' plain f64s right here. Every unresolved reference is
@@ -84,7 +91,7 @@ pub fn generate(
             None => {
                 return Err(GenError::Invalid(
                     "the 3+2 index commands no direction - its angles are not finite".into(),
-                ))
+                ));
             }
         },
     };
@@ -107,15 +114,30 @@ pub fn generate(
                 .into(),
         ));
     }
-    let material_local = frame
-        .as_ref()
-        .map(|f| Material { facets: f.local_facets(&material.facets), top: material.top - oz });
+    let material_local = frame.as_ref().map(|f| Material {
+        facets: f.local_facets(&material.facets),
+        top: material.top - oz,
+    });
     let m_gen = material_local.as_ref().unwrap_or(&material);
 
     // Region + path per kind.
     let (region, path) = match &op.params {
-        OpParams::Face { stepover, stepdown, feed, plunge_feed, climb, .. } => {
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+        OpParams::Face {
+            stepover,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            ..
+        } => {
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = machining2d::face(
                 &region,
                 &FaceParams {
@@ -205,7 +227,14 @@ pub fn generate(
                     (region, path)
                 }
                 _ => {
-                    let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+                    let region = region_for_src(
+                        world,
+                        op.setup.as_deref(),
+                        &op.src,
+                        &op.params,
+                        m_gen,
+                        frame.as_ref(),
+                    )?;
                     let path = machining2d::contour(&region, &cp)?;
                     (region, path)
                 }
@@ -225,7 +254,14 @@ pub fn generate(
             max_engagement,
             ..
         } => {
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = machining2d::pocket(
                 &region,
                 &PocketParams {
@@ -268,7 +304,14 @@ pub fn generate(
             // themselves at every plane, so there is nothing here for a
             // picked loop to add - and nothing to erode by hand either:
             // one erosion per level, from that level's target.
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let pp = Pocket3DParams {
                 tool_diameter: d,
                 stepover: *stepover,
@@ -352,7 +395,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let fp = Finish3DParams {
                 pattern: *pattern,
                 stepover: *stepover,
@@ -380,18 +430,10 @@ pub fn generate(
                 | finishing3d::FinishPattern::Scallop => {
                     finishing3d::parallel(&material.facets, &fp)?
                 }
-                finishing3d::FinishPattern::Radial => {
-                    finishing3d::radial(&material.facets, &fp)?
-                }
-                finishing3d::FinishPattern::Spiral => {
-                    finishing3d::spiral(&material.facets, &fp)?
-                }
-                finishing3d::FinishPattern::Contour => {
-                    finishing3d::contour(&material.facets, &fp)?
-                }
-                finishing3d::FinishPattern::Project => {
-                    finishing3d::project(&material.facets, &fp)?
-                }
+                finishing3d::FinishPattern::Radial => finishing3d::radial(&material.facets, &fp)?,
+                finishing3d::FinishPattern::Spiral => finishing3d::spiral(&material.facets, &fp)?,
+                finishing3d::FinishPattern::Contour => finishing3d::contour(&material.facets, &fp)?,
+                finishing3d::FinishPattern::Project => finishing3d::project(&material.facets, &fp)?,
             };
             (region, path)
         }
@@ -436,12 +478,23 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::BallNose {
                 return Err(GenError::Invalid(format!(
                     "{} needs a ball-nose tool, '{}' is a {}",
-                    if is_contour { "5-Axis Contour" } else { "5-Axis Parallel" },
+                    if is_contour {
+                        "5-Axis Contour"
+                    } else {
+                        "5-Axis Parallel"
+                    },
                     op.tool,
                     tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let fp = Finish3DParams {
                 pattern: if is_contour {
                     finishing3d::FinishPattern::Waterline
@@ -520,7 +573,14 @@ pub fn generate(
                     tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let fp = Finish3DParams {
                 // The ruling replaces the pattern's choice of lines;
                 // the geometry that remains is the parallel's exactly.
@@ -586,12 +646,23 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::BallNose {
                 return Err(GenError::Invalid(format!(
                     "{} needs a ball-nose tool, '{}' is a {}",
-                    if is_contour { "Rotary Contour" } else { "Rotary Parallel" },
+                    if is_contour {
+                        "Rotary Contour"
+                    } else {
+                        "Rotary Parallel"
+                    },
                     op.tool,
                     tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let fp = Finish3DParams {
                 // The kind names the ladder - waterline rings about
                 // the axis, or passes along it - so the pattern byte
@@ -656,7 +727,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let pp = Pocket3DParams {
                 tool_diameter: d,
                 stepover: *stepover,
@@ -719,7 +797,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let pp = Pocket3DParams {
                 tool_diameter: d,
                 stepover: *stepover,
@@ -749,7 +834,12 @@ pub fn generate(
             // stamps exactly as stage E3 shipped it.
             let shank = (*shank_avoid).then(|| shank_of(&tool));
             let path = match crate::multiaxis::multiaxis_rough_prev(
-                &material.facets, &region, &pp, &axis, mask, shank.as_ref(),
+                &material.facets,
+                &region,
+                &pp,
+                &axis,
+                mask,
+                shank.as_ref(),
             ) {
                 Ok(path) => path,
                 // The pocket arm's Empty remap, verbatim: with a mask
@@ -790,7 +880,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let fp = Finish3DParams {
                 // The field replaces the pattern's choice of lines;
                 // the geometry that remains is the raster's exactly.
@@ -844,7 +941,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let top = req_z(hl.top, "Top of Part Z")?;
             let bottom = req_z(hl.bottom, "Bottom of Part Z")?;
             let chains = drive_chains_of(world, op)?;
@@ -854,7 +958,10 @@ pub fn generate(
             // pose can fix - refused by vertex, never quietly
             // clipped (the Prime Directive's kind of wrong).
             for (ci, ch) in chains.iter().enumerate() {
-                if let Some(v) = ch.iter().find(|v| v.z < bottom - Z_TOL || v.z > top + Z_TOL) {
+                if let Some(v) = ch
+                    .iter()
+                    .find(|v| v.z < bottom - Z_TOL || v.z > top + Z_TOL)
+                {
                     return Err(GenError::Invalid(format!(
                         "picked chain {} stands at z {:.3}, outside the window [{:.3}, {:.3}] - widen Top/Bottom of Part Z or re-pick",
                         ci + 1,
@@ -878,8 +985,13 @@ pub fn generate(
                 max_tilt_deg: Some(*max_tilt_deg),
             };
             let shank = (*shank_avoid).then(|| shank_of(&tool));
-            let path =
-                crate::multiaxis::contour_curve(&chains, &material.facets, &cp, &axis, shank.as_ref())?;
+            let path = crate::multiaxis::contour_curve(
+                &chains,
+                &material.facets,
+                &cp,
+                &axis,
+                shank.as_ref(),
+            )?;
             (region, path)
         }
         OpParams::Slot {
@@ -912,11 +1024,31 @@ pub fn generate(
                     climb: *climb,
                 },
             )?;
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             (region, path)
         }
-        OpParams::Trace { stepdown, feed, plunge_feed, climb, .. } => {
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+        OpParams::Trace {
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            ..
+        } => {
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = machining2d::trace(
                 &region,
                 &TraceParams {
@@ -932,24 +1064,96 @@ pub fn generate(
             )?;
             (region, path)
         }
-        OpParams::Drill { cycle, peck, dwell, feed, plunge_feed, holes, .. } => {
+        OpParams::Drill {
+            cycle,
+            peck,
+            dwell,
+            feed,
+            plunge_feed,
+            holes,
+            cross,
+            ..
+        } => {
             // No region feeds the generator - the hole list is the
             // geometry - but the verify pass below needs one, and it is
             // built the same shared way as every other kind's.
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
-            let path = drilling::drill(&drilling::CycleParams {
-                clearance_z: hl.clearance,
-                r_z: req_z(hl.top, "Top of Part Z")?,
-                hop_z: hl.retract,
-                bottom_z: hl.bottom,
-                cycle: *cycle,
-                peck: *peck,
-                dwell: *dwell,
-                feed: *feed,
-                plunge_feed: *plunge_feed,
-                tool: &tool,
-                holes,
-            })?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            // M5.2 F2: the radial branch. (Radial first, Z otherwise -
+            // both arms end in the shared verify tail below.)
+            let path = if !cross.is_empty() {
+                // M5.2 F2: the radial branch. The Z laws above are the
+                // mill's; these holes are plunged by live tooling from
+                // a turret station, so three refusals come first - a
+                // document that mixes the two lists (one program, two
+                // stories about where the tool stands), a plain mill
+                // with nothing to plunge them with, and a bottom
+                // plane, which is a Z coordinate no radial hole owns.
+                // The heights ride as STANDOFFS: the bar's face is
+                // curved, so no world plane says "clear of it" - the
+                // kernel adds `stock_r` itself.
+                if !holes.is_empty() {
+                    return Err(GenError::Invalid(
+                        "this op lists Z holes AND cross holes - drill either the mill's holes or the turret's, not both (M5.2 v1)".into(),
+                    ));
+                }
+                if crate::machine::kind_of(world) == crate::machine::Kind::Mill {
+                    return Err(GenError::Invalid(
+                        "cross holes are live-tooling work - the mounted machine is a mill with no turret".into(),
+                    ));
+                }
+                if hl.bottom.is_some() {
+                    return Err(GenError::Invalid(
+                        "a Bottom Z plane cannot drive radial holes - each cross hole's depth rides the hole itself (M5.2 v1)".into(),
+                    ));
+                }
+                let top = req_z(hl.top, "Top of Part Z")?;
+                let stock_r = material
+                    .facets
+                    .iter()
+                    .flat_map(|t| [t.a, t.b, t.c])
+                    .map(|p| (p.x * p.x + p.y * p.y).sqrt())
+                    .fold(0.0_f64, f64::max);
+                drilling::cross_drill(&drilling::CrossParams {
+                    // The clearance/retract planes projected onto the
+                    // plunge axis: their Z height above R is exactly
+                    // the standoff the radial law wants (a curved
+                    // face has no one plane - the kernel owns the
+                    // stock_r part).
+                    clearance_d: (hl.clearance - top).max(1.0),
+                    r_d: (hl.clearance - top).max(1.0),
+                    hop_d: hl.retract.map(|r| (r - top).max(0.0)),
+                    bottom_d: None,
+                    cycle: *cycle,
+                    peck: *peck,
+                    dwell: *dwell,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    stock_r: stock_r.max(1.0),
+                    tool: &tool,
+                    holes: cross,
+                })?
+            } else {
+                drilling::drill(&drilling::CycleParams {
+                    clearance_z: hl.clearance,
+                    r_z: req_z(hl.top, "Top of Part Z")?,
+                    hop_z: hl.retract,
+                    bottom_z: hl.bottom,
+                    cycle: *cycle,
+                    peck: *peck,
+                    dwell: *dwell,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    tool: &tool,
+                    holes,
+                })?
+            };
             (region, path)
         }
         // M5.2 stage A: the first turning kind. Which documents may
@@ -959,14 +1163,27 @@ pub fn generate(
         // here is refused by name before a move is computed. The
         // facets are the world's (no tilt: the height laws below
         // already read the planes the axis fit walks).
-        OpParams::Facing { stepdown, feed, plunge_feed, tolerance, .. } => {
+        OpParams::Facing {
+            stepdown,
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Facing needs a turning insert, '{}' is a {}",
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             // `tolerance` is the VERIFY budget (the envelope law's,
             // as in RotaryOffset) - the kernel itself chords the
             // profile by that law's own tol/4 promise.
@@ -992,14 +1209,28 @@ pub fn generate(
         // `tolerance` is NOT ignored here: the kernel chords the
         // silhouette and the ride at it (quarter budgets each), so
         // it shapes the path exactly as the verdict measures it.
-        OpParams::ProfileRough { stepdown, stock_to_leave, feed, plunge_feed, tolerance, .. } => {
+        OpParams::ProfileRough {
+            stepdown,
+            stock_to_leave,
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Profile Rough needs a turning insert, '{}' is a {}",
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::profile_rough(
                 &material.facets,
                 &crate::turning::ProfileRoughParams {
@@ -1016,14 +1247,26 @@ pub fn generate(
             )?;
             (region, path)
         }
-        OpParams::ProfileFinish { feed, plunge_feed, tolerance, .. } => {
+        OpParams::ProfileFinish {
+            feed,
+            plunge_feed,
+            tolerance,
+            ..
+        } => {
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Profile Finish needs a turning insert, '{}' is a {}",
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::profile_finish(
                 &material.facets,
                 &crate::turning::ProfileFinishParams {
@@ -1059,7 +1302,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::groove_rough(
                 &material.facets,
                 &crate::turning::GrooveRoughParams {
@@ -1088,7 +1338,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::groove_finish(
                 &material.facets,
                 &crate::turning::GrooveFinishParams {
@@ -1116,7 +1373,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::part(
                 &material.facets,
                 &crate::turning::PartParams {
@@ -1154,7 +1418,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::thread(
                 &material.facets,
                 &crate::turning::ThreadParams {
@@ -1192,7 +1463,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::chamfer(
                 &material.facets,
                 &crate::turning::ChamferParams {
@@ -1222,7 +1500,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::taper(
                 &material.facets,
                 &crate::turning::TaperParams {
@@ -1257,7 +1542,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::multi_pass(
                 &material.facets,
                 &crate::turning::MultiPassParams {
@@ -1294,7 +1586,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::form(
                 &material.facets,
                 &crate::turning::FormParams {
@@ -1328,7 +1627,14 @@ pub fn generate(
                     op.tool, tool.kind
                 )));
             }
-            let region = region_for_src(world, op.setup.as_deref(), &op.src, &op.params, m_gen, frame.as_ref())?;
+            let region = region_for_src(
+                world,
+                op.setup.as_deref(),
+                &op.src,
+                &op.params,
+                m_gen,
+                frame.as_ref(),
+            )?;
             let path = crate::turning::bore(
                 &material.facets,
                 &crate::turning::BoreParams {
@@ -1701,7 +2007,9 @@ pub fn generate(
                     GOUGE_TOL,
                 ));
                 warns.extend(verify::rapids_vs_fixtures(
-                    &path_world, &geom, &fixture_boxes,
+                    &path_world,
+                    &geom,
+                    &fixture_boxes,
                 ));
             }
             Ok((path_world, warns))

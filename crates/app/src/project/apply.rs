@@ -345,6 +345,16 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // the mesh every kind already files.
         file.version = 39;
     }
+    if file.version == 39 {
+        // v39 -> v40: the drill op grows its radial list (M5.2 stage
+        // F2) as one optional `cross` key on the existing `drill`
+        // variant - absent decodes (via the serde default) to the
+        // empty list every v39 document means, and a pure-Z file
+        // re-saves without the key, byte for byte. No new tag, no
+        // new kind: a v39 file cannot contain `cross` because the
+        // key did not exist.
+        file.version = 40;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -365,10 +375,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     if let Some(m) = &file.machine
         && !m.machine.is_sane()
     {
-        return Err(corrupt("machine definition states a limit that cannot be meant"));
+        return Err(corrupt(
+            "machine definition states a limit that cannot be meant",
+        ));
     }
     if file.active_setup.as_deref().is_some_and(str::is_empty) {
-        return Err(corrupt("the active setup names nothing - an empty setup name"));
+        return Err(corrupt(
+            "the active setup names nothing - an empty setup name",
+        ));
     }
     units::set(world, doc_units);
     // Opening lands the machine too - including the mute state, so a
@@ -432,19 +446,18 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                     .ok_or_else(|| corrupt("stock entity without parameters"))?
                     .to_shape();
                 let facets = match &shape {
-                    StockShape::FromModel { .. } => {
-                        dto_to_facets(dto.facets.ok_or_else(|| {
-                            corrupt("from-model stock is missing its facets")
-                        })?)
-                    }
+                    StockShape::FromModel { .. } => dto_to_facets(
+                        dto.facets
+                            .ok_or_else(|| corrupt("from-model stock is missing its facets"))?,
+                    ),
                     _ => stock::stock_mesh(&shape)
                         .filter(|f| !f.is_empty())
                         .ok_or_else(|| corrupt("stock mesh regeneration failed"))?,
                 };
                 model::set_facets(world, &entity, facets);
-                entity
-                    .entity_view(world)
-                    .set(StockDef { shape: shape.clone() });
+                entity.entity_view(world).set(StockDef {
+                    shape: shape.clone(),
+                });
             }
             EntityKind::Wcs => {
                 entity.entity_view(world).add(Wcs);

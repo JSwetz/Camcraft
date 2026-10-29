@@ -81,9 +81,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 tool: op.tool,
                 src: match &op.src {
                     SrcRef::Stock => SrcDto::Stock,
-                    SrcRef::Entity(name) => SrcDto::Entity {
-                        name: name.clone(),
-                    },
+                    SrcRef::Entity(name) => SrcDto::Entity { name: name.clone() },
                     SrcRef::Selection(items) => SrcDto::Selection {
                         items: items
                             .iter()

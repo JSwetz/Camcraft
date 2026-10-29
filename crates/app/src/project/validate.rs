@@ -16,14 +16,21 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
     }
     match kind {
         EntityKind::Model => {
-            if dto.stock.is_some() || dto.tool.is_some() || dto.operation.is_some() || dto.setup.is_some()
+            if dto.stock.is_some()
+                || dto.tool.is_some()
+                || dto.operation.is_some()
+                || dto.setup.is_some()
             {
                 return Err(corrupt(format!(
                     "'{}' is a model carrying setup or CAM parameters",
                     dto.name
                 )));
             }
-            if dto.fixture.as_ref().is_some_and(|f| f.setup.as_deref().is_some_and(str::is_empty)) {
+            if dto
+                .fixture
+                .as_ref()
+                .is_some_and(|f| f.setup.as_deref().is_some_and(str::is_empty))
+            {
                 return Err(corrupt(format!(
                     "'{}' is tagged a fixture of an empty setup name",
                     dto.name
@@ -52,7 +59,9 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             };
             let shape = stock.to_shape();
             if !shape.is_sane() || !shape.is_bounded() {
-                return Err(corrupt(format!("stock parameters are not usable: {stock:?}")));
+                return Err(corrupt(format!(
+                    "stock parameters are not usable: {stock:?}"
+                )));
             }
             match (&shape, &dto.facets) {
                 // Parametric stock is regenerated, never stored as floats;
@@ -121,7 +130,10 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             if dto.name.is_empty() {
                 return Err(corrupt("an operation entity must be named"));
             }
-            if dto.facets.is_some() || dto.stock.is_some() || dto.tool.is_some() || dto.setup.is_some()
+            if dto.facets.is_some()
+                || dto.stock.is_some()
+                || dto.tool.is_some()
+                || dto.setup.is_some()
             {
                 return Err(corrupt(format!(
                     "'{}' is an operation, not a solid, tool or setup",
@@ -140,7 +152,10 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             if let SrcDto::Entity { name } = &op.src
                 && name.is_empty()
             {
-                return Err(corrupt(format!("'{}' has an empty geometry source", dto.name)));
+                return Err(corrupt(format!(
+                    "'{}' has an empty geometry source",
+                    dto.name
+                )));
             }
             if let SrcDto::Selection { items } = &op.src
                 && (items.is_empty() || items.iter().any(|g| g.entity.is_empty()))
@@ -167,10 +182,16 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
                     )));
                 }
                 if !path.all_finite() {
-                    return Err(corrupt(format!("'{}' cache has non-finite moves", dto.name)));
+                    return Err(corrupt(format!(
+                        "'{}' cache has non-finite moves",
+                        dto.name
+                    )));
                 }
                 if !path.is_chained() {
-                    return Err(corrupt(format!("'{}' cache is not a linked path", dto.name)));
+                    return Err(corrupt(format!(
+                        "'{}' cache is not a linked path",
+                        dto.name
+                    )));
                 }
                 if path.cycles.iter().any(|c| c.first_move >= path.moves.len()) {
                     return Err(corrupt(format!(
@@ -202,7 +223,10 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
             // placed in this setup (the schema's own law) - but an empty
             // string names nothing at all.
             if s.stock.is_empty() || s.wcs.iter().any(String::is_empty) {
-                return Err(corrupt(format!("'{}' has an empty furniture name", dto.name)));
+                return Err(corrupt(format!(
+                    "'{}' has an empty furniture name",
+                    dto.name
+                )));
             }
         }
     }

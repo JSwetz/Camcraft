@@ -10,7 +10,7 @@ use super::*;
 /// Vertical walls of an XY ring, z in [z0, z1]. Ring order decides
 /// the facing: CCW rings face outward (a plate, a boss), CW rings
 /// face inward (a hole's wall in an outward-wound solid).
-fn ring_walls(poly: &[(f64, f64)], z0: f64, z1: f64) -> Vec<Triangle> {
+pub(super) fn ring_walls(poly: &[(f64, f64)], z0: f64, z1: f64) -> Vec<Triangle> {
     let mut f = Vec::new();
     let n = poly.len();
     for i in 0..n {
@@ -24,7 +24,7 @@ fn ring_walls(poly: &[(f64, f64)], z0: f64, z1: f64) -> Vec<Triangle> {
     f
 }
 
-fn circle(cx: f64, cy: f64, r: f64, n: usize) -> Vec<(f64, f64)> {
+pub(super) fn circle(cx: f64, cy: f64, r: f64, n: usize) -> Vec<(f64, f64)> {
     (0..n)
         .map(|i| {
             let a = std::f64::consts::TAU * (i as f64) / (n as f64);
@@ -33,7 +33,7 @@ fn circle(cx: f64, cy: f64, r: f64, n: usize) -> Vec<(f64, f64)> {
         .collect()
 }
 
-fn circle_cw(cx: f64, cy: f64, r: f64, n: usize) -> Vec<(f64, f64)> {
+pub(super) fn circle_cw(cx: f64, cy: f64, r: f64, n: usize) -> Vec<(f64, f64)> {
     let mut p = circle(cx, cy, r, n);
     p.reverse();
     p
@@ -50,7 +50,7 @@ fn plate(extra: Vec<Triangle>) -> Vec<Triangle> {
     t
 }
 
-fn drill_tool(d: f64) -> Tool {
+pub(super) fn drill_tool(d: f64) -> Tool {
     Tool {
         kind: ToolKind::Drill,
         diameter: d,

@@ -1,0 +1,293 @@
+//! Radial (cross) drilling on the turned solid (M5.2 F2): the live
+//! tooling's cycle, plunged from a turret station along X or Y
+//! toward the spindle axis. The moves state their tool pose through
+//! `cl`'s existing axis machinery (the multiaxis contour law), so
+//! verification reads the path's own truth - and the truth is a
+//! horizontal chain the vertical height field cannot judge: the
+//! kernel's caller verifies it in `Mode::Radial`, whose doctrine
+//! (stands (a),(b),(c),(c3),(d) down to the construction law, keeps
+//! the fixture laws) is stated where the mode lives. There is no
+//! canned `Cycle` record for a radial hole yet: the chain is the
+//! single truth until the post learns G8x-style radial vocabulary.
+//!
+//! Provenance: cycle semantics (drill, chip-break peck, deep full-
+//! retract march, through-hole exit allowance) follow the public
+//! RS-274 / ISO 6983 vocabulary, shared with `cycle.rs`; the
+//! traverse law - every rapid between holes running OUTSIDE the
+//! stock's radius by at least the cutter's own rim, and a station
+//! change inflating the hop plane so the chord's closest approach
+//! (never merely the endpoints) clears the bar - is ours, from the
+//! law that a bar's face is curved and a chord over it dives into
+//! steel.
+
+use super::cylinder::coord;
+use super::hole::{auto_kind, CrossHole, CycleChoice, CHIP_BREAK, SPOT_DEPTH, THROUGH_CLEAR};
+
+use crate::cl::{lattice, CycleKind, MoveKind, PathBuilder, Toolpath};
+use crate::geometry::Point3;
+use crate::machining2d::GenError;
+use crate::tools::Tool;
+
+/// Everything the radial generator needs. The heights are
+/// STANDOFFS above the mouth (a curved face has no one Z plane to
+/// name), except `stock_r`: the stock's own maximum radial extent,
+/// which is what makes a traverse safe between holes that open at
+/// different places on the cylinder.
+pub struct CrossParams<'a> {
+    /// Radial clearance above the stock: where the tool stands
+    /// between holes and at the path's ends.
+    pub clearance_d: f64,
+    /// Feed entry: this far out along the plunge axis from the
+    /// hole's own mouth.
+    pub r_d: f64,
+    /// Retract plane between holes (a standoff); `None` retracts
+    /// to the clearance plane.
+    pub hop_d: Option<f64>,
+    /// Depth override: an absolute coordinate plane on the plunge
+    /// axis (the `bottom_z` mirror); `None` uses each hole's floor
+    /// (plus the exit allowance past a through hole's far wall).
+    pub bottom_d: Option<f64>,
+    pub cycle: CycleChoice,
+    /// Depth per peck; `<= 0` lets the Auto law pick.
+    pub peck: f64,
+    pub dwell: f64,
+    pub feed: f64,
+    pub plunge_feed: f64,
+    /// Max radial extent of the stock (bar radius for a centered
+    /// turned body; the mesh's max of x,y over vertices).
+    pub stock_r: f64,
+    pub tool: &'a Tool,
+    pub holes: &'a [CrossHole],
+}
+
+/// The position at signed travel `d` from a hole's mouth: `d > 0`
+/// stands outward (air), `d < 0` is depth - the mouth convention
+/// [`CrossHole`] carries.
+fn along(h: &CrossHole, d: f64) -> Point3 {
+    Point3::new(
+        h.origin.x - h.dir.x * d,
+        h.origin.y - h.dir.y * d,
+        h.origin.z - h.dir.z * d,
+    )
+}
+
+/// The dominant axis of an axis-aligned unit plunge direction.
+fn plunge_axis(dir: Point3) -> Option<usize> {
+    let mut hit = None;
+    for i in 0..3 {
+        let a = coord(dir, i).abs();
+        if (a - 1.0).abs() <= 1e-9 {
+            if hit.is_some() {
+                return None; // two unit components: not a coordinate axis
+            }
+            hit = Some(i);
+        } else if a > 1e-9 {
+            return None; // an off-axis component: not axis-aligned
+        }
+    }
+    hit
+}
+
+/// Machine a list of cross-drilled holes: one pose-tagged chain,
+/// every rapid running clear of the stock's radius, every cut
+/// along the hole's own axis. Nonsense in, `GenError` out; a
+/// silent wrong answer never leaves this function (Prime
+/// Directive - a radial path that cannot be proven clear refuses
+/// by name instead).
+pub fn cross_drill(p: &CrossParams) -> Result<Toolpath, GenError> {
+    let d = p.tool.diameter;
+    if !(d.is_finite() && d > 0.0)
+        || !p.clearance_d.is_finite()
+        || p.clearance_d < 0.0
+        || !p.r_d.is_finite()
+        || p.r_d <= 0.0
+        || !p.stock_r.is_finite()
+        || p.stock_r <= 0.0
+    {
+        return Err(GenError::Invalid("cross-drill tool or heights not usable".into()));
+    }
+    if p.holes.is_empty() {
+        return Err(GenError::Empty("no cross holes to drill".into()));
+    }
+    if !p.holes.iter().all(|h| h.is_usable()) {
+        return Err(GenError::Invalid("malformed cross hole list".into()));
+    }
+    for h in p.holes {
+        match plunge_axis(h.dir) {
+            None => {
+                return Err(GenError::Invalid(format!(
+                    "cross hole at ({}, {}, {}) plunges along ({}, {}, {}): only axis-aligned live tooling (M5.2 v1)",
+                    h.origin.x, h.origin.y, h.origin.z, h.dir.x, h.dir.y, h.dir.z
+                )));
+            }
+            Some(2) => {
+                return Err(GenError::Invalid(format!(
+                    "cross hole at ({}, {}, {}) plunges along Z: this cycle plunges radially - the mill-side drill owns Z",
+                    h.origin.x, h.origin.y, h.origin.z
+                )));
+            }
+            _ => {}
+        }
+    }
+    if !(p.feed.is_finite() && p.plunge_feed.is_finite() && p.dwell.is_finite() && p.dwell >= 0.0) {
+        return Err(GenError::Invalid("cycle parameters not usable".into()));
+    }
+    if matches!(p.cycle, CycleChoice::Tap | CycleChoice::Bore | CycleChoice::BackBore) {
+        return Err(GenError::Invalid(
+            "radial tapping and boring are not this cycle's word (M5.2 v1)".into(),
+        ));
+    }
+
+    // Snap once; every move reads these numbers.
+    let hs: Vec<CrossHole> = p
+        .holes
+        .iter()
+        .map(|h| CrossHole {
+            origin: Point3::new(lattice(h.origin.x), lattice(h.origin.y), lattice(h.origin.z)),
+            dir: h.dir,
+            radius: lattice(h.radius),
+            entry_d: 0.0,
+            floor_d: lattice(h.floor_d),
+            through: h.through,
+        })
+        .collect();
+
+    // Absolute standoffs on the plunge coordinates: the traverse
+    // planes sit OUTSIDE the stock's radius BY AT LEAST THE TOOL
+    // RADIUS - a station's hop point is clear only if the cutter's
+    // own rim, trailing the tip toward the station, misses the
+    // bar's face too - and a station CHANGE inflates that plane
+    // further (see `traverse_s`), so no chord between two hop
+    // points can dive into the bar's face.
+    let margin = p.r_d.max(0.5 * d + 0.1);
+    let end_s = p.stock_r + p.clearance_d.max(margin);
+    let hop_s = p.stock_r + p.hop_d.unwrap_or(p.clearance_d).max(margin);
+    let mut b = PathBuilder::new(along(&hs[0], start_d(&hs[0], end_s)));
+    for (i, h) in hs.iter().enumerate() {
+        if i > 0 {
+            // The travel rapid rides the OLD station's pose: the
+            // tool swings to the new station after it arrives.
+            let s = traverse_s(hs[i - 1].dir, h.dir, hop_s).ok_or_else(|| {
+                GenError::Invalid(format!(
+                    "cross holes {} and {} stand on opposite stations: a straight traverse would cross the spindle (M5.2 v1)",
+                    i - 1,
+                    i
+                ))
+            })?;
+            b.push(MoveKind::Rapid, along(h, start_d(h, s)), None);
+        }
+        // The pose tag states the tool's axis from tip toward
+        // shank (the CL law `moves.rs` records) - the live tool
+        // plunges ALONG `dir`, so its shank stands BEHIND the tip,
+        // on the negated side. The station hop's rapids ride the
+        // previous hole's pose, so this sign is what makes the
+        // traverse leave the way the tool came in.
+        b.set_axis(Some([-h.dir.x, -h.dir.y, -h.dir.z]));
+        b.push(MoveKind::Rapid, along(h, p.r_d), None);
+        let floor_bottom = h.floor_d - if h.through { THROUGH_CLEAR } else { 0.0 };
+        // In d-space the entry plane is d = 0 (the mouth; `r_d` is
+        // only where the rapids stop outside), so the dimple law
+        // reads -SPOT_DEPTH, and a bottom at or above 0 cuts air.
+        let bottom = match p.bottom_d {
+            Some(s) => start_d(h, s),
+            None if matches!(p.cycle, CycleChoice::Spot) => (-SPOT_DEPTH).max(h.floor_d),
+            None => floor_bottom,
+        };
+        if bottom >= 0.0 {
+            return Err(GenError::Invalid(format!(
+                "cross hole at ({}, {}, {}) bottoms at {bottom}, above its entry",
+                h.origin.x, h.origin.y, h.origin.z
+            )));
+        }
+        let depth = p.r_d - bottom;
+        let kind = match p.cycle {
+            CycleChoice::Auto => auto_kind(p.tool.kind, depth, d),
+            CycleChoice::Spot => CycleKind::Spot,
+            CycleChoice::Drill => CycleKind::Drill,
+            CycleChoice::Peck => CycleKind::Peck,
+            _ => unreachable!("rejected by the v1 cycle door above"),
+        };
+        if matches!(kind, CycleKind::Tap | CycleKind::Bore | CycleKind::BackBore) {
+            return Err(GenError::Invalid(format!(
+                "a {:?} cycle is not radial-capable (M5.2 v1)",
+                kind
+            )));
+        }
+        match kind {
+            CycleKind::Spot | CycleKind::Drill => {
+                b.push(MoveKind::Plunge, along(h, bottom), Some(p.plunge_feed));
+                b.push(MoveKind::Rapid, along(h, p.r_d), None);
+            }
+            CycleKind::Peck | CycleKind::Deep => {
+                let auto = if kind == CycleKind::Peck { 3.0 * d } else { d };
+                let step = if p.peck > 0.0 { p.peck } else { auto }.max(0.25 * d);
+                if !(step.is_finite() && step > 0.0) || depth / step > 4096.0 {
+                    return Err(GenError::Invalid("peck plan unusable".into()));
+                }
+                let mut t = (p.r_d - step).max(bottom);
+                loop {
+                    b.push(MoveKind::Plunge, along(h, t), Some(p.plunge_feed));
+                    if t <= bottom {
+                        break;
+                    }
+                    let up = if kind == CycleKind::Peck {
+                        (t + CHIP_BREAK).min(p.r_d)
+                    } else {
+                        p.r_d
+                    };
+                    b.push(MoveKind::Rapid, along(h, up), None);
+                    t = (t - step).max(bottom);
+                }
+                b.push(MoveKind::Rapid, along(h, p.r_d), None);
+            }
+            _ => {}
+        }
+        if i + 1 < hs.len() {
+            // Lift to the (station-pair inflated) hop plane before
+            // the turret indexes to the next hole.
+            let s = traverse_s(h.dir, hs[i + 1].dir, hop_s).ok_or_else(|| {
+                GenError::Invalid(format!(
+                    "cross holes {} and {} stand on opposite stations: a straight traverse would cross the spindle (M5.2 v1)",
+                    i,
+                    i + 1
+                ))
+            })?;
+            b.push(MoveKind::Rapid, along(h, start_d(h, s)), None);
+        }
+    }
+    let last = hs[hs.len() - 1];
+    b.push(MoveKind::Rapid, along(&last, start_d(&last, end_s)), None);
+    let t = b.finish();
+    if !t.is_chained() || !t.all_finite() {
+        return Err(GenError::Invalid("cross-drill chain self-check failed".into()));
+    }
+    Ok(t)
+}
+
+/// The hop radius for a traverse from one station's hole to
+/// another's: a straight chord between points at equal radius `s`
+/// whose stations stand at angle dtheta never closer than
+/// `s * cos(dtheta/2)` to the spindle axis - for a quarter turn
+/// that is `0.707 s`, so the plane inflates by sqrt(2) to keep the
+/// chord's closest approach at the stock-clear radius. Same
+/// station: factor 1, and the chord is the pure-Z slide between
+/// two mouths. Opposite stations: the chord crosses the spindle
+/// itself, and this cycle has no straight word for that - the
+/// machine retracts axially and indexes, which is stage G's path
+/// to model. `from.dot(to)` on unit XY plunges is cos(dtheta).
+fn traverse_s(from: Point3, to: Point3, hop_s: f64) -> Option<f64> {
+    let dot = from.x * to.x + from.y * to.y;
+    if dot < -0.9 {
+        return None;
+    }
+    Some(hop_s * (2.0 / (1.0 + dot)).sqrt())
+}
+
+/// The travel `d` at which the hole's point reaches absolute
+/// coordinate `s` on its plunge axis. `dir` is an axis-aligned
+/// unit, so this is exact, not projected.
+fn start_d(h: &CrossHole, s: f64) -> f64 {
+    let a = plunge_axis(h.dir).unwrap_or(2);
+    let dcomp = coord(h.dir, a);
+    (coord(h.origin, a) - s) / dcomp
+}

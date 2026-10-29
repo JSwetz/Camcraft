@@ -169,6 +169,11 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
         holes: Vec<HoleDto>,
+        /// The radial list (M5.2 F2). Absent - the common shape, since
+        /// a mill document's list is empty and `skip` keeps the file
+        /// byte-identical to a pre-v40 one - is "no cross holes".
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        cross: Vec<CrossHoleDto>,
     },
     /// Declared at v11 with the 3-D pocket. No footprint on the wire:
     /// a 3-D op's machine area is the model's silhouette at generation
@@ -782,6 +787,51 @@ impl HoleDto {
     }
 }
 
+/// One RADIAL hole of a drill op's cross list, on the wire (M5.2 F2):
+/// the mouth's world point, the plunge direction (recognition only
+/// emits axis-aligned unit dirs), the hole's own radius, and the two
+/// travels along that direction - `entry_d` (the mouth convention:
+/// 0 at the surface the hole opens on) and `floor_d` (negative =
+/// depth). `through` selects the exit allowance at generation, the
+/// same stored-not-requeried law [`HoleDto`] keeps.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct CrossHoleDto {
+    pub origin: [f64; 3],
+    pub dir: [f64; 3],
+    pub radius: f64,
+    pub entry_d: f64,
+    pub floor_d: f64,
+    pub through: bool,
+}
+
+impl CrossHoleDto {
+    pub(super) fn from_hole(h: &CrossHole) -> Self {
+        CrossHoleDto {
+            origin: [
+                lattice(h.origin.x),
+                lattice(h.origin.y),
+                lattice(h.origin.z),
+            ],
+            dir: [h.dir.x, h.dir.y, h.dir.z],
+            radius: lattice(h.radius),
+            entry_d: lattice(h.entry_d),
+            floor_d: lattice(h.floor_d),
+            through: h.through,
+        }
+    }
+
+    pub(super) fn to_hole(self) -> CrossHole {
+        CrossHole {
+            origin: Point3::new(self.origin[0], self.origin[1], self.origin[2]),
+            dir: Point3::new(self.dir[0], self.dir[1], self.dir[2]),
+            radius: self.radius,
+            entry_d: self.entry_d,
+            floor_d: self.floor_d,
+            through: self.through,
+        }
+    }
+}
+
 /// Which canned cycle a drill op runs; the file mirror of
 /// `drilling::CycleChoice`. `Auto` resolves at generate time (tool kind
 /// first, then the depth-vs-diameter law), so the file stores only the
@@ -847,7 +897,10 @@ pub(super) enum HeightWire {
 impl From<HeightWire> for HeightDto {
     fn from(v: HeightWire) -> Self {
         match v {
-            HeightWire::Legacy(z) => HeightDto { reference: HeightRefDto::Fixed, offset: z },
+            HeightWire::Legacy(z) => HeightDto {
+                reference: HeightRefDto::Fixed,
+                offset: z,
+            },
             HeightWire::Expr { reference, offset } => HeightDto { reference, offset },
         }
     }
@@ -855,13 +908,19 @@ impl From<HeightWire> for HeightDto {
 
 impl From<crate::operation::Height> for HeightDto {
     fn from(h: crate::operation::Height) -> Self {
-        HeightDto { reference: h.reference.into(), offset: h.offset }
+        HeightDto {
+            reference: h.reference.into(),
+            offset: h.offset,
+        }
     }
 }
 
 impl From<HeightDto> for crate::operation::Height {
     fn from(d: HeightDto) -> Self {
-        crate::operation::Height { reference: d.reference.into(), offset: d.offset }
+        crate::operation::Height {
+            reference: d.reference.into(),
+            offset: d.offset,
+        }
     }
 }
 
@@ -897,12 +956,18 @@ impl From<HeightRefDto> for crate::operation::HeightReference {
 #[serde(rename_all = "snake_case")]
 pub enum LeadDto {
     None,
-    Linear { length: f64 },
-    Arc { radius: f64 },
+    Linear {
+        length: f64,
+    },
+    Arc {
+        radius: f64,
+    },
     /// Added at v9 with the tangential lead: older files carry no key
     /// change at all (`lead` has been required since v1), only this new
     /// tag can appear in newer ones.
-    Tangential { radius: f64 },
+    Tangential {
+        radius: f64,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

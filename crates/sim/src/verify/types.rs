@@ -27,6 +27,25 @@ pub enum Mode {
     /// which judges the revolved cut volume exactly. The reach laws
     /// stay: they are pose-independent.
     Revolve,
+    /// The radial drill (M5.2 F2): a live tool plunges HORIZONTALLY
+    /// into the turned solid's wall. The XY laws read that chain
+    /// through the mill's vertical-axis eye: a plunge chord crossing
+    /// the silhouette head-on is the hole itself (b convicts it), two
+    /// holes drilled through one another at shared height are a
+    /// cross-drilled intersection, not a collision (a convicts it),
+    /// and the leaning-column enclosure of a fully horizontal shank
+    /// is a vertical slab as wide as the band is long (c/c3 convict
+    /// the part's own walls), and a height field cannot SEE a
+    /// horizontal bore - the retract sliding out along its own kerf
+    /// stands under solid stock by the column's reading, so (d)
+    /// convicts it too. They all stand down in favor of the kernel's
+    /// construction law - doors measured on the mesh, traverses
+    /// proven clear of the silhouette by the inflation math, exits
+    /// along the hole's own axis - exactly the promise Revolve's
+    /// meridian scan keeps for the turned family. The fixture laws
+    /// stay: they are 3-D boxes, no height field in them, and steel
+    /// keeps no tangency courtesies.
+    Radial,
 }
 
 #[derive(Clone, Debug, PartialEq)]

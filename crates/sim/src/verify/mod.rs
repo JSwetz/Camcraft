@@ -15,11 +15,19 @@
 //!   in XY. Proper crossings only: touching at a shared vertex (a closed
 //!   trace loop, a serpentine join) is not a crossing. `Mode::Envelope`
 //!   stands it down - crossed raster families overlap by design, and the
-//!   chord that matters there is measured by law (f) instead.
+//!   chord that matters there is measured by law (f) instead;
+//!   `Mode::Revolve` and `Mode::Radial` stand it down because the XY
+//!   reading of a posed path says nothing true about paths that share
+//!   an axis line (meridian plunges at the spindle axis, cross-drilled
+//!   holes at their intersection - both are the machined part).
 //! - [`Warning::Gouge`] - a cutter center closer to a region boundary
 //!   than `r - leave - tol`, i.e. the disc bites past the finish surface
 //!   it is supposed to touch. Engrave paths (trace) deliberately sit on
-//!   boundaries, so `Mode::Engrave` skips it.
+//!   boundaries, so `Mode::Engrave` skips it; Envelope and Revolve skip
+//!   it because tangency IS their geometry (rings tangent to the model,
+//!   lathes tracing the meridian); `Mode::Radial` skips it because a
+//!   plunge chord crosses the silhouette wall head-on - d = 0 is the
+//!   hole's mouth, not a gouge (M5.2 F2).
 //! - [`Warning::ShankHit`] - uncut material inside the shank or holder
 //!   annulus above the current cut. Rest material: at a boundary sample
 //!   q (region and stock loop vertices and edge midpoints, nudged a hair
@@ -29,7 +37,12 @@
 //!   swept q. A band bottomed at `cut_z + flute_len` (shank) or
 //!   `cut_z + flute_len + shank_len` (holder) with radius above the
 //!   flute's to q, with material still above it, collides. Sampling at
-//!   vertices and edge midpoints is conservative, not exact.
+//!   vertices and edge midpoints is conservative, not exact. Engrave
+//!   never poses and `Mode::Radial` stands down (M5.2 F2): the column
+//!   enclosure of a fully horizontal band is a vertical slab over the
+//!   part's own walls - the kernel's door margins are the shank law
+//!   for a live tool. The fixture form of this law (c2) is pose-aware
+//!   3-D and speaks every mode.
 //! - [`Warning::SweepHit`] - the assembly meets material DURING a pose
 //!   change (M5.1 stage G, law (c3) in [`sweep`]): a coordinated block
 //!   drives table and head at once, so the reachable set between the
@@ -47,6 +60,12 @@
 //!   the flanks of its own cut V - as a plunge through solid. The
 //!   turning rapids' safety rides the kernel's clearance radius and
 //!   the meridian scan; fixture steel (d2) still speaks every mode.
+//!   `Mode::Radial` stands it down on the same reading inverted
+//!   (M5.2 F2): a horizontal bore is a tunnel the height field cannot
+//!   see, so the retract sliding out along its own kerf reads as
+//!   lateral travel under solid stock - the kernel's traverse law
+//!   (outside `stock_r`, proved in drilling's cross tests) owns the
+//!   hop's safety instead.
 //! - [`Warning::ShankHit`] again, from the cycle list: a hole whose
 //!   entry-to-bottom span exceeds flute + shank + holder pushes the
 //!   assembly below the entry surface no matter what the path looks

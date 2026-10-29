@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
-use flecs_ecs::prelude::World;
 use camcraft_app::commands::{
     ActivateSetup, AddTool, ChangeTool, CommandError, CreateOperation, CreateSetup, DeleteEntity,
     DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks,
@@ -22,13 +21,18 @@ use camcraft_app::commands::{
     RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry, SetOperationSetup, SetStock,
     SetUnits, SetWcsOrigin, TagFixture, UntagFixture, UpdateModel,
 };
-use camcraft_app::geometry::{feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point, Point3};
-use camcraft_app::operation::{self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef};
+use camcraft_app::geometry::{
+    Point3, feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point,
+};
+use camcraft_app::operation::{
+    self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef,
+};
 use camcraft_app::schema::{Location, Operation as OperationDef, PostRef, WCS_SLOTS};
 use camcraft_app::stock::{self, StockShape};
-use camcraft_app::tools::{catalog, Tool, ToolKind};
+use camcraft_app::tools::{Tool, ToolKind, catalog};
 use camcraft_app::units::{self, Unit};
 use camcraft_app::{machine, model, posting, project, world::new_world};
+use flecs_ecs::prelude::World;
 
 use crate::viewport::Camera;
 
@@ -84,7 +88,10 @@ pub enum CommandKind {
     /// undo puts the machine's previous numbers back exactly.
     LoadBuiltinMachine(String),
     EditMachineDialog,
-    EditMachineApply { path: String, machine: Box<camcraft_app::machine::Machine> },
+    EditMachineApply {
+        path: String,
+        machine: Box<camcraft_app::machine::Machine>,
+    },
     /// The post script (M3.3 A): the built-in arm ships, the dialog arm
     /// picks a user `.cps` through the file-pick law, and the path arm
     /// is what the headless tests run. Selection is a command like
@@ -110,10 +117,16 @@ pub enum CommandKind {
         yaw_deg: f64,
     },
     /// Tool library: create a tool entity (catalog row or hand-typed page).
-    AddTool { name: String, tool: Tool },
+    AddTool {
+        name: String,
+        tool: Tool,
+    },
     /// Tool library: replace a tool entity's numbers (referencing
     /// operations read Stale from their stamp - no cascade writes).
-    ChangeTool { name: String, tool: Tool },
+    ChangeTool {
+        name: String,
+        tool: Tool,
+    },
     DeleteTool(String),
     /// New operation entity; deliberately never generated until
     /// [`CommandKind::GenerateOperation`] runs.
@@ -124,7 +137,10 @@ pub enum CommandKind {
         params: OpParams,
     },
     /// The properties page's parameter draft.
-    EditOperationParams { name: String, params: OpParams },
+    EditOperationParams {
+        name: String,
+        params: OpParams,
+    },
     /// Retarget an operation's tool and/or source (combo changes).
     EditOperationLinks {
         name: String,
@@ -133,7 +149,10 @@ pub enum CommandKind {
     },
     /// The op's full feature pick list (Geometry section, M1.5 step 7
     /// drives this; adding a chip sends the list with it appended).
-    SetOperationGeometry { name: String, items: Vec<GeoSel> },
+    SetOperationGeometry {
+        name: String,
+        items: Vec<GeoSel>,
+    },
     DeleteOperation(String),
     /// Generate and verify the cached path. The command does the work at
     /// construction, synchronously; status arrives with the result.
@@ -157,7 +176,10 @@ pub enum CommandKind {
     /// Which setup an operation machines in (the Properties page's Setup
     /// combo). Keeps the operation's stamp; the resolved-Z digest answers
     /// Ok-or-Stale from the two setups' placements.
-    SetOperationSetup { name: String, setup: Option<String> },
+    SetOperationSetup {
+        name: String,
+        setup: Option<String>,
+    },
     /// Fixtures (M3.2 stage B): the marker is the whole fixture, so these
     /// are the marker and placement verbs a model already knows - tag
     /// marks one as the setup context's workholding steel, untag demotes
@@ -323,7 +345,8 @@ impl Default for OpUi {
             // carries this clearance into every kind, so the draft
             // default must already be the seed shape the panes display -
             // quick-add and the creation form then say the same thing.
-            params: OpParams::Face { tilt: None,
+            params: OpParams::Face {
+                tilt: None,
                 stepover: 3.0,
                 clearance_z: Height::of(HeightReference::TopOfStock, 25.0),
                 cut_z: Height::of(HeightReference::TopOfStock, 0.0),
@@ -465,7 +488,10 @@ fn fit_circle(pts: &[[f64; 3]]) -> Option<([f64; 2], f64)> {
     let u = (0.5 * bxx * syy - 0.5 * sxy * byy) / det;
     let v = (0.5 * byy * sxx - 0.5 * sxy * bxx) / det;
     let c = [mx + u, my + v];
-    let r = pts.iter().map(|p| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt()).sum::<f64>()
+    let r = pts
+        .iter()
+        .map(|p| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt())
+        .sum::<f64>()
         / n as f64;
     (r.is_finite() && r > 0.0).then_some((c, r))
 }
@@ -920,8 +946,9 @@ impl UiTarget {
                 name.is_empty()
                     || model::find_by_name(world, name).is_some_and(|e| model::is_tool(world, &e))
             }
-            UiTarget::Operation(name) => model::find_by_name(world, name)
-                .is_some_and(|e| model::is_operation(world, &e)),
+            UiTarget::Operation(name) => {
+                model::find_by_name(world, name).is_some_and(|e| model::is_operation(world, &e))
+            }
             UiTarget::Setups => true,
         }
     }
@@ -1056,12 +1083,9 @@ impl State {
                 None => {}
             }
         }
-        let placed = camcraft_app::setup::wcs_entity(
-            &self.world,
-            active.as_deref(),
-            self.wcs_ui.slot,
-        )
-        .and_then(|entity| model::transform_of(&self.world, &entity));
+        let placed =
+            camcraft_app::setup::wcs_entity(&self.world, active.as_deref(), self.wcs_ui.slot)
+                .and_then(|entity| model::transform_of(&self.world, &entity));
         match placed {
             Some(loc) => {
                 self.wcs_ui.x = loc.pos.x;
@@ -1189,7 +1213,8 @@ impl State {
                 params: self.op_ui.params.clone(),
             });
         }
-        self.pending.push_back(CommandKind::GenerateOperation(name.to_string()));
+        self.pending
+            .push_back(CommandKind::GenerateOperation(name.to_string()));
     }
 
     /// Arm the Drill page's "Detect holes" click: recognize against the
@@ -1203,11 +1228,17 @@ impl State {
     /// unsaved typing.
     pub fn detect_holes(&mut self, name: &str) {
         let Some(entity) = model::find_by_name(&self.world, name) else {
-            self.refuse(ErrorScope::Operation, format!("no operation named '{name}'"));
+            self.refuse(
+                ErrorScope::Operation,
+                format!("no operation named '{name}'"),
+            );
             return;
         };
         let Some(op) = model::operation_of(&self.world, &entity) else {
-            self.refuse(ErrorScope::Operation, format!("'{name}' is not an operation"));
+            self.refuse(
+                ErrorScope::Operation,
+                format!("'{name}' is not an operation"),
+            );
             return;
         };
         let draft = name == self.op_ui.name;
@@ -1216,30 +1247,44 @@ impl State {
         } else {
             op.params.clone()
         };
-        let OpParams::Drill { holes, .. } = &mut params else {
+        let OpParams::Drill { holes, cross, .. } = &mut params else {
             self.refuse(
                 ErrorScope::Operation,
                 format!("'{name}' is not a drilling operation"),
             );
             return;
         };
-        match operation::holes_of(&self.world, op.setup.as_deref(), &op.src) {
-            Ok(found) if found.is_empty() => self.refuse(
+        // A document whose machine holds a turret gets the radial
+        // reading beside the mill's (M5.2 F2): the same mesh, its
+        // other half - walls whose axis runs AT the spindle. A plain
+        // mill asks nothing of the mesh's sides; its cross list stays
+        // the empty one it was (an op typed at a machine that cannot
+        // plunge it is the generator's refusal, not this click's).
+        let radial = if machine::kind_of(&self.world) == machine::Kind::Mill {
+            Ok(Vec::new())
+        } else {
+            operation::cross_holes_of(&self.world, op.setup.as_deref(), &op.src)
+        };
+        match (
+            operation::holes_of(&self.world, op.setup.as_deref(), &op.src),
+            radial,
+        ) {
+            (Err(err), _) | (_, Err(err)) => self.refuse(ErrorScope::Operation, err.to_string()),
+            (Ok(z), Ok(x)) if z.is_empty() && x.is_empty() => self.refuse(
                 ErrorScope::Operation,
-                "no drilled holes found in the source model".to_string(),
+                "no drilled holes found in the source model - Z or radial".to_string(),
             ),
-            Ok(found) => {
-                *holes = found;
+            (Ok(z), Ok(x)) => {
+                *holes = z;
+                *cross = x;
                 if draft {
                     self.op_ui.params = params.clone();
                 }
-                self.pending
-                    .push_back(CommandKind::EditOperationParams {
-                        name: name.to_string(),
-                        params,
-                    });
+                self.pending.push_back(CommandKind::EditOperationParams {
+                    name: name.to_string(),
+                    params,
+                });
             }
-            Err(err) => self.refuse(ErrorScope::Operation, err.to_string()),
         }
     }
 
@@ -1305,20 +1350,22 @@ impl State {
                                 } else {
                                     ('y', f.offset)
                                 };
-                                let mut label =
-                                    format!(
-                                        "Face {} · {axis}={} · {} {}",
-                                        g.entity,
-                                        units::len(v, unit, 2),
-                                        units::area(f.area, unit),
-                                        unit.area_suffix()
-                                    );
+                                let mut label = format!(
+                                    "Face {} · {axis}={} · {} {}",
+                                    g.entity,
+                                    units::len(v, unit, 2),
+                                    units::area(f.area, unit),
+                                    unit.area_suffix()
+                                );
                                 if f.loops.len() > 1 {
                                     label.push_str(&format!(" · {} loops", f.loops.len()));
                                 }
                                 (label, false)
                             }
-                            None => (format!("Face {} · {} · missing", g.entity, short_id(id)), true),
+                            None => (
+                                format!("Face {} · {} · missing", g.entity, short_id(id)),
+                                true,
+                            ),
                         }
                     }
                     FeatureSel::Chain(id) => {
@@ -1473,12 +1520,14 @@ impl State {
                         }
                     }
                 };
-                if !missing
-                    && let Some(k) = stitched.get(gi).copied().flatten()
-                {
+                if !missing && let Some(k) = stitched.get(gi).copied().flatten() {
                     label.push_str(&format!(" · → ring {}", k + 1));
                 }
-                GeoChip { sel: g.clone(), label, missing }
+                GeoChip {
+                    sel: g.clone(),
+                    label,
+                    missing,
+                }
             })
             .collect()
     }
@@ -1553,7 +1602,8 @@ impl State {
         // The blank form creates rather than points, so it survives.
         if let Some(name) = &self.tool_editor
             && !name.is_empty()
-            && !model::find_by_name(&self.world, name).is_some_and(|e| model::is_tool(&self.world, &e))
+            && !model::find_by_name(&self.world, name)
+                .is_some_and(|e| model::is_tool(&self.world, &e))
         {
             self.tool_editor = None;
         }
@@ -1621,12 +1671,10 @@ impl State {
                     }
                 }
             }
-            CommandKind::SaveProjectFile(path) => {
-                match project::save(&self.world, &path) {
-                    Ok(()) => self.status = format!("saved {}", path.display()),
-                    Err(err) => self.status = format!("save failed: {err}"),
-                }
-            }
+            CommandKind::SaveProjectFile(path) => match project::save(&self.world, &path) {
+                Ok(()) => self.status = format!("saved {}", path.display()),
+                Err(err) => self.status = format!("save failed: {err}"),
+            },
             CommandKind::PostProgramDialog => {
                 if let Some(path) = post_program_dialog() {
                     self.post_program_path(path);
@@ -1675,17 +1723,19 @@ impl State {
             }
             CommandKind::FrameAll => self.frame_all(),
             CommandKind::Quit => self.request_quit = true,
-            CommandKind::DeleteByName(name) => {
-                match DeleteEntity::new(&self.world, &name) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("deleted {name}");
-                    }
-                    Err(err) => self.refuse(ErrorScope::Setup, format!("delete failed: {err}")),
+            CommandKind::DeleteByName(name) => match DeleteEntity::new(&self.world, &name) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("deleted {name}");
                 }
-            }
-            CommandKind::SetStock { shape, pos, yaw_deg } => {
+                Err(err) => self.refuse(ErrorScope::Setup, format!("delete failed: {err}")),
+            },
+            CommandKind::SetStock {
+                shape,
+                pos,
+                yaw_deg,
+            } => {
                 let location = Location {
                     pos: Point3::new(pos[0], pos[1], pos[2]),
                     rot: quat_from_yaw(yaw_deg.to_radians()),
@@ -1699,34 +1749,28 @@ impl State {
                     Err(err) => self.refuse(ErrorScope::Setup, format!("stock not set: {err}")),
                 }
             }
-            CommandKind::SetUnits(next) => {
-                match SetUnits::new(&self.world, next) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("units: {}", next.label());
-                    }
-                    Err(err) => self.refuse(ErrorScope::Setup, format!("units not set: {err}")),
+            CommandKind::SetUnits(next) => match SetUnits::new(&self.world, next) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("units: {}", next.label());
                 }
-            }
+                Err(err) => self.refuse(ErrorScope::Setup, format!("units not set: {err}")),
+            },
             CommandKind::LoadMachineDialog => {
                 if let Some(path) = pick_machine_file() {
                     self.load_machine_path(path);
                 }
             }
             CommandKind::LoadMachineFile(path) => self.load_machine_path(path),
-            CommandKind::ClearMachine => {
-                match LoadMachine::new(&self.world, String::new(), None) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = String::from("machine cleared");
-                    }
-                    Err(err) => {
-                        self.refuse(ErrorScope::Setup, format!("machine not cleared: {err}"))
-                    }
+            CommandKind::ClearMachine => match LoadMachine::new(&self.world, String::new(), None) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = String::from("machine cleared");
                 }
-            }
+                Err(err) => self.refuse(ErrorScope::Setup, format!("machine not cleared: {err}")),
+            },
             CommandKind::LoadBuiltinMachine(name) => {
                 match LoadMachine::builtin(&self.world, &name) {
                     Ok(command) => {
@@ -1782,7 +1826,10 @@ impl State {
                 self.select_post(PostRef::File(path.display().to_string()));
             }
             CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
-            CommandKind::StockFit { margin, shape: radio } => {
+            CommandKind::StockFit {
+                margin,
+                shape: radio,
+            } => {
                 if radio == 2 {
                     // From-model stock IS its source's shape; there is
                     // nothing to wrap. Refuse visibly, never guess.
@@ -1868,16 +1915,14 @@ impl State {
                     Err(err) => self.refuse(ErrorScope::Setup, format!("offset not set: {err}")),
                 }
             }
-            CommandKind::AddTool { name, tool } => {
-                match AddTool::new(&self.world, &name, tool) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("tool {name} added");
-                    }
-                    Err(err) => self.refuse(ErrorScope::Tool, format!("tool not added: {err}")),
+            CommandKind::AddTool { name, tool } => match AddTool::new(&self.world, &name, tool) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("tool {name} added");
                 }
-            }
+                Err(err) => self.refuse(ErrorScope::Tool, format!("tool not added: {err}")),
+            },
             CommandKind::ChangeTool { name, tool } => {
                 match ChangeTool::new(&self.world, &name, tool) {
                     Ok(command) => {
@@ -1888,33 +1933,32 @@ impl State {
                     Err(err) => self.refuse(ErrorScope::Tool, format!("tool not updated: {err}")),
                 }
             }
-            CommandKind::DeleteTool(name) => {
-                match DeleteTool::new(&self.world, &name) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("deleted tool {name}");
-                    }
-                    Err(err) => self.refuse(ErrorScope::Tool, format!("tool not deleted: {err}")),
+            CommandKind::DeleteTool(name) => match DeleteTool::new(&self.world, &name) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("deleted tool {name}");
                 }
-            }
+                Err(err) => self.refuse(ErrorScope::Tool, format!("tool not deleted: {err}")),
+            },
             CommandKind::CreateOperation {
                 name,
                 tool,
                 src,
                 params,
-            } => {
-                match CreateOperation::new(&self.world, &name, &tool, src, params) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("operation {name} created");
-                    }
-                    Err(err) => {
-                        self.refuse(ErrorScope::Operation, format!("operation not created: {err}"));
-                    }
+            } => match CreateOperation::new(&self.world, &name, &tool, src, params) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("operation {name} created");
                 }
-            }
+                Err(err) => {
+                    self.refuse(
+                        ErrorScope::Operation,
+                        format!("operation not created: {err}"),
+                    );
+                }
+            },
             CommandKind::EditOperationParams { name, params } => {
                 match EditOperationParams::new(&self.world, &name, params) {
                     Ok(command) => {
@@ -1931,12 +1975,7 @@ impl State {
                 }
             }
             CommandKind::EditOperationLinks { name, tool, src } => {
-                let links = EditOperationLinks::new(
-                    &self.world,
-                    &name,
-                    tool.as_deref(),
-                    src,
-                );
+                let links = EditOperationLinks::new(&self.world, &name, tool.as_deref(), src);
                 match links {
                     Ok(command) => {
                         self.history.execute(&self.world, command);
@@ -1963,18 +2002,19 @@ impl State {
                     }
                 }
             }
-            CommandKind::DeleteOperation(name) => {
-                match DeleteOperation::new(&self.world, &name) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("deleted operation {name}");
-                    }
-                    Err(err) => {
-                        self.refuse(ErrorScope::Operation, format!("operation not deleted: {err}"));
-                    }
+            CommandKind::DeleteOperation(name) => match DeleteOperation::new(&self.world, &name) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("deleted operation {name}");
                 }
-            }
+                Err(err) => {
+                    self.refuse(
+                        ErrorScope::Operation,
+                        format!("operation not deleted: {err}"),
+                    );
+                }
+            },
             CommandKind::GenerateOperation(name) => {
                 // Generation happens in the constructor (a refusal writes
                 // nothing); the status line reports what was produced.
@@ -1992,7 +2032,9 @@ impl State {
                             None => format!("generated {name}"),
                         };
                     }
-                    Err(err) => self.refuse(ErrorScope::Operation, format!("generate failed: {err}")),
+                    Err(err) => {
+                        self.refuse(ErrorScope::Operation, format!("generate failed: {err}"))
+                    }
                 }
             }
             CommandKind::RegenerateAll => {
@@ -2020,7 +2062,11 @@ impl State {
                     self.status = if skipped.is_empty() {
                         format!("regenerated {n} operation(s)")
                     } else {
-                        format!("regenerated {n} operation(s); {} skipped - {}", skipped.len(), skipped.join("; "))
+                        format!(
+                            "regenerated {n} operation(s); {} skipped - {}",
+                            skipped.len(),
+                            skipped.join("; ")
+                        )
                     };
                 }
             }
@@ -2037,18 +2083,16 @@ impl State {
                     }
                 }
             }
-            CommandKind::DeleteSetup(name) => {
-                match DeleteSetup::new(&self.world, &name) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("deleted setup {name}");
-                    }
-                    Err(err) => {
-                        self.refuse(ErrorScope::Setup, format!("setup not deleted: {err}"));
-                    }
+            CommandKind::DeleteSetup(name) => match DeleteSetup::new(&self.world, &name) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("deleted setup {name}");
                 }
-            }
+                Err(err) => {
+                    self.refuse(ErrorScope::Setup, format!("setup not deleted: {err}"));
+                }
+            },
             CommandKind::ActivateSetup(name) => {
                 match ActivateSetup::new(&self.world, name.as_deref()) {
                     Ok(command) => {
@@ -2078,10 +2122,7 @@ impl State {
                         );
                     }
                     Err(err) => {
-                        self.refuse(
-                            ErrorScope::Operation,
-                            format!("setup not moved: {err}"),
-                        );
+                        self.refuse(ErrorScope::Operation, format!("setup not moved: {err}"));
                     }
                 }
             }
@@ -2100,18 +2141,16 @@ impl State {
                     }
                 }
             }
-            CommandKind::UntagFixture(name) => {
-                match UntagFixture::new(&self.world, &name) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("unmarked {name} - the solid is a plain model again");
-                    }
-                    Err(err) => {
-                        self.refuse(ErrorScope::Setup, format!("fixture not unmarked: {err}"));
-                    }
+            CommandKind::UntagFixture(name) => match UntagFixture::new(&self.world, &name) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("unmarked {name} - the solid is a plain model again");
                 }
-            }
+                Err(err) => {
+                    self.refuse(ErrorScope::Setup, format!("fixture not unmarked: {err}"));
+                }
+            },
             CommandKind::MoveFixture { name, pos, yaw_deg } => {
                 let location = Location {
                     pos: Point3::new(pos[0], pos[1], pos[2]),
@@ -2128,18 +2167,16 @@ impl State {
                     }
                 }
             }
-            CommandKind::DeleteFixture(name) => {
-                match DeleteFixture::new(&self.world, &name) {
-                    Ok(command) => {
-                        self.history.execute(&self.world, command);
-                        self.doc_version += 1;
-                        self.status = format!("deleted fixture {name}");
-                    }
-                    Err(err) => {
-                        self.refuse(ErrorScope::Setup, format!("fixture not deleted: {err}"));
-                    }
+            CommandKind::DeleteFixture(name) => match DeleteFixture::new(&self.world, &name) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("deleted fixture {name}");
                 }
-            }
+                Err(err) => {
+                    self.refuse(ErrorScope::Setup, format!("fixture not deleted: {err}"));
+                }
+            },
             CommandKind::ImportFixtureDialog => {
                 if let Some(path) = pick_mesh_file() {
                     // Bind to the context the page shows: the active
@@ -2375,8 +2412,10 @@ impl State {
         {
             let secs = t0.elapsed().as_secs_f64();
             if secs >= 1.0 {
-                let label =
-                    self.import_file.as_deref().map_or_else(|| "model".to_string(), file_label);
+                let label = self
+                    .import_file
+                    .as_deref()
+                    .map_or_else(|| "model".to_string(), file_label);
                 self.status = format!("importing {label}… {secs:.0}s");
             }
         }
@@ -2499,7 +2538,11 @@ impl State {
         }
         match std::fs::write(&path, out) {
             Ok(()) => {
-                self.status = format!("{} setup sheet(s) written to {}", sheets.len(), path.display())
+                self.status = format!(
+                    "{} setup sheet(s) written to {}",
+                    sheets.len(),
+                    path.display()
+                )
             }
             Err(err) => self.status = format!("sheet write failed: {err}"),
         }
@@ -2544,7 +2587,9 @@ fn pick_machine_file() -> Option<PathBuf> {
 fn pick_post_file() -> Option<PathBuf> {
     // The `.cps` script format is the one we reuse by user instruction
     // (M3.3 A) - plain JavaScript, the user's own; the filter names it.
-    rfd::FileDialog::new().add_filter("Post Script", &["cps"]).pick_file()
+    rfd::FileDialog::new()
+        .add_filter("Post Script", &["cps"])
+        .pick_file()
 }
 
 fn save_project_dialog() -> Option<PathBuf> {

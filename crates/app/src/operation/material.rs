@@ -1,5 +1,3 @@
-
-
 use super::*;
 
 /// The height expressions of a params set (the `for_each_height` soup
@@ -29,15 +27,17 @@ pub(super) struct Material {
     pub(super) top: f64,
 }
 
-pub(super) fn material_of(world: &World, setup: Option<&str>, src: &SrcRef) -> Result<Material, GenError> {
+pub(super) fn material_of(
+    world: &World,
+    setup: Option<&str>,
+    src: &SrcRef,
+) -> Result<Material, GenError> {
     match src {
         SrcRef::Stock => {
             let name = crate::setup::stock_entity_name(world, setup);
             named_material(world, &name, "no stock: set it up in Setup first")
         }
-        SrcRef::Entity(name) => {
-            named_material(world, name, &format!("no entity named '{name}'"))
-        }
+        SrcRef::Entity(name) => named_material(world, name, &format!("no entity named '{name}'")),
         SrcRef::Selection(items) => {
             // Union of the distinct selected entities (stock is a legal
             // pick): what the generators stand in and what verification
@@ -77,6 +77,19 @@ pub fn holes_of(
     Ok(crate::drilling::recognize(&m.facets))
 }
 
+/// The radial hole list of one source, for Detect holes on a document
+/// that holds a turret (M5.2 F2): the same world-transformed facets,
+/// read a second way - closed cylindrical walls whose AXIS runs at
+/// the spindle, found by the same weld law the Z pass runs.
+pub fn cross_holes_of(
+    world: &World,
+    setup: Option<&str>,
+    src: &SrcRef,
+) -> Result<Vec<crate::drilling::CrossHole>, GenError> {
+    let m = material_of(world, setup, src)?;
+    Ok(crate::drilling::recognize_cross(&m.facets))
+}
+
 pub(super) fn named_material(world: &World, name: &str, gone: &str) -> Result<Material, GenError> {
     let Some(entity) = model::find_by_name(world, name) else {
         return Err(GenError::Invalid(gone.to_string()));
@@ -90,7 +103,9 @@ pub(super) fn named_material(world: &World, name: &str, gone: &str) -> Result<Ma
 
 /// The shared sanity gate: every vertex finite, a real top.
 pub(super) fn usable(facets: Vec<Triangle>, top: f64, label: &str) -> Result<Material, GenError> {
-    if !facets.iter().all(|t| t.a.is_finite() && t.b.is_finite() && t.c.is_finite())
+    if !facets
+        .iter()
+        .all(|t| t.a.is_finite() && t.b.is_finite() && t.c.is_finite())
         || !top.is_finite()
     {
         return Err(GenError::Invalid(format!(
@@ -131,14 +146,21 @@ pub(super) fn section(facets: &[Triangle], z: f64) -> Result<Region, GenError> {
 pub(super) fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let len = (dx * dx + dy * dy).sqrt();
-    let (ux, uy) = if len > 1e-9 { (dx / len, dy / len) } else { (1.0, 0.0) };
+    let (ux, uy) = if len > 1e-9 {
+        (dx / len, dy / len)
+    } else {
+        (1.0, 0.0)
+    };
     let (nx, ny) = (-uy, ux);
     let mut pts = Vec::with_capacity(2 * CAP_SEGMENTS + 2);
     for (c, t0, t1) in [(b, -90.0f64, 90.0), (a, 90.0, 270.0)] {
         for i in 0..=CAP_SEGMENTS {
             let th = (t0 + (t1 - t0) * i as f64 / CAP_SEGMENTS as f64).to_radians();
             let (ca, sa) = (th.cos(), th.sin());
-            pts.push(Point2::new(c.x + h * (ca * ux + sa * nx), c.y + h * (ca * uy + sa * ny)));
+            pts.push(Point2::new(
+                c.x + h * (ca * ux + sa * nx),
+                c.y + h * (ca * uy + sa * ny),
+            ));
         }
     }
     let loop_ = Loop::new(pts)?;
@@ -194,8 +216,8 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
                 top: material.top - f.origin.z,
             };
             let local = region_for(world, op.setup.as_deref(), &local, &op.params, Some(f)).ok()?;
-            let zl = resolve_height(world, op.setup.as_deref(), op.params.region_height())?
-                - f.origin.z;
+            let zl =
+                resolve_height(world, op.setup.as_deref(), op.params.region_height())? - f.origin.z;
             f.world_region(&local, zl).ok()
         }
     }
@@ -443,7 +465,17 @@ pub(super) fn region_for(
             section(&material.facets, z - oz)
         }
         OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
-        OpParams::Drill { holes, .. } => {
+        OpParams::Drill { holes, cross, .. } => {
+            // A radial list asks for the silhouette only (M5.2 F2):
+            // a cross hole opens on the bar's SKIN, so its mouth is
+            // already in the projection, and its wall runs along X or
+            // Y - a "rim" in the XY shadow would be a lie. The law
+            // that proves a posed plunge is the 3-D envelope judge
+            // the turning and multiaxis families ride, not this
+            // circle-in-the-footprint tangency test.
+            if !cross.is_empty() {
+                return slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice);
+            }
             // The silhouette, plus a rim loop for every hole (a blind
             // hole's mouth sits inside the material's shadow and the
             // projection never sees it; a through wall does show up,
@@ -498,7 +530,10 @@ pub(super) fn rim_loop(h: Hole) -> Result<Loop, GenError> {
     let mut pts = Vec::with_capacity(n);
     for i in 0..n {
         let th = std::f64::consts::TAU * i as f64 / n as f64;
-        pts.push(Point2::new(h.xy.x + h.radius * th.cos(), h.xy.y + h.radius * th.sin()));
+        pts.push(Point2::new(
+            h.xy.x + h.radius * th.cos(),
+            h.xy.y + h.radius * th.sin(),
+        ));
     }
     Ok(Loop::new(pts)?)
 }
@@ -514,18 +549,14 @@ pub(super) fn rim_is(l: &Loop, h: Hole) -> bool {
         return false;
     }
     let tol = (0.02 * h.radius).max(0.1);
-    pts.iter().all(|p| ((p.x - h.xy.x).hypot(p.y - h.xy.y) - h.radius).abs() <= tol)
+    pts.iter()
+        .all(|p| ((p.x - h.xy.x).hypot(p.y - h.xy.y) - h.radius).abs() <= tol)
 }
 
 /// The shared refusal phrasing for an unresolved height, named by field.
 /// One source so `resolve_params`, the region builders and every command
 /// error read identically.
-pub fn unresolved_msg(
-    what: &str,
-    h: Height,
-    world: &World,
-    setup: Option<&str>,
-) -> String {
+pub fn unresolved_msg(what: &str, h: Height, world: &World, setup: Option<&str>) -> String {
     format!(
         "{what} (From: {ref}, offset {off}) is unresolved: {why}",
         ref = h.reference,
@@ -535,7 +566,12 @@ pub fn unresolved_msg(
     )
 }
 
-pub(super) fn unresolved_err(what: &str, h: Height, world: &World, setup: Option<&str>) -> GenError {
+pub(super) fn unresolved_err(
+    what: &str,
+    h: Height,
+    world: &World,
+    setup: Option<&str>,
+) -> GenError {
     GenError::Invalid(unresolved_msg(what, h, world, setup))
 }
 

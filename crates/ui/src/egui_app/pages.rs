@@ -44,30 +44,29 @@
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense,
-    Shape, Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Color32, ComboBox, DragValue, FontId, Id, Label, Pos2, ScrollArea, Sense, Shape,
+    Stroke, TextEdit, Ui, Vec2, Window,
 };
 
 use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
 use camcraft_app::machine;
 use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
 use camcraft_app::model;
-use camcraft_app::posting;
 use camcraft_app::operation::{
     self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef, Tilt,
 };
+use camcraft_app::posting;
 use camcraft_app::schema::{Operation, PostRef, WCS_SLOTS};
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools;
 use camcraft_app::units::{self, Unit};
 use camcraft_app::verify::Warning;
 
-
 use crate::actions;
 use crate::interact;
 use crate::operations::{
-    cycle_index, cycle_names, fold_warnings, height_echo, offset_label, side_names,
-    strategy3d_names, strategy_names, unresolved_note,
+    cycle_index, cycle_names, fold_warnings, height_echo, offset_label, side_names, strategy_names,
+    strategy3d_names, unresolved_note,
 };
 use crate::state::{
     CommandKind, ErrorScope, FixtureUi, GeoPick, PostView, State, UiTarget, quat_yaw_deg,
@@ -149,34 +148,32 @@ pub fn properties(ui: &mut Ui, state: &mut State, _pal: &Palette) {
     let t = state.pane_target();
     ScrollArea::vertical()
         .auto_shrink([false, false])
-        .show(ui, |ui| {
-            match t {
-                UiTarget::None => operation_page(ui, state, None),
-                UiTarget::Operation(n) => operation_page(ui, state, Some(n.as_str())),
-                UiTarget::Tool(n) => tool_page(ui, state, &n),
-                UiTarget::Stock => {
-                    state.sync_setup_ui();
-                    ui.heading("Stock");
-                    ui.separator();
-                    stock_page(ui, state);
-                    setup_error(ui, state);
-                }
-                UiTarget::WcsSlot(i) => {
-                    state.sync_setup_ui();
-                    let name = WCS_SLOTS.get(i).copied().unwrap_or("?");
-                    ui.heading(format!("Work offset {name}"));
-                    ui.separator();
-                    wcs_page(ui, state, i);
-                    setup_error(ui, state);
-                }
-                UiTarget::Model(n) => model_page(ui, state, n),
-                UiTarget::Setups => {
-                    state.sync_setup_ui();
-                    ui.heading("Setups");
-                    ui.separator();
-                    setups_page(ui, state);
-                    setup_error(ui, state);
-                }
+        .show(ui, |ui| match t {
+            UiTarget::None => operation_page(ui, state, None),
+            UiTarget::Operation(n) => operation_page(ui, state, Some(n.as_str())),
+            UiTarget::Tool(n) => tool_page(ui, state, &n),
+            UiTarget::Stock => {
+                state.sync_setup_ui();
+                ui.heading("Stock");
+                ui.separator();
+                stock_page(ui, state);
+                setup_error(ui, state);
+            }
+            UiTarget::WcsSlot(i) => {
+                state.sync_setup_ui();
+                let name = WCS_SLOTS.get(i).copied().unwrap_or("?");
+                ui.heading(format!("Work offset {name}"));
+                ui.separator();
+                wcs_page(ui, state, i);
+                setup_error(ui, state);
+            }
+            UiTarget::Model(n) => model_page(ui, state, n),
+            UiTarget::Setups => {
+                state.sync_setup_ui();
+                ui.heading("Setups");
+                ui.separator();
+                setups_page(ui, state);
+                setup_error(ui, state);
             }
         });
 }
@@ -228,7 +225,9 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     let mut tools = state.tool_names();
     if !state.op_ui.tool.is_empty() && !tools.contains(&state.op_ui.tool) {
         tools.push(state.op_ui.tool.clone());
-    } else if state.op_ui.tool.is_empty() && let Some(first) = tools.first() {
+    } else if state.op_ui.tool.is_empty()
+        && let Some(first) = tools.first()
+    {
         state.op_ui.tool = first.clone();
     }
     ui.label("Tool");
@@ -313,7 +312,10 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
             .as_ref()
             .and_then(|o| o.setup.clone())
             .or_else(|| setups.first().cloned());
-        let mut s_idx = setups.iter().position(|n| Some(n) == cur.as_ref()).unwrap_or(0);
+        let mut s_idx = setups
+            .iter()
+            .position(|n| Some(n) == cur.as_ref())
+            .unwrap_or(0);
         let before = s_idx;
         combo_owned(ui, "op_setup", &mut s_idx, &setups);
         if s_idx != before {
@@ -372,7 +374,11 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     // scroll (hidden guards write no params).
     let kind = state.op_ui.params.kind();
     let want = state.op_tab.min(SECTIONS.len() - 1);
-    let mut tab = if has_section(kind, want) { want } else { SEC_GEO };
+    let mut tab = if has_section(kind, want) {
+        want
+    } else {
+        SEC_GEO
+    };
     ui.horizontal_wrapped(|ui| {
         for (i, name) in SECTIONS.iter().enumerate() {
             if !has_section(kind, i) {
@@ -492,7 +498,9 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
 
     // Footer.
     if exists {
-        let unchanged = live.as_ref().is_some_and(|o| o.params == state.op_ui.params);
+        let unchanged = live
+            .as_ref()
+            .is_some_and(|o| o.params == state.op_ui.params);
         ui.horizontal(|ui| {
             let apply = ui.add_enabled(!unchanged, egui::Button::new("Apply Parameters"));
             if apply.clicked() {
@@ -502,7 +510,9 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
                 state.generate_operation(&target);
             }
             if ui.button("Delete").clicked() {
-                state.pending.push_back(CommandKind::DeleteOperation(target.clone()));
+                state
+                    .pending
+                    .push_back(CommandKind::DeleteOperation(target.clone()));
             }
         });
         if unchanged {
@@ -534,7 +544,9 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
                 src,
                 params,
             });
-            state.pending.push_back(CommandKind::Select(Some(name.clone())));
+            state
+                .pending
+                .push_back(CommandKind::Select(Some(name.clone())));
             state.ui_target = UiTarget::Operation(name);
         }
         if !block.is_empty() {
@@ -576,17 +588,24 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let op_ctx: Option<String> = model::find_by_name(&state.world, &nm)
         .and_then(|e| model::operation_of(&state.world, &e))
         .and_then(|o| o.setup);
-    if let OpParams::Drill { cycle: camcraft_app::drilling::CycleChoice::Auto, holes, .. } =
-        &state.op_ui.params
+    if let OpParams::Drill {
+        cycle: camcraft_app::drilling::CycleChoice::Auto,
+        holes,
+        cross,
+        ..
+    } = &state.op_ui.params
     {
         // What Auto answers for, in the tool's and first hole's own
         // numbers - the same call generation makes (`auto_kind`), never
-        // a panel-side guess that could drift from it.
+        // a panel-side guess that could drift from it. A radial list
+        // keeps its note to generation (M5.2 F2): the kernel's depth
+        // starts at the R standoff, which the panel would only guess.
+        let radial = !cross.is_empty();
         cycle_note = match (
             model::find_by_name(&state.world, &state.op_ui.tool)
                 .as_ref()
                 .and_then(|t| model::tool_of(&state.world, t)),
-            holes.first(),
+            if radial { None } else { holes.first() },
         ) {
             (Some(t), Some(h)) => {
                 let depth = h.entry_z - h.floor_z;
@@ -612,24 +631,32 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let op = model::find_by_name(&state.world, &nm)
         .as_ref()
         .and_then(|e| model::operation_of(&state.world, e));
-    if let OpParams::Contour { side: Side::Auto, .. } = &state.op_ui.params {
-        let resolved = op
-            .as_ref()
-            .and_then(|o| {
-                operation::contour_auto_side(
-                    &state.world,
-                    o.setup.as_deref(),
-                    &o.src,
-                    &state.op_ui.params.clone(),
-                )
-            });
+    if let OpParams::Contour {
+        side: Side::Auto, ..
+    } = &state.op_ui.params
+    {
+        let resolved = op.as_ref().and_then(|o| {
+            operation::contour_auto_side(
+                &state.world,
+                o.setup.as_deref(),
+                &o.src,
+                &state.op_ui.params.clone(),
+            )
+        });
         side_note = Some(match resolved {
-            Some(true) => "Auto -> Inside: the picked rings bound air, so the metal is outside them.".into(),
+            Some(true) => {
+                "Auto -> Inside: the picked rings bound air, so the metal is outside them.".into()
+            }
             Some(false) => "Auto -> Outside: the picked rings bound material.".into(),
             None => "Auto picks the side from the selection at generate.".into(),
         });
     }
-    if let OpParams::Pocket { strategy: PocketStrategy::Auto, stepover, .. } = &state.op_ui.params {
+    if let OpParams::Pocket {
+        strategy: PocketStrategy::Auto,
+        stepover,
+        ..
+    } = &state.op_ui.params
+    {
         let pick = "Auto picks the shape from the pocket's outline at generate.".to_owned();
         auto_note = Some(match op.as_ref() {
             Some(o) => {
@@ -660,11 +687,27 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     }
 
     match &mut state.op_ui.params {
-        OpParams::Face { stepover, clearance_z, cut_z, top_z, stepdown, feed, plunge_feed, climb, tilt } => {
+        OpParams::Face {
+            stepover,
+            clearance_z,
+            cut_z,
+            top_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            tilt,
+        } => {
             if tab == SEC_HEIGHTS {
                 orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "face.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "face.clearance",
+                );
                 field(ui, "Cut Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), cut_z, "face.cut");
                 field(ui, "Depth staging");
@@ -682,7 +725,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if staged {
                     field(ui, "Top Z (first cut level)");
                     let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
-                    height_editor(ui, &state.world, op_ctx.as_deref(), top_z.get_or_insert(seed), "face.top");
+                    height_editor(
+                        ui,
+                        &state.world,
+                        op_ctx.as_deref(),
+                        top_z.get_or_insert(seed),
+                        "face.top",
+                    );
                     field(ui, "Stepdown");
                     num(ui, u, stepdown.get_or_insert(1.0));
                 }
@@ -739,21 +788,40 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             if tab == SEC_HEIGHTS {
                 orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "contour.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "contour.clearance",
+                );
                 field(ui, "Retract Z (between passes)");
-                height_editor(ui, &state.world, op_ctx.as_deref(), retract_z, "contour.retract");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    retract_z,
+                    "contour.retract",
+                );
                 if let (Some(rz), Some(cz)) =
                     (retract_z.z(&state.world), clearance_z.z(&state.world))
                     && rz > cz
                 {
                     ui.label(format!(
-                        "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                        "above clearance - the hop travels at {} (min of the two)",
+                        units::len(cz, u, 3)
                     ));
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "contour.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "contour.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "contour.bottom",
+                );
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -831,7 +899,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             if tab == SEC_HEIGHTS {
                 orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "pocket.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "pocket.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -843,20 +917,26 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"pocket.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "pocket.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "pocket.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "pocket.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "pocket.bottom",
+                );
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -955,7 +1035,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             if tab == SEC_HEIGHTS {
                 orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "slot.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "slot.clearance",
+                );
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "slot.top");
                 field(ui, "Bottom Z");
@@ -977,11 +1063,27 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
-        OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, stepdown, feed, plunge_feed, climb, tilt } => {
+        OpParams::Trace {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            tilt,
+        } => {
             if tab == SEC_HEIGHTS {
                 orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "trace.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "trace.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -993,20 +1095,26 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"trace.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "trace.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "trace.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "trace.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "trace.bottom",
+                );
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -1029,27 +1137,48 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             feed,
             plunge_feed,
             holes,
+            cross,
         } => {
             if tab == SEC_GEO {
                 field(ui, "Holes");
-                if holes.is_empty() {
+                if holes.is_empty() && cross.is_empty() {
                     ui.label("none yet - Detect holes reads them from the model");
-                } else {
-                    for (i, h) in holes.iter().enumerate() {
-                        let floor = if h.through {
-                            "through".to_owned()
-                        } else {
-                            format!("floor {}", units::len(h.floor_z, u, 3))
-                        };
-                        ui.label(format!(
-                            "{}  X {}  Y {}  Ø{}  entry {}  {floor}",
-                            i + 1,
-                            units::len(h.xy.x, u, 3),
-                            units::len(h.xy.y, u, 3),
-                            units::len(2.0 * h.radius, u, 3),
-                            units::len(h.entry_z, u, 3),
-                        ));
-                    }
+                }
+                for (i, h) in holes.iter().enumerate() {
+                    let floor = if h.through {
+                        "through".to_owned()
+                    } else {
+                        format!("floor {}", units::len(h.floor_z, u, 3))
+                    };
+                    ui.label(format!(
+                        "{}  X {}  Y {}  Ø{}  entry {}  {floor}",
+                        i + 1,
+                        units::len(h.xy.x, u, 3),
+                        units::len(h.xy.y, u, 3),
+                        units::len(2.0 * h.radius, u, 3),
+                        units::len(h.entry_z, u, 3),
+                    ));
+                }
+                // The radial half of the list (M5.2 F2): a cross hole
+                // states its mouth in world XYZ, its plunge by the
+                // station's axis, and its floor as a travel INWARD
+                // from the mouth - the mouth is the surface it opens
+                // on, not a Z plane.
+                for (i, h) in cross.iter().enumerate() {
+                    let station = if h.dir.x != 0.0 { "X" } else { "Y" };
+                    let floor = if h.through {
+                        "through".to_owned()
+                    } else {
+                        format!("depth {}", units::len(-h.floor_d, u, 3))
+                    };
+                    ui.label(format!(
+                        "R{}  ({}, {}, {})  Ø{}  plunge {station}  {floor}",
+                        holes.len() + i + 1,
+                        units::len(h.origin.x, u, 3),
+                        units::len(h.origin.y, u, 3),
+                        units::len(h.origin.z, u, 3),
+                        units::len(2.0 * h.radius, u, 3),
+                    ));
                 }
                 // Edge-driven, one recognize pass per click (never per
                 // paint frame): the list it finds replaces the draft's,
@@ -1060,7 +1189,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "drill.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "drill.clearance",
+                );
                 field(ui, "R plane (feed starts here)");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "drill.top");
                 field(ui, "Retract plane (between holes)");
@@ -1073,13 +1208,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     };
                 }
                 if let Some(r) = retract_z {
-                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"drill.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "drill.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
@@ -1093,7 +1228,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     };
                 }
                 match bottom_z {
-                    Some(b) => height_editor(ui, &state.world, op_ctx.as_deref(), b, "drill.bottom"),
+                    Some(b) => {
+                        height_editor(ui, &state.world, op_ctx.as_deref(), b, "drill.bottom")
+                    }
                     None => {
                         ui.label("every hole stops at its own floor from the model");
                     }
@@ -1152,7 +1289,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "pocket3d.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "pocket3d.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1164,20 +1307,26 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"pocket3d.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "pocket3d.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "pocket3d.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "pocket3d.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "pocket3d.bottom",
+                );
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -1260,7 +1409,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "finish3d.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "finish3d.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1272,20 +1427,26 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, op_ctx.as_deref(), r,"finish3d.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "finish3d.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "finish3d.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "finish3d.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "finish3d.bottom",
+                );
                 ui.label("Top is the first ring's plane, Bottom the last level's");
             }
             if tab == SEC_PASSES {
@@ -1334,7 +1495,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         num(ui, u, s);
                         ui.label("flat-ground spacing; on a slope it follows the terrain's cosine");
                     } else {
-                        ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
+                        ui.label(
+                            "from tolerance and tool by the scallop law, times the slope's cosine",
+                        );
                     }
                     field(ui, "Minimum step");
                     let mut floored = min_step.is_some();
@@ -1403,7 +1566,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "contour5d.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "contour5d.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1416,19 +1585,25 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "contour5d.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "contour5d.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "contour5d.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "contour5d.bottom",
+                );
                 ui.label("Top is the first ring's plane, Bottom the last level's");
             }
             if tab == SEC_PASSES {
@@ -1464,7 +1639,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "parallel5d.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "parallel5d.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1477,19 +1658,25 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "parallel5d.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "parallel5d.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "parallel5d.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "parallel5d.bottom",
+                );
                 ui.label("Top is the first line's plane, Bottom the last one's");
             }
             if tab == SEC_PASSES {
@@ -1506,7 +1693,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     num(ui, u, s);
                     ui.label("flat-ground spacing; on a slope it follows the terrain's cosine");
                 } else {
-                    ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
+                    ui.label(
+                        "from tolerance and tool by the scallop law, times the slope's cosine",
+                    );
                 }
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
                 shank_avoid_editor(ui, shank_avoid);
@@ -1542,7 +1731,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "flow5d.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "flow5d.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1555,19 +1750,25 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
                     height_editor(ui, &state.world, op_ctx.as_deref(), r, "flow5d.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "flow5d.top");
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "flow5d.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "flow5d.bottom",
+                );
                 ui.label("Top is the first line's plane, Bottom the last one's");
             }
             if tab == SEC_PASSES {
@@ -1584,7 +1785,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     num(ui, u, s);
                     ui.label("flat-ground spacing; on a slope it follows the terrain's cosine");
                 } else {
-                    ui.label("from tolerance and tool by the scallop law, times the slope's cosine");
+                    ui.label(
+                        "from tolerance and tool by the scallop law, times the slope's cosine",
+                    );
                 }
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
                 shank_avoid_editor(ui, shank_avoid);
@@ -1620,7 +1823,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "multi_axis_contour.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "multi_axis_contour.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1632,20 +1841,38 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "multi_axis_contour.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    height_editor(
+                        ui,
+                        &state.world,
+                        op_ctx.as_deref(),
+                        r,
+                        "multi_axis_contour.retract",
+                    );
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "multi_axis_contour.top");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    top_z,
+                    "multi_axis_contour.top",
+                );
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "multi_axis_contour.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "multi_axis_contour.bottom",
+                );
                 ui.label("the machining window: a picked chain standing outside it is refused by name, never clipped");
             }
             if tab == SEC_PASSES {
@@ -1830,11 +2057,29 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "rotary_offset.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "rotary_offset.clearance",
+                );
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "rotary_offset.top");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    top_z,
+                    "rotary_offset.top",
+                );
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "rotary_offset.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "rotary_offset.bottom",
+                );
                 ui.label("the world planes map onto stations along the fitted axis - the ladder roughs the bar only between them (inert on a bar lying flat)");
                 field(ui, "Stepdown (radial)");
                 num(ui, u, stepdown);
@@ -1892,7 +2137,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
-                ui.label("the verify budget: the swept envelope is judged against the model within it");
+                ui.label(
+                    "the verify budget: the swept envelope is judged against the model within it",
+                );
                 rotary_axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
             }
             if tab == SEC_FEEDS {
@@ -1930,7 +2177,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "multiaxis_rough.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "multiaxis_rough.clearance",
+                );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
                 if ui.checkbox(&mut hop, "Hop below clearance").changed() {
@@ -1942,20 +2195,38 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if let Some(r) = retract_z {
                     field(ui, "Retract Z");
-                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "multiaxis_rough.retract");
-                    if let (Some(rz), Some(cz)) =
-                        (r.z(&state.world), clearance_z.z(&state.world))
+                    height_editor(
+                        ui,
+                        &state.world,
+                        op_ctx.as_deref(),
+                        r,
+                        "multiaxis_rough.retract",
+                    );
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
                         && rz > cz
                     {
                         ui.label(format!(
-                            "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
                         ));
                     }
                 }
                 field(ui, "Top Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "multiaxis_rough.top");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    top_z,
+                    "multiaxis_rough.top",
+                );
                 field(ui, "Bottom Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "multiaxis_rough.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "multiaxis_rough.bottom",
+                );
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
             }
@@ -2010,7 +2281,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
-                ui.label("the verify budget: the swept envelope is judged against the model within it");
+                ui.label(
+                    "the verify budget: the swept envelope is judged against the model within it",
+                );
                 ui.label("the ladder is move for move the 3-D pocket's; the spindle adds a pose where a wall or corner needs one, and stands vertical where a floor does not ask");
                 axis_editor(ui, lead_deg, lag_deg, max_tilt_deg);
                 shank_avoid_editor(ui, shank_avoid);
@@ -2042,7 +2315,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "facing.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "facing.clearance",
+                );
                 field(ui, "Top of Part Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "facing.top");
                 field(ui, "Facing Plane Z");
@@ -2055,7 +2334,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             if tab == SEC_PASSES {
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
-                ui.label("the verify budget: the swept envelope is judged against the model within it");
+                ui.label(
+                    "the verify budget: the swept envelope is judged against the model within it",
+                );
             }
             if tab == SEC_FEEDS {
                 field(ui, &format!("Feed ({})", u.feed_suffix()));
@@ -2083,18 +2364,38 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "profile_rough.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "profile_rough.clearance",
+                );
                 field(ui, "Top of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "profile_rough.top");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    top_z,
+                    "profile_rough.top",
+                );
                 field(ui, "Bottom of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "profile_rough.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "profile_rough.bottom",
+                );
                 ui.label("the rungs ride the bar between these heights; the window's ends are where the tool plunges in and slides out");
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
                 ui.label("radial shell one rung eats - the kernel refuses past twice the insert nose radius, the sheet the next rung in would miss");
                 field(ui, "Stock to leave");
                 num(ui, u, stock_to_leave);
-                ui.label("the wall the last rung stands off the skin - the finish pass takes it off");
+                ui.label(
+                    "the wall the last rung stands off the skin - the finish pass takes it off",
+                );
             }
             if tab == SEC_PASSES {
                 field(ui, "Tolerance");
@@ -2119,11 +2420,29 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "profile_finish.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "profile_finish.clearance",
+                );
                 field(ui, "Top of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "profile_finish.top");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    top_z,
+                    "profile_finish.top",
+                );
                 field(ui, "Bottom of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "profile_finish.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "profile_finish.bottom",
+                );
                 ui.label("one ride of the nose along the bar's offset, bottom of the window up to top - the whole finish is one pass");
             }
             if tab == SEC_PASSES {
@@ -2156,11 +2475,29 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "groove_rough.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "groove_rough.clearance",
+                );
                 field(ui, "Top of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "groove_rough.top");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    top_z,
+                    "groove_rough.top",
+                );
                 field(ui, "Bottom of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "groove_rough.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "groove_rough.bottom",
+                );
                 ui.label("the band's axial ends: the kerfs tile between these heights, one blade width apart, and the window must be at least a blade wide");
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
@@ -2192,11 +2529,29 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "groove_finish.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "groove_finish.clearance",
+                );
                 field(ui, "Top of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "groove_finish.top");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    top_z,
+                    "groove_finish.top",
+                );
                 field(ui, "Bottom of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "groove_finish.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "groove_finish.bottom",
+                );
                 ui.label("one plunge per center between these heights, to the model's own floor - the whole finish is one walk of the band");
             }
             if tab == SEC_PASSES {
@@ -2227,7 +2582,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "part.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "part.clearance",
+                );
                 field(ui, "Parting Plane Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "part.plane");
                 ui.label("where a part gets cut off from the bar it was turned on: the blade stands one center deep at this plane and its kerf falls through the model's whole column");
@@ -2263,11 +2624,23 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "threading.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "threading.clearance",
+                );
                 field(ui, "Top of Part Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "threading.top");
                 field(ui, "Bottom of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "threading.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "threading.bottom",
+                );
                 ui.label("the helix runs between these heights, one turn per pitch - the whole thread walks past the bar's floor in the model");
             }
             if tab == SEC_PASSES {
@@ -2309,11 +2682,23 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "chamfer.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "chamfer.clearance",
+                );
                 field(ui, "Top of Part Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "chamfer.top");
                 field(ui, "Bottom of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "chamfer.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "chamfer.bottom",
+                );
                 ui.label("the two stations the chamfered corner spans - the ride walks the face between them and nowhere outside");
             }
             if tab == SEC_PASSES {
@@ -2348,12 +2733,26 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "taper.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "taper.clearance",
+                );
                 field(ui, "Top of Part Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "taper.top");
                 field(ui, "Bottom of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "taper.bottom");
-                ui.label("the stations the taper runs between - the diameters stand at these planes");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "taper.bottom",
+                );
+                ui.label(
+                    "the stations the taper runs between - the diameters stand at these planes",
+                );
             }
             if tab == SEC_PASSES {
                 field(ui, "Tolerance");
@@ -2364,7 +2763,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the cone's size at the window's low station");
                 field(ui, "Top Diameter");
                 num(ui, u, top_dia);
-                ui.label("and at its high one - equal diameters state the straight turn of a cylinder");
+                ui.label(
+                    "and at its high one - equal diameters state the straight turn of a cylinder",
+                );
             }
             if tab == SEC_FEEDS {
                 field(ui, &format!("Feed ({})", u.feed_suffix()));
@@ -2392,23 +2793,39 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "multipass.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "multipass.clearance",
+                );
                 field(ui, "Top of Part Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "multipass.top");
                 field(ui, "Bottom of Part Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "multipass.bottom");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "multipass.bottom",
+                );
                 ui.label("the length of bar the ladder eats and the rides finish, station window and all (M5.2 B's law, one program long)");
             }
             if tab == SEC_PASSES {
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
-                ui.label("the chord budget every ride settles at, and the play the verdict measures");
+                ui.label(
+                    "the chord budget every ride settles at, and the play the verdict measures",
+                );
                 field(ui, "Stepdown");
                 num(ui, u, stepdown);
                 ui.label("radial shell each rung eats - never more than twice the nose, the ladder's own door");
                 field(ui, "Stock to leave");
                 num(ui, u, stock_to_leave);
-                ui.label("what the last rung stands off the skin for the finishing rides to share out");
+                ui.label(
+                    "what the last rung stands off the skin for the finishing rides to share out",
+                );
                 field(ui, "Finishing passes");
                 let mut n = f64::from(*passes);
                 num_plain(ui, &mut n);
@@ -2438,7 +2855,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "form.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "form.clearance",
+                );
                 field(ui, "Top of Part Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "form.top");
                 field(ui, "Bottom of Part Z");
@@ -2473,7 +2896,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
-                height_editor(ui, &state.world, op_ctx.as_deref(), clearance_z, "bore.clearance");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "bore.clearance",
+                );
                 field(ui, "Top of Part Z");
                 height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "bore.top");
                 field(ui, "Bottom of Part Z");
@@ -2578,7 +3007,8 @@ fn swarf_editor(
                 && rz > cz
             {
                 ui.label(format!(
-                    "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                    "above clearance - the hop travels at {} (min of the two)",
+                    units::len(cz, u, 3)
                 ));
             }
         }
@@ -2672,7 +3102,8 @@ fn rotary_editor(
                 && rz > cz
             {
                 ui.label(format!(
-                    "above clearance - the hop travels at {} (min of the two)", units::len(cz, u, 3)
+                    "above clearance - the hop travels at {} (min of the two)",
+                    units::len(cz, u, 3)
                 ));
             }
         }
@@ -2724,7 +3155,9 @@ fn rotary_axis_editor(ui: &mut Ui, lead_deg: &mut f64, lag_deg: &mut f64, max_ti
     ui.label("lean with the feed, off the radial from the fitted axis - tips the shank away from the wall ahead of the cut");
     field(ui, "Tool lag angle (deg)");
     num_plain(ui, lag_deg);
-    ui.label("lean across the feed (side tilt), off the radial - clears the wall the tool has just cut");
+    ui.label(
+        "lean across the feed (side tilt), off the radial - clears the wall the tool has just cut",
+    );
     field(ui, "Max tilt (deg)");
     num_plain(ui, max_tilt_deg);
     ui.label("the cone the spindle may open from the radial; where the stance demands more, the lean folds onto the cone's edge");
@@ -2896,7 +3329,9 @@ fn height_editor_inner(
     ui.horizontal(|ui| {
         ui.label(offset_label(h.reference));
         num(ui, u, &mut h.offset);
-        ui.add(Label::new(egui::RichText::new(height_echo(world, setup, h)).weak()).selectable(false));
+        ui.add(
+            Label::new(egui::RichText::new(height_echo(world, setup, h)).weak()).selectable(false),
+        );
     });
 }
 
@@ -2918,7 +3353,10 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     ui.add_space(3.0);
     ui.horizontal(|ui| {
         for (i, name) in ["Box", "Cylinder", "From model"].iter().enumerate() {
-            if ui.radio_value(&mut state.stock_ui.shape, i as i32, *name).changed() {}
+            if ui
+                .radio_value(&mut state.stock_ui.shape, i as i32, *name)
+                .changed()
+            {}
         }
     });
     let shape = state.stock_ui.shape;
@@ -2983,8 +3421,7 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
     // "Stock", so the legacy behavior is the degenerate case, not a
     // branch. sync_setup_ui already mirrored this entity's numbers.
     let active = camcraft_app::setup::active(&state.world);
-    let stock_name =
-        camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
+    let stock_name = camcraft_app::setup::stock_entity_name(&state.world, active.as_deref());
     let has_stock = model::find_by_name(&state.world, &stock_name)
         .is_some_and(|e| model::is_stock(&state.world, &e));
     if let Some(s) = active.as_deref() {
@@ -2995,7 +3432,9 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             let s = if shape == 1 {
                 StockShape::Cylinder { diameter, height }
             } else if shape == 2 {
-                StockShape::FromModel { source: source.clone() }
+                StockShape::FromModel {
+                    source: source.clone(),
+                }
             } else {
                 StockShape::Box { dx, dy, dz }
             };
@@ -3006,10 +3445,14 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
             });
         }
         if ui.button("Fit to Models").clicked() {
-            state.pending.push_back(CommandKind::StockFit { margin, shape });
+            state
+                .pending
+                .push_back(CommandKind::StockFit { margin, shape });
         }
         if has_stock && ui.button("Delete").clicked() {
-            state.pending.push_back(CommandKind::DeleteByName(stock_name.clone()));
+            state
+                .pending
+                .push_back(CommandKind::DeleteByName(stock_name.clone()));
         }
     });
     ui.add_space(10.0);
@@ -3080,9 +3523,7 @@ fn machine_section(ui: &mut Ui, state: &mut State) {
     ui.horizontal(|ui| {
         ui.label("Library");
         let names: Vec<&str> = posting::MACHINES.iter().map(|(n, _)| *n).collect();
-        let sel: Option<usize> = names
-            .iter()
-            .position(|n| path == posting::builtin_path(n));
+        let sel: Option<usize> = names.iter().position(|n| path == posting::builtin_path(n));
         let text = match sel {
             Some(i) => names[i].to_owned(),
             None => "other".to_owned(),
@@ -3098,16 +3539,15 @@ fn machine_section(ui: &mut Ui, state: &mut State) {
                 }
             });
         if let Some(name) = pick {
-            state.pending.push_back(CommandKind::LoadBuiltinMachine(name));
+            state
+                .pending
+                .push_back(CommandKind::LoadBuiltinMachine(name));
         }
     });
     match &m {
         Some(m) => {
             ui.label(m.summary());
-            ui.label(format!(
-                "{} workspace",
-                machine::kind(Some(m)).label()
-            ));
+            ui.label(format!("{} workspace", machine::kind(Some(m)).label()));
             if !path.is_empty() {
                 ui.label(format!("loaded from {path}"));
             }
@@ -3345,22 +3785,25 @@ fn setups_page(ui: &mut Ui, state: &mut State) {
         let is_active = active.as_deref() == Some(name.as_str());
         ui.horizontal(|ui| {
             if ui.selectable_label(is_active, name).clicked() && !is_active {
-                state.pending.push_back(CommandKind::ActivateSetup(Some(name.clone())));
+                state
+                    .pending
+                    .push_back(CommandKind::ActivateSetup(Some(name.clone())));
             }
             if is_active {
                 ui.label("(active)");
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("Delete").clicked() {
-                    state.pending.push_back(CommandKind::DeleteSetup(name.clone()));
+                    state
+                        .pending
+                        .push_back(CommandKind::DeleteSetup(name.clone()));
                 }
             });
         });
         if let Some(def) = camcraft_app::setup::def_of(&state.world, name) {
             let placed = (0..WCS_SLOTS.len())
                 .filter(|i| {
-                    camcraft_app::setup::wcs_entity(&state.world, Some(name.as_str()), *i)
-                        .is_some()
+                    camcraft_app::setup::wcs_entity(&state.world, Some(name.as_str()), *i).is_some()
                 })
                 .count();
             let mut line = format!("    stock {}, offsets placed {placed}", def.stock);
@@ -3423,7 +3866,8 @@ fn tool_list_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     ui.label(format!(
         "    setup total: est {} min",
         camcraft_app::setup_sheet::minutes(camcraft_app::tool_list::setup_minutes(
-            &state.world, ctx,
+            &state.world,
+            ctx,
         )),
     ));
 }
@@ -3454,9 +3898,7 @@ fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     // A draft whose row vanished (deleted or untagged, here or via
     // undo) retires with it - the pane never edits a ghost.
     if !state.fixture_ui.name.is_empty()
-        && !fixtures
-            .iter()
-            .any(|(n, _)| n == &state.fixture_ui.name)
+        && !fixtures.iter().any(|(n, _)| n == &state.fixture_ui.name)
     {
         state.fixture_ui = FixtureUi::default();
     }
@@ -3487,10 +3929,14 @@ fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
             ));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("Delete").clicked() {
-                    state.pending.push_back(CommandKind::DeleteFixture(name.clone()));
+                    state
+                        .pending
+                        .push_back(CommandKind::DeleteFixture(name.clone()));
                 }
                 if ui.small_button("Unmark").clicked() {
-                    state.pending.push_back(CommandKind::UntagFixture(name.clone()));
+                    state
+                        .pending
+                        .push_back(CommandKind::UntagFixture(name.clone()));
                 }
             });
         });
@@ -3530,12 +3976,11 @@ fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
         let sel: Vec<String> = model::selected_names(&state.world)
             .into_iter()
             .filter(|n| {
-                model::find_by_name(&state.world, n).is_some_and(|e| model::is_model(&state.world, &e))
+                model::find_by_name(&state.world, n)
+                    .is_some_and(|e| model::is_model(&state.world, &e))
             })
             .collect();
-        if sel.len() == 1
-            && ui.button(format!("Mark {} as fixture", sel[0])).clicked()
-        {
+        if sel.len() == 1 && ui.button(format!("Mark {} as fixture", sel[0])).clicked() {
             state.pending.push_back(CommandKind::TagFixture {
                 name: sel[0].clone(),
                 setup: ctx.map(str::to_owned),
@@ -3565,7 +4010,9 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
         ui.separator();
         // The summary: the WORLD's numbers, not the draft's - what the
         // document holds right now, one line per fact.
-        if let Some(t) = model::find_by_name(&state.world, &nm).and_then(|e| model::tool_of(&state.world, &e)) {
+        if let Some(t) =
+            model::find_by_name(&state.world, &nm).and_then(|e| model::tool_of(&state.world, &e))
+        {
             ui.label(format!(
                 "{}  Ø{}  corner r {}",
                 kind_name(t.kind),
@@ -3590,9 +4037,7 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
         }
         ui.add_space(4.0);
         let (edit, del) = ui
-            .horizontal(|ui| {
-                (ui.button("Edit").clicked(), ui.button("Delete").clicked())
-            })
+            .horizontal(|ui| (ui.button("Edit").clicked(), ui.button("Delete").clicked()))
             .inner;
         if del {
             state.pending.push_back(CommandKind::DeleteTool(nm.clone()));
@@ -3616,7 +4061,12 @@ fn tool_page(ui: &mut Ui, state: &mut State, name: &str) {
         let taken = model::find_by_name(&state.world, cname).is_some();
         let clicked = ui
             .horizontal(|ui| {
-                ui.label(format!("{}  Ø{} {}", cname, ct.diameter, kind_name(ct.kind)));
+                ui.label(format!(
+                    "{}  Ø{} {}",
+                    cname,
+                    ct.diameter,
+                    kind_name(ct.kind)
+                ));
                 if taken {
                     ui.label("(in document)");
                     false
@@ -3668,7 +4118,13 @@ pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
     let mut open = view.open;
     // Disjoint field borrows: the closure writes `line` and reads
     // `program` at once, and `open` is a copy resolved after the pass.
-    let PostView { program, line, blocks, trace, .. } = view;
+    let PostView {
+        program,
+        line,
+        blocks,
+        trace,
+        ..
+    } = view;
     // The trace pane's selection is DERIVED (the block owning the
     // scroll cursor), never stored - the one cursor law the viewer
     // already obeys, applied to a second view of the same evidence.
@@ -3726,7 +4182,9 @@ pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
                                                     ui.visuals().text_color()
                                                 });
                                             let r = ui.add(
-                                                Label::new(rt).selectable(false).sense(Sense::click()),
+                                                Label::new(rt)
+                                                    .selectable(false)
+                                                    .sense(Sense::click()),
                                             );
                                             if r.clicked() {
                                                 jump.set(Some(b.first));
@@ -3747,14 +4205,7 @@ pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
                         },
                     );
             } else {
-                gcode_listing(
-                    ui,
-                    program.as_str(),
-                    line,
-                    blocks.as_slice(),
-                    false,
-                    &jump,
-                );
+                gcode_listing(ui, program.as_str(), line, blocks.as_slice(), false, &jump);
             }
         });
     view.open = open;
@@ -3804,7 +4255,9 @@ fn gcode_listing(
             for (i, ln) in program.lines().enumerate() {
                 let label = format!("{:>4}  {}", i + 1, ln);
                 let mut rt = egui::RichText::new(label).monospace();
-                if let Some((a, b)) = want && !(i >= a && i < b.max(a + 1)) {
+                if let Some((a, b)) = want
+                    && !(i >= a && i < b.max(a + 1))
+                {
                     rt = rt.weak();
                 }
                 // add_sized pins every row to exactly row_h, so the
@@ -4078,12 +4531,9 @@ fn draw_tool_preview(ui: &mut Ui, t: &tools::Tool, u: Unit) {
     let base_y = rect.max.y - PAD;
     let scale = (((rect.width() - 2.0 * PAD) / (r_max as f32 * 2.0))
         .min((rect.height() - 2.0 * PAD) / z_max as f32))
-        .max(f32::EPSILON);
+    .max(f32::EPSILON);
     let at = |z: f64, r: f64| -> Pos2 {
-        Pos2::new(
-            axis_x + (r as f32 * scale),
-            base_y - (z as f32 * scale),
-        )
+        Pos2::new(axis_x + (r as f32 * scale), base_y - (z as f32 * scale))
     };
     // The axis first, so everything steel-colored lies over it.
     painter.line_segment(
@@ -4184,9 +4634,9 @@ fn model_page(ui: &mut Ui, state: &mut State, name: String) {
     } else {
         ui.label(format!("Source for: {}", users.join(", ")));
     }
-    if model::stock_def_of(&state.world, &entity).is_some_and(|s| {
-        matches!(s, StockShape::FromModel { source } if source == name)
-    }) {
+    if model::stock_def_of(&state.world, &entity)
+        .is_some_and(|s| matches!(s, StockShape::FromModel { source } if source == name))
+    {
         ui.label("It is also the stock solid (Setup > Stock).");
     }
     ui.label("Selected now: Del removes it (undo restores).");
@@ -4230,7 +4680,9 @@ mod turn_tests {
         // Right-hand +90 about X takes +Z to -Y.
         let p = transform_point(Point3::new(0.0, 0.0, 1.0), loc.pos, loc.rot);
         assert!(
-            [(p.x - 10.0), (p.y + 1.0), p.z].iter().all(|v| v.abs() < 1e-9),
+            [(p.x - 10.0), (p.y + 1.0), p.z]
+                .iter()
+                .all(|v| v.abs() < 1e-9),
             "{p:?}"
         );
     }
@@ -4248,7 +4700,11 @@ mod turn_tests {
         // Same rotation as the 30-degree start: quaternion equal up to sign.
         let start = quat_from_euler(0.0, 0.0, 30.0f64.to_radians());
         let dot: f64 = start.iter().zip(loc.rot).map(|(a, b)| a * b).sum();
-        assert!((dot.abs() - 1.0).abs() < 1e-9, "closed the circle: {:?}", loc.rot);
+        assert!(
+            (dot.abs() - 1.0).abs() < 1e-9,
+            "closed the circle: {:?}",
+            loc.rot
+        );
     }
 
     #[test]
@@ -4264,7 +4720,9 @@ mod turn_tests {
         // rotation, rode along.
         let p = transform_point(Point3::new(1.0, 0.0, 0.0), loc.pos, loc.rot);
         assert!(
-            [(p.x - 5.0), p.y, (p.z - 1.0)].iter().all(|v| v.abs() < 1e-9),
+            [(p.x - 5.0), p.y, (p.z - 1.0)]
+                .iter()
+                .all(|v| v.abs() < 1e-9),
             "{p:?}"
         );
     }
@@ -4303,5 +4761,3 @@ mod turn_tests {
         assert!(state.pending.is_empty());
     }
 }
-
-

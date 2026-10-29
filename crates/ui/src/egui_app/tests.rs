@@ -2528,6 +2528,200 @@ fn detect_holes_refuses_recognizes_and_undo_empties_again() {
     assert!(holes.is_empty(), "undo must empty the detected list again");
 }
 
+/// The M5.2 F2 port of the same law to the turret's side of the
+/// document: on a mill-turn machine, Detect holes reads RADIAL
+/// walls - the turned solid's cross-bores - into the `cross` list,
+/// keeps the Z list empty, and rides history like any detection.
+/// On a plain mill the same mesh detects nothing (the radial door
+/// stays shut) - the machine, not the model, decides what a live
+/// tool can ask for.
+#[test]
+fn radial_detect_fills_the_cross_list_on_a_millturn() {
+    // The app cross suite's bar, ported verbatim - the document
+    // slices it and recognizes it by the same laws the app test
+    // proves green, so the mesh here is that mesh, not a paraphrase
+    // of it. Closures stand in for the app test's free functions;
+    // every coordinate and winding is theirs.
+    use camcraft_app::geometry::{Point3, Triangle};
+    let tau = std::f64::consts::TAU;
+    let sp = |along: usize, u: usize, v: usize, s: f64, pu: f64, pv: f64| {
+        let mut c = [0.0; 3];
+        c[along] = s;
+        c[u] = pu;
+        c[v] = pv;
+        Point3::new(c[0], c[1], c[2])
+    };
+    let quad = |a: Point3, b: Point3, c: Point3, d: Point3, f: &mut Vec<Triangle>| {
+        f.push(Triangle::new(a, b, c));
+        f.push(Triangle::new(a, c, d));
+    };
+    let circle = |cu: f64, cv: f64, r: f64, n: usize| -> Vec<(f64, f64)> {
+        (0..n)
+            .map(|k| {
+                let a = tau * (k as f64) / (n as f64);
+                (cu + r * a.cos(), cv + r * a.sin())
+            })
+            .collect()
+    };
+    let circle_cw = |cu: f64, cv: f64, r: f64, n: usize| -> Vec<(f64, f64)> {
+        let mut c = circle(cu, cv, r, n);
+        c.reverse();
+        c
+    };
+    let wall_ring = |along: usize,
+                     u: usize,
+                     v: usize,
+                     poly: &[(f64, f64)],
+                     s0: f64,
+                     s1: f64,
+                     f: &mut Vec<Triangle>| {
+        let (s0, s1) = if matches!((u, v, along), (0, 1, 2) | (1, 2, 0) | (2, 0, 1)) {
+            (s0, s1)
+        } else {
+            (s1, s0)
+        };
+        let n = poly.len();
+        for i in 0..n {
+            let a = sp(along, u, v, s0, poly[i].0, poly[i].1);
+            let b = sp(along, u, v, s0, poly[(i + 1) % n].0, poly[(i + 1) % n].1);
+            let c = sp(along, u, v, s1, poly[(i + 1) % n].0, poly[(i + 1) % n].1);
+            let d = sp(along, u, v, s1, poly[i].0, poly[i].1);
+            f.push(Triangle::new(a, b, c));
+            f.push(Triangle::new(a, c, d));
+        }
+    };
+    let disc = |along: usize,
+                u: usize,
+                v: usize,
+                cu: f64,
+                cv: f64,
+                r: f64,
+                n: usize,
+                s: f64,
+                f: &mut Vec<Triangle>| {
+        let p = circle(cu, cv, r, n);
+        let ctr = sp(along, u, v, s, cu, cv);
+        for i in 0..n {
+            f.push(Triangle::new(
+                ctr,
+                sp(along, u, v, s, p[i].0, p[i].1),
+                sp(along, u, v, s, p[(i + 1) % n].0, p[(i + 1) % n].1),
+            ));
+        }
+    };
+    let annulus = |along: usize,
+                   u: usize,
+                   v: usize,
+                   cu: f64,
+                   cv: f64,
+                   hu: f64,
+                   hv: f64,
+                   r: f64,
+                   n: usize,
+                   s: f64,
+                   f: &mut Vec<Triangle>| {
+        let q = |k: usize| -> (f64, f64) {
+            let a = tau * (k as f64) / (n as f64);
+            let (co, si) = (a.cos(), a.sin());
+            let t = (co.abs() / hu).max(si.abs() / hv);
+            (cu + co / t, cv + si / t)
+        };
+        let c = |k: usize| -> (f64, f64) {
+            let a = tau * (k as f64) / (n as f64);
+            (cu + r * a.cos(), cv + r * a.sin())
+        };
+        for k in 0..n {
+            let qa = sp(along, u, v, s, q(k).0, q(k).1);
+            let qb = sp(along, u, v, s, q(k + 1).0, q(k + 1).1);
+            let ca = sp(along, u, v, s, c(k).0, c(k).1);
+            let cb = sp(along, u, v, s, c(k + 1).0, c(k + 1).1);
+            f.push(Triangle::new(qa, ca, cb));
+            f.push(Triangle::new(qa, cb, qb));
+        }
+    };
+    let p = Point3::new;
+    let mut facets = Vec::new();
+    // The four prismatic faces.
+    quad(p(-15.0, 5.0, -15.0), p(-15.0, 5.0, 15.0), p(15.0, 5.0, 15.0), p(15.0, 5.0, -15.0), &mut facets);
+    quad(p(-15.0, -5.0, -15.0), p(15.0, -5.0, -15.0), p(15.0, -5.0, 15.0), p(-15.0, -5.0, 15.0), &mut facets);
+    quad(p(-15.0, -5.0, 15.0), p(15.0, -5.0, 15.0), p(15.0, 5.0, 15.0), p(-15.0, 5.0, 15.0), &mut facets);
+    quad(p(-15.0, -5.0, -15.0), p(-15.0, 5.0, -15.0), p(15.0, 5.0, -15.0), p(15.0, -5.0, -15.0), &mut facets);
+    // -X face: punched once in the through hole's band, solid
+    // across everything else (the blind hole never reaches it).
+    quad(p(-15.0, -5.0, -5.0), p(-15.0, -5.0, 15.0), p(-15.0, 5.0, 15.0), p(-15.0, 5.0, -5.0), &mut facets);
+    annulus(0, 1, 2, 0.0, -10.0, 5.0, 5.0, 2.0, 24, -15.0, &mut facets);
+    // +X face: punched where each hole meets it, solid between.
+    annulus(0, 1, 2, 0.0, 10.0, 5.0, 5.0, 2.0, 24, 15.0, &mut facets);
+    annulus(0, 1, 2, 0.0, -10.0, 5.0, 5.0, 2.0, 24, 15.0, &mut facets);
+    quad(p(15.0, -5.0, -5.0), p(15.0, 5.0, -5.0), p(15.0, 5.0, 5.0), p(15.0, -5.0, 5.0), &mut facets);
+    // The bores: blind wall + floor, through wall.
+    wall_ring(0, 1, 2, &circle_cw(0.0, 10.0, 2.0, 24), 5.0, 15.0, &mut facets);
+    disc(0, 1, 2, 0.0, 10.0, 2.0, 24, 5.0, &mut facets);
+    wall_ring(0, 1, 2, &circle_cw(0.0, -10.0, 2.0, 24), -15.0, 15.0, &mut facets);
+    let bar = camcraft_app::geometry::Mesh { facets };
+
+    let dir = std::env::temp_dir().join(format!("hsmw_cross_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let mt = dir.join("mt.mch");
+    std::fs::write(
+        &mt,
+        r#"{"general":{"model":"TurretBench","kind":"mill-turn"},"kinematics":{"default":{"units":{"length":"mm"},"parts":[]}}}"#,
+    )
+    .expect("write machine file");
+
+    let mut harness = shell_harness();
+    crate::actions::add_operation(&mut harness.state_mut().state, 5);
+    harness.run_steps(2);
+    {
+        let sh = harness.state_mut();
+        sh.state.op_tab = 0;
+        sh.state.sync_ops_ui();
+        sh.state.pending.push_back(CommandKind::LoadMachineFile(mt.clone()));
+        let (world, history) = (&sh.state.world, &mut sh.state.history);
+        history.execute(world, camcraft_app::commands::ImportModel::from_mesh("Bar", bar));
+        sh.state.pending.push_back(CommandKind::EditOperationLinks {
+            name: "Operation2".into(),
+            tool: None,
+            src: Some(SrcRef::Entity("Bar".into())),
+        });
+    }
+    harness.run_steps(3);
+
+    harness.get_by_label("Detect holes").click();
+    harness.run_steps(2);
+    let params = {
+        let st = &harness.state().state;
+        assert!(
+            st.error_for(crate::state::ErrorScope::Operation).is_none(),
+            "a turret document must not refuse its own cross-bores: {}",
+            st.status
+        );
+        model::find_by_name(&st.world, "Operation2")
+            .as_ref()
+            .and_then(|e| model::operation_of(&st.world, e))
+            .expect("Operation2 survives")
+            .params
+            .clone()
+    };
+    let OpParams::Drill { holes, cross, .. } = &params else { unreachable!() };
+    assert!(holes.is_empty(), "a radial bar carries no Z holes");
+    assert_eq!(cross.len(), 2, "the blind and the through bore: {cross:?}");
+    assert!(cross.iter().filter(|h| h.through).count() == 1, "exactly one through");
+    assert_eq!(harness.state().state.op_ui.params, params, "the draft shows the rows");
+
+    // Undo retires the detection - cross holes are a command too.
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let op = model::find_by_name(&st.world, "Operation2")
+        .as_ref()
+        .and_then(|e| model::operation_of(&st.world, e))
+        .unwrap();
+    let OpParams::Drill { cross, .. } = &op.params else { unreachable!() };
+    assert!(cross.is_empty(), "undo must empty the detected cross list again");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // ------------------------------------------- M1.7c: move simulation
 
 /// The playhead's law, pinned pure (kittest frames advance ~0 seconds,

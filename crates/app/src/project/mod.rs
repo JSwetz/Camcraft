@@ -89,7 +89,7 @@ use flecs_ecs::prelude::World;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::cl::{Cycle, CycleKind, Move, MoveKind, Toolpath, lattice};
-use crate::drilling::{CycleChoice, Hole};
+use crate::drilling::{CrossHole, CycleChoice, Hole};
 use crate::geo2d::Point2;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
 use crate::machining2d::{Lead, PocketStrategy, Side};
@@ -97,8 +97,8 @@ use crate::machining3d::Entry3D;
 use crate::model;
 use crate::operation::{FeatureSel, GenStamp, GeoSel, OpParams, SrcRef};
 use crate::schema::{
-    FixtureDef, Location, Operation, SetupDef, StockDef, ToolDef, Toolpath as ToolpathCache, Wcs,
-    STOCK_NAME, WCS_SLOTS,
+    FixtureDef, Location, Operation, STOCK_NAME, SetupDef, StockDef, ToolDef,
+    Toolpath as ToolpathCache, WCS_SLOTS, Wcs,
 };
 use crate::stock::{self, StockShape};
 use crate::tools::{Tool, ToolKind};
@@ -109,8 +109,8 @@ mod file;
 pub use file::*;
 mod params;
 pub use params::*;
-mod params_impl;
 mod entity;
+mod params_impl;
 pub use entity::*;
 mod wire;
 pub use wire::*;

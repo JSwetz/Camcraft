@@ -19,12 +19,12 @@ use camcraft_app::commands::{
 };
 use camcraft_app::drilling::CycleChoice;
 use camcraft_app::geo2d::Point2;
-use camcraft_app::geometry::{cube, IDENTITY_Q, Point3};
+use camcraft_app::geometry::{IDENTITY_Q, Point3, cube};
 use camcraft_app::machining2d::{Lead, Side};
 use camcraft_app::model;
-use camcraft_app::schema::{Location, PostRef};
 use camcraft_app::operation::{Height, HeightReference, OpParams, SrcRef};
 use camcraft_app::posting;
+use camcraft_app::schema::{Location, PostRef};
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools::catalog;
 use camcraft_app::world::new_world;
@@ -48,7 +48,8 @@ fn box_stock(world: &World, history: &mut History, dx: f64, dy: f64, dz: f64) {
 }
 
 fn contour_params() -> OpParams {
-    OpParams::Contour { tilt: None,
+    OpParams::Contour {
+        tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),
@@ -79,10 +80,18 @@ fn drill_params(hole: camcraft_app::drilling::Hole, top_z: f64, clearance_z: f64
         feed: 130.0,
         plunge_feed: 100.0,
         holes: vec![hole],
+        cross: Vec::new(),
     }
 }
 
-fn hole(x: f64, y: f64, radius: f64, entry_z: f64, floor_z: f64, through: bool) -> camcraft_app::drilling::Hole {
+fn hole(
+    x: f64,
+    y: f64,
+    radius: f64,
+    entry_z: f64,
+    floor_z: f64,
+    through: bool,
+) -> camcraft_app::drilling::Hole {
     camcraft_app::drilling::Hole {
         xy: Point2::new(x, y),
         radius,
@@ -101,10 +110,22 @@ fn contour_and_drill() -> (World, History) {
     box_stock(&world, &mut history, 100.0, 100.0, 10.0);
     add_tool(&world, &mut history, "EM-0600-4FL");
     add_tool(&world, &mut history, "DR-0400");
-    history.execute(&world, ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))));
-    let cmd = CreateOperation::new(&world, "Contour1", "EM-0600-4FL", SrcRef::Entity("part".into()), contour_params());
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    let cmd = CreateOperation::new(
+        &world,
+        "Contour1",
+        "EM-0600-4FL",
+        SrcRef::Entity("part".into()),
+        contour_params(),
+    );
     history.execute(&world, cmd.expect("create contour"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate contour"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate contour"),
+    );
     let cmd = CreateOperation::new(
         &world,
         "Drill1",
@@ -113,18 +134,29 @@ fn contour_and_drill() -> (World, History) {
         drill_params(hole(20.0, 20.0, 2.0, 10.0, 0.0, true), 10.0, 14.0),
     );
     history.execute(&world, cmd.expect("create drill"));
-    history.execute(&world, GenerateOperation::new(&world, "Drill1").expect("generate drill"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Drill1").expect("generate drill"),
+    );
     for op in ["Contour1", "Drill1"] {
         let e = model::find_by_name(&world, op).expect("op");
         let cache = model::toolpath_of(&world, &e).expect("cache");
-        assert!(cache.warnings.is_empty(), "{op} fixture must generate silent: {:?}", cache.warnings);
+        assert!(
+            cache.warnings.is_empty(),
+            "{op} fixture must generate silent: {:?}",
+            cache.warnings
+        );
     }
     (world, history)
 }
 
 fn tmp_nc(tag: &str) -> std::path::PathBuf {
     let mut p = std::env::temp_dir();
-    p.push(format!("camcraft-posting-{}-{}.nc", tag, std::process::id()));
+    p.push(format!(
+        "camcraft-posting-{}-{}.nc",
+        tag,
+        std::process::id()
+    ));
     let _ = std::fs::remove_file(&p);
     p
 }
@@ -147,16 +179,29 @@ fn two_ops_post_to_one_program_cycles_stay_in_their_section() {
     let parts: Vec<&str> = text.split("G90 G54 G40 G49 G80").collect();
     assert_eq!(parts.len(), 3, "one preamble per section: {text}");
     assert!(parts[1].contains("T02 M6"), "EM-0600-4FL is library rank 2");
-    assert!(parts[1].contains("G01") || parts[1].contains("G02"), "the contour chain posted");
+    assert!(
+        parts[1].contains("G01") || parts[1].contains("G02"),
+        "the contour chain posted"
+    );
     assert!(
         !(parts[1].contains("G73") || parts[1].contains("G81")),
         "no cycle belongs in the contour's section: {}",
         parts[1]
     );
     assert!(parts[2].contains("T01 M6"), "DR-0400 is library rank 1");
-    assert!(parts[2].contains("G98"), "the cycle retract mode posted once");
-    assert!(parts[2].contains("G73 X20 Y20"), "the peck block, at its hole: {}", parts[2]);
-    assert!(text.starts_with('%') && text.trim_end().ends_with('%'), "one % wrapped program");
+    assert!(
+        parts[2].contains("G98"),
+        "the cycle retract mode posted once"
+    );
+    assert!(
+        parts[2].contains("G73 X20 Y20"),
+        "the peck block, at its hole: {}",
+        parts[2]
+    );
+    assert!(
+        text.starts_with('%') && text.trim_end().ends_with('%'),
+        "one % wrapped program"
+    );
     assert_eq!(text.matches("M30").count(), 1, "one footer");
 }
 
@@ -171,12 +216,16 @@ fn an_unborn_toolpath_refuses_to_post() {
     // Never generated: the gate refuses by name, and writes nothing.
     let path = tmp_nc("never");
     let err = posting::post_setup(&world, &path).expect_err("an empty path must not post");
-    assert!(err.contains("Face1") && err.contains("generate it first"), "{err}");
+    assert!(
+        err.contains("Face1") && err.contains("generate it first"),
+        "{err}"
+    );
     assert!(!path.exists(), "a refusal leaves no file");
 }
 
 fn face_params() -> OpParams {
-    OpParams::Face { tilt: None,
+    OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.5),
@@ -198,13 +247,30 @@ fn a_stale_operation_blocks_the_post_and_leaves_the_file_untouched() {
     // The drill op reads the stock, so moving the part goes stale
     // through the world-Aabb digest term.
     let e = model::find_by_name(&world, "part").expect("part");
-    model::set_transform(&world, &e, Location { pos: Point3::new(3.0, 0.0, 0.0), rot: IDENTITY_Q });
+    model::set_transform(
+        &world,
+        &e,
+        Location {
+            pos: Point3::new(3.0, 0.0, 0.0),
+            rot: IDENTITY_Q,
+        },
+    );
     let err = posting::post_setup(&world, &path).expect_err("stale blocks");
-    assert!(err.contains("Contour1") && err.contains("regenerate"), "{err}");
-    assert_eq!(std::fs::read_to_string(&path).expect("still there"), before, "a refusal rewrites nothing");
+    assert!(
+        err.contains("Contour1") && err.contains("regenerate"),
+        "{err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("still there"),
+        before,
+        "a refusal rewrites nothing"
+    );
 
     // Regenerating through the command clears it and the post runs again.
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("regenerate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("regenerate"),
+    );
     posting::post_setup(&world, &path).expect("fresh again posts");
     let _ = std::fs::remove_file(&path);
 }
@@ -227,16 +293,25 @@ fn a_warned_path_blocks_even_though_it_generated() {
         drill_params(hole(0.0, 0.0, 2.0, 130.0, 0.0, true), 130.0, 140.0),
     );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Deep1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Deep1").expect("generate"),
+    );
     let e = model::find_by_name(&world, "Deep1").expect("op");
     assert!(
-        !model::toolpath_of(&world, &e).expect("cache").warnings.is_empty(),
+        !model::toolpath_of(&world, &e)
+            .expect("cache")
+            .warnings
+            .is_empty(),
         "the fixture must carry its warning"
     );
 
     let path = tmp_nc("warned");
     let err = posting::post_setup(&world, &path).expect_err("a warning blocks the gate");
-    assert!(err.contains("post blocked") && err.contains("shank"), "{err}");
+    assert!(
+        err.contains("post blocked") && err.contains("shank"),
+        "{err}"
+    );
     assert!(!path.exists(), "blocked output is never written");
 }
 
@@ -256,15 +331,24 @@ fn a_gouging_program_is_refused_by_the_verification_gate() {
         &world,
         ImportModel::from_mesh(
             "part",
-            cube(Point3::new(-30.0, -30.0, 0.0), Point3::new(30.0, 30.0, 20.0)),
+            cube(
+                Point3::new(-30.0, -30.0, 0.0),
+                Point3::new(30.0, 30.0, 20.0),
+            ),
         ),
     );
     let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
     let e = model::find_by_name(&world, "Face1").expect("op");
     assert!(
-        model::toolpath_of(&world, &e).expect("cache").warnings.is_empty(),
+        model::toolpath_of(&world, &e)
+            .expect("cache")
+            .warnings
+            .is_empty(),
         "the fixture must generate silent - the sim is the only net here"
     );
 
@@ -300,7 +384,10 @@ fn machine_limits_block_the_post_and_within_limits_does_not() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
 
     let tight = camcraft_app::machine::Machine {
         model: "TestMill 1".into(),
@@ -309,21 +396,29 @@ fn machine_limits_block_the_post_and_within_limits_does_not() {
         spindle_max: Some(10000.0), // EM-0400-2FL runs 12000
         ..Default::default()
     };
-    history
-        .execute(&world, LoadMachine::new(&world, "tight.mch".into(), Some(tight.clone())).expect("sane"));
+    history.execute(
+        &world,
+        LoadMachine::new(&world, "tight.mch".into(), Some(tight.clone())).expect("sane"),
+    );
     let path = tmp_nc("limits");
     let err = posting::post_setup(&world, &path).expect_err("the ceiling blocks");
     assert!(
-        err.contains("machine TestMill 1: 1 limit problem(s)") && err.contains("above the machine's 10000"),
+        err.contains("machine TestMill 1: 1 limit problem(s)")
+            && err.contains("above the machine's 10000"),
         "{err}"
     );
     assert!(!path.exists(), "a limit refusal writes nothing");
 
     // The same program under a machine that can give it: the gate
     // opens without touching the program - it never re-plans.
-    let roomy = camcraft_app::machine::Machine { spindle_max: Some(12000.0), ..tight };
-    history
-        .execute(&world, LoadMachine::new(&world, "roomy.mch".into(), Some(roomy)).expect("sane"));
+    let roomy = camcraft_app::machine::Machine {
+        spindle_max: Some(12000.0),
+        ..tight
+    };
+    history.execute(
+        &world,
+        LoadMachine::new(&world, "roomy.mch".into(), Some(roomy)).expect("sane"),
+    );
     assert!(posting::verification_gate(&world).is_empty());
     posting::post_setup(&world, &path).expect("within limits posts");
     assert!(path.exists(), "and writes");
@@ -331,7 +426,10 @@ fn machine_limits_block_the_post_and_within_limits_does_not() {
 
     // No machine mounted, nothing claimed (the unstated-limit law's
     // gate half): clearing the machine cannot make this program illegal.
-    history.execute(&world, LoadMachine::new(&world, String::new(), None).expect("clear"));
+    history.execute(
+        &world,
+        LoadMachine::new(&world, String::new(), None).expect("clear"),
+    );
     posting::post_setup(&world, &path).expect("an unmounted checker blocks nothing");
     let _ = std::fs::remove_file(&path);
 }
@@ -357,14 +455,26 @@ fn a_program_the_sim_cannot_judge_still_posts() {
         contour_params(),
     );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate"),
+    );
     let e = model::find_by_name(&world, "Contour1").expect("op");
     assert!(
-        model::toolpath_of(&world, &e).expect("cache").warnings.is_empty(),
+        model::toolpath_of(&world, &e)
+            .expect("cache")
+            .warnings
+            .is_empty(),
         "generation must be silent - the sim's silence here is the tested thing"
     );
-    assert!(camcraft_app::stock_sim::simulate_document(&world).is_err(), "fixture: no stock, no judge");
-    assert!(posting::verification_gate(&world).is_empty(), "no verdict, no veto");
+    assert!(
+        camcraft_app::stock_sim::simulate_document(&world).is_err(),
+        "fixture: no stock, no judge"
+    );
+    assert!(
+        posting::verification_gate(&world).is_empty(),
+        "no verdict, no veto"
+    );
     posting::post_setup(&world, &tmp_nc("nostock")).expect("unjudged is not unsafe");
 }
 
@@ -387,7 +497,10 @@ fn a_moved_wcs_origin_moves_the_posted_numbers() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
 
     // Both the default (no slot placed) and the shifted program.
     let path = tmp_nc("wcs");
@@ -396,8 +509,15 @@ fn a_moved_wcs_origin_moves_the_posted_numbers() {
 
     history.execute(
         &world,
-        SetWcsOrigin::new(&world, "G54", Location { pos: Point3::new(10.0, 5.0, 1.0), rot: IDENTITY_Q })
-            .expect("set G54"),
+        SetWcsOrigin::new(
+            &world,
+            "G54",
+            Location {
+                pos: Point3::new(10.0, 5.0, 1.0),
+                rot: IDENTITY_Q,
+            },
+        )
+        .expect("set G54"),
     );
     // The face's heights are Fixed: the origin is pure post context
     // (the OriginX/Y/Z PARAMs), not a digest input - the toolpath is
@@ -424,7 +544,8 @@ fn a_non_g54_slot_is_what_the_script_writes() {
         &world,
         SetWcsOrigin::new(&world, "G55", Location::default()).expect("place G55"),
     );
-    let params = OpParams::Face { tilt: None,
+    let params = OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::of(HeightReference::WorkOffset(1), 25.0),
         cut_z: Height::of(HeightReference::WorkOffset(1), 19.5),
@@ -436,12 +557,18 @@ fn a_non_g54_slot_is_what_the_script_writes() {
     };
     let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, params);
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
     let path = tmp_nc("g55");
     posting::post_setup(&world, &path).expect("posts");
     let text = std::fs::read_to_string(&path).expect("written");
     let _ = std::fs::remove_file(&path);
-    assert!(text.contains("G90 G55"), "the script took the slot from the PARAM: {text}");
+    assert!(
+        text.contains("G90 G55"),
+        "the script took the slot from the PARAM: {text}"
+    );
 }
 
 #[test]
@@ -457,8 +584,16 @@ fn posted_carries_line_positions_matching_the_move_chain() {
     let posted = posting::post_setup(&world, &path).expect("a fresh, silent world posts");
     let _ = std::fs::remove_file(&path);
 
-    assert_eq!(posted.line_pos.len(), posted.lines, "one slot per program line");
-    assert_eq!(posted.lines, posted.program.lines().count(), "the retained text is the program");
+    assert_eq!(
+        posted.line_pos.len(),
+        posted.lines,
+        "one slot per program line"
+    );
+    assert_eq!(
+        posted.lines,
+        posted.program.lines().count(),
+        "the retained text is the program"
+    );
 
     let mut endpoints: Vec<[f64; 3]> = Vec::new();
     let mut contour_moves = 0usize;
@@ -470,9 +605,7 @@ fn posted_carries_line_positions_matching_the_move_chain() {
         }
         endpoints.extend(tp.path.moves.iter().map(|m| [m.to.x, m.to.y, m.to.z]));
     }
-    let same = |a: &[f64; 3], b: &[f64; 3]| {
-        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
-    };
+    let same = |a: &[f64; 3], b: &[f64; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
     let resolved: Vec<[f64; 3]> = posted.line_pos.iter().copied().flatten().collect();
     assert!(
         resolved.len() >= contour_moves,
@@ -499,7 +632,11 @@ fn posted_carries_line_positions_matching_the_move_chain() {
 /// A scratch `.cps` with the given text, named for this process.
 fn tmp_cps(tag: &str, text: &str) -> std::path::PathBuf {
     let mut p = std::env::temp_dir();
-    p.push(format!("camcraft-posting-{}-{}.cps", tag, std::process::id()));
+    p.push(format!(
+        "camcraft-posting-{}-{}.cps",
+        tag,
+        std::process::id()
+    ));
     let _ = std::fs::remove_file(&p);
     std::fs::write(&p, text).expect("write temp cps");
     p
@@ -511,9 +648,17 @@ fn the_built_in_is_the_default_post_and_needs_no_choice() {
     // picker existed - the built-in is a default, not a dialog.
     let (world, _h) = contour_and_drill();
     assert_eq!(posting::post_of(&world), PostRef::Builtin);
-    assert!(posting::post_label(&world).contains("Fanuc"), "{}", posting::post_label(&world));
+    assert!(
+        posting::post_label(&world).contains("Fanuc"),
+        "{}",
+        posting::post_label(&world)
+    );
     let (label, cps) = posting::script_source(&world).expect("the built-in always resolves");
-    assert_eq!(cps, posting::BUILTINS[0].1, "the built-in is the shipped script text");
+    assert_eq!(
+        cps,
+        posting::BUILTINS[0].1,
+        "the built-in is the shipped script text"
+    );
     assert!(label.contains("built-in"));
 }
 
@@ -532,12 +677,18 @@ fn a_mounted_machine_names_the_program_and_speaks_only_its_own_coolant() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
 
     let path = tmp_nc("mount-name");
     posting::post_setup(&world, &path).expect("the unmounted default posts");
     let plain = std::fs::read_to_string(&path).expect("written");
-    assert!(plain.contains("(VMC 3-AXIS)"), "the shipped machine names the header: {plain}");
+    assert!(
+        plain.contains("(VMC 3-AXIS)"),
+        "the shipped machine names the header: {plain}"
+    );
     assert!(plain.contains("M8"), "the shipped VMC states flood coolant");
 
     let mounted = camcraft_app::machine::Machine {
@@ -577,7 +728,10 @@ fn a_mounted_machine_names_the_program_and_speaks_only_its_own_coolant() {
     posting::post_setup(&world, &path).expect("the mounted machine posts the same program");
     let text = std::fs::read_to_string(&path).expect("written");
     let _ = std::fs::remove_file(&path);
-    assert!(text.contains("(TestMill 2)"), "the mounted identity reaches the script: {text}");
+    assert!(
+        text.contains("(TestMill 2)"),
+        "the mounted identity reaches the script: {text}"
+    );
     assert!(
         !text.contains("M8"),
         "a machine that states no coolant gets no coolant words: {text}"
@@ -586,7 +740,9 @@ fn a_mounted_machine_names_the_program_and_speaks_only_its_own_coolant() {
     // The mirror is the whole bridge; the sim clock walks the same one.
     let v = posting::machine_value(&world);
     assert_eq!(v["name"], "TestMill 2");
-    let axes = v["kinematics"]["static"]["axes"].as_array().expect("three axes");
+    let axes = v["kinematics"]["static"]["axes"]
+        .as_array()
+        .expect("three axes");
     assert_eq!(axes.len(), 3);
     assert_eq!(camcraft_app::sim::Traverse::from_machine(&v).z, 4000.0);
 }
@@ -602,7 +758,10 @@ fn a_mounted_coolant_list_writes_its_own_codes() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params());
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
 
     let mounted = camcraft_app::machine::Machine {
         model: "CoolMill".into(),
@@ -653,11 +812,21 @@ fn a_user_script_is_validated_on_choice_undone_cleanly_and_missed_loudly() {
     let path = tmp_nc("user");
     posting::post_setup(&world, &path).expect("the user script posts");
     let text = std::fs::read_to_string(&path).expect("written");
-    assert!(text.contains("USERPOST-7"), "the user's own words in the program: {text}");
-    assert!(!text.contains("O0001"), "the built-in's header is gone, not mixed in: {text}");
+    assert!(
+        text.contains("USERPOST-7"),
+        "the user's own words in the program: {text}"
+    );
+    assert!(
+        !text.contains("O0001"),
+        "the built-in's header is gone, not mixed in: {text}"
+    );
 
     assert!(history.undo(&world), "the choice is in the history");
-    assert_eq!(posting::post_of(&world), PostRef::Builtin, "undo restores the built-in");
+    assert_eq!(
+        posting::post_of(&world),
+        PostRef::Builtin,
+        "undo restores the built-in"
+    );
     assert!(history.redo(&world));
     assert!(matches!(posting::post_of(&world), PostRef::File(_)));
 
@@ -681,7 +850,10 @@ fn a_user_script_is_validated_on_choice_undone_cleanly_and_missed_loudly() {
     std::fs::remove_file(&cps).expect("chosen post disappears");
     let gone_path = tmp_nc("user-gone");
     let err = posting::post_setup(&world, &gone_path).expect_err("a vanished post is a refusal");
-    assert!(err.contains("post script") && err.contains(&cps_name), "{err}");
+    assert!(
+        err.contains("post script") && err.contains(&cps_name),
+        "{err}"
+    );
     assert!(!gone_path.exists(), "the refusal writes nothing, ever");
     let _ = std::fs::remove_file(&path);
 }
@@ -702,18 +874,38 @@ fn the_trace_rides_the_program_it_wrote() {
     assert!(!posted.blocks.is_empty(), "a real program leaves a trace");
     let mut cursor = 0usize;
     for b in &posted.blocks {
-        assert!(b.first >= cursor && b.first <= b.last.max(b.first + 1), "blocks run forward: {b:?}");
-        assert!(b.last <= posted.lines, "a block reaches past the program: {b:?}");
+        assert!(
+            b.first >= cursor && b.first <= b.last.max(b.first + 1),
+            "blocks run forward: {b:?}"
+        );
+        assert!(
+            b.last <= posted.lines,
+            "a block reaches past the program: {b:?}"
+        );
         cursor = b.last;
     }
-    assert_eq!(posted.blocks[0].record, None, "the header belongs to no record");
+    assert_eq!(
+        posted.blocks[0].record, None,
+        "the header belongs to no record"
+    );
     assert_eq!(posted.blocks[0].label, "header");
-    assert_eq!(posted.blocks.last().unwrap().record, None, "so does the footer");
+    assert_eq!(
+        posted.blocks.last().unwrap().record,
+        None,
+        "so does the footer"
+    );
     // The tool record itself writes no line (this post emits T/M6 in
     // the section preamble, from the stored ToolNumber property - the
     // trace shows where lines were WRITTEN, not what was heard), but
     // the sections and the peck cycle the two ops became all ride it.
-    assert!(posted.blocks.iter().all(|b| b.record.is_none() || !b.label.starts_with("tool")), "a silent record has no empty block: {:?}", posted.blocks.iter().map(|b| &b.label).collect::<Vec<_>>());
+    assert!(
+        posted
+            .blocks
+            .iter()
+            .all(|b| b.record.is_none() || !b.label.starts_with("tool")),
+        "a silent record has no empty block: {:?}",
+        posted.blocks.iter().map(|b| &b.label).collect::<Vec<_>>()
+    );
     assert!(
         posted.blocks.iter().any(|b| b.label.starts_with("cycle")),
         "the canned cycle rides the trace: {:?}",
@@ -724,7 +916,10 @@ fn the_trace_rides_the_program_it_wrote() {
     let mut seen: Vec<Option<usize>> = Vec::new();
     for b in &posted.blocks {
         if let Some(r) = b.record {
-            assert!(!seen.contains(&Some(r)), "record {r} appears twice in one trace");
+            assert!(
+                !seen.contains(&Some(r)),
+                "record {r} appears twice in one trace"
+            );
             seen.push(Some(r));
         }
     }

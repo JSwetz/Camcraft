@@ -184,6 +184,11 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
         holes: Vec<Hole>,
+        /// Radial holes in the turned solid, plunged by live tooling
+        /// from a turret station (M5.2 F2). A document carries one
+        /// kind or the other - the mill's Z holes or the turret's
+        /// cross holes - and the generator refuses a mix by name.
+        cross: Vec<camcraft_motion::drilling::CrossHole>,
     },
     /// Mesh-driven 3D pocketing. The model is the final part: every
     /// level cuts the footprint minus the model's section strictly above
@@ -1074,7 +1079,6 @@ impl OpParams {
             }
         }
     }
-
 
     // (the world-feeding stamp_with stays in the parent module)
 }

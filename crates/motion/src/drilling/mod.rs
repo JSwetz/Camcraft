@@ -19,22 +19,31 @@
 //! rapids precede the group), and the group's deepest point is
 //! `bottom_z`.
 //!
-//! Holes are Z-axis only: the whole codebase plunges along Z (2.5-D),
-//! and recognition finds walls, not axes.
+//! Z-axis holes are the mill's whole story (2.5-D); M5.2 F2 added
+//! the lathe's other half: recognition tries the wall's AXIS as a
+//! finding (`recognize_cross` reads the same mesh for radial walls)
+//! and `cross_drill` plunges them as pose-tagged chains from the
+//! turret's X or Y station. The Z code is untouched by the
+//! generalization - the candidate passes are independent readings
+//! of one weld law.
 
-
-
-
+mod cylinder;
+mod cross;
 mod cycle;
 mod hole;
 mod recognize;
 
 #[cfg(test)]
 #[allow(unused_imports)]
-use {cycle::*, hole::*, recognize::*};
+use {cross::*, cycle::*, hole::*, recognize::*};
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_cross;
 
+pub use cross::{cross_drill, CrossParams};
 pub use cycle::drill;
-pub use hole::{auto_kind, CycleChoice, CycleParams, Hole, CHIP_BREAK, SPOT_DEPTH, THROUGH_CLEAR};
-pub use recognize::recognize;
+pub use hole::{
+    auto_kind, CrossHole, CycleChoice, CycleParams, Hole, CHIP_BREAK, SPOT_DEPTH, THROUGH_CLEAR,
+};
+pub use recognize::{recognize, recognize_cross};

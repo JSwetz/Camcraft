@@ -203,7 +203,9 @@ impl MoveDto {
             // snap (zeros and ones are lattice fixed points), so a
             // stated-up path saves and reloads into the prismatic
             // code paths the sim and dump branch on.
-            axis: m.axis.map(|a| [lattice(a[0]), lattice(a[1]), lattice(a[2])]),
+            axis: m
+                .axis
+                .map(|a| [lattice(a[0]), lattice(a[1]), lattice(a[2])]),
         }
     }
 
@@ -241,8 +243,16 @@ impl PathDto {
 
     pub(super) fn to_cache(&self) -> ToolpathCache {
         let mut path = Toolpath::new(self.moves.iter().map(|m| m.to_move()).collect());
-        path.cycles = self.cycles.iter().copied().map(CycleDto::to_cycle).collect();
-        ToolpathCache { path, warnings: self.warnings.clone() }
+        path.cycles = self
+            .cycles
+            .iter()
+            .copied()
+            .map(CycleDto::to_cycle)
+            .collect();
+        ToolpathCache {
+            path,
+            warnings: self.warnings.clone(),
+        }
     }
 }
 

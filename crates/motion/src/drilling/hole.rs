@@ -3,6 +3,7 @@
 
 use crate::cl::CycleKind;
 use crate::geo2d::Point2;
+use crate::geometry::Point3;
 use crate::tools::{Tool, ToolKind};
 /// One recognized (or hand-entered) hole, in world coordinates. The
 /// cutter's own shape makes the diameter when drilling - `radius` is
@@ -35,6 +36,52 @@ impl Hole {
     #[must_use]
     pub fn is_usable(&self) -> bool {
         self.all_finite() && self.radius > 0.0 && self.floor_z < self.entry_z
+    }
+}
+
+/// A cross-drilled hole: the same round closed wall, standing on a
+/// RADIAL axis. Live tooling (M5.2 F2) points a drill from the +X
+/// or +Y turret position in toward the spindle axis, so the plunge
+/// runs along `dir` (the inward unit of that axis) and depth
+/// DECREASES the axis coordinate. `origin` is the MOUTH's center -
+/// the wall's highest coordinate along the axis, where the tool
+/// first meets steel - and the scalars ride `dir` from there:
+/// `entry_d = 0.0` at the mouth (kept for a future angled entry),
+/// `floor_d = -depth` at the floor. Recognition fits the circle in
+/// the plane the wall's vertices actually live in (YZ for an X
+/// hole, XZ for a Y one); the cycle plunges along `dir` with the
+/// move's tool pose stated, not down Z.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CrossHole {
+    pub origin: Point3,
+    pub dir: Point3,
+    pub radius: f64,
+    /// Distance from `origin` along `dir` to the material's entry;
+    /// 0.0 for a mouth-on-the-face hole.
+    pub entry_d: f64,
+    /// Distance from `origin` along `dir` to the floor: negative,
+    /// the drill's travel end. A through hole's floor is the far
+    /// wall plus the exit allowance the cycle adds.
+    pub floor_d: f64,
+    pub through: bool,
+}
+
+impl CrossHole {
+    /// Structural sanity for command construction, mirroring
+    /// [`Hole::is_usable`]: finite numbers, a unit plunge direction,
+    /// a positive radius, and a floor beyond the entry along `dir`
+    /// (a smaller `floor_d` is deeper travel).
+    #[must_use]
+    pub fn is_usable(&self) -> bool {
+        let n2 = self.dir.x * self.dir.x + self.dir.y * self.dir.y + self.dir.z * self.dir.z;
+        self.origin.is_finite()
+            && n2.is_finite()
+            && (n2 - 1.0).abs() <= 1e-9
+            && self.radius.is_finite()
+            && self.radius > 0.0
+            && self.entry_d.is_finite()
+            && self.floor_d.is_finite()
+            && self.floor_d < self.entry_d
     }
 }
 

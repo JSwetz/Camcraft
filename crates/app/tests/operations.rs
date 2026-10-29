@@ -9,16 +9,16 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
     AddTool, ChangeTool, CommandError, CreateOperation, DeleteEntity, DeleteOperation,
-    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, RegenerateAll,
-    SetStock, SetWcsOrigin, UpdateModel,
+    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel,
+    RegenerateAll, SetStock, SetWcsOrigin, UpdateModel,
 };
-use camcraft_app::geometry::{Mesh, IDENTITY_Q, Point3, cube};
+use camcraft_app::geometry::{IDENTITY_Q, Mesh, Point3, cube};
 use camcraft_app::machining2d::{Lead, Side};
 use camcraft_app::model;
 use camcraft_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
-use camcraft_app::schema::{Location, Operation, Toolpath, STOCK_NAME};
+use camcraft_app::schema::{Location, Operation, STOCK_NAME, Toolpath};
 use camcraft_app::stock::StockShape;
-use camcraft_app::tools::{catalog, Tool};
+use camcraft_app::tools::{Tool, catalog};
 use camcraft_app::world::new_world;
 
 fn catalog_tool(name: &str) -> Tool {
@@ -38,7 +38,8 @@ fn at(x: f64, y: f64, z: f64) -> Location {
 
 /// Face parameters for the 60x60x20 box stock with a 4 mm cutter.
 fn face_params() -> OpParams {
-    OpParams::Face { tilt: None,
+    OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.5),
@@ -51,7 +52,8 @@ fn face_params() -> OpParams {
 }
 
 fn contour_params() -> OpParams {
-    OpParams::Contour { tilt: None,
+    OpParams::Contour {
+        tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),
@@ -120,7 +122,10 @@ fn edit_operation_params_refuses_a_type_change() {
     // than the retype it replaces.
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
     let e = model::find_by_name(&world, "Face1").expect("entity");
-    assert_eq!(model::operation_of(&world, &e).expect("op").params, face_params());
+    assert_eq!(
+        model::operation_of(&world, &e).expect("op").params,
+        face_params()
+    );
 }
 
 #[test]
@@ -138,7 +143,10 @@ fn tools_are_entities_and_undoable() {
     assert!(model::find_by_name(&world, "EM-0800-4FL").is_none());
     assert!(history.redo(&world));
     let e = model::find_by_name(&world, "EM-0800-4FL").expect("restored");
-    assert_eq!(model::tool_of(&world, &e), Some(catalog_tool("EM-0800-4FL")));
+    assert_eq!(
+        model::tool_of(&world, &e),
+        Some(catalog_tool("EM-0800-4FL"))
+    );
 }
 
 #[test]
@@ -169,10 +177,20 @@ fn add_tool_refusals_at_construction() {
     ));
     // insane geometry
     assert!(matches!(
-        AddTool::new(&world, "T2", Tool { diameter: 0.0, ..catalog_tool("EM-0400-2FL") }),
+        AddTool::new(
+            &world,
+            "T2",
+            Tool {
+                diameter: 0.0,
+                ..catalog_tool("EM-0400-2FL")
+            }
+        ),
         Err(CommandError::Invalid(_))
     ));
-    assert!(model::find_by_name(&world, "T2").is_none(), "refused names never spawn");
+    assert!(
+        model::find_by_name(&world, "T2").is_none(),
+        "refused names never spawn"
+    );
 }
 
 #[test]
@@ -182,9 +200,19 @@ fn change_tool_is_exact_and_marks_dependents_stale() {
 
     let mut fatter = catalog_tool("EM-0400-2FL");
     fatter.diameter = 6.0;
-    history.execute(&world, ChangeTool::new(&world, "EM-0400-2FL", fatter.clone()).expect("edit"));
-    assert_eq!(status(&world, "Face1"), OpStatus::Stale, "the cache predates the edit");
-    assert!(cache(&world, "Face1").is_some(), "stale keeps the old path on screen");
+    history.execute(
+        &world,
+        ChangeTool::new(&world, "EM-0400-2FL", fatter.clone()).expect("edit"),
+    );
+    assert_eq!(
+        status(&world, "Face1"),
+        OpStatus::Stale,
+        "the cache predates the edit"
+    );
+    assert!(
+        cache(&world, "Face1").is_some(),
+        "stale keeps the old path on screen"
+    );
 
     assert!(history.undo(&world));
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
@@ -192,7 +220,10 @@ fn change_tool_is_exact_and_marks_dependents_stale() {
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
 
     // re-generating with the fatter tool clears the staleness
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("regenerate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("regenerate"),
+    );
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
     let e = model::find_by_name(&world, "EM-0400-2FL").expect("tool");
     assert_eq!(model::tool_of(&world, &e).map(|t| t.diameter), Some(6.0));
@@ -204,8 +235,14 @@ fn create_operation_validates_every_reference() {
     let mut history = History::default();
     box_stock(&world, &mut history, 20.0, 20.0, 10.0);
     add_tool(&world, &mut history, "EM-0400-2FL");
-    history.execute(&world, ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(2.0, 2.0, 2.0))));
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 0.0)).expect("wcs"));
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(2.0, 2.0, 2.0))),
+    );
+    history.execute(
+        &world,
+        SetWcsOrigin::new(&world, "G54", at(0.0, 0.0, 0.0)).expect("wcs"),
+    );
 
     // unknown tool, and a name that is a model rather than a tool
     assert!(matches!(
@@ -218,11 +255,23 @@ fn create_operation_validates_every_reference() {
     ));
     // sources must exist and not be offsets
     assert!(matches!(
-        CreateOperation::new(&world, "O", "EM-0400-2FL", SrcRef::Entity("gone".into()), face_params()),
+        CreateOperation::new(
+            &world,
+            "O",
+            "EM-0400-2FL",
+            SrcRef::Entity("gone".into()),
+            face_params()
+        ),
         Err(CommandError::NotFound(_))
     ));
     assert!(matches!(
-        CreateOperation::new(&world, "O", "EM-0400-2FL", SrcRef::Entity("G54".into()), face_params()),
+        CreateOperation::new(
+            &world,
+            "O",
+            "EM-0400-2FL",
+            SrcRef::Entity("G54".into()),
+            face_params()
+        ),
         Err(CommandError::Invalid(_))
     ));
     // parameters gate at construction (no struct-update on enum variants:
@@ -233,7 +282,8 @@ fn create_operation_validates_every_reference() {
             "O",
             "EM-0400-2FL",
             SrcRef::Stock,
-            OpParams::Face { tilt: None,
+            OpParams::Face {
+                tilt: None,
                 stepover: f64::NAN,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(19.5),
@@ -247,14 +297,16 @@ fn create_operation_validates_every_reference() {
         Err(CommandError::Invalid(_))
     ));
     // the positive case: a model source with sane params is accepted
-    assert!(CreateOperation::new(
-        &world,
-        "O",
-        "EM-0400-2FL",
-        SrcRef::Entity("part".into()),
-        contour_params()
-    )
-    .is_ok());
+    assert!(
+        CreateOperation::new(
+            &world,
+            "O",
+            "EM-0400-2FL",
+            SrcRef::Entity("part".into()),
+            contour_params()
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -277,11 +329,22 @@ fn generate_undo_redo_replays_the_identical_path() {
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
 
     assert!(history.undo(&world));
-    assert_eq!(status(&world, "Face1"), OpStatus::Never, "undo restores the pre-generate state");
-    assert!(cache(&world, "Face1").is_none(), "no component, not an empty one");
+    assert_eq!(
+        status(&world, "Face1"),
+        OpStatus::Never,
+        "undo restores the pre-generate state"
+    );
+    assert!(
+        cache(&world, "Face1").is_none(),
+        "no component, not an empty one"
+    );
 
     assert!(history.redo(&world));
-    assert_eq!(cache(&world, "Face1").map(|c| c.path), Some(first.path.clone()), "redo replays bytes, never re-runs");
+    assert_eq!(
+        cache(&world, "Face1").map(|c| c.path),
+        Some(first.path.clone()),
+        "redo replays bytes, never re-runs"
+    );
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
 }
 
@@ -290,7 +353,8 @@ fn edit_params_clears_the_stamp_not_the_cache() {
     let (world, mut history) = face_world();
     let first = cache(&world, "Face1").expect("generated").path;
 
-    let lower = OpParams::Face { tilt: None,
+    let lower = OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(19.0),
@@ -300,12 +364,23 @@ fn edit_params_clears_the_stamp_not_the_cache() {
         plunge_feed: 300.0,
         climb: true,
     };
-    history.execute(&world, EditOperationParams::new(&world, "Face1", lower).expect("edit"));
+    history.execute(
+        &world,
+        EditOperationParams::new(&world, "Face1", lower).expect("edit"),
+    );
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
-    assert_eq!(cache(&world, "Face1").map(|c| c.path), Some(first.clone()), "cache survives the edit");
+    assert_eq!(
+        cache(&world, "Face1").map(|c| c.path),
+        Some(first.clone()),
+        "cache survives the edit"
+    );
 
     assert!(history.undo(&world));
-    assert_eq!(status(&world, "Face1"), OpStatus::Ok, "the stamp comes back with the params");
+    assert_eq!(
+        status(&world, "Face1"),
+        OpStatus::Ok,
+        "the stamp comes back with the params"
+    );
     assert!(history.redo(&world));
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
 }
@@ -320,7 +395,10 @@ fn stock_resize_makes_generated_ops_stale() {
     box_stock(&world, &mut history, 60.0, 60.0, 25.0);
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
 
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("regenerate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("regenerate"),
+    );
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
     // undoing the regenerate returns the stock-resize staleness, cache and all
     assert!(history.undo(&world));
@@ -334,10 +412,22 @@ fn stock_move_makes_generated_ops_stale() {
     let e = model::find_by_name(&world, STOCK_NAME).expect("stock");
     // A command-less move is the model case; use SetStock to relocate
     // exactly (same parameters, new placement).
-    let cmd = SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, at(5.0, 0.0, 0.0));
+    let cmd = SetStock::new(
+        &world,
+        StockShape::Box {
+            dx: 60.0,
+            dy: 60.0,
+            dz: 20.0,
+        },
+        at(5.0, 0.0, 0.0),
+    );
     history.execute(&world, cmd.expect("relocate"));
     assert_eq!(model::transform_of(&world, &e).map(|l| l.pos.x), Some(5.0));
-    assert_eq!(status(&world, "Face1"), OpStatus::Stale, "the stamp reads stock Location");
+    assert_eq!(
+        status(&world, "Face1"),
+        OpStatus::Stale,
+        "the stamp reads stock Location"
+    );
 }
 
 #[test]
@@ -351,13 +441,15 @@ fn retarget_links_clear_the_stamp() {
     );
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
     assert_eq!(
-        model::operation_of(&world, &model::find_by_name(&world, "Face1").expect("op")).map(|o| o.tool),
+        model::operation_of(&world, &model::find_by_name(&world, "Face1").expect("op"))
+            .map(|o| o.tool),
         Some("EM-0600-4FL".to_string())
     );
     assert!(history.undo(&world));
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
     assert_eq!(
-        model::operation_of(&world, &model::find_by_name(&world, "Face1").expect("op")).map(|o| o.tool),
+        model::operation_of(&world, &model::find_by_name(&world, "Face1").expect("op"))
+            .map(|o| o.tool),
         Some("EM-0400-2FL".to_string())
     );
 }
@@ -367,7 +459,10 @@ fn generation_failure_refuses_the_command_and_writes_nothing() {
     let world = new_world();
     let mut history = History::default();
     add_tool(&world, &mut history, "EM-0600-4FL");
-    history.execute(&world, ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))));
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
     let cmd = CreateOperation::new(
         &world,
         "Contour1",
@@ -376,7 +471,10 @@ fn generation_failure_refuses_the_command_and_writes_nothing() {
         contour_params(),
     );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate"),
+    );
     let first_path = cache(&world, "Contour1").expect("cache").path;
     let stored_stamp = model::operation_of(
         &world,
@@ -395,9 +493,17 @@ fn generation_failure_refuses_the_command_and_writes_nothing() {
     assert!(matches!(err, CommandError::Machining(_)), "{err:?}");
     // Nothing half-wrote: the old cache and its stamp stand.
     assert_eq!(cache(&world, "Contour1").map(|c| c.path), Some(first_path));
-    let op = model::operation_of(&world, &model::find_by_name(&world, "Contour1").expect("op")).expect("op");
+    let op = model::operation_of(
+        &world,
+        &model::find_by_name(&world, "Contour1").expect("op"),
+    )
+    .expect("op");
     assert_eq!(op.stamp, stored_stamp, "the stored stamp is untouched");
-    assert_eq!(status(&world, "Contour1"), OpStatus::Stale, "the moved source reads stale");
+    assert_eq!(
+        status(&world, "Contour1"),
+        OpStatus::Stale,
+        "the moved source reads stale"
+    );
 }
 
 /// The cube's silent twin at the same footprint: twelve facets, the same
@@ -455,7 +561,10 @@ fn a_model_update_marks_entity_sourced_operations_stale() {
         contour_params(),
     );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate"),
+    );
     assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
 
     let cmd = UpdateModel::new(&world, "part", prism_10x10x5()).expect("model exists");
@@ -494,7 +603,10 @@ fn a_reimport_with_unchanged_geometry_keeps_operations_ok() {
         contour_params(),
     );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate"),
+    );
 
     history.execute(
         &world,
@@ -509,7 +621,8 @@ fn a_reimport_with_unchanged_geometry_keeps_operations_ok() {
 
 /// Face parameters for the 10 x 10 x 5 solid the stock tests below cut.
 fn face_params_5() -> OpParams {
-    OpParams::Face { tilt: None,
+    OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(10.0),
         cut_z: Height::fixed(4.5),
@@ -540,14 +653,29 @@ fn a_model_update_flows_through_a_frommodel_stock() {
     history.execute(&world, ImportModel::from_mesh("block", cube_v1.clone()));
     let cmd = SetStock::new(
         &world,
-        StockShape::FromModel { source: "block".into() },
+        StockShape::FromModel {
+            source: "block".into(),
+        },
         Location::default(),
     );
     history.execute(&world, cmd.expect("from-model stock"));
-    assert_eq!(stock_facets(&world), cube_v1.facets, "the copy starts honest");
-    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params_5());
+    assert_eq!(
+        stock_facets(&world),
+        cube_v1.facets,
+        "the copy starts honest"
+    );
+    let cmd = CreateOperation::new(
+        &world,
+        "Face1",
+        "EM-0400-2FL",
+        SrcRef::Stock,
+        face_params_5(),
+    );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
 
     // Same facet count, same box, different walls - the pre-M3.1 blind
@@ -593,21 +721,35 @@ fn a_frommodel_stock_survives_its_source_being_deleted() {
             &world,
             SetStock::new(
                 &world,
-                StockShape::FromModel { source: "block".into() },
+                StockShape::FromModel {
+                    source: "block".into(),
+                },
                 Location::default(),
             )
             .expect("from-model stock"),
         );
-        let cmd =
-            CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, face_params_5());
+        let cmd = CreateOperation::new(
+            &world,
+            "Face1",
+            "EM-0400-2FL",
+            SrcRef::Stock,
+            face_params_5(),
+        );
         history.execute(&world, cmd.expect("create"));
-        history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+        history.execute(
+            &world,
+            GenerateOperation::new(&world, "Face1").expect("generate"),
+        );
         (world, history)
     };
     let before = stock_facets(&world);
     let cmd = DeleteEntity::new(&world, "block").expect("delete");
     history.execute(&world, cmd);
-    assert_eq!(stock_facets(&world), before, "the material kept its geometry");
+    assert_eq!(
+        stock_facets(&world),
+        before,
+        "the material kept its geometry"
+    );
     assert_eq!(
         status(&world, "Face1"),
         OpStatus::Ok,
@@ -631,7 +773,11 @@ fn a_model_update_does_not_touch_a_box_stock() {
     let cmd = UpdateModel::new(&world, "part", prism_10x10x5()).expect("model exists");
     history.execute(&world, cmd);
     assert_eq!(stock_facets(&world), before, "the box is its own material");
-    assert_eq!(status(&world, "Face1"), OpStatus::Ok, "the stock op never read the model");
+    assert_eq!(
+        status(&world, "Face1"),
+        OpStatus::Ok,
+        "the stock op never read the model"
+    );
 }
 
 // ------------------------------------------------------------ M3.1 stage C:
@@ -648,7 +794,11 @@ fn reason(world: &World, name: &str) -> Option<String> {
 #[test]
 fn stale_reason_is_none_unless_the_operation_is_stale() {
     let (world, mut history) = face_world();
-    assert_eq!(reason(&world, "Face1"), None, "Ok - there is nothing to explain");
+    assert_eq!(
+        reason(&world, "Face1"),
+        None,
+        "Ok - there is nothing to explain"
+    );
     // Never is not stale either: the status line already says "never".
     let cmd = CreateOperation::new(&world, "Face2", "EM-0400-2FL", SrcRef::Stock, face_params());
     history.execute(&world, cmd.expect("create"));
@@ -661,7 +811,10 @@ fn stale_reason_names_the_vanished_tool() {
     let cmd = DeleteEntity::new(&world, "EM-0400-2FL").expect("delete");
     history.execute(&world, cmd);
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
-    assert_eq!(reason(&world, "Face1").as_deref(), Some("its tool 'EM-0400-2FL' no longer exists"));
+    assert_eq!(
+        reason(&world, "Face1").as_deref(),
+        Some("its tool 'EM-0400-2FL' no longer exists")
+    );
 }
 
 #[test]
@@ -675,7 +828,10 @@ fn stale_reason_names_a_deleted_geometry_source() {
         contour_params(),
     );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate"),
+    );
     history.execute(&world, DeleteEntity::new(&world, "part").expect("delete"));
     assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
     assert_eq!(
@@ -691,9 +847,18 @@ fn stale_reason_asks_for_a_re_pick_when_the_feature_moved() {
     // message names the action - re-pick, not re-import blindly.
     let (world, mut history) = box_part_world();
     let top = FeatureSel::Face(top_face_of(&world, "part"));
-    let cmd = CreateOperation::new(&world, "C1", "EM-0600-4FL", sel("part", top), contour_params());
+    let cmd = CreateOperation::new(
+        &world,
+        "C1",
+        "EM-0600-4FL",
+        sel("part", top),
+        contour_params(),
+    );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "C1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "C1").expect("generate"),
+    );
     let cmd = UpdateModel::new(&world, "part", prism_10x10x5()).expect("model exists");
     history.execute(&world, cmd);
     assert_eq!(status(&world, "C1"), OpStatus::Stale);
@@ -716,10 +881,19 @@ fn stale_reason_names_a_height_whose_source_is_gone() {
     );
     history.execute(
         &world,
-        SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, Location::default())
-            .expect("box stock"),
+        SetStock::new(
+            &world,
+            StockShape::Box {
+                dx: 60.0,
+                dy: 60.0,
+                dz: 20.0,
+            },
+            Location::default(),
+        )
+        .expect("box stock"),
     );
-    let params = OpParams::Face { tilt: None,
+    let params = OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::of(HeightReference::TopOfStock, 5.0),
         cut_z: Height::fixed(4.5),
@@ -729,10 +903,22 @@ fn stale_reason_names_a_height_whose_source_is_gone() {
         plunge_feed: 300.0,
         climb: true,
     };
-    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Entity("part".into()), params);
+    let cmd = CreateOperation::new(
+        &world,
+        "Face1",
+        "EM-0400-2FL",
+        SrcRef::Entity("part".into()),
+        params,
+    );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
-    history.execute(&world, DeleteEntity::new(&world, STOCK_NAME).expect("delete stock"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate"),
+    );
+    history.execute(
+        &world,
+        DeleteEntity::new(&world, STOCK_NAME).expect("delete stock"),
+    );
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
     let why = reason(&world, "Face1").expect("stale");
     assert!(
@@ -748,7 +934,10 @@ fn stale_reason_falls_back_when_every_input_survives() {
     let (world, mut history) = face_world();
     let mut fatter = catalog_tool("EM-0400-2FL");
     fatter.diameter = 8.0;
-    history.execute(&world, ChangeTool::new(&world, "EM-0400-2FL", fatter).expect("edit"));
+    history.execute(
+        &world,
+        ChangeTool::new(&world, "EM-0400-2FL", fatter).expect("edit"),
+    );
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
     assert_eq!(
         reason(&world, "Face1").as_deref(),
@@ -783,7 +972,10 @@ fn regenerate_all_fixes_the_whole_job_in_one_undo_unit() {
         face_params_5(),
     );
     history.execute(&world, cmd.expect("create face"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate face"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate face"),
+    );
     let cmd = CreateOperation::new(
         &world,
         "Contour1",
@@ -792,9 +984,15 @@ fn regenerate_all_fixes_the_whole_job_in_one_undo_unit() {
         contour_params(),
     );
     history.execute(&world, cmd.expect("create contour"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate contour"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate contour"),
+    );
 
-    history.execute(&world, UpdateModel::new(&world, "part", prism_10x10x5()).expect("update"));
+    history.execute(
+        &world,
+        UpdateModel::new(&world, "part", prism_10x10x5()).expect("update"),
+    );
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
     assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
 
@@ -836,7 +1034,10 @@ fn regenerate_all_skips_what_it_cannot_generate() {
         face_params_5(),
     );
     history.execute(&world, cmd.expect("create face"));
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate face"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("generate face"),
+    );
     let cmd = CreateOperation::new(
         &world,
         "Contour1",
@@ -845,20 +1046,41 @@ fn regenerate_all_skips_what_it_cannot_generate() {
         contour_params(),
     );
     history.execute(&world, cmd.expect("create contour"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate contour"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate contour"),
+    );
 
     let face_cache = cache(&world, "Face1").expect("cache").path;
-    history.execute(&world, UpdateModel::new(&world, "part", prism_10x10x5()).expect("update"));
-    history.execute(&world, DeleteEntity::new(&world, "EM-0400-2FL").expect("delete tool"));
+    history.execute(
+        &world,
+        UpdateModel::new(&world, "part", prism_10x10x5()).expect("update"),
+    );
+    history.execute(
+        &world,
+        DeleteEntity::new(&world, "EM-0400-2FL").expect("delete tool"),
+    );
 
     let cmd = RegenerateAll::new(&world);
-    assert_eq!(cmd.regenerated(), 1, "Contour1 regenerates; Face1's generator refuses");
+    assert_eq!(
+        cmd.regenerated(),
+        1,
+        "Contour1 regenerates; Face1's generator refuses"
+    );
     assert_eq!(cmd.skipped().len(), 1);
     assert_eq!(cmd.skipped()[0].0, "Face1");
     history.execute(&world, cmd);
     assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
-    assert_eq!(status(&world, "Face1"), OpStatus::Stale, "the skip stays honestly marked");
-    assert_eq!(cache(&world, "Face1").expect("cache").path, face_cache, "a refusal wrote nothing");
+    assert_eq!(
+        status(&world, "Face1"),
+        OpStatus::Stale,
+        "the skip stays honestly marked"
+    );
+    assert_eq!(
+        cache(&world, "Face1").expect("cache").path,
+        face_cache,
+        "a refusal wrote nothing"
+    );
 
     // Undo trades back the one thing the batch touched.
     assert!(history.undo(&world));
@@ -869,20 +1091,38 @@ fn regenerate_all_skips_what_it_cannot_generate() {
 #[test]
 fn delete_operation_round_trips_with_its_cache() {
     let (world, mut history) = face_world();
-    let op = model::operation_of(&world, &model::find_by_name(&world, "Face1").expect("op")).expect("definition");
+    let op = model::operation_of(&world, &model::find_by_name(&world, "Face1").expect("op"))
+        .expect("definition");
     let first = cache(&world, "Face1").expect("cache").path;
 
-    history.execute(&world, DeleteOperation::new(&world, "Face1").expect("delete"));
-    assert!(model::find_by_name(&world, "Face1").is_none(), "entity and cache are gone together");
+    history.execute(
+        &world,
+        DeleteOperation::new(&world, "Face1").expect("delete"),
+    );
+    assert!(
+        model::find_by_name(&world, "Face1").is_none(),
+        "entity and cache are gone together"
+    );
 
     assert!(history.undo(&world));
     let e = model::find_by_name(&world, "Face1").expect("restored");
     assert!(model::is_operation(&world, &e));
-    assert_eq!(model::operation_of(&world, &e), Some(op), "definition restored exactly");
-    assert_eq!(cache(&world, "Face1").map(|c| c.path), Some(first.clone()), "cache restored too - not a hollow entity");
+    assert_eq!(
+        model::operation_of(&world, &e),
+        Some(op),
+        "definition restored exactly"
+    );
+    assert_eq!(
+        cache(&world, "Face1").map(|c| c.path),
+        Some(first.clone()),
+        "cache restored too - not a hollow entity"
+    );
 
     // regenerating now replays the identical path (deterministic generators)
-    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("regenerate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face1").expect("regenerate"),
+    );
     assert_eq!(cache(&world, "Face1").map(|c| c.path), Some(first));
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
 }
@@ -892,7 +1132,10 @@ fn delete_entity_restores_camparts() {
     // The generic delete must carry ToolDef/Operation/Toolpath through its
     // snapshot, or undo recreates a hollow entity and re-adding conflicts.
     let (world, mut history) = face_world();
-    history.execute(&world, DeleteEntity::new(&world, "Face1").expect("generic delete"));
+    history.execute(
+        &world,
+        DeleteEntity::new(&world, "Face1").expect("generic delete"),
+    );
     assert!(model::find_by_name(&world, "Face1").is_none());
     assert!(history.undo(&world));
     let e = model::find_by_name(&world, "Face1").expect("restored");
@@ -900,11 +1143,17 @@ fn delete_entity_restores_camparts() {
     assert!(model::toolpath_of(&world, &e).is_some(), "cache survives");
     assert_eq!(status(&world, "Face1"), OpStatus::Ok);
 
-    history.execute(&world, DeleteEntity::new(&world, "EM-0400-2FL").expect("delete tool"));
+    history.execute(
+        &world,
+        DeleteEntity::new(&world, "EM-0400-2FL").expect("delete tool"),
+    );
     assert!(history.undo(&world));
     let t = model::find_by_name(&world, "EM-0400-2FL").expect("tool restored");
     assert!(model::is_tool(&world, &t));
-    assert_eq!(model::tool_of(&world, &t), Some(catalog_tool("EM-0400-2FL")));
+    assert_eq!(
+        model::tool_of(&world, &t),
+        Some(catalog_tool("EM-0400-2FL"))
+    );
 }
 
 #[test]
@@ -914,8 +1163,15 @@ fn tools_and_operations_stay_out_of_the_models_list() {
         .into_iter()
         .map(|(n, _)| n)
         .collect();
-    assert!(names.is_empty(), "setup furniture and CAM objects are not models: {names:?}");
-    assert_eq!(model::named_entities(&world).len(), 3, "Stock, tool, operation");
+    assert!(
+        names.is_empty(),
+        "setup furniture and CAM objects are not models: {names:?}"
+    );
+    assert_eq!(
+        model::named_entities(&world).len(),
+        3,
+        "Stock, tool, operation"
+    );
 }
 
 #[test]
@@ -923,7 +1179,10 @@ fn contour_on_a_model_box_generates() {
     let world = new_world();
     let mut history = History::default();
     add_tool(&world, &mut history, "EM-0600-4FL");
-    history.execute(&world, ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))));
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
     let cmd = CreateOperation::new(
         &world,
         "Contour1",
@@ -932,7 +1191,10 @@ fn contour_on_a_model_box_generates() {
         contour_params(),
     );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "Contour1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate"),
+    );
     let c = cache(&world, "Contour1").expect("cache");
     assert!(!c.path.is_empty());
     assert!(c.path.is_chained());
@@ -954,7 +1216,8 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
     let trace = Operation {
         tool: String::new(),
         src: SrcRef::Stock,
-        params: OpParams::Trace { tilt: None,
+        params: OpParams::Trace {
+            tilt: None,
             clearance_z: Height::fixed(25.0),
             retract_z: None,
             top_z: Height::fixed(10.0),
@@ -981,13 +1244,17 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
     };
     assert!((extent(|p| p.x) - 60.0).abs() < 1e-9, "60 mm across X");
     assert!((extent(|p| p.y) - 60.0).abs() < 1e-9, "60 mm across Y");
-    assert!(pts.iter().all(|p| p.x.abs() <= 30.0 + 1e-9 && p.y.abs() <= 30.0 + 1e-9));
+    assert!(
+        pts.iter()
+            .all(|p| p.x.abs() <= 30.0 + 1e-9 && p.y.abs() <= 30.0 + 1e-9)
+    );
 
     // Face: the silhouette footprint of the same box (no tool consulted).
     let face = Operation {
         tool: String::new(),
         src: SrcRef::Stock,
-        params: OpParams::Face { tilt: None,
+        params: OpParams::Face {
+            tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
             cut_z: Height::fixed(19.5),
@@ -1001,7 +1268,11 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         setup: None,
     };
     assert_eq!(operation::region_z(&world, None, &face.params), Some(19.5));
-    assert!(!operation::region_of(&world, &face).expect("footprint").is_empty());
+    assert!(
+        !operation::region_of(&world, &face)
+            .expect("footprint")
+            .is_empty()
+    );
 
     // A vanished source previews NOTHING, not a stale outline.
     let ghost = Operation {
@@ -1016,8 +1287,8 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
 
 // ===================== M1.5 step 4: selection sources =====================
 
-use camcraft_app::geometry::feature::{self, FaceKind};
 use camcraft_app::geometry::Triangle;
+use camcraft_app::geometry::feature::{self, FaceKind};
 use camcraft_app::operation::{FeatureSel, GeoSel};
 
 /// Planar face whose plane sits highest along +z - the box's top. Face
@@ -1089,7 +1360,8 @@ fn sel(entity: &str, feature: FeatureSel) -> SrcRef {
 }
 
 fn face_sel_params() -> OpParams {
-    OpParams::Face { tilt: None,
+    OpParams::Face {
+        tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
         cut_z: Height::fixed(4.5),
@@ -1119,24 +1391,45 @@ fn a_selected_face_bounds_facing_and_contour() {
 
     // Contour: the face's outline is the boundary; generation is the
     // normal command path end to end.
-    let cmd = CreateOperation::new(&world, "C1", "EM-0600-4FL", sel("part", top), contour_params());
+    let cmd = CreateOperation::new(
+        &world,
+        "C1",
+        "EM-0600-4FL",
+        sel("part", top),
+        contour_params(),
+    );
     history.execute(&world, cmd.expect("create contour on selection"));
-    let op = model::operation_of(&world, &model::find_by_name(&world, "C1").expect("C1")).expect("op");
+    let op =
+        model::operation_of(&world, &model::find_by_name(&world, "C1").expect("C1")).expect("op");
     let region = operation::region_of(&world, &op).expect("the picked face bounds a region");
     assert_eq!(region.loops().len(), 1, "one square boundary, nothing else");
     let xs: Vec<f64> = region.loops()[0].points().iter().map(|p| p.x).collect();
     let ys: Vec<f64> = region.loops()[0].points().iter().map(|p| p.y).collect();
     assert!(xs.iter().all(|x| (0.0..=10.0).contains(x)) && xs.iter().any(|x| *x > 9.0));
     assert!(ys.iter().all(|y| (0.0..=10.0).contains(y)) && ys.iter().any(|y| *y > 9.0));
-    history.execute(&world, GenerateOperation::new(&world, "C1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "C1").expect("generate"),
+    );
     assert!(!cache(&world, "C1").expect("cache").path.is_empty());
     assert_eq!(status(&world, "C1"), OpStatus::Ok);
 
     // Face: same region, cut plane from the parameter.
-    let cmd = CreateOperation::new(&world, "F1", "EM-0600-4FL", sel("part", top), face_sel_params());
+    let cmd = CreateOperation::new(
+        &world,
+        "F1",
+        "EM-0600-4FL",
+        sel("part", top),
+        face_sel_params(),
+    );
     history.execute(&world, cmd.expect("create face on selection"));
-    let op = model::operation_of(&world, &model::find_by_name(&world, "F1").expect("F1")).expect("op");
-    assert!(!operation::region_of(&world, &op).expect("footprint").is_empty());
+    let op =
+        model::operation_of(&world, &model::find_by_name(&world, "F1").expect("F1")).expect("op");
+    assert!(
+        !operation::region_of(&world, &op)
+            .expect("footprint")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1162,8 +1455,8 @@ fn a_vertical_or_tilted_pick_refuses_with_the_fix_in_the_message() {
     // says so.
     let contour = op(contour_params());
     assert_eq!(operation::region_of(&world, &contour), None);
-    let e = operation::generate(&world, &contour, "")
-        .expect_err("a wall face bounds no area in XY");
+    let e =
+        operation::generate(&world, &contour, "").expect_err("a wall face bounds no area in XY");
     assert!(e.to_string().contains("projects to a line"), "{e}");
 }
 
@@ -1184,13 +1477,22 @@ fn closed_chain_rims_bound_and_double_picks_collapse_to_one_loop() {
     };
     let region = operation::region_of(&world, &op).expect("the rim chain bounds the disc");
     assert_eq!(region.loops().len(), 1);
-    assert!(region.loops()[0].points().len() >= 16, "the chord ring survives");
+    assert!(
+        region.loops()[0].points().len() >= 16,
+        "the chord ring survives"
+    );
 
     // The same rim picked twice is one boundary, not a zero-wide sliver.
     let twice = Operation {
         src: SrcRef::Selection(vec![
-            GeoSel { entity: "disc".into(), feature: rim },
-            GeoSel { entity: "disc".into(), feature: rim },
+            GeoSel {
+                entity: "disc".into(),
+                feature: rim,
+            },
+            GeoSel {
+                entity: "disc".into(),
+                feature: rim,
+            },
         ]),
         ..op.clone()
     };
@@ -1218,13 +1520,23 @@ fn closed_chain_rims_bound_and_double_picks_collapse_to_one_loop() {
     assert_eq!(r3.loops().len(), 1);
     let both = Operation {
         src: SrcRef::Selection(vec![
-            GeoSel { entity: "disc".into(), feature: sheet },
-            GeoSel { entity: "disc".into(), feature: rim },
+            GeoSel {
+                entity: "disc".into(),
+                feature: sheet,
+            },
+            GeoSel {
+                entity: "disc".into(),
+                feature: rim,
+            },
         ]),
         ..op.clone()
     };
     let r4 = operation::region_of(&world, &both).expect("face+rim dedupe");
-    assert_eq!(r4.loops().len(), 1, "one ring whether picked as face, chain, or both");
+    assert_eq!(
+        r4.loops().len(),
+        1,
+        "one ring whether picked as face, chain, or both"
+    );
 }
 
 #[test]
@@ -1242,7 +1554,8 @@ fn pocket_refuses_an_open_run() {
     let op = Operation {
         tool: "EM-0600-4FL".into(),
         src: sel("part", open),
-        params: OpParams::Pocket { tilt: None,
+        params: OpParams::Pocket {
+            tilt: None,
             stepover: 3.0,
             stock_to_leave: 0.0,
             clearance_z: Height::fixed(10.0),
@@ -1275,7 +1588,10 @@ fn selection_staleness_tracks_content_not_counts() {
     let params = face_sel_params();
     let cmd = CreateOperation::new(&world, "S1", "EM-0600-4FL", src_a.clone(), params.clone());
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "S1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "S1").expect("generate"),
+    );
     assert_eq!(status(&world, "S1"), OpStatus::Ok);
 
     // Swapping the picked face - same entity, same item count - moves
@@ -1297,15 +1613,34 @@ fn selection_staleness_tracks_content_not_counts() {
     // Face vs Chain on one entity are distinguishable, and so is item
     // order (the pick list is the user's, not a bag).
     let chain = FeatureSel::Chain(any_chain_of(&world, "part"));
-    let sc = operation::current_stamp(&world, "EM-0600-4FL", &sel("part", chain), &params, "S1", None);
+    let sc = operation::current_stamp(
+        &world,
+        "EM-0600-4FL",
+        &sel("part", chain),
+        &params,
+        "S1",
+        None,
+    );
     assert_ne!(sa, sc);
     let ab = SrcRef::Selection(vec![
-        GeoSel { entity: "part".into(), feature: FeatureSel::Face(top_a) },
-        GeoSel { entity: "part".into(), feature: FeatureSel::Face(wall) },
+        GeoSel {
+            entity: "part".into(),
+            feature: FeatureSel::Face(top_a),
+        },
+        GeoSel {
+            entity: "part".into(),
+            feature: FeatureSel::Face(wall),
+        },
     ]);
     let ba = SrcRef::Selection(vec![
-        GeoSel { entity: "part".into(), feature: FeatureSel::Face(wall) },
-        GeoSel { entity: "part".into(), feature: FeatureSel::Face(top_a) },
+        GeoSel {
+            entity: "part".into(),
+            feature: FeatureSel::Face(wall),
+        },
+        GeoSel {
+            entity: "part".into(),
+            feature: FeatureSel::Face(top_a),
+        },
     ]);
     assert_ne!(
         operation::current_stamp(&world, "EM-0600-4FL", &ab, &params, "S1", None),
@@ -1318,14 +1653,31 @@ fn a_vanished_selection_previews_nothing_and_goes_stale() {
     let (world, mut history) = box_part_world();
     box_stock(&world, &mut history, 60.0, 60.0, 20.0);
     let top = FeatureSel::Face(top_face_of(&world, "part"));
-    let cmd = CreateOperation::new(&world, "V1", "EM-0600-4FL", sel("part", top), face_sel_params());
+    let cmd = CreateOperation::new(
+        &world,
+        "V1",
+        "EM-0600-4FL",
+        sel("part", top),
+        face_sel_params(),
+    );
     history.execute(&world, cmd.expect("create"));
-    history.execute(&world, GenerateOperation::new(&world, "V1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "V1").expect("generate"),
+    );
     assert_eq!(status(&world, "V1"), OpStatus::Ok);
 
-    history.execute(&world, DeleteEntity::new(&world, "part").expect("delete part"));
-    let op = model::operation_of(&world, &model::find_by_name(&world, "V1").expect("V1")).expect("op");
-    assert_eq!(operation::region_of(&world, &op), None, "a dead pick draws nothing");
+    history.execute(
+        &world,
+        DeleteEntity::new(&world, "part").expect("delete part"),
+    );
+    let op =
+        model::operation_of(&world, &model::find_by_name(&world, "V1").expect("V1")).expect("op");
+    assert_eq!(
+        operation::region_of(&world, &op),
+        None,
+        "a dead pick draws nothing"
+    );
     assert_eq!(status(&world, "V1"), OpStatus::Stale);
 }
 
@@ -1334,7 +1686,16 @@ fn selection_commands_validate_at_construction() {
     let (world, mut history) = box_part_world();
     add_tool(&world, &mut history, "EM-0400-2FL");
     // Empty picks, vanished entities and offsets never reach the world.
-    assert!(CreateOperation::new(&world, "B", "EM-0400-2FL", SrcRef::Selection(vec![]), face_params()).is_err());
+    assert!(
+        CreateOperation::new(
+            &world,
+            "B",
+            "EM-0400-2FL",
+            SrcRef::Selection(vec![]),
+            face_params()
+        )
+        .is_err()
+    );
     let bad = sel("gone", FeatureSel::Face(7));
     assert!(matches!(
         CreateOperation::new(&world, "B", "EM-0400-2FL", bad, face_params()),
@@ -1342,12 +1703,17 @@ fn selection_commands_validate_at_construction() {
     ));
     let offset = sel("G54", FeatureSel::Face(7));
     assert!(CreateOperation::new(&world, "B", "EM-0400-2FL", offset, face_params()).is_err());
-    let blank = SrcRef::Selection(vec![GeoSel { entity: String::new(), feature: FeatureSel::Face(7) }]);
+    let blank = SrcRef::Selection(vec![GeoSel {
+        entity: String::new(),
+        feature: FeatureSel::Face(7),
+    }]);
     assert!(CreateOperation::new(&world, "B", "EM-0400-2FL", blank, face_params()).is_err());
     // A real pick creates cleanly (the id itself is only checked at
     // generation - it is a geometry hash, not a pointer).
     let top = FeatureSel::Face(top_face_of(&world, "part"));
-    assert!(CreateOperation::new(&world, "OK", "EM-0400-2FL", sel("part", top), face_params()).is_ok());
+    assert!(
+        CreateOperation::new(&world, "OK", "EM-0400-2FL", sel("part", top), face_params()).is_ok()
+    );
 }
 
 // ============== M1.5 step 8: selection-aware generation ==============
@@ -1363,11 +1729,10 @@ fn open_run_of(world: &World, name: &str) -> u64 {
     feature::chains(&f)
         .into_iter()
         .find(|c| {
-            !c.closed
-                && {
-                    let p = feature::chain_points(&f, c);
-                    p.len() >= 2 && (p[0][0] != p[1][0] || p[0][1] != p[1][1])
-                }
+            !c.closed && {
+                let p = feature::chain_points(&f, c);
+                p.len() >= 2 && (p[0][0] != p[1][0] || p[0][1] != p[1][1])
+            }
         })
         .map(|c| c.id)
         .expect("a box has horizontal rim edges")
@@ -1388,14 +1753,24 @@ fn an_open_run_contours_on_its_centerline() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Edge1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Edge1").expect("generate"),
+    );
 
     // Preview: the run bounds no area, so no region outline - the
     // centerline stands in for it, and it is exactly what the path rides.
     let op = model::operation_of(&world, &model::find_by_name(&world, "Edge1").expect("op"))
         .expect("op");
-    assert!(operation::region_of(&world, &op).is_none(), "a run bounds no area");
-    assert_eq!(operation::chains_of(&world, &op).len(), 1, "one run to draw");
+    assert!(
+        operation::region_of(&world, &op).is_none(),
+        "a run bounds no area"
+    );
+    assert_eq!(
+        operation::chains_of(&world, &op).len(),
+        1,
+        "one run to draw"
+    );
 
     let path = cache(&world, "Edge1").expect("cache").path;
     assert!(path.is_chained(), "one continuous path");
@@ -1430,7 +1805,11 @@ fn an_open_run_contours_on_its_centerline() {
             .iter()
             .filter(|m| m.kind == MoveKind::Feed && m.to.z == z)
             .collect();
-        assert_eq!(feeds.len(), pts.len() - 1, "one feed per segment, level {lvl}");
+        assert_eq!(
+            feeds.len(),
+            pts.len() - 1,
+            "one feed per segment, level {lvl}"
+        );
         let last = feeds.last().expect("a level feeds somewhere");
         assert_eq!(
             (last.to.x, last.to.y),
@@ -1609,7 +1988,11 @@ fn duplicate_seam_points_do_not_break_push_loop() {
         setup: None,
     };
     let region = operation::region_of(&world, &op).expect("the ring survives the doubled seam");
-    assert_eq!(region.loops().len(), 1, "one ring, whatever the pick repeats");
+    assert_eq!(
+        region.loops().len(),
+        1,
+        "one ring, whatever the pick repeats"
+    );
 }
 
 #[test]
@@ -1632,7 +2015,8 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
             .expect("the disc is one planar face"),
     );
     let rim_id = rim_chain_of(&world, "disc");
-    let params = OpParams::Contour { tilt: None,
+    let params = OpParams::Contour {
+        tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),
@@ -1671,9 +2055,19 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
         )
         .expect("create rim pick"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "R-face").expect("generate face"));
-    history.execute(&world, GenerateOperation::new(&world, "R-rim").expect("generate rim"));
-    assert_eq!(status(&world, "R-rim"), OpStatus::Ok, "a tangential boundary cut");
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "R-face").expect("generate face"),
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "R-rim").expect("generate rim"),
+    );
+    assert_eq!(
+        status(&world, "R-rim"),
+        OpStatus::Ok,
+        "a tangential boundary cut"
+    );
 
     let pf = cache(&world, "R-face").expect("cache").path;
     let pr = cache(&world, "R-rim").expect("cache").path;
@@ -1716,7 +2110,10 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
             ring.iter()
                 .any(|q| (m.to.x - q[0]).abs() < 1e-6 && (m.to.y - q[1]).abs() < 1e-6)
         });
-    assert!(!on_rim, "a closed chain bounds - the tool never rides its vertices");
+    assert!(
+        !on_rim,
+        "a closed chain bounds - the tool never rides its vertices"
+    );
     let min_standoff = pr
         .moves
         .iter()
@@ -1758,11 +2155,21 @@ fn a_mixed_pick_list_cuts_boundary_then_run_and_says_what_overlap_means() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Mix1").expect("generate"));
-    let op = model::operation_of(&world, &model::find_by_name(&world, "Mix1").expect("op"))
-        .expect("op");
-    assert!(operation::region_of(&world, &op).is_some(), "the face still bounds");
-    assert_eq!(operation::chains_of(&world, &op).len(), 1, "the run still runs");
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Mix1").expect("generate"),
+    );
+    let op =
+        model::operation_of(&world, &model::find_by_name(&world, "Mix1").expect("op")).expect("op");
+    assert!(
+        operation::region_of(&world, &op).is_some(),
+        "the face still bounds"
+    );
+    assert_eq!(
+        operation::chains_of(&world, &op).len(),
+        1,
+        "the run still runs"
+    );
 
     let out = cache(&world, "Mix1").expect("cache");
     assert!(out.path.is_chained(), "stitched seams stay continuous");
@@ -1820,7 +2227,11 @@ fn bored_plate() -> camcraft_app::geometry::Mesh {
     let tau = std::f64::consts::TAU;
     let bore = |i: usize| {
         let a = tau * (i % 16) as f64 / 16.0;
-        let r = if (i % 16).is_multiple_of(8) { 12.0 * 1.15 } else { 12.0 };
+        let r = if (i % 16).is_multiple_of(8) {
+            12.0 * 1.15
+        } else {
+            12.0
+        };
         (r * a.cos(), r * a.sin())
     };
     // The bore vertices pushed radially onto the plate's square edge;
@@ -1942,7 +2353,11 @@ fn seamed_area(r: f64, every: usize) -> f64 {
     let tau = std::f64::consts::TAU;
     let v = |i: usize| {
         let a = tau * (i % 16) as f64 / 16.0;
-        let rr = if (i % 16).is_multiple_of(every) { r * 1.15 } else { r };
+        let rr = if (i % 16).is_multiple_of(every) {
+            r * 1.15
+        } else {
+            r
+        };
         (rr * a.cos(), rr * a.sin())
     };
     (0..16)
@@ -1971,7 +2386,8 @@ fn face_on_split_bore_rim_machines_annulus() {
     let op = sel_op(&world, items.clone(), face_sel_params());
     let region = operation::region_of(&world, &op).expect("the rim's complement in the plate");
     assert_eq!(
-        region.loops().len(), 2,
+        region.loops().len(),
+        2,
         "plate boundary and bore, not a half-open rim"
     );
     let want = 1600.0 - seamed_area(12.0, 8);
@@ -1980,19 +2396,37 @@ fn face_on_split_bore_rim_machines_annulus() {
         (got - want).abs() / want < 0.01,
         "the annulus, to the polygon's own area: {got} vs {want}"
     );
-    assert!(!region.contains(Point2::new(0.0, 0.0)), "the bore is left standing");
-    assert!(region.contains(Point2::new(15.0, 0.0)), "material by the rim is taken");
+    assert!(
+        !region.contains(Point2::new(0.0, 0.0)),
+        "the bore is left standing"
+    );
+    assert!(
+        region.contains(Point2::new(15.0, 0.0)),
+        "material by the rim is taken"
+    );
     assert!(region.contains(Point2::new(0.0, -16.0)), "and across it");
 
     // And it generates: the same walk the preview read, start to finish.
     history.execute(
         &world,
-        CreateOperation::new(&world, "Bore1", "EM-0600-4FL", SrcRef::Selection(items), face_sel_params())
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "Bore1",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            face_sel_params(),
+        )
+        .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Bore1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Bore1").expect("generate"),
+    );
     let path = cache(&world, "Bore1").expect("cache").path;
-    assert!(!path.moves.is_empty(), "facing rows across the annulus bounds");
+    assert!(
+        !path.moves.is_empty(),
+        "facing rows across the annulus bounds"
+    );
     assert!(path.all_finite());
 }
 
@@ -2021,7 +2455,8 @@ fn a_patch_pick_bounds_the_same_annulus_as_its_strips() {
     let op = sel_op(&world, items.clone(), face_sel_params());
     let region = operation::region_of(&world, &op).expect("bore wall bounds a region");
     assert_eq!(
-        region.loops().len(), 2,
+        region.loops().len(),
+        2,
         "block outline and bore, not the wall's two rims doubled"
     );
     let tau = std::f64::consts::TAU;
@@ -2031,8 +2466,14 @@ fn a_patch_pick_bounds_the_same_annulus_as_its_strips() {
         (got - want).abs() / want < 0.01,
         "the annulus, to the polygon's own area: {got} vs {want}"
     );
-    assert!(!region.contains(Point2::new(0.0, 0.0)), "the bore stays standing");
-    assert!(region.contains(Point2::new(15.0, 0.0)), "material by the wall is taken");
+    assert!(
+        !region.contains(Point2::new(0.0, 0.0)),
+        "the bore stays standing"
+    );
+    assert!(
+        region.contains(Point2::new(15.0, 0.0)),
+        "material by the wall is taken"
+    );
 
     // Equivalence oracle: the closed rim chains answer the same cut.
     let rims: Vec<u64> = feature::chains(&f)
@@ -2057,12 +2498,24 @@ fn a_patch_pick_bounds_the_same_annulus_as_its_strips() {
     // And it generates.
     history.execute(
         &world,
-        CreateOperation::new(&world, "Wall1", "EM-0600-4FL", SrcRef::Selection(items), face_sel_params())
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "Wall1",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            face_sel_params(),
+        )
+        .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Wall1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Wall1").expect("generate"),
+    );
     let path = cache(&world, "Wall1").expect("cache").path;
-    assert!(!path.moves.is_empty(), "facing rows across the annulus bounds");
+    assert!(
+        !path.moves.is_empty(),
+        "facing rows across the annulus bounds"
+    );
     assert!(path.all_finite());
 }
 
@@ -2087,7 +2540,10 @@ fn face_on_one_bore_run_machines_outside_to_stock() {
         .iter()
         .copied()
         .find(|&id| {
-            let c = feature::chains(&f).into_iter().find(|x| x.id == id).expect("chain");
+            let c = feature::chains(&f)
+                .into_iter()
+                .find(|x| x.id == id)
+                .expect("chain");
             let p = feature::chain_points(&f, &c);
             p.iter().map(|q| q[1]).sum::<f64>() > 0.0
         })
@@ -2096,16 +2552,33 @@ fn face_on_one_bore_run_machines_outside_to_stock() {
     let items = chain_picks("plate", &[upper]);
     let op = sel_op(&world, items.clone(), face_sel_params());
     let region = operation::region_of(&world, &op).expect("the run-out to the stock");
-    assert!(region.contains(Point2::new(0.0, 16.0)), "material beyond the rim, up to stock");
-    assert!(region.contains(Point2::new(18.0, 6.0)), "and by the extension, still past the rim");
-    assert!(!region.contains(Point2::new(0.0, -16.0)), "the run limits: below it nothing moves");
-    assert!(!region.contains(Point2::new(0.0, 6.0)), "and the bore air is never in the region");
-    let got = region.area().abs();
-    assert!(got > 400.0 && got < 1600.0, "a band of the plate, not all of it: {got}");
-
-    let notes = operation::selection_notes(&world, None,&items, &face_sel_params());
     assert!(
-        notes.iter().any(|s| s.contains("1 open run extended to the stock boundary")),
+        region.contains(Point2::new(0.0, 16.0)),
+        "material beyond the rim, up to stock"
+    );
+    assert!(
+        region.contains(Point2::new(18.0, 6.0)),
+        "and by the extension, still past the rim"
+    );
+    assert!(
+        !region.contains(Point2::new(0.0, -16.0)),
+        "the run limits: below it nothing moves"
+    );
+    assert!(
+        !region.contains(Point2::new(0.0, 6.0)),
+        "and the bore air is never in the region"
+    );
+    let got = region.area().abs();
+    assert!(
+        got > 400.0 && got < 1600.0,
+        "a band of the plate, not all of it: {got}"
+    );
+
+    let notes = operation::selection_notes(&world, None, &items, &face_sel_params());
+    assert!(
+        notes
+            .iter()
+            .any(|s| s.contains("1 open run extended to the stock boundary")),
         "the list says what the run-out did: {notes:?}"
     );
     assert!(
@@ -2124,7 +2597,10 @@ fn one_open_run_on_a_boss_faces_the_whole_boss() {
     let mut history = History::default();
     add_tool(&world, &mut history, "EM-0600-4FL");
     box_stock(&world, &mut history, 60.0, 60.0, 20.0);
-    history.execute(&world, ImportModel::from_mesh("disc", seamed_sheet(12.0, 4)));
+    history.execute(
+        &world,
+        ImportModel::from_mesh("disc", seamed_sheet(12.0, 4)),
+    );
     let runs = open_runs_of(&world, "disc");
     assert_eq!(runs.len(), 4, "the quarter-seamed rim walks as four runs");
 
@@ -2138,15 +2614,22 @@ fn one_open_run_on_a_boss_faces_the_whole_boss() {
         "the whole boss, to its own polygon: {got} vs {want}"
     );
     assert!(region.contains(Point2::new(0.0, 0.0)));
-    assert!(region.contains(Point2::new(2.0, 2.0)), "the interior is the answer");
-
-    let notes = operation::selection_notes(&world, None,&items, &face_sel_params());
     assert!(
-        notes.iter().any(|s| s.contains("1 open run extended to the stock boundary")),
+        region.contains(Point2::new(2.0, 2.0)),
+        "the interior is the answer"
+    );
+
+    let notes = operation::selection_notes(&world, None, &items, &face_sel_params());
+    assert!(
+        notes
+            .iter()
+            .any(|s| s.contains("1 open run extended to the stock boundary")),
         "{notes:?}"
     );
     assert!(
-        notes.iter().any(|s| s.contains("machining outside the run")),
+        notes
+            .iter()
+            .any(|s| s.contains("machining outside the run")),
         "air on the far side is said, not swallowed: {notes:?}"
     );
 }
@@ -2182,9 +2665,18 @@ fn straight_run_machines_the_material_side() {
         (got - want).abs() / want < 0.01,
         "the whole sheet under the run: {got} vs {want}"
     );
-    assert!(region.contains(Point2::new(0.0, -9.0)), "metal below the scribble is in");
-    assert!(region.contains(Point2::new(0.0, 9.0)), "metal above it is in - the run is a limit, not a side");
-    assert!(!region.contains(Point2::new(0.0, 15.0)), "air up to the stock stays air");
+    assert!(
+        region.contains(Point2::new(0.0, -9.0)),
+        "metal below the scribble is in"
+    );
+    assert!(
+        region.contains(Point2::new(0.0, 9.0)),
+        "metal above it is in - the run is a limit, not a side"
+    );
+    assert!(
+        !region.contains(Point2::new(0.0, 15.0)),
+        "air up to the stock stays air"
+    );
 }
 
 #[test]
@@ -2197,17 +2689,29 @@ fn ambiguous_extension_refuses_by_name() {
     let mut history = History::default();
     add_tool(&world, &mut history, "EM-0600-4FL");
     box_stock(&world, &mut history, 60.0, 60.0, 20.0);
-    history.execute(&world, ImportModel::from_mesh("disc", seamed_sheet(30.0, 8)));
+    history.execute(
+        &world,
+        ImportModel::from_mesh("disc", seamed_sheet(30.0, 8)),
+    );
     let runs = open_runs_of(&world, "disc");
     assert_eq!(runs.len(), 2);
 
     let op = sel_op(&world, chain_picks("disc", &[runs[0]]), face_sel_params());
-    assert!(operation::region_of(&world, &op).is_none(), "no preview from undecidable geometry");
+    assert!(
+        operation::region_of(&world, &op).is_none(),
+        "no preview from undecidable geometry"
+    );
     let items = chain_picks("disc", &[runs[0]]);
     history.execute(
         &world,
-        CreateOperation::new(&world, "Bad1", "EM-0600-4FL", SrcRef::Selection(items), face_sel_params())
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "Bad1",
+            "EM-0600-4FL",
+            SrcRef::Selection(items),
+            face_sel_params(),
+        )
+        .expect("create"),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "Bad1")
         .err()
@@ -2215,7 +2719,10 @@ fn ambiguous_extension_refuses_by_name() {
     else {
         panic!("expected a machining refusal, got something else");
     };
-    assert!(msg.contains("ambiguous") && msg.contains("closed chain"), "{msg}");
+    assert!(
+        msg.contains("ambiguous") && msg.contains("closed chain"),
+        "{msg}"
+    );
 }
 
 #[test]
@@ -2238,10 +2745,19 @@ fn straight_runs_face_their_material_and_trace_refuses_by_name() {
     );
     history.execute(
         &world,
-        CreateOperation::new(&world, "Face9", "EM-0600-4FL", SrcRef::Selection(items.clone()), face_sel_params())
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "Face9",
+            "EM-0600-4FL",
+            SrcRef::Selection(items.clone()),
+            face_sel_params(),
+        )
+        .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Face9").expect("generate the whole face"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Face9").expect("generate the whole face"),
+    );
     assert!(
         !cache(&world, "Face9").expect("cache").path.moves.is_empty(),
         "rows across the top face"
@@ -2256,7 +2772,8 @@ fn straight_runs_face_their_material_and_trace_refuses_by_name() {
             "Tr9",
             "EM-0600-4FL",
             SrcRef::Selection(items),
-            OpParams::Trace { tilt: None,
+            OpParams::Trace {
+                tilt: None,
                 clearance_z: Height::fixed(25.0),
                 retract_z: None,
                 top_z: Height::fixed(5.0),
@@ -2289,16 +2806,24 @@ fn selection_notes_report_stitching_and_extension() {
     history.execute(&world, ImportModel::from_mesh("plate", bored_plate()));
     let runs = bore_runs_of(&world, "plate");
     let items = chain_picks("plate", &runs);
-    let notes = operation::selection_notes(&world, None,&items, &face_sel_params());
+    let notes = operation::selection_notes(&world, None, &items, &face_sel_params());
     assert!(
-        notes.iter().any(|s| s.contains("2 open runs stitched into 1 ring")),
+        notes
+            .iter()
+            .any(|s| s.contains("2 open runs stitched into 1 ring")),
         "{notes:?}"
     );
-    assert!(notes.iter().any(|s| s.contains("machining outside the run")), "{notes:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|s| s.contains("machining outside the run")),
+        "{notes:?}"
+    );
 
     // A Contour over the same picks stitches into one boundary pass, so
     // the stitch is reported; nothing was extended, so that stays unsaid.
-    let contour = OpParams::Contour { tilt: None,
+    let contour = OpParams::Contour {
+        tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(25.0),
         retract_z: Height::fixed(12.0),
@@ -2315,16 +2840,20 @@ fn selection_notes_report_stitching_and_extension() {
         tab_width: 0.0,
         tab_height: 0.0,
     };
-    let notes = operation::selection_notes(&world, None,&items, &contour);
+    let notes = operation::selection_notes(&world, None, &items, &contour);
     assert!(
-        notes.iter().any(|s| s.contains("2 open runs stitched into 1 ring")),
+        notes
+            .iter()
+            .any(|s| s.contains("2 open runs stitched into 1 ring")),
         "{notes:?}"
     );
     assert!(!notes.iter().any(|s| s.contains("extended")), "{notes:?}");
     // The stitched ring circles the bore's air, so Auto answers Inside
     // (M1.5.4) - what used to be a silent outside cut is now said.
     assert!(
-        notes.iter().any(|s| s.contains("machining inside the ring")),
+        notes
+            .iter()
+            .any(|s| s.contains("machining inside the ring")),
         "{notes:?}"
     );
 }
@@ -2336,7 +2865,8 @@ fn selection_notes_report_stitching_and_extension() {
 
 /// Contour at the band z±1, one level pair deep enough for the fixtures.
 fn contour_at(side: Side, z: f64) -> OpParams {
-    OpParams::Contour { tilt: None,
+    OpParams::Contour {
+        tilt: None,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(10.0),
         retract_z: Height::fixed(8.0),
@@ -2398,19 +2928,28 @@ fn contour_bore_wall_pick_defaults_inside() {
     let items = bore_patch_pick(&world, "plate");
     let op = sel_op(&world, items.clone(), contour_at(Side::Auto, 4.0));
     let region = operation::region_of(&world, &op).expect("the picked wall rings");
-    assert_eq!(region.loops().len(), 1, "contour machines the ring, not the annulus");
+    assert_eq!(
+        region.loops().len(),
+        1,
+        "contour machines the ring, not the annulus"
+    );
     // 1e-5: Region::new round-trips the vertices through clipper's int
     // grid; the law under test is that nothing was COMPLEMENTED, not the
     // last bit of the coordinate.
     assert!(
-        region.loops()[0].points().iter().all(|p| (p.x.hypot(p.y) - 12.0).abs() < 1e-5),
+        region.loops()[0]
+            .points()
+            .iter()
+            .all(|p| (p.x.hypot(p.y) - 12.0).abs() < 1e-5),
         "the picked ring is untouched: contour never rewrites loops; got {:?}",
         region.loops()[0].points(),
     );
 
-    let notes = operation::selection_notes(&world, None,&items, &contour_at(Side::Auto, 4.0));
+    let notes = operation::selection_notes(&world, None, &items, &contour_at(Side::Auto, 4.0));
     assert!(
-        notes.iter().any(|s| s.contains("machining inside the ring")),
+        notes
+            .iter()
+            .any(|s| s.contains("machining inside the ring")),
         "{notes:?}"
     );
 
@@ -2425,7 +2964,10 @@ fn contour_bore_wall_pick_defaults_inside() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "BoreC").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "BoreC").expect("generate"),
+    );
     assert_eq!(status(&world, "BoreC"), OpStatus::Ok);
     let radii = feed_radii(&world, "BoreC");
     assert!(
@@ -2443,9 +2985,11 @@ fn contour_boss_pick_defaults_outside() {
     add_tool(&world, &mut history, "EM-0600-4FL");
     history.execute(&world, ImportModel::from_mesh("disc", disc_mesh(12.0)));
     let items = chain_picks("disc", &[rim_chain_of(&world, "disc")]);
-    let notes = operation::selection_notes(&world, None,&items, &contour_at(Side::Auto, 0.0));
+    let notes = operation::selection_notes(&world, None, &items, &contour_at(Side::Auto, 0.0));
     assert!(
-        !notes.iter().any(|s| s.contains("machining inside the ring")),
+        !notes
+            .iter()
+            .any(|s| s.contains("machining inside the ring")),
         "a boss's ring bounds material: {notes:?}"
     );
     history.execute(
@@ -2459,7 +3003,10 @@ fn contour_boss_pick_defaults_outside() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "BossC").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "BossC").expect("generate"),
+    );
     assert_eq!(status(&world, "BossC"), OpStatus::Ok);
     let radii = feed_radii(&world, "BossC");
     assert!(
@@ -2474,7 +3021,7 @@ fn contour_outside_forces_outside_on_bore() {
     // path and stays silent (the note belongs to Auto's verdict).
     let (world, mut history) = world_with_bore();
     let items = bore_patch_pick(&world, "plate");
-    let notes = operation::selection_notes(&world, None,&items, &contour_at(Side::Outside, 4.0));
+    let notes = operation::selection_notes(&world, None, &items, &contour_at(Side::Outside, 4.0));
     assert!(
         !notes.iter().any(|s| s.contains("inside the ring")),
         "{notes:?}"
@@ -2490,7 +3037,10 @@ fn contour_outside_forces_outside_on_bore() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "BoreO").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "BoreO").expect("generate"),
+    );
     let radii = feed_radii(&world, "BoreO");
     assert!(
         radii.iter().all(|d| (14.0..=16.0).contains(d)),
@@ -2507,8 +3057,11 @@ fn contour_inside_forces_inside_on_boss() {
     add_tool(&world, &mut history, "EM-0600-4FL");
     history.execute(&world, ImportModel::from_mesh("disc", disc_mesh(12.0)));
     let items = chain_picks("disc", &[rim_chain_of(&world, "disc")]);
-    let notes = operation::selection_notes(&world, None,&items, &contour_at(Side::Inside, 0.0));
-    assert!(!notes.iter().any(|s| s.contains("inside the ring")), "{notes:?}");
+    let notes = operation::selection_notes(&world, None, &items, &contour_at(Side::Inside, 0.0));
+    assert!(
+        !notes.iter().any(|s| s.contains("inside the ring")),
+        "{notes:?}"
+    );
     history.execute(
         &world,
         CreateOperation::new(
@@ -2520,7 +3073,10 @@ fn contour_inside_forces_inside_on_boss() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "BossI").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "BossI").expect("generate"),
+    );
     let radii = feed_radii(&world, "BossI");
     assert!(
         radii.iter().all(|d| (8.0..=10.0).contains(d)),
@@ -2605,8 +3161,12 @@ fn inside_on_entity_source_is_refused() {
     };
     assert!(msg.contains("needs picked rings"), "{msg}");
     // The refusal wrote nothing: S1 still machines its picked ring.
-    let op = model::operation_of(&world, &model::find_by_name(&world, "S1").expect("op")).expect("op");
-    assert!(matches!(op.src, SrcRef::Selection(_)), "the refused retarget stands off");
+    let op =
+        model::operation_of(&world, &model::find_by_name(&world, "S1").expect("op")).expect("op");
+    assert!(
+        matches!(op.src, SrcRef::Selection(_)),
+        "the refused retarget stands off"
+    );
 }
 
 #[test]
@@ -2627,25 +3187,47 @@ fn side_change_goes_stale_once_and_generate_clears_it() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Stale1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Stale1").expect("generate"),
+    );
     assert_eq!(status(&world, "Stale1"), OpStatus::Ok);
 
     history.execute(
         &world,
         EditOperationParams::new(&world, "Stale1", contour_at(Side::Inside, 4.0)).expect("edit"),
     );
-    assert_eq!(status(&world, "Stale1"), OpStatus::Stale, "the ask changed, the path did not");
+    assert_eq!(
+        status(&world, "Stale1"),
+        OpStatus::Stale,
+        "the ask changed, the path did not"
+    );
 
-    history.execute(&world, GenerateOperation::new(&world, "Stale1").expect("regen"));
-    assert_eq!(status(&world, "Stale1"), OpStatus::Ok, "apply clears the flag");
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Stale1").expect("regen"),
+    );
+    assert_eq!(
+        status(&world, "Stale1"),
+        OpStatus::Ok,
+        "apply clears the flag"
+    );
 
     // Back through the regenerate, then through the edit: the params and
     // their digest travel together, so two steps down lands on the old
     // consistent pair.
     history.undo(&world);
-    assert_eq!(status(&world, "Stale1"), OpStatus::Stale, "the regen's stamp is undone");
+    assert_eq!(
+        status(&world, "Stale1"),
+        OpStatus::Stale,
+        "the regen's stamp is undone"
+    );
     history.undo(&world);
-    assert_eq!(status(&world, "Stale1"), OpStatus::Ok, "undo restores ask and digest together");
+    assert_eq!(
+        status(&world, "Stale1"),
+        OpStatus::Ok,
+        "undo restores ask and digest together"
+    );
 }
 
 // ---------------------------------------------------------------- M1.6 drilling
@@ -2678,11 +3260,29 @@ fn drilled_block() -> camcraft_app::geometry::Mesh {
     for i in 0..16 {
         let j = i + 1;
         // Caps: annuli wound outward (+z top, -z bottom).
-        quad(bp(j, 10.0), bp(i, 10.0), op(i, 10.0), op(j, 10.0), &mut facets);
+        quad(
+            bp(j, 10.0),
+            bp(i, 10.0),
+            op(i, 10.0),
+            op(j, 10.0),
+            &mut facets,
+        );
         quad(bp(i, 0.0), bp(j, 0.0), op(j, 0.0), op(i, 0.0), &mut facets);
         // The hole wall faces the axis; the block wall faces away.
-        quad(bp(i, 10.0), bp(j, 10.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
-        quad(op(j, 10.0), op(i, 10.0), op(i, 0.0), op(j, 0.0), &mut facets);
+        quad(
+            bp(i, 10.0),
+            bp(j, 10.0),
+            bp(j, 0.0),
+            bp(i, 0.0),
+            &mut facets,
+        );
+        quad(
+            op(j, 10.0),
+            op(i, 10.0),
+            op(i, 0.0),
+            op(j, 0.0),
+            &mut facets,
+        );
     }
     camcraft_app::geometry::Mesh { facets }
 }
@@ -2699,6 +3299,7 @@ fn drill_params(holes: Vec<Hole>, top_z: f64, clearance_z: f64) -> OpParams {
         feed: 130.0,
         plunge_feed: 100.0,
         holes,
+        cross: Vec::new(),
     }
 }
 
@@ -2727,7 +3328,10 @@ fn drill_op_recognizes_from_the_model_then_machines_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Drill1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Drill1").expect("generate"),
+    );
     assert_eq!(status(&world, "Drill1"), OpStatus::Ok);
     let cache = cache(&world, "Drill1").expect("cached");
     assert_eq!(cache.warnings, Vec::new(), "{:?}", cache.warnings);
@@ -2771,18 +3375,25 @@ fn a_hole_deeper_than_the_drill_reaches_warns_and_still_generates() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Deep1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Deep1").expect("generate"),
+    );
     let cache = cache(&world, "Deep1").expect("cached");
     assert_eq!(cache.path.cycles[0].kind, CycleKind::Deep, "131 mm past 4d");
     assert!(
-        cache
-            .warnings
-            .iter()
-            .any(|w| matches!(w, camcraft_app::verify::Warning::ShankHit { part: true, .. })),
+        cache.warnings.iter().any(|w| matches!(
+            w,
+            camcraft_app::verify::Warning::ShankHit { part: true, .. }
+        )),
         "reach law must speak: {:?}",
         cache.warnings
     );
-    assert_eq!(status(&world, "Deep1"), OpStatus::Ok, "a warning is not a refusal");
+    assert_eq!(
+        status(&world, "Deep1"),
+        OpStatus::Ok,
+        "a warning is not a refusal"
+    );
 }
 
 #[test]
@@ -2796,8 +3407,14 @@ fn a_drill_op_without_holes_creates_but_refuses_generation_by_name() {
     add_tool(&world, &mut history, "DR-0400");
     history.execute(
         &world,
-        CreateOperation::new(&world, "Empty1", "DR-0400", SrcRef::Stock, drill_params(vec![], 10.0, 25.0))
-            .expect("a hole list arrives via Detect; creation must not need it"),
+        CreateOperation::new(
+            &world,
+            "Empty1",
+            "DR-0400",
+            SrcRef::Stock,
+            drill_params(vec![], 10.0, 25.0),
+        )
+        .expect("a hole list arrives via Detect; creation must not need it"),
     );
     let err = GenerateOperation::new(&world, "Empty1")
         .err()
@@ -2829,17 +3446,30 @@ fn moving_the_part_marks_the_drill_op_stale_until_regen() {
             )
             .expect("create"),
         );
-        history.execute(&world, GenerateOperation::new(&world, "Move1").expect("generate"));
+        history.execute(
+            &world,
+            GenerateOperation::new(&world, "Move1").expect("generate"),
+        );
         (world, history)
     };
     assert_eq!(status(&world, "Move1"), OpStatus::Ok);
     let e = model::find_by_name(&world, "pblock").expect("part");
     model::set_location(&world, &e, Point3::new(0.0, 0.0, 2.0));
-    assert_eq!(status(&world, "Move1"), OpStatus::Stale, "the part moved under the hole list");
-    history.execute(&world, GenerateOperation::new(&world, "Move1").expect("regen"));
+    assert_eq!(
+        status(&world, "Move1"),
+        OpStatus::Stale,
+        "the part moved under the hole list"
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Move1").expect("regen"),
+    );
     assert_eq!(status(&world, "Move1"), OpStatus::Ok);
     let cache = cache(&world, "Move1").expect("cached");
-    assert_eq!(cache.path.cycles[0].entry_z, 10.0, "stored holes are not re-detected");
+    assert_eq!(
+        cache.path.cycles[0].entry_z, 10.0,
+        "stored holes are not re-detected"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2851,7 +3481,7 @@ fn moving_the_part_marks_the_drill_op_stale_until_regen() {
 /// R20 spherical cap to the 45 deg rim - the same solid `finish3d.rs`
 /// walks directly, as an imported model.
 fn dome_mesh() -> camcraft_app::geometry::Mesh {
-    use camcraft_app::geometry::{Triangle, Point3};
+    use camcraft_app::geometry::{Point3, Triangle};
     const TAU: f64 = std::f64::consts::TAU;
     let (radius, polar_max, n_lat, n_lon) = (20.0, std::f64::consts::FRAC_PI_4, 12usize, 96usize);
     let mut facets = Vec::new();
@@ -2926,7 +3556,10 @@ fn finish3d_waterline_generates_and_verifies_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "Finish1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Finish1").expect("generate"),
+    );
     // Ok, not Warning: the envelope verdict came back inside the gate,
     // measured by the same kernel the direct tests drive.
     assert_eq!(status(&world, "Finish1"), OpStatus::Ok);
@@ -2940,9 +3573,14 @@ fn finish3d_waterline_generates_and_verifies_clean() {
     // One ring per level from 18 down, snapped at the rim - the scallop
     // stepdown's ladder, 2*sqrt(3*0.1) = 1.0954 per rung.
     assert!((4..=6).contains(&plunges.len()), "ladder: {plunges:?}");
-    assert!(plunges.last() == Some(&DOME_RIM_Z), "the bottom ring snaps to the bottom: {plunges:?}");
     assert!(
-        t.moves.iter().all(|m| m.to.z <= 25.0 + 1e-9 && m.from.z <= 25.0 + 1e-9),
+        plunges.last() == Some(&DOME_RIM_Z),
+        "the bottom ring snaps to the bottom: {plunges:?}"
+    );
+    assert!(
+        t.moves
+            .iter()
+            .all(|m| m.to.z <= 25.0 + 1e-9 && m.from.z <= 25.0 + 1e-9),
         "nothing starts above clearance"
     );
 }
@@ -3016,7 +3654,10 @@ fn pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
     let mut leaned = 0usize;
     for m in &path.moves {
         if let Some(a) = m.axis {
-            assert!(a.iter().all(|v| v.is_finite()), "{name}: a non-finite pose on a move");
+            assert!(
+                a.iter().all(|v| v.is_finite()),
+                "{name}: a non-finite pose on a move"
+            );
             let len = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
             assert!((len - 1.0).abs() < 1e-6, "{name}: a pose of length {len}");
             if m.kind == MoveKind::Feed && (a[0] * a[0] + a[1] * a[1]).sqrt() > 1e-3 {
@@ -3147,8 +3788,15 @@ fn contour5d_generates_leaning_axes_and_verifies_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "C5A").expect("generate"));
-    assert_eq!(status(&world, "C5A"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "C5A").expect("generate"),
+    );
+    assert_eq!(
+        status(&world, "C5A"),
+        OpStatus::Ok,
+        "the envelope verdict came back inside the gate"
+    );
     let t = cache(&world, "C5A").expect("cached").path;
     pose_law("contour5d", &t);
     let plunges: Vec<f64> = t
@@ -3157,7 +3805,10 @@ fn contour5d_generates_leaning_axes_and_verifies_clean() {
         .filter(|m| m.kind == MoveKind::Plunge)
         .map(|m| m.to.z)
         .collect();
-    assert!(plunges.last() == Some(&DOME_RIM_Z), "the bottom ring snaps to the bottom: {plunges:?}");
+    assert!(
+        plunges.last() == Some(&DOME_RIM_Z),
+        "the bottom ring snaps to the bottom: {plunges:?}"
+    );
 }
 
 #[test]
@@ -3178,7 +3829,10 @@ fn parallel5d_generates_leaning_axes_and_verifies_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "P5A").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "P5A").expect("generate"),
+    );
     assert_eq!(status(&world, "P5A"), OpStatus::Ok);
     let t = cache(&world, "P5A").expect("cached").path;
     pose_law("parallel5d", &t);
@@ -3198,7 +3852,10 @@ fn parallel5d_generates_leaning_axes_and_verifies_clean() {
         .moves
         .iter()
         .any(|m| m.kind == MoveKind::Feed && (m.to.z - HILL_RIM_Z).abs() < 1e-9);
-    assert!(on_flank, "nothing reached the Bottom plane - the flank went uncut");
+    assert!(
+        on_flank,
+        "nothing reached the Bottom plane - the flank went uncut"
+    );
 }
 
 #[test]
@@ -3222,8 +3879,15 @@ fn flow5d_generates_following_axes_and_verifies_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "F5A").expect("generate"));
-    assert_eq!(status(&world, "F5A"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "F5A").expect("generate"),
+    );
+    assert_eq!(
+        status(&world, "F5A"),
+        OpStatus::Ok,
+        "the envelope verdict came back inside the gate"
+    );
     let t = cache(&world, "F5A").expect("cached").path;
     pose_law("flow5d", &t);
     let lowest = t
@@ -3255,8 +3919,14 @@ fn axis_twins_refuse_a_flat_bottomed_tool_by_name() {
         history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
         history.execute(
             &world,
-            CreateOperation::new(&world, name, "EM-0600-4FL", SrcRef::Entity("dome".into()), params)
-                .expect("create"),
+            CreateOperation::new(
+                &world,
+                name,
+                "EM-0600-4FL",
+                SrcRef::Entity("dome".into()),
+                params,
+            )
+            .expect("create"),
         );
         let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
             .err()
@@ -3266,7 +3936,11 @@ fn axis_twins_refuse_a_flat_bottomed_tool_by_name() {
         };
         assert!(msg.contains("ball-nose"), "{msg}");
         assert!(msg.contains("5-Axis"), "{msg}");
-        assert_eq!(status(&world, name), OpStatus::Never, "the refusal leaves no path behind");
+        assert_eq!(
+            status(&world, name),
+            OpStatus::Never,
+            "the refusal leaves no path behind"
+        );
     }
 }
 
@@ -3280,7 +3954,13 @@ fn axis_twins_refuse_nonsense_pose_at_creation() {
     add_tool(&world, &mut history, "BN-0600");
     history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
     let mk = |op: OpParams| {
-        CreateOperation::new(&world, "PoseX", "BN-0600", SrcRef::Entity("dome".into()), op)
+        CreateOperation::new(
+            &world,
+            "PoseX",
+            "BN-0600",
+            SrcRef::Entity("dome".into()),
+            op,
+        )
     };
     let OpParams::Contour5D { tolerance, .. } = contour5d_params(18.0, DOME_RIM_Z) else {
         unreachable!()
@@ -3289,7 +3969,10 @@ fn axis_twins_refuse_nonsense_pose_at_creation() {
     if let OpParams::Contour5D { tolerance: t, .. } = &mut zero_tol {
         *t = 0.0;
     }
-    assert!(matches!(mk(zero_tol), Err(CommandError::Invalid(_))), "tol {tolerance}");
+    assert!(
+        matches!(mk(zero_tol), Err(CommandError::Invalid(_))),
+        "tol {tolerance}"
+    );
     let mut flat_lean = parallel5d_params(18.0, DOME_RIM_Z);
     if let OpParams::Parallel5D { lead_deg, .. } = &mut flat_lean {
         *lead_deg = 91.0;
@@ -3409,7 +4092,10 @@ fn blade_pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
     let (mut body, mut posed) = (0usize, 0usize);
     for m in &path.moves {
         if let Some(a) = m.axis {
-            assert!(a.iter().all(|v| v.is_finite()), "{name}: a non-finite pose on a move");
+            assert!(
+                a.iter().all(|v| v.is_finite()),
+                "{name}: a non-finite pose on a move"
+            );
             let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
             assert!((l - 1.0).abs() < 1e-6, "{name}: a pose of length {l}");
             posed += 1;
@@ -3426,7 +4112,10 @@ fn blade_pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
             assert!(m.axis.is_none(), "{name}: a rapid states a pose");
         }
     }
-    assert!(body >= 8, "{name}: only {body} blade-lying body poses over a whole tube");
+    assert!(
+        body >= 8,
+        "{name}: only {body} blade-lying body poses over a whole tube"
+    );
     assert!(posed >= body, "{name}: uncounted poses cannot be");
 }
 
@@ -3448,8 +4137,15 @@ fn swarf_generates_blade_lying_axes_and_verifies_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "SWA").expect("generate"));
-    assert_eq!(status(&world, "SWA"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "SWA").expect("generate"),
+    );
+    assert_eq!(
+        status(&world, "SWA"),
+        OpStatus::Ok,
+        "the envelope verdict came back inside the gate"
+    );
     let t = cache(&world, "SWA").expect("cached").path;
     pose_law("swarf", &t);
     blade_pose_law("swarf", &t);
@@ -3472,15 +4168,27 @@ fn advanced_swarf_adds_the_coarse_rungs() {
     ] {
         history.execute(
             &world,
-            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("blade".into()), params)
-                .expect("create"),
+            CreateOperation::new(
+                &world,
+                name,
+                "BN-0600",
+                SrcRef::Entity("blade".into()),
+                params,
+            )
+            .expect("create"),
         );
-        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        history.execute(
+            &world,
+            GenerateOperation::new(&world, name).expect("generate"),
+        );
         assert_eq!(status(&world, name), OpStatus::Ok);
     }
     let one = cache(&world, "SW1").expect("cached").path;
     let two = cache(&world, "SW2").expect("cached").path;
-    assert!(two.moves.len() > one.moves.len(), "the rough pass added nothing");
+    assert!(
+        two.moves.len() > one.moves.len(),
+        "the rough pass added nothing"
+    );
     blade_pose_law("advanced swarf", &two);
 }
 
@@ -3500,8 +4208,14 @@ fn swarf_family_refuses_a_flat_tool_by_name() {
         history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
         history.execute(
             &world,
-            CreateOperation::new(&world, name, "EM-0600-4FL", SrcRef::Entity("blade".into()), params)
-                .expect("create"),
+            CreateOperation::new(
+                &world,
+                name,
+                "EM-0600-4FL",
+                SrcRef::Entity("blade".into()),
+                params,
+            )
+            .expect("create"),
         );
         let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
             .err()
@@ -3511,7 +4225,11 @@ fn swarf_family_refuses_a_flat_tool_by_name() {
         };
         assert!(msg.contains("ball-nose"), "{msg}");
         assert!(msg.contains("Swarf"), "{msg}");
-        assert_eq!(status(&world, name), OpStatus::Never, "the refusal leaves no path behind");
+        assert_eq!(
+            status(&world, name),
+            OpStatus::Never,
+            "the refusal leaves no path behind"
+        );
     }
 }
 
@@ -3537,8 +4255,9 @@ fn swarf_refuses_an_unruled_dome_by_name() {
         )
         .expect("create"),
     );
-    let CommandError::Machining(msg) =
-        GenerateOperation::new(&world, "SWD").err().expect("a dome must refuse swarf")
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "SWD")
+        .err()
+        .expect("a dome must refuse swarf")
     else {
         panic!("expected a machining refusal");
     };
@@ -3561,7 +4280,10 @@ fn advanced_swarf_refuses_passes_nonsense_at_creation() {
     };
     for n in [0u32, 5] {
         assert!(
-            matches!(mk(advanced_swarf_params(11.0, -11.0, n), "SwBad"), Err(CommandError::Invalid(_))),
+            matches!(
+                mk(advanced_swarf_params(11.0, -11.0, n), "SwBad"),
+                Err(CommandError::Invalid(_))
+            ),
             "passes {n} reached a generator's door"
         );
     }
@@ -3571,7 +4293,10 @@ fn advanced_swarf_refuses_passes_nonsense_at_creation() {
     if let OpParams::Swarf { tolerance, .. } = &mut zero_tol {
         *tolerance = 0.0;
     }
-    assert!(matches!(mk(zero_tol, "SwTol"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(zero_tol, "SwTol"),
+        Err(CommandError::Invalid(_))
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -3635,7 +4360,14 @@ fn lathe_mesh() -> camcraft_app::geometry::Mesh {
     camcraft_app::geometry::Mesh {
         facets: revolve(
             16,
-            &[(0.0, -16.0), (6.0, -16.0), (6.0, -2.0), (5.0, 2.0), (5.0, 16.0), (0.0, 16.0)],
+            &[
+                (0.0, -16.0),
+                (6.0, -16.0),
+                (6.0, -2.0),
+                (5.0, 2.0),
+                (5.0, 16.0),
+                (0.0, 16.0),
+            ],
         ),
     }
 }
@@ -3763,7 +4495,10 @@ fn radial_pose_law(name: &str, path: &camcraft_app::cl::Toolpath, axial: usize) 
             continue;
         }
         let Some(a) = m.axis else { continue };
-        assert!(a.iter().all(|v| v.is_finite()), "{name}: a non-finite pose on a move");
+        assert!(
+            a.iter().all(|v| v.is_finite()),
+            "{name}: a non-finite pose on a move"
+        );
         let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
         assert!((l - 1.0).abs() < 1e-6, "{name}: a pose of length {l}");
         let mut d = [m.to.x, m.to.y, m.to.z];
@@ -3781,7 +4516,10 @@ fn radial_pose_law(name: &str, path: &camcraft_app::cl::Toolpath, axial: usize) 
         );
         body += 1;
     }
-    assert!(body >= 8, "{name}: only {body} radial-posed cut moves over a whole turned bar");
+    assert!(
+        body >= 8,
+        "{name}: only {body} radial-posed cut moves over a whole turned bar"
+    );
 }
 
 #[test]
@@ -3802,8 +4540,15 @@ fn rotary_contour_generates_radial_axes_and_verifies_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "RC1").expect("generate"));
-    assert_eq!(status(&world, "RC1"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "RC1").expect("generate"),
+    );
+    assert_eq!(
+        status(&world, "RC1"),
+        OpStatus::Ok,
+        "the envelope verdict came back inside the gate"
+    );
     let t = cache(&world, "RC1").expect("cached").path;
     radial_pose_law("rotary contour", &t, 2);
     let plunges: Vec<f64> = t
@@ -3812,7 +4557,10 @@ fn rotary_contour_generates_radial_axes_and_verifies_clean() {
         .filter(|m| m.kind == MoveKind::Plunge)
         .map(|m| m.to.z)
         .collect();
-    assert!(plunges.last() == Some(&-14.0), "the bottom ring snaps to the bottom: {plunges:?}");
+    assert!(
+        plunges.last() == Some(&-14.0),
+        "the bottom ring snaps to the bottom: {plunges:?}"
+    );
 }
 
 #[test]
@@ -3833,7 +4581,10 @@ fn rotary_parallel_generates_radial_axes_and_verifies_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "RP1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "RP1").expect("generate"),
+    );
     assert_eq!(status(&world, "RP1"), OpStatus::Ok);
     let t = cache(&world, "RP1").expect("cached").path;
     radial_pose_law("rotary parallel", &t, 0);
@@ -3846,12 +4597,18 @@ fn rotary_parallel_generates_radial_axes_and_verifies_clean() {
         .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
         .map(|m| m.to.z)
         .fold(f64::INFINITY, f64::min);
-    assert!(lowest >= -4.0 - 1e-9, "the raster sank below its Bottom plane: {lowest}");
+    assert!(
+        lowest >= -4.0 - 1e-9,
+        "the raster sank below its Bottom plane: {lowest}"
+    );
     let on_bottom = t
         .moves
         .iter()
         .any(|m| m.kind == MoveKind::Feed && (m.to.z + 4.0).abs() < 1e-9);
-    assert!(on_bottom, "nothing reached the Bottom plane - the flank went uncut");
+    assert!(
+        on_bottom,
+        "nothing reached the Bottom plane - the flank went uncut"
+    );
 }
 
 #[test]
@@ -3859,8 +4616,20 @@ fn the_rotary_twins_refuse_each_other_stances_by_name() {
     // The pair cannot disagree about where the boundary sits: one
     // sine for both refusals, each naming the kind the stance wants.
     for (mname, name, mesh, params, wants) in [
-        ("lathe", "RPx", lathe_mesh(), rotary_parallel_params(4.0, -4.0), "Rotary Contour"),
-        ("laid", "RCx", laid_mesh(), rotary_contour_params(14.0, -14.0), "Rotary Parallel"),
+        (
+            "lathe",
+            "RPx",
+            lathe_mesh(),
+            rotary_parallel_params(4.0, -4.0),
+            "Rotary Contour",
+        ),
+        (
+            "laid",
+            "RCx",
+            laid_mesh(),
+            rotary_contour_params(14.0, -14.0),
+            "Rotary Parallel",
+        ),
     ] {
         let world = new_world();
         let mut history = History::default();
@@ -3869,8 +4638,14 @@ fn the_rotary_twins_refuse_each_other_stances_by_name() {
         history.execute(&world, ImportModel::from_mesh(mname, mesh));
         history.execute(
             &world,
-            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity(mname.into()), params)
-                .expect("create"),
+            CreateOperation::new(
+                &world,
+                name,
+                "BN-0600",
+                SrcRef::Entity(mname.into()),
+                params,
+            )
+            .expect("create"),
         );
         let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
             .err()
@@ -3879,7 +4654,11 @@ fn the_rotary_twins_refuse_each_other_stances_by_name() {
             panic!("expected a machining refusal");
         };
         assert!(msg.contains(wants), "{msg} should point at {wants}");
-        assert_eq!(status(&world, name), OpStatus::Never, "the refusal leaves no path behind");
+        assert_eq!(
+            status(&world, name),
+            OpStatus::Never,
+            "the refusal leaves no path behind"
+        );
     }
 }
 
@@ -3899,8 +4678,14 @@ fn rotary_twins_refuse_a_flat_bottomed_tool_by_name() {
         history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
         history.execute(
             &world,
-            CreateOperation::new(&world, name, "EM-0600-4FL", SrcRef::Entity("lathe".into()), params)
-                .expect("create"),
+            CreateOperation::new(
+                &world,
+                name,
+                "EM-0600-4FL",
+                SrcRef::Entity("lathe".into()),
+                params,
+            )
+            .expect("create"),
         );
         let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
             .err()
@@ -3910,7 +4695,11 @@ fn rotary_twins_refuse_a_flat_bottomed_tool_by_name() {
         };
         assert!(msg.contains("ball-nose"), "{msg}");
         assert!(msg.contains(label), "{msg} should name {label}");
-        assert_eq!(status(&world, name), OpStatus::Never, "the refusal leaves no path behind");
+        assert_eq!(
+            status(&world, name),
+            OpStatus::Never,
+            "the refusal leaves no path behind"
+        );
     }
 }
 
@@ -3936,8 +4725,9 @@ fn rotary_refuses_a_freeform_by_name() {
         )
         .expect("create"),
     );
-    let CommandError::Machining(msg) =
-        GenerateOperation::new(&world, "RCb").err().expect("a box must refuse rotary")
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "RCb")
+        .err()
+        .expect("a box must refuse rotary")
     else {
         panic!("expected a machining refusal");
     };
@@ -3961,12 +4751,18 @@ fn rotary_twins_refuse_nonsense_pose_at_creation() {
     if let OpParams::RotaryContour { tolerance, .. } = &mut zero_tol {
         *tolerance = 0.0;
     }
-    assert!(matches!(mk(zero_tol, "RcTol"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(zero_tol, "RcTol"),
+        Err(CommandError::Invalid(_))
+    ));
     let mut flat_lean = rotary_parallel_params(4.0, -4.0);
     if let OpParams::RotaryParallel { lead_deg, .. } = &mut flat_lean {
         *lead_deg = 91.0;
     }
-    assert!(matches!(mk(flat_lean, "RpLd"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(flat_lean, "RpLd"),
+        Err(CommandError::Invalid(_))
+    ));
     let mut no_cone = rotary_contour_params(14.0, -14.0);
     if let OpParams::RotaryContour { max_tilt_deg, .. } = &mut no_cone {
         *max_tilt_deg = 0.0;
@@ -4022,7 +4818,10 @@ fn rotary_offset_peels_the_wrap_ladder_and_verifies_clean() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "RO1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "RO1").expect("generate"),
+    );
     assert_eq!(
         status(&world, "RO1"),
         OpStatus::Ok,
@@ -4044,7 +4843,10 @@ fn rotary_offset_peels_the_wrap_ladder_and_verifies_clean() {
     );
     assert!(hi > 8.9, "no ring at the skin (max rho {hi})");
     assert!(lo < 8.6, "the ladder never left the skin: {lo}..{hi}");
-    assert!(hi - lo > 0.5, "one plane of cut is not a ladder: {lo}..{hi}");
+    assert!(
+        hi - lo > 0.5,
+        "one plane of cut is not a ladder: {lo}..{hi}"
+    );
 }
 
 #[test]
@@ -4069,14 +4871,19 @@ fn rotary_offset_refuses_a_flat_tool_by_name() {
         )
         .expect("create"),
     );
-    let CommandError::Machining(msg) =
-        GenerateOperation::new(&world, "ROf").err().expect("a flat tool must refuse the wrap")
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "ROf")
+        .err()
+        .expect("a flat tool must refuse the wrap")
     else {
         panic!("expected a machining refusal");
     };
     assert!(msg.contains("ball-nose"), "{msg}");
     assert!(msg.contains("Rotary Offset"), "{msg}");
-    assert_eq!(status(&world, "ROf"), OpStatus::Never, "the refusal leaves no path behind");
+    assert_eq!(
+        status(&world, "ROf"),
+        OpStatus::Never,
+        "the refusal leaves no path behind"
+    );
 }
 
 #[test]
@@ -4100,8 +4907,9 @@ fn rotary_offset_refuses_a_freeform_by_name() {
         )
         .expect("create"),
     );
-    let CommandError::Machining(msg) =
-        GenerateOperation::new(&world, "ROb").err().expect("a box must refuse the wrap")
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "ROb")
+        .err()
+        .expect("a box must refuse the wrap")
     else {
         panic!("expected a machining refusal");
     };
@@ -4127,17 +4935,26 @@ fn rotary_offset_refuses_nonsense_at_creation() {
     if let OpParams::RotaryOffset { stepover, .. } = &mut zero_step {
         *stepover = 0.0;
     }
-    assert!(matches!(mk(zero_step, "RoSo"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(zero_step, "RoSo"),
+        Err(CommandError::Invalid(_))
+    ));
     let mut zero_infeed = rotary_offset_params(14.0, -14.0);
     if let OpParams::RotaryOffset { stepdown, .. } = &mut zero_infeed {
         *stepdown = 0.0;
     }
-    assert!(matches!(mk(zero_infeed, "RoSd"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(zero_infeed, "RoSd"),
+        Err(CommandError::Invalid(_))
+    ));
     let mut flat_lean = rotary_offset_params(14.0, -14.0);
     if let OpParams::RotaryOffset { lead_deg, .. } = &mut flat_lean {
         *lead_deg = 91.0;
     }
-    assert!(matches!(mk(flat_lean, "RoLd"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(flat_lean, "RoLd"),
+        Err(CommandError::Invalid(_))
+    ));
     let mut no_cone = rotary_offset_params(14.0, -14.0);
     if let OpParams::RotaryOffset { max_tilt_deg, .. } = &mut no_cone {
         *max_tilt_deg = 0.0;
@@ -4167,9 +4984,7 @@ fn slab_boss_mesh() -> Mesh {
         Point3::new(20.0, 20.0, -10.0),
     )
     .facets;
-    facets.extend(
-        cube(Point3::new(-5.0, -5.0, -11.0), Point3::new(5.0, 5.0, 0.0)).facets,
-    );
+    facets.extend(cube(Point3::new(-5.0, -5.0, -11.0), Point3::new(5.0, 5.0, 0.0)).facets);
     Mesh { facets }
 }
 
@@ -4249,8 +5064,14 @@ fn ladder_job(tag: &str, stamped: bool) -> (World, History, camcraft_app::cl::To
     };
     history.execute(
         &world,
-        CreateOperation::new(&world, tag, "BN-0600", SrcRef::Entity("slabboss".into()), params)
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            tag,
+            "BN-0600",
+            SrcRef::Entity("slabboss".into()),
+            params,
+        )
+        .expect("create"),
     );
     let cmd = GenerateOperation::new(&world, tag).expect("generate");
     history.execute(&world, cmd);
@@ -4270,7 +5091,11 @@ fn multiaxis_rough_peels_the_same_ladder_and_poses_its_walls() {
     // own world, the budget the vertical kind always met.
     let (_pw, _ph, plain) = ladder_job("P3R", false);
     let (_rw, _rh, rough) = ladder_job("MAR1", true);
-    assert_eq!(plain.moves.len(), rough.moves.len(), "one ladder, two readings");
+    assert_eq!(
+        plain.moves.len(),
+        rough.moves.len(),
+        "one ladder, two readings"
+    );
     let mut posed = 0usize;
     let mut floor_air = 0usize;
     for (a, b) in plain.moves.iter().zip(&rough.moves) {
@@ -4345,14 +5170,19 @@ fn multiaxis_rough_refuses_a_flat_tool_by_name() {
         )
         .expect("create"),
     );
-    let CommandError::Machining(msg) =
-        GenerateOperation::new(&world, "MAF").err().expect("a flat tool must refuse the stamp")
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "MAF")
+        .err()
+        .expect("a flat tool must refuse the stamp")
     else {
         panic!("expected a machining refusal");
     };
     assert!(msg.contains("ball-nose"), "{msg}");
     assert!(msg.contains("Multi-Axis Rough"), "{msg}");
-    assert_eq!(status(&world, "MAF"), OpStatus::Never, "the refusal leaves no path behind");
+    assert_eq!(
+        status(&world, "MAF"),
+        OpStatus::Never,
+        "the refusal leaves no path behind"
+    );
 }
 
 #[test]
@@ -4365,23 +5195,38 @@ fn multiaxis_rough_refuses_nonsense_at_creation() {
     add_tool(&world, &mut history, "BN-0600");
     history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
     let mk = |op: OpParams, name: &str| {
-        CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("slabboss".into()), op)
+        CreateOperation::new(
+            &world,
+            name,
+            "BN-0600",
+            SrcRef::Entity("slabboss".into()),
+            op,
+        )
     };
     let mut zero_step = multiaxis_rough_params();
     if let OpParams::MultiAxisRough { stepover, .. } = &mut zero_step {
         *stepover = 0.0;
     }
-    assert!(matches!(mk(zero_step, "MaSo"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(zero_step, "MaSo"),
+        Err(CommandError::Invalid(_))
+    ));
     let mut zero_infeed = multiaxis_rough_params();
     if let OpParams::MultiAxisRough { stepdown, .. } = &mut zero_infeed {
         *stepdown = 0.0;
     }
-    assert!(matches!(mk(zero_infeed, "MaSd"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(zero_infeed, "MaSd"),
+        Err(CommandError::Invalid(_))
+    ));
     let mut flat_lean = multiaxis_rough_params();
     if let OpParams::MultiAxisRough { lead_deg, .. } = &mut flat_lean {
         *lead_deg = 91.0;
     }
-    assert!(matches!(mk(flat_lean, "MaLd"), Err(CommandError::Invalid(_))));
+    assert!(matches!(
+        mk(flat_lean, "MaLd"),
+        Err(CommandError::Invalid(_))
+    ));
     let mut no_cone = multiaxis_rough_params();
     if let OpParams::MultiAxisRough { max_tilt_deg, .. } = &mut no_cone {
         *max_tilt_deg = 0.0;
@@ -4432,7 +5277,10 @@ fn avoid_job(tag: &str, dodging: bool) -> camcraft_app::cl::Toolpath {
     let world = new_world();
     let mut history = History::default();
     box_stock(&world, &mut history, 40.0, 40.0, 20.0);
-    history.execute(&world, AddTool::new(&world, tag, stub_tool()).expect("stub"));
+    history.execute(
+        &world,
+        AddTool::new(&world, tag, stub_tool()).expect("stub"),
+    );
     history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
     let mut params = multiaxis_rough_params();
     if let OpParams::MultiAxisRough { shank_avoid, .. } = &mut params {
@@ -4440,18 +5288,16 @@ fn avoid_job(tag: &str, dodging: bool) -> camcraft_app::cl::Toolpath {
     }
     history.execute(
         &world,
-        CreateOperation::new(
-            &world,
-            "OP",
-            tag,
-            SrcRef::Entity("slabboss".into()),
-            params,
-        )
-        .expect("create"),
+        CreateOperation::new(&world, "OP", tag, SrcRef::Entity("slabboss".into()), params)
+            .expect("create"),
     );
     let cmd = GenerateOperation::new(&world, "OP").expect("generate");
     history.execute(&world, cmd);
-    assert_eq!(status(&world, "OP"), OpStatus::Ok, "{tag} refused a dodgeable boss");
+    assert_eq!(
+        status(&world, "OP"),
+        OpStatus::Ok,
+        "{tag} refused a dodgeable boss"
+    );
     cache(&world, "OP").expect("cached").path
 }
 
@@ -4463,27 +5309,48 @@ fn multiaxis_rough_poses_around_the_shank_and_moves_nothing() {
     let mut escaped = 0usize;
     let mut plus: Vec<[f64; 3]> = Vec::new();
     for (i, (a, b)) in off.moves.iter().zip(&on.moves).enumerate() {
-        assert!(a.axis.is_none() || b.axis == a.axis, "F overrode the surface law at {i}");
-        assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z), "the ladder moved at {i}");
+        assert!(
+            a.axis.is_none() || b.axis == a.axis,
+            "F overrode the surface law at {i}"
+        );
+        assert_eq!(
+            (a.to.x, a.to.y, a.to.z),
+            (b.to.x, b.to.y, b.to.z),
+            "the ladder moved at {i}"
+        );
         if b.kind == MoveKind::Rapid {
             assert!(b.axis.is_none(), "a rapid states an angle");
             continue;
         }
         if b.to.z == -10.0 && 8.0 < b.to.x.abs() && b.to.x.abs() < 10.0 {
-            let v = b.axis.unwrap_or_else(|| panic!("floor row {i} lets the shank rub: {:?}", b.to));
+            let v = b
+                .axis
+                .unwrap_or_else(|| panic!("floor row {i} lets the shank rub: {:?}", b.to));
             let tilt = v[2].clamp(-1.0, 1.0).acos().to_degrees();
-            assert!(tilt > 1e-6 && tilt <= 85.0001, "an escape outside the posed cone: {v:?}");
-            assert!(v[0] * b.to.x + v[1] * b.to.y > 0.0, "an escape leaned INTO the boss: {v:?}");
+            assert!(
+                tilt > 1e-6 && tilt <= 85.0001,
+                "an escape outside the posed cone: {v:?}"
+            );
+            assert!(
+                v[0] * b.to.x + v[1] * b.to.y > 0.0,
+                "an escape leaned INTO the boss: {v:?}"
+            );
             if b.to.x > 8.4 && b.to.y.abs() <= 4.0 {
                 plus.push(v);
             }
             escaped += 1;
         }
         if b.to.z == -10.0 && b.to.x.abs() >= 12.0 {
-            assert!(b.axis.is_none(), "a clean floor row got posed anyway at {i}");
+            assert!(
+                b.axis.is_none(),
+                "a clean floor row got posed anyway at {i}"
+            );
         }
     }
-    assert!(escaped >= 4, "the shank never spoke on a boss-adjacent ladder: {escaped}");
+    assert!(
+        escaped >= 4,
+        "the shank never spoke on a boss-adjacent ladder: {escaped}"
+    );
     // The calm law, stated as the shortest-travel rule really is: the
     // AMOUNT of lean is geometry's answer (the smallest grid tilt the
     // whole cone agrees is clear, so it is the same for every row of
@@ -4493,7 +5360,10 @@ fn multiaxis_rough_poses_around_the_shank_and_moves_nothing() {
     let t0 = plus[0][2].clamp(-1.0, 1.0).acos().to_degrees();
     for v in &plus[1..] {
         let t = v[2].clamp(-1.0, 1.0).acos().to_degrees();
-        assert!((t - t0).abs() < 1e-6, "the same wall escaped by two tilts: {t} vs {t0}");
+        assert!(
+            (t - t0).abs() < 1e-6,
+            "the same wall escaped by two tilts: {t} vs {t0}"
+        );
     }
 }
 
@@ -4506,7 +5376,10 @@ fn flipping_shank_avoid_ages_the_path() {
     let world = new_world();
     let mut history = History::default();
     box_stock(&world, &mut history, 40.0, 40.0, 20.0);
-    history.execute(&world, AddTool::new(&world, "STUB", stub_tool()).expect("stub"));
+    history.execute(
+        &world,
+        AddTool::new(&world, "STUB", stub_tool()).expect("stub"),
+    );
     history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
     history.execute(
         &world,
@@ -4519,25 +5392,36 @@ fn flipping_shank_avoid_ages_the_path() {
         )
         .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "MAH").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "MAH").expect("generate"),
+    );
     assert_eq!(status(&world, "MAH"), OpStatus::Ok);
     let plain = cache(&world, "MAH").expect("cached").path;
-    assert!(plain
-        .moves
-        .iter()
-        .all(|m| m.to.z != -10.0 || m.to.x.abs() <= 8.0 || m.axis.is_none()));
+    assert!(
+        plain
+            .moves
+            .iter()
+            .all(|m| m.to.z != -10.0 || m.to.x.abs() <= 8.0 || m.axis.is_none())
+    );
 
     let mut dodging = multiaxis_rough_params();
     if let OpParams::MultiAxisRough { shank_avoid, .. } = &mut dodging {
         *shank_avoid = true;
     }
-    history.execute(&world, EditOperationParams::new(&world, "MAH", dodging).expect("edit"));
+    history.execute(
+        &world,
+        EditOperationParams::new(&world, "MAH", dodging).expect("edit"),
+    );
     assert_eq!(
         status(&world, "MAH"),
         OpStatus::Stale,
         "the digest missed stage F's flag - a stale posed path survives its flip"
     );
-    history.execute(&world, GenerateOperation::new(&world, "MAH").expect("regenerate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "MAH").expect("regenerate"),
+    );
     assert_eq!(status(&world, "MAH"), OpStatus::Ok);
     let posed = cache(&world, "MAH").expect("cached").path;
     assert!(
@@ -4557,9 +5441,18 @@ fn multiaxis_rough_refuses_a_slot_the_cone_cannot_clear() {
     // same job with the flag off stays E3's behavior: it generates, and
     // post-time judgment is the verifier's.
     let slot = || {
-        let mut facets = cube(Point3::new(-20.0, -20.0, -20.0), Point3::new(20.0, 20.0, -10.0)).facets;
-        facets
-            .extend(cube(Point3::new(-20.0, -20.0, -11.0), Point3::new(-4.5, 20.0, 5.0)).facets);
+        let mut facets = cube(
+            Point3::new(-20.0, -20.0, -20.0),
+            Point3::new(20.0, 20.0, -10.0),
+        )
+        .facets;
+        facets.extend(
+            cube(
+                Point3::new(-20.0, -20.0, -11.0),
+                Point3::new(-4.5, 20.0, 5.0),
+            )
+            .facets,
+        );
         facets.extend(cube(Point3::new(4.5, -20.0, -11.0), Point3::new(20.0, 20.0, 5.0)).facets);
         Mesh { facets }
     };
@@ -4567,7 +5460,10 @@ fn multiaxis_rough_refuses_a_slot_the_cone_cannot_clear() {
         let world = new_world();
         let mut history = History::default();
         box_stock(&world, &mut history, 40.0, 40.0, 20.0);
-        history.execute(&world, AddTool::new(&world, "STUB", stub_tool()).expect("stub"));
+        history.execute(
+            &world,
+            AddTool::new(&world, "STUB", stub_tool()).expect("stub"),
+        );
         history.execute(&world, ImportModel::from_mesh("slot", slot()));
         let mut params = multiaxis_rough_params();
         if let OpParams::MultiAxisRough { shank_avoid, .. } = &mut params {
@@ -4588,14 +5484,19 @@ fn multiaxis_rough_refuses_a_slot_the_cone_cannot_clear() {
     };
     let (world, _history) = job(true);
     let cmd = GenerateOperation::new(&world, "SLOT");
-    let CommandError::Machining(msg) =
-        cmd.err().expect("a 10-wide shank must refuse a 9-wide slot")
+    let CommandError::Machining(msg) = cmd
+        .err()
+        .expect("a 10-wide shank must refuse a 9-wide slot")
     else {
         panic!("expected a machining refusal");
     };
     assert!(msg.contains("shank"), "{msg}");
     assert!(msg.contains("cone"), "{msg}");
-    assert_eq!(status(&world, "SLOT"), OpStatus::Never, "a refusal leaves no path behind");
+    assert_eq!(
+        status(&world, "SLOT"),
+        OpStatus::Never,
+        "a refusal leaves no path behind"
+    );
     let (world, mut history) = job(false);
     let cmd = GenerateOperation::new(&world, "SLOT").expect("flag off stays E3");
     history.execute(&world, cmd);
@@ -4639,7 +5540,10 @@ fn a_quiet_shank_leaves_the_contour_twin_alone() {
     let pb = run(on, "C5R");
     assert_eq!(pa.moves.len(), pb.moves.len());
     for (i, (a, b)) in pa.moves.iter().zip(&pb.moves).enumerate() {
-        assert_eq!(a.axis, b.axis, "a shank that reaches nothing moved a pose at {i}");
+        assert_eq!(
+            a.axis, b.axis,
+            "a shank that reaches nothing moved a pose at {i}"
+        );
         assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z));
     }
 }
@@ -4702,7 +5606,8 @@ fn mac_corner_post(world: &World) -> SrcRef {
         .into_iter()
         .find(|c| {
             let pts = feature::chain_points(&f, c);
-            pts.iter().all(|p| (p[0] - pts[0][0]).abs() < 1e-9 && (p[1] - pts[0][1]).abs() < 1e-9)
+            pts.iter()
+                .all(|p| (p[0] - pts[0][0]).abs() < 1e-9 && (p[1] - pts[0][1]).abs() < 1e-9)
                 && pts.iter().any(|p| p[2] < 1.0)
                 && pts.iter().any(|p| p[2] > 4.0)
         })
@@ -4739,15 +5644,32 @@ fn multiaxis_contour_walks_the_picked_edges_and_leans_at_the_fold() {
     let src = mac_top_edges(&world);
     history.execute(
         &world,
-        CreateOperation::new(&world, "MAC", "BN-0600", src, multiaxis_contour_params(6.0, 4.0))
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "MAC",
+            "BN-0600",
+            src,
+            multiaxis_contour_params(6.0, 4.0),
+        )
+        .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "MAC").expect("generate"));
-    assert_eq!(status(&world, "MAC"), OpStatus::Ok, "the envelope verdict came back inside the gate");
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "MAC").expect("generate"),
+    );
+    assert_eq!(
+        status(&world, "MAC"),
+        OpStatus::Ok,
+        "the envelope verdict came back inside the gate"
+    );
     let t = cache(&world, "MAC").expect("cached").path;
     pose_law("multiaxis_contour", &t);
     let mut cut = 0usize;
-    for m in t.moves.iter().filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge)) {
+    for m in t
+        .moves
+        .iter()
+        .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
+    {
         cut += 1;
         assert!(
             (m.to.z - 8.0).abs() < 1e-6,
@@ -4755,9 +5677,16 @@ fn multiaxis_contour_walks_the_picked_edges_and_leans_at_the_fold() {
             m.to
         );
         let reach = (m.to.x - 5.0).abs().max((m.to.y - 5.0).abs());
-        assert!(reach >= 8.0 - 1e-6, "a cut point fell inside the footprint: {:?}", m.to);
+        assert!(
+            reach >= 8.0 - 1e-6,
+            "a cut point fell inside the footprint: {:?}",
+            m.to
+        );
     }
-    assert!(cut >= 4, "the pass skipped picked stations: {cut} cut moves");
+    assert!(
+        cut >= 4,
+        "the pass skipped picked stations: {cut} cut moves"
+    );
 }
 
 #[test]
@@ -4770,22 +5699,46 @@ fn multiaxis_contour_goes_stale_when_the_picked_model_moves() {
     let src = mac_top_edges(&world);
     history.execute(
         &world,
-        CreateOperation::new(&world, "MS1", "BN-0600", src.clone(), multiaxis_contour_params(6.0, 4.0))
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "MS1",
+            "BN-0600",
+            src.clone(),
+            multiaxis_contour_params(6.0, 4.0),
+        )
+        .expect("create"),
     );
-    history.execute(&world, GenerateOperation::new(&world, "MS1").expect("generate"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "MS1").expect("generate"),
+    );
     assert_eq!(status(&world, "MS1"), OpStatus::Ok);
     let part = model::find_by_name(&world, "part").expect("part");
     model::set_transform(&world, &part, at(4.0, 0.0, 0.0));
-    assert_eq!(status(&world, "MS1"), OpStatus::Stale, "the chains moved with the model");
+    assert_eq!(
+        status(&world, "MS1"),
+        OpStatus::Stale,
+        "the chains moved with the model"
+    );
     model::set_transform(&world, &part, at(0.0, 0.0, 0.0));
-    assert_eq!(status(&world, "MS1"), OpStatus::Ok, "back where it was, the cache is honest again");
+    assert_eq!(
+        status(&world, "MS1"),
+        OpStatus::Ok,
+        "back where it was, the cache is honest again"
+    );
 
     // A different pick is a different path, counts or no counts: the
     // digest reads the chain ids, so swapping one edge for a post
     // moves the stamp the same way swapping a face does for the 2D
     // kinds.
-    let sa = operation::current_stamp(&world, "BN-0600", &src, &multiaxis_contour_params(6.0, 4.0), "MS1", None);
+    let sa = operation::current_stamp(
+        &world,
+        "BN-0600",
+        &src,
+        &multiaxis_contour_params(6.0, 4.0),
+        "MS1",
+        None,
+    );
     let sb = operation::current_stamp(
         &world,
         "BN-0600",
@@ -4806,8 +5759,14 @@ fn multiaxis_contour_refuses_a_face_pick_by_name() {
     let top = FeatureSel::Face(top_face_of(&world, "part"));
     history.execute(
         &world,
-        CreateOperation::new(&world, "MF1", "BN-0600", sel("part", top), multiaxis_contour_params(6.0, 4.0))
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "MF1",
+            "BN-0600",
+            sel("part", top),
+            multiaxis_contour_params(6.0, 4.0),
+        )
+        .expect("create"),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "MF1")
         .err()
@@ -4831,8 +5790,14 @@ fn multiaxis_contour_refuses_a_chain_outside_its_window_by_name() {
     let src = mac_corner_post(&world);
     history.execute(
         &world,
-        CreateOperation::new(&world, "MW1", "BN-0600", src, multiaxis_contour_params(6.0, 4.0))
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "MW1",
+            "BN-0600",
+            src,
+            multiaxis_contour_params(6.0, 4.0),
+        )
+        .expect("create"),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "MW1")
         .err()
@@ -4841,7 +5806,11 @@ fn multiaxis_contour_refuses_a_chain_outside_its_window_by_name() {
         panic!("expected a machining refusal");
     };
     assert!(msg.contains("outside the window"), "{msg}");
-    assert_eq!(status(&world, "MW1"), OpStatus::Never, "a refusal leaves no path behind");
+    assert_eq!(
+        status(&world, "MW1"),
+        OpStatus::Never,
+        "a refusal leaves no path behind"
+    );
 }
 
 #[test]
@@ -4858,20 +5827,28 @@ fn multiaxis_contour_refuses_the_wrong_source_by_name() {
             &world,
             ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
         );
-        let cmd = CreateOperation::new(&world, tag, "BN-0600", src, multiaxis_contour_params(6.0, 4.0));
+        let cmd = CreateOperation::new(
+            &world,
+            tag,
+            "BN-0600",
+            src,
+            multiaxis_contour_params(6.0, 4.0),
+        );
         history.execute(&world, cmd.expect("create"));
         (world, history)
     };
     let (world, _history) = mk(SrcRef::Stock, "MJ1");
-    let CommandError::Machining(msg) =
-        GenerateOperation::new(&world, "MJ1").err().expect("stock is not a pick list")
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "MJ1")
+        .err()
+        .expect("stock is not a pick list")
     else {
         panic!("expected a machining refusal");
     };
     assert!(msg.contains("pick them in the Geometry section"), "{msg}");
     let (world, _history) = mk(SrcRef::Entity("part".into()), "MJ2");
-    let CommandError::Machining(msg) =
-        GenerateOperation::new(&world, "MJ2").err().expect("a whole model is not a pick list")
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "MJ2")
+        .err()
+        .expect("a whole model is not a pick list")
     else {
         panic!("expected a machining refusal");
     };
@@ -4888,8 +5865,14 @@ fn multiaxis_contour_refuses_a_flat_tool_and_nonsense_pose_by_name() {
     let src = mac_top_edges(&world);
     history.execute(
         &world,
-        CreateOperation::new(&world, "MT1", "EM-0600-4FL", src.clone(), multiaxis_contour_params(6.0, 4.0))
-            .expect("create"),
+        CreateOperation::new(
+            &world,
+            "MT1",
+            "EM-0600-4FL",
+            src.clone(),
+            multiaxis_contour_params(6.0, 4.0),
+        )
+        .expect("create"),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "MT1")
         .err()
@@ -4905,7 +5888,10 @@ fn multiaxis_contour_refuses_a_flat_tool_and_nonsense_pose_by_name() {
     if let OpParams::MultiAxisContour { tolerance, .. } = &mut zero_tol {
         *tolerance = 0.0;
     }
-    assert!(matches!(mk(zero_tol), Err(CommandError::Invalid(_))), "tol 0 is no budget");
+    assert!(
+        matches!(mk(zero_tol), Err(CommandError::Invalid(_))),
+        "tol 0 is no budget"
+    );
     let mut flat_lean = multiaxis_contour_params(6.0, 4.0);
     if let OpParams::MultiAxisContour { lead_deg, .. } = &mut flat_lean {
         *lead_deg = 91.0;
@@ -4915,7 +5901,10 @@ fn multiaxis_contour_refuses_a_flat_tool_and_nonsense_pose_by_name() {
     if let OpParams::MultiAxisContour { max_tilt_deg, .. } = &mut no_cone {
         *max_tilt_deg = 0.0;
     }
-    assert!(matches!(mk(no_cone), Err(CommandError::Invalid(_))), "a 0 cone allows no lean at all");
+    assert!(
+        matches!(mk(no_cone), Err(CommandError::Invalid(_))),
+        "a 0 cone allows no lean at all"
+    );
 }
 
 #[test]
@@ -4933,7 +5922,8 @@ fn multiaxis_contour_quiet_shank_moves_nothing() {
         }
         history.execute(
             &world,
-            CreateOperation::new(&world, tag, "BN-0600", mac_top_edges(&world), params).expect("create"),
+            CreateOperation::new(&world, tag, "BN-0600", mac_top_edges(&world), params)
+                .expect("create"),
         );
         let cmd = GenerateOperation::new(&world, tag).expect("generate");
         history.execute(&world, cmd);
@@ -4944,7 +5934,10 @@ fn multiaxis_contour_quiet_shank_moves_nothing() {
     let pb = run(true, "MQ2");
     assert_eq!(pa.moves.len(), pb.moves.len());
     for (i, (a, b)) in pa.moves.iter().zip(&pb.moves).enumerate() {
-        assert_eq!(a.axis, b.axis, "a shank that reaches nothing moved a pose at {i}");
+        assert_eq!(
+            a.axis, b.axis,
+            "a shank that reaches nothing moved a pose at {i}"
+        );
         assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z));
     }
 }
