@@ -128,8 +128,9 @@ pub fn current_stamp(
                     // the source lands here as a moved signature - and a
                     // stock whose source was deleted stays honestly Ok,
                     // because the material it describes never changed.
-                    let tris = model::facets_of(world, &entity)?;
-                    h.write_u64(revision::signature(&model::features_of_local(&tris)));
+                    // (M5.3 A: via the per-entity memo - the same digest,
+                    // recomputed only when the facets actually moved.)
+                    h.write_u64(model::geometry_signature(world, &entity)?);
                 }
             }
         }
@@ -148,8 +149,7 @@ pub fn current_stamp(
             // cube was) must read Stale, and a re-tessellation of the same
             // faces must not. Face ids are local-frame content hashes, so
             // the transform hashed above carries all the placement.
-            let tris = model::facets_of(world, &entity)?;
-            h.write_u64(revision::signature(&model::features_of_local(&tris)));
+            h.write_u64(model::geometry_signature(world, &entity)?);
         }
         SrcRef::Selection(items) => {
             // b'L', not b'S': the Stock arm already owns that byte, and a
@@ -193,8 +193,7 @@ pub fn current_stamp(
                     ] {
                         w(&mut h, v);
                     }
-                    let tris = model::facets_of(world, &entity)?;
-                    h.write_u64(revision::signature(&model::features_of_local(&tris)));
+                    h.write_u64(model::geometry_signature(world, &entity)?);
                 }
             }
         }

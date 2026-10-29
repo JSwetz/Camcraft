@@ -428,16 +428,16 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                 if let Some(tris) = dto.facets {
                     model::set_facets(world, &entity, dto_to_facets(tris));
                 }
-                // 0 means the key was absent, i.e. a pre-v20 document: no
-                // counter component is the world a v19 loader would have
-                // built, and `rev_of` reads it as 0 anyway. A model first
-                // updated after such a load lands rev 1 - the counter
-                // counts landings this document remembers, not the file's
-                // whole history. Staleness never reads it; the stamp's
-                // signature does the work.
-                if dto.rev > 0 {
-                    model::set_rev(world, &entity, dto.rev);
-                }
+                // The loader's pin is UNCONDITIONAL (M5.3 A): the counter
+                // must end the load exactly where the file remembered it,
+                // and set_facets above moved it as every landing does.
+                // 0 means the key was absent, i.e. a pre-v20 document:
+                // the pin puts back the 0 a v19 loader would have left.
+                // A model first updated after such a load lands rev 1 -
+                // the counter counts landings this document remembers,
+                // not the file's whole history. Staleness never reads
+                // it; the stamp's signature does the work.
+                model::set_rev(world, &entity, dto.rev);
             }
             EntityKind::Stock => {
                 // validate_kind already refused these; Result, never unwrap.

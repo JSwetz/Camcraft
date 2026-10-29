@@ -185,7 +185,7 @@ fn sheet_file_arm_writes_one_page_per_setup() {
     state.drain_actions();
 
     let path = std::env::temp_dir().join(format!(
-        "hsmw_sheet_test_{}.txt",
+        "camcraft_sheet_test_{}.txt",
         std::process::id()
     ));
     state.pending.push_back(CommandKind::SetupSheetFile(path.clone()));

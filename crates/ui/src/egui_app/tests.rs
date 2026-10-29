@@ -1935,7 +1935,7 @@ fn ribbon_drill_cell_creates_a_drill_operation() {
 /// `machine::kind_of`, which reads the loaded `.mch`.
 #[test]
 fn a_lathe_machine_darkens_the_mill_cells() {
-    let dir = std::env::temp_dir().join(format!("hsmw_kind_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("camcraft_kind_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let write = |name: &str, axes: &str| {
         let path = dir.join(name);
@@ -2660,7 +2660,7 @@ fn radial_detect_fills_the_cross_list_on_a_millturn() {
     wall_ring(0, 1, 2, &circle_cw(0.0, -10.0, 2.0, 24), -15.0, 15.0, &mut facets);
     let bar = camcraft_app::geometry::Mesh { facets };
 
-    let dir = std::env::temp_dir().join(format!("hsmw_cross_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("camcraft_cross_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let mt = dir.join("mt.mch");
     std::fs::write(
@@ -3153,7 +3153,7 @@ fn selecting_a_post_script_is_a_command_with_the_pane_labels() {
     use camcraft_app::posting;
     use camcraft_app::schema::PostRef;
 
-    let dir = std::env::temp_dir().join(format!("hsmw-ui-post-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("camcraft-ui-post-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let cps = dir.join("userpost.cps");
     std::fs::write(&cps, "function onOpen() { writeln(\"(UIPOST-3)\"); }").expect("write cps");

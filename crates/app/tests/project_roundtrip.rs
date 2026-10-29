@@ -2676,7 +2676,7 @@ fn the_post_choice_round_trips_and_a_v22_file_means_the_built_in() {
     use camcraft_app::posting;
     use camcraft_app::schema::PostRef;
 
-    let cps = std::env::temp_dir().join(format!("hsmw_rtpost_{}.cps", std::process::id()));
+    let cps = std::env::temp_dir().join(format!("camcraft_rtpost_{}.cps", std::process::id()));
     std::fs::write(&cps, "function onOpen() { writeln(\"(RT)\"); }").expect("write temp cps");
     let cps_name = cps.display().to_string();
 

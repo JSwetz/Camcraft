@@ -9,12 +9,15 @@
 use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::{Entity, World};
 
-use crate::geometry::feature::{self, Features};
 use crate::geometry::{Aabb, IDENTITY_Q, Point3, Triangle, normalize_quat, transform_point};
 use crate::schema::{
     Facets, Location, Name, Operation, Selected, StockDef, ToolDef, Toolpath, Wcs,
 };
 use crate::stock::StockShape;
+
+mod geometry;
+
+pub use geometry::{features_of, features_of_local, geometry_signature};
 use crate::tools::Tool;
 
 /// Create a named model entity at the origin with no geometry yet.
@@ -26,8 +29,17 @@ pub fn spawn(world: &World, name: &str) -> Entity {
         .set(Location::default())
 }
 
+/// Land geometry on an entity - the ONLY writer of `Facets` (M5.3 A).
+/// Every landing moves the revision counter in the same step: the
+/// geometry signature memo keys by `(rev)`, so forgetting to move it
+/// is not a thing a call site can do. Commands that restore a past
+/// revision pin it right back via [`set_rev`], paired with the exact
+/// bytes that revision carried.
 pub fn set_facets(world: &World, entity: &Entity, tris: Vec<Triangle>) {
-    entity.entity_view(world).set(Facets { tris });
+    let view = entity.entity_view(world);
+    view.set(Facets { tris });
+    let next = rev_of(world, entity).saturating_add(1);
+    view.set(crate::schema::Revision(next));
 }
 
 /// Set the translation half of the placement, keeping any existing rotation.
@@ -65,47 +77,6 @@ pub fn remove(world: &World, entity: &Entity) {
 #[must_use]
 pub fn facets_of(world: &World, entity: &Entity) -> Option<Vec<Triangle>> {
     entity.entity_view(world).try_get::<&Facets>(|f| f.tris.clone())
-}
-
-thread_local! {
-    /// Cap-8 MRU of analyzed meshes, keyed by local-facet content digest.
-    /// Faces resolve in the LOCAL frame, so transforms never invalidate an
-    /// entry; correctness is independent of hits - this is pure fuel for
-    /// per-frame hover (M1.5).
-    static FEATURES_CACHE: std::cell::RefCell<Vec<(u64, std::sync::Arc<Features>)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-/// Feature topology (faces, loops, feature edges) of a model's LOCAL
-/// facets, memoized by content. `None` only for a facet-less entity;
-/// garbage facets still return complete (degenerate-tagged) features.
-#[must_use]
-pub fn features_of(world: &World, entity: &Entity) -> Option<std::sync::Arc<Features>> {
-    let tris = facets_of(world, entity)?;
-    Some(features_of_local(&tris))
-}
-
-/// The cache chokepoint, exposed for callers already holding the facets.
-#[must_use]
-pub fn features_of_local(tris: &[Triangle]) -> std::sync::Arc<Features> {
-    if tris.is_empty() {
-        return std::sync::Arc::new(Features::default());
-    }
-    let key = feature::digest_of(tris);
-    FEATURES_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
-            let entry = cache.remove(i);
-            cache.push(entry.clone()); // MRU bump
-            return entry.1;
-        }
-        let f = std::sync::Arc::new(feature::features_of_facets(tris));
-        if cache.len() >= 8 {
-            cache.remove(0);
-        }
-        cache.push((key, f.clone()));
-        f
-    })
 }
 
 /// Translation only - the common read for position-oriented code. Use
@@ -179,8 +150,12 @@ pub fn rev_of(world: &World, entity: &Entity) -> u64 {
         .unwrap_or(0)
 }
 
-/// Land a geometry revision counter (commands only, per AGENTS.md: the UI
-/// and systems never write fields ad hoc).
+/// Pin a geometry revision counter (commands only, per AGENTS.md: the UI
+/// and systems never write fields ad hoc). A pin REPLACES the landing
+/// counter, so it must land together with the exact facets that value
+/// carried when it was current - undo restores both sides, the loader
+/// replays what the file remembered. A bare pin with foreign geometry
+/// would hand the signature memo a reused key; the pairing is the law.
 pub fn set_rev(world: &World, entity: &Entity, rev: u64) {
     entity.entity_view(world).set(crate::schema::Revision(rev));
 }

@@ -156,11 +156,17 @@ pub fn changes(old: &Features, new: &Features) -> FeatureChanges {
 /// changing a weld or a chain without changing a single face needs a
 /// facet-count coincidence too, and the Selection arm digests the ids it
 /// actually picked anyway (the law behind keeping this cheap: it runs per
-/// frame in status checks; the face ids ride the FEATURES_CACHE for free).
+/// frame in status checks - since M5.3 A the caller memoizes it per
+/// entity against the geometry revision, so an unmoved mesh pays this
+/// walk once, not once per operation per frame).
 #[must_use]
 pub fn signature(features: &Features) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
-    h.write(b"hsmw-signature-v1");
+    // v2: the M4.3 rename of the old brand's salt. Every stored digest
+    // moves once - documents saved under the old salt read their
+    // operations Stale exactly one time and settle for good (the
+    // stamp.rs salt-rename precedent: working as designed).
+    h.write(b"camcraft-signature-v2");
     h.write_usize(features.faces.len() + features.facet_face.len());
     for id in face_ids(features) {
         h.write_u64(id);

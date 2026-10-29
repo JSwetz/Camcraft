@@ -49,13 +49,34 @@ pub struct Facets {
     pub tris: Vec<Triangle>,
 }
 
-/// How many times geometry has landed on this model (M3.1): `1` at import,
-/// `+1` per `UpdateModel`. Display and save bookkeeping only - staleness is
-/// derived from the stamp against the live facets, never from this counter
-/// (AGENTS.md: no stored stale flags). Entities without the component read
-/// as revision 0, which is exactly what pre-v20 project files meant.
+/// How many times geometry has landed on this model. M3.1's shape was
+/// `1` at import, `+1` per `UpdateModel`; M5.3 A moved the increment
+/// into `model::set_facets`, so EVERY landing moves it - a write can
+/// never leave a fresh-looking memo entry behind, because the memo key
+/// moves with the write. Restore commands (`UpdateModel::invert`, the
+/// project loader) pin the counter back to a past value while landing
+/// the exact bytes that value carried - the pairing the memo trusts.
+/// Staleness is still derived from the stamp against the live facets,
+/// never from this counter (AGENTS.md: no stored stale flags); the
+/// counter only says when a derived digest may be REUSED, not what is
+/// true. Entities without the component read as revision 0, which is
+/// exactly what pre-v20 project files meant.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Revision(pub u64);
+
+/// The newest derived geometry signature of a model, paired with the
+/// revision it describes (M5.3 A). Valid exactly while `rev` is the live
+/// revision counter (which `set_facets` moves with every landing) and
+/// gated on the facets still being mounted. Derived state, never a
+/// stored stale flag: correctness is independent of hits (the
+/// FEATURES_CACHE law), and as a component it dies with the entity it
+/// describes - no cache outlives its subject. Not serialized: a fresh
+/// world re-derives on first read.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeoSig {
+    pub rev: u64,
+    pub sig: u64,
+}
 
 /// Selection marker (tag). Only `SelectEntity` writes it (AGENTS.md: changes
 /// go through commands); the tree and viewport read it to highlight.
@@ -205,6 +226,7 @@ pub fn register_schema(world: &World) {
     world.component::<Location>();
     world.component::<Facets>();
     world.component::<Revision>();
+    world.component::<GeoSig>();
     world.component::<Selected>();
     world.component::<StockDef>();
     world.component::<Wcs>();
