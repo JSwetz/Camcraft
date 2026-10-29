@@ -5240,3 +5240,20 @@ moved before the tagging. Considered and dropped: reordering
 `MoveModel::new` to check the pose before the entity doors - it
 would disagree with `MoveFixture`'s identical order for one test's
 convenience.
+
+## M5.2 close-out - the tag and the vehicle, version untouched
+
+**`m5.2-done` was tagged and the release vehicle built without a
+version bump, because the bump is not this milestone's to make.** The
+repo's law, read from `git log Cargo.toml`, is that the workspace
+version moves only in a dedicated `chore(release)` commit at the
+milestone that owns a `Release 0.x.0` label - 0.1.0 at M1.7, 0.2.0 at
+M2.3, 0.3.0 at M3.3. M5.2 sits inside the 0.3.0-to-0.4.0 window; M5.3
+carries the `(Release 0.4.0)` label, so 0.4.0 lands at that close-out.
+The precedent is exact: `m5.1-done:Cargo.toml` still reads 0.3.0. What
+M5.2 owes is the annotated tag on `e9db438` (after the heavy measuring
+lane ran green in release) and `cargo build --release` on stable into
+`target-release/` - the hand-test vehicle - both done. Considered and
+dropped: bumping to 0.4.0 now (a number ahead of the milestone that
+delivers it is a version that lies) and a version-less tag (the
+vehicle would point at no named state).
