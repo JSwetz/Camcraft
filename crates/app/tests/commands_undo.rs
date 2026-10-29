@@ -816,20 +816,10 @@ fn move_model_refuses_other_furniture_and_garbage() {
         Err(CommandError::NotFound(_))
     ));
     assert!(MoveModel::new(&world, "block", Location::default()).is_ok());
-    history.execute(&world, TagFixture::new(&world, "block", None).expect("tagged"));
-    let why = MoveModel::new(&world, "block", Location::default()).map(drop).err();
-    match why {
-        Some(CommandError::Invalid(m)) => assert!(m.contains("fixture"), "names its reason: {m}"),
-        other => panic!("expected an invalid refusal, got {other:?}"),
-    }
-    // The offset exists once a command has placed it; it is not a part.
-    history.execute(&world, SetWcsOrigin::new(&world, "G54", Location::default()).expect("wcs"));
-    assert!(matches!(
-        MoveModel::new(&world, "G54", Location::default()),
-        Err(CommandError::Invalid(m)) if m.contains("work offset")
-    ));
-
     // Garbage never enters history: non-finite and degenerate poses.
+    // Checked while the block is still a plain part - a placed
+    // fixture's door (below) is the higher truth and would speak
+    // first, naming the furniture instead of the pose.
     let nan = Location {
         pos: Point3::new(f64::NAN, 0.0, 0.0),
         rot: [0.0, 0.0, 0.0, 1.0],
@@ -843,4 +833,17 @@ fn move_model_refuses_other_furniture_and_garbage() {
         MoveModel::new(&world, "block", zero_q),
         Err(CommandError::Invalid(m)) if m.contains("quaternion")
     ));
+    history.execute(&world, TagFixture::new(&world, "block", None).expect("tagged"));
+    let why = MoveModel::new(&world, "block", Location::default()).map(drop).err();
+    match why {
+        Some(CommandError::Invalid(m)) => assert!(m.contains("fixture"), "names its reason: {m}"),
+        other => panic!("expected an invalid refusal, got {other:?}"),
+    }
+    // The offset exists once a command has placed it; it is not a part.
+    history.execute(&world, SetWcsOrigin::new(&world, "G54", Location::default()).expect("wcs"));
+    assert!(matches!(
+        MoveModel::new(&world, "G54", Location::default()),
+        Err(CommandError::Invalid(m)) if m.contains("work offset")
+    ));
+
 }

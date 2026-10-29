@@ -65,6 +65,16 @@ function formatFeed(v) {
   return String(Math.round(v));
 }
 function onComment(s) { writeln(s); }
+// Bar-feeder lifecycle defaults (M5.2 G.2): the events carry no
+// motion and no post may invent an M-code, so the default voices
+// the intent as a comment - visible to the operator, harmless to
+// any controller. A script with a real feeder dialect overrides
+// these exactly as it overrides any other hook.
+function onPartLoading() {
+  var a = properties.Advance;
+  writeComment("PART LOAD" + (a > 0 ? " ADVANCE " + formatUnit(a) : ""));
+}
+function onPartUnloading() { writeComment("PART UNLOAD"); }
 // The reference-era language-version pragma: accepted and ignored,
 // because the engine (not the script) decides semantics.
 function setLanguageVersion(_v) { return 0; }
@@ -100,6 +110,8 @@ pub const HOOKS: &[&str] = &[
     "onDwell",
     "onSpindleSpeed",
     "onRadiusCompensation",
+    "onPartLoading",
+    "onPartUnloading",
     "onComment",
     "onClose",
 ];

@@ -160,6 +160,24 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                 // continues from there.
                 pos = (c.x, c.y, c.r_z);
             }
+            Record::Part { loading, advance } => {
+                // A lifecycle event, like SECTION: it commands no
+                // motion, so `onCommand` never sees it - the script's
+                // onPartLoading/onPartUnloading is the whole contract,
+                // and the PRELUDE's defaults voice the intent as a
+                // comment so a program from a bare script still says
+                // what it asks the machine to do.
+                let mut p = BTreeMap::new();
+                p.insert(
+                    "command".into(),
+                    json!(if *loading { "PartLoading" } else { "PartUnloading" }),
+                );
+                if *loading {
+                    p.insert("Advance".into(), json!(advance));
+                }
+                s.set_properties(&merged(&base, &p, pos))?;
+                s.call(if *loading { "onPartLoading" } else { "onPartUnloading" }, "")?;
+            }
         }
         let after = s.out_len()?;
         for line in before..after {

@@ -576,7 +576,9 @@ pub enum ParamsDto {
     },
     /// Declared at v35 (M5.2 stage C): the bar's top and the parting
     /// plane (`bottom_z`'s name in this variant), the rung infeed
-    /// and the feeds.
+    /// and the feeds. The feeder signals grew in at v40 (M5.2 G.2)
+    /// with `#[serde(default)]` — an old file steps up silent-off,
+    /// no version bump: the same shape every grown field takes.
     Part {
         tolerance: f64,
         clearance_z: HeightDto,
@@ -585,6 +587,12 @@ pub enum ParamsDto {
         stepdown: f64,
         feed: f64,
         plunge_feed: f64,
+        #[serde(default)]
+        bar_load: bool,
+        #[serde(default)]
+        bar_advance: f64,
+        #[serde(default)]
+        bar_unload: bool,
     },
     /// Declared at v36 with the threading kind (M5.2 stage D): the
     /// window of turns' three heights and the wave's own numbers -

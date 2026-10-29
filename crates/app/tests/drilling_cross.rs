@@ -126,6 +126,7 @@ fn wall_ring(along: usize, u: usize, v: usize, poly: &[(f64, f64)], s0: f64, s1:
     f
 }
 
+#[allow(clippy::too_many_arguments)] // the frame-permutation builders: one slot per axis, every call site fills all eight
 fn disc(along: usize, u: usize, v: usize, cu: f64, cv: f64, r: f64, n: usize, s: f64) -> Vec<Triangle> {
     let p = circle(cu, cv, r, n);
     let ctr = sp(along, u, v, s, cu, cv);
@@ -140,6 +141,7 @@ fn disc(along: usize, u: usize, v: usize, cu: f64, cv: f64, r: f64, n: usize, s:
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)] // same law as `disc`, plus the rounded-rect hole's own radii
 fn annulus(
     along: usize,
     u: usize,

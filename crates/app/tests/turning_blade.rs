@@ -21,8 +21,8 @@
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
-    AddTool, ChangeTool, CreateOperation, GenerateOperation, History, ImportModel, LoadMachine,
-    SetStock,
+    AddTool, ChangeTool, CreateOperation, EditOperationParams, GenerateOperation, History,
+    ImportModel, LoadMachine, SetStock,
 };
 use camcraft_app::geometry::{Mesh, Point3, Triangle};
 use camcraft_app::machine::Machine;
@@ -157,6 +157,9 @@ fn part_params(plane_z: f64) -> OpParams {
         stepdown: 0.5,
         feed: 150.0,
         plunge_feed: 60.0,
+        bar_load: false,
+        bar_advance: 0.0,
+        bar_unload: false,
     }
 }
 
@@ -320,4 +323,67 @@ fn a_reground_blade_marks_every_op_stale_both_ways() {
     assert_eq!(status(&world, "G1"), OpStatus::Ok, "the 3.0 blade tiles the 3.2 window too");
     assert!(history.undo(&world), "undo the grind");
     assert_eq!(status(&world, "G1"), OpStatus::Stale, "and the cached 3.0 path reads stale now");
+}
+
+// ---------------------------------------------------------------- M5.2 G.2
+// The bar feeder's signals are authored numbers the POST reads: they
+// ride the stamp, the file, and the program - and never a toolpath.
+
+#[test]
+fn the_feeder_signals_reach_the_posted_program() {
+    // End to end in a live document: flags on -> the program says
+    // load, advance, unload around the section's own lines; the
+    // same world with silent flags writes no feeder lines at all
+    // (the byte-identity the goldens keep watching).
+    let (world, mut history) = blade_world();
+    let mut p = part_params(-10.0);
+    if let OpParams::Part { bar_load, bar_advance, bar_unload, .. } = &mut p {
+        *bar_load = true;
+        *bar_advance = 25.0;
+        *bar_unload = true;
+    }
+    create(&world, &mut history, "P1", "GT-0300", p.clone());
+    let mut path = std::env::temp_dir();
+    path.push(format!("camcraft-feeder-{}.nc", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    camcraft_app::posting::post_setup(&world, &path).expect("the sever posts");
+    let text = std::fs::read_to_string(&path).expect("written");
+    assert!(
+        text.contains("(PART LOAD ADVANCE 25)") && text.contains("(PART UNLOAD)"),
+        "the events must voice: {text}"
+    );
+    // The stamp: the flags change what posts, so they dirty the
+    // cache exactly like an authored feed would.
+    let mut quiet = p.clone();
+    if let OpParams::Part { bar_load, bar_unload, bar_advance, .. } = &mut quiet {
+        *bar_load = false;
+        *bar_unload = false;
+        *bar_advance = 0.0;
+    }
+    history.execute(
+        &world,
+        EditOperationParams::new(&world, "P1", quiet).expect("edit"),
+    );
+    assert_eq!(
+        status(&world, "P1"),
+        OpStatus::Stale,
+        "the signals changed the program, so they changed the stamp"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_negative_bar_advance_is_refused_at_the_door() {
+    // Validate early, name the door: an unmeasurable advance is
+    // created never, not posted wrong.
+    let (world, _h) = blade_world();
+    let mut p = part_params(-10.0);
+    if let OpParams::Part { bar_advance, .. } = &mut p {
+        *bar_advance = -5.0;
+    }
+    let Err(err) = CreateOperation::new(&world, "P1", "GT-0300", SrcRef::Entity("bar".into()), p)
+    else {
+        panic!("a negative advance cannot be authored");
+    };
+    assert!(format!("{err:?}").contains("not usable"), "the door must speak: {err:?}");
 }

@@ -31,6 +31,14 @@ pub enum Record {
     Section { begin: bool },
     Move(MoveRec),
     Cycle(CycleRec),
+    /// A bar-feeder event inside a parting op's section (M5.2 G.2):
+    /// `loading` true is PART LOAD - the feeder stands the next bar
+    /// out `advance` mm (0 signals the act alone) - and false is
+    /// PART UNLOAD, the catcher taking the severed part. The stream
+    /// carries intent, not motion: no geometry rides here, and a
+    /// post whose machine has no feeder prints its comment and
+    /// changes nothing else.
+    Part { loading: bool, advance: f64 },
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -186,6 +194,11 @@ impl Record {
                 cycle_name(c.kind),
                 pos(c.x, c.y, c.bottom_z)
             ),
+            Record::Part { loading: true, advance } if *advance > 0.0 => {
+                format!("part load · advance {advance:.3} mm")
+            }
+            Record::Part { loading: true, .. } => "part load".into(),
+            Record::Part { loading: false, .. } => "part unload".into(),
         }
     }
 
@@ -289,6 +302,17 @@ pub fn serialize(records: &[Record]) -> String {
                     f,
                     c.first_move,
                 ))
+            }
+            Record::Part { loading, advance } => {
+                let adv = if *loading && *advance > 0.0 {
+                    format!(" ADVANCE {}", q(*advance))
+                } else {
+                    String::new()
+                };
+                s.push_str(&format!(
+                    "PART {}{adv}\n",
+                    if *loading { "LOAD" } else { "UNLOAD" }
+                ));
             }
         }
     }
@@ -647,6 +671,55 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                 let r = parse_cycle_rec(&mut it, move_idx).map_err(fail)?;
                 out.push(Record::Cycle(r));
                 in_section = true;
+            }
+            "PART" => {
+                let dir = it.next().unwrap_or("");
+                let loading = match dir {
+                    "LOAD" => true,
+                    "UNLOAD" => false,
+                    other => {
+                        return Err(fail(format!(
+                            "PART needs LOAD or UNLOAD, found {other:?}"
+                        )))
+                    }
+                };
+                // One optional ADVANCE word - spaced, joined, or
+                // keyed - carrying microns, the lattice law again.
+                let mut advance = 0.0;
+                if let Some(w) = it.next() {
+                    let inline = match w.split_once([':', '=']) {
+                        Some((k, v)) if k.eq_ignore_ascii_case("ADVANCE") => Some(v),
+                        Some(_) => None,
+                        None => w
+                            .strip_prefix("ADVANCE")
+                            .filter(|r| !r.is_empty())
+                            .map(|r| r as &str)
+                            .or_else(|| {
+                                if w.eq_ignore_ascii_case("ADVANCE") {
+                                    Some("")
+                                } else {
+                                    None
+                                }
+                            }),
+                    };
+                    let Some(inline) = inline else {
+                        return Err(fail(format!("PART word {w:?} is not ADVANCE")));
+                    };
+                    let v = if inline.is_empty() {
+                        it.next().ok_or_else(|| fail("ADVANCE needs a value".into()))?
+                    } else {
+                        inline
+                    };
+                    // ADVANCE rides the LOAD alone - the serializer
+                    // writes it on no other line, so seeing it there
+                    // is a hand-edited stream saying something
+                    // confused; refuse by name, never drop silently.
+                    if !loading {
+                        return Err(fail("ADVANCE rides PART LOAD, not PART UNLOAD".into()));
+                    }
+                    advance = num(v).map_err(|_| fail(format!("ADVANCE {v:?}")))? / 1000.0;
+                }
+                out.push(Record::Part { loading, advance });
             }
             other => {
                 return Err(fail(format!("unknown record {other:?}")));

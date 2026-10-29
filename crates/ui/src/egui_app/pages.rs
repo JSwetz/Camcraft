@@ -118,17 +118,20 @@ const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
 /// instead of long stacks"), in tab-bar order. The guard indices in
 /// `params_fields` are these same numbers - one placement law, table and
 /// guards read each other.
-const SECTIONS: [&str; 5] = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds"];
+const SECTIONS: [&str; 6] = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds", "Machine"];
 const SEC_GEO: usize = 0;
 const SEC_HEIGHTS: usize = 1;
 const SEC_PASSES: usize = 2;
 const SEC_LEADS: usize = 3;
 const SEC_FEEDS: usize = 4;
+const SEC_MACHINE: usize = 5;
 
 /// Which sections an operation kind actually has fields (or the pick law)
 /// for: Geometry/Heights/Feeds always; Passes except Trace (Trace has no
 /// stepover or leave); Leads & Links only Contour - it is the kind with
-/// lead moves and tabs. The tab bar shows exactly this: no dead tabs.
+/// lead moves and tabs; Machine only Part - the bar feeder's signals
+/// are the one lifecycle group no cutting tab names (M5.2 G.2). The
+/// tab bar shows exactly this: no dead tabs.
 fn has_section(kind: OpType, s: usize) -> bool {
     match s {
         SEC_GEO | SEC_HEIGHTS | SEC_FEEDS => true,
@@ -136,6 +139,7 @@ fn has_section(kind: OpType, s: usize) -> bool {
         // peck depth and bottom dwell, the numbers that shape its hops.
         SEC_PASSES => !matches!(kind, OpType::Trace),
         SEC_LEADS => matches!(kind, OpType::Contour),
+        SEC_MACHINE => matches!(kind, OpType::Part),
         _ => false,
     }
 }
@@ -2582,7 +2586,10 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             feed: _,
             plunge_feed,
             bottom_z,
-            ..
+            top_z: _,
+            bar_load,
+            bar_advance,
+            bar_unload,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -2609,6 +2616,22 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
                 num_feed(ui, u, plunge_feed);
                 ui.label("the ladder down the column plunges at this feed; every retract off the kerf is a rapid back to the clear radius at the same station");
+            }
+            // The bar feeder's signals (M5.2 G.2): they shape no
+            // toolpath and enter no sim - they are what the POSTED
+            // program says around the cut. One program cuts one
+            // part, so the honest frame is load, then cut, then
+            // unload; the advance is the bar's next bite, measured
+            // from wherever the stub left the axis.
+            if tab == SEC_MACHINE {
+                ui.checkbox(bar_load, "Load bar before the cut");
+                if *bar_load {
+                    field(ui, "Bar advance");
+                    num(ui, u, bar_advance);
+                    ui.label("how far the feeder pushes the bar past the previous part's stub - 0 says the act alone, no measured advance");
+                }
+                ui.checkbox(bar_unload, "Unload part after the cut");
+                ui.label("the two signals post as stream events around this section - a script voices them for the machine, M-code or comment, and silence posts silence");
             }
         }
         // Threading (M5.2 D): the wave the model already carries, cut

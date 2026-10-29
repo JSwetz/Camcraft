@@ -822,6 +822,9 @@ impl OpParams {
                 stepdown,
                 feed,
                 plunge_feed,
+                bar_load,
+                bar_advance,
+                bar_unload,
             } => {
                 w(h, *tolerance);
                 wh(h, *clearance_z);
@@ -830,6 +833,12 @@ impl OpParams {
                 for v in [*stepdown, *feed, *plunge_feed] {
                     w(h, v);
                 }
+                // The feeder signals change the POSTED program, so
+                // they dirty the stamp like every authored number -
+                // even though no geometry reads them (M5.2 G.2).
+                w(h, if *bar_load { 1.0 } else { 0.0 });
+                w(h, *bar_advance);
+                w(h, if *bar_unload { 1.0 } else { 0.0 });
             }
             // The threading ladder (M5.2 stage D, tag 24): the wave's
             // own three numbers ride beside the twins' - pitch, depth

@@ -343,6 +343,8 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
     ];
     let d = Dump {
         op_name: "Drill1",
+        part_load: None,
+        part_unload: false,
         tool_number: 1,
         tool_name: "DR-0300",
         tool_diameter: 3.0,
@@ -401,6 +403,8 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
     let t = Toolpath::new(vec![feed(1.0), m2, m3]);
     let d = Dump {
         op_name: "Lean1",
+        part_load: None,
+        part_unload: false,
         tool_number: 1,
         tool_name: "EM-0400",
         tool_diameter: 4.0,
@@ -566,4 +570,129 @@ function onClose() { writeln("M30"); }
     assert!(f.label.contains("(no output)"), "swallowed is said: {}", f.label);
     let e = &out.blocks[3];
     assert_eq!((e.record.as_ref(), e.first, e.last, e.label.as_str()), (None, 2, 3, "end"));
+}
+
+// ---------------------------------------------------------------- M5.2 G.2
+// The bar feeder's lifecycle: PART records are stream events, not
+// commands - they bracket the section, voice through dedicated
+// hooks, and round-trip their micron numbers exactly.
+
+#[test]
+fn part_events_roundtrip_and_strays_refuse() {
+    for recs in [
+        vec![Record::Part { loading: true, advance: 25.0 }],
+        vec![Record::Part { loading: true, advance: 0.0 }],
+        vec![Record::Part { loading: false, advance: 0.0 }],
+    ] {
+        let text = cnc::serialize(&recs);
+        assert_eq!(cnc::parse(&text).expect("own output must parse"), recs);
+    }
+    // The three legal spellings of the same micron number.
+    for w in ["ADVANCE 25000", "ADVANCE:25000", "ADVANCE25000"] {
+        let text = format!("PART LOAD {w}\n");
+        assert_eq!(
+            cnc::parse(&text).expect("a legal ADVANCE spelling must read")[0],
+            Record::Part { loading: true, advance: 25.0 },
+            "{text}"
+        );
+    }
+    for bad in [
+        "PART\n",
+        "PART FIZZ\n",
+        "PART LOAD SIDE\n",
+        "PART LOAD ADVANCE zap\n",
+        "PART UNLOAD ADVANCE 1\n",
+    ] {
+        let e = cnc::parse(bad).expect_err("a confused PART line must refuse, never half-read");
+        assert!(format!("{e}").contains("line"), "error must name its line: {e}");
+    }
+}
+
+#[test]
+fn part_events_voice_the_lifecycle_defaults() {
+    // A bare script (prelude only) still says what the program asks
+    // the machine to do - the defaults speak in comments.
+    let text = cnc::serialize(&[
+        Record::Section { begin: true },
+        Record::Part { loading: true, advance: 25.0 },
+        Record::Move(MoveRec {
+            kind: MoveKind::Feed,
+            x: 0.0,
+            y: 0.0,
+            z: -1.0,
+            feed: Some(100.0),
+            center: None,
+            ccw: false,
+            abc: None,
+        }),
+        Record::Part { loading: false, advance: 0.0 },
+        Record::Section { begin: false },
+    ]);
+    let out = engine::run("", &json!(null), &text).expect("the prelude alone posts");
+    assert!(out.program.contains("(PART LOAD ADVANCE 25)"), "{}", out.program);
+    assert!(out.program.contains("(PART UNLOAD)"), "{}", out.program);
+    // The act alone, no measured number, says just the act.
+    let out = engine::run("", &json!(null), "PART LOAD\n").expect("posts");
+    assert!(out.program.contains("(PART LOAD)"), "{}", out.program);
+    assert!(!out.program.contains("ADVANCE"), "{}", out.program);
+}
+
+#[test]
+fn part_events_are_lifecycle_hooks_not_commands() {
+    // onCommand never sees a PART record - the contract SECTION
+    // already keeps (engine.rs): the dedicated hooks do the voice,
+    // and the properties carry the command name and the advance
+    // only where an advance means something.
+    let cps = r#"
+var SEEN = [];
+function onCommand() { SEEN.push("cmd:" + properties.command); }
+function onPartLoading() { SEEN.push("load:" + properties.command + ":" + formatUnit(properties.Advance)); }
+function onPartUnloading() { SEEN.push("unload:" + (properties.Advance === undefined ? "silent" : "leak")); }
+function onClose() { SEEN.forEach(function (x) { writeln(x); }); }
+"#;
+    let text = cnc::serialize(&[
+        Record::Part { loading: true, advance: 25.0 },
+        Record::Part { loading: false, advance: 0.0 },
+    ]);
+    let out = engine::run(cps, &json!(null), &text).expect("post");
+    assert!(out.program.contains("load:PartLoading:25"), "{}", out.program);
+    assert!(out.program.contains("unload:silent"), "{}", out.program);
+    assert!(!out.program.contains("cmd:"), "onCommand must never see it: {}", out.program);
+}
+
+#[test]
+fn dump_brackets_the_section_with_the_feeder() {
+    use camcraft_post::geometry::Point3;
+    let t = Toolpath::new(vec![camcraft_post::cl::Move::new(
+        MoveKind::Feed,
+        Point3 { x: 0.0, y: 0.0, z: 1.0 },
+        Point3 { x: 0.0, y: 0.0, z: -1.0 },
+        Some(100.0),
+    )]);
+    let d = Dump {
+        op_name: "Part1",
+        part_load: Some(12.0),
+        part_unload: true,
+        tool_number: 1,
+        tool_name: "GT-0300",
+        tool_diameter: 16.0,
+        rpm: 2000.0,
+        clearance_z: 20.0,
+        retract_z: 20.0,
+        top_z: 0.0,
+        wcs: "G54",
+        origin: [0.0; 3],
+        stock: [-20.0, 20.0, -20.0, 20.0],
+        stock_top_z: 0.0,
+        warnings: vec![],
+    };
+    let recs = camcraft_post::post::dump(&t, &d);
+    let open = recs.iter().position(|r| matches!(r, Record::Section { begin: true })).expect("open");
+    let close = recs.iter().rposition(|r| matches!(r, Record::Section { begin: false })).expect("close");
+    assert_eq!(recs[open + 1], Record::Part { loading: true, advance: 12.0 }, "load leads the section");
+    assert_eq!(recs[close - 1], Record::Part { loading: false, advance: 0.0 }, "unload trails it");
+    // Silent flags write no events at all - the default document
+    // posts byte-identically to before the feeder existed.
+    let d2 = Dump { op_name: "Part1", part_load: None, part_unload: false, ..d };
+    assert!(!camcraft_post::post::dump(&t, &d2).iter().any(|r| matches!(r, Record::Part { .. })));
 }

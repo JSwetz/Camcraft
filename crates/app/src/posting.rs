@@ -439,8 +439,25 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             Some(a) => ([a.min.x, a.max.x, a.min.y, a.max.y], a.max.z),
             None => ([0.0; 4], 0.0),
         };
+        // The feeder signals ride the section (M5.2 G.2): only a
+        // Part operation can carry them, and a load with an advance
+        // of 0 is still a load - the ACT, not the number.
+        let (part_load, part_unload) = match &op.params {
+            OpParams::Part {
+                bar_load,
+                bar_advance,
+                bar_unload,
+                ..
+            } => (
+                bar_load.then_some(*bar_advance),
+                *bar_unload,
+            ),
+            _ => (None, false),
+        };
         let d = Dump {
             op_name: name,
+            part_load,
+            part_unload,
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,

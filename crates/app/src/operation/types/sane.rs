@@ -635,6 +635,8 @@ impl OpParams {
                 stepdown,
                 feed,
                 plunge_feed,
+                bar_advance,
+                ..
             } => {
                 pos(*tolerance)
                     && clearance_z.is_sane()
@@ -643,6 +645,11 @@ impl OpParams {
                     && pos(*stepdown)
                     && pos(*feed)
                     && pos(*plunge_feed)
+                    // The feeder's advance is a length even when the
+                    // signal is off: 0 stands (the act alone), a
+                    // negative or unmeasurable one is not authored.
+                    && bar_advance.is_finite()
+                    && *bar_advance >= 0.0
             }
             // The threading door (M5.2 stage D): three positive helix
             // numbers - pitch, depth, infeed - beside the twins'

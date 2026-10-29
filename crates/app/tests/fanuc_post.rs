@@ -91,6 +91,8 @@ fn a_dumped_lean_posts_the_same_program_as_a_tilted_stream() {
     ]);
     let d = Dump {
         op_name: "Lean1",
+        part_load: None,
+        part_unload: false,
         tool_number: 1,
         tool_name: "EM-0400",
         tool_diameter: 4.0,

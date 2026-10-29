@@ -881,6 +881,12 @@ fn seed_part(c: &Carried) -> OpParams {
         stepdown: 0.5,
         feed: c.feed,
         plunge_feed: c.plunge,
+        // The feeder signals are off by default: a seeded parting
+        // operation says nothing the controller wasn't told to
+        // expect (M5.2 G.2).
+        bar_load: false,
+        bar_advance: 0.0,
+        bar_unload: false,
     }
 }
 

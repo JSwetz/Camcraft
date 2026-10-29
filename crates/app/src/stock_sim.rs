@@ -124,6 +124,18 @@ pub fn simulate_document(
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
             .ok_or_else(|| format!("{name}: lost its operation"))?;
+        // The revolved clause (M5.2 G.2): a Turn-family path lives in
+        // the half-plane - its numbers speak radius and axial
+        // station, and a Z-downward height field would read a parting
+        // kerf as a 38 mm plunge and the whole program as gouged. The
+        // verdict that governs it is the revolved one, already binding
+        // at generation; HERE the honest answer is that nothing was
+        // judged. Refusal, not a guess - the rotated-stock precedent.
+        if op.params.kind().info().family == crate::operation::Family::Turn {
+            return Err(format!(
+                "{name}: a revolved path is not judgeable in the mill's dexel frame - its law is the revolved verdict at generation"
+            ));
+        }
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t))
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;

@@ -657,6 +657,14 @@ pub enum OpParams {
     /// bar's top for the panel. The cut itself is the bar's whole
     /// column at the plane: the model, not these numbers, sets the
     /// ladder's depth, and the last rung passes the axis to sever.
+    /// The bar feeder (M5.2 G.2): `bar_load` stands fresh bar out
+    /// `bar_advance` mm BEFORE the section's moves (0 signals the
+    /// act alone - a controller that indexes by its own stops), and
+    /// `bar_unload` asks the catcher for the severed part AFTER
+    /// them. A program describes ONE part: load the bar it is cut
+    /// from, machine it, take the part away. The signals ride the
+    /// stamp (they change the POSTED program) but no geometry -
+    /// generate, simulate and verify never read them.
     Part {
         tolerance: f64,
         clearance_z: Height,
@@ -665,6 +673,9 @@ pub enum OpParams {
         stepdown: f64,
         feed: f64,
         plunge_feed: f64,
+        bar_load: bool,
+        bar_advance: f64,
+        bar_unload: bool,
     },
     /// Threading (M5.2 stage D): the helical ladder on a MODELED
     /// thread. `pitch` is that thread's lead - the lattice of V's

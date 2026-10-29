@@ -4426,3 +4426,64 @@ fn v38_file_steps_to_v39_and_the_bore_grammar_round_trips() {
         "the tag is the variant's snake name, not a guess from the label"
     );
 }
+
+#[test]
+fn v40_part_rows_step_up_silent_and_the_feeder_flags_round_trip() {
+    // The G.2 fields grew in with serde defaults and NO version bump,
+    // so a current file simply omits them - the same meaning the
+    // keys were invented to carry: the feeder says nothing.
+    // Built by concatenation, not format!: a JSON template needs its
+    // own braces verbatim, and format!'s doubling is a trap worth
+    // avoiding outright in prose-shaped strings.
+    let silent = |keys: &str| {
+        let mut t = String::from(r#"{"version": "#);
+        t.push_str(&project::PROJECT_VERSION.to_string());
+        t.push_str(
+            r#", "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "groove", "diameter": 16.0, "corner_r": 0.0,
+                      "width": 2.0,
+                      "flute_len": 8.0, "shank_d": 16.0, "shank_len": 60.0,
+                      "holder_d": 0.0, "holder_len": 0.0,
+                      "material_group": "general", "rpm": 2000.0, "feed": 150.0}},
+            {"name": "PT1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"part": {
+                 "tolerance": 0.05,
+                 "clearance_z": {"reference": "fixed", "offset": 20.0},
+                 "top_z": {"reference": "fixed", "offset": 16.0},
+                 "bottom_z": {"reference": "fixed", "offset": -10.0},
+                 "stepdown": 0.5, "feed": 150.0, "plunge_feed": 60.0"#,
+        );
+        t.push_str(keys);
+        t.push_str("}}}}\n        ]\n}");
+        t
+    };
+    let read = |world: &flecs_ecs::prelude::World| -> (bool, f64, bool) {
+        let e = model::find_by_name(world, "PT1").expect("op");
+        let o = model::operation_of(world, &e).expect("operation");
+        let OpParams::Part { bar_load, bar_advance, bar_unload, .. } = &o.params else {
+            panic!("part params expected, got {:?}", o.params);
+        };
+        (*bar_load, *bar_advance, *bar_unload)
+    };
+
+    let world = new_world();
+    project::open(&world, &silent("")).expect("a feeder-less part row must read");
+    assert_eq!(read(&world), (false, 0.0, false), "absence means silence, the seed's own shape");
+    // And the save states the learned keys - the fixed point the
+    // feed_opt precedent keeps: a second open cannot drift them.
+    let p = tmp_path("g2silent");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(saved.contains("\"bar_load\": false"), "{saved}");
+    let world2 = new_world();
+    project::open(&world2, &saved).expect("reopened");
+    assert_eq!(read(&world2), (false, 0.0, false));
+
+    // Stated keys ride through whole, mm and all.
+    let world3 = new_world();
+    project::open(&world3, &silent(", \"bar_load\": true, \"bar_advance\": 25.0, \"bar_unload\": true"))
+        .expect("the feeder keys must read");
+    assert_eq!(read(&world3), (true, 25.0, true), "the signals are the file's, verbatim");
+    let _ = std::fs::remove_file(&p);
+}

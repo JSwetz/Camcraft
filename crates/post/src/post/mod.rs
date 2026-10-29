@@ -76,6 +76,15 @@ pub struct Dump<'a> {
     /// Verification warnings attached to the path (the gate's
     /// evidence, riding the stream).
     pub warnings: Vec<String>,
+    /// Bar-feeder signals (M5.2 G.2): `part_load` is Some(advance)
+    /// when the op's setup feeds a new bar (the advance stands it
+    /// out that many mm; 0 is the act alone), and `part_unload`
+    /// asks the catcher for the severed part. They bracket the
+    /// section - the machine events a parting op exists to make -
+    /// and ride no geometry, so a toolpath with them set still
+    /// simulates and verifies exactly as without.
+    pub part_load: Option<f64>,
+    pub part_unload: bool,
 }
 
 impl<'a> Default for Dump<'a> {
@@ -94,6 +103,8 @@ impl<'a> Default for Dump<'a> {
             stock: [0.0; 4],
             stock_top_z: 0.0,
             warnings: Vec::new(),
+            part_load: None,
+            part_unload: false,
         }
     }
 }
@@ -133,6 +144,12 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
         out.push(Record::Tool { number: d.tool_number, name: d.tool_name.into() });
     }
     out.push(Record::Section { begin: true });
+    if let Some(advance) = d.part_load {
+        out.push(Record::Part {
+            loading: true,
+            advance,
+        });
+    }
 
     // Hole groups lead with their cycle record: bucket cycles by the
     // move index they anchor at.
@@ -196,6 +213,12 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     }
     for c in &cycles[ci..] {
         out.push(Record::Cycle((*c).clone()));
+    }
+    if d.part_unload {
+        out.push(Record::Part {
+            loading: false,
+            advance: 0.0,
+        });
     }
     out.push(Record::Section { begin: false });
     out
