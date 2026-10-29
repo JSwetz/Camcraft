@@ -5122,3 +5122,40 @@ dropped: buttons that only edit the draft until Apply - a rotation
 the viewport shows but the history cannot undo is a bug by the
 everything-is-a-command law, and the turn is exactly what a
 mouse-drag orbit would want to become later.
+
+## M5.2 stage G.3 - the opposite-station detour, and the hop plane's side (code b9c06ca + this docs)
+
+**A 180-degree station pair travels over the bar's end face, not
+through it.** No hop radius saves the chord: two points on opposite
+columns at any equal radius straddle the spindle, so the closest
+approach is 0 - the F2 refusal stood because the machine really has
+no legal straight traverse there. With the stock's Z top known the
+path lifts on the OLD column, indexes the turret in the clear,
+swings above the end face (a plane no radial chord can reach), and
+descends on the NEW column. Considered and dropped: a B-axis rotary
+move to bring the stations adjacent - the kernel's live tooling is
+axis-aligned v1, and inventing a rotary traverse to dodge a linear
+problem is the kind of cleverness the refusal doctrine exists to
+prevent.
+
+**The detour needs a witness, not a guess.** `stock_z_max` rides
+`CrossParams` as `Option<f64>`: `generate` measures it from the same
+mesh vertices that give `stock_r`, `None` keeps the old refusal
+verbatim, and a NaN top is turned away at the door - "no detour can
+be proven clear of a bar whose height is a guess". The swing plane
+adds `clearance.max(margin)` on top, the margin carrying the tool
+body's own rim below the tip line.
+
+**A hop plane is a radial distance on the mouth's own side.**
+`start_d` had read it as a signed coordinate: a station whose mouth
+sat at negative x parked at POSITIVE x - through the spindle,
+mid-air, silent. G.3's -X test hole made the old lie visible while
+writing the swing assertion; every F2 mouth happened to sit at
+positive coordinates, so nothing had caught it. The fix takes the
+side from the mouth's coordinate sign (a centered stock's radial
+mouth never sits at 0; the fallback is the station behind the tip),
+and `a_negative_station_hops_on_its_own_column` pins both the chord
+law and the first rapid's side. Considered and dropped: leaving the
+signed reading for positive-only callers - recognition hands
+negative mouths to this code the day a real bar is drilled, and a
+latent through-spindle rapid is a gouge with a calendar on it.
