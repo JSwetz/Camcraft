@@ -4964,6 +4964,7 @@ the split is a pure code move landed in the stage's own commit, before
 the tree ever saw a release: the kernel entry and the ride, the parity
 doors, and the MIN-fold wall are three subjects, and `revolve.rs`'s
 487 lines are the cautionary tale, not the precedent.
+
 ## M5.2 stage F2 - radial drilling and the turned solid read sideways (code 32d3f27 + this docs)
 
 **Recognition is the Z pipeline rotated, not a second pipeline.** The
