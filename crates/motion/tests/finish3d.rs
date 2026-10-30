@@ -268,14 +268,19 @@ fn box_walls_are_pure_structure() {
     // ring and the y-wall ring both graze them), so they read as real
     // ridges with a real - but sub-gate - cusp standing between the two
     // offset ladders. Silence is the verifier's; measurement tells the
-    // truth, and the truth here is under budget, not zero.
+    // truth, and the truth here is under budget, not zero. Since the
+    // M5.2 E facet-distance law the corner vertex now registers on the
+    // GOUGE channel too (0.027 mm at a 0.123 gate) - the old dexel-floor
+    // law was blind to a graze with no floor under the wall columns - so
+    // the assert is `gouge <= gate`, the same budget the comment names,
+    // never the `gouge == 0` the blind law let it stay.
     let f = box_facets();
     let t = waterline(&f, &params(10.0, 0.0)).expect("box waterline");
     assert!(!t.moves.is_empty());
     let rep = envelope(&f, &t);
-    assert_eq!(
-        rep.gouge_mm, 0.0,
-        "the tangent ladder cut below the box tops somewhere: {:?}",
+    assert!(
+        rep.gouge_mm <= gate(rep.cell),
+        "the tangent ladder cut below the box tops past budget: {:?}",
         rep
     );
     assert!(
