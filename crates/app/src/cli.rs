@@ -23,7 +23,7 @@ camcraft-cli - CamCraft headless batch lane (clean-room)
 
 USAGE:
     camcraft-cli script   <job.js>
-    camcraft-cli process  <job.camp> [-o <out.nc>] [--cps <name|file.cps>]
+    camcraft-cli process  <job.camproj> [-o <out.nc>] [--cps <name|file.cps>]
     camcraft-cli help
     camcraft-cli version
 
@@ -40,14 +40,14 @@ stdout; refusals print on stderr. Exit: 0 stood, 1 refused, 2 usage.
 /// The process lane's generated job: the verbs a headless project
 /// run always means, spelled exactly as a hand-written script would.
 /// No second code path: the CLI's project processing IS a script run.
-fn process_script(camp: &Path, out: Option<&Path>, cps: Option<&str>) -> String {
+fn process_script(proj: &Path, out: Option<&Path>, cps: Option<&str>) -> String {
     let mut opts = json!({ "to": out.map(|p| p.display().to_string()) });
     if let Some(c) = cps {
         opts["cps"] = json!(c);
     }
     let mut s = format!(
         "cam.load({});\ncam.generate();\n",
-        json!(camp.display().to_string())
+        json!(proj.display().to_string())
     );
     if out.is_some() {
         s.push_str(&format!("cam.post({opts});\n"));
@@ -131,7 +131,7 @@ fn lane_script(args: &[String]) -> i32 {
 }
 
 fn lane_process(args: &[String]) -> i32 {
-    let mut camp: Option<PathBuf> = None;
+    let mut proj: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
     let mut cps: Option<String> = None;
     let mut it = args.iter();
@@ -156,20 +156,20 @@ fn lane_process(args: &[String]) -> i32 {
                 return 2;
             }
             other => {
-                if camp.is_some() {
+                if proj.is_some() {
                     eprintln!("camcraft-cli: process takes one project (extra: {other:?})");
                     return 2;
                 }
-                camp = Some(PathBuf::from(other));
+                proj = Some(PathBuf::from(other));
             }
         }
     }
-    let Some(path) = camp else {
-        eprintln!("camcraft-cli: process needs a .camp project");
+    let Some(path) = proj else {
+        eprintln!("camcraft-cli: process needs a .camproj project");
         return 2;
     };
-    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("camp")) {
-        eprintln!("camcraft-cli: {} is not a .camp project", path.display());
+    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("camproj")) {
+        eprintln!("camcraft-cli: {} is not a .camproj project", path.display());
         return 2;
     }
     let source = process_script(&path, out.as_deref(), cps.as_deref());

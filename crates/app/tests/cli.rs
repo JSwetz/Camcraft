@@ -31,7 +31,7 @@ fn tmp(tag: &str, ext: &str) -> PathBuf {
 /// box stock and one clean facing op - saved so `process` has a
 /// project to bring current. If this refuses, the door is fine and
 /// the fixture is wrong.
-fn fixture_camp() -> World {
+fn fixture_proj() -> World {
     let world = new_world();
     let mut history = History::default();
     let cmd = SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, Default::default());
@@ -82,7 +82,7 @@ fn no_command_and_strangers_refuse_with_a_two() {
     let o = cli_str(&["frobnicate"]);
     assert_eq!(code(&o), 2);
     assert!(String::from_utf8_lossy(&o.stderr).contains("frobnicate"), "refusals name what they met");
-    let o = cli_str(&["script", "job.camp"]);
+    let o = cli_str(&["script", "job.camproj"]);
     assert_eq!(code(&o), 2);
     let o = cli_str(&["process", "project.js"]);
     assert_eq!(code(&o), 2);
@@ -111,11 +111,11 @@ fn a_refused_script_exits_one_with_the_line_on_stderr() {
 
 #[test]
 fn process_lane_loads_generates_and_posts_the_project() {
-    let camp = tmp("proc", "camp");
-    let world = fixture_camp();
-    project::save(&world, &camp).expect("save fixture");
+    let proj = tmp("proc", "camproj");
+    let world = fixture_proj();
+    project::save(&world, &proj).expect("save fixture");
     let nc = tmp("proc", "nc");
-    let o = cli_str(&["process", camp.to_str().unwrap(), "-o", nc.to_str().unwrap()]);
+    let o = cli_str(&["process", proj.to_str().unwrap(), "-o", nc.to_str().unwrap()]);
     assert_eq!(code(&o), 0, "{:?}", String::from_utf8_lossy(&o.stderr));
     assert!(nc.exists(), "the -o lane posts");
     let text = String::from_utf8_lossy(&o.stdout);
@@ -125,29 +125,29 @@ fn process_lane_loads_generates_and_posts_the_project() {
 
 #[test]
 fn process_lane_without_o_judges_rather_than_writes() {
-    let camp = tmp("judge", "camp");
-    let world = fixture_camp();
-    project::save(&world, &camp).expect("save fixture");
-    let o = cli_str(&["process", camp.to_str().unwrap()]);
+    let proj = tmp("judge", "camproj");
+    let world = fixture_proj();
+    project::save(&world, &proj).expect("save fixture");
+    let o = cli_str(&["process", proj.to_str().unwrap()]);
     assert_eq!(code(&o), 0, "a fresh-after-generate job stands");
     let text = String::from_utf8_lossy(&o.stdout);
     assert!(text.contains("\"gate\""), "the answer is the verify report: {text}");
     // A named post rides the same door: --cps is a post option, not a CLI flag.
     let nc = tmp("judge-haas", "nc");
-    let o = cli_str(&["process", camp.to_str().unwrap(), "-o", nc.to_str().unwrap(), "--cps", "Haas"]);
+    let o = cli_str(&["process", proj.to_str().unwrap(), "-o", nc.to_str().unwrap(), "--cps", "Haas"]);
     assert_eq!(code(&o), 0, "{:?}", String::from_utf8_lossy(&o.stderr));
     assert!(nc.exists());
 }
 
 #[test]
 fn a_post_that_refuses_exits_one_and_says_why() {
-    let camp = tmp("refuse", "camp");
-    let world = fixture_camp();
-    project::save(&world, &camp).expect("save fixture");
+    let proj = tmp("refuse", "camproj");
+    let world = fixture_proj();
+    project::save(&world, &proj).expect("save fixture");
     // A directory that is not there: the post verb refuses, the
     // script stops on the Error, and no verify answer prints.
     let nc = tmp("refuse", "no-such-dir").join("out.nc");
-    let o = cli_str(&["process", camp.to_str().unwrap(), "-o", nc.to_str().unwrap()]);
+    let o = cli_str(&["process", proj.to_str().unwrap(), "-o", nc.to_str().unwrap()]);
     assert_eq!(code(&o), 1);
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(err.contains("post:"), "the verb names itself: {err}");

@@ -2000,7 +2000,7 @@ Phase-5 shape law.
 - ✅ **CLI + golden-model regression suite** (stage G, this commit):
       the batch lane gets its door - `camcraft-cli` is thin over the
       scripting host, so every run is a `script::run` someone could
-      have typed: `script <job.js>` runs a job, `process <project.camp>
+      have typed: `script <job.js>` runs a job, `process <project.camproj>
       [-o out.nc] [--cps name|file]` runs a generated one (load,
       generate, post, verify) and speaks the verdict as the exit code -
       0 stood, 1 a verb or the verify report refused, 2 the command
