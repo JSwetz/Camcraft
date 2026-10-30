@@ -5772,3 +5772,90 @@ Gate (close-out): the debug ladder was green at stage G (855/195); the
 heavy release lane and the 0.4.0 release build run at the tag; dist
 assembly is mechanical (copy + zip), verified by listing the folder with
 sizes.
+
+## M6.1 A - the Tokens table lands: visuals derived, chrome read through it
+
+**Chosen: `Tokens` (14 colours + 17 geometry values) replaces the 14-field
+`Palette`, and `visuals()` becomes a destructuring arm** - every colour
+field named there and nowhere else, geometry routed through `style()`,
+and a `const _` arm as the exhaustiveness guard: a new field that no
+code path reads is a build error, not default-egui grey. Considered
+and dropped: keeping `Palette` and adding a parallel geometry struct
+(two tables that can disagree is the drift M6.1 exists to kill).
+
+**Chosen: geometry is clamped at the seam** (`theme::clamp`: radii,
+spacing, control/row/cell heights, glyph, fonts) so the M6.1-B theme
+files can supply any number and the worst case is ugly-but-legal, never
+a blown-out checkbox or a zero-height ribbon; the same windows are the
+const guard's bounds for the built-in table. `ribbon_h(&Tokens) =
+cell_h + 26` is the one derivation - shell, painted strip, and the test
+fixture all compute it, so a theme that grows the cells grows the
+ribbon with it.
+
+**Chosen: `egui_tool_editor.png` golden regenerated for a 12-pixel
+change** - the widgets' corner radii now come from the token table
+(`radius_window`/`radius_menu` = 6 where egui's defaults were 8), which
+is the milestone's whole point: the widget path and the painted path
+cannot disagree about what the theme is. Considered and dropped:
+quietly setting the tokens to egui's defaults to keep the golden
+byte-identical - the painted chrome already uses 6, so egui's 8 was the
+disagreement. The `.diff.png`/`.old.png` kittest scratch stays out of
+the repo.
+
+Also in this stage (unremarkable, recorded for the audit trail):
+`apply_to` installs style+visuals together through egui 0.36's
+`global_style` seam (one call, no half-apply), `shell::RIBBON_H` became
+`#[cfg(test)]` (its only readers are the frame fixtures), and
+`icons::ICON_PX` was deleted - the display edge is `glyph_px` now, and
+`UPLOAD_PX` keeps its 2x comment.
+
+Gate: lib 119 + egui_app 3 + shell 19 + gpu_render 7 + models 3 +
+operations 31 + machine 6 + fixtures 7 = 195 passed, serial with
+CWD=crates\ui; clippy -D warnings clean on camcraft-ui --all-targets;
+the .nc goldens untouched (motion not in this diff).
+
+## Phase 8 opened - Cutting order: the generator review & refactor
+
+User report: a pocket done "adaptive" starts at the hole's outer edge
+and cuts inward, and the helix entry ramps in the PLANE OF CUT instead
+of down into the material - the tool plunges straight in. Verified in
+`crates/motion` before writing anything: both pocket ladders apply the
+`entry` family only at level crossings (`levels.rs` gates on
+`crossing = !first && ...`, `ladder.rs` on `li > 0`), so the first dive
+into uncut stock is always the fallback arm - a full-depth axial plunge
+whatever the user chose; a Waterline/Adaptive plan's `passes[0]` is the
+outermost ring, so that plunge lands ON THE FINISHED WALL and the rings
+then march toward the center (wall-first, core-last: backwards for
+roughing); and `dive_point` demands a straight run the all-arcs ring
+plan of a round pocket never has, so the crossing helix resolves None
+and silently degrades to climb-and-plunge. `Adaptive` spaces rings by
+the engagement law but is not trochoidal - the label overstates it.
+
+**Chosen: a new ROADMAP Phase 8 ("Cutting order"), three milestones
+(M8.1 roughing ladders, M8.2 finishing + planar families, M8.3
+canned/posed/revolved), each generator visited one by one against three
+questions (first engagement, pass order, link crossings), and the phase
+sequenced BEFORE Phase 7** - the SDF engine rewrites how the sim knows
+material, not the order a generator reaches it in, and a gouging entry
+is a gouging entry in either engine; the Phase 7 block already warns
+its retirement must not ride away the entry-path verdicts, which is the
+same argument from the other side.
+Considered and dropped: (a) an M6.3 under the UI phase - wrong domain,
+and the registry's order questions are not chrome work; (b) fixing just
+the two pocket ladders now and reviewing later - the same law is
+restated (not re-derived) in finishing3d's tangent plunge, contour's
+lead-in Z entry (M1.3's still-open "spiral/helical entries" debt), the
+drilling R-plane, and the 5-axis/turning approaches; a visit phase makes
+each family state its order in writing where the per-bug fix leaves the
+next family unasked; (c) running it after Phase 7 - cutting-order bugs
+must not wait on a simulator rewrite, and the review's goldens feed
+Phase 7's parity law rather than the other way round.
+
+**Chosen: silent fallbacks become diagnostics during the review** - the
+dive-None → plunge path posts a status-line note naming the
+substitution (Prime Directive: an honest answer beats a silent
+reasonable one), and goldens regenerate only where the order genuinely
+changes, family by family, heavy envelope/verify lanes as the referee.
+
+Gate: docs-only commit (ROADMAP Phase 8 block + summary rows); each M8
+milestone gates on its own ladder + heavy lane as it executes.
