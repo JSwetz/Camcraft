@@ -5524,3 +5524,78 @@ binary across app/motion/post/sim/ui likewise 0 failed; clippy
 -D warnings clean on the five touched crates; goldens porcelain
 clean, the .nc and .cl sets byte-identical; flow5d's debug wall
 426 s -> 19.5 s, the operations suite 460+ s -> 68.5 s.
+
+## M5.3 E - Large models: the shared mesh, the streaming door, the sparse grid
+
+**Chosen: facets stored once behind `Arc<[Triangle]>`, 72 bytes each;
+mesh and stream, not mesh plus copy.** The alternatives: keeping the
+stored normal on the triangle (96 bytes) - dropped, it was dead
+weight the winding already answers and `normal()` now recomputes at
+the sites that ask, so no verdict moved; a `Vec<Triangle>` per holder -
+dropped, the model plus its clones in every system is exactly the
+"coexists with its copy" tax the stage exists to kill. The one law
+that bit back and got recorded as toolchain lore: `Arc<[T]>` does not
+implement by-value `IntoIterator`, so `x.into_iter()` on one resolves
+THROUGH DEREF and iterates `&T` - silent, and clippy's
+`into_iter_on_ref` is what names it; two test helpers were riding that
+deref before the ladder caught them. `.iter()` is the honest spelling.
+
+**Chosen: the import door streams, and the binary/ASCII sniff is a
+file-size law, not a content guess.** `solid` at byte 0 is ambiguous
+(a binary header can carry it), so the reader declares binary iff the
+file is EXACTLY `84 + 50 * count` bytes and nothing else matches; an
+inexact `solid` file goes to the ASCII machine. Both flavors and both
+read paths (buffer and stream) share one `AsciiFsm` and one
+per-facet acceptance law, so `parse` and `parse_file` cannot drift -
+the equivalence is a test, verdict-for-verdict, UTF-8 tail included
+(the buffer validates the whole file, so the stream keeps reading
+past `endsolid` instead of stopping early - a tail that is not valid
+UTF-8 must refuse both roads alike). The file's declared facet normal
+is parsed for finiteness and then IGNORED: orientation is recomputed
+from the winding, the same everywhere, a lying header cannot lie its
+way into a flipped shell. Caps: 30M facets, 4 GiB - past those the
+door refuses by name; a 10M-facet round trip measures 517 ms to write
+and 3.98 s to stream back in a DEBUG build, the peak being the facet
+buffer plus one 8 MiB window, never twice the disk size. Per-facet
+error tags ride a lazy closure: a 10M-facet stream allocates the
+"facet 12" string only when it actually refuses.
+
+**Dropped: the GPU-resident sparse voxel / SDF stock the roadmap line
+suggests.** The law that killed it is the one M5.3 D just spent its
+budget proving: the color map and the post gate re-read this field
+and must agree to the bit - a driver's float is not a reproducible
+witness, and the CPU dexel already answers 10M-facet grids in
+seconds. The SDF road stays closed unless a measurement shows the
+tiled CPU grid being the bottleneck at sizes we do not yet have.
+
+**Chosen: the stock grid lives in 64x64 tiles, and the untouched tile
+is not stored at all.** A `None` tile's value IS `stock_z` - the
+fresh 2000-squared grid pays zero allocations where the dense `Vec`
+paid 32 MiB before anyone touched it; a never-varying tile is one
+number (`Uniform`); only tiles a cut reached carry 4096 cells. The
+budget: `lower()` materializes a tile only when a cell ACTUALLY drops
+(the old `if cut < top[k]`, NaN-safe the same way through
+`partial_cmp` - a NaN cut writes nothing, exactly as before), `set()`
+keeps the economy when the new value IS the tile's value, the
+cylinder's air marks wholly-outside tiles with one number and runs
+the old `hypot` cell law only on the ring the boundary crosses, and
+model stock's `from_grid` collapses its uniform runs on arrival.
+Equality is representation-independent by construction - two grids
+are equal when their lattices are and every cell answers the same
+number - which is what lets the tests keep their `assert_eq!` on
+Dexels while a `None` and a `Uniform(stock_z)` differ in bytes and
+never in verdict. The out-of-grid read answers NaN where the dense
+index used to panic: the callers gate with `col`, and after this
+stage not even an index bug can crash a verdict. `translate_finite`
+skips `None` tiles by law because the caller moves `stock_z` itself -
+they travel together; forgetting that would shift the untouched
+lattice twice.
+
+Gate (M5.3 E): two binary sets on the final tree, all green - 52
+rebuilt app/motion/sim test binaries 830 passed / 0 failed in
+parallel, 9 UI binaries 195 passed / 0 failed serial with
+CWD=crates\ui; clippy -D warnings clean across sim/motion/app (three
+nits caught and fixed on the way: the NaN-preserving `partial_cmp`
+rewrite of `!(z < cur)`, `slice::fill` in `fill`,
+`needless_range_loop` in the feed zip); goldens porcelain clean, all
+13 .nc and every .cl byte-identical.

@@ -1851,7 +1851,7 @@ Phase-5 shape law.
 ### M5.3 - Performance & Automation (Release 0.4.0)
 **Goal: big models, headless jobs, scripting.**
 
-- **Large models**: GPU-resident sparse voxel / SDF stock simulation, streaming mesh and B-rep handling, 10M+ triangle models
+- ✅ **Large models**: streaming mesh import and a tiled sparse stock grid (stage E); the GPU-resident SDF road was dropped for CPU determinism (see RECOMMENDED.md, M5.3 E)
 - **Generation performance**: threaded toolpath generation, incremental recompute after model changes
 - **Scripting API**: Typescript bindings for batch ops - generate, verify, post, report
 - **Part handling**: loading, unloading, and transfer choreography as
@@ -1951,6 +1951,29 @@ Phase-5 shape law.
       verdicts and the composed one lets every leg keep its own. No
       cache field, no schema change: the verdict is a derived read, like
       the gouge and fixture lines. RECOMMENDED.md, M5.3 D.
+
+- ✅ **Large models: the shared mesh and the sparse grid** (stage E):
+      the triangle loses its dead stored
+      normal (96 -> 72 bytes, the `normal()` method recomputing what
+      every consumer already read from the winding), facets ride
+      `Arc<[Triangle]>` so a model is stored once and every system
+      borrows the count, and the STL door streams - an 8 MiB window,
+      the binary/ASCII sniff a file-size law (`84 + 50 * count`), both
+      flavors through one per-facet acceptance machine, so a 10M-facet
+      file never coexists with its triangles: measured 517 ms to write
+      500 MB and 3.98 s to stream it back IN DEBUG. The stock grid
+      gets tiles: a 64x64 tile that was never cut is not stored at all
+      (its value IS `stock_z`), a never-varying tile is one number,
+      and only tiles a cut reached pay a box - a fresh 2000-squared
+      grid costs zero allocations where the dense `Vec` cost 32 MiB,
+      model stock collapses its air and full-height runs the same
+      way, and every verdict (`top_at`, the equality, the masks) reads
+      values, never bytes, so the representation is private and the
+      answers are bit-identical. The GPU-resident SDF reading of the
+      roadmap line died on the determinism law (RECOMMENDED.md, M5.3 E
+      - the color map re-reads this field every frame and a driver is
+      not a reproducible witness). 30M-facet import ceiling, 4 GiB
+      file door; all 13 .nc goldens byte-identical.
 
 ---
 
