@@ -31,6 +31,10 @@ serde_json = "1"
 # Apache-2.0; pure Rust (its deps included), no build scripts of concern.
 rayon = "1"
 
+# The JS engine - one in the tree (M5.3 F): the post's sandbox (post/js.rs)
+# and the job-script host (app/script) run the same hard-pinned boa.
+boa_engine = "0.21.1"
+
 # Platform + dialog deps shared with the UI stack; imgui retired at M1.4.2
 # M-g (the dear-imgui-* trio left with it).
 # No direct wgpu dep: camcraft-ui uses egui_wgpu::wgpu so types match the

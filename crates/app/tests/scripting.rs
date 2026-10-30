@@ -1,0 +1,281 @@
+//! The job-script host (M5.3 F): laws, not plumbing. What must stay
+//! true: a script's post is the APP's post (same bytes, not a batch
+//! dialect of it); a refusal is always recorded, even caught; the
+//! bindings file and the verb table cannot drift; and nothing the
+//! engine chokes on ever crashes the process - a bad source comes
+//! back as an error line with a place in it.
+//!
+//! Gate map (M4.4): covers app::script, app::posting, app::project,
+//! app::commands, app::operation, app::tool_list, app::world.
+
+use flecs_ecs::prelude::World;
+
+use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, SetStock};
+use camcraft_app::operation::{Height, OpParams, SrcRef};
+use camcraft_app::posting;
+use camcraft_app::project;
+use camcraft_app::script;
+use camcraft_app::stock::StockShape;
+use camcraft_app::tools::catalog;
+use camcraft_app::world::new_world;
+
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+
+fn tmp(tag: &str, ext: &str) -> PathBuf {
+    let mut p = std::env::temp_dir();
+    p.push(format!("camcraft-script-{tag}-{}.{}", std::process::id(), ext));
+    let _ = std::fs::remove_file(&p);
+    p
+}
+
+/// The fixture both lanes share: box stock and one clean facing op,
+/// the same parameters the posting tests post successfully - so any
+/// refusal here is a scripting bug, not a generator one.
+fn fixture() -> World {
+    let world = new_world();
+    let mut history = History::default();
+    let cmd = SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, Default::default());
+    history.execute(&world, cmd.expect("box stock"));
+    let tool = catalog().into_iter().find(|(n, _)| *n == "EM-0400-2FL").map(|(_, t)| t).expect("catalog entry");
+    history.execute(&world, AddTool::new(&world, "EM-0400-2FL", tool).expect("catalog tool"));
+    let params = OpParams::Face {
+        tilt: None,
+        stepover: 3.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(19.5),
+        top_z: None,
+        stepdown: None,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+    };
+    let cmd = CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, params);
+    history.execute(&world, cmd.expect("create"));
+    world
+}
+
+fn json_str(p: &Path) -> String {
+    json!(&p.display().to_string()).to_string()
+}
+
+#[test]
+fn an_empty_script_is_a_clean_run() {
+    let out = script::run("");
+    assert!(out.ok, "{:?}", out.errors);
+    assert!(out.result.is_null());
+    assert!(out.logs.is_empty() && out.errors.is_empty());
+}
+
+#[test]
+fn a_syntax_error_refuses_with_a_place_in_it() {
+    let out = script::run("var x = @;");
+    assert!(!out.ok, "a bad source must refuse");
+    let text = out.errors.join("\n");
+    assert!(text.contains("line"), "the refusal must say where: {text}");
+}
+
+#[test]
+fn a_caught_refusal_is_still_recorded() {
+    // The law: swallowing an Error must not make the job clean - the
+    // batch report is the host's record, not the script's.
+    let out = script::run("try { cam.operations(\"extra\") } catch (e) { cam.log(\"got: \" + e.message) }");
+    assert!(!out.ok, "{:?}", out.errors);
+    assert!(out.errors.iter().any(|l| l.starts_with("operations:")), "{:?}", out.errors);
+    assert!(out.logs[0].starts_with("got: operations:"), "{:?}", out.logs);
+}
+
+#[test]
+fn an_unknown_option_names_the_key_that_typed_wrong() {
+    let nc = tmp("opt", "nc");
+    let out = script::run(&format!("cam.post({{ to: {}, nosuch: 1 }})", json_str(&nc)));
+    assert!(!out.ok);
+    assert!(out.errors[0].contains("unknown option \"nosuch\""), "{:?}", out.errors);
+    assert!(!nc.exists(), "a refusal writes nothing");
+}
+
+#[test]
+fn a_post_needs_where_to_put_the_program() {
+    let out = script::run("cam.post({})");
+    assert!(!out.ok);
+    assert!(out.errors[0].contains("\"to\""), "{:?}", out.errors);
+}
+
+#[test]
+fn a_bare_save_without_a_document_refuses() {
+    let out = script::run("cam.save()");
+    assert!(!out.ok);
+    assert!(out.errors[0].contains("no document"), "{:?}", out.errors);
+}
+
+#[test]
+fn a_logged_object_reads_as_json() {
+    let out = script::run("cam.log(\"a\", { b: 1 }, 2)");
+    assert!(out.ok, "{:?}", out.errors);
+    assert_eq!(out.logs, vec!["a".to_string(), "{\"b\":1}".to_string(), "2".to_string()]);
+}
+
+#[test]
+fn cam_result_parks_the_last_verb() {
+    let camp = tmp("park", "camp");
+    let world = fixture();
+    project::save(&world, &camp).expect("save fixture");
+    let out = script::run(&format!("cam.load({}); cam.result().operations[0].name", json_str(&camp)));
+    assert!(out.ok, "{:?}", out.errors);
+    assert_eq!(out.result, json!("Face1"));
+}
+
+#[test]
+fn verify_on_an_ungenerated_document_refuses_to_judge() {
+    let camp = tmp("never", "camp");
+    let world = fixture();
+    project::save(&world, &camp).expect("save fixture");
+    let out = script::run(&format!("cam.load({}); cam.verify()", json_str(&camp)));
+    // verify() is a question, not a refusal: the run stands, and it
+    // answers honestly that there is nothing to judge yet.
+    assert!(out.ok, "{:?}", out.errors);
+    assert_eq!(out.result["ok"], json!(false), "a stale job is not a passed job");
+    let v = out.result.pointer("/gate/skipped").expect("skipped says why");
+    assert!(v.is_string(), "{v}");
+    assert_eq!(out.result.pointer("/operations/0/status"), Some(&json!("never")));
+    // The never-generated program also cannot post, by name.
+    let nc = tmp("neverpost", "nc");
+    let out = script::run(&format!(
+        "cam.load({}); cam.post({{ to: {} }})",
+        json_str(&camp),
+        json_str(&nc)
+    ));
+    assert!(!out.ok);
+    assert!(out.errors[0].contains("no toolpath yet"), "{:?}", out.errors);
+    assert!(!nc.exists());
+}
+
+#[test]
+fn a_scripts_post_is_the_apps_post_byte_for_byte() {
+    // The law of the seam, measured: the batch lane and the UI post
+    // the same document with the same bytes, because both call the
+    // same door. A drift here means the host grew its own dialect.
+    let camp = tmp("same", "camp");
+    let world = fixture();
+    project::save(&world, &camp).expect("save fixture");
+
+    let nc_script = tmp("same-script", "nc");
+    let nc_app = tmp("same-app", "nc");
+    let script_src = format!(
+        "cam.load({}); cam.generate(); cam.post({{ to: {} }}); cam.report()",
+        json_str(&camp),
+        json_str(&nc_script)
+    );
+    let out = script::run(&script_src);
+    assert!(out.ok, "{:?}", out.errors);
+    assert_eq!(out.result["operations"][0]["status"], json!("ok"));
+    assert_eq!(out.result["posted"], json!(nc_script.display().to_string()));
+    assert!(out.result["minutes"].is_number(), "report carries the time law");
+
+    // The app lane: same file, same commands, the UI's own post call.
+    let world_b = new_world();
+    project::load(&world_b, &camp).expect("load fixture");
+    let mut history_b = History::default();
+    let cmd = GenerateOperation::new(&world_b, "Face1").expect("generate");
+    history_b.execute(&world_b, cmd);
+    posting::post_setup(&world_b, &nc_app).expect("app post");
+
+    let a = std::fs::read(&nc_script).expect("script wrote it");
+    let b = std::fs::read(&nc_app).expect("app wrote it");
+    assert_eq!(a, b, "the batch lane and the app must post one program");
+    // The text round trip the script's `program: true` promises:
+    let out = script::run(&format!(
+        "cam.load({}); cam.generate(); cam.post({{ to: {}, program: true }}).program",
+        json_str(&camp),
+        json_str(&nc_script)
+    ));
+    assert!(out.ok, "{:?}", out.errors);
+    let Value::String(text) = &out.result else { panic!("program text expected: {:?}", out.result) };
+    assert_eq!(text.as_bytes(), &a[..]);
+}
+
+#[test]
+fn named_generate_forces_even_a_fresh_operation() {
+    let camp = tmp("force", "camp");
+    let world = fixture();
+    project::save(&world, &camp).expect("save fixture");
+    let out = script::run(&format!(
+        "cam.load({}); cam.generate(); cam.generate(\"Face1\").length",
+        json_str(&camp)
+    ));
+    assert!(out.ok, "{:?}", out.errors);
+    assert_eq!(out.result, json!(1), "a named op regenerates whatever its status");
+    // An unknown name refuses by name and changes nothing after it.
+    let out = script::run(&format!("cam.load({}); cam.generate(\"Ghost1\")", json_str(&camp)));
+    assert!(!out.ok);
+    assert!(out.errors[0].contains("Ghost1"), "{:?}", out.errors);
+}
+
+#[test]
+fn the_bindings_file_is_the_verb_table() {
+    // assets/scripts/cam.d.ts is this generated text, committed; the
+    // test is the drift alarm the GENERATED header promises.
+    // From the manifest, not the CWD: the law must judge the same
+    // file wherever the binary is stood up (gate-ladder lore).
+    let committed =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/scripts/cam.d.ts"))
+            .expect("bindings file");
+    let norm = |s: String| s.replace("\r\n", "\n");
+    assert_eq!(norm(script::bindings()), norm(committed), "regenerate cam.d.ts from the VERBS table");
+}
+
+#[test]
+fn scripts_see_no_world_and_no_side_doors() {
+    // The sandbox law: the only door is the verb table.
+    for probe in ["typeof console", "typeof fetch", "typeof require", "typeof globalThis.__cam_env"] {
+        let out = script::run(probe);
+        assert!(out.ok, "{probe}: {:?}", out.errors);
+        assert_eq!(out.result, json!("undefined"), "{probe} must not exist");
+    }
+    // __cam_call exists (the shim needs it) but is off the typed
+    // surface: calling the raw door with junk refuses, never panics.
+    let out = script::run("var e = JSON.parse(String(__cam_call(1, 2))); e.ok ? \"accepted\" : \"refused\"");
+    assert!(out.ok, "the door must answer, not crash: {:?}", out.errors);
+    assert_eq!(out.result, json!("refused"));
+}
+
+#[test]
+fn a_post_with_a_named_builtin_shapes_the_program() {
+    let camp = tmp("cps", "camp");
+    let world = fixture();
+    project::save(&world, &camp).expect("save fixture");
+    let nc = tmp("cps", "nc");
+    let out = script::run(&format!(
+        "cam.load({}); cam.generate(); cam.post({{ to: {}, cps: \"Haas\" }}).lines",
+        json_str(&camp),
+        json_str(&nc)
+    ));
+    assert!(out.ok, "{:?}", out.errors);
+    assert!(out.result.as_u64().unwrap_or(0) > 0);
+    // A stranger's name is a refusal that lists the registry, never
+    // a silent fall to the default.
+    let out = script::run(&format!(
+        "cam.load({}); cam.generate(); cam.post({{ to: {}, cps: \"Acme2000\" }})",
+        json_str(&camp),
+        json_str(&nc)
+    ));
+    assert!(!out.ok);
+    assert!(out.errors[0].contains("Acme2000") && out.errors[0].contains("Fanuc"), "{:?}", out.errors);
+}
+
+#[test]
+fn arity_is_a_law_not_a_suggestion() {
+    let out = script::run("cam.report(\"extra\")");
+    assert!(!out.ok && out.errors[0].contains("takes 0 argument"), "{:?}", out.errors);
+    let out = script::run("cam.load()");
+    assert!(!out.ok && out.errors[0].contains("takes 1 argument"), "{:?}", out.errors);
+}
+
+#[test]
+fn a_nonzero_exit_shape_survives_a_late_throw() {
+    // Verbs that already ran stay recorded; the uncaught error leads.
+    let out = script::run("cam.log(\"one\"); cam.operations(\"x\"); null");
+    assert!(!out.ok);
+    assert_eq!(out.logs, vec!["one".to_string()]);
+    assert!(out.errors.iter().any(|e| e.starts_with("operations:")));
+}

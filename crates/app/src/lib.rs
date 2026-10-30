@@ -24,6 +24,7 @@ pub mod posting;
 pub mod project;
 pub mod rest;
 pub mod schema;
+pub mod script;
 pub mod setup;
 pub mod setup_sheet;
 pub use camcraft_sim::solid_rest;

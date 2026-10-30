@@ -8,7 +8,7 @@ rust-version.workspace = true
 [dependencies]
 camcraft-cl = { workspace = true }
 camcraft-geometry = { workspace = true }
-boa_engine = "0.21.1" # moved from app at M4.1 R3; hard-pinned, sandboxed by js.rs
+boa_engine = { workspace = true } # moved from app at M4.1 R3; hard-pinned in the workspace, sandboxed by js.rs
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

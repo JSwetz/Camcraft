@@ -699,6 +699,7 @@ dependencies = [
 name = "camcraft-app"
 version = "0.3.0"
 dependencies = [
+ "boa_engine",
  "camcraft-cl",
  "camcraft-geometry",
  "camcraft-motion",
