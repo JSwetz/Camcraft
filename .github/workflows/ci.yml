@@ -28,10 +28,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Golden regression suite
         shell: bash
+        # M5.3 G: regression_models is the numerical arm of this lane -
+        # the import door, a real generation, the gate, and measured
+        # lengths/counts where the suites above judge bytes.
         run: >-
           cargo test -p camcraft-app
           --test golden_cl --test posting --test fanuc_post
-          --test project_roundtrip -- --test-threads=4
+          --test project_roundtrip --test regression_models -- --test-threads=4
       - name: Split crate tests (M4.1 R1-R2)
         shell: bash
         run: >-
@@ -82,7 +85,7 @@ jobs:
         run: >-
           cargo test -p camcraft-app
           --test golden_cl --test posting --test fanuc_post
-          --test project_roundtrip -- --test-threads=4
+          --test project_roundtrip --test regression_models -- --test-threads=4
       - name: Split crate tests
         shell: bash
         run: >-

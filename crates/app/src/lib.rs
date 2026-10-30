@@ -5,6 +5,7 @@
 //! literature. No HSMWorks source, binaries, or assets were consulted.
 
 pub use camcraft_cl::cl;
+pub mod cli;
 pub mod commands;
 pub use camcraft_motion::drilling;
 pub mod fixture;

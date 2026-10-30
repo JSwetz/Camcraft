@@ -1,0 +1,177 @@
+//! The headless door (M5.3 G): `camcraft-cli` is the batch lane's
+//! argv - two commands over one host. `script` runs a job file
+//! through `script::run`; `process` runs a project through a script
+//! the CLI generates (load, generate, post, verify), so the command
+//! line speaks no dialect the verb table does not already have. The
+//! exit code is the verdict: 0 the job stood, 1 a verb (or the
+//! verify report) refused, 2 the command line itself was wrong or a
+//! file could not be read. Diagnostics ride the streams the same way
+//! every batch lane reads them: logs and the run's answer on stdout,
+//! refusal lines on stderr.
+//!
+//! Provenance: our own CLI shape, specced from this repo's ROADMAP
+//! line "CLI: headless project processing and regression runs".
+//! Clean-room, public sources only.
+
+use crate::script;
+
+use serde_json::json;
+use std::path::{Path, PathBuf};
+
+const USAGE: &str = "\
+camcraft-cli - CamCraft headless batch lane (clean-room)
+
+USAGE:
+    camcraft-cli script   <job.js>
+    camcraft-cli process  <job.camp> [-o <out.nc>] [--cps <name|file.cps>]
+    camcraft-cli help
+    camcraft-cli version
+
+COMMANDS:
+    script    run a job script through the cam verbs (assets/scripts/
+              cam.d.ts types them; every world write rides the commands)
+    process   headless project processing: load, generate, and - with
+              -o - post; verify's verdict is the exit code
+
+A clean run prints its logs, then the last verb's JSON answer on
+stdout; refusals print on stderr. Exit: 0 stood, 1 refused, 2 usage.
+";
+
+/// The process lane's generated job: the verbs a headless project
+/// run always means, spelled exactly as a hand-written script would.
+/// No second code path: the CLI's project processing IS a script run.
+fn process_script(camp: &Path, out: Option<&Path>, cps: Option<&str>) -> String {
+    let mut opts = json!({ "to": out.map(|p| p.display().to_string()) });
+    if let Some(c) = cps {
+        opts["cps"] = json!(c);
+    }
+    let mut s = format!(
+        "cam.load({});\ncam.generate();\n",
+        json!(camp.display().to_string())
+    );
+    if out.is_some() {
+        s.push_str(&format!("cam.post({opts});\n"));
+    }
+    s.push_str("cam.verify()");
+    s
+}
+
+/// One finished run on the streams: logs, then the parked answer
+/// (stdout), refusals (stderr). The returned code is the verdict.
+fn report(out: &script::ScriptOutcome, post_requested: bool) -> i32 {
+    for line in &out.logs {
+        println!("{line}");
+    }
+    for line in &out.errors {
+        eprintln!("camcraft-cli: {line}");
+    }
+    if !out.result.is_null() {
+        println!("{}", out.result);
+    }
+    if !out.ok {
+        return 1;
+    }
+    // No post asked for: the verify report is the verdict, and a
+    // stale or gated job does not exit clean (verify is a question,
+    // the CLI's contract is the answer).
+    if !post_requested && out.result.get("ok") == Some(&json!(false)) {
+        eprintln!("camcraft-cli: the job is not clean - see the verify report");
+        return 1;
+    }
+    0
+}
+
+/// The argv entry: `main` hands this everything after the program
+/// name and exits by its answer. Testable in-process, one parse.
+pub fn run(args: &[String]) -> i32 {
+    let Some(cmd) = args.first().map(String::as_str) else {
+        eprint!("{USAGE}");
+        return 2;
+    };
+    match cmd {
+        "help" | "--help" | "-h" => {
+            print!("{USAGE}");
+            0
+        }
+        "version" | "--version" => {
+            println!("camcraft-cli {} (boa_engine)", env!("CARGO_PKG_VERSION"));
+            0
+        }
+        "script" => lane_script(&args[1..]),
+        "process" => lane_process(&args[1..]),
+        other => {
+            eprintln!("camcraft-cli: unknown command {other:?} (try help)");
+            2
+        }
+    }
+}
+
+fn read_source(path: &Path) -> Option<String> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("camcraft-cli: cannot read {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+fn lane_script(args: &[String]) -> i32 {
+    let [job] = args else {
+        eprintln!("camcraft-cli: script takes exactly one .js file");
+        return 2;
+    };
+    let path = PathBuf::from(job);
+    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("js")) {
+        eprintln!("camcraft-cli: {} is not a .js job", path.display());
+        return 2;
+    }
+    let Some(source) = read_source(&path) else { return 2 };
+    report(&script::run(&source), false)
+}
+
+fn lane_process(args: &[String]) -> i32 {
+    let mut camp: Option<PathBuf> = None;
+    let mut out: Option<PathBuf> = None;
+    let mut cps: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-o" | "--out" => {
+                let Some(p) = it.next() else {
+                    eprintln!("camcraft-cli: {a} needs a path");
+                    return 2;
+                };
+                out = Some(PathBuf::from(p));
+            }
+            "--cps" => {
+                let Some(c) = it.next() else {
+                    eprintln!("camcraft-cli: --cps needs a value");
+                    return 2;
+                };
+                cps = Some(c.clone());
+            }
+            other if other.starts_with('-') => {
+                eprintln!("camcraft-cli: unknown option {other:?} (try help)");
+                return 2;
+            }
+            other => {
+                if camp.is_some() {
+                    eprintln!("camcraft-cli: process takes one project (extra: {other:?})");
+                    return 2;
+                }
+                camp = Some(PathBuf::from(other));
+            }
+        }
+    }
+    let Some(path) = camp else {
+        eprintln!("camcraft-cli: process needs a .camp project");
+        return 2;
+    };
+    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("camp")) {
+        eprintln!("camcraft-cli: {} is not a .camp project", path.display());
+        return 2;
+    }
+    let source = process_script(&path, out.as_deref(), cps.as_deref());
+    report(&script::run(&source), out.is_some())
+}
