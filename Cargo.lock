@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "camcraft-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "boa_engine",
  "camcraft-cl",
@@ -721,14 +721,14 @@ dependencies = [
 
 [[package]]
 name = "camcraft-cl"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "camcraft-geometry",
 ]
 
 [[package]]
 name = "camcraft-geometry"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "clipper2-rust",
  "thiserror 2.0.21",
@@ -736,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "camcraft-motion"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "camcraft-cl",
  "camcraft-geometry",
@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "camcraft-post"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "boa_engine",
  "camcraft-cl",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "camcraft-sim"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "camcraft-cl",
  "camcraft-geometry",
@@ -774,11 +774,11 @@ dependencies = [
 
 [[package]]
 name = "camcraft-tools"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "camcraft-ui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "camcraft-app",
  "egui",
