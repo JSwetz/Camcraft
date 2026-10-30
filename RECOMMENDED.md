@@ -5744,3 +5744,31 @@ clean on app+ui with --all-targets (two nits fixed on the way: a manual
 `.iter().any` over stdout bytes became `.contains`, and the slab's
 9-tuple facet type got its `type Tri`). `regression_models` rides the
 CI Golden step on Windows and the parity job alike.
+
+## M5.3 close-out / Release 0.4.0 - the vehicle grows a second door
+
+**Chosen: the portable zip now ships three binaries - camcraft-ui,
+camcraft-cli, post - plus assets/posts, assets/machines, assets/ui and
+assets/scripts (the scripter's types).** The release notes name
+`camcraft-cli` as the batch door, so the zip must carry it; the version's
+single truth stays the built binary stamped by cargo (0.4.0 at
+`post.exe --version`), and the CI release lane copies `assets/scripts`
+beside the rest (the drift test reads the same file the app embeds).
+Considered and dropped: shipping the scripts folder only inside the app
+binary (users own their posts and jobs - the files must sit on disk for
+them to edit).
+
+**Chosen: ROADMAP line M5.2 and M5.3 flip to done in the release
+commit, with the summary rows quoting the stage letters** - every stage
+was ✅ at its own commit; the milestone rows waited for the release
+because their text is the release's table of contents.
+
+Deferred (unchanged): Authenticode signing (no certificate owned), the
+installer-vs-zip question, and the two open catalog debts (M2.4/M2.5)
+that the notes now name plainly - a release's honesty is its limits
+section.
+
+Gate (close-out): the debug ladder was green at stage G (855/195); the
+heavy release lane and the 0.4.0 release build run at the tag; dist
+assembly is mechanical (copy + zip), verified by listing the folder with
+sizes.
