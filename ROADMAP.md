@@ -2340,11 +2340,15 @@ code (`crates/motion`):
 - **The helix that does run is in-plane at the places it matters.**
   `entry::helix_down` is a true Z-descending dive (it spirals one
   stepdown between planes), but the ladders place it with
-  `entry::dive_point`, which demands the plan's longest STRAIGHT run
-  with room for the widened disc. An all-arcs ring plan - exactly what
-  a round pocket tiles to - has no straight interior run, the dive
-  resolves `None`, and the arm falls back to climb-and-plunge. On
-  round geometry the helix entry rarely engages at all, silently.
+  `entry::dive_point`, which picks the plan's longest chord - any
+  consecutive point pair, line or arc segment alike - whose midpoint
+  sits inside BOTH leg regions eroded by the helix radius. There is no
+  straightness test; containment is what bites. An all-arcs ring plan -
+  exactly what a round pocket tiles to - has its chords ON the ring
+  boundary, so every midpoint lies inside the cut, never in the eroded
+  clear regions; the dive resolves `None` and the arm falls back to
+  climb-and-plunge. On round geometry the helix entry rarely engages at
+  all, silently.
 - **`Adaptive` is rings, not trochoids.** The strategy spaces
   waterline rings at the engagement-law step (M2.1c's sagitta); the
   bound holds only each ring's own wall bite. The name promises HEM;

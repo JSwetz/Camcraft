@@ -5553,7 +5553,14 @@ past `endsolid` instead of stopping early - a tail that is not valid
 UTF-8 must refuse both roads alike). The file's declared facet normal
 is parsed for finiteness and then IGNORED: orientation is recomputed
 from the winding, the same everywhere, a lying header cannot lie its
-way into a flipped shell. Caps: 30M facets, 4 GiB - past those the
+way into a flipped shell. (Erratum, added at the box_walls finding:
+"no verdict moved" was true of the lanes that ran at THIS close-out,
+but the motion ignored lane - 27 finish3d + 1 flow measured verdicts -
+did not run here or at M5.2 E, so the `9f38881` facet-distance law that
+flipped `box_walls_are_pure_structure` to red went unseen for two
+milestones. The verdict that moved was not this stage's doing; the
+claim's silence about the ignored lane was the real gap, and the
+close-out gate law now names it. See the box_walls section.) Caps: 30M facets, 4 GiB - past those the
 door refuses by name; a 10M-facet round trip measures 517 ms to write
 and 3.98 s to stream back in a DEBUG build, the peak being the facet
 buffer plus one 8 MiB window, never twice the disk size. Per-facet
@@ -5792,15 +5799,23 @@ cell_h + 26` is the one derivation - shell, painted strip, and the test
 fixture all compute it, so a theme that grows the cells grows the
 ribbon with it.
 
-**Chosen: `egui_tool_editor.png` golden regenerated for a 12-pixel
-change** - the widgets' corner radii now come from the token table
-(`radius_window`/`radius_menu` = 6 where egui's defaults were 8), which
-is the milestone's whole point: the widget path and the painted path
-cannot disagree about what the theme is. Considered and dropped:
-quietly setting the tokens to egui's defaults to keep the golden
-byte-identical - the painted chrome already uses 6, so egui's 8 was the
-disagreement. The `.diff.png`/`.old.png` kittest scratch stays out of
-the repo.
+**Chosen: `egui_tool_editor.png` golden regenerated for a 27-pixel
+change** - measured, not asserted: diffing the two committed PNGs, one
+hovered widget's two corner columns (8 px each side) moved. The law
+behind it: egui 0.36's `Visuals::dark()` ships per-state widget corner
+radii 2/2/3/2/2 - a HOVERED widget rounds one notch more than its rest
+state, egui's own whim, not a themed number - and `visuals()` now sets
+all five states from the one `radius_widget` token (= 2, the number the
+painted cells and rows already draw). So the delta is hovered 3 -> 2,
+one pixel of corner on one hovered button. (An earlier draft of this
+entry and of commit `4dd77c0`'s message said "12 pixels" and blamed
+`radius_window`/`radius_menu` = 6 against "egui's default 8"; the
+vendored `style.rs` says window/menu are already `same(6)` in `dark()`
+and no token touched 8 - the ledger and the audit trail carry the
+measured story, the commit message is history.) The disagreement the
+token kills is real, it is just this one notch: widget path and painted
+path now agree on 2 by construction. The `.diff.png`/`.old.png` kittest
+scratch stays out of the repo.
 
 Also in this stage (unremarkable, recorded for the audit trail):
 `apply_to` installs style+visuals together through egui 0.36's
@@ -5826,9 +5841,15 @@ into uncut stock is always the fallback arm - a full-depth axial plunge
 whatever the user chose; a Waterline/Adaptive plan's `passes[0]` is the
 outermost ring, so that plunge lands ON THE FINISHED WALL and the rings
 then march toward the center (wall-first, core-last: backwards for
-roughing); and `dive_point` demands a straight run the all-arcs ring
-plan of a round pocket never has, so the crossing helix resolves None
-and silently degrades to climb-and-plunge. `Adaptive` spaces rings by
+roughing); and `dive_point` scores a round pocket's all-arcs ring plan
+by containment - its longest chord's midpoint must sit inside BOTH
+helix-radius-eroded leg regions, and ring chords have their midpoints
+ON the boundary - so the crossing helix resolves None and silently
+degrades to climb-and-plunge. (An early draft of this entry and of the
+ROADMAP block said dive_point "demands a straight run"; entry.rs has no
+straightness test - `windows(2)` scores every chord by length, and
+containment is what bites. The ROADMAP text carries the fix; this
+parenthetical is the audit trail.) `Adaptive` spaces rings by
 the engagement law but is not trochoidal - the label overstates it.
 
 **Chosen: a new ROADMAP Phase 8 ("Cutting order"), three milestones
@@ -5859,3 +5880,58 @@ changes, family by family, heavy envelope/verify lanes as the referee.
 
 Gate: docs-only commit (ROADMAP Phase 8 block + summary rows); each M8
 milestone gates on its own ladder + heavy lane as it executes.
+
+## The box_walls verdict rides its own stated law (heavy-lane honesty)
+
+Found on the way into Phase 8, while confirming the motion heavy lane's
+baseline: `finish3d::box_walls_are_pure_structure`, the release-lane
+test that says the tangent-ladder finish never touches the box roofs,
+has been RED since `9f38881` (M5.2 E). Bisect + measurement: the corner
+vertex (9.3125, 9.3125) now registers 0.0272 mm of `gouge_mm` against
+the test's own budget law `gate = TOL + cell²/(2R)` ≈ 0.1234 mm - real,
+sub-gate, verifier-silent (`verify_finish` empty), identical in debug
+and release. M5.2 E replaced the dexel height-field gouge law, which
+was BLIND to a graze with no floor under the wall columns (its law
+compared part-floor Z to the lowest ball-bottom - a pure wall has no
+floor), with exact facet-to-path distance; the facet law sees the corner
+the floor law could not. The `assert_eq!(gouge_mm, 0.0)` was stale
+scaffolding that only ever held because of the blind spot - the test's
+M2.2a comment already named the budget ("under budget, not zero").
+
+**Chosen: the assert becomes `gouge_mm <= gate(cell)`** - the law the
+comment states, with a comment on the assert telling the reader why the
+zero was legal before and is not now. Considered and dropped: (a)
+re-exempting walls in the sim law - that rebuilds the exact blind spot
+M5.2 E's envelope generalization exists to close, and "never gouge"
+means the strict channel, softened only by the documented deflection
+budget; (b) loosening the gate constant - the budget is tool-deflection
+physics, not a fudge knob; (c) rewriting the fixture so the corner is
+truly untouched - the graze is honest generator output at that tolerance
+and geometry, and moving the benchmark to flatter the law inverts the
+referee.
+
+**Chosen: the M5.3-E entry carries an erratum** (amended in place below
+its own text - see that section): its "no verdict moved" claim was true
+of the lanes that ran at that close-out and false of `finish3d`'s
+ignored lane, which did not run - this red sat unnoticed across two
+milestones. The lane-history gap is a process finding, recorded here:
+close-outs were interpreting "release ignored lane" as app+sim only,
+while motion's 28 measured tests (27 finish3d + 1 flow) carry verdicts
+too. **Chosen: from now
+on every milestone close-out runs
+`cargo test --release --target-dir target-release -p <crate> -- --ignored`
+for every crate touched since the last close-out** - this fix's own
+gate ran motion's full ignored lane green (27/27 finish3d + flow) before
+commit.
+
+**Chosen: PATH-shadow fix gets a durable note** - this machine's PATH
+carries Git's `mingw64\bin` before MSYS2's, and the older DLLs there
+break gcc-15's `cc1.exe` (0xC0000139) mid-C-compile, which cargo
+reports as a flecs build failure. Release-lane commands prepend
+`C:\msys64\mingw64\bin` to PATH; the gate that just ran did not need
+the workaround, so it is a standing caution, not a broken thing.
+
+Gate: debug `cargo test -p camcraft-motion --test finish3d` 13/13;
+release ignored lane 27/27 finish3d + 1/1 flow, zero FAILED crate-wide;
+clippy -p camcraft-motion --all-targets clean; 13 .nc goldens and every
+fixture byte-identical (the diff is one assert + comments).
