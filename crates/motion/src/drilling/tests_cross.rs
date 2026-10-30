@@ -61,6 +61,9 @@ fn wall_ring(
 /// A disc of radius `r` centered at (`cu`, `cv`), lying in the
 /// plane `s`: a hole floor. Winding is irrelevant - floors are
 /// caps to the weld law and surfaces to the parity ray.
+// Fixture builders: the coordinate spread is the lattice's own
+// (along/u/v + center + radius + count + spacing), not logic.
+#[allow(clippy::too_many_arguments)]
 fn disc(along: usize, u: usize, v: usize, cu: f64, cv: f64, r: f64, n: usize, s: f64) -> Vec<Triangle> {
     let p = circle(cu, cv, r, n);
     let ctr = sp(along, u, v, s, cu, cv);
@@ -79,6 +82,8 @@ fn disc(along: usize, u: usize, v: usize, cu: f64, cv: f64, r: f64, n: usize, s:
 /// circular opening of radius `r` punched out: the cap face a
 /// drilled hole enters. Sector quads between circle and projected
 /// boundary; the union is the annulus, so the solid stays closed.
+// Same law as `disc`: a fixture builder, the spread is coordinates.
+#[allow(clippy::too_many_arguments)]
 fn annulus(
     along: usize,
     u: usize,

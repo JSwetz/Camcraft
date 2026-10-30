@@ -192,6 +192,20 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                 s.set_properties(&merged(&base, &p, pos))?;
                 s.call("onPartTransfer", "")?;
             }
+            Record::Probe { tol_mm } => {
+                // The fourth lifecycle name (M5.3 D): the measurement
+                // ask rides as a property, the same law as its
+                // siblings - no motion, `onCommand` never sees it,
+                // and onProbe is the whole contract. What protocol
+                // the probe speaks is the script's dialect; the
+                // engine only says that a measurement was asked for,
+                // against what budget.
+                let mut p = BTreeMap::new();
+                p.insert("command".into(), json!("Probe"));
+                p.insert("Tolerance".into(), json!(tol_mm));
+                s.set_properties(&merged(&base, &p, pos))?;
+                s.call("onProbe", "")?;
+            }
         }
         let after = s.out_len()?;
         for line in before..after {

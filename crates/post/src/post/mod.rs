@@ -91,6 +91,15 @@ pub struct Dump<'a> {
     /// the program gate (not the post) says whether the machine
     /// states a second spindle at all.
     pub part_transfer: bool,
+    /// The measurement ask (M5.3 D): Some(tol) is the deviation
+    /// budget the op's author wrote for probing this part - the
+    /// stream carries `PROBE <µm>`, intent again (which protocol
+    /// measures is the script's dialect). The stream only voices the
+    /// ask: the verdict is the app's POST gate composing every
+    /// blade leg into the final part and measuring that under this
+    /// budget (`operation::probe_problems`) - no warning rides the
+    /// cache for it. None is silence: the op asks no probe.
+    pub probe_tol: Option<f64>,
 }
 
 impl<'a> Default for Dump<'a> {
@@ -112,6 +121,7 @@ impl<'a> Default for Dump<'a> {
             part_load: None,
             part_unload: false,
             part_transfer: false,
+            probe_tol: None,
         }
     }
 }
@@ -225,7 +235,12 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     // last cut - the part is severed, then it moves - and before the
     // unload, which then takes the part off the spindle now holding
     // it. A transfer with no load or unload is legal: the program's
-    // story is only the handoff.
+    // story is only the handoff. The probe (M5.3 D) sits in front of
+    // the handoff: the part is measured where it was last machined,
+    // before it changes hands - LOAD, cut, PROBE, TRANSFER, UNLOAD.
+    if let Some(t) = d.probe_tol {
+        out.push(Record::Probe { tol_mm: t });
+    }
     if d.part_transfer {
         out.push(Record::Transfer { from: 1, to: 2 });
     }

@@ -161,6 +161,7 @@ fn part_params(plane_z: f64) -> OpParams {
         bar_advance: 0.0,
         bar_unload: false,
         bar_transfer: false,
+        inspect_tol: 0.0,
     }
 }
 
@@ -431,6 +432,169 @@ fn a_negative_bar_advance_is_refused_at_the_door() {
     let Err(err) = CreateOperation::new(&world, "P1", "GT-0300", SrcRef::Entity("bar".into()), p)
     else {
         panic!("a negative advance cannot be authored");
+    };
+    assert!(format!("{err:?}").contains("not usable"), "the door must speak: {err:?}");
+}
+
+// ---------------------------------------------------------------- M5.3 D
+// The measurement ask: authored on the Part op's parameters, voiced
+// as one PROBE comment on the stream - and JUDGED AT THE POST, on
+// the composition. The probe touches the PART, and the part is what
+// every blade of the program cut TOGETHER: a rough holding steel
+// back for a finish leaves nothing on the part once the finish
+// answers for it, and leaves exactly that floor when it never does.
+// The fixtures ride that law, not a lattice's arithmetic: a
+// GrooveRough with leave 0.25 stands 0.25 mm off the model floor by
+// construction (its floor is `b + leave`), which its own op-level
+// bar forgives (tolerance + leave) and a 0.05 ask does not.
+
+fn groove_rough_params(leave: f64) -> OpParams {
+    OpParams::GrooveRough {
+        tolerance: 0.05,
+        clearance_z: Height::fixed(20.0),
+        top_z: Height::fixed(-3.6),
+        bottom_z: Height::fixed(-6.8),
+        stepdown: 0.5,
+        stock_to_leave: leave,
+        feed: 150.0,
+        plunge_feed: 60.0,
+    }
+}
+
+/// A grooved bar roughed (G1), optionally finished (G2), parted
+/// (P1) with a probe ask on the parting - the program in the order
+/// its lifecycle reads. The rough's leave is the deviation; the
+/// finish's presence is whether the program answers for it.
+fn probe_program(budget: f64, with_finish: bool) -> (World, History) {
+    let (world, mut history) = blade_world();
+    create(&world, &mut history, "G1", "GT-0200", groove_rough_params(0.25));
+    if with_finish {
+        create(&world, &mut history, "G2", "GT-0200", groove_finish_params());
+    }
+    let mut p = part_params(-10.0);
+    if let OpParams::Part { bar_load, bar_unload, bar_transfer, inspect_tol, .. } = &mut p {
+        *bar_load = true;
+        *bar_unload = true;
+        *bar_transfer = true;
+        *inspect_tol = budget;
+    }
+    create(&world, &mut history, "P1", "GT-0300", p);
+    (world, history)
+}
+
+fn post_txt(world: &World, tag: &str) -> Result<String, String> {
+    let path = std::env::temp_dir().join(format!("camcraft-probe-{tag}-{}.nc", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let r = camcraft_app::posting::post_setup(world, &path);
+    let out = match &r {
+        Ok(_) => std::fs::read_to_string(&path).expect("written"),
+        Err(e) => e.clone(),
+    };
+    let _ = std::fs::remove_file(&path);
+    r.map(|_| out)
+}
+
+#[test]
+fn a_left_floor_under_the_probe_budget_refuses_the_post() {
+    // The verdict as a decision, and composed: the parting op's own
+    // cut is clean, but the rough's left floor stands under the
+    // ask - the part as machined CANNOT measure to it, and no
+    // per-op rule could have said so. The refusal names the ask,
+    // the asker, the guilty leg and the act (re-run); a clean
+    // program's numbers appear nowhere in it.
+    let (world, _h) = probe_program(0.05, false);
+    let err = post_txt(&world, "refuse").expect_err("left steel under the ask blocks the post");
+    assert!(err.contains("post blocked"), "{err}");
+    assert!(
+        err.contains("probe ask") && err.contains("P1") && err.contains("G1") && err.contains("re-run"),
+        "the refusal names ask, asker, culprit and act: {err}"
+    );
+    assert!(err.contains("left standing"), "the floor clause, not a phantom gouge: {err}");
+}
+
+#[test]
+fn a_finish_that_answers_for_the_leave_posts() {
+    // The composition's honesty, in the other direction: the same
+    // 0.25 mm the rough stood on the part is now cut away by G2,
+    // and the union's floor is the model's - silence, and a posted
+    // program. A per-op verdict could not pass this test: it would
+    // convict the rough for a promise the program kept. This is
+    // also the choreography check: LOAD, cut, PROBE, TRANSFER,
+    // UNLOAD, in the posted order.
+    let (world, _h) = probe_program(0.05, true);
+    let text = post_txt(&world, "finish").expect("the answered promise posts");
+    assert!(text.contains("(PROBE TOL"), "the ask voices: {text}");
+    assert!(
+        !text.contains("probe ask") && !text.contains("left standing"),
+        "the composition measures silence, so the program says nothing of it:\n{text}"
+    );
+    let at = |needle: &str| text.find(needle).expect("present");
+    assert!(
+        at("(PART LOAD") < at("(PROBE TOL")
+            && at("(PROBE TOL") < at("(PART TRANSFER")
+            && at("(PART TRANSFER") < at("(PART UNLOAD)"),
+        "load, cut, measure, hand off, unload - in order"
+    );
+}
+
+#[test]
+fn a_budget_over_the_deviation_posts_the_ask_and_says_nothing() {
+    // The ask stands, the verdict does not: a bar of r6 by 44 long
+    // cannot hide a 50 mm floor, so the program voices PROBE and
+    // the gate has nothing to say. The budget edit still STALES the
+    // op - the number changed the posted program even though no
+    // geometry reads it - the stamp's own law, unchanged by where
+    // the verdict lives.
+    let (world, mut h) = probe_program(50.0, false);
+    let text = post_txt(&world, "loose").expect("a meetable budget posts");
+    assert!(text.contains("(PROBE TOL"), "the ask voices: {text}");
+    assert!(!text.contains("probe ask"), "no verdict text rides the program: {text}");
+    let mut p = part_params(-10.0);
+    if let OpParams::Part { bar_load, bar_unload, bar_transfer, inspect_tol, .. } = &mut p {
+        *bar_load = true;
+        *bar_unload = true;
+        *bar_transfer = true;
+        *inspect_tol = 1.0;
+    }
+    h.execute(&world, EditOperationParams::new(&world, "P1", p).expect("edit"));
+    assert_eq!(
+        status(&world, "P1"),
+        OpStatus::Stale,
+        "the budget changed the program, so it changed the stamp"
+    );
+}
+
+#[test]
+fn a_clean_parting_measures_zero_under_the_ask() {
+    // The vacuity guard, aimed the right way: a parting cut's own
+    // band stands inside its cutoff kerf - what stands there was
+    // meant to go - so a program that leaves steel nowhere measures
+    // 0 mm deviation and posts at ANY ask. (The v2 law made this
+    // the whole verdict and it meant nothing; under the composition
+    // it means the program is clean, which is only worth saying
+    // because the test above proves the same gate convicts a
+    // program that is not.)
+    let (world, mut history) = blade_world();
+    let mut p = part_params(-10.0);
+    if let OpParams::Part { inspect_tol, .. } = &mut p {
+        *inspect_tol = 0.05;
+    }
+    create(&world, &mut history, "P1", "GT-0300", p);
+    post_txt(&world, "solo").expect("a clean part leaves nothing for a probe to find");
+}
+
+#[test]
+fn a_negative_probe_budget_is_refused_at_the_door() {
+    // The advance's law again, in the measuring direction: a budget
+    // that cannot be measured to was never authored.
+    let (world, _h) = blade_world();
+    let mut p = part_params(-10.0);
+    if let OpParams::Part { inspect_tol, .. } = &mut p {
+        *inspect_tol = -0.05;
+    }
+    let Err(err) = CreateOperation::new(&world, "P1", "GT-0300", SrcRef::Entity("bar".into()), p)
+    else {
+        panic!("a negative budget cannot be authored");
     };
     assert!(format!("{err:?}").contains("not usable"), "the door must speak: {err:?}");
 }

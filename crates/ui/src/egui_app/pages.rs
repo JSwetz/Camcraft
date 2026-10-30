@@ -2591,6 +2591,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             bar_advance,
             bar_unload,
             bar_transfer,
+            inspect_tol,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -2635,6 +2636,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("the signals post as stream events around this section - a script voices them for the machine, M-code or comment, and silence posts silence");
                 ui.checkbox(bar_transfer, "Transfer to sub-spindle");
                 ui.label("the handoff step (M5.3 C): after the last cut, the part moves to the machine's second spindle - check the program gate, it names a machine that states no second spindle");
+                field(ui, "Probe budget (mm)");
+                num(ui, u, inspect_tol);
+                ui.label("the measurement ask (M5.3 D): 0 asks no probe; above 0 the program posts its PROBE intent and the post measures the part as machined - every blade's cut composed into one - against this bar; what stands above the model past it holds the post and names the pass to re-run (0.1 um is the least any probe measures)");
             }
         }
         // Threading (M5.2 D): the wave the model already carries, cut

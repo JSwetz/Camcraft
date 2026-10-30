@@ -231,6 +231,7 @@ pub fn form_warnings(
                 tip: ra.min(rb),
                 at: i,
                 floor: revolve::Floor::Crown(crown_radius),
+                half: band_width * 0.5,
             }
         })
         .collect();
@@ -239,5 +240,5 @@ pub fn form_warnings(
     // crown standing off the floor's edges must rest out loud even
     // where the window never sees the skin it cannot reach.
     let crest = pts.iter().map(|&(_, r)| r).fold(0.0f64, f64::max);
-    revolve::judge(&pts, moves, band_width * 0.5, tol, 0.0, true, Some(crest))
+    revolve::judge(&pts, moves, tol, 0.0, true, Some(crest))
 }

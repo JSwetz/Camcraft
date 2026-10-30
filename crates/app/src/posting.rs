@@ -292,12 +292,16 @@ pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
 ///
 /// What blocks: a GOUGE (the program cuts below the model's final
 /// geometry - the Prime Directive's "never", located); a stated machine
-/// limit the program outruns. What does not: REST material (a roughing
-/// program posts with its promise of a later finish op - Deviate shows
-/// the shortfall, the gate respects the intent), and a sim that cannot
-/// run at all (no stock, rotated stock - nothing was judged, so nothing
-/// is claimed; the per-op WARN gate is still the net under it, and the
-/// Deviate cell states the reason on demand).
+/// limit the program outruns; and a PROBE ask the program's own cuts
+/// cannot measure to (M5.3 D): the part is what the program's blades
+/// cut together, so the ask is judged on that composition, at the
+/// post - the law and the lines in `operation::probe_problems`. What
+/// does not: REST material on a program that asked no probe (a
+/// roughing program posts with its promise of a later finish op -
+/// Deviate shows the shortfall, the gate respects the intent; an
+/// authored ask is what turns that promise into a fact), and a sim
+/// that cannot run at all (no stock, rotated stock, a revolved path's
+/// own frame - nothing judged here is claimed).
 #[must_use]
 pub fn verification_gate(world: &World) -> Vec<String> {
     let mut problems = Vec::new();
@@ -343,6 +347,15 @@ pub fn verification_gate(world: &World) -> Vec<String> {
     // precedent: what the room is made of is verified now, never baked
     // into a digest).
     problems.extend(fixture_problems(world));
+
+    // The in-process measurement ask (M5.3 D): a Part op's probe
+    // budget is a claim about the FINISHED part, and the finished
+    // part is the program's blades composed - so it is judged here,
+    // against every blade leg's cached path, not at any single
+    // operation's generation (a rough's left floor is a fact about
+    // what came after it). The law and lines live in
+    // `operation::probe_problems`.
+    problems.extend(crate::operation::probe_problems(world));
     problems
 }
 
@@ -444,26 +457,33 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         // of 0 is still a load - the ACT, not the number. The
         // handoff step joins the family (M5.3 C) - same extraction,
         // same law: a signal, no geometry, the gate says whether the
-        // machine states the second spindle it names.
-        let (part_load, part_unload, part_transfer) = match &op.params {
+        // machine states the second spindle it names. The
+        // measurement ask joins last (M5.3 D) with its own shape:
+        // the NUMBER is the switch - an authored budget above 0
+        // asks the probe, 0 is silence, so no second flag exists to
+        // disagree with it.
+        let (part_load, part_unload, part_transfer, probe_tol) = match &op.params {
             OpParams::Part {
                 bar_load,
                 bar_advance,
                 bar_unload,
                 bar_transfer,
+                inspect_tol,
                 ..
             } => (
                 bar_load.then_some(*bar_advance),
                 *bar_unload,
                 *bar_transfer,
+                (*inspect_tol > 0.0).then_some(*inspect_tol),
             ),
-            _ => (None, false, false),
+            _ => (None, false, false, None),
         };
         let d = Dump {
             op_name: name,
             part_load,
             part_unload,
             part_transfer,
+            probe_tol,
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,

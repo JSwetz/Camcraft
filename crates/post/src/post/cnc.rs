@@ -50,6 +50,19 @@ pub enum Record {
     /// stated-what's-stated law: the program gate names it, the
     /// engine never guesses.
     Transfer { from: u32, to: u32 },
+    /// A measurement ask (M5.3 D): probe the part against
+    /// `tol_mm` - the deviation budget the op's author wrote, in
+    /// millimeters (µm-integer on the lattice like every other
+    /// length here). The fourth name in the lifecycle family: no
+    /// motion, no geometry, and no PROTOCOL - RS238 or a Renishaw
+    /// macro cycle or a laser is the script's dialect, exactly as
+    /// the handoff's handshake is the transfer script's (the
+    /// probing choice stays deferred per the ROADMAP's note). The
+    /// engine voices the ask; the deviation verdict is the POST's
+    /// composed blade scan - every cut on the part measured together
+    /// under this budget - and it is what decides whether the part
+    /// gets a re-run. The stream only says what to measure.
+    Probe { tol_mm: f64 },
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -211,6 +224,7 @@ impl Record {
             Record::Part { loading: true, .. } => "part load".into(),
             Record::Part { loading: false, .. } => "part unload".into(),
             Record::Transfer { from, to } => format!("part transfer {from}→{to}"),
+            Record::Probe { tol_mm } => format!("probe · tol {tol_mm:.3} mm"),
         }
     }
 
@@ -328,6 +342,11 @@ pub fn serialize(records: &[Record]) -> String {
             }
             Record::Transfer { from, to } => {
                 s.push_str(&format!("PART TRANSFER {from} {to}\n"));
+            }
+            Record::Probe { tol_mm } => {
+                // A length like the loader's ADVANCE: the µm integer,
+                // the lattice law - not a parameter real.
+                s.push_str(&format!("PROBE {}\n", q(*tol_mm)));
             }
         }
     }
@@ -756,6 +775,22 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     }
                     out.push(Record::Part { loading, advance });
                 }
+            }
+            "PROBE" => {
+                // The measurement ask (M5.3 D): one micron integer,
+                // the lattice law like ADVANCE. A missing or
+                // unmeasurable value is refused by name - a probe
+                // whose budget the parser guessed at is the silent
+                // wrong answer the Prime Directive forbids twice
+                // over.
+                let w = it
+                    .next()
+                    .ok_or_else(|| fail("PROBE needs a tolerance in microns".into()))?;
+                let v = num(w).map_err(|_| fail(format!("PROBE tolerance {w:?}")))?;
+                if v < 0.0 {
+                    return Err(fail(format!("PROBE tolerance {w:?} is negative")));
+                }
+                out.push(Record::Probe { tol_mm: v / 1000.0 });
             }
             other => {
                 return Err(fail(format!("unknown record {other:?}")));

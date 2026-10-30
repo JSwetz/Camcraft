@@ -670,7 +670,17 @@ pub enum OpParams {
     /// moves to the machine's second spindle - a `PART TRANSFER 1 2`
     /// intent on the stream, and the program gate (not the post)
     /// says whether the machine states a second spindle. Same law as
-    /// its siblings: a signal, never geometry.
+    /// its siblings: a signal, never geometry. `inspect_tol` (M5.3 D)
+    /// is the family's measurement ask: > 0 asks the program to
+    /// probe the finished part against that deviation budget (mm)
+    /// - a `PROBE` intent on the stream - and asks the POST to
+    ///   judge it: the program's blade legs compose into the final
+    ///   cut and one meridian scan measures it under this bar
+    ///   (`operation::probe_problems` - the part is what ALL the
+    ///   blades leave, so a rough's promise is only silent once a
+    ///   finish answers for it). The verdict as a re-run decision,
+    ///   not a report tail. 0 is silence, like every signal's off
+    ///   state.
     Part {
         tolerance: f64,
         clearance_z: Height,
@@ -683,6 +693,7 @@ pub enum OpParams {
         bar_advance: f64,
         bar_unload: bool,
         bar_transfer: bool,
+        inspect_tol: f64,
     },
     /// Threading (M5.2 stage D): the helical ladder on a MODELED
     /// thread. `pitch` is that thread's lead - the lattice of V's

@@ -80,6 +80,13 @@ function onPartUnloading() { writeComment("PART UNLOAD"); }
 function onPartTransfer() {
   writeComment("PART TRANSFER " + properties.From + "->" + properties.To);
 }
+// The measurement ask of the same family (M5.3 D): the default states
+// the budget as a comment - which probe protocol measures to it (an
+// RS238 hand check, a macro cycle, a laser) is the override's
+// dialect, and the engine invents none of it.
+function onProbe() {
+  writeComment("PROBE TOL " + formatUnit(properties.Tolerance));
+}
 // The reference-era language-version pragma: accepted and ignored,
 // because the engine (not the script) decides semantics.
 function setLanguageVersion(_v) { return 0; }
@@ -118,6 +125,7 @@ pub const HOOKS: &[&str] = &[
     "onPartLoading",
     "onPartUnloading",
     "onPartTransfer",
+    "onProbe",
     "onComment",
     "onClose",
 ];

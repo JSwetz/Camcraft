@@ -76,6 +76,8 @@ mod stamp;
 pub use stamp::*;
 mod material;
 pub use material::*;
+mod probe;
+pub(crate) use probe::*;
 mod selection;
 pub use selection::*;
 mod picks;

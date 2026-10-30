@@ -98,11 +98,19 @@ pub struct BandMove {
     pub a: f64,
     pub b: f64,
     pub tip: f64,
-    /// Index into the judged path, for the warning's attribution.
+    /// Index into the judged path, for the warning's attribution. A
+    /// composed program scan (`blade_program_warnings`) keeps the
+    /// index in the PROGRAM's move space - the caller's law for
+    /// naming which leg's move stands deepest here.
     pub at: usize,
     /// The floor's shape around the center `(a + b) * 0.5`;
     /// [`Floor::Flat`] for the plain-tipped blade.
     pub floor: Floor,
+    /// The half-width of the blade making this move. A single-tool
+    /// scan stores the same number on every move; a program scan
+    /// judges passes of different blades together (M5.3 D), and the
+    /// tangency promise reads per move exactly as it did per call.
+    pub half: f64,
 }
 
 /// The floor a move holds at a station: its tip, plus the steel's
@@ -191,24 +199,20 @@ pub fn span_max(sg: &Segs, lo: f64, hi: f64) -> f64 {
 /// promise spelled once. The bar's ends are the lattice's domain
 /// law's business, not the band's: a band may stand in end air and
 /// simply own no interval there.
-fn raw_band(m: &BandMove, half: f64) -> (f64, f64) {
-    (m.a.min(m.b) - half, m.a.max(m.b) + half)
+fn raw_band(m: &BandMove) -> (f64, f64) {
+    (m.a.min(m.b) - m.half, m.a.max(m.b) + m.half)
 }
 
 /// The window the passes can reach (their bands' union, kept where
 /// the tip bites) and the lattice to judge: E's breakpoints and the
 /// bands' edges - kerfs' too - retained inside the bar's own
 /// stations, which is the whole of the domain law.
-pub fn lattice(
-    pts: &[SR],
-    moves: &[BandMove],
-    half: f64,
-) -> (Option<(f64, f64)>, Vec<f64>) {
+pub fn lattice(pts: &[SR], moves: &[BandMove]) -> (Option<(f64, f64)>, Vec<f64>) {
     let (d_lo, d_hi) = (pts[0].0, pts[pts.len() - 1].0);
     let mut lat: Vec<f64> = Vec::with_capacity(pts.len() + 4 * moves.len() + 2);
     let mut window = None;
     for m in moves {
-        let (lo, hi) = raw_band(m, half);
+        let (lo, hi) = raw_band(m);
         lat.push(lo);
         lat.push(hi);
         lat.push(m.a.min(m.b));
@@ -263,7 +267,6 @@ pub struct Alert {
 pub fn scan(
     sg: &Segs,
     moves: &[BandMove],
-    half: f64,
     window: Option<(f64, f64)>,
     lat: &[f64],
     tol: f64,
@@ -274,7 +277,7 @@ pub fn scan(
     let mut order: Vec<(f64, usize)> = Vec::new();
     let mut kerfs: Vec<(f64, f64)> = Vec::new();
     for (i, m) in moves.iter().enumerate() {
-        let (lo, hi) = raw_band(m, half);
+        let (lo, hi) = raw_band(m);
         if m.tip <= 0.0 {
             if hi > lo {
                 kerfs.push((lo, hi));
@@ -304,7 +307,7 @@ pub fn scan(
         }
         while next < order.len() && order[next].0 < v {
             let mi = order[next].1;
-            let hi = raw_band(&moves[mi], half).1;
+            let hi = raw_band(&moves[mi]).1;
             let k = heap.partition_point(|e| e.0.total_cmp(&hi) == std::cmp::Ordering::Greater);
             heap.insert(k, (hi, mi));
             next += 1;
@@ -443,10 +446,76 @@ pub fn blade_warnings(
                 tip: ra.min(rb),
                 at: i,
                 floor: Floor::Flat,
+                half: width * 0.5,
             }
         })
         .collect();
-    judge(&pts, moves, width * 0.5, tol, leave, false, None)
+    judge(&pts, moves, tol, leave, false, None)
+}
+
+/// One leg of a program composed for the final-part scan: the
+/// passes an operation cached, and the width of the blade that
+/// would run them.
+pub struct BladeLeg<'a> {
+    pub path: &'a Toolpath,
+    pub width: f64,
+}
+
+/// The final-part scan (M5.3 D): what an in-process probe touches
+/// is everything the program's blades cut TOGETHER, so a probe
+/// budget is judged on the composed cut, not on any one op. The
+/// legs' moves union into one lattice - the same boxcar-min law as
+/// the single-tool scan, so a finish that comes later in the
+/// program answers for a rough's left floor, and the kerf law
+/// stands unchanged: inside a cutoff, what stands there was meant
+/// to go. `tol` is the strictest authored ask (it chords the
+/// silhouette at its quarter, the scan's own resolution law), and
+/// leave is zero BY CONSTRUCTION - a roughing promise is what the
+/// PROMISE forgives, never the part. `at` indexes the composed
+/// feed order (program order, the caller's op names), which is how
+/// the verdict says who left the steel. A model this cannot frame,
+/// or a blade without a width, reports as a gouge at move 0 - a
+/// judge that cannot measure never reports silence.
+pub fn blade_program_warnings(
+    facets: &[Triangle],
+    legs: &[BladeLeg<'_>],
+    tol: f64,
+) -> Vec<Warning> {
+    if legs.is_empty()
+        || facets.is_empty()
+        || legs.iter().any(|l| l.width <= 0.0 || !l.width.is_finite())
+    {
+        return vec![Warning::Gouge { at: 0 }];
+    }
+    let f = match profile::Frame::about(facets) {
+        Ok(f) => f,
+        Err(_) => return vec![Warning::Gouge { at: 0 }],
+    };
+    let pts = match profile::silhouette(facets, &f, tol * 0.25) {
+        Ok(p) => p,
+        Err(_) => return vec![Warning::Gouge { at: 0 }],
+    };
+    let mut moves: Vec<BandMove> = Vec::new();
+    let mut start = 0usize;
+    for l in legs {
+        for (i, m) in l.path.moves.iter().enumerate() {
+            if m.kind != MoveKind::Feed {
+                continue;
+            }
+            let (sa, ra) = f.sr(m.from);
+            let (sb, rb) = f.sr(m.to);
+            moves.push(BandMove {
+                a: sa,
+                b: sb,
+                tip: ra.min(rb),
+                at: start + i,
+                floor: Floor::Flat,
+                half: l.width * 0.5,
+            });
+        }
+        start += l.path.moves.len();
+    }
+    judge(&pts, moves, tol, 0.0, false, None)
 }
 
 /// The shared close: scan what the moves leave and speak it in the
@@ -456,19 +525,17 @@ pub fn blade_warnings(
 /// clip reads - None takes the window's own span (the thread's
 /// crest), Some the model's tallest claim (a lone crown's steel
 /// cannot reach past the bar, M5.2 E2).
-#[allow(clippy::too_many_arguments)] // the verdict's whole frame, spelled at the seam
 pub(crate) fn judge(
     pts: &[SR],
     moves: Vec<BandMove>,
-    half: f64,
     tol: f64,
     leave: f64,
     clip_shell: bool,
     crest: Option<f64>,
 ) -> Vec<Warning> {
     let sg = segs(pts);
-    let (window, lat) = lattice(pts, &moves, half);
-    let (gouge, rest) = scan(&sg, &moves, half, window, &lat, tol, leave, clip_shell, crest);
+    let (window, lat) = lattice(pts, &moves);
+    let (gouge, rest) = scan(&sg, &moves, window, &lat, tol, leave, clip_shell, crest);
     let g = gouge.as_ref().map(|a| a.mm).unwrap_or(0.0);
     let r = rest.as_ref().map(|a| a.mm).unwrap_or(0.0);
     if g <= 0.0 && r <= 0.0 {

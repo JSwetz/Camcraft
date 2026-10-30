@@ -21,8 +21,8 @@ use camcraft_motion::geometry::{Point3, Triangle};
 use camcraft_motion::machining2d::GenError;
 use camcraft_motion::turning::profile::Frame;
 use camcraft_motion::turning::{
-    blade_warnings, groove_finish, groove_rough, part, GrooveFinishParams, GrooveRoughParams,
-    PartParams,
+    blade_program_warnings, blade_warnings, groove_finish, groove_rough, part, BladeLeg,
+    GrooveFinishParams, GrooveRoughParams, PartParams,
 };
 use camcraft_motion::verify::Warning;
 
@@ -191,6 +191,80 @@ fn the_roughs_own_leave_is_silent_then_a_rest() {
             assert!(*rest_mm > 0.24 && *rest_mm < 0.26, "rest size: {warns:?}");
         }
         other => panic!("expected one rest verdict, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_program_scan_judges_the_part_not_the_passes() {
+    // The composition law (M5.3 D): a probe measures what the
+    // blades cut TOGETHER. The rough from the test above stands
+    // 0.25 off the model's floor, and the scan convicts it alone
+    // exactly once, blaming a move inside the rough's own
+    // program range - but composed with the finish that answers
+    // for it, the union floor is the model's and the scan says
+    // nothing. A parting leg exempts its own band as kerf in the
+    // composition too, and nothing else: a clean program measures
+    // 0 at any ask, which is only an honest silence because the
+    // same gate just convicted a program that was not clean.
+    let rough = groove_rough(
+        &grooved(),
+        &GrooveRoughParams {
+            tolerance: TOL,
+            clearance_z: 44.0,
+            top_z: -3.6,
+            bottom_z: -6.0,
+            stepdown: 0.5,
+            stock_to_leave: 0.25,
+            feed: 0.0,
+            plunge_feed: 60.0,
+            blade_width: WIDTH,
+        },
+    )
+    .expect("the groove roughs");
+    let fin = groove_finish(&grooved(), &groove_fin(-3.6, -6.0)).expect("the groove finishes");
+    let sever = part(
+        &grooved(),
+        &PartParams {
+            tolerance: TOL,
+            clearance_z: 44.0,
+            top_z: 40.0,
+            parting_z: -10.0,
+            stepdown: 1.5,
+            feed: 0.0,
+            plunge_feed: 60.0,
+            blade_width: WIDTH,
+        },
+    )
+    .expect("the bar parts");
+    fn leg(t: &camcraft_motion::cl::Toolpath) -> BladeLeg<'_> {
+        BladeLeg { path: t, width: WIDTH }
+    }
+    match blade_program_warnings(&grooved(), &[leg(&rough), leg(&sever)], TOL).as_slice() {
+        [Warning::Envelope {
+            at,
+            gouge_mm,
+            rest_mm,
+        }] => {
+            assert!(*gouge_mm <= 0.0, "nothing here cuts below the model: {at}");
+            assert!(*rest_mm > 0.24 && *rest_mm < 0.26, "rest size: {rest_mm}");
+            assert!(*at < rough.moves.len(), "blame stands in the guilty leg's own range: {at}");
+        }
+        other => panic!("expected one composed rest verdict, got {other:?}"),
+    }
+    assert!(
+        blade_program_warnings(&grooved(), &[leg(&rough), leg(&fin), leg(&sever)], TOL).is_empty(),
+        "a program that keeps its promise measures zero"
+    );
+    assert!(
+        blade_program_warnings(&grooved(), &[leg(&fin), leg(&sever)], TOL).is_empty(),
+        "a clean program measures zero too - the vacuity the per-op law hid"
+    );
+    // A leg without a blade is not a measurement: the judge that
+    // cannot measure never reports silence.
+    let bladeless = BladeLeg { path: &fin, width: 0.0 };
+    match blade_program_warnings(&grooved(), &[leg(&rough), bladeless], TOL).as_slice() {
+        [Warning::Gouge { at: 0 }] => {}
+        other => panic!("a zero-width leg must refuse, got {other:?}"),
     }
 }
 

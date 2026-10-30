@@ -826,6 +826,7 @@ impl OpParams {
                 bar_advance,
                 bar_unload,
                 bar_transfer,
+                inspect_tol,
             } => {
                 w(h, *tolerance);
                 wh(h, *clearance_z);
@@ -844,6 +845,9 @@ impl OpParams {
                 w(h, *bar_advance);
                 w(h, if *bar_unload { 1.0 } else { 0.0 });
                 w(h, if *bar_transfer { 1.0 } else { 0.0 });
+                // The measurement ask rides the same fold (M5.3 D):
+                // it changes the posted stream, no geometry reads it.
+                w(h, *inspect_tol);
             }
             // The threading ladder (M5.2 stage D, tag 24): the wave's
             // own three numbers ride beside the twins' - pitch, depth

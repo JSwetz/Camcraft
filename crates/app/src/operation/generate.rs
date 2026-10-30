@@ -1885,6 +1885,17 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     stl,
                 ));
             }
+            // The inspection ask (M5.3 D) is NOT judged here: it
+            // measures the PART, and the part is what the program's
+            // blades cut TOGETHER - a rough's left floor is silent
+            // once a later finish removes it, and no single op's
+            // scan can know that. The verdict lives at the post,
+            // composing every blade leg into the final cut
+            // (posting::verification_gate), where the conviction
+            // names the op that left the steel. What is judged
+            // here is the machining promise alone: this path under
+            // its own tolerance, above. An ask that no probe
+            // budgets costs nothing extra anywhere.
             // The threading verdict (M5.2 D): the path's own helix
             // states the lattice - every second arc endpoint is a
             // meridian crossing, where the V's floor belongs - and

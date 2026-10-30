@@ -636,6 +636,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 bar_advance,
+                inspect_tol,
                 ..
             } => {
                 pos(*tolerance)
@@ -650,6 +651,16 @@ impl OpParams {
                     // negative or unmeasurable one is not authored.
                     && bar_advance.is_finite()
                     && *bar_advance >= 0.0
+                    // The probe budget (M5.3 D): 0 is silence, and a
+                    // nonzero ask must be a measurement a probe can
+                    // take - 0.1 um floors the world's best machines.
+                    // The budget also chords the gate's composed
+                    // scan (a quarter of it per sample edge), so a
+                    // sub-floor ask is not merely unmeasurable, it
+                    // would chase samples no machine holds - the
+                    // generator's level-cap precedent, at the door.
+                    && inspect_tol.is_finite()
+                    && (*inspect_tol == 0.0 || *inspect_tol >= 1e-4)
             }
             // The threading door (M5.2 stage D): three positive helix
             // numbers - pitch, depth, infeed - beside the twins'

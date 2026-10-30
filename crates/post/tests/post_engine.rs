@@ -393,6 +393,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         stock_top_z: 0.0,
         warnings: vec!["drill vs hole dia advisory".into()],
         part_transfer: false,
+        probe_tol: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     // dump emits each cycle with first_move <= mi just before move mi:
@@ -454,6 +455,7 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         stock_top_z: 0.0,
         warnings: vec![],
         part_transfer: false,
+        probe_tol: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let angles: Vec<Option<[f64; 3]>> = recs
@@ -723,6 +725,7 @@ fn dump_brackets_the_section_with_the_feeder() {
         stock_top_z: 0.0,
         warnings: vec![],
         part_transfer: false,
+        probe_tol: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let open = recs.iter().position(|r| matches!(r, Record::Section { begin: true })).expect("open");
@@ -818,6 +821,7 @@ fn dump_places_the_handoff_after_the_cut_before_the_unload() {
         stock_top_z: 0.0,
         warnings: vec![],
         part_transfer: true,
+        probe_tol: None,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let at = |pat: &dyn Fn(&Record) -> bool| {
@@ -834,4 +838,100 @@ fn dump_places_the_handoff_after_the_cut_before_the_unload() {
     // goldens keep watching.
     let d2 = Dump { part_transfer: false, ..d };
     assert!(!camcraft_post::post::dump(&t, &d2).iter().any(|r| matches!(r, Record::Transfer { .. })));
+}
+
+// M5.3 stage D: the measurement ask joins the lifecycle family -
+// `PROBE <µm>` on the stream (a length, so the lattice law, unlike
+// the transfer's ordinals), one dedicated hook, and the choreography
+// seats it after the last cut and before any handoff: measure the
+// part where it was machined, before it changes hands.
+
+#[test]
+fn probe_roundtrips_and_strays_refuse() {
+    for recs in [
+        vec![Record::Probe { tol_mm: 0.05 }],
+        vec![Record::Probe { tol_mm: 0.0 }],
+        vec![Record::Probe { tol_mm: 12.345 }],
+    ] {
+        let text = cnc::serialize(&recs);
+        assert_eq!(cnc::parse(&text).expect("own output must parse"), recs);
+    }
+    assert!(cnc::serialize(&[Record::Probe { tol_mm: 0.05 }]).contains("PROBE 50\n"));
+    for bad in ["PROBE\n", "PROBE x\n", "PROBE -1\n"] {
+        let e = cnc::parse(bad).expect_err("a budget the stream cannot state must refuse");
+        let msg = format!("{e}");
+        assert!(msg.contains("line"), "error must name its line: {msg}");
+        assert!(msg.contains("PROBE"), "the refusal names the word: {msg}");
+    }
+    // The unknown-word door lists its words as before - PROBE stands
+    // beside them, not inside PART.
+    let e = cnc::parse("PROBED 50\n").expect_err("not a word");
+    assert!(format!("{e}").contains("PROBED"), "the refusal echoes the stray: {e}");
+}
+
+#[test]
+fn probe_voices_the_default_and_the_override() {
+    // Prelude alone: the comment states the budget - which protocol
+    // measures to it is the script's dialect, and the default
+    // invents none.
+    let out = engine::run("", &json!(null), "PROBE 50\n").expect("posts");
+    assert!(out.program.contains("(PROBE TOL 0.05)"), "{}", out.program);
+    // The hook is the whole contract: lifecycle, so onCommand never
+    // sees it, and the budget rides as a property, never invented M.
+    let cps = r#"
+var SEEN = [];
+function onCommand() { SEEN.push("cmd:" + properties.command); }
+function onProbe() {
+    SEEN.push("ask:" + properties.command + ":" + properties.Tolerance);
+}
+function onClose() { SEEN.forEach(function (x) { writeln(x); }); }
+"#;
+    let out = engine::run(cps, &json!(null), "PROBE 250\n").expect("post");
+    assert!(out.program.contains("ask:Probe:0.25"), "{}", out.program);
+    assert!(!out.program.contains("cmd:"), "onCommand must never see it: {}", out.program);
+}
+
+#[test]
+fn dump_places_the_probe_after_the_cut_before_the_handoff() {
+    use camcraft_post::geometry::Point3;
+    let t = Toolpath::new(vec![camcraft_post::cl::Move::new(
+        MoveKind::Feed,
+        Point3 { x: 0.0, y: 0.0, z: 1.0 },
+        Point3 { x: 0.0, y: 0.0, z: -1.0 },
+        Some(100.0),
+    )]);
+    let d = Dump {
+        op_name: "Part1",
+        part_load: Some(0.0),
+        part_unload: true,
+        tool_number: 1,
+        tool_name: "GT-0300",
+        tool_diameter: 16.0,
+        rpm: 2000.0,
+        clearance_z: 20.0,
+        retract_z: 20.0,
+        top_z: 0.0,
+        wcs: "G54",
+        origin: [0.0; 3],
+        stock: [-20.0, 20.0, -20.0, 20.0],
+        stock_top_z: 0.0,
+        warnings: vec![],
+        part_transfer: true,
+        probe_tol: Some(0.05),
+    };
+    let recs = camcraft_post::post::dump(&t, &d);
+    let at = |pat: &dyn Fn(&Record) -> bool| recs.iter().position(pat).expect("record present");
+    let load = at(&|r| matches!(r, Record::Part { loading: true, .. }));
+    let move_ = at(&|r| matches!(r, Record::Move(_)));
+    let ask = at(&|r| matches!(r, Record::Probe { .. }));
+    let hand = at(&|r| matches!(r, Record::Transfer { .. }));
+    let unload = at(&|r| matches!(r, Record::Part { loading: false, .. }));
+    assert!(
+        load < move_ && move_ < ask && ask < hand && hand < unload,
+        "LOAD..cut..PROBE..TRANSFER..UNLOAD: {recs:?}"
+    );
+    assert_eq!(recs[ask], Record::Probe { tol_mm: 0.05 }, "the authored budget, verbatim");
+    // No ask writes no event - the byte-identity the goldens watch.
+    let d2 = Dump { probe_tol: None, ..d };
+    assert!(!camcraft_post::post::dump(&t, &d2).iter().any(|r| matches!(r, Record::Probe { .. })));
 }

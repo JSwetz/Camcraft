@@ -53,5 +53,5 @@ pub use form::{form, form_warnings, FormParams};
 pub use offset::profile_offset;
 pub use prof::{profile_finish, profile_rough, ProfileFinishParams, ProfileRoughParams};
 pub use profile::{profile_of, silhouette, Profile};
-pub use revolve::{blade_warnings, BandMove, Floor};
+pub use revolve::{blade_program_warnings, blade_warnings, BladeLeg, BandMove, Floor};
 pub use thread::{thread, thread_warnings, ThreadParams};

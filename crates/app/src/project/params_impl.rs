@@ -648,6 +648,7 @@ impl ParamsDto {
                 bar_advance,
                 bar_unload,
                 bar_transfer,
+                inspect_tol,
             } => ParamsDto::Part {
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
@@ -660,6 +661,7 @@ impl ParamsDto {
                 bar_advance: *bar_advance,
                 bar_unload: *bar_unload,
                 bar_transfer: *bar_transfer,
+                inspect_tol: *inspect_tol,
             },
             // The threading kind (M5.2 stage D): the wave's own three
             // numbers beside the blade trio of heights - and the
@@ -1479,7 +1481,8 @@ impl ParamsDto {
             },
             // The feeder signals read back with the rest; an old
             // file's absence was already stepped up to silent-off
-            // by serde (M5.2 G.2).
+            // by serde (M5.2 G.2), the handoff step and the probe
+            // budget alike (M5.3 C, M5.3 D).
             ParamsDto::Part {
                 tolerance,
                 clearance_z,
@@ -1492,6 +1495,7 @@ impl ParamsDto {
                 bar_advance,
                 bar_unload,
                 bar_transfer,
+                inspect_tol,
             } => OpParams::Part {
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
@@ -1504,6 +1508,7 @@ impl ParamsDto {
                 bar_advance: *bar_advance,
                 bar_unload: *bar_unload,
                 bar_transfer: *bar_transfer,
+                inspect_tol: *inspect_tol,
             },
             // Read back whole, the threading kind's way too - sane or
             // nothing, `validate_kind`'s door again first (M5.2 D).

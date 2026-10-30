@@ -297,6 +297,7 @@ pub fn thread_warnings(
                     tip,
                     at: i,
                     floor: revolve::Floor::Wave(cot),
+                    half: insert_width * 0.5,
                 });
             }
         } else {
@@ -308,8 +309,9 @@ pub fn thread_warnings(
                 tip,
                 at: i,
                 floor: revolve::Floor::Wave(cot),
+                half: insert_width * 0.5,
             });
         }
     }
-    revolve::judge(&pts, moves, insert_width * 0.5, tol, 0.0, true, None)
+    revolve::judge(&pts, moves, tol, 0.0, true, None)
 }
