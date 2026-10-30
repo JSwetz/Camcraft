@@ -14,40 +14,52 @@ pub fn generate(
     op: &Operation,
     op_name: &str,
 ) -> Result<(Toolpath, Vec<Warning>), GenError> {
+    run_job(collect_job(world, op, op_name)?)
+}
+
+/// Run a fully-collected job: every world read happened in
+/// [`collect_job`], on the caller's thread, and nothing here names a
+/// `World`. Split from [`generate`] at the seam M5.3 B needed - a
+/// batch's jobs run on worker threads, where a `&World` cannot exist -
+/// and it is exactly the old body below the old head, so a solo
+/// generation is byte-identical to the file's whole history of them.
+pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
+    let GenJob {
+        tool,
+        tool_name,
+        params,
+        src,
+        material,
+        frame,
+        hs,
+        stock_facets,
+        stock_aabb,
+        mut section_z,
+        mut picked_region,
+        mut contour_sel,
+        mut drive_chains,
+        mut prior,
+        is_mill,
+        spindle,
+        fixtures,
+    } = job;
     // Tool: the diameter drives the path, the body drives the reach law.
-    let Some(tool_entity) = model::find_by_name(world, &op.tool) else {
-        return Err(GenError::Invalid(format!("no tool named '{}'", op.tool)));
-    };
-    let Some(tool) = model::tool_of(world, &tool_entity) else {
-        return Err(GenError::Invalid(format!("'{}' is not a tool", op.tool)));
-    };
     let d = tool.diameter;
 
-    // Source material (the slot reads its own endpoints instead, but the
-    // verification still wants to know what stands around it).
-    let setup = op.setup.as_deref();
-    let material = material_of(world, setup, &op.src)?;
-    // Setup stock, when it is not the source itself: the swarf column
-    // around a smaller model. Island-vs-swarf in the reach law keys on
-    // `region.contains`, so this only widens what counts as material -
-    // and it is THIS operation's setup's stock (M3.2 A), never a
-    // neighbor setup's block.
-    let stock_facets = match &op.src {
-        SrcRef::Stock => None,
-        SrcRef::Entity(_) | SrcRef::Selection(_) => {
-            model::find_by_name(world, &crate::setup::stock_entity_name(world, setup))
-                .and_then(|e| model::world_facets(world, &e))
-        }
-    };
+    // Source stock, when it is not the source itself: the swarf column
+    // around a smaller model. The world reads that chose it rode into
+    // the job (M5.3 B); the projection below is pure, so it stays here.
+    // Island-vs-swarf in the reach law keys on `region.contains`, so
+    // this only widens what counts as material - and it is THIS
+    // operation's setup's stock (M3.2 A), never a neighbor setup's
+    // block, which is what the collect read of the setup's stock
+    // entity guarantees.
     let stock_region = stock_facets
         .as_deref()
         .and_then(|f| slice::project(f, FOOTPRINT_SAMPLES).ok())
         .filter(|r| !r.is_empty());
-    let stock_top_z = material.top.max(
-        model::stock_world_aabb_for(world, setup)
-            .map(|b| b.max.z)
-            .unwrap_or(f64::NEG_INFINITY),
-    );
+    let stock_top_z =
+        material.top.max(stock_aabb.map(|(_, b)| b.z).unwrap_or(f64::NEG_INFINITY));
 
     // Which verify laws the path answers to is registry data (M5.0.2):
     // the row's comment explains each choice. One seam-side override:
@@ -56,45 +68,24 @@ pub fn generate(
     // the vertical-axis laws down for exactly that geometry (the
     // sim-side comment is the doctrine; the registry row stays the
     // Z-hole truth).
-    let mode = match &op.params {
+    let mode = match &params {
         OpParams::Drill { cross, .. } if !cross.is_empty() => {
             crate::verify::Mode::Radial
         }
-        _ => op.params.kind().info().mode,
+        _ => params.kind().info().mode,
     };
 
-    // The height seam: the params' From+offset expressions become the
-    // generators' plain f64s right here. Every unresolved reference is
-    // refused by name before a single move is computed - never a
-    // guessed z. `machining2d`'s params keep taking resolved values, so
-    // the generators (and the goldens) know nothing of references.
-    let hs = resolve_params(world, setup, &op.params).map_err(GenError::Invalid)?;
-
-    // The 3+2 wrap (M5.1 stage B). A planar op with a tilt generates
-    // exactly the path the upright kind would on the model as seen
-    // FROM the tilted plane: the model's facets come through the
-    // frame's `local_facets`, every resolved height is read as
-    // distance along the frame's axis from the plane anchor
-    // (`h - origin.z`, the identity-exact law: an upright frame at the
+    // The height seam crossed in the collect: the params' From+offset
+    // expressions became the generators' plain f64s there, every
+    // unresolved reference refused by name before a single move was
+    // computed - never a guessed z. The 3+2 wrap's frame (M5.1 B)
+    // rode along too; the shift below is pure arithmetic -
+    // `h - origin.z`, the identity-exact law: an upright frame at the
     // world origin shifts nothing, so every prismatic file and golden
-    // rides on untouched), and the finished LOCAL path leaves through
-    // the frame's one door, `world_path`. The generators themselves
-    // never see a frame - rotation invariance is the whole argument
-    // that this is sound - and the laws that verify the path below run
-    // on the local one for exactly the same reason.
-    let frame = match op.params.tilt() {
-        None => None,
-        Some(t) => match t.frame() {
-            Some(f) => Some(f),
-            // Only a non-finite letter could get here (the parameter
-            // door refuses it); naming it beats inventing a plane.
-            None => {
-                return Err(GenError::Invalid(
-                    "the 3+2 index commands no direction - its angles are not finite".into(),
-                ));
-            }
-        },
-    };
+    // rides on untouched. The generators themselves never see a frame
+    // - rotation invariance is the whole argument that this is sound
+    // - and the laws that verify the path below run on the local one
+    // for exactly the same reason.
     let oz = frame.map_or(0.0, |f| f.origin.z);
     let hl = ResolvedHeights {
         clearance: hs.clearance - oz,
@@ -103,17 +94,6 @@ pub fn generate(
         face_top: hs.face_top.map(|v| v - oz),
         retract: hs.retract.map(|v| v - oz),
     };
-    // The one refusal the wrap owes (M5.1 B): a picked selection is
-    // read as world geometry by the selection walk - projecting a pick
-    // onto a tilted plane is not implemented, and a shadow of the
-    // pick is not what was picked. Refused by name, never silently
-    // cut as a projection.
-    if frame.is_some() && matches!(op.src, SrcRef::Selection(_)) {
-        return Err(GenError::Invalid(
-            "a tilted plane cannot yet index a picked selection - pick a whole model instead"
-                .into(),
-        ));
-    }
     let material_local = frame.as_ref().map(|f| Material {
         facets: f.local_facets(&material.facets),
         top: material.top - oz,
@@ -121,7 +101,7 @@ pub fn generate(
     let m_gen = material_local.as_ref().unwrap_or(&material);
 
     // Region + path per kind.
-    let (region, path) = match &op.params {
+    let (region, path) = match &params {
         OpParams::Face {
             stepover,
             stepdown,
@@ -130,11 +110,11 @@ pub fn generate(
             climb,
             ..
         } => {
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -171,7 +151,7 @@ pub fn generate(
             // Backstop for a committed file that carries Inside on a
             // whole-model source (commands refuse it at creation): the
             // mirror-gouge law must never reach a path.
-            if let Some(msg) = side_sane(&op.params, &op.src) {
+            if let Some(msg) = side_sane(&params, &src) {
                 return Err(GenError::Invalid(msg));
             }
             let cp = ContourParams {
@@ -192,14 +172,17 @@ pub fn generate(
                 tab_width: *tab_width,
                 tab_height: *tab_height,
             };
-            let (region, path) = match &op.src {
-                SrcRef::Selection(items) => {
+            let (region, path) = match &src {
+                SrcRef::Selection(_) => {
                     // The boundary path cuts the loops the picks bound;
                     // each open run in the picks adds a centerline pass
                     // along its own points. Either half alone is enough;
-                    // together they machine the whole pick list.
-                    let (loops, runs, auto_inside) =
-                        selection_geometry_impl(world, setup, items, &op.params, None)?;
+                    // together they machine the whole pick list. The
+                    // walk resolved them on the caller's thread (M5.3 B);
+                    // this arm only takes the answer.
+                    let (loops, runs, auto_inside) = contour_sel
+                        .take()
+                        .ok_or_else(|| unreached("contour selection geometry"))??;
                     if loops.is_empty() && runs.is_empty() {
                         return Err(GenError::Empty(
                             "nothing in the selection bounds an area or a run".into(),
@@ -227,11 +210,11 @@ pub fn generate(
                     (region, path)
                 }
                 _ => {
-                    let region = region_for_src(
-                        world,
-                        op.setup.as_deref(),
-                        &op.src,
-                        &op.params,
+                    let region = region_for_job(
+                            &mut picked_region,
+                            &mut section_z,
+                            &src,
+                            &params,
                         m_gen,
                         frame.as_ref(),
                     )?;
@@ -254,11 +237,11 @@ pub fn generate(
             max_engagement,
             ..
         } => {
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -304,11 +287,11 @@ pub fn generate(
             // themselves at every plane, so there is nothing here for a
             // picked loop to add - and nothing to erode by hand either:
             // one erosion per level, from that level's target.
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -333,8 +316,13 @@ pub fn generate(
             // pocket left standing bounds the coarse run, so it cuts
             // the shelves its predecessors already cleared only if the
             // mask says material still stands there. Nothing ahead (or
-            // nothing cut) is `None`, and the path is what it was.
-            let prior = crate::rest::prior_state(world, op_name, setup, d * 0.5)?;
+            // nothing cut) is `None`, and the path is what it was. The
+            // mask itself was resolved on the caller's thread (M5.3 B)
+            // - an Arc, because a height field this size is never
+            // cloned just to move it between threads.
+            let prior = prior
+                .take()
+                .ok_or_else(|| unreached("re-machining mask"))??;
             let mask = prior.grid.as_ref();
             // The rest pass's verdict rides the path: what the sim
             // still reports after the closing ladder is the closing
@@ -392,14 +380,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::BallNose {
                 return Err(GenError::Invalid(format!(
                     "3D Finish needs a ball-nose tool, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -467,11 +455,11 @@ pub fn generate(
             shank_avoid,
             ..
         } => {
-            let is_contour = matches!(&op.params, OpParams::Contour5D { .. });
+            let is_contour = matches!(&params, OpParams::Contour5D { .. });
             // The contour has no stepover field to bind (the or-pattern
             // binds one name on one side and E0642s); read it here,
             // where the parallel's own arm answers.
-            let stepover = match &op.params {
+            let stepover = match &params {
                 OpParams::Parallel5D { stepover, .. } => *stepover,
                 _ => None,
             };
@@ -483,15 +471,15 @@ pub fn generate(
                     } else {
                         "5-Axis Parallel"
                     },
-                    op.tool,
+                    tool_name,
                     tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -560,8 +548,8 @@ pub fn generate(
             max_tilt_deg,
             ..
         } => {
-            let is_ladder = matches!(&op.params, OpParams::AdvancedSwarf { .. });
-            let passes = match &op.params {
+            let is_ladder = matches!(&params, OpParams::AdvancedSwarf { .. });
+            let passes = match &params {
                 OpParams::AdvancedSwarf { passes, .. } => *passes,
                 _ => 1,
             };
@@ -569,15 +557,15 @@ pub fn generate(
                 return Err(GenError::Invalid(format!(
                     "{} needs a ball-nose tool, '{}' is a {}",
                     if is_ladder { "Advanced Swarf" } else { "Swarf" },
-                    op.tool,
+                    tool_name,
                     tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -638,8 +626,8 @@ pub fn generate(
             max_tilt_deg,
             ..
         } => {
-            let is_contour = matches!(&op.params, OpParams::RotaryContour { .. });
-            let stepover = match &op.params {
+            let is_contour = matches!(&params, OpParams::RotaryContour { .. });
+            let stepover = match &params {
                 OpParams::RotaryParallel { stepover, .. } => *stepover,
                 _ => None,
             };
@@ -651,15 +639,15 @@ pub fn generate(
                     } else {
                         "Rotary Parallel"
                     },
-                    op.tool,
+                    tool_name,
                     tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -724,14 +712,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::BallNose {
                 return Err(GenError::Invalid(format!(
                     "Rotary Offset needs a ball-nose tool, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -794,14 +782,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::BallNose {
                 return Err(GenError::Invalid(format!(
                     "Multi-Axis Rough needs a ball-nose tool, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -828,7 +816,9 @@ pub fn generate(
                 max_tilt_deg: Some(*max_tilt_deg),
             };
             let _ = tolerance;
-            let prior = crate::rest::prior_state(world, op_name, setup, d * 0.5)?;
+            let prior = prior
+                .take()
+                .ok_or_else(|| unreached("re-machining mask"))??;
             let mask = prior.grid.as_ref();
             // Same opt-in law as the twins' arm above: off, the ladder
             // stamps exactly as stage E3 shipped it.
@@ -877,14 +867,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::BallNose {
                 return Err(GenError::Invalid(format!(
                     "5-Axis Flow needs a ball-nose tool, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -938,20 +928,22 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::BallNose {
                 return Err(GenError::Invalid(format!(
                     "Multi-Axis Contour needs a ball-nose tool, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
             let top = req_z(hl.top, "Top of Part Z")?;
             let bottom = req_z(hl.bottom, "Bottom of Part Z")?;
-            let chains = drive_chains_of(world, op)?;
+            let chains = drive_chains
+                .take()
+                .ok_or_else(|| unreached("drive chains"))??;
             // The window applies to the curve itself: a picked chain
             // standing outside the operation's top/bottom is a
             // disagreement between the pick and the heights that no
@@ -1024,11 +1016,11 @@ pub fn generate(
                     climb: *climb,
                 },
             )?;
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1041,11 +1033,11 @@ pub fn generate(
             climb,
             ..
         } => {
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1077,11 +1069,11 @@ pub fn generate(
             // No region feeds the generator - the hole list is the
             // geometry - but the verify pass below needs one, and it is
             // built the same shared way as every other kind's.
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1103,7 +1095,7 @@ pub fn generate(
                         "this op lists Z holes AND cross holes - drill either the mill's holes or the turret's, not both (M5.2 v1)".into(),
                     ));
                 }
-                if crate::machine::kind_of(world) == crate::machine::Kind::Mill {
+                if is_mill {
                     return Err(GenError::Invalid(
                         "cross holes are live-tooling work - the mounted machine is a mill with no turret".into(),
                     ));
@@ -1176,14 +1168,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Facing needs a turning insert, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1223,14 +1215,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Profile Rough needs a turning insert, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1259,14 +1251,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Profile Finish needs a turning insert, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1302,14 +1294,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Groove {
                 return Err(GenError::Invalid(format!(
                     "Groove Rough needs a grooving blade, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1338,14 +1330,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Groove {
                 return Err(GenError::Invalid(format!(
                     "Groove Finish needs a grooving blade, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1373,14 +1365,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Groove {
                 return Err(GenError::Invalid(format!(
                     "Parting needs a grooving blade, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1418,14 +1410,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Thread {
                 return Err(GenError::Invalid(format!(
                     "Threading needs a threading insert, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1463,14 +1455,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Chamfering needs a turning insert, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1500,14 +1492,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Taper Turning needs a turning insert, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1542,14 +1534,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Turning {
                 return Err(GenError::Invalid(format!(
                     "Multi-Pass Turning needs a turning insert, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1586,14 +1578,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Form {
                 return Err(GenError::Invalid(format!(
                     "Form Turning needs a form gauge, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1627,14 +1619,14 @@ pub fn generate(
             if tool.kind != crate::tools::ToolKind::Bore {
                 return Err(GenError::Invalid(format!(
                     "Boring needs a boring bar, '{}' is a {}",
-                    op.tool, tool.kind
+                    tool_name, tool.kind
                 )));
             }
-            let region = region_for_src(
-                world,
-                op.setup.as_deref(),
-                &op.src,
-                &op.params,
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
                 m_gen,
                 frame.as_ref(),
             )?;
@@ -1657,17 +1649,13 @@ pub fn generate(
     // M3.2 stage B: what the program clamps to. The op's setup context
     // decides - user fixtures bound to it (tagged models, implicit-
     // setup resolution on both sides) plus the machine table when the
-    // .mch states a travel the table can sit in.
-    let fixture_boxes = crate::fixture::boxes_for(world, op.setup.as_deref());
-    let geom = tool.geom();
-    // The machine's own steel, if it states any (M3.2 stage B): the
+    // .mch states a travel the table can sit in. Both reads rode in
+    // with the job (M5.3 B); the machine's own steel too: the
     // unstated-limit law means a file that names no spindle body adds
     // no band, exactly as it adds no feed or travel check.
-    let spindle = crate::machine::of(world)
-        .1
-        .and_then(|m| m.spindle_d.zip(m.spindle_len))
-        .map(|(d, l)| (d * 0.5, l));
-    let stl = match &op.params {
+    let geom = tool.geom();
+    let fixture_boxes = fixtures;
+    let stl = match &params {
         OpParams::Face { .. }
         | OpParams::Trace { .. }
         | OpParams::Drill { .. }
@@ -1753,7 +1741,7 @@ pub fn generate(
                     // every other op verifies against its static region,
                     // untouched.
                     model: matches!(
-                        &op.params,
+                        &params,
                         OpParams::Pocket3D { .. }
                             | OpParams::Finish3D { .. }
                             | OpParams::Contour5D { .. }
@@ -1821,7 +1809,7 @@ pub fn generate(
                     // shank, so they carry their tolerance the same way
                     // (the ball's path is identical; the envelope scan
                     // never sees the difference).
-                    finish_tol: match &op.params {
+                    finish_tol: match &params {
                         OpParams::Finish3D { tolerance, .. }
                         | OpParams::Contour5D { tolerance, .. }
                         | OpParams::Parallel5D { tolerance, .. }
@@ -1883,7 +1871,7 @@ pub fn generate(
             // along Z - so the envelope law stands the family down
             // and the truth is measured here, against these very
             // facets, move-attributed into the same vocabulary.
-            if let Some(tol) = match &op.params {
+            if let Some(tol) = match &params {
                 OpParams::GrooveRough { tolerance, .. }
                 | OpParams::GrooveFinish { tolerance, .. }
                 | OpParams::Part { tolerance, .. } => Some(*tolerance),
@@ -1904,7 +1892,7 @@ pub fn generate(
             // the tool's V, not a boxcar, says what stands between
             // the turns. The insert's crest width and included
             // angle ride from the tool, the blade's law again.
-            if let OpParams::Threading { tolerance, .. } = &op.params {
+            if let OpParams::Threading { tolerance, .. } = &params {
                 warns.extend(crate::turning::thread_warnings(
                     &material.facets,
                     &path,
@@ -1919,7 +1907,7 @@ pub fn generate(
             // between the band's edges - and with the crest law the
             // thread already keeps: what a crown floor stands above
             // the blank belongs to the shell, not to this cut.
-            if let OpParams::FormTurning { tolerance, .. } = &op.params {
+            if let OpParams::FormTurning { tolerance, .. } = &params {
                 warns.extend(crate::turning::form_warnings(
                     &material.facets,
                     &path,
@@ -1948,8 +1936,8 @@ pub fn generate(
             let path_world = f.world_path(&path, machining2d::ARC_FIT_TOL);
             let mut st_local = stock_top_z - oz;
             let mut boxes: Vec<(crate::geometry::Point3, crate::geometry::Point3)> = Vec::new();
-            if let Some(b) = model::stock_world_aabb_for(world, setup) {
-                boxes.push((b.min, b.max));
+            if let Some(b) = stock_aabb {
+                boxes.push(b);
             }
             // The model's own corners too: `stock_top_z` already holds
             // its top, but the tilted slab rides over its XY span, and

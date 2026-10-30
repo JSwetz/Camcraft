@@ -22,3 +22,4 @@ truck-polymesh = { workspace = true }
 truck-meshalgo = { workspace = true }
 ruststep = { workspace = true }
 clipper2-rust = { workspace = true }
+rayon = { workspace = true }

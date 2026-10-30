@@ -82,6 +82,8 @@ mod picks;
 pub use picks::*;
 mod stitch;
 use stitch::*;
+mod job;
+pub use job::*;
 mod generate;
 pub use generate::*;
 #[cfg(test)]

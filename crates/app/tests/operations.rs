@@ -1088,6 +1088,135 @@ fn regenerate_all_skips_what_it_cannot_generate() {
     assert_eq!(status(&world, "Face1"), OpStatus::Stale);
 }
 
+/// Pocket3D parameters for the fixture's 30 x 30 x 5 cube: a ball-nose
+/// plunge ladder down the middle of the model's own silhouette.
+fn pocket3d_params_5() -> OpParams {
+    let mut p = multiaxis_rough_pocket_twin();
+    let OpParams::Pocket3D {
+        top_z,
+        bottom_z,
+        stepdown,
+        clearance_z,
+        ..
+    } = &mut p
+    else {
+        unreachable!()
+    };
+    *top_z = Height::fixed(5.0);
+    *bottom_z = Height::fixed(0.0);
+    *stepdown = 2.5;
+    *clearance_z = Height::fixed(10.0);
+    p
+}
+
+#[test]
+fn threaded_batch_matches_the_serial_loop_bit_for_bit() {
+    // M5.3 B's determinism claim, tested as a law: `RegenerateAll`
+    // stages every stale job against the frozen world, then FINISHES
+    // the jobs on rayon workers; the serial loop it replaces ran
+    // stage+finish op by op against that same frozen world (the old
+    // batch accumulated its parts and applied them only at the end,
+    // so no job ever saw another's writes). Constructors never write
+    // the world, so "in parallel" cannot change what "before" means:
+    // both roads must write down identical bytes - paths, warnings,
+    // stamps - in identical tree order.
+    let build = || {
+        let world = new_world();
+        let mut history = History::default();
+        // Box stock: what every Entity-source op reads at collect
+        // time as the swarf column around the smaller model.
+        box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+        add_tool(&world, &mut history, "EM-0400-2FL");
+        add_tool(&world, &mut history, "BN-0600");
+        history.execute(
+            &world,
+            ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(30.0, 30.0, 5.0))),
+        );
+        // Names encode the program order on purpose (name order IS
+        // post order), and the three jobs read three different
+        // corners of the world at collect time: the pocket's prior
+        // state (nothing ahead of it - the empty-mask branch), the
+        // contour's section height, and the face's From-referenced
+        // heights. The batch/serial law this test proves is about
+        // the seam; the masked rest paths ride it through the
+        // remachining suite, whose ops generate through this same
+        // collect_job/run_job pair.
+        let mut rim = contour_params();
+        if let OpParams::Contour { bottom_z, .. } = &mut rim {
+            *bottom_z = Height::fixed(4.0);
+        }
+        for (name, tool, params) in [
+            ("APocket3D", "BN-0600", pocket3d_params_5()),
+            ("BContour", "EM-0400-2FL", rim),
+            ("CFrame", "EM-0400-2FL", face_params_5()),
+        ] {
+            let cmd =
+                CreateOperation::new(&world, name, tool, SrcRef::Entity("part".into()), params);
+            history.execute(&world, cmd.expect("create op"));
+            let cmd = GenerateOperation::new(&world, name).expect("generate op");
+            history.execute(&world, cmd);
+        }
+        // The revision that drives everything Stale: a cube one mm
+        // narrower in x. A geometry-kind change (a diamond prism)
+        // would read the pocket's ladder off its envelope law too -
+        // this is the same kind of model, honestly moved.
+        history.execute(
+            &world,
+            UpdateModel::new(
+                &world,
+                "part",
+                cube(Point3::ZERO, Point3::new(29.0, 30.0, 5.0)),
+            )
+            .expect("update"),
+        );
+        for name in ["APocket3D", "BContour", "CFrame"] {
+            assert_eq!(status(&world, name), OpStatus::Stale);
+        }
+        (world, history)
+    };
+
+    // The batch: stage all (world reads, tree order), finish on rayon, apply once.
+    let (world_a, mut history_a) = build();
+    let batch = RegenerateAll::new(&world_a);
+    assert_eq!(batch.regenerated() + batch.skipped().len(), 3);
+    assert!(batch.skipped().is_empty(), "{:?}", batch.skipped());
+    history_a.execute(&world_a, batch);
+
+    // The serial loop: each stale op's constructor stage-and-finishes
+    // in turn against the untouched world; the commands apply after,
+    // in tree order - exactly what the batch's loop did before rayon.
+    let (world_b, mut history_b) = build();
+    let stale: Vec<String> = camcraft_app::setup::operation_order(&world_b)
+        .into_iter()
+        .filter(|(_, e)| operation::status_of(&world_b, e) == OpStatus::Stale)
+        .map(|(n, _)| n)
+        .collect();
+    assert_eq!(stale.len(), 3);
+    let mut parts = Vec::new();
+    for name in &stale {
+        parts.push(GenerateOperation::new(&world_b, name).expect("serial generate"));
+    }
+    for part in parts {
+        history_b.execute(&world_b, part);
+    }
+
+    // Bit-for-bit: the path bytes, the warnings, and the stamps agree.
+    for name in &stale {
+        assert_eq!(
+            cache(&world_a, name),
+            cache(&world_b, name),
+            "{name}: the batch's path must be the serial loop's bytes"
+        );
+        let e_a = model::find_by_name(&world_a, name).expect("op exists");
+        let e_b = model::find_by_name(&world_b, name).expect("op exists");
+        assert_eq!(
+            model::operation_of(&world_a, &e_a),
+            model::operation_of(&world_b, &e_b),
+            "{name}: the batch's stamp must be the serial loop's stamp"
+        );
+    }
+}
+
 #[test]
 fn delete_operation_round_trips_with_its_cache() {
     let (world, mut history) = face_world();

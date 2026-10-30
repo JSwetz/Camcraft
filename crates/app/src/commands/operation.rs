@@ -474,40 +474,74 @@ pub struct GenerateOperation {
     output: Toolpath,
 }
 
-impl GenerateOperation {
-    pub fn new(world: &World, name: &str) -> Result<Self, CommandError> {
-        let Some(entity) = model::find_by_name(world, name) else {
-            return Err(CommandError::NotFound(name.to_string()));
-        };
-        let prev_operation = model::operation_of(world, &entity)
-            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))?;
-        let prev_cache = model::toolpath_of(world, &entity);
-        let (path, warnings) = operation::generate(world, &prev_operation, name)
-            .map_err(|e| CommandError::Machining(format!("{name}: {e}")))?;
-        let stamp = operation::current_stamp(
-            world,
-            &prev_operation.tool,
-            &prev_operation.src,
-            &prev_operation.params,
-            name,
-            prev_operation.setup.as_deref(),
-        )
-        .ok_or_else(|| {
+/// The constructor split at M5.3 B's seam: [`stage_generation`] does
+/// EVERY world read - the entity, the components, the whole job
+/// collection, the stamp - and [`Staged::finish`] runs the pure result.
+/// One op does stage and finish together, exactly as before; a batch
+/// stages all and finishes in parallel, and because a constructor
+/// never writes the world, that batch is byte-identical to the serial
+/// loop it replaces.
+struct Staged {
+    name: String,
+    prev_operation: Operation,
+    prev_cache: Option<Toolpath>,
+    job: operation::GenJob,
+    stamp: Option<operation::GenStamp>,
+}
+
+fn stage_generation(world: &World, name: &str) -> Result<Staged, CommandError> {
+    let Some(entity) = model::find_by_name(world, name) else {
+        return Err(CommandError::NotFound(name.to_string()));
+    };
+    let prev_operation = model::operation_of(world, &entity)
+        .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))?;
+    let prev_cache = model::toolpath_of(world, &entity);
+    let job = operation::collect_job(world, &prev_operation, name)
+        .map_err(|e| CommandError::Machining(format!("{name}: {e}")))?;
+    let stamp = operation::current_stamp(
+        world,
+        &prev_operation.tool,
+        &prev_operation.src,
+        &prev_operation.params,
+        name,
+        prev_operation.setup.as_deref(),
+    );
+    Ok(Staged {
+        name: name.to_string(),
+        prev_operation,
+        prev_cache,
+        job,
+        stamp,
+    })
+}
+
+impl Staged {
+    fn finish(self) -> Result<GenerateOperation, CommandError> {
+        let (path, warnings) = operation::run_job(self.job)
+            .map_err(|e| CommandError::Machining(format!("{}: {e}", self.name)))?;
+        let stamp = self.stamp.ok_or_else(|| {
             CommandError::Machining(format!(
-                "{name}: its tool or geometry source vanished mid-generation"
+                "{}: its tool or geometry source vanished mid-generation",
+                self.name
             ))
         })?;
         let next_operation = Operation {
             stamp: Some(stamp),
-            ..prev_operation.clone()
+            ..self.prev_operation.clone()
         };
         Ok(GenerateOperation {
-            name: name.to_string(),
-            prev_operation,
-            prev_cache,
+            name: self.name,
+            prev_operation: self.prev_operation,
+            prev_cache: self.prev_cache,
             next_operation,
             output: Toolpath { path, warnings },
         })
+    }
+}
+
+impl GenerateOperation {
+    pub fn new(world: &World, name: &str) -> Result<Self, CommandError> {
+        stage_generation(world, name)?.finish()
     }
 }
 
@@ -563,17 +597,41 @@ impl RegenerateAll {
     /// Runs every stale operation's generator against the current world.
     /// `Never` and `Ok` operations are left alone - this command is for
     /// what a revision invalidated, not for first-time generation.
+    ///
+    /// The M5.3 B shape: stage every op first (all world reads, tree
+    /// order, the same status gate the serial loop had), then finish the
+    /// jobs through rayon - ordered `collect`, so `parts` is tree order
+    /// and every result is what the serial batch produced, byte for
+    /// byte. `skipped` lists stage failures before run failures; the
+    /// set is unchanged.
     pub fn new(world: &World) -> Self {
         let mut parts = Vec::new();
         let mut skipped = Vec::new();
+        let mut staged = Vec::new();
         // THE program order (M3.2 A): a rest-aware op regenerates AFTER
         // what it re-machines, so one round converges - the same walk
-        // the post makes.
+        // the post makes. Nothing here writes the world (constructors
+        // only read), so the frozen batch every job collects against
+        // is the same frozen batch the serial loop ran on.
         for (name, entity) in crate::setup::operation_order(world) {
             if operation::status_of(world, &entity) != operation::OpStatus::Stale {
                 continue;
             }
-            match GenerateOperation::new(world, &name) {
+            match stage_generation(world, &name) {
+                Ok(job) => staged.push(job),
+                Err(err) => skipped.push((name, err.to_string())),
+            }
+        }
+        use rayon::prelude::*;
+        let results: Vec<(String, Result<GenerateOperation, CommandError>)> = staged
+            .into_par_iter()
+            .map(|job| {
+                let name = job.name.clone();
+                (name, job.finish())
+            })
+            .collect();
+        for (name, result) in results {
+            match result {
                 Ok(part) => parts.push(part),
                 Err(err) => skipped.push((name, err.to_string())),
             }

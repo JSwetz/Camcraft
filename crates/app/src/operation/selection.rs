@@ -20,8 +20,10 @@ pub(super) const OUTSIDE_BIAS: f64 = 0.5;
 
 /// What a selection resolves to: the boundary loops and centerline runs
 /// it spells, plus Auto's inside verdict for a Contour (the fill law;
-/// `false` for every other kind and for a side the user named).
-type SelectionGeometry = (Vec<Loop>, Vec<Vec<Point2>>, bool);
+/// `false` for every other kind and for a side the user named). Named
+/// so the job struct (`super::job`) stores the same shape it reads -
+/// one truth for the tuple, not a second spelling to drift.
+pub(super) type SelectionGeometry = (Vec<Loop>, Vec<Vec<Point2>>, bool);
 
 /// The region loops and centerline runs a feature selection resolves to,
 /// as the world stands now: each picked face gives its closed boundary

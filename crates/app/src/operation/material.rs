@@ -265,113 +265,78 @@ pub(super) fn drive_chains_of(world: &World, op: &Operation) -> Result<Vec<Vec<P
     }
 }
 
-/// The source dispatch shared by `generate` and `region_of`: a selection
-/// resolves its picked features, anything else slices its material, and
-/// Slot keeps its closed-form stadium regardless of source (its boundary
-/// is the two endpoints, not the model). Drill likewise ignores a
-/// selection source: its geometry is the hole list in the params, so
-/// picking features could only disagree with it. Pocket3D too: its
-/// footprint is the model's own silhouette - the level law reads the
-/// mesh at every Z, so a picked loop could only disagree with it.
-/// `frame` is the 3+2 index this region belongs to (M5.1 B): Some
-/// means `material`'s facets are already the frame's LOCAL ones and
-/// every section plane is the world height read as axis distance from
-/// the anchor (`z - origin.z`); `region_of`'s preview and `generate`'s
-/// local pass share this one law so the drawn outline cannot
-/// disagree with the cut. None is the prismatic path, bit-identical.
-pub(super) fn region_for_src(
-    world: &World,
-    setup: Option<&str>,
-    src: &SrcRef,
-    params: &OpParams,
-    material: &Material,
-    frame: Option<&crate::cl::TiltedFrame>,
-) -> Result<Region, GenError> {
-    match src {
-        SrcRef::Selection(items)
-            if !matches!(
-                params,
-                OpParams::Slot { .. }
-                    | OpParams::Drill { .. }
-                    | OpParams::Pocket3D { .. }
-                    | OpParams::Finish3D { .. }
-                    // The 5-axis kinds are mesh-driven like the finish:
-                    // the rings and raster lines chase the model at
-                    // every plane, so a picked loop could only disagree
-                    // with the path (M5.1 C).
-                    | OpParams::Contour5D { .. }
-                    | OpParams::Parallel5D { .. }
-                    // The swarf family is mesh-driven the same way, and
-                    // more strictly so: its pass lines ARE the ruling
-                    // the picked loop could only contradict (M5.1 D).
-                    | OpParams::Swarf { .. }
-                    | OpParams::AdvancedSwarf { .. }
-                    // The rotary twins ride the fitted axis, not a pick:
-                    // the turn's own geometry authors the path (M5.1 E).
-                    | OpParams::RotaryContour { .. }
-                    | OpParams::RotaryParallel { .. }
-                    // The rough ladder wraps the same axis - its islands
-                    // come from the mesh in wrap space, never a pick.
-                    | OpParams::RotaryOffset { .. }
-                    // The stamped ladder is the 3-D pocket's islands
-                    // verbatim - mesh sections at every plane, and the
-                    // stamp only ever writes poses onto them. Flow
-                    // chases the mesh's own direction field; a picked
-                    // loop could only contradict it (M5.1 I).
-                    | OpParams::MultiAxisRough { .. }
-                    | OpParams::Flow5D { .. }
-                    // The drive-curve contour is the one kind whose
-                    // picks ARE the path: the region is still the
-                    // material's shadow - a picked loop could not
-                    // disagree with the pattern because the picks
-                    // ARE it (M5.1 J).
-                    | OpParams::MultiAxisContour { .. }
-                    // The facing ladder's limit is the turned
-                    // profile's own silhouette at every station:
-                    // the meridian projection authors it from the
-                    // mesh, and a pick could only disagree with
-                    // the turn (M5.2 A). The profile kinds ride
-                    // that very silhouette - same answer (M5.2 B).
-                    | OpParams::Facing { .. }
-                    | OpParams::ProfileRough { .. }
-                    | OpParams::ProfileFinish { .. }
-                    // The blade stands in the turned part's own
-                    // silhouette - the band is model-bounded, not
-                    // pick-bounded (M5.2 C).
-                    | OpParams::GrooveRough { .. }
-                    | OpParams::GrooveFinish { .. }
-                    | OpParams::Part { .. }
-                    // The lattice is the modeled thread's own - a
-                    // pick could only disagree with the helix (D).
-                    // So is a face: the window says which cone the
-                    // ride walks, and the model says it too (E).
-                    | OpParams::Threading { .. }
-                    | OpParams::Chamfering { .. }
-                    | OpParams::TaperTurning { .. }
-                    // So is a crown plunge: the window says which
-                    // valleys the gauge stamps, and the model says
-                    // it too (M5.2 E2). So is a bore: the hole the
-                    // bar rides is in the model, and a pick could
-                    // only disagree with it (M5.2 F).
-                    | OpParams::MultiPassTurning { .. }
-                    | OpParams::FormTurning { .. }
-                    | OpParams::BoringTurning { .. }
-            ) =>
-        {
-            // The one door's lock (M5.1 B): a picked edge is a world
-            // feature; reading it in a tilted plane means projecting
-            // the pick onto the plane, and nothing here does that
-            // yet. Refuse by name rather than cut a shadow.
-            if frame.is_some() {
-                return Err(GenError::Invalid(
-                    "a tilted plane cannot yet index a picked selection - pick a whole model instead"
-                        .into(),
-                ));
-            }
-            selection_region(world, setup, items, params)
-        }
-        _ => region_for(world, setup, material, params, frame),
-    }
+/// Whether a `Selection` source is allowed to author the region (the
+/// guard the generation selection arm used to spell inline, lifted
+/// so the threaded job builder - which precomputes that arm's answer on
+/// the caller's thread - shares this one law). The kinds NOT listed
+/// (Contour, Pocket, Face's picked loops) take the region from the
+/// picks; every kind listed here is mesh-driven, and a picked loop
+/// could only disagree with the path the model authors.
+pub(super) fn selection_drives_region(params: &OpParams) -> bool {
+    !matches!(
+        params,
+        OpParams::Slot { .. }
+            | OpParams::Drill { .. }
+            | OpParams::Pocket3D { .. }
+            | OpParams::Finish3D { .. }
+            // The 5-axis kinds are mesh-driven like the finish: the
+            // rings and raster lines chase the model at every plane,
+            // so a picked loop could only disagree with the path
+            // (M5.1 C).
+            | OpParams::Contour5D { .. }
+            | OpParams::Parallel5D { .. }
+            // The swarf family is mesh-driven the same way, and more
+            // strictly so: its pass lines ARE the ruling the picked
+            // loop could only contradict (M5.1 D).
+            | OpParams::Swarf { .. }
+            | OpParams::AdvancedSwarf { .. }
+            // The rotary twins ride the fitted axis, not a pick: the
+            // turn's own geometry authors the path (M5.1 E).
+            | OpParams::RotaryContour { .. }
+            | OpParams::RotaryParallel { .. }
+            // The rough ladder wraps the same axis - its islands come
+            // from the mesh in wrap space, never a pick.
+            | OpParams::RotaryOffset { .. }
+            // The stamped ladder is the 3-D pocket's islands verbatim
+            // - mesh sections at every plane, and the stamp only ever
+            // writes poses onto them. Flow chases the mesh's own
+            // direction field; a picked loop could only contradict it
+            // (M5.1 I).
+            | OpParams::MultiAxisRough { .. }
+            | OpParams::Flow5D { .. }
+            // The drive-curve contour is the one kind whose picks ARE
+            // the path: the region is still the material's shadow - a
+            // picked loop could not disagree with the pattern because
+            // the picks ARE it (M5.1 J).
+            | OpParams::MultiAxisContour { .. }
+            // The facing ladder's limit is the turned profile's own
+            // silhouette at every station: the meridian projection
+            // authors it from the mesh, and a pick could only
+            // disagree with the turn (M5.2 A). The profile kinds ride
+            // that very silhouette - same answer (M5.2 B).
+            | OpParams::Facing { .. }
+            | OpParams::ProfileRough { .. }
+            | OpParams::ProfileFinish { .. }
+            // The blade stands in the turned part's own silhouette -
+            // the band is model-bounded, not pick-bounded (M5.2 C).
+            | OpParams::GrooveRough { .. }
+            | OpParams::GrooveFinish { .. }
+            | OpParams::Part { .. }
+            // The lattice is the modeled thread's own - a pick could
+            // only disagree with the helix (D). So is a face: the
+            // window says which cone the ride walks, and the model
+            // says it too (E).
+            | OpParams::Threading { .. }
+            | OpParams::Chamfering { .. }
+            | OpParams::TaperTurning { .. }
+            // So is a crown plunge: the window says which valleys the
+            // gauge stamps, and the model says it too (M5.2 E2). So
+            // is a bore: the hole the bar rides is in the model, and
+            // a pick could only disagree with it (M5.2 F).
+            | OpParams::MultiPassTurning { .. }
+            | OpParams::FormTurning { .. }
+            | OpParams::BoringTurning { .. }
+    )
 }
 
 /// The per-kind region build, shared by `generate` and `region_of` so the
@@ -386,6 +351,44 @@ pub(super) fn region_for(
     material: &Material,
     params: &OpParams,
     frame: Option<&crate::cl::TiltedFrame>,
+) -> Result<Region, GenError> {
+    let z = section_z_of(world, setup, params).unwrap_or(Ok(0.0));
+    region_core(material, params, frame, z)
+}
+
+/// The section height the Contour/Pocket/Trace families cut at, read
+/// through the world - the ONLY part of the region build that touches
+/// it. `None` for every kind whose region needs no height (the
+/// silhouettes, the stadium, the rims). `region_for` resolves it on the
+/// spot; the threaded job builder precomputes it on the caller's
+/// thread, and `region_core` - pure - takes either. Same call, same
+/// refusal, same number.
+pub(super) fn section_z_of(
+    world: &World,
+    setup: Option<&str>,
+    params: &OpParams,
+) -> Option<Result<f64, GenError>> {
+    let top_z = match params {
+        OpParams::Contour { top_z, .. }
+        | OpParams::Pocket { top_z, .. }
+        | OpParams::Trace { top_z, .. } => *top_z,
+        _ => return None,
+    };
+    Some(
+        resolve_height(world, setup, top_z)
+            .ok_or_else(|| unresolved_err("Top of Part Z", top_z, world, setup)),
+    )
+}
+
+/// The region build once every world read it needs is in hand: `z` is
+/// `section_z_of`'s answer for the section kinds and an ignored
+/// `Ok(0.0)` for the rest; `region_for` and the threaded job share this
+/// one body, so a batched generation cannot disagree with a single one.
+pub(super) fn region_core(
+    material: &Material,
+    params: &OpParams,
+    frame: Option<&crate::cl::TiltedFrame>,
+    z: Result<f64, GenError>,
 ) -> Result<Region, GenError> {
     // The section plane as the material's coordinates read it: the
     // world height minus the anchor's z is the frame's own distance
@@ -457,11 +460,8 @@ pub(super) fn region_for(
         | OpParams::BoringTurning { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
-        OpParams::Contour { top_z, .. }
-        | OpParams::Pocket { top_z, .. }
-        | OpParams::Trace { top_z, .. } => {
-            let z = resolve_height(world, setup, *top_z)
-                .ok_or_else(|| unresolved_err("Top of Part Z", *top_z, world, setup))?;
+        OpParams::Contour { .. } | OpParams::Pocket { .. } | OpParams::Trace { .. } => {
+            let z = z?;
             section(&material.facets, z - oz)
         }
         OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
