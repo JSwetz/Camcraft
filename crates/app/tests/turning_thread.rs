@@ -87,7 +87,7 @@ fn revolve(meridian: &[(f64, f64)]) -> Mesh {
             }
         }
     }
-    Mesh { facets }
+    Mesh::from_facets(facets)
 }
 
 /// The threaded bar, app-sized: the motion suite's own fixture -

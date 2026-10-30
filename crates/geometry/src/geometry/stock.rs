@@ -78,10 +78,11 @@ pub fn stock_mesh(shape: &StockShape) -> Option<Vec<Triangle>> {
                 Point3::new(-dx * 0.5, -dy * 0.5, 0.0),
                 Point3::new(dx * 0.5, dy * 0.5, *dz),
             )
-            .facets,
+            .facets
+            .to_vec(),
         ),
         StockShape::Cylinder { diameter, height } => {
-            Some(cylinder(*diameter, *height, CYLINDER_SEGMENTS).facets)
+            Some(cylinder(*diameter, *height, CYLINDER_SEGMENTS).facets.to_vec())
         }
         StockShape::FromModel { .. } => None,
     }

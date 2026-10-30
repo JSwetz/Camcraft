@@ -48,12 +48,12 @@ pub struct UpdateModel {
     /// The component as it stood: `None` means the entity had no geometry
     /// at all (a spawned-empty model), and undo must not leave an empty
     /// `Facets` behind where there was no component.
-    prev_facets: Option<Vec<crate::geometry::Triangle>>,
+    prev_facets: Option<std::sync::Arc<[crate::geometry::Triangle]>>,
     prev_rev: u64,
     /// The derived stock's facets when a `FromModel` stock copied this
     /// model at construction (`Some`) - the propagation law's side of the
     /// snapshot, so undo trades model and material back together.
-    prev_stock: Option<Vec<crate::geometry::Triangle>>,
+    prev_stock: Option<std::sync::Arc<[crate::geometry::Triangle]>>,
 }
 
 impl UpdateModel {

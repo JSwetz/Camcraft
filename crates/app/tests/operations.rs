@@ -522,8 +522,8 @@ fn prism_10x10x5() -> Mesh {
         Point3::new(5.0, 10.0, 5.0),
         Point3::new(0.0, 5.0, 5.0),
     );
-    Mesh {
-        facets: vec![
+    Mesh::from_facets(
+        vec![
             Triangle::new(a, b, c),
             Triangle::new(a, c, d),
             Triangle::new(a1, c1, b1),
@@ -537,7 +537,7 @@ fn prism_10x10x5() -> Mesh {
             Triangle::new(d, a, a1),
             Triangle::new(d, a1, d1),
         ],
-    }
+    )
 }
 
 #[test]
@@ -634,7 +634,7 @@ fn face_params_5() -> OpParams {
     }
 }
 
-fn stock_facets(world: &World) -> Vec<camcraft_app::geometry::Triangle> {
+fn stock_facets(world: &World) -> std::sync::Arc<[camcraft_app::geometry::Triangle]> {
     let stock = model::find_by_name(world, STOCK_NAME).expect("stock exists");
     model::facets_of(world, &stock).expect("stock carries geometry")
 }
@@ -1478,7 +1478,7 @@ fn disc_mesh(r: f64) -> camcraft_app::geometry::Mesh {
     let facets: Vec<Triangle> = (0..16)
         .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
         .collect();
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 fn sel(entity: &str, feature: FeatureSel) -> SrcRef {
@@ -1966,7 +1966,7 @@ fn split_rim_disc(r: f64) -> camcraft_app::geometry::Mesh {
     let facets: Vec<Triangle> = (0..16)
         .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
         .collect();
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 /// The open runs an entity's chains carry, in chain order.
@@ -2344,7 +2344,7 @@ fn seamed_sheet(r: f64, every: usize) -> camcraft_app::geometry::Mesh {
     let facets: Vec<Triangle> = (0..16)
         .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), p(i), p(i + 1)))
         .collect();
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 /// The hand-test's model in flat form: a 40x40 plate with a bore whose
@@ -2384,7 +2384,7 @@ fn bored_plate() -> camcraft_app::geometry::Mesh {
         facets.push(Triangle::new(op(i), op(i + 1), bp(i + 1)));
         facets.push(Triangle::new(op(i), bp(i + 1), bp(i)));
     }
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 /// A 60x20 sheet scribbled once down its middle: two planar faces, and
@@ -2392,14 +2392,14 @@ fn bored_plate() -> camcraft_app::geometry::Mesh {
 /// side by the material score, not by a coin flip.
 fn scribed_sheet() -> camcraft_app::geometry::Mesh {
     let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
-    camcraft_app::geometry::Mesh {
-        facets: vec![
+    camcraft_app::geometry::Mesh::from_facets(
+        vec![
             Triangle::new(p(-30.0, -10.0), p(0.0, -10.0), p(0.0, 10.0)),
             Triangle::new(p(-30.0, -10.0), p(0.0, 10.0), p(-30.0, 10.0)),
             Triangle::new(p(0.0, -10.0), p(30.0, -10.0), p(30.0, 10.0)),
             Triangle::new(p(0.0, -10.0), p(30.0, 10.0), p(0.0, 10.0)),
         ],
-    }
+    )
 }
 
 /// The open half-runs of a `bored_plate` bore rim: long runs that hug
@@ -2452,7 +2452,7 @@ fn bored_block() -> camcraft_app::geometry::Mesh {
         quad(bp(i, 8.0), bp(j, 8.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
         quad(op(j, 8.0), op(i, 8.0), op(i, 0.0), op(j, 0.0), &mut facets);
     }
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 /// Picks for a list of chain ids on one entity, in the given order.
@@ -3413,7 +3413,7 @@ fn drilled_block() -> camcraft_app::geometry::Mesh {
             &mut facets,
         );
     }
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 fn drill_params(holes: Vec<Hole>, top_z: f64, clearance_z: f64) -> OpParams {
@@ -3644,7 +3644,7 @@ fn dome_mesh() -> camcraft_app::geometry::Mesh {
     for j in 0..n_lon {
         facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
     }
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 const DOME_RIM_Z: f64 = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
@@ -3874,7 +3874,7 @@ fn hill_mesh() -> camcraft_app::geometry::Mesh {
     for j in 0..n_lon {
         facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
     }
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 /// Apex 12, rim 60 degrees: z = 12 cos 60 = 6, and normals tilt
@@ -4165,7 +4165,7 @@ fn blade_mesh() -> camcraft_app::geometry::Mesh {
         facets.push(Triangle::new(cap(cen), v(j, n_x), v(j + 1, n_x)));
         facets.push(Triangle::new(cap(-cen), v(j + 1, 0), v(j, 0)));
     }
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 fn swarf_params(top_z: f64, bottom_z: f64) -> OpParams {
@@ -4486,8 +4486,8 @@ fn revolve(n_circ: usize, meridian: &[(f64, f64)]) -> Vec<camcraft_app::geometry
 /// it. 16 turns clear the fit's coarseness gate - an honest lathe,
 /// not a pretending polygon.
 fn lathe_mesh() -> camcraft_app::geometry::Mesh {
-    camcraft_app::geometry::Mesh {
-        facets: revolve(
+    camcraft_app::geometry::Mesh::from_facets(
+        revolve(
             16,
             &[
                 (0.0, -16.0),
@@ -4498,20 +4498,20 @@ fn lathe_mesh() -> camcraft_app::geometry::Mesh {
                 (0.0, 16.0),
             ],
         ),
-    }
+    )
 }
 
 /// The same bar laid down: its axis is world x, its crown world z.
 fn laid_mesh() -> camcraft_app::geometry::Mesh {
     use camcraft_app::geometry::{Point3, Triangle};
     let s = |p: Point3| Point3::new(p.z, p.x, p.y);
-    camcraft_app::geometry::Mesh {
-        facets: lathe_mesh()
+    camcraft_app::geometry::Mesh::from_facets(
+        lathe_mesh()
             .facets
-            .into_iter()
+            .iter()
             .map(|t| Triangle::new(s(t.a), s(t.b), s(t.c)))
             .collect(),
-    }
+    )
 }
 
 /// Not a revolve anywhere: a 14x10x20 box. Its normals' second moment
@@ -4542,7 +4542,7 @@ fn freeform_box() -> camcraft_app::geometry::Mesh {
         Triangle::new(p(1, 0, 0), p(1, 1, 0), p(1, 1, 1)),
         Triangle::new(p(1, 0, 0), p(1, 1, 1), p(1, 0, 1)),
     ];
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 fn rotary_contour_params(top_z: f64, bottom_z: f64) -> OpParams {
@@ -5112,9 +5112,10 @@ fn slab_boss_mesh() -> Mesh {
         Point3::new(-20.0, -20.0, -20.0),
         Point3::new(20.0, 20.0, -10.0),
     )
-    .facets;
-    facets.extend(cube(Point3::new(-5.0, -5.0, -11.0), Point3::new(5.0, 5.0, 0.0)).facets);
-    Mesh { facets }
+    .facets
+    .to_vec();
+    facets.extend(cube(Point3::new(-5.0, -5.0, -11.0), Point3::new(5.0, 5.0, 0.0)).facets.iter().cloned());
+    Mesh::from_facets(facets)
 }
 
 fn multiaxis_rough_params() -> OpParams {
@@ -5574,16 +5575,17 @@ fn multiaxis_rough_refuses_a_slot_the_cone_cannot_clear() {
             Point3::new(-20.0, -20.0, -20.0),
             Point3::new(20.0, 20.0, -10.0),
         )
-        .facets;
+        .facets
+        .to_vec();
         facets.extend(
             cube(
                 Point3::new(-20.0, -20.0, -11.0),
                 Point3::new(-4.5, 20.0, 5.0),
             )
-            .facets,
+            .facets.iter().cloned(),
         );
-        facets.extend(cube(Point3::new(4.5, -20.0, -11.0), Point3::new(20.0, 20.0, 5.0)).facets);
-        Mesh { facets }
+        facets.extend(cube(Point3::new(4.5, -20.0, -11.0), Point3::new(20.0, 20.0, 5.0)).facets.iter().cloned());
+        Mesh::from_facets(facets)
     };
     let job = |dodging: bool| {
         let world = new_world();

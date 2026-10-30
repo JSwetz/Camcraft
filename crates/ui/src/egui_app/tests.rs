@@ -1894,7 +1894,7 @@ fn bored_block() -> camcraft_app::geometry::Mesh {
         quad(bp(i, 8.0), bp(j, 8.0), bp(j, 0.0), bp(i, 0.0), &mut facets);
         quad(op(j, 8.0), op(i, 8.0), op(i, 0.0), op(j, 0.0), &mut facets);
     }
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 #[test]
@@ -2658,7 +2658,7 @@ fn radial_detect_fills_the_cross_list_on_a_millturn() {
     wall_ring(0, 1, 2, &circle_cw(0.0, 10.0, 2.0, 24), 5.0, 15.0, &mut facets);
     disc(0, 1, 2, 0.0, 10.0, 2.0, 24, 5.0, &mut facets);
     wall_ring(0, 1, 2, &circle_cw(0.0, -10.0, 2.0, 24), -15.0, 15.0, &mut facets);
-    let bar = camcraft_app::geometry::Mesh { facets };
+    let bar = camcraft_app::geometry::Mesh::from_facets(facets);
 
     let dir = std::env::temp_dir().join(format!("camcraft_cross_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");

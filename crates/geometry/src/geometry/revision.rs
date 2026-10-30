@@ -181,7 +181,7 @@ mod tests {
     use crate::geometry::{Mesh, Point3, Triangle, cube};
 
     fn tris(m: &Mesh) -> Vec<Triangle> {
-        m.facets.clone()
+        m.facets.to_vec()
     }
 
     fn p(q: [f64; 3]) -> Point3 {

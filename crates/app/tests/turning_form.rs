@@ -87,7 +87,7 @@ fn revolve(meridian: &[(f64, f64)]) -> Mesh {
             }
         }
     }
-    Mesh { facets }
+    Mesh::from_facets(facets)
 }
 
 /// The formed bar, app-sized: wall r 10 with one crown-6 valley

@@ -84,13 +84,12 @@ fn block() -> Mesh {
 fn rotated_by_90(m: Mesh) -> Mesh {
     Mesh::from_facets(
         m.facets
-            .into_iter()
-            .map(|t| Triangle {
-                a: Point3::new(t.a.y, t.a.z, t.a.x),
-                b: Point3::new(t.b.y, t.b.z, t.b.x),
-                c: Point3::new(t.c.y, t.c.z, t.c.x),
-                normal: Point3::new(t.normal.y, t.normal.z, t.normal.x),
-            })
+            .iter()
+            .map(|t| Triangle::new(
+                Point3::new(t.a.y, t.a.z, t.a.x),
+                Point3::new(t.b.y, t.b.z, t.b.x),
+                Point3::new(t.c.y, t.c.z, t.c.x),
+            ))
             .collect(),
     )
 }

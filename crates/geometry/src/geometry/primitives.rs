@@ -78,7 +78,7 @@ mod tests {
         let m = cube(Point3::ZERO, Point3::new(1.0, 1.0, 1.0));
         assert_eq!(m.len(), 12);
         let center = Point3::new(0.5, 0.5, 0.5);
-        for t in &m.facets {
+        for t in m.facets.iter() {
             // facet centroid to outside must agree with the normal direction
             let cx = Point3::new(
                 (t.a.x + t.b.x + t.c.x) / 3.0,
@@ -99,7 +99,7 @@ mod tests {
         // The cylinder is convex, so the centroid trick from the cube test
         // applies with any interior point: here the axis midpoint.
         let center = Point3::new(0.0, 0.0, 2.0);
-        for t in &m.facets {
+        for t in m.facets.iter() {
             let cx = Point3::new(
                 (t.a.x + t.b.x + t.c.x) / 3.0,
                 (t.a.y + t.b.y + t.c.y) / 3.0,

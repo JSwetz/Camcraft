@@ -89,7 +89,7 @@ fn revolve(meridian: &[(f64, f64)]) -> Mesh {
             }
         }
     }
-    Mesh { facets }
+    Mesh::from_facets(facets)
 }
 
 /// The stage-A bar: wall r6 to z 2, neck r5 to the top, z -16..16.

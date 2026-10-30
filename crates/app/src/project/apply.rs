@@ -426,7 +426,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         match kind {
             EntityKind::Model => {
                 if let Some(tris) = dto.facets {
-                    model::set_facets(world, &entity, dto_to_facets(tris));
+                    model::set_facets(world, &entity, dto_to_facets(tris).into());
                 }
                 // The loader's pin is UNCONDITIONAL (M5.3 A): the counter
                 // must end the load exactly where the file remembered it,
@@ -454,7 +454,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                         .filter(|f| !f.is_empty())
                         .ok_or_else(|| corrupt("stock mesh regeneration failed"))?,
                 };
-                model::set_facets(world, &entity, facets);
+                model::set_facets(world, &entity, facets.into());
                 entity.entity_view(world).set(StockDef {
                     shape: shape.clone(),
                 });

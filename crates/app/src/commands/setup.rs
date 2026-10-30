@@ -55,7 +55,7 @@ struct StockSnap {
     name: String,
     shape: StockShape,
     location: Location,
-    facets: Vec<Triangle>,
+    facets: std::sync::Arc<[Triangle]>,
 }
 
 /// Create a setup, optionally transferring a datum: cloning the named

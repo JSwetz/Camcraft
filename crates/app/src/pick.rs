@@ -69,8 +69,8 @@ pub fn first_hit_f(
         } else {
             &mut best_model
         };
-        for (idx, t) in tris.into_iter().enumerate() {
-            let Some(hit_t) = ray_triangle(t, o_local, d_local) else {
+        for (idx, t) in tris.iter().enumerate() {
+            let Some(hit_t) = ray_triangle(*t, o_local, d_local) else {
                 continue;
             };
             if bucket.as_ref().is_none_or(|(b, _, _, _)| hit_t < *b) {

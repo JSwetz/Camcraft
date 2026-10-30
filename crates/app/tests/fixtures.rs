@@ -162,7 +162,7 @@ fn jaw_box() -> FixtureBox {
 /// leaves it - the starting point every tag in these tests rides on.
 fn add_model(world: &flecs_ecs::prelude::World, name: &str, tris: Vec<Triangle>) {
     let entity = model::spawn(world, name);
-    model::set_facets(world, &entity, tris);
+    model::set_facets(world, &entity, tris.into());
     model::set_rev(world, &entity, 1);
 }
 

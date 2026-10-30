@@ -98,7 +98,7 @@ fn bar_mesh() -> Mesh {
             }
         }
     }
-    Mesh { facets }
+    Mesh::from_facets(facets)
 }
 
 fn machine(word: &str) -> Machine {

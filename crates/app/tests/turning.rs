@@ -90,7 +90,7 @@ fn bar_mesh() -> Mesh {
             }
         }
     }
-    Mesh { facets }
+    Mesh::from_facets(facets)
 }
 
 /// A declared machine by word - the stated-kind path of the `.mch`

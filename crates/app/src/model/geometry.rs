@@ -101,7 +101,7 @@ mod tests {
     use crate::schema::{Facets, GeoSig};
     use crate::world::new_world;
 
-    fn box_at(z_max: f64) -> Vec<Triangle> {
+    fn box_at(z_max: f64) -> std::sync::Arc<[Triangle]> {
         cube(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 10.0, z_max)).facets
     }
 

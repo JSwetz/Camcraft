@@ -13,7 +13,7 @@ use crate::tools::Tool;
 pub struct DeleteEntity {
     name: String,
     location: Location,
-    facets: Option<Vec<Triangle>>,
+    facets: Option<std::sync::Arc<[Triangle]>>,
     /// Non-`None` restores the `StockDef` component; `wcs` restores the
     /// `Wcs` tag. Together with the CAM components below they keep every
     /// kind of named entity undoable with its kind intact.

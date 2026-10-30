@@ -811,7 +811,7 @@ fn split_rim_disc(r: f64) -> camcraft_app::geometry::Mesh {
     let facets: Vec<Triangle> = (0..16)
         .map(|i| Triangle::new(Point3::new(0.0, 0.0, 0.0), pt(i), pt(i + 1)))
         .collect();
-    camcraft_app::geometry::Mesh { facets }
+    camcraft_app::geometry::Mesh::from_facets(facets)
 }
 
 #[test]

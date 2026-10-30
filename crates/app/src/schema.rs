@@ -46,7 +46,7 @@ impl Default for Location {
 /// Triangulated geometry of a model. Rust-owned storage: freed on delete.
 #[derive(Component, Debug)]
 pub struct Facets {
-    pub tris: Vec<Triangle>,
+    pub tris: std::sync::Arc<[Triangle]>,
 }
 
 /// How many times geometry has landed on this model. M3.1's shape was

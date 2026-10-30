@@ -18,7 +18,7 @@ fn testdata(name: &str) -> PathBuf {
 fn assert_outward(m: &Mesh) {
     let b = m.bounds().expect("non-empty mesh");
     let c = b.center();
-    for t in &m.facets {
+    for t in m.facets.iter() {
         let centroid = Point3::new(
             (t.a.x + t.b.x + t.c.x) / 3.0,
             (t.a.y + t.b.y + t.c.y) / 3.0,
@@ -58,7 +58,7 @@ fn binary_stl_roundtrip_of_ascii_content() {
     bytes[0..5].copy_from_slice(b"solid");
     let m = import::parse_model(&bytes, Format::Stl).expect("binary");
     assert_eq!(m.len(), 12);
-    for (a, b) in ascii.facets.iter().zip(&m.facets) {
+    for (a, b) in ascii.facets.iter().zip(m.facets.iter()) {
         assert_eq!(a.a.x, b.a.x);
         assert_eq!(a.c.z, b.c.z);
     }
@@ -180,7 +180,7 @@ fn step_box_matches_primitive_corner_set() {
     let b = m.bounds().expect("bounds");
     assert!(b.min.x == 0.0 && b.min.y == 0.0 && b.min.z == 0.0, "{b:?}");
     assert!(b.max.x == 1.0 && b.max.y == 1.0 && b.max.z == 1.0, "{b:?}");
-    for t in &m.facets {
+    for t in m.facets.iter() {
         let n = t.normal();
         assert!(n.x != 0.0 || n.y != 0.0 || n.z != 0.0, "degenerate facet leaked: {t:?}");
     }
@@ -231,8 +231,9 @@ fn step_binary_garbage_never_panics() {
 }
 
 #[test]
-fn facet_cap_is_5_million() {
-    assert_eq!(MAX_FACETS, 5_000_000);
+fn facet_cap_is_30_million() {
+    // M5.3 E: the 10M+ roadmap models walk through this door.
+    assert_eq!(MAX_FACETS, 30_000_000);
 }
 
 // ---------- helpers ----------
@@ -241,7 +242,7 @@ fn mesh_to_binary(m: &Mesh) -> Vec<u8> {
     let mut out = vec![0u8; 84];
     let n = m.facets.len() as u32;
     out[80..84].copy_from_slice(&n.to_le_bytes());
-    for t in &m.facets {
+    for t in m.facets.iter() {
         let mut rec = [0u8; 50];
         for (pi, p) in [t.a, t.b, t.c].iter().enumerate() {
             for (ci, c) in [p.x, p.y, p.z].iter().enumerate() {

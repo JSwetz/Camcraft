@@ -210,7 +210,7 @@ pub struct DeleteFixture {
     name: String,
     def: FixtureDef,
     location: Location,
-    facets: Vec<Triangle>,
+    facets: std::sync::Arc<[Triangle]>,
 }
 
 impl DeleteFixture {
@@ -253,7 +253,7 @@ impl Command for DeleteFixture {
 /// setup (the implicit first).
 pub struct AddFixtureModel {
     name: String,
-    facets: Vec<Triangle>,
+    facets: std::sync::Arc<[Triangle]>,
 }
 
 impl AddFixtureModel {

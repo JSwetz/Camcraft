@@ -158,12 +158,7 @@ impl TiltedFrame {
     pub fn local_facets(&self, facets: &[Triangle]) -> Vec<Triangle> {
         facets
             .iter()
-            .map(|t| Triangle {
-                a: self.to_local(t.a),
-                b: self.to_local(t.b),
-                c: self.to_local(t.c),
-                normal: self.dir_to_local(t.normal),
-            })
+            .map(|t| Triangle::new(self.to_local(t.a), self.to_local(t.b), self.to_local(t.c)))
             .collect()
     }
 

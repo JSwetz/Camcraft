@@ -258,7 +258,7 @@ fn cross_world(word: &str) -> (World, History) {
     let cmd = LoadMachine::new(&world, "bench.mch".into(), Some(machine(word)));
     history.execute(&world, cmd.expect("machine"));
     add_tool(&world, &mut history, "DR-0400");
-    history.execute(&world, ImportModel::from_mesh("bar", Mesh { facets: radial_bar() }));
+    history.execute(&world, ImportModel::from_mesh("bar", Mesh::from_facets(radial_bar())));
     (world, history)
 }
 

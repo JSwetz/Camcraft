@@ -2316,7 +2316,7 @@ impl State {
                 continue;
             };
             let loc = model::transform_of(&self.world, &entity).unwrap_or_default();
-            for t in tris {
+            for t in tris.iter() {
                 for p in [t.a, t.b, t.c] {
                     let p = transform_point(p, loc.pos, loc.rot);
                     for axis in 0..3 {

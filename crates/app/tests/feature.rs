@@ -337,7 +337,7 @@ fn absurd_soup_yields_degenerate_faces_and_never_panics() {
 fn features_of_caches_by_content_not_by_frame() {
     let world = new_world();
     let e = model::spawn(&world, "cached");
-    model::set_facets(&world, &e, tris(&box_rows(0.0, 0.0, 0.0, 2.0, 2.0, 1.0)));
+    model::set_facets(&world, &e, tris(&box_rows(0.0, 0.0, 0.0, 2.0, 2.0, 1.0)).into());
     let f1 = model::features_of(&world, &e);
     let f2 = model::features_of(&world, &e);
     assert!(std::sync::Arc::ptr_eq(&f1.unwrap(), &f2.unwrap()), "second ask is a cache hit");
@@ -347,7 +347,7 @@ fn features_of_caches_by_content_not_by_frame() {
     let f2 = model::features_of(&world, &e).unwrap();
     assert!(std::sync::Arc::ptr_eq(&f2, &f3), "translation is not new content");
     // New facets are new content: a different Arc, different ids.
-    model::set_facets(&world, &e, tris(&box_rows(0.0, 0.0, 0.0, 2.0, 2.0, 2.0)));
+    model::set_facets(&world, &e, tris(&box_rows(0.0, 0.0, 0.0, 2.0, 2.0, 2.0)).into());
     let f4 = model::features_of(&world, &e).unwrap();
     assert!(!std::sync::Arc::ptr_eq(&f3, &f4));
     assert_eq!(f4.faces.len(), 6);

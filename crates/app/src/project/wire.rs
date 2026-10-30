@@ -12,8 +12,8 @@ pub(super) fn corrupt(msg: impl Into<String>) -> ProjectError {
     ProjectError::Corrupt(msg.into())
 }
 
-pub(super) fn facets_to_dto(tris: Vec<Triangle>) -> Vec<[[f64; 3]; 3]> {
-    tris.into_iter()
+pub(super) fn facets_to_dto(tris: &[Triangle]) -> Vec<[[f64; 3]; 3]> {
+    tris.iter()
         .map(|t| {
             [
                 [t.a.x, t.a.y, t.a.z],
@@ -117,7 +117,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 {
                     None
                 }
-                _ => model::facets_of(world, &entity).map(facets_to_dto),
+                _ => model::facets_of(world, &entity).map(|t| facets_to_dto(&t)),
             };
             EntityDto {
                 name,

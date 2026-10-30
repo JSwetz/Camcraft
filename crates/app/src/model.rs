@@ -35,7 +35,7 @@ pub fn spawn(world: &World, name: &str) -> Entity {
 /// is not a thing a call site can do. Commands that restore a past
 /// revision pin it right back via [`set_rev`], paired with the exact
 /// bytes that revision carried.
-pub fn set_facets(world: &World, entity: &Entity, tris: Vec<Triangle>) {
+pub fn set_facets(world: &World, entity: &Entity, tris: std::sync::Arc<[Triangle]>) {
     let view = entity.entity_view(world);
     view.set(Facets { tris });
     let next = rev_of(world, entity).saturating_add(1);
@@ -74,8 +74,11 @@ pub fn remove(world: &World, entity: &Entity) {
     entity.entity_view(world).destruct();
 }
 
+/// The shared read: an `Arc` bump, never a copy - a 10M-triangle model
+/// read per frame costs a refcount (M5.3 E). Deref it to `&[Triangle]`
+/// at any kernel seam.
 #[must_use]
-pub fn facets_of(world: &World, entity: &Entity) -> Option<Vec<Triangle>> {
+pub fn facets_of(world: &World, entity: &Entity) -> Option<std::sync::Arc<[Triangle]>> {
     entity.entity_view(world).try_get::<&Facets>(|f| f.tris.clone())
 }
 
@@ -251,7 +254,7 @@ pub fn world_facets(world: &World, entity: &Entity) -> Option<Vec<Triangle>> {
     let tris = facets_of(world, entity)?;
     let loc = transform_of(world, entity).unwrap_or_default();
     Some(
-        tris.into_iter()
+        tris.iter()
             .map(|t| Triangle::new(
                 transform_point(t.a, loc.pos, loc.rot),
                 transform_point(t.b, loc.pos, loc.rot),
@@ -299,7 +302,7 @@ pub fn solid_world_aabb(world: &World) -> Option<Aabb> {
             continue;
         };
         let loc = transform_of(world, &entity).unwrap_or_default();
-        for t in tris {
+        for t in tris.iter() {
             for p in [t.a, t.b, t.c] {
                 let p = transform_point(p, loc.pos, loc.rot);
                 for axis in 0..3 {
@@ -344,7 +347,7 @@ pub fn stock_world_aabb_for(world: &World, setup: Option<&str>) -> Option<Aabb> 
     let mut min = [f64::MAX; 3];
     let mut max = [f64::MIN; 3];
     let mut any = false;
-    for t in tris {
+    for t in tris.iter() {
         for p in [t.a, t.b, t.c] {
             let p = transform_point(p, loc.pos, loc.rot);
             for axis in 0..3 {

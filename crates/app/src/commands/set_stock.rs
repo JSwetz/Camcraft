@@ -24,10 +24,10 @@ pub struct SetStock {
     stock_name: String,
     shape: StockShape,
     location: Location,
-    facets: Vec<Triangle>,
+    facets: std::sync::Arc<[Triangle]>,
     /// Stock's state before this command; `None` means the command creates
     /// the stock entity, so its inverse removes it.
-    prev: Option<(StockShape, Location, Vec<Triangle>)>,
+    prev: Option<(StockShape, Location, std::sync::Arc<[Triangle]>)>,
 }
 
 impl SetStock {
@@ -81,7 +81,8 @@ impl SetStock {
                 tris
             }
             other => stock::stock_mesh(other)
-                .ok_or_else(|| CommandError::Invalid("stock meshing failed".into()))?,
+                .ok_or_else(|| CommandError::Invalid("stock meshing failed".into()))?
+                .into(),
         };
 
         let prev = match model::find_by_name(world, &stock_name) {

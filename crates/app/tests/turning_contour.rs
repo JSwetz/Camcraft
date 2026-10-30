@@ -101,7 +101,7 @@ fn revolve(meridian: &[(f64, f64)]) -> Mesh {
             }
         }
     }
-    Mesh { facets }
+    Mesh::from_facets(facets)
 }
 
 /// r 10 wall with a true 45-degree chamfer across the bottom

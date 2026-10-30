@@ -205,25 +205,23 @@ pub fn transform_inverse_point(p: Point3, pos: Point3, rot: [f64; 4]) -> Point3 
     )
 }
 
-/// One planar facet. The stored `normal` field is reserved for file-declared
-/// values; importers currently always leave it zero. Orientation comes from
-/// `Triangle::normal` (recomputed from vertices) - never trust the field.
+/// One planar facet: the three vertices are the whole story (72 bytes,
+/// `Copy`), and orientation comes from [`Triangle::normal`] recomputed
+/// from them. The old stored-normal field (M1-era, "reserved for
+/// file-declared values") was always zero from every importer and read
+/// by nothing - dropped for M5.3 E, where a quarter of the facet's
+/// width is the difference between a 10M-triangle model fitting twice
+/// over or once. The .cam wire format never carried it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Triangle {
     pub a: Point3,
     pub b: Point3,
     pub c: Point3,
-    pub normal: Point3,
 }
 
 impl Triangle {
     pub fn new(a: Point3, b: Point3, c: Point3) -> Self {
-        Triangle {
-            a,
-            b,
-            c,
-            normal: Point3::ZERO,
-        }
+        Triangle { a, b, c }
     }
 
     /// Right-hand-rule facet normal; zero if the triangle is degenerate.
@@ -259,9 +257,13 @@ impl Aabb {
 /// A triangulated surface: the Phase-1 working representation of a model and
 /// of stock. `Triangle`-only storage (no vertex sharing) keeps facet order
 /// authoritative for later stock comparison; dedup happens at import for OBJ.
+/// The buffer is `Arc<[Triangle]>` (M5.3 E): a 10M-triangle model is 720 MB,
+/// and the one copy is THE model - every clone (a command snapshot, a
+/// per-frame read) is a refcount, so undo history no longer duplicates the
+/// solid it merely remembers.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Mesh {
-    pub facets: Vec<Triangle>,
+    pub facets: std::sync::Arc<[Triangle]>,
 }
 
 impl Mesh {
@@ -270,6 +272,14 @@ impl Mesh {
     }
 
     pub fn from_facets(facets: Vec<Triangle>) -> Self {
+        Mesh {
+            facets: facets.into(),
+        }
+    }
+
+    /// Share an existing immutable buffer - the streaming importers hand
+    /// over their finished slice without a copy.
+    pub fn from_shared(facets: std::sync::Arc<[Triangle]>) -> Self {
         Mesh { facets }
     }
 

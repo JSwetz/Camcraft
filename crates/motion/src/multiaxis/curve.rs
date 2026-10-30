@@ -595,7 +595,7 @@ mod tests {
     use crate::geometry::cube;
 
     fn boxy() -> Vec<Triangle> {
-        cube(Point3::ZERO, Point3::new(40.0, 40.0, 15.0)).facets
+        cube(Point3::ZERO, Point3::new(40.0, 40.0, 15.0)).facets.to_vec()
     }
 
     fn cp() -> CurveParams {

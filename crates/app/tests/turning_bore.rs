@@ -84,7 +84,7 @@ fn revolve(meridian: &[(f64, f64)]) -> Mesh {
             }
         }
     }
-    Mesh { facets }
+    Mesh::from_facets(facets)
 }
 
 /// The bored bar: OD 10, an open hole of radius 6 from the top down

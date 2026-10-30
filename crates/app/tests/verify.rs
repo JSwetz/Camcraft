@@ -717,7 +717,7 @@ fn envelope_gouge_names_the_nearest_move() {
     // test was written against called the whole 5 mm trench the ball's
     // doing; facet distance measures what the envelope itself covers,
     // and its deepest possible reading is r, never more.)
-    let f: Vec<Triangle> = camcraft_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
+    let f: Vec<Triangle> = camcraft_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets.to_vec();
     let t = Toolpath::new(vec![
         Move::new(MoveKind::Rapid, p(0.0, 0.0, 15.0), p(-15.0, 0.0, 15.0), None),
         Move::new(MoveKind::Plunge, p(-15.0, 0.0, 15.0), p(-15.0, 0.0, 5.0), Some(100.0)),
@@ -745,7 +745,7 @@ fn an_envelope_that_cannot_measure_proves_nothing() {
     ]);
     let r = rect(-10.0, -10.0, 10.0, 10.0);
     let tool = ball();
-    let f: Vec<Triangle> = camcraft_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets;
+    let f: Vec<Triangle> = camcraft_app::geometry::cube(p(-10.0, -10.0, 0.0), p(10.0, 10.0, 10.0)).facets.to_vec();
     assert_eq!(
         verify(&t, &env_ctx(&r, None, &tool, Some(0.1))),
         vec![Warning::Gouge { at: 1 }],

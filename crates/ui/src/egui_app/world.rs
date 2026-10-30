@@ -183,7 +183,7 @@ fn world_verts(state: &State, entity: &flecs_ecs::prelude::Entity) -> Vec<[f32; 
     let tris = model::facets_of(&state.world, entity).unwrap_or_default();
     let loc = model::transform_of(&state.world, entity).unwrap_or_default();
     let mut verts = Vec::with_capacity(tris.len() * 3);
-    for t in tris {
+    for t in tris.iter() {
         for p in [t.a, t.b, t.c] {
             let p = transform_point(p, loc.pos, loc.rot);
             verts.push([ftoz(p.x), ftoz(p.y), ftoz(p.z)]);

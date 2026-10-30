@@ -129,7 +129,7 @@ fn corrupt_import_fails_at_construction() {
 /// Everything undo must bring back for stock: parameters, placement, facets.
 fn stock_state(
     world: &flecs_ecs::prelude::World,
-) -> Option<(StockShape, Location, Vec<camcraft_app::geometry::Triangle>)> {
+) -> Option<(StockShape, Location, std::sync::Arc<[camcraft_app::geometry::Triangle]>)> {
     let entity = model::find_by_name(world, STOCK_NAME)?;
     let shape = model::stock_def_of(world, &entity)?;
     Some((
@@ -584,8 +584,8 @@ fn prism_mesh() -> Mesh {
         Point3::new(0.5, 1.0, 1.0),
         Point3::new(0.0, 0.5, 1.0),
     );
-    Mesh {
-        facets: vec![
+    Mesh::from_facets(
+        vec![
             Triangle::new(a, b, c),
             Triangle::new(a, c, d), // bottom
             Triangle::new(a1, c1, b1),
@@ -599,10 +599,10 @@ fn prism_mesh() -> Mesh {
             Triangle::new(d, a, a1),
             Triangle::new(d, a1, d1),
         ],
-    }
+    )
 }
 
-fn facets(world: &flecs_ecs::prelude::World, name: &str) -> Option<Vec<Triangle>> {
+fn facets(world: &flecs_ecs::prelude::World, name: &str) -> Option<std::sync::Arc<[Triangle]>> {
     model::find_by_name(world, name).and_then(|e| model::facets_of(world, &e))
 }
 
@@ -694,7 +694,7 @@ fn update_validates_at_construction() {
     // Empty geometry cannot land.
     history_import(&world);
     assert!(matches!(
-        UpdateModel::new(&world, "m", Mesh { facets: vec![] }),
+        UpdateModel::new(&world, "m", Mesh::from_facets(vec![])),
         Err(CommandError::Invalid(_))
     ));
 }
