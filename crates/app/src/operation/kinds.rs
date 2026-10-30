@@ -887,6 +887,7 @@ fn seed_part(c: &Carried) -> OpParams {
         bar_load: false,
         bar_advance: 0.0,
         bar_unload: false,
+        bar_transfer: false,
     }
 }
 

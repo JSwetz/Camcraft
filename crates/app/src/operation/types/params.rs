@@ -664,7 +664,13 @@ pub enum OpParams {
     /// them. A program describes ONE part: load the bar it is cut
     /// from, machine it, take the part away. The signals ride the
     /// stamp (they change the POSTED program) but no geometry -
-    /// generate, simulate and verify never read them.
+    /// generate, simulate and verify never read them. `bar_transfer`
+    /// (M5.3 C) adds the handoff step the feeder pair was the special
+    /// case of: after the last cut the parting op makes, the part
+    /// moves to the machine's second spindle - a `PART TRANSFER 1 2`
+    /// intent on the stream, and the program gate (not the post)
+    /// says whether the machine states a second spindle. Same law as
+    /// its siblings: a signal, never geometry.
     Part {
         tolerance: f64,
         clearance_z: Height,
@@ -676,6 +682,7 @@ pub enum OpParams {
         bar_load: bool,
         bar_advance: f64,
         bar_unload: bool,
+        bar_transfer: bool,
     },
     /// Threading (M5.2 stage D): the helical ladder on a MODELED
     /// thread. `pitch` is that thread's lead - the lattice of V's

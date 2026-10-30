@@ -304,6 +304,41 @@ fn machine_flattens_for_the_script() {
 }
 
 #[test]
+fn the_spindle_inventory_crosses_every_script_door() {
+    // M5.3 C: a dialect script asks `machine.spindles > 1` before it
+    // handshakes, and the answer must be the FILE's - through the
+    // mirror, through the serde field, through a raw .mch parts
+    // tree - never a number the reader invented for a machine that
+    // said nothing (the unstated-limit law with its own door).
+    let mirror = json!({ "kinematics": { "static": { "head": { "spindleCount": 2 } } } });
+    assert_eq!(machine::script_props(&mirror)["spindles"], json!(2));
+    let serde_form = json!({ "spindles": 3 });
+    assert_eq!(machine::script_props(&serde_form)["spindles"], json!(3));
+    let raw = json!({ "kinematics": { "default": { "parts": [
+        { "type": "head", "spindle": { "max": 4000.0 }, "parts": [
+            { "type": "axis", "letter": "Z" } ] },
+        { "type": "head", "spindle": 0 },
+        { "type": "head", "name": "no spindle stated" } ] } } });
+    assert_eq!(machine::script_props(&raw)["spindles"], json!(2), "heads stating a spindle, tree-walked");
+    // Unstated stays absent - `machine.spindles > 1` reads false in
+    // a script, and a millturn dialect refuses to handoff, not guesses.
+    let quiet = json!({ "name": "PLAIN" });
+    assert!(machine::script_props(&quiet)["spindles"].is_null());
+    let cps = "function onClose() { writeln(machine.spindles === undefined || machine.spindles === null ? \"silent\" : \"n=\" + machine.spindles); }";
+    let out = engine::run(cps, &quiet, "").expect("post");
+    assert_eq!(out.program, "silent\n", "the script sees the silence, not a 1");
+}
+
+#[test]
+fn the_mirror_states_spindles_only_when_the_file_did() {
+    let m = camcraft_post::machine::Machine { model: "MT".into(), spindles: Some(2), ..Default::default() };
+    let v = machine::mirror(&m);
+    assert_eq!(v["kinematics"]["static"]["head"]["spindleCount"], json!(2));
+    let m = camcraft_post::machine::Machine { model: "VMC".into(), ..Default::default() };
+    assert!(machine::mirror(&m)["kinematics"]["static"]["head"].get("spindleCount").is_none());
+}
+
+#[test]
 fn dump_interleaves_cycles_at_their_anchor_moves() {
     use camcraft_post::geo2d::Point2;
     use camcraft_post::geometry::Point3;
@@ -357,6 +392,7 @@ fn dump_interleaves_cycles_at_their_anchor_moves() {
         stock: [-20.0, 20.0, -20.0, 20.0],
         stock_top_z: 0.0,
         warnings: vec!["drill vs hole dia advisory".into()],
+        part_transfer: false,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     // dump emits each cycle with first_move <= mi just before move mi:
@@ -417,6 +453,7 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         stock: [-20.0, 20.0, -20.0, 20.0],
         stock_top_z: 0.0,
         warnings: vec![],
+        part_transfer: false,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let angles: Vec<Option<[f64; 3]>> = recs
@@ -685,6 +722,7 @@ fn dump_brackets_the_section_with_the_feeder() {
         stock: [-20.0, 20.0, -20.0, 20.0],
         stock_top_z: 0.0,
         warnings: vec![],
+        part_transfer: false,
     };
     let recs = camcraft_post::post::dump(&t, &d);
     let open = recs.iter().position(|r| matches!(r, Record::Section { begin: true })).expect("open");
@@ -695,4 +733,105 @@ fn dump_brackets_the_section_with_the_feeder() {
     // posts byte-identically to before the feeder existed.
     let d2 = Dump { op_name: "Part1", part_load: None, part_unload: false, ..d };
     assert!(!camcraft_post::post::dump(&t, &d2).iter().any(|r| matches!(r, Record::Part { .. })));
+}
+
+// M5.3 stage C: the handoff joins the same family - `PART TRANSFER
+// from to` on the stream, one dedicated hook, one flag on the dump -
+// and the choreography puts it after the cut, before the unload.
+
+#[test]
+fn part_transfer_roundtrips_and_strays_refuse() {
+    for recs in [
+        vec![Record::Transfer { from: 1, to: 2 }],
+        vec![Record::Transfer { from: 2, to: 1 }],
+        vec![Record::Transfer { from: 3, to: 17 }],
+    ] {
+        let text = cnc::serialize(&recs);
+        assert_eq!(cnc::parse(&text).expect("own output must parse"), recs);
+    }
+    for bad in [
+        "PART TRANSFER\n",
+        "PART TRANSFER 1\n",
+        "PART TRANSFER 0 2\n",
+        "PART TRANSFER 1 x\n",
+        "PART TRANSFER -1 2\n",
+    ] {
+        let e = cnc::parse(bad).expect_err("a station the stream cannot name must refuse");
+        let msg = format!("{e}");
+        assert!(msg.contains("line"), "error must name its line: {msg}");
+        assert!(
+            msg.contains("station") || msg.contains("FROM and TO") || msg.contains("TO station"),
+            "the refusal says which operand went wrong: {msg}"
+        );
+    }
+    // The old unknown-word refusal still speaks, now that TRANSFER
+    // is one of the words PART accepts.
+    let e = cnc::parse("PART FIZZ\n").expect_err("still not a direction");
+    assert!(format!("{e}").contains("TRANSFER"), "the door lists its words: {e}");
+}
+
+#[test]
+fn part_transfer_voices_the_default_and_the_override() {
+    // Prelude alone: the comment names both stations, the "->" the
+    // feeder family's comments already use.
+    let out = engine::run("", &json!(null), "PART TRANSFER 1 2\n").expect("posts");
+    assert!(out.program.contains("(PART TRANSFER 1->2)"), "{}", out.program);
+    // The hook is the whole contract - onCommand never sees a
+    // lifecycle record, and the stations ride as From/To, never a
+    // number the engine invented.
+    let cps = r#"
+var SEEN = [];
+function onCommand() { SEEN.push("cmd:" + properties.command); }
+function onPartTransfer() {
+    SEEN.push("hand:" + properties.command + ":" + properties.From + properties.To);
+}
+function onClose() { SEEN.forEach(function (x) { writeln(x); }); }
+"#;
+    let out = engine::run(cps, &json!(null), "PART TRANSFER 2 5\n").expect("post");
+    assert!(out.program.contains("hand:PartTransfer:25"), "{}", out.program);
+    assert!(!out.program.contains("cmd:"), "onCommand must never see it: {}", out.program);
+}
+
+#[test]
+fn dump_places_the_handoff_after_the_cut_before_the_unload() {
+    use camcraft_post::geometry::Point3;
+    let t = Toolpath::new(vec![camcraft_post::cl::Move::new(
+        MoveKind::Feed,
+        Point3 { x: 0.0, y: 0.0, z: 1.0 },
+        Point3 { x: 0.0, y: 0.0, z: -1.0 },
+        Some(100.0),
+    )]);
+    let d = Dump {
+        op_name: "Part1",
+        part_load: Some(0.0),
+        part_unload: true,
+        tool_number: 1,
+        tool_name: "GT-0300",
+        tool_diameter: 16.0,
+        rpm: 2000.0,
+        clearance_z: 20.0,
+        retract_z: 20.0,
+        top_z: 0.0,
+        wcs: "G54",
+        origin: [0.0; 3],
+        stock: [-20.0, 20.0, -20.0, 20.0],
+        stock_top_z: 0.0,
+        warnings: vec![],
+        part_transfer: true,
+    };
+    let recs = camcraft_post::post::dump(&t, &d);
+    let at = |pat: &dyn Fn(&Record) -> bool| {
+        recs.iter().position(pat).expect("record present")
+    };
+    let load = at(&|r| matches!(r, Record::Part { loading: true, .. }));
+    let move_ = at(&|r| matches!(r, Record::Move(_)));
+    let hand = at(&|r| matches!(r, Record::Transfer { .. }));
+    let unload = at(&|r| matches!(r, Record::Part { loading: false, .. }));
+    let close = recs.iter().rposition(|r| matches!(r, Record::Section { begin: false })).expect("close");
+    assert!(load < move_ && move_ < hand && hand < unload && unload < close, "LOAD..cut..TRANSFER..UNLOAD: {recs:?}");
+    assert_eq!(recs[hand], Record::Transfer { from: 1, to: 2 }, "the app's one handoff convention");
+    // The flag off writes no handoff at all - the byte-identity the
+    // goldens keep watching.
+    let d2 = Dump { part_transfer: false, ..d };
+    assert!(!camcraft_post::post::dump(&t, &d2).iter().any(|r| matches!(r, Record::Transfer { .. })));
 }

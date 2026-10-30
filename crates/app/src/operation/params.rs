@@ -825,6 +825,7 @@ impl OpParams {
                 bar_load,
                 bar_advance,
                 bar_unload,
+                bar_transfer,
             } => {
                 w(h, *tolerance);
                 wh(h, *clearance_z);
@@ -835,10 +836,14 @@ impl OpParams {
                 }
                 // The feeder signals change the POSTED program, so
                 // they dirty the stamp like every authored number -
-                // even though no geometry reads them (M5.2 G.2).
+                // even though no geometry reads them (M5.2 G.2). The
+                // handoff step rides the same law (M5.3 C): a fold
+                // added to the digest reads ops Stale once, the
+                // stamp-salt precedent says working as designed.
                 w(h, if *bar_load { 1.0 } else { 0.0 });
                 w(h, *bar_advance);
                 w(h, if *bar_unload { 1.0 } else { 0.0 });
+                w(h, if *bar_transfer { 1.0 } else { 0.0 });
             }
             // The threading ladder (M5.2 stage D, tag 24): the wave's
             // own three numbers ride beside the twins' - pitch, depth

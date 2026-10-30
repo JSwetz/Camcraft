@@ -65,6 +65,12 @@ unstated capability into existence.
     not judged — the sheet renders it, no model consumes it),
     `body_diameter`/`body_length` for the envelope checks; and
     `tool_station { max_tool_length, max_tool_diameter, coolants }`.
+    Separately from first-match, the checker also COUNTS (M5.3 C):
+    `Machine.spindles` is how many head parts anywhere in the tree
+    state a spindle — the handoff gate reads it (`PART TRANSFER` to a
+    second station on a one-spindle machine is a named refusal at the
+    program gate). A file stating no spindle keeps `None`: the
+    unstated-limit law again, never a guessed `Some(1)`.
   - `coolants`: entries are `{ "name": "Flood", "mCode": "M8" }` (the
     M-code is the machine's own word — string `"M8"` or bare number
     `8`, both normalized to `M8`; `mcode` spelling reads too) or a

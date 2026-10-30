@@ -4458,32 +4458,39 @@ fn v40_part_rows_step_up_silent_and_the_feeder_flags_round_trip() {
         t.push_str("}}}}\n        ]\n}");
         t
     };
-    let read = |world: &flecs_ecs::prelude::World| -> (bool, f64, bool) {
+    // M5.3 C grew one more key the same way - `bar_transfer` rides
+    // the same serde default, so an older row that never heard of
+    // the handoff reads silent, exactly as the G.2 row did.
+    let read = |world: &flecs_ecs::prelude::World| -> (bool, f64, bool, bool) {
         let e = model::find_by_name(world, "PT1").expect("op");
         let o = model::operation_of(world, &e).expect("operation");
-        let OpParams::Part { bar_load, bar_advance, bar_unload, .. } = &o.params else {
+        let OpParams::Part { bar_load, bar_advance, bar_unload, bar_transfer, .. } = &o.params else {
             panic!("part params expected, got {:?}", o.params);
         };
-        (*bar_load, *bar_advance, *bar_unload)
+        (*bar_load, *bar_advance, *bar_unload, *bar_transfer)
     };
 
     let world = new_world();
     project::open(&world, &silent("")).expect("a feeder-less part row must read");
-    assert_eq!(read(&world), (false, 0.0, false), "absence means silence, the seed's own shape");
+    assert_eq!(read(&world), (false, 0.0, false, false), "absence means silence, the seed's own shape");
     // And the save states the learned keys - the fixed point the
     // feed_opt precedent keeps: a second open cannot drift them.
     let p = tmp_path("g2silent");
     project::save(&world, &p).expect("save");
     let saved = std::fs::read_to_string(&p).expect("read");
     assert!(saved.contains("\"bar_load\": false"), "{saved}");
+    assert!(saved.contains("\"bar_transfer\": false"), "the handoff key rides too: {saved}");
     let world2 = new_world();
     project::open(&world2, &saved).expect("reopened");
-    assert_eq!(read(&world2), (false, 0.0, false));
+    assert_eq!(read(&world2), (false, 0.0, false, false));
 
     // Stated keys ride through whole, mm and all.
     let world3 = new_world();
-    project::open(&world3, &silent(", \"bar_load\": true, \"bar_advance\": 25.0, \"bar_unload\": true"))
-        .expect("the feeder keys must read");
-    assert_eq!(read(&world3), (true, 25.0, true), "the signals are the file's, verbatim");
+    project::open(
+        &world3,
+        &silent(", \"bar_load\": true, \"bar_advance\": 25.0, \"bar_unload\": true, \"bar_transfer\": true"),
+    )
+    .expect("the feeder keys must read");
+    assert_eq!(read(&world3), (true, 25.0, true, true), "the signals are the file's, verbatim");
     let _ = std::fs::remove_file(&p);
 }

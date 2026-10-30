@@ -2590,6 +2590,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             bar_load,
             bar_advance,
             bar_unload,
+            bar_transfer,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -2631,7 +2632,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     ui.label("how far the feeder pushes the bar past the previous part's stub - 0 says the act alone, no measured advance");
                 }
                 ui.checkbox(bar_unload, "Unload part after the cut");
-                ui.label("the two signals post as stream events around this section - a script voices them for the machine, M-code or comment, and silence posts silence");
+                ui.label("the signals post as stream events around this section - a script voices them for the machine, M-code or comment, and silence posts silence");
+                ui.checkbox(bar_transfer, "Transfer to sub-spindle");
+                ui.label("the handoff step (M5.3 C): after the last cut, the part moves to the machine's second spindle - check the program gate, it names a machine that states no second spindle");
             }
         }
         // Threading (M5.2 D): the wave the model already carries, cut

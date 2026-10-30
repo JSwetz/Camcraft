@@ -32,6 +32,7 @@ committed golden is a legal post input.
 | `Arc CW\|CCW X.. Y.. Z.. F.. I.. J..` | planar arc; I J = absolute center |
 | `CYCLE <TYPE> X.. Y.. Z.. [R.. ENTRY.. Q.. P.. F.. AT..]` | one canned cycle |
 | `PART LOAD [ADVANCE <µm>]` / `PART UNLOAD` | a part lifecycle event: `dump` brackets each section with them; ADVANCE rides the LOAD alone (the bar's next bite, µm) |
+| `PART TRANSFER <from> <to>` | the handoff step of the same family: station `from` (1-based, the order the machine file states its spindles) hands the part to station `to`; both operands required, a missing or zero-station number refuses by name |
 | `START X <i> Y <i> Z <i>` / `END` | legacy `.cl` position lines: consumed silently (END ends the record span) |
 
 `CYCLE` TYPE ∈ SPOT DRILL PECK DEEP TAP BORE BACKBORE. Word meanings
@@ -83,8 +84,9 @@ behavior only):
 | `StockXYLeft/Right/Front/Back` `StockZTop` | stock bounds (PARAMs) |
 | `ClearancePlane` `RetractPlane` `TopOfStock` | plane heights (PARAMs) |
 | `OperationName` `ToolDiameter` | op identity (PARAMs) |
-| `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument); part events set `PartLoading` / `PartUnloading` for their dedicated hooks and never reach `onCommand` |
+| `command` | per motion/cycle record: `Rapid` `Linear` `Circular` `Drilling` (the `onCommand` argument); part events set `PartLoading` / `PartUnloading` / `PartTransfer` for their dedicated hooks and never reach `onCommand` |
 | `Advance` | the `PART LOAD` ADVANCE in mm (present only on loads; an unload's properties carry no `Advance` key at all) |
+| `From` `To` | the `PART TRANSFER` stations, 1-based (present only on transfer events) |
 | `CircularDirection` | `CW` / `CCW` (arcs) |
 | `CycleType` | the `CYCLE` TYPE token (cycles) |
 | `EntryZ` `Q` `P` `FeedRate` | cycle entry plane, peck mm, dwell s, cutting feed mm/min (`null` for legacy markers) |
@@ -110,10 +112,11 @@ behavior only):
 - `message(s)` — counted warning, not text
 - format helpers `formatUnit` / `formatMotion` / `formatFeed`
 - `onComment(s)` — default: `writeln(s)`
-- `onPartLoading()` / `onPartUnloading()` — defaults write the intent
-  as a comment (`(PART LOAD [ADVANCE <mm>])`, `(PART UNLOAD)`); a
-  script with a real feeder dialect overrides them as it would any
-  hook
+- `onPartLoading()` / `onPartUnloading()` / `onPartTransfer()` —
+  defaults write the intent as a comment (`(PART LOAD [ADVANCE <mm>])`,
+  `(PART UNLOAD)`, `(PART TRANSFER <from>-><to>)`); a script with a
+  real feeder or handoff dialect overrides them as it would any hook
+  (the engine invents no M-code it was not given)
 - `setLanguageVersion(_v)` — accepted and ignored (the engine decides
   semantics, not the script; a reference-era pragma kept harmless)
 
@@ -128,7 +131,7 @@ else the kind hook: `onRapid`, `onLinear`, `onCircular`, or
 cycles fire `onCycle`, `onCyclePoint`, `onDwell(seconds)` when the
 dwell is positive, then `onCycleEnd`. Part events are lifecycle, like
 `SECTION`: `onCommand` never sees them — `onPartLoading` /
-`onPartUnloading` is the whole contract. `onRadiusCompensation` is
+`onPartUnloading` / `onPartTransfer` is the whole contract. `onRadiusCompensation` is
 reserved (never called in 0.1.0 — the Fanuc post runs G40). `onClose`
 ends the run; its lines belong to no record.
 

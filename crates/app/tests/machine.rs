@@ -53,6 +53,9 @@ fn reference() -> Machine {
         ],
         max_tool_length: Some(150.0),
         max_tool_diameter: Some(20.0),
+        // The file's one head states a spindle, so the M5.3 C
+        // inventory reads it: one hand, stated, not guessed.
+        spindles: Some(1),
         // No spindle body stated: this reference machine keeps the
         // pre-M3.2B verdicts byte-identical - the spindle band only
         // exists when the `.mch` says it does. Stage C's new fields
@@ -197,7 +200,33 @@ fn zero_means_the_file_does_not_say() {
     assert_eq!(m.axes.len(), 1);
     assert_eq!(m.axes[0].feed, None);
     assert_eq!(m.axes[0].travel, None);
+    assert_eq!(m.spindles, Some(1), "an unconfigured spindle is still a spindle the file stated");
     assert!(m.summary().contains("?-? rpm"), "unknown shows as unknown: {}", m.summary());
+}
+
+#[test]
+fn heads_that_state_a_spindle_are_counted() {
+    // The M5.3 C inventory, at its source: the count walks the WHOLE
+    // parts tree (a sub-spindle nested under the main head counts),
+    // a head without a spindle statement is furniture, and a file
+    // that states no spindle at all stays None - never a 1 the
+    // reader guessed for a machine that said nothing.
+    let counted = |parts: &str| {
+        let text = format!(
+            r#"{{ "general": {{}},
+              "kinematics": {{ "default": {{ "units": {{ "length": "mm" }}, "parts": [ {parts} ] }} }} }}"#
+        );
+        parse_mch(&text).expect("well-formed").spindles
+    };
+    assert_eq!(
+        counted(r#"{"type": "head", "name": "main", "spindle": {"max_speed": 4000}, "parts": [
+                      {"type": "head", "name": "sub", "spindle": {"max_speed": 6000}} ]},
+                   {"type": "head", "name": "no spindle stated"}"#),
+        Some(2),
+        "nested hands count; a head with no spindle is not a hand"
+    );
+    assert_eq!(counted(r#"{"type": "head", "name": "solo"}"#), None, "unstated stays absent");
+    assert_eq!(counted(r#"{"type": "static", "name": "base"}"#), None, "no heads at all");
 }
 
 #[test]

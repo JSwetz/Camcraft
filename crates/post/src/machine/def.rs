@@ -120,6 +120,16 @@ pub struct Machine {
     /// speaks its own M-codes instead of the default's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub coolants: Vec<Coolant>,
+    /// How many spindles the file states (M5.3 C): the count of
+    /// `type: "head"` parts carrying a spindle. The limit numbers
+    /// still read the first head (the first-match law); this count
+    /// answers a different question - whether a program's handoff
+    /// step (`PART TRANSFER 1 2`) has a second spindle to talk
+    /// about at all. Unstated (no spindle-carrying head anywhere)
+    /// reads `None`, and unstated checks nothing: an empty machine
+    /// claims no inventory of steel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spindles: Option<usize>,
 }
 
 /// What a machine is, inferred from its axis inventory (M3.2 stage E -

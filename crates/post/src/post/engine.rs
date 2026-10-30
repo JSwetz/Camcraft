@@ -178,6 +178,20 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                 s.set_properties(&merged(&base, &p, pos))?;
                 s.call(if *loading { "onPartLoading" } else { "onPartUnloading" }, "")?;
             }
+            Record::Transfer { from, to } => {
+                // The handoff step (M5.3 C): same lifecycle law as
+                // the feeder records - no motion, so `onCommand`
+                // never sees it, and the script's onPartTransfer is
+                // the whole contract. The stations ride as From/To
+                // so a dialect can name its own handshake; the
+                // engine invents nothing.
+                let mut p = BTreeMap::new();
+                p.insert("command".into(), json!("PartTransfer"));
+                p.insert("From".into(), json!(from));
+                p.insert("To".into(), json!(to));
+                s.set_properties(&merged(&base, &p, pos))?;
+                s.call("onPartTransfer", "")?;
+            }
         }
         let after = s.out_len()?;
         for line in before..after {

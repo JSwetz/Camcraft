@@ -647,6 +647,7 @@ impl ParamsDto {
                 bar_load,
                 bar_advance,
                 bar_unload,
+                bar_transfer,
             } => ParamsDto::Part {
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
@@ -658,6 +659,7 @@ impl ParamsDto {
                 bar_load: *bar_load,
                 bar_advance: *bar_advance,
                 bar_unload: *bar_unload,
+                bar_transfer: *bar_transfer,
             },
             // The threading kind (M5.2 stage D): the wave's own three
             // numbers beside the blade trio of heights - and the
@@ -1489,6 +1491,7 @@ impl ParamsDto {
                 bar_load,
                 bar_advance,
                 bar_unload,
+                bar_transfer,
             } => OpParams::Part {
                 tolerance: *tolerance,
                 clearance_z: (*clearance_z).into(),
@@ -1500,6 +1503,7 @@ impl ParamsDto {
                 bar_load: *bar_load,
                 bar_advance: *bar_advance,
                 bar_unload: *bar_unload,
+                bar_transfer: *bar_transfer,
             },
             // Read back whole, the threading kind's way too - sane or
             // nothing, `validate_kind`'s door again first (M5.2 D).

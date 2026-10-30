@@ -113,6 +113,12 @@ pub fn mirror(m: &crate::machine::Machine) -> Value {
     if let Some(s) = m.spindle_max {
         head.insert("spindle".to_owned(), json!({"max": s}));
     }
+    if let Some(n) = m.spindles {
+        // The handoff inventory (M5.3 C): how many heads stated a
+        // spindle. Absent when the file stated none - never a 1
+        // that guesses for a machine that said nothing.
+        head.insert("spindleCount".to_owned(), json!(n));
+    }
     if !m.coolants.is_empty() {
         // Only what the file stated: a named-without-code entry rides
         // as a bare name, and script_props reads it as codeless - the
@@ -235,6 +241,19 @@ pub fn script_props(m: &Value) -> Value {
             })
             .unwrap_or(false)
     });
+    // The spindle inventory (M5.3 C): the mirror's stated count, the
+    // serde mirror's field, or - through the raw door - the same
+    // whole-tree head count `parse_mch` keeps. Unstated stays
+    // absent: a dialect script asks `machine.spindles > 1` and gets
+    // truth about what the file states, never a number invented for
+    // a machine that said nothing.
+    let spindles = get(m, &["kinematics", "static", "head", "spindleCount"])
+        .or_else(|| m.get("spindles"))
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            let n = spindle_heads(get(m, &["kinematics", "default", "parts"]));
+            (n > 0).then_some(n as u64)
+        });
     json!({
         "name": get(m, &["name"]).and_then(Value::as_str).unwrap_or(""),
         "capabilities": get(m, &["capabilities"]).cloned().unwrap_or_else(|| json!({})),
@@ -244,7 +263,25 @@ pub fn script_props(m: &Value) -> Value {
         "coolants": coolants,
         "rotaries": rotaries,
         "rtcp": rtcp,
+        "spindles": spindles.map_or(Value::Null, |n| json!(n)),
     })
+}
+
+/// Count `type: "head"` parts stating a spindle, depth-first - the
+/// raw door for the M5.3 C inventory, the walk `parse_mch`'s
+/// `count_spindles` makes over the same tree.
+fn spindle_heads(parts: Option<&Value>) -> usize {
+    let Some(arr) = parts.and_then(Value::as_array) else {
+        return 0;
+    };
+    arr.iter()
+        .map(|p| {
+            usize::from(
+                p.get("type").and_then(Value::as_str) == Some("head")
+                    && p.get("spindle").is_some_and(|s| !s.is_null()),
+            ) + spindle_heads(p.get("parts"))
+        })
+        .sum()
 }
 
 /// The RS-274 rotary addresses: A turns about X, B about Y, C about Z.

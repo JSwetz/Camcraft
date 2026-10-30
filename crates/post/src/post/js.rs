@@ -75,6 +75,11 @@ function onPartLoading() {
   writeComment("PART LOAD" + (a > 0 ? " ADVANCE " + formatUnit(a) : ""));
 }
 function onPartUnloading() { writeComment("PART UNLOAD"); }
+// The handoff step of the same lifecycle family (M5.3 C): a comment
+// naming the stations, the machine's own dialect by override.
+function onPartTransfer() {
+  writeComment("PART TRANSFER " + properties.From + "->" + properties.To);
+}
 // The reference-era language-version pragma: accepted and ignored,
 // because the engine (not the script) decides semantics.
 function setLanguageVersion(_v) { return 0; }
@@ -112,6 +117,7 @@ pub const HOOKS: &[&str] = &[
     "onRadiusCompensation",
     "onPartLoading",
     "onPartUnloading",
+    "onPartTransfer",
     "onComment",
     "onClose",
 ];

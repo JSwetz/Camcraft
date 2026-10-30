@@ -160,6 +160,7 @@ fn part_params(plane_z: f64) -> OpParams {
         bar_load: false,
         bar_advance: 0.0,
         bar_unload: false,
+        bar_transfer: false,
     }
 }
 
@@ -337,10 +338,11 @@ fn the_feeder_signals_reach_the_posted_program() {
     // (the byte-identity the goldens keep watching).
     let (world, mut history) = blade_world();
     let mut p = part_params(-10.0);
-    if let OpParams::Part { bar_load, bar_advance, bar_unload, .. } = &mut p {
+    if let OpParams::Part { bar_load, bar_advance, bar_unload, bar_transfer, .. } = &mut p {
         *bar_load = true;
         *bar_advance = 25.0;
         *bar_unload = true;
+        *bar_transfer = true;
     }
     create(&world, &mut history, "P1", "GT-0300", p.clone());
     let mut path = std::env::temp_dir();
@@ -349,16 +351,24 @@ fn the_feeder_signals_reach_the_posted_program() {
     camcraft_app::posting::post_setup(&world, &path).expect("the sever posts");
     let text = std::fs::read_to_string(&path).expect("written");
     assert!(
-        text.contains("(PART LOAD ADVANCE 25)") && text.contains("(PART UNLOAD)"),
-        "the events must voice: {text}"
+        text.contains("(PART LOAD ADVANCE 25)")
+            && text.contains("(PART TRANSFER 1->2)")
+            && text.contains("(PART UNLOAD)"),
+        "the events must voice, in the choreography's order: {text}"
+    );
+    let at = |needle: &str| text.find(needle).expect("present");
+    assert!(
+        at("(PART LOAD") < at("(PART TRANSFER") && at("(PART TRANSFER") < at("(PART UNLOAD)"),
+        "load, cut, hand off, unload - the program tells the story in order"
     );
     // The stamp: the flags change what posts, so they dirty the
     // cache exactly like an authored feed would.
     let mut quiet = p.clone();
-    if let OpParams::Part { bar_load, bar_unload, bar_advance, .. } = &mut quiet {
+    if let OpParams::Part { bar_load, bar_unload, bar_advance, bar_transfer, .. } = &mut quiet {
         *bar_load = false;
         *bar_unload = false;
         *bar_advance = 0.0;
+        *bar_transfer = false;
     }
     history.execute(
         &world,
@@ -370,6 +380,43 @@ fn the_feeder_signals_reach_the_posted_program() {
         "the signals changed the program, so they changed the stamp"
     );
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_handoff_needs_the_steel_it_asks_for() {
+    // The program gate's new clause (M5.3 C): stated spindles check,
+    // unstated check nothing - the transfer flag alone never blocks
+    // a post on a machine that said nothing about its hands, and a
+    // one-spindle lathe hears the refusal by the op's name, the
+    // machine's own, and the number it stated.
+    let (world, mut history) = blade_world();
+    let mut p = part_params(-10.0);
+    if let OpParams::Part { bar_transfer, .. } = &mut p {
+        *bar_transfer = true;
+    }
+    create(&world, &mut history, "P1", "GT-0300", p);
+    let with = |n: Option<usize>| {
+        let m = Machine { spindles: n, ..machine("lathe") };
+        camcraft_app::machine::check_document(&world, &m)
+            .expect("a fresh program checks")
+            .problems
+    };
+    let one = with(Some(1));
+    assert!(
+        one.iter().any(|x| x.starts_with("P1:")
+            && x.contains("second spindle")
+            && x.contains("TestBench lathe")
+            && x.contains("1 spindle")),
+        "the refusal names op, machine and count: {one:?}"
+    );
+    assert!(
+        with(Some(2)).iter().all(|x| !x.contains("second spindle")),
+        "two hands, no complaint"
+    );
+    assert!(
+        with(None).iter().all(|x| !x.contains("second spindle")),
+        "unstated checks nothing - the same floor the tilt refusal stands on"
+    );
 }
 
 #[test]

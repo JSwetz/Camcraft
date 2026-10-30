@@ -34,7 +34,10 @@
 //! `"type": "rotary"` parts join the axis table with degrees for
 //! travel and a `"resolution"` key for positioning steps. The mirror
 //! to the post grammar (posting) now speaks coolants too, so a
-//! mounted machine's coolant words are its own.
+//! mounted machine's coolant words are its own. M5.3 stage C added
+//! the spindle INVENTORY - heads stating a spindle, counted
+//! whole-tree - which is what makes a program's part transfer a
+//! checkable claim instead of a hope.
 
 //!
 //! M4.1 R0 split (docs/M4.1-CRATE-SPLIT.md): the plain types live in
@@ -174,6 +177,24 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
             && tool.diameter > diam
         {
             say(&mut out, format!("{name}: tool {} is {:.1} mm across, the machine takes {diam:.1}", op.tool, tool.diameter));
+        }
+        // The handoff step (M5.3 C): a parting op that asks for its
+        // part to move to a second spindle wants steel the machine
+        // may not have. Stated spindles check, unstated check
+        // nothing - the same floor the tilt refusal stands on, and
+        // the number a `PART TRANSFER 1 2` comment would have the
+        // operator reach for a hand that isn't there.
+        if let crate::operation::OpParams::Part { bar_transfer: true, .. } = &op.params
+            && let Some(n) = machine.spindles
+            && n < 2
+        {
+            say(
+                &mut out,
+                format!(
+                    "{name}: parting hands the part to a second spindle; {} states {n} spindle(s)",
+                    machine.model
+                ),
+            );
         }
 
         for (i, mv) in cache.path.moves.iter().enumerate() {

@@ -88,6 +88,24 @@ fn parse_coolants(v: Option<&serde_json::Value>) -> Vec<Coolant> {
         .collect()
 }
 
+/// How many `type: "head"` parts anywhere in the tree state a
+/// spindle (M5.3 C). The limit numbers still read the first match
+/// (`find_type` above) - this is the inventory for the handoff
+/// check, so it counts them all.
+fn count_spindles(parts: Option<&serde_json::Value>) -> usize {
+    let Some(arr) = parts.and_then(|p| p.as_array()) else {
+        return 0;
+    };
+    arr.iter()
+        .map(|p| {
+            usize::from(
+                p.get("type").and_then(|t| t.as_str()) == Some("head")
+                    && p.get("spindle").is_some_and(|s| !s.is_null()),
+            ) + count_spindles(p.get("parts"))
+        })
+        .sum()
+}
+
 /// First part anywhere in the tree with the given `type`, depth-first.
 fn find_type<'a>(parts: &'a serde_json::Value, ty: &str) -> Option<&'a serde_json::Value> {
     let arr = parts.as_array()?;
@@ -161,6 +179,10 @@ pub fn parse_mch(text: &str) -> Result<Machine, String> {
             // rather than on the station; either home reads.
             m.coolants = parse_coolants(v.pointer("/tooling/coolants"));
         }
+        // The spindle inventory (M5.3 C): heads that state a spindle,
+        // counted whole-tree; no head states one, no count is stated.
+        let nsp = count_spindles(Some(parts));
+        m.spindles = (nsp > 0).then_some(nsp);
         // The changer (stage C's capacity number): the tooling tree's
         // `number_of_tools`, a count the file states directly.
         m.tool_count = v

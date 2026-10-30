@@ -441,23 +441,29 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
         };
         // The feeder signals ride the section (M5.2 G.2): only a
         // Part operation can carry them, and a load with an advance
-        // of 0 is still a load - the ACT, not the number.
-        let (part_load, part_unload) = match &op.params {
+        // of 0 is still a load - the ACT, not the number. The
+        // handoff step joins the family (M5.3 C) - same extraction,
+        // same law: a signal, no geometry, the gate says whether the
+        // machine states the second spindle it names.
+        let (part_load, part_unload, part_transfer) = match &op.params {
             OpParams::Part {
                 bar_load,
                 bar_advance,
                 bar_unload,
+                bar_transfer,
                 ..
             } => (
                 bar_load.then_some(*bar_advance),
                 *bar_unload,
+                *bar_transfer,
             ),
-            _ => (None, false),
+            _ => (None, false, false),
         };
         let d = Dump {
             op_name: name,
             part_load,
             part_unload,
+            part_transfer,
             tool_number,
             tool_name: &op.tool,
             tool_diameter: tool.diameter,

@@ -85,6 +85,12 @@ pub struct Dump<'a> {
     /// simulates and verifies exactly as without.
     pub part_load: Option<f64>,
     pub part_unload: bool,
+    /// The handoff step (M5.3 C): true asks the machine to move the
+    /// severed part from its spindle to the second one - the stream
+    /// carries `PART TRANSFER 1 2`, intent again, no geometry, and
+    /// the program gate (not the post) says whether the machine
+    /// states a second spindle at all.
+    pub part_transfer: bool,
 }
 
 impl<'a> Default for Dump<'a> {
@@ -105,6 +111,7 @@ impl<'a> Default for Dump<'a> {
             warnings: Vec::new(),
             part_load: None,
             part_unload: false,
+            part_transfer: false,
         }
     }
 }
@@ -213,6 +220,14 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     }
     for c in &cycles[ci..] {
         out.push(Record::Cycle((*c).clone()));
+    }
+    // The choreography order (M5.3 C): the handoff comes after the
+    // last cut - the part is severed, then it moves - and before the
+    // unload, which then takes the part off the spindle now holding
+    // it. A transfer with no load or unload is legal: the program's
+    // story is only the handoff.
+    if d.part_transfer {
+        out.push(Record::Transfer { from: 1, to: 2 });
     }
     if d.part_unload {
         out.push(Record::Part {

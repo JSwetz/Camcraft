@@ -39,6 +39,17 @@ pub enum Record {
     /// post whose machine has no feeder prints its comment and
     /// changes nothing else.
     Part { loading: bool, advance: f64 },
+    /// A part transfer (M5.3 C): the choreography step between
+    /// handlers - `from` spindle hands the part to `to` spindle
+    /// (1-based ordinals, the order the machine file states its
+    /// spindles). The general form M5.2 G.2's feeder signals were
+    /// heading to: still intent, not motion, still no geometry
+    /// rides here, and still a comment-only default - the script's
+    /// dialect turns it into whatever the machine's handoff protocol
+    /// is. Whether the machine HAS the second spindle is the
+    /// stated-what's-stated law: the program gate names it, the
+    /// engine never guesses.
+    Transfer { from: u32, to: u32 },
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -199,6 +210,7 @@ impl Record {
             }
             Record::Part { loading: true, .. } => "part load".into(),
             Record::Part { loading: false, .. } => "part unload".into(),
+            Record::Transfer { from, to } => format!("part transfer {from}→{to}"),
         }
     }
 
@@ -313,6 +325,9 @@ pub fn serialize(records: &[Record]) -> String {
                     "PART {}{adv}\n",
                     if *loading { "LOAD" } else { "UNLOAD" }
                 ));
+            }
+            Record::Transfer { from, to } => {
+                s.push_str(&format!("PART TRANSFER {from} {to}\n"));
             }
         }
     }
@@ -674,52 +689,73 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
             }
             "PART" => {
                 let dir = it.next().unwrap_or("");
-                let loading = match dir {
-                    "LOAD" => true,
-                    "UNLOAD" => false,
-                    other => {
-                        return Err(fail(format!(
-                            "PART needs LOAD or UNLOAD, found {other:?}"
-                        )))
+                if dir == "TRANSFER" {
+                    // The canonical spelling is exactly two 1-based
+                    // station numbers: `PART TRANSFER 1 2`. A missing
+                    // or non-numeric station is refused by name -
+                    // guessing which spindles a hand-edited line
+                    // meant is the silent-wrong shape.
+                    let station = |w: &str| w.parse::<u32>().ok().filter(|n| *n >= 1);
+                    let bad = |w: &str| {
+                        fail(format!("PART TRANSFER station {w:?} is not a 1-based spindle number"))
+                    };
+                    let fw = it
+                        .next()
+                        .ok_or_else(|| fail("PART TRANSFER needs FROM and TO stations".into()))?;
+                    let from = station(fw).ok_or_else(|| bad(fw))?;
+                    let tw = it
+                        .next()
+                        .ok_or_else(|| fail(format!("PART TRANSFER {from} needs its TO station")))?;
+                    let to = station(tw).ok_or_else(|| bad(tw))?;
+                    out.push(Record::Transfer { from, to });
+                } else {
+                    let loading = match dir {
+                        "LOAD" => true,
+                        "UNLOAD" => false,
+                        other => {
+                            return Err(fail(format!(
+                                "PART needs LOAD, UNLOAD or TRANSFER, found {other:?}"
+                            )))
+                        }
+                    };
+                    // One optional ADVANCE word - spaced, joined, or
+                    // keyed - carrying microns, the lattice law again.
+                    let mut advance = 0.0;
+                    if let Some(w) = it.next() {
+                        let inline = match w.split_once([':', '=']) {
+                            Some((k, v)) if k.eq_ignore_ascii_case("ADVANCE") => Some(v),
+                            Some(_) => None,
+                            None => w
+                                .strip_prefix("ADVANCE")
+                                .filter(|r| !r.is_empty())
+                                .map(|r| r as &str)
+                                .or_else(|| {
+                                    if w.eq_ignore_ascii_case("ADVANCE") {
+                                        Some("")
+                                    } else {
+                                        None
+                                    }
+                                }),
+                        };
+                        let Some(inline) = inline else {
+                            return Err(fail(format!("PART word {w:?} is not ADVANCE")));
+                        };
+                        let v = if inline.is_empty() {
+                            it.next().ok_or_else(|| fail("ADVANCE needs a value".into()))?
+                        } else {
+                            inline
+                        };
+                        // ADVANCE rides the LOAD alone - the serializer
+                        // writes it on no other line, so seeing it there
+                        // is a hand-edited stream saying something
+                        // confused; refuse by name, never drop silently.
+                        if !loading {
+                            return Err(fail("ADVANCE rides PART LOAD, not PART UNLOAD".into()));
+                        }
+                        advance = num(v).map_err(|_| fail(format!("ADVANCE {v:?}")))? / 1000.0;
                     }
-                };
-                // One optional ADVANCE word - spaced, joined, or
-                // keyed - carrying microns, the lattice law again.
-                let mut advance = 0.0;
-                if let Some(w) = it.next() {
-                    let inline = match w.split_once([':', '=']) {
-                        Some((k, v)) if k.eq_ignore_ascii_case("ADVANCE") => Some(v),
-                        Some(_) => None,
-                        None => w
-                            .strip_prefix("ADVANCE")
-                            .filter(|r| !r.is_empty())
-                            .map(|r| r as &str)
-                            .or_else(|| {
-                                if w.eq_ignore_ascii_case("ADVANCE") {
-                                    Some("")
-                                } else {
-                                    None
-                                }
-                            }),
-                    };
-                    let Some(inline) = inline else {
-                        return Err(fail(format!("PART word {w:?} is not ADVANCE")));
-                    };
-                    let v = if inline.is_empty() {
-                        it.next().ok_or_else(|| fail("ADVANCE needs a value".into()))?
-                    } else {
-                        inline
-                    };
-                    // ADVANCE rides the LOAD alone - the serializer
-                    // writes it on no other line, so seeing it there
-                    // is a hand-edited stream saying something
-                    // confused; refuse by name, never drop silently.
-                    if !loading {
-                        return Err(fail("ADVANCE rides PART LOAD, not PART UNLOAD".into()));
-                    }
-                    advance = num(v).map_err(|_| fail(format!("ADVANCE {v:?}")))? / 1000.0;
+                    out.push(Record::Part { loading, advance });
                 }
-                out.push(Record::Part { loading, advance });
             }
             other => {
                 return Err(fail(format!("unknown record {other:?}")));
