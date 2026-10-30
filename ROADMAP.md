@@ -1860,8 +1860,8 @@ Phase-5 shape law.
       M5.2's bar feeders get their general form here
 - **In-process inspection**: probe-style measurement hooks after ops,
       feeding the deviation verdict a re-run decision, not a report tail
-- **CLI**: headless project processing and regression runs
-- **Regression suite**: golden-model CI (import → generate → verify → post) with numerical tolerances
+- ✅ **CLI**: headless project processing and regression runs (stage G)
+- ✅ **Regression suite**: golden-model CI (import → generate → verify → post) with numerical tolerances (stage G)
 
 - ✅ **Incremental recompute after model changes** (stage A, commit
       d11b1e1): the per-frame staleness wall (a facets clone, a full
@@ -1996,6 +1996,30 @@ Phase-5 shape law.
       operation is stale the program gate SKIPS and says why, because
       a stale verdict about metal is worse than none (the sandbox
       shows no console, no fs, no fetch). RECOMMENDED.md, M5.3 F.
+
+- ✅ **CLI + golden-model regression suite** (stage G, this commit):
+      the batch lane gets its door - `camcraft-cli` is thin over the
+      scripting host, so every run is a `script::run` someone could
+      have typed: `script <job.js>` runs a job, `process <project.camp>
+      [-o out.nc] [--cps name|file]` runs a generated one (load,
+      generate, post, verify) and speaks the verdict as the exit code -
+      0 stood, 1 a verb or the verify report refused, 2 the command
+      line was wrong; logs and the parked answer on stdout, refusals on
+      stderr, judged by real process spawns (`tests/cli.rs`, 7). The
+      regression lane (`tests/regression_models.rs`) JUDGES NUMBERS
+      where the .nc goldens judge bytes: import a model, stock it, face
+      it, generate, run the program gate, post - and measure facets,
+      moves, millimetres, minutes and lines against goldens with a
+      micron floor on the floats and exact equality on the counts. Two
+      fixtures speak: a wavy slab generated in-code as BINARY STL (its
+      f32 read is the only quantizer, so every platform sees the same
+      vertices; 386 facets, 1342 cut mm, 1.4677 min, 54 lines) and the
+      committed `cube.stl` M1.1's acceptance has read since day one
+      (12 facets, 12 cut mm, 16 lines). Both lanes ride the CI Golden
+      step, Windows and the parity job alike. The gouge gate earned
+      its keep on the first draft: a face plane below the model's own
+      top refuses, and the fixtures went up to skim, not the gate down.
+      RECOMMENDED.md, M5.3 G.
 
 ---
 

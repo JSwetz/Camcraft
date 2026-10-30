@@ -5680,3 +5680,67 @@ doc_lazy_continuation nits from a module-doc list and two needless
 lives in the tests - fixed); goldens porcelain clean, every .nc and
 .cl byte-identical, and the keystone test measures the law directly:
 the script's post and the app's post are the same bytes.
+
+## M5.3 G - The headless door: CLI over the script host, goldens that count
+
+**Chosen: `camcraft-cli` is thin over `script::run` - the process lane
+generates the script a human would have written (`cam.load; cam.generate;
+cam.post; cam.verify`) and runs it through the same host the `script`
+lane runs.** Considered and dropped: a native command path beside the
+verbs (two dialects for one job - the project load/generate/post rules
+would drift the moment one of them got a fix), and making the CLI shell
+out to `post.exe` (a third argv to keep honest when the verb table
+already speaks post). The door parses argv and maps verdicts to exit
+codes; every world write rides a command through a real History exactly
+as in a typed job.
+
+**Chosen: the exit code is the verdict - 0 stood, 1 refused, 2 the
+command line was wrong - and with no `-o` the verify report's `ok`
+flips 0 to 1.** The scripting decision that `verify` is a question,
+never a refusal, needed a home for CI: a stale or gated job must not
+exit clean. Considered: always exit 0 and let the JSON speak (a
+`set -e` lane passes a broken program - the silent-wrong answer one
+layer up), and duplicating the gate rules in the CLI (they would
+disagree with the host on the first change to either). Logs and the
+parked answer go to stdout, refusal lines prefixed to stderr - the
+same stream law every batch lane reads.
+
+**Chosen: the regression goldens judge NUMBERS, not bytes - lengths,
+counts, minutes, with a micron floor on the floats (TOL_MM 1e-6, the
+quantization floor M4.2b already established) and exact equality on
+integers.** Considered and dropped: a third byte-golden .nc (it proves
+nothing moved and says nothing about how much a kernel shifted - and
+13 of those already guard the post lane), and pure count asserts (they
+blind the lane to the exact regressions it exists to catch: a millimetre
+of drift in the dexel, a microsecond of feed math). The suite runs the
+whole chain - import, stock, face, generate, the verification gate,
+tool-list totals, post - and refuses the measurement if the gate would
+block the program: a number over a path the gate stops is a bug, not a
+golden.
+
+**Chosen: the wavy slab is generated in code and written as BINARY STL,
+so the import door's f32 read is the only quantizer.** Considered and
+dropped: ASCII STL (the float's decimal rendering is a second
+platform-dependent surface), STEP (the tessellator's chordal tolerance
+varies with the platform's libm - the M4.2b lesson), and feeding an
+in-memory f64 mesh via `from_mesh` (it skips the import door, which is
+half the lane's point). 386 facets exact; the slab's polynomial top
+skims under the face plane at every corner.
+
+**Chosen: where the first draft was refused by the gouge gate, the
+FIXTURE moved, never the gate.** Facing a FromModel stock with the
+plane below the model's own surface cuts the part, not the stock - the
+gate said so in 34,900 cells, correctly, and the fixtures went to a box
+stock faced down to the model's maximum. Weakening a program-level
+refusal to make a test stand is the silent-wrong answer wearing a
+test's clothes; RECOMMENDED.md, M2.3 D, still governs.
+
+Gate (M5.3 G): all green on the final tree - 58 app/motion/sim binaries
+855 passed / 0 failed (846 baseline + 7 real-spawn CLI tests + the
+2-test numerical lane), 9 UI binaries 195 passed / 0 failed serial with
+CWD=crates\ui; goldens porcelain clean, every .nc and .cl
+byte-identical (the default post path is untouched); clippy -D warnings
+clean on app+ui with --all-targets (two nits fixed on the way: a manual
+`.iter().any` over stdout bytes became `.contains`, and the slab's
+9-tuple facet type got its `type Tri`). `regression_models` rides the
+CI Golden step on Windows and the parity job alike.
