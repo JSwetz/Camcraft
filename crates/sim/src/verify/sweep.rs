@@ -51,6 +51,18 @@ const POSE_FRACS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 /// same-band verdict is spoken, and this law exists for what (c)
 /// finds clean. One [`Warning::SweepHit`] per move; part material
 /// outranks stock, like (c)'s worst-offender rule.
+///
+/// The three column laws (`in_stock`, `surface`, `part_at`) are pure
+/// functions of the sample column alone - the cut list, the island
+/// slices and the stock are fixed for the whole path - so their
+/// answers ride a memo keyed by the column's exact bits, built once
+/// per path and read by every move's `swing_hit`. Without it the
+/// grid's price is states x samples x PATH per move: a flowline's
+/// 800 posed moves ask the same ten-odd thousand columns forty
+/// times apiece, and the verdict spent minutes reading the same
+/// answer. The memo cannot move a verdict: it is the same float, the
+/// same bool, and the max-severity rule (part outranks stock outranks
+/// clean) does not care what order the pairs are seen in.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn mid_turn_sweeps(
     path: &Toolpath,
@@ -65,6 +77,12 @@ pub(super) fn mid_turn_sweeps(
     part_at: &dyn Fn(Point2) -> bool,
 ) -> Vec<Warning> {
     let mut warns = Vec::new();
+    // The column memo, one per path (see the module law above): a
+    // sample's (in stock, surface height, part?) truth, keyed by the
+    // column's exact bits. Eager per column seen near any move's
+    // sweep; the three laws are pure, so asking early asks the same
+    // answer the old lazy ask would have got.
+    let mut reach: std::collections::HashMap<(u64, u64), (bool, f64, bool)> = std::collections::HashMap::new();
     // The held letters, exactly as `sim::script` threads them (the
     // same modal law, the same canonical form): a path's first move
     // turns FROM home - the cross-operation swing belongs to the
@@ -82,8 +100,9 @@ pub(super) fn mid_turn_sweeps(
         if m.kind != MoveKind::Rapid
             && held != next
             && !shanked.contains(&i)
-            && let Some(part) =
-                swing_hit(m, held, next, bands, r, gouge_tol, chord_tol, samples, in_stock, surface, part_at)
+            && let Some(part) = swing_hit(
+                m, held, next, bands, r, gouge_tol, chord_tol, samples, &mut reach, in_stock, surface, part_at,
+            )
         {
             warns.push(Warning::SweepHit { at: i, part });
         }
@@ -104,7 +123,9 @@ pub(super) fn mid_turn_sweeps(
 /// far-field majority of samples is outside every disc at once. The
 /// grid's price is then 20x law (c)'s reach, not 20x its sample
 /// count - which is what lets (c3) run for the Envelope programs,
-/// where the posed kinds live.
+/// where the posed kinds live. The columns' own answers ride the
+/// path-wide `reach` memo (see [`mid_turn_sweeps`]): read once per
+/// near column, never recomputed for the other 39 states that ask.
 #[allow(clippy::too_many_arguments)]
 fn swing_hit(
     m: &Move,
@@ -115,6 +136,7 @@ fn swing_hit(
     gouge_tol: f64,
     chord_tol: f64,
     samples: &[Point2],
+    reach: &mut std::collections::HashMap<(u64, u64), (bool, f64, bool)>,
     in_stock: &dyn Fn(Point2) -> bool,
     surface: &dyn Fn(Point2) -> f64,
     part_at: &dyn Fn(Point2) -> bool,
@@ -167,19 +189,35 @@ fn swing_hit(
         .copied()
         .filter(|q| q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1)
         .collect();
+    // This move's near columns, answers read once: the memo has
+    // them, the three laws compute them on the first ask anywhere
+    // in the path. Eager for every near column where the old loop
+    // asked only after the annulus filter - legal because all three
+    // laws are pure in q, so the early ask is the same float, the
+    // same bool, the old lazy ask would have got. The state loop
+    // then costs a distance and three compares per pair whatever
+    // the column laws' own price; and reading `in_stock` before the
+    // annulus is a legal reordering of filters over one predicate
+    // set - the worst-offender max cannot see the difference.
+    let mut vals: Vec<(Point2, bool, f64, bool)> = Vec::with_capacity(near.len());
+    for q in near {
+        let k = (q.x.to_bits(), q.y.to_bits());
+        let v = *reach.entry(k).or_insert_with(|| (in_stock(q), surface(q), part_at(q)));
+        vals.push((q, v.0, v.1, v.2));
+    }
     let inner2 = (r + gouge_tol) * (r + gouge_tol);
     let mut worst = None;
     for &(pc, r2, h0) in &states {
-        for q in &near {
-            let dd = dist2_seg(*q, pc, pc);
+        for &(q, instk, zq, part) in &vals {
+            if !instk {
+                continue; // outside the stock for every state's annulus
+            }
+            let dd = dist2_seg(q, pc, pc);
             if dd > r2 || dd <= inner2 {
                 continue; // outside this band's annulus
             }
-            if !in_stock(*q) {
-                continue;
-            }
-            if h0 < surface(*q) {
-                if part_at(*q) {
+            if h0 < zq {
+                if part {
                     return Some(true); // report the worst offender
                 }
                 worst = Some(false);
