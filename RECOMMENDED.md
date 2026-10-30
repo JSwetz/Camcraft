@@ -5316,3 +5316,67 @@ byte-stability lanes (the salt rename shifted no golden - digests ride
 stamps, not files). `operations` (app) needs ~490 s fully parallel, over
 the old 240 s batch window: contention, not regression - solo rerun
 green; worth remembering when batching ladders.
+
+## M5.3 B - Threaded generation: the seam where the world goes out of scope
+
+**Chosen: a collect/run split with the type system as the law, over any
+form of shared-world threading.** `&World` is `!Send` (a flecs design
+fact, not an accident), so "generate on worker threads" had three
+shapes: hand the world around as a read lock (flecs forbids it, and it
+would serialize every read site anyway - the parallelism would be a
+lie); clone the world per worker (a memory fork, and "which clone is
+newer" has no honest answer); or read the world ONCE on the caller's
+thread, pack the answers into an owned `Send` job, and generate from
+the job. Third one. `GenJob` cannot smuggle a live read because it
+cannot hold a reference - if it compiles, the collect phase provably
+saw everything. `generate = run_job(collect_job(..)?)` keeps the
+one-op road byte-for-byte the old behavior, which is why the entire
+existing suite passed untouched over the new code path.
+
+**rayon, new to the workspace, for the batch finish.** Chosen over a
+hand-rolled pool with join handles: `into_par_iter().collect()`
+preserves input order, so `parts` comes out in tree order exactly as
+the sequential loop wrote it, and work-stealing plus panic propagation
+are not ours to get wrong. The batch law - the reason ordering was
+worth a sentence: constructors only READ, so a batch's world is frozen
+for the whole run and running jobs in any order, or in parallel,
+cannot change what "before" means. The new test
+`threaded_batch_matches_the_serial_loop_bit_for_bit` runs a three-op
+stale program both roads over one model revision and asserts paths,
+warnings and stamps equal per operation - the law as a gate, not a
+comment.
+
+**Error precedence rides positionally, not by cloning.** `GenError` is
+not `Clone` by design, so each arm-scoped world read
+(`section_z_of`, the picked region, the contour selection pair, the
+drive chains, the re-machining mask) is taken at its generation-time
+call site during `collect_job` and rides the job as a stored
+`Option<Result<_, GenError>>`; `run_job` consumes it with `.take()` at
+the exact statement the live call used to make. The `??` law: one `?`
+unwraps the Option-tripwire layer, the second the arm's own answer -
+and `unreached()` names itself rather than cutting a silent shadow if
+the call structure ever drifts. A stored error therefore surfaces
+exactly where the serial path surfaced it, same precedence, without
+any error type growing a clone.
+
+**The re-machining mask is `Arc<PriorState>`, and `region_for_src`
+retired.** A Dexel height field is big and borrowed anyway - `prior_state`
+resolves once on the collect thread and every worker shares it by Arc.
+`region_for_src` no longer exists: its selection guard and tilt lock now
+live in `collect_job` (where they decide WHICH precomputes to run), and
+its world-free dispatch in `region_for_job` - `region_core` unchanged
+underneath. Noted honestly: the preview path (`region_of`) keeps its own
+inline selection arm with a different kind-exclusion list; that
+preview/generate divergence predates this stage and was not touched.
+The skipped-list order has one documented deviation: staging failures
+surface before run failures, while the old loop reported in pure tree
+order - the SET of skipped names is identical, and no test or UI path
+depends on the list's order.
+
+**Goldens stayed byte-identical because the parallelism is BETWEEN
+operations, never inside one.** The per-kind kernels were not touched at
+all; clippy's `type_complexity` on the new job field was resolved by
+widening `selection.rs`'s existing `SelectionGeometry` alias to
+`pub(super)` and reusing it - one name for the tuple, no second spelling
+to drift. Gate: full app/ui ladder green (290+ tests), both clippy lanes
+clean, `git status crates/app/tests/golden` empty.

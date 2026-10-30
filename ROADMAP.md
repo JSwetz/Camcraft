@@ -1880,8 +1880,27 @@ Phase-5 shape law.
       M4.3 residues went with it (`hsmw-signature-v1` ->
       `camcraft-signature-v2`, one-time honest Stale per precedent; six
       test temp names); every .nc/.cl golden byte-identical.
-      RECOMMENDED.md, M5.3 A. The bullet's other half - threaded
-      generation - is stage B.
+      RECOMMENDED.md, M5.3 A.
+
+- ✅ **Threaded toolpath generation** (stage B, commit ab3809d):
+      generation gets its world-free seam - `collect_job` reads the
+      world once exactly as `generate` always has and packs the answers
+      into a `Send` `GenJob` of plain owned data (`&World` is `!Send`,
+      so the type system is the law: a job that compiles cannot
+      smuggle a live read onto a worker thread); `run_job` builds the
+      verified path without ever naming a `World`, and
+      `generate = run_job(collect_job(..)?)` keeps the one-op road
+      byte-for-byte the old behavior. `RegenerateAll` stages stale ops
+      serially - error precedence rides positionally, stored `Result`s
+      taken at each arm's exact statement (`GenError` is not `Clone`) -
+      then finishes on rayon with an ordered `collect`, parts in tree
+      order. Constructors only read, so a batch's world is frozen and
+      parallelism cannot change what "before" means: tested as a law,
+      `threaded_batch_matches_the_serial_loop_bit_for_bit` (paths,
+      warnings, stamps equal both roads). Re-machining masks ride as
+      `Arc<PriorState>` (a dexel field borrowed, never cloned);
+      `region_for_src` retires into the seam. Kernels untouched - every
+      .nc and .cl golden byte-identical. RECOMMENDED.md, M5.3 B.
 
 ---
 
