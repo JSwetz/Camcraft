@@ -5432,3 +5432,95 @@ one regenerate and they are fresh. Gate: 380 tests green across
 post/app/ui (post crate on the ladder for the first time since the
 split), clippy `-D warnings` clean on all three, all goldens
 byte-identical.
+
+## M5.3 D - In-process inspection: the ask on the stream, the verdict at the post
+
+**Chosen: the deviation verdict lives at the POST, composing every
+blade leg of the program into the final cut and measuring it under the
+strictest authored ask.** The alternatives, in the order they died: a
+per-op max-deviation riding the cached path - rejected on paper, it
+over-convicts rough+finish programs, because a rough's left floor is
+removed by the finish the probe never sees as absent; a dexel
+deviation read (v1) - rejected as the wrong venue, the program-sim
+grid is a verification layer whose Z-height field is blind to a
+lathe's meridian; the same-op scan at generation (v2) - rejected BY
+MEASUREMENT, the cutoff-kerf law makes a clean parting measure
+exactly zero deviation, so the verdict was never true, it was
+vacuous. The composed final-part scan (v3) is where the three died
+into: the boxcar-min union the M5.2 C scan already makes of one op's
+passes, now of the program's - and leave zero BY CONSTRUCTION, because
+a roughing promise is what the PROMISE forgives, never the part. The
+honesty test that killed the per-op design is now the tests'
+strongest pair: the same rough-leave that REFUSES the post alone
+POSTS silently once a finish answers for it.
+
+**The stream voices the ask, the gate makes the decision, and nothing
+new rides the cache.** Record::Probe <-> `PROBE <um>` <-> onProbe <->
+Dump.probe_tol: intent, the same grammar as the loader family, the
+measurement protocol itself staying the script's dialect. No
+Toolpath.dev, no PathDto field, no schema change - the verdict is a
+derived read over the program's truth (the cached paths, exactly what
+program_ops validated) and lives where the program's derived reads
+live: verification_gate. The gate speaks problem STRINGS like the
+gouge and fixture lines do; v2's Warning::Probe was reverted, the enum
+being a file-format contract (project v3 cache warnings), and a
+variant added only to be netted into one gate line is a type paying
+rent for a sentence.
+
+**The choreography is LOAD..cut..PROBE..TRANSFER..UNLOAD** - the
+measure sits after the last cut and before the hands move the part,
+which is where a real probe touches it. The number IS the switch:
+0 asks nothing and costs nothing (silence buys out of the scan
+entirely), and the budget rides the stamp like every post-visible
+signal, so editing it stales the op though no geometry reads it.
+The door floors a nonzero ask at 0.1 um - the world's best machines
+- and the budget also chords the scan that judges it (a quarter per
+sample edge), so a sub-floor ask was never authorable in the first
+place.
+
+**Jurisdiction: the boxcar-blade family only - Part, GrooveRough,
+GrooveFinish.** The threading's V and the forming's crown compose
+floors the same scanner reads (their Floor variants stand beside the
+blades in the lattice), but no ask rides them yet: honest silence
+beats half-measurement, and the ask is authored on the Part because
+parting is where a lathe program handles the finished part. No
+machine-file clause: a `.mch` states nothing about probes, and the
+unstated-limit law says an unstated limit checks nothing - what is
+judged here is deviation, not hardware.
+
+**Blame is composed, not global**: the scan's `at` index rides the
+program's move space, so the verdict names the guilty leg and its own
+move number, the asker, and the act (re-run the named op, or run the
+pass that takes the steel off) - and the tie-break keeps the smaller
+`at`, the earlier op, because when two passes promise the same
+station the first one is the story. `BandMove.half` made the
+per-move blade width explicit for this: single-tool scans store the
+same number on every move (their law byte-identical, every existing
+verdict unchanged) and the composed scan lets each leg keep its own
+width.
+
+**The gate's timing law, bought at this stage.** flow5d's debug run
+measured ~426 s and the gate's first pass read it as a silent
+deadlock. It never hung - generation completes in seconds; the time
+was sim verify, ~400 s of it, and a per-law lap-timing bisect named
+the thief: law (c3)'s mid-turn sweep re-asked the three pure column
+laws (`in_stock`, `surface`, `part_at`) at every (state, sample)
+pair - 800 posed moves x 40 sweep states x the flow path's
+tens-of-thousands of per-plane island samples, every re-ask the same
+answer to the same question. Committed apart (6f9d453): one memo per
+path, keyed by the column's exact bits; the max-severity verdict
+cannot see the reordering, and 407 s became 1.5 s. Two rules come
+out of it, as law: a test that "hangs" gets TIMED, not assumed - the
+Prime Directive's slow-but-refused road runs through the ladder
+fitting its budget (~5 min debug, AGENTS), so a slow test is a bug
+to fix, never a lane to cut; and a suite timeout must exceed the
+slowest single test's measured wall on the machine it gates - when
+the same binary passes at one patience and fails at another, the
+suspect is the timeout, not the code.
+
+Gate (M5.3 D): two independent ladder runs, all green - 37 rebuilt
+test binaries 793 passed / 0 failed / 28 ignored, and every fresh
+binary across app/motion/post/sim/ui likewise 0 failed; clippy
+-D warnings clean on the five touched crates; goldens porcelain
+clean, the .nc and .cl sets byte-identical; flow5d's debug wall
+426 s -> 19.5 s, the operations suite 460+ s -> 68.5 s.

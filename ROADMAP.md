@@ -146,7 +146,7 @@ home.
 | Part loading | ✅ | M5.2 G.2 (bar feeder events on the stream; see RECOMMENDED) |
 | Part unloading | ✅ | M5.2 G.2 (bar feeder events on the stream; see RECOMMENDED) |
 | Part transfer | ✅ | M5.3 C (the handoff intent on the stream; see RECOMMENDED) |
-| Part inspection | 📋 | M5.3 (automation) |
+| Part inspection | ✅ | M5.3 D (the PROBE ask on the stream, the composed verdict at the post; see RECOMMENDED) |
 
 ---
 
@@ -1925,6 +1925,32 @@ Phase-5 shape law.
       transfer on a machine stating fewer than two spindles - naming
       the op, the machine and the count. The flag rides the stamp like
       every post-visible signal. RECOMMENDED.md, M5.3 C.
+
+- ✅ **In-process inspection: the ask on the stream, the verdict at the
+      post** (stage D, commit 4cb29c6): `inspect_tol` joins the Part op's
+      signal family - a `PROBE <um>` intent on the stream (the number IS
+      the switch, silence is free, the protocol the probe speaks staying
+      the script's dialect through `onProbe` and its `Tolerance`
+      property) - and the re-run decision lives where the program's
+      truth is: the post's verification gate. The part is what the
+      program's blades cut TOGETHER, so `operation::probe_problems`
+      composes every blade leg of the asked part (Part, GrooveRough,
+      GrooveFinish, the stock-sourced ones pinned through their setup)
+      into one meridian scan - `revolve::blade_program_warnings`, the
+      M5.2 C boxcar-min law run across the PROGRAM - leaves zero BY
+      CONSTRUCTION (a roughing promise is what the PROMISE forgives,
+      never the part), and measures under the strictest authored ask. A
+      rough that posts silently on its promise refuses by named asker,
+      named leg, named move and millimetres the moment its answering
+      finish never comes; the same leave posts once the finish answers
+      for it - the tests' strongest pair. A composed part the judge
+      cannot frame, or an ask split across two parts, refuses rather
+      than reporting silence; the door floors a nonzero ask at 0.1 um,
+      where the world's best machines measure. `BandMove.half` carries
+      each move's blade width so the single-tool scans keep their exact
+      verdicts and the composed one lets every leg keep its own. No
+      cache field, no schema change: the verdict is a derived read, like
+      the gouge and fixture lines. RECOMMENDED.md, M5.3 D.
 
 ---
 
