@@ -1,13 +1,16 @@
 //! Split from `stock_sim.rs` by M5.0.1; structure only.
 
 use super::kernel::{MAX_CELLS_PER_AXIS, StockError};
+use super::tiles::{Tile, TILE};
 
 use crate::cl::{Move, MoveKind};
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
 /// The height field: material top per cell, row-major from (`x0`, `y0`)
 /// at the lower-left corner, cell centers at `x0 + (i + 0.5) * cell`.
-#[derive(Clone, Debug, PartialEq)]
+/// The storage is tiled (M5.3 E2, see `tiles`): `top_at(k)` answers
+/// what the dense `Vec` used to hold at `top[k]`, value for value.
+#[derive(Clone, Debug)]
 pub struct Dexel {
     pub x0: f64,
     pub y0: f64,
@@ -18,8 +21,11 @@ pub struct Dexel {
     /// here, so a column's removed depth is one subtraction, not a
     /// history.
     pub stock_z: f64,
-    /// Top of the material standing at each column.
-    pub top: Vec<f64>,
+    /// Top of the material standing at each column, in `TILE`-squared
+    /// boxes: `None` is "every cell at `stock_z`", a cut tile carries
+    /// its own cells (the `tiles` module owns the representation and
+    /// every law that reads or writes it).
+    pub(super) tiles: Vec<Option<Tile>>,
 }
 
 impl Dexel {
@@ -47,7 +53,7 @@ impl Dexel {
             nx,
             ny,
             stock_z: top_z,
-            top: vec![top_z; nx * ny],
+            tiles: vec![None; nx.div_ceil(TILE) * ny.div_ceil(TILE)],
         })
     }
 
@@ -106,10 +112,7 @@ impl Dexel {
                 let za = a.z + (b.z - a.z) * t0;
                 let zb = a.z + (b.z - a.z) * t1;
                 let cut = za.min(zb);
-                let k = ix + iy * self.nx;
-                if cut < self.top[k] {
-                    self.top[k] = cut;
-                }
+                self.lower(ix + iy * self.nx, cut);
             }
         }
     }
@@ -182,10 +185,7 @@ impl Dexel {
                         }
                     }
                 }
-                let col = ix + iy * self.nx;
-                if cut < self.top[col] {
-                    self.top[col] = cut;
-                }
+                self.lower(ix + iy * self.nx, cut);
             }
         }
     }
@@ -265,7 +265,7 @@ impl Dexel {
         for iy in 0..self.ny {
             let mut run: Option<usize> = None;
             for ix in 0..=self.nx {
-                let over = ix < self.nx && self.top[ix + iy * self.nx] > z;
+                let over = ix < self.nx && self.top_at(ix + iy * self.nx) > z;
                 match (run, over) {
                     (None, true) => run = Some(ix),
                     (Some(a), false) => {

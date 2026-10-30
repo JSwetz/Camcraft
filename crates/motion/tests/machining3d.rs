@@ -850,7 +850,7 @@ fn a_prev_mask_only_ever_removes_cuts() {
         for ix in 0..mask.nx {
             let x = mask.x0 + (ix as f64 + 0.5) * mask.cell;
             if x < 0.0 {
-                mask.top[iy * mask.nx + ix] = -10.0;
+                mask.set(iy * mask.nx + ix, -10.0);
             }
         }
     }

@@ -61,7 +61,7 @@ pub(super) fn engagement(dex: &Dexel, from: Point2, to: Point2, z: f64, r: f64) 
             );
             total += 1;
             if let Some(i) = dex.col(q)
-                && dex.top[i] > z + EPS
+                && dex.top_at(i) > z + EPS
             {
                 hit += 1;
             }
@@ -181,9 +181,9 @@ pub(super) fn sim_of(
     let cell = (p.tool_diameter * 0.5).min(p.tiling_step() * 0.5);
     let mut dex = Dexel::block(lo.x, lo.y, hi.x, hi.y, p.top_z, cell)?;
     let part = stock_sim::part_surface(facets, dex.x0, dex.y0, dex.cell, dex.nx, dex.ny);
-    for (t, &pt) in dex.top.iter_mut().zip(&part) {
-        if pt > *t {
-            *t = pt;
+    for (k, &pt) in part.iter().enumerate() {
+        if pt > dex.top_at(k) {
+            dex.set(k, pt);
         }
     }
     Ok((dex, part))

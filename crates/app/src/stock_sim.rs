@@ -80,11 +80,7 @@ pub fn stock_grid(
             d.x0 += loc.pos.x;
             d.y0 += loc.pos.y;
             d.stock_z += loc.pos.z;
-            for t in &mut d.top {
-                if t.is_finite() {
-                    *t += loc.pos.z;
-                }
-            }
+            d.translate_finite(loc.pos.z); // stored heights ride with it
             d
         }
     };
@@ -239,10 +235,10 @@ fn clip_to_setup_stock(
         for ix in 0..dex.nx {
             let q = dex.center(ix, iy);
             let Some(k) = nd.col(q) else { continue };
-            let t = nd.top[k];
+            let t = nd.top_at(k);
             let i = ix + iy * dex.nx;
-            if t.is_finite() && t < dex.top[i] {
-                dex.top[i] = t;
+            if t.is_finite() {
+                dex.lower(i, t);
             }
         }
     }
@@ -277,9 +273,9 @@ mod tests {
                     100.0
                 };
                 assert!(
-                    (dex.top[ix + iy * dex.nx] - want).abs() <= 1e-12,
+                    (dex.top_at(ix + iy * dex.nx) - want).abs() <= 1e-12,
                     "cell {q:?} d={d}: got {}, want {want}",
-                    dex.top[ix + iy * dex.nx]
+                    dex.top_at(ix + iy * dex.nx)
                 );
             }
         }
@@ -299,11 +295,11 @@ mod tests {
         let u = 21.0 / 449.0f64.sqrt();
         let want = 5.0 + 7.0 * (10.0 - u) / 20.0 - 20.0 * u / 7.0;
         assert!(
-            (dex.top[k] - want).abs() <= 1e-9,
+            (dex.top_at(k) - want).abs() <= 1e-9,
             "got {}, want {want} (t_c-only would say 5.5)",
-            dex.top[k]
+            dex.top_at(k)
         );
-        assert!(dex.top[k] < 5.5 - 0.05, "the quadratic root never ran");
+        assert!(dex.top_at(k) < 5.5 - 0.05, "the quadratic root never ran");
     }
 
     #[test]
@@ -316,9 +312,9 @@ mod tests {
         let k = dex.col(Point2::new(0.0, 0.75)).unwrap();
         let want = 5.0 - (9.0f64 - 0.75 * 0.75).sqrt();
         assert!(
-            (dex.top[k] - want).abs() <= 1e-12,
+            (dex.top_at(k) - want).abs() <= 1e-12,
             "got {}, want {want}",
-            dex.top[k]
+            dex.top_at(k)
         );
     }
 
@@ -334,7 +330,7 @@ mod tests {
                 let q = dex.center(ix, iy);
                 let touched = q.x.abs() <= 10.0 + 3.0 && q.y.abs() <= 3.0;
                 if !touched {
-                    assert_eq!(dex.top[ix + iy * dex.nx], 7.0, "phantom cut at {q:?}");
+                    assert_eq!(dex.top_at(ix + iy * dex.nx), 7.0, "phantom cut at {q:?}");
                 }
             }
         }
@@ -356,7 +352,7 @@ mod tests {
         dex.cut_ball(p3(0.0, 0.0, f64::NAN), p3(1.0, 0.0, 0.0), 2.0);
         dex.cut_ball(p3(0.0, 0.0, 1.0), p3(1.0, 0.0, 1.0), f64::INFINITY);
         dex.cut_chord(p3(0.0, 0.0, 1.0), p3(f64::NAN, 0.0, 1.0), 2.0);
-        assert!(dex.top.iter().all(|&v| v == 9.0), "garbage cut something");
+        assert!(dex.tops().all(|v| v == 9.0), "garbage cut something");
     }
 
     #[test]

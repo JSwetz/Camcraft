@@ -59,6 +59,7 @@ mod deviate;
 mod gouge;
 mod kernel;
 mod scan;
+mod tiles;
 
 pub use cut::{auto_cell, simulate, SimOp};
 pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSurface};

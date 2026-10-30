@@ -62,14 +62,10 @@ impl Dexel {
                     *height,
                     cell,
                 )?;
-                for iy in 0..dex.ny {
-                    for ix in 0..dex.nx {
-                        let c = dex.center(ix, iy);
-                        if c.x.hypot(c.y) > *diameter / 2.0 {
-                            dex.top[ix + iy * dex.nx] = f64::NEG_INFINITY;
-                        }
-                    }
-                }
+                // Tile-aware air (M5.3 E2): the same `hypot` cell law
+                // on the ring the circle crosses, one number for the
+                // tiles wholly outside it.
+                dex.air_outside_circle(*diameter / 2.0);
                 Ok(dex)
             }
             S::FromModel { .. } => Err(StockError::Invalid(
@@ -114,15 +110,18 @@ impl Dexel {
                 "grid would be {nx}x{ny} cells; at most {MAX_CELLS_PER_AXIS} per axis"
             )));
         }
-        Ok(Dexel {
+        // The mesh's own surface, wrapped into tiles: most of a
+        // model's bounding box is air or full height, and those runs
+        // cost one number each, not a cell apiece (M5.3 E2).
+        Ok(Dexel::from_grid(
             x0,
             y0,
             cell,
             nx,
             ny,
-            stock_z: if bz1.is_finite() { bz1 } else { 0.0 },
-            top: part_surface(facets, x0, y0, cell, nx, ny),
-        })
+            if bz1.is_finite() { bz1 } else { 0.0 },
+            part_surface(facets, x0, y0, cell, nx, ny),
+        ))
     }
 }
 

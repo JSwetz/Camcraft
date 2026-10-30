@@ -66,7 +66,7 @@ pub fn deviate(dex: &Dexel, facets: &[Triangle], tol: f64) -> Result<Deviation, 
     for iy in 0..dex.ny {
         for ix in 0..dex.nx {
             let k = ix + iy * dex.nx;
-            let (sim, p) = (dex.top[k], part[k]);
+            let (sim, p) = (dex.top_at(k), part[k]);
             if !(sim.is_finite() && p.is_finite()) {
                 continue; // NaN stays: no material, or nothing to judge against
             }
@@ -142,7 +142,7 @@ impl Dexel {
     /// missing reads as class 0 - the surface never invents a verdict.
     #[must_use]
     pub fn surface(&self, classes: &[f32]) -> SimSurface {
-        let at = |ix: usize, iy: usize| -> f64 { self.top[ix + iy * self.nx] };
+        let at = |ix: usize, iy: usize| -> f64 { self.top_at(ix + iy * self.nx) };
         let cls = |ix: usize, iy: usize| -> f32 {
             classes.get(ix + iy * self.nx).copied().unwrap_or(0.0)
         };

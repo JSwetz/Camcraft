@@ -103,7 +103,7 @@ pub fn measure(dex: &Dexel, part: &[f64], footprint: &Region, tol: f64) -> Stock
             if !footprint.contains(dex.center(ix, iy)) {
                 continue;
             }
-            let sim = dex.top[k];
+            let sim = dex.top_at(k);
             let ptop = part[k];
             if ptop.is_finite() {
                 if sim > ptop + tol {

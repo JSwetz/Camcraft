@@ -44,9 +44,10 @@ fn feed(from: Point3, to: Point3) -> Move {
 }
 
 /// Cell `ix, iy` of a grid as a raw read - the tests inspect the field
-/// directly because the field IS the law (one number per column).
+/// directly because the field IS the law (one number per column; the
+/// tiles that store it are an economy, never a different answer).
 fn top_of(d: &Dexel, ix: usize, iy: usize) -> f64 {
-    d.top[ix + iy * d.nx]
+    d.top_at(ix + iy * d.nx)
 }
 
 #[test]
@@ -89,7 +90,7 @@ fn an_oblique_chord_cuts_the_reach_interval_not_the_endpoints() {
     assert!(near(top_of(&d, 2, 4), 10.0), "(5,4) never felt the tool");
     // The plunge end of the interval is what counts, not where the
     // segment ends: nothing dips below the segment's own bottom.
-    assert!(d.top.iter().all(|&z| z >= 0.0), "never below the chord");
+    assert!(d.tops().all(|z| z >= 0.0), "never below the chord");
 }
 
 #[test]
@@ -140,7 +141,7 @@ fn arc_chords_under_sweep_so_the_sim_only_over_reports() {
         top_of(&d, 4, 0)
     );
     assert!(
-        d.top.iter().all(|&z| z >= -1.0),
+        d.tops().all(|z| z >= -1.0),
         "nothing cuts below the arc's own floor - no invented gouge"
     );
 }
@@ -419,7 +420,11 @@ fn program_chains_ops_in_order() {
     // by what the viewer will ask: the grid there reads the plunge's
     // bottom, and it is inside the swept circle.
     let gc = d.col(Point2::new(g_at.x, g_at.y)).expect("gouge in grid");
-    assert!(near(d.top[gc], 1.0), "gouge located at a column reading {}", d.top[gc]);
+    assert!(
+        near(d.top_at(gc), 1.0),
+        "gouge located at a column reading {}",
+        d.top_at(gc)
+    );
     assert!(
         (g_at.x + 2.5).hypot(g_at.y + 2.5) <= 2.0 + d.cell,
         "gouge located outside the plunge: {g_at:?}"
@@ -428,7 +433,7 @@ fn program_chains_ops_in_order() {
     // And the rapid's column: the path crossed it all the way down,
     // and the grid still reads full height.
     let kc = d.col(Point2::new(4.5, 4.5)).expect("in grid");
-    assert!(near(d.top[kc], 5.0), "a rapid cut stock");
+    assert!(near(d.top_at(kc), 5.0), "a rapid cut stock");
     // Op 3 is the pass that covers the plate end to end: rest gone,
     // the gouge still stands.
     let o3 = [feed(p(-3.2, 0.0, 2.0), p(3.2, 0.0, 2.0))];
@@ -479,9 +484,9 @@ fn the_cylinders_world_is_air_beside_the_round() {
     // the stock, real in the part, and the only honest answer there
     // is no answer.
     let far = d.col(Point2::new(4.2, 4.2)).expect("in bbox"); // center (4.25,4.25): 6.01 off-axis
-    assert!(d.top[far] == f64::NEG_INFINITY, "air beside the round was cut");
+    assert!(d.top_at(far) == f64::NEG_INFINITY, "air beside the round was cut");
     let on = d.col(Point2::new(3.0, 0.0)).expect("in grid");
-    assert!(near(d.top[on], 1.0), "in reach and in material: cut");
+    assert!(near(d.top_at(on), 1.0), "in reach and in material: cut");
     let dev = stock_sim::deviate(&d, &flat_top(2.0, 4.7), 0.01).expect("deviate");
     assert!(dev.dev[far].is_nan(), "a verdict where no stock stood");
 }
@@ -492,16 +497,19 @@ fn model_stock_stocks_the_model_itself() {
     // the mesh's own top, and degenerate meshes refuse at build.
     let mut d = Dexel::from_facets(&flat_top(5.0, 3.0), 0.5).unwrap();
     let inside = d.col(Point2::new(0.0, 0.0)).unwrap();
-    assert!(near(d.top[inside], 5.0));
+    assert!(near(d.top_at(inside), 5.0));
     let outside = d.col(Point2::new(4.0, 0.0));
-    assert!(outside.is_none() || d.top[outside.unwrap()] == f64::NEG_INFINITY, "the bbox corner was material");
+    assert!(
+        outside.is_none() || d.top_at(outside.unwrap()) == f64::NEG_INFINITY,
+        "the bbox corner was material"
+    );
     let moves = [plunge(0.0, 0.0, 1.0, 5.0)];
     stock_sim::simulate(
         &mut d,
         &[stock_sim::SimOp { moves: &moves, radius: 1.0, ball: false }],
     )
     .expect("cut");
-    assert!(near(d.top[inside], 1.0));
+    assert!(near(d.top_at(inside), 1.0));
     // Refusals, before any subtraction: empty, flat in XY, non-finite.
     assert!(Dexel::from_facets(&[], 0.5).is_err());
     let pin = vec![Triangle::new(p(1.0, 1.0, 0.0), p(1.0, 1.0, 5.0), p(1.0, 1.0, 2.0))];
@@ -585,4 +593,105 @@ fn the_sim_is_deterministic_including_its_nans() {
     let loc = |p: Option<Point3>| p.map(|q| (q.x.to_bits(), q.y.to_bits()));
     assert_eq!(loc(a.max_rest_at), loc(b.max_rest_at));
     assert_eq!(loc(a.max_gouge_at), loc(b.max_gouge_at));
+}
+
+// ---- M5.3 E2: the tiled field's laws -------------------------------
+// The tiles are an economy, not a new law: what the dense Vec
+// answered, `top_at` answers, and what the dense Vec cost, a grid
+// that was never cut must not.
+
+#[test]
+fn an_untouched_grid_costs_zero_tiles() {
+    let d = Dexel::block(-100.0, -100.0, 100.0, 100.0, 5.0, 0.5).unwrap();
+    assert_eq!(d.cells(), 400 * 400);
+    assert_eq!(d.tiles_allocated(), 0, "untouched lattice is a fact about stock_z, not 4 MiB");
+    assert!(d.tops().all(|z| near(z, 5.0)), "and every cell still answers it");
+    // Reading past the end answers NaN - never the old index panic.
+    assert!(d.top_at(d.cells() + 7).is_nan());
+}
+
+#[test]
+fn a_cut_pays_only_the_tiles_it_reaches() {
+    let mut d = Dexel::block(-100.0, -100.0, 100.0, 100.0, 5.0, 0.5).unwrap();
+    // Plunge on a corner FOUR tiles share (cell 192,192 stands at
+    // (-4,-4)): the footprint straddles all of them and no fifth.
+    let m = [plunge(-4.0, -4.0, 1.0, 2.0)];
+    stock_sim::simulate(
+        &mut d,
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false }],
+    )
+    .expect("sweep");
+    assert!(
+        d.tiles_allocated() > 0 && d.tiles_allocated() <= 4,
+        "{} tiles paid for one disc",
+        d.tiles_allocated()
+    );
+    // The values are the old ones exactly: in reach the plunge's
+    // bottom, out of reach the untouched face.
+    let at = d.col(Point2::new(-4.0, -4.0)).unwrap();
+    assert!(near(d.top_at(at), 1.0), "the plunge's own column");
+    let far = d.col(Point2::new(99.75, 99.75)).unwrap();
+    assert!(near(d.top_at(far), 5.0), "the corner of the world");
+    assert!(d.tops().all(|z| near(z, 1.0) || near(z, 5.0)), "no third answer");
+}
+
+#[test]
+fn equality_reads_values_not_bytes() {
+    let fresh = Dexel::block(-10.0, -10.0, 10.0, 10.0, 5.0, 0.5).unwrap();
+    let mut d = Dexel::block(-10.0, -10.0, 10.0, 10.0, 5.0, 0.5).unwrap();
+    // The cut law at the face: lowering to the height that already
+    // stands touches nothing - the tile stays the fact it was.
+    let m = [plunge(0.0, 0.0, 5.0, 6.0)];
+    stock_sim::simulate(
+        &mut d,
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false }],
+    )
+    .expect("sweep");
+    assert_eq!(d.tiles_allocated(), 0, "a cut to the standing height is not a cut");
+    assert_eq!(d, fresh, "equal grids answer equal numbers");
+    // And the fill law un-cuts everything back into nothing:
+    let m = [plunge(0.0, 0.0, 1.0, 2.0)];
+    stock_sim::simulate(
+        &mut d,
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false }],
+    )
+    .expect("cut");
+    assert!(d.tiles_allocated() > 0, "a real cut paid a real tile");
+    d.fill(5.0);
+    assert_eq!(d.tiles_allocated(), 0, "fill to the stock face is representable as nothing");
+    assert_eq!(d, fresh);
+}
+
+#[test]
+fn the_cylinder_masks_air_by_tiles() {
+    let d = Dexel::from_shape(
+        &camcraft_sim::stock::StockShape::Cylinder { diameter: 100.0, height: 5.0 },
+        0.5,
+    )
+    .unwrap();
+    // 200x200 cells = 16 tiles: the round's core answers height, the
+    // world beside it answers air, and the tile wholly inside the
+    // circle proves the wholly-material law costs nothing.
+    let core = d.col(Point2::new(0.0, 0.0)).unwrap();
+    assert!(near(d.top_at(core), 5.0));
+    let corner = d.col(Point2::new(49.9, 49.9)).unwrap(); // 70.6 off-axis
+    assert!(d.top_at(corner) == f64::NEG_INFINITY, "the bbox corner stands as material");
+    assert!(d.tiles_allocated() < 16, "the middle tile was never even written");
+    // The ring keeps the old hypot law: first air out, last material
+    // in, cell centers strictly past the radius are air.
+    let just_in = d.col(Point2::new(49.75, 0.0)).unwrap(); // center 49.75
+    assert!(near(d.top_at(just_in), 5.0), "49.75 stands inside the 50.0 round");
+}
+
+#[test]
+fn model_stock_collapses_uniform_runs() {
+    let d = Dexel::from_facets(&flat_top(5.0, 40.0), 0.5).unwrap();
+    // 162x162 cells = 9 tiles over a flat square: the mesh's own top
+    // everywhere the facets cover, air in the margin ring - and the
+    // wholly-material middle collapses to nothing at all.
+    let core = d.col(Point2::new(0.0, 0.0)).unwrap();
+    assert!(near(d.top_at(core), 5.0), "the mesh's top stands");
+    let air = d.col(Point2::new(-40.4, -40.4)).unwrap(); // margin cell
+    assert!(d.top_at(air) == f64::NEG_INFINITY, "the margin is air");
+    assert!(d.tiles_allocated() < 9, "the mesh's own face costs no per-cell memory");
 }
