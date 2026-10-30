@@ -5599,3 +5599,84 @@ nits caught and fixed on the way: the NaN-preserving `partial_cmp`
 rewrite of `!(z < cur)`, `slice::fill` in `fill`,
 `needless_range_loop` in the feed zip); goldens porcelain clean, all
 13 .nc and every .cl byte-identical.
+
+## M5.3 F - Scripting API: one verb table, two faces, JSON at the edge
+
+**Chosen: one host door, `__cam_call(name, argsJson)`, with the `cam`
+object a shim the VERBS table writes - and `cam.d.ts` generated from
+the same table, drift-tested.** The alternatives: register each verb
+as its own boa native function (dropped - boa 0.21's
+`JsObject::insert` is pub(crate), so a built object cannot be handed
+out under a name without a second path through the engine, and two
+paths is where drift lives); a hand-typed `cam.d.ts` (dropped - it
+rots the first time a verb's arity moves). The generator is ~10 lines
+and one test; the law "a script can never see a method the header
+does not name, nor a header line the runtime does not back" is then
+structural, not a convention someone remembers.
+
+**Chosen: the bridge across boa's edge is JSON text, and the closure
+captures one raw pointer.** boa's host closures cannot soundly
+capture an environment (only `Copy` captures are allowed, and `Env`
+holds a World - neither `Copy` nor GC-traceable), so the pointer
+stands in for the capture and every value crosses as serialized text,
+never as a `JsValue` handle. The pointer's validity is an ownership
+order, stated where it is constructed: `run` declares the
+`Rc<RefCell<Env>>` before the `Context`, so the context and every
+function inside it drop first. A leak-free alternative (thread-local
+env stack) was considered and dropped: it works, but it hides the
+lifetime behind a global and buys nothing a batch process needs.
+Re-entrance (a verb calling back into JS mid-call) would break the
+`RefCell` law, so it is refused by name in the dispatcher rather than
+panicked - and nothing does it today.
+
+**Chosen: refusals are recorded by the HOST, even when the script
+catches them.** The dispatcher pushes `"{verb}: {reason}" into the
+run's errors before it throws the catchable Error, so
+`try { cam.operations("extra") } catch (e) {}` still exits nonzero
+with a record. The alternative - errors are the script's problem
+once caught - is what a JS runtime does and what a batch CI must
+never do: a job that swallowed its failures is not a clean job. The
+arity check rides the same road (it happens inside the borrow, so it
+lands in `errors` too - the first version checked before borrowing,
+and the law test caught it).
+
+**Chosen: `verify` is a question, never a refusal - and the program
+gate SKIPS while any operation is stale.** A stale document cannot be
+judged (the gate would speak of paths older than the inputs), but the
+script must still be able to ASK, so the answer is
+`{ok: false, gate: {skipped: "why"}}`, never an Error - and
+`check()` is `verify()` with the whole document, one judgment spelled
+two ways by one body. `generate()` mirrors the app's two buttons
+exactly: unnamed = every Never/Stale operation (what RegenerateAll
+stages), named = force-regenerate whatever the status (what the
+Generate button does); each rides its own `GenerateOperation`
+command, so a mid-run refusal names the operation and leaves the
+generations before it real and undoable.
+
+**Chosen: the engine is the post's engine - one workspace-pinned boa
+0.21.1 for both sandboxes.** Considered and dropped: a second engine
+for scripts (rquickjs/QuickJS - a second memory-safety surface to
+audit for zero capability we lack), and Node-with-a-bridge (a process
+that cannot ship in the portable zip). The pin moved to
+`workspace.dependencies` with a comment naming both consumers, so an
+upgrade is one line checked twice. The sandbox law is airtight for
+free in 0.21: there is no `console` builtin at all, and the four
+`typeof` probes (console, fetch, require, the env pointer) read
+"undefined" as tests - the only door is the verb table.
+
+**Deferred: callback-shaped verbs** (`cam.verify({probe: fn})`,
+per-operation JS hooks). Mid-verb re-entrance into JS while the host
+holds the `RefCell` borrow is exactly what the dispatcher refuses by
+name; a real use case would redesign the park/pull surface, not bolt
+a second door onto the one. The parked `result()` covers the shapes
+the chain cannot carry.
+
+Gate (M5.3 F): all green on the final tree - 53 rebuilt app/motion/
+sim binaries 846 passed / 0 failed (830 baseline + the 16-test law
+suite `crates/app/tests/scripting.rs`), 9 UI binaries 195 passed / 0
+failed serial with CWD=crates\ui; clippy -D warnings clean on
+app+post with --tests (the first pass carried five
+doc_lazy_continuation nits from a module-doc list and two needless
+lives in the tests - fixed); goldens porcelain clean, every .nc and
+.cl byte-identical, and the keystone test measures the law directly:
+the script's post and the app's post are the same bytes.

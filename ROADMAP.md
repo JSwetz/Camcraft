@@ -1975,6 +1975,28 @@ Phase-5 shape law.
       not a reproducible witness). 30M-facet import ceiling, 4 GiB
       file door; all 13 .nc goldens byte-identical.
 
+- ✅ **Scripting API: the job-script host** (stage F, commit eec07c2):
+      the batch lane's door - `app::script` runs a JS job against a
+      fresh world, and every `cam` verb (load, save, import,
+      operations, generate, verify, post, report, check, result, log)
+      rides a real command through a real History, so the Prime
+      Directive keeps one shape everywhere and the law is MEASURED: a
+      script's post is the app's post byte for byte. One engine - the
+      workspace-pinned boa the post already runs, nothing adapted from
+      any vendor's scripting surface - with one host door
+      (`__cam_call(name, argsJson)`) crossing as JSON text both ways,
+      because boa's closures cannot soundly capture an `Env`: the
+      bridge carries one raw pointer, valid by ownership order. The
+      `cam` object AND `cam.d.ts` are generated from the same VERBS
+      table, and a drift test refuses a typed surface the runtime
+      does not back. What a refusal looks like: a catchable Error
+      whose text names the reason, recorded in the run's errors even
+      when swallowed - a job that caught its failures is not a clean
+      job. `verify` is a question, never a refusal: while any
+      operation is stale the program gate SKIPS and says why, because
+      a stale verdict about metal is worse than none (the sandbox
+      shows no console, no fs, no fetch). RECOMMENDED.md, M5.3 F.
+
 ---
 
 ## Phase 6 — UI refactoring.
