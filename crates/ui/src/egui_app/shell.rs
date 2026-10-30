@@ -45,11 +45,13 @@ use super::viewcube;
 use super::world;
 
 const VIEW3D_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-/// Ribbon strip height: imgui's `height()` formula - `2*PAD_V + cell_h +
-/// 5 + line` = 8 + 35 + 5 + 13. Since M-g the cells are that formula's
-/// real size (icon 20 over the label at +22, captions at top+44), where
-/// the pre-icon spike squeezed them into 49.
-pub(crate) const RIBBON_H: f32 = 61.0;
+/// Ribbon strip height: the cell box plus the caption row and the pad
+/// (`theme::ribbon_h` = `cell_h + 26`), imgui's `height()` formula restated
+/// as one derivation off the token - 61 at the dark defaults. The panel
+/// sizes it live from `theme::current()`; this const is the test fixture's
+/// number (a theme that grows the cells grows the ribbon with it).
+#[cfg(test)]
+pub(crate) const RIBBON_H: f32 = theme::ribbon_h(&theme::Tokens::DARK);
 /// Status strip height (imgui's single-line bottom bar).
 const STATUS_H: f32 = 22.0;
 
@@ -531,17 +533,21 @@ pub(crate) fn shell_layout(
     // chip hovers then own it until the pointer moves on.
     state.geo_hover = None;
     panes::shortcuts(ui, state);
+    // The live theme, read once per pass: the strips and every pane below
+    // share one token table, so the widget path and the painted ink cannot
+    // disagree on a retheme (M6.1 A). `ribbon_h` tracks the cell box.
+    let pal = theme::current();
     egui::Panel::top("ribbon")
         .frame(egui::Frame::NONE)
-        .exact_size(RIBBON_H)
+        .exact_size(theme::ribbon_h(&pal))
         .show(ui, |ui| {
-            panes::ribbon(ui, &mut *state, &theme::Palette::DARK, icons);
+            panes::ribbon(ui, &mut *state, &pal, icons);
         });
     egui::Panel::bottom("status")
         .frame(egui::Frame::NONE)
         .exact_size(STATUS_H)
         .show(ui, |ui| {
-            panes::status(ui, &mut *state, &theme::Palette::DARK);
+            panes::status(ui, &mut *state, &pal);
         });
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
@@ -673,10 +679,14 @@ impl TabViewer for ShellTabs<'_> {
                 );
             }
             Tab::Browser => {
-                panes::browser(ui, self.state, &theme::Palette::DARK, self.icons);
+                // Same seam, same table: every reader of the live theme
+                // calls `current()` (M6.1 C makes it document state).
+                let pal = theme::current();
+                panes::browser(ui, self.state, &pal, self.icons);
             }
             Tab::Properties => {
-                pages::properties(ui, self.state, &theme::Palette::DARK);
+                let pal = theme::current();
+                pages::properties(ui, self.state, &pal);
             }
         }
     }

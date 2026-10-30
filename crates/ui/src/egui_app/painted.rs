@@ -24,9 +24,9 @@
 //!
 //! The shapes are original marks (rectangle outlines, triangles, a
 //! two-stroke eye), drawn from the geometry of what they name - not
-//! adapted from any icon set, per AGENTS.md. Colors are the shared
-//! `Palette` tokens, so the painted strips and the widget panes cannot
-//! drift apart on a retheme.
+//! adapted from any icon set, per AGENTS.md. Colours AND sizes are the
+//! shared `Tokens` table (M6.1 A), so the painted strips and the widget
+//! panes cannot drift apart on a retheme - or on a resize.
 //!
 //! Provenance: our own port, specced from imgui browser.rs/ribbon.rs
 //! (our code) and the egui vendored sources.
@@ -37,8 +37,8 @@ use egui::{
     Ui, Vec2,
 };
 
-use super::icons::{Icon, IconSet, ICON_PX};
-use super::theme::Palette;
+use super::icons::{Icon, IconSet};
+use super::theme::Tokens;
 
 /// The full-texel uv of an uploaded image.
 const UV_FULL: Rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
@@ -56,7 +56,7 @@ pub fn cell(
     id: egui::Id,
     rect: Rect,
     label: &str,
-    pal: &Palette,
+    pal: &Tokens,
     enabled: bool,
     toggled: bool,
     icon: Option<&TextureHandle>,
@@ -75,31 +75,31 @@ pub fn cell(
     };
     let painter = ui.painter();
     if let Some(bg) = bg {
-        painter.add(Shape::rect_filled(rect, 2.0, bg));
+        painter.add(Shape::rect_filled(rect, pal.radius_widget, bg));
     }
     if let Some(tex) = icon {
         // White line art already carries the ink; the enabled/disabled
         // rule rides the tint (imgui's x1.0 / x0.45).
         let r = Rect::from_min_size(
-            Pos2::new(rect.left() + (rect.width() - ICON_PX) * 0.5, rect.top()),
-            Vec2::splat(ICON_PX),
+            Pos2::new(rect.left() + (rect.width() - pal.glyph_px) * 0.5, rect.top()),
+            Vec2::splat(pal.glyph_px),
         );
         let tint = if enabled { Color32::WHITE } else { Color32::from_white_alpha(115) };
         painter.image(tex.id(), r, UV_FULL, tint);
     }
     let ink = if enabled { pal.text } else { pal.text_faint };
     painter.text(
-        Pos2::new(rect.center().x, rect.top() + ICON_PX + 2.0),
+        Pos2::new(rect.center().x, rect.top() + pal.glyph_px + 2.0),
         Align2::CENTER_TOP,
         label,
-        FontId::proportional(11.5),
+        FontId::proportional(pal.font_label),
         ink,
     );
     resp
 }
 
 /// A group divider: one vertical hairline, ink only.
-pub fn divider(painter: &egui::Painter, x: f32, rect: Rect, pal: &Palette) {
+pub fn divider(painter: &egui::Painter, x: f32, rect: Rect, pal: &Tokens) {
     painter.line_segment(
         [Pos2::new(x, rect.top() + 4.0), Pos2::new(x, rect.bottom() - 4.0)],
         Stroke::new(1.0, pal.border),
@@ -107,12 +107,12 @@ pub fn divider(painter: &egui::Painter, x: f32, rect: Rect, pal: &Palette) {
 }
 
 /// A group caption: small dim text centered under its cells' row.
-pub fn caption(painter: &egui::Painter, center_x: f32, y: f32, title: &str, pal: &Palette) {
+pub fn caption(painter: &egui::Painter, center_x: f32, y: f32, title: &str, pal: &Tokens) {
     painter.text(
         Pos2::new(center_x, y),
         Align2::CENTER_TOP,
         title,
-        FontId::proportional(10.0),
+        FontId::proportional(pal.font_caption),
         pal.text_dim,
     );
 }
@@ -152,12 +152,10 @@ pub enum Kind {
     Op,
 }
 
-/// Row height: browser.rs's `(INK + 2).max(line + 4)` at the panel's font,
-/// 20 px - unchanged by the icon fold, so the tree's column model and the
-/// row-click hit-tests are pixel-stable.
-pub const ROW_H: f32 = 20.0;
-
-/// Tree icon edge (browser.rs: 32 px sources render at 16).
+/// Tree icon edge (browser.rs: 32 px sources render at 16). The row's
+/// height is NOT here: it is `Tokens::row_height` (M6.1 A), and the
+/// tree's column model and row-click hit-tests all read that one number,
+/// so a theme that grows the rows grows the tree with them.
 const TREE_INK: f32 = 16.0;
 
 /// The eye column's reserved width at the row's right edge: the 18 px hit
@@ -188,20 +186,18 @@ pub fn tree(
     ui: &mut Ui,
     rect: Rect,
     rows: &[Row],
-    pal: &Palette,
+    pal: &Tokens,
     icons: Option<&IconSet>,
 ) -> TreeHit {
     let mut hit = TreeHit { row: None, eye: None };
     let mut eye_resps: Vec<(usize, Response)> = Vec::new();
+    let row_h = pal.row_height;
     for (ix, row) in rows.iter().enumerate() {
-        let top = rect.top() + ix as f32 * ROW_H;
+        let top = rect.top() + ix as f32 * row_h;
         if top >= rect.bottom() {
             break; // scrolled past the pane: no row, no input, no ink
         }
-        let rr = Rect::from_min_size(
-            Pos2::new(rect.left(), top),
-            Vec2::new(rect.width(), ROW_H),
-        );
+        let rr = Rect::from_min_size(Pos2::new(rect.left(), top), Vec2::new(rect.width(), row_h));
         // Row first, eye after: egui's last-wins interaction order plus the
         // clicked() guard below means an eye pixel is one action, never
         // row+eye (browser.rs reaches the same law by submitting the eye's
@@ -223,9 +219,9 @@ pub fn tree(
         };
         let painter = ui.painter();
         if row.selected {
-            painter.add(Shape::rect_filled(rr.shrink(1.0), 2.0, pal.selection_bg));
+            painter.add(Shape::rect_filled(rr.shrink(1.0), pal.radius_widget, pal.selection_bg));
         } else if row_resp.hovered() {
-            painter.add(Shape::rect_filled(rr.shrink(1.0), 2.0, pal.field_hover));
+            painter.add(Shape::rect_filled(rr.shrink(1.0), pal.radius_widget, pal.field_hover));
         }
         let gx = rr.left() + 10.0 + row.depth as f32 * 14.0;
         // PNG first (browser.rs: the tree icon rides the row, dimmed to
@@ -278,12 +274,16 @@ pub fn tree(
             wrap: TextWrapping::truncate_at_width(max_w),
             ..LayoutJob::default()
         };
-        job.append(&row.label, 0.0, TextFormat::simple(FontId::proportional(12.5), ink));
+        job.append(
+            &row.label,
+            0.0,
+            TextFormat::simple(FontId::proportional(pal.font_row), ink),
+        );
         if !row.suffix.is_empty() {
             job.append(
                 &row.suffix,
                 6.0,
-                TextFormat::simple(FontId::proportional(10.5), suffix_ink),
+                TextFormat::simple(FontId::proportional(pal.font_row_suffix), suffix_ink),
             );
         }
         let galley = painter.layout_job(job);
@@ -306,7 +306,7 @@ pub fn tree(
 }
 
 /// The ~9-px marks, per kind: original geometry, one stroke family.
-fn glyph(shapes: &mut Vec<Shape>, c: Pos2, kind: Kind, pal: &Palette) {
+fn glyph(shapes: &mut Vec<Shape>, c: Pos2, kind: Kind, pal: &Tokens) {
     let s = Stroke::new(1.0, pal.text_dim);
     match kind {
         Kind::Section => {
@@ -371,7 +371,7 @@ fn glyph(shapes: &mut Vec<Shape>, c: Pos2, kind: Kind, pal: &Palette) {
 /// The browser eye: an outlined lid-rect with a pupil, or crossed when
 /// hidden (display state - the row click still selects, the eye never
 /// destroys).
-fn eye_glyph(shapes: &mut Vec<Shape>, r: Rect, hidden: bool, pal: &Palette) {
+fn eye_glyph(shapes: &mut Vec<Shape>, r: Rect, hidden: bool, pal: &Tokens) {
     let s = Stroke::new(1.0, if hidden { pal.text_faint } else { pal.text_dim });
     shapes.push(Shape::rect_stroke(r, 4.0, s, egui::StrokeKind::Middle));
     if hidden {
@@ -384,7 +384,7 @@ fn eye_glyph(shapes: &mut Vec<Shape>, r: Rect, hidden: bool, pal: &Palette) {
 
 /// Ground and hairline under a painted strip (ribbon rows, the status
 /// line): the caller sizes the panel, this makes it read as chrome.
-pub fn strip_bg(painter: &egui::Painter, rect: Rect, pal: &Palette) {
+pub fn strip_bg(painter: &egui::Painter, rect: Rect, pal: &Tokens) {
     painter.rect_filled(rect, 0.0, pal.strip_fill());
     let y = rect.bottom() - 0.5;
     painter.line_segment(

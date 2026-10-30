@@ -223,9 +223,9 @@ impl Icon {
     }
 }
 
-/// Display size, in logical px; sources are uploaded at 2x for clean
-/// minification on the 20px button glyphs.
-pub(crate) const ICON_PX: f32 = 20.0;
+/// Upload edge: 2x the token's `glyph_px` (20 display px at the dark
+/// defaults - the painted path reads the token, not this number) for
+/// clean minification on the button glyphs.
 const UPLOAD_PX: u32 = 40;
 
 /// Loaded icon set: one handle per slot, parallel to [`Icon::ALL`], with

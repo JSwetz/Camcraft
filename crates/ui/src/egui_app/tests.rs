@@ -349,10 +349,10 @@ fn file_ops_round_trip_through_commands() {
 /// previous program on disk is not touched (the gate writes nothing).
 #[test]
 fn post_cell_queues_and_the_file_arm_runs_the_gate() {
-    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        Vec2::new(1280.0, super::shell::RIBBON_H),
-    ));
+    let (cells, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+    );
     let post = cells
         .iter()
         .find(|c| c.cmd == Cmd::Post)
@@ -1474,10 +1474,10 @@ fn file_keys_queue_their_commands() {
 fn ribbon_click_creates_through_the_actions_law() {
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        Vec2::new(1280.0, super::shell::RIBBON_H),
-    ));
+    let (cells, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+    );
     let pocket = cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(2))
@@ -1901,10 +1901,10 @@ fn bored_block() -> camcraft_app::geometry::Mesh {
 fn ribbon_drill_cell_creates_a_drill_operation() {
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        Vec2::new(1280.0, super::shell::RIBBON_H),
-    ));
+    let (cells, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+    );
     let drill = cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(5))
@@ -2145,10 +2145,10 @@ fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() 
 fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        Vec2::new(1280.0, super::shell::RIBBON_H),
-    ));
+    let (cells, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+    );
     let pocket3d = cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(6))
@@ -2180,10 +2180,10 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
 fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        Vec2::new(1280.0, super::shell::RIBBON_H),
-    ));
+    let (cells, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+    );
     let finish3d = cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(7))
@@ -2774,10 +2774,10 @@ fn simulate_cell_arms_transport_and_stop_disarms() {
         !panes::enabled(Cmd::Simulate, &State::new()),
         "nothing to simulate on an empty document"
     );
-    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        Vec2::new(1280.0, super::shell::RIBBON_H),
-    ));
+    let (cells, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+    );
     let cell = cells
         .iter()
         .find(|c| c.cmd == Cmd::Simulate)
@@ -2900,10 +2900,10 @@ fn deviate_cell_stores_the_verdict_as_view_state() {
         !panes::enabled(Cmd::Deviate, &State::new()),
         "nothing to judge on an empty document"
     );
-    let (cells, _, _) = panes::ribbon_cells(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        Vec2::new(1280.0, super::shell::RIBBON_H),
-    ));
+    let (cells, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+    );
     let cell = cells
         .iter()
         .find(|c| c.cmd == Cmd::Deviate)

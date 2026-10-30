@@ -73,7 +73,7 @@ use crate::state::{
 };
 
 use super::panes::{TYPES, kind_name, retype};
-use super::theme::Palette;
+use super::theme::Tokens;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
 const TOOL_KINDS: [&str; 10] = [
@@ -148,7 +148,7 @@ fn has_section(kind: OpType, s: usize) -> bool {
 
 /// The dock's properties pane: dispatch on the shell's ui target, exactly
 /// like operations.rs's contents() dispatcher.
-pub fn properties(ui: &mut Ui, state: &mut State, _pal: &Palette) {
+pub fn properties(ui: &mut Ui, state: &mut State, _pal: &Tokens) {
     let t = state.pane_target();
     ScrollArea::vertical()
         .auto_shrink([false, false])

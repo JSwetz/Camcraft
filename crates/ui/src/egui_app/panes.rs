@@ -32,7 +32,7 @@ use crate::state::{CommandKind, DisplayMode, Sim, State, UiTarget};
 
 use super::icons::{Icon, IconSet};
 use super::painted;
-use super::theme::Palette;
+use super::theme::Tokens;
 
 /// The operation kinds in panel order - the app's kind registry labels
 /// (M5.0.2), one list for the whole surface. Shared with pages.rs: the
@@ -154,12 +154,12 @@ const GROUPS: [(&str, &[Cmd]); 5] = [
     ("Inspect", &[Cmd::Frame, Cmd::Paths, Cmd::Simulate, Cmd::Deviate]),
 ];
 
-const CELL_W: f32 = 56.0;
-/// Icon over caption, ribbon.rs's cell: ICON_PX + 2 + one line, so the
-/// PNG and the painted fallback occupy the same box. The egui font's
-/// 11.5 px label needs 35; the fold's one geometry change (RIBBON_H in
-/// shell.rs follows it).
-const CELL_H: f32 = 35.0;
+// The cell box is tokens, not constants (M6.1 A): `Tokens::cell_w`/
+// `cell_h` - icon over caption, ribbon.rs's cell: glyph + 2 + one line,
+// so the PNG and the painted fallback occupy the same box; the 11.5 px
+// label needs 35, and shell.rs's ribbon height follows the token
+// (`theme::ribbon_h`). GAP/PAD_H stay literals: the ribbon's own
+// rhythm, not a theme knob.
 const GAP: f32 = 4.0;
 const PAD_H: f32 = 8.0;
 
@@ -447,15 +447,19 @@ pub(super) struct Cell {
 /// The ribbon's layout math, pure: cell rects, then the group captions
 /// (centre x, title) and the divider x's between groups. `ribbon` draws
 /// exactly this, and the tests click through it - one source of truth
-/// for where each command lives. CELL_W/GAP/PAD_H are ribbon.rs's.
-pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>, Vec<f32>) {
+/// for where each command lives. FLOOR_W/GAP/PAD_H are ribbon.rs's; the
+/// cell box is the theme's (Tokens::cell_w/cell_h).
+pub(super) fn ribbon_cells(
+    strip: Rect,
+    pal: &Tokens,
+) -> (Vec<Cell>, Vec<(f32, &'static str)>, Vec<f32>) {
     let mut cells = Vec::new();
     let mut captions = Vec::new();
     let mut dividers = Vec::new();
     // The row is a flow, not the fixed imgui pitch: cells share the strip's
     // width, so adding an operation kind can never push the last group off
     // the edge of the window (M2.1a's seventh Create cell was what the
-    // fixed 56 px box could no longer hold at 1280). CELL_W stands as the
+    // fixed 56 px box could no longer hold at 1280). cell_w stands as the
     // cap, so a roomy window still draws ribbon.rs's exact geometry; below
     // FLOOR_W the row overflows on purpose rather than rendering illegible
     // cells. Painted content is centered in each rect, so narrowing is
@@ -466,7 +470,7 @@ pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>,
         + (n_cells - n_groups) as f32 * GAP
         + (n_groups - 1) as f32 * (GAP + 2.0);
     const FLOOR_W: f32 = 40.0;
-    let cell_w = ((strip.width() - overhead) / n_cells as f32).clamp(FLOOR_W, CELL_W);
+    let cell_w = ((strip.width() - overhead) / n_cells as f32).clamp(FLOOR_W, pal.cell_w);
     // PAD_V (ribbon.rs): cells start 4 below the strip top.
     let cell_top = strip.top() + 4.0;
     let mut x = strip.left() + PAD_H;
@@ -476,7 +480,10 @@ pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>,
         for c in *group {
             cells.push(Cell {
                 cmd: *c,
-                rect: Rect::from_min_size(egui::Pos2::new(x, cell_top), Vec2::new(cell_w, CELL_H)),
+                rect: Rect::from_min_size(
+                    egui::Pos2::new(x, cell_top),
+                    Vec2::new(cell_w, pal.cell_h),
+                ),
                 salt,
             });
             salt += 1;
@@ -500,13 +507,13 @@ pub(super) fn ribbon_cells(strip: Rect) -> (Vec<Cell>, Vec<(f32, &'static str)>,
 pub fn ribbon(
     ui: &mut Ui,
     state: &mut State,
-    pal: &Palette,
+    pal: &Tokens,
     icons: Option<&IconSet>,
 ) {
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
     let base = ui.id().with("ribbon");
-    let (cells, captions, dividers) = ribbon_cells(rect);
+    let (cells, captions, dividers) = ribbon_cells(rect, pal);
     for cell in &cells {
         let c = cell.cmd;
         let resp = painted::cell(
@@ -526,7 +533,10 @@ pub fn ribbon(
         }
     }
     for (mid, title) in captions {
-        painted::caption(ui.painter(), mid, rect.top() + 44.0, title, pal);
+        // The caption row sits under its cells' row: PAD_V (4) + the
+        // cell box + 5 - 44 at the defaults, one derivation now that
+        // cell_h is a token.
+        painted::caption(ui.painter(), mid, rect.top() + 4.0 + pal.cell_h + 5.0, title, pal);
     }
     for dx in dividers {
         painted::divider(ui.painter(), dx, rect, pal);
@@ -540,7 +550,7 @@ pub fn ribbon(
 /// writes them all), while command refusals read twice by design: here for
 /// everyone, and on their own pane through `error_for` (M-c). Startup is a
 /// plain empty document; an untouched status reads "ready".
-pub fn status(ui: &mut Ui, state: &mut State, pal: &Palette) {
+pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
     // Owned so the button below can reborrow `state` mutably while the
@@ -812,7 +822,7 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
 pub fn browser(
     ui: &mut Ui,
     state: &mut State,
-    pal: &Palette,
+    pal: &Tokens,
     icons: Option<&IconSet>,
 ) {
     ui.checkbox(&mut state.show_world_axes, "Show world origin axes");
@@ -833,7 +843,7 @@ pub fn browser(
     let (rows, leaves) = browser_rows(state);
     let rect = Rect::from_min_size(
         ui.cursor().min,
-        Vec2::new(ui.available_width(), rows.len() as f32 * painted::ROW_H),
+        Vec2::new(ui.available_width(), rows.len() as f32 * pal.row_height),
     );
     let hit = painted::tree(ui, rect, &rows, pal, icons);
     if let Some(ix) = hit.eye {

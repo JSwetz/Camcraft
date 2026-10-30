@@ -1,23 +1,27 @@
-//! The dark Visuals, graduated from the M1.4.1 spike (theme.rs, unchanged
-//! law): the numbers are the imgui shell's dark theme (app.rs's style block)
-//! restated as egui tokens.
+//! The theme's single token table (M6.1 A): every colour, radius, spacing
+//! and size the shell shows is a named field here - widget path and
+//! painted path read the SAME struct, so a retheme is one table and the
+//! two render paths cannot drift. The law is adopted from a sibling
+//! project's proven design at the user's direction (ROADMAP M6.1); the
+//! values are ours - the dark column carries today's `Palette::DARK`
+//! numbers verbatim so the snapshots stay meaningful through the change.
 //!
-//! Every color is a named token here and nowhere else: the painted ribbon
-//! and browser (M-b will graduate painted.rs) read the same struct the egui
-//! widgets get via `Visuals`, so a retheme is one edit and the two render
-//! paths (widgets vs draw-list port) cannot drift. The numbers are the
-//! imgui shell's dark theme (app.rs's style block): the same slate grounds,
-//! the same steel-blue accent, hover/active stepping one notch each, flat
-//! 1-px strokes.
-//! Provenance: our own module (graduated from the spike), specced from the
-//! imgui theme we already ship and the egui Visuals docs; no third-party
-//! theme copied.
+//! The drift guard is structural, not a checklist: the const block below
+//! destructures EVERY `Tokens` field without a `..` arm, so adding a
+//! field without wiring it (or explicitly resting it in the painted
+//! path) fails to build - the sibling repo's exhaustiveness pattern,
+//! restated for a table that paints as well as widgets.
+//! Provenance: our own module (graduated from the spike and the M6.1 A
+//! rework), specced from the imgui theme we already ship, the egui
+//! Visuals docs, and the sibling architecture at the user's direction;
+//! no HSMWorks material.
 
-use egui::{Color32, Stroke, Visuals};
+use egui::{Color32, CornerRadius, Margin, Stroke, Style, Visuals, vec2};
 
-/// One frame of the shell's color truth.
-#[derive(Clone, Copy, Debug)]
-pub struct Palette {
+/// One theme's whole truth: colours, then geometry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tokens {
+    // -- colours: the old Palette, names unchanged (M6.1 B keys on them).
     /// Window/panel ground.
     pub ink: Color32,
     /// Ribbon / browser / header ground (one step above ink).
@@ -38,11 +42,78 @@ pub struct Palette {
     /// Text selection and combo-open highlight.
     pub selection_bg: Color32,
     pub selection_stroke: Color32,
+    // -- geometry: the Phase-6 complaint made themeable - ribbon size,
+    // input fields and button size are tokens, not literals.
+    /// Corner radius of widget rects and painted cells/rows.
+    pub radius_widget: u8,
+    /// Corner radius of egui windows.
+    pub radius_window: u8,
+    /// Corner radius of menus and combo dropdowns.
+    pub radius_menu: u8,
+    /// egui item spacing, x/y.
+    pub item_spacing_x: f32,
+    pub item_spacing_y: f32,
+    /// egui button padding, x/y.
+    pub button_padding_x: f32,
+    pub button_padding_y: f32,
+    /// Input-field/combo minimum height (egui's `interact_size.y`).
+    pub control_height: f32,
+    /// Browser tree row height (painted::tree).
+    pub row_height: f32,
+    /// Ribbon cell height (painted cell box; RIBBON_H follows it).
+    pub cell_h: f32,
+    /// Ribbon cell width cap (panes' flow clamp; floor is geometry).
+    pub cell_w: f32,
+    /// Ribbon glyph edge (the PNG and the painted fallback ride it).
+    pub glyph_px: f32,
+    /// Cell caption size under the ribbon glyph.
+    pub font_label: f32,
+    /// Group caption size.
+    pub font_caption: f32,
+    /// Browser row label size.
+    pub font_row: f32,
+    /// Browser row suffix size.
+    pub font_row_suffix: f32,
 }
 
-impl Palette {
-    /// The imgui shell's numbers, as tokens.
-    pub const DARK: Palette = Palette {
+/// The painted path's clamps: geometry a theme file supplies can make
+/// the shell ugly, never impossible - each value is clamped to the
+/// window it must live in at the draw site (M6.1 law: a 400-point
+/// radius cannot blow out a checkbox, a 0-height cell cannot eat the
+/// viewport).
+pub mod clamp {
+    /// Widget/cell corner radius.
+    pub const RADIUS: u8 = 12;
+    /// Item spacing and button padding (px per axis): a window, so a
+    /// file can space the shell out or in, never apart.
+    pub const SPACING: (f32, f32) = (0.0, 32.0);
+    /// Input-field height, browser row height (px).
+    pub const CONTROL_H: (f32, f32) = (12.0, 64.0);
+    /// Ribbon cell height/width (px).
+    pub const CELL: (f32, f32) = (24.0, 96.0);
+    /// Ribbon glyph edge (px).
+    pub const GLYPH: (f32, f32) = (8.0, 64.0);
+    /// Caption/row font sizes (px).
+    pub const FONT: (f32, f32) = (6.0, 32.0);
+
+    #[must_use]
+    pub fn range(v: f32, lo_hi: (f32, f32)) -> f32 {
+        if v.is_finite() { v.clamp(lo_hi.0, lo_hi.1) } else { lo_hi.0 }
+    }
+}
+
+/// The ribbon strip's height: the cell box plus the caption row and the
+/// pad, so a theme that grows the cells grows the ribbon with them
+/// (61 = 35 + 26 is today's arithmetic, kept exact at the defaults).
+#[must_use]
+pub const fn ribbon_h(t: &Tokens) -> f32 {
+    t.cell_h + 26.0
+}
+
+impl Tokens {
+    /// The imgui shell's numbers, as tokens - unchanged values, now the
+    /// dark COLUMN of a table that will carry a second one (M6.1 C).
+    pub const DARK: Tokens = Tokens {
         ink: Color32::from_rgb(0x23, 0x26, 0x2B),
         ink_alt: Color32::from_rgb(0x2C, 0x30, 0x37),
         well: Color32::from_rgb(0x1B, 0x1E, 0x22),
@@ -57,45 +128,90 @@ impl Palette {
         field_active: Color32::from_rgb(0x1A, 0x2B, 0x3A),
         selection_bg: Color32::from_rgb(0x26, 0x4A, 0x6E),
         selection_stroke: Color32::from_rgb(0x4A, 0x86, 0xC2),
+        radius_widget: 2,
+        radius_window: 6,
+        radius_menu: 6,
+        item_spacing_x: 8.0,
+        item_spacing_y: 3.0,
+        button_padding_x: 4.0,
+        button_padding_y: 1.0,
+        control_height: 18.0,
+        row_height: 20.0,
+        cell_h: 35.0,
+        cell_w: 56.0,
+        glyph_px: 20.0,
+        font_label: 11.5,
+        font_caption: 10.0,
+        font_row: 12.5,
+        font_row_suffix: 10.5,
     };
 
-    /// Build the egui Visuals from the tokens: every default-egui color the
-    /// shell shows is named here, so the widget path and the painted path
-    /// cannot disagree about what the theme is.
+    /// The panel ground behind the ribbon/browser strips (painted.rs).
     #[must_use]
-    pub fn visuals(self) -> Visuals {
+    pub const fn strip_fill(&self) -> Color32 {
+        self.ink_alt
+    }
+
+    /// Build the egui Visuals from the tokens: every default-egui colour
+    /// and corner the shell shows is named here, so the widget path and
+    /// the painted path cannot disagree about what the theme is.
+    #[must_use]
+    pub fn visuals(&self) -> Visuals {
+        // The destructuring arm: every COLOUR is named here and nowhere
+        // else; a new colour field without a wiring line is a build
+        // error, not default-egui grey. (Geometry routes through
+        // `style()`; the const guard below covers those names.)
+        let Tokens {
+            ink, ink_alt, well, text, text_dim, text_faint, border, accent,
+            accent_hover, field_bg, field_hover, field_active, selection_bg,
+            selection_stroke,
+            radius_widget, radius_window, radius_menu,
+            item_spacing_x: _, item_spacing_y: _,
+            button_padding_x: _, button_padding_y: _,
+            control_height: _, row_height: _, cell_h: _, cell_w: _,
+            glyph_px: _, font_label: _, font_caption: _,
+            font_row: _, font_row_suffix: _,
+        } = *self;
         let mut v = Visuals::dark();
-        v.panel_fill = self.ink;
-        v.window_fill = self.ink_alt;
-        v.faint_bg_color = self.well;
-        v.extreme_bg_color = self.well;
-        v.code_bg_color = self.well;
-        v.override_text_color = Some(self.text);
-        v.weak_text_color = Some(self.text_dim);
-        v.hyperlink_color = self.accent_hover;
+        v.panel_fill = ink;
+        v.window_fill = ink_alt;
+        v.faint_bg_color = well;
+        v.extreme_bg_color = well;
+        v.code_bg_color = well;
+        v.override_text_color = Some(text);
+        v.weak_text_color = Some(text_dim);
+        v.hyperlink_color = accent_hover;
+        v.window_corner_radius = CornerRadius::same(radius_window);
+        v.menu_corner_radius = CornerRadius::same(radius_menu);
         v.selection = egui::style::Selection {
-            bg_fill: self.selection_bg,
-            stroke: Stroke::new(v.selection.stroke.width, self.selection_stroke),
+            bg_fill: selection_bg,
+            stroke: Stroke::new(v.selection.stroke.width, selection_stroke),
         };
-        let stroke_1px = Stroke::new(1.0, self.border);
-        v.widgets.noninteractive.bg_fill = self.ink_alt;
+        let stroke_1px = Stroke::new(1.0, border);
+        let r = CornerRadius::same(radius_widget);
+        v.widgets.noninteractive.bg_fill = ink_alt;
         v.widgets.noninteractive.weak_bg_fill = Color32::TRANSPARENT;
         v.widgets.noninteractive.bg_stroke = stroke_1px;
-        v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, self.text);
-        v.widgets.inactive.bg_fill = self.field_bg;
-        v.widgets.inactive.weak_bg_fill = self.ink_alt;
+        v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, text);
+        v.widgets.noninteractive.corner_radius = r;
+        v.widgets.inactive.bg_fill = field_bg;
+        v.widgets.inactive.weak_bg_fill = ink_alt;
         v.widgets.inactive.bg_stroke = stroke_1px;
-        v.widgets.inactive.fg_stroke = Stroke::new(1.0, self.text);
-        v.widgets.hovered.bg_fill = self.field_hover;
-        v.widgets.hovered.weak_bg_fill = self.accent;
-        v.widgets.hovered.bg_stroke = Stroke::new(1.0, self.accent_hover);
+        v.widgets.inactive.fg_stroke = Stroke::new(1.0, text);
+        v.widgets.inactive.corner_radius = r;
+        v.widgets.hovered.bg_fill = field_hover;
+        v.widgets.hovered.weak_bg_fill = accent;
+        v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent_hover);
         v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
-        v.widgets.active.bg_fill = self.field_active;
-        v.widgets.active.weak_bg_fill = self.accent_hover;
-        v.widgets.active.bg_stroke = Stroke::new(1.0, self.accent_hover);
+        v.widgets.hovered.corner_radius = r;
+        v.widgets.active.bg_fill = field_active;
+        v.widgets.active.weak_bg_fill = accent_hover;
+        v.widgets.active.bg_stroke = Stroke::new(1.0, accent_hover);
         v.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
-        v.widgets.open.bg_fill = self.field_bg;
+        v.widgets.active.corner_radius = r;
+        v.widgets.open.bg_fill = field_bg;
         v.widgets.open.bg_stroke = stroke_1px;
+        v.widgets.open.corner_radius = r;
         for exp in [
             &mut v.widgets.noninteractive.expansion,
             &mut v.widgets.inactive.expansion,
@@ -105,18 +221,81 @@ impl Palette {
         ] {
             *exp = 0.0; // flat chrome: hovered widgets must not bleed past their bounds
         }
+        let _ = text_faint; // read by the painted path's disabled ink, not Visuals
         v
     }
 
-    /// The panel ground behind the ribbon/browser strips (painted.rs, M-b).
+    /// The style spacing the table owns: item gaps, button padding, the
+    /// field height. Defaults equal egui's own numbers, so wiring the
+    /// tokens in changes no pixels until a theme file overrides them.
     #[must_use]
-    pub fn strip_fill(self) -> Color32 {
-        self.ink_alt
+    pub fn style(&self, base: &Style) -> Style {
+        let mut s = base.clone();
+        // Clamp at the seam (the M6.1 law's other half): the const guard
+        // proves the built-in tables are in range; a file-supplied
+        // overlay is checked here, where it can no longer hurt.
+        s.spacing.item_spacing =
+            vec2(clamp::range(self.item_spacing_x, clamp::SPACING), clamp::range(self.item_spacing_y, clamp::SPACING));
+        s.spacing.button_padding =
+            vec2(clamp::range(self.button_padding_x, clamp::SPACING), clamp::range(self.button_padding_y, clamp::SPACING));
+        s.spacing.interact_size =
+            vec2(s.spacing.interact_size.x, clamp::range(self.control_height, clamp::CONTROL_H));
+        s.spacing.window_margin = Margin::same(self.item_spacing_y.max(6.0) as i8);
+        s
     }
 }
 
-/// Install the palette into a context. Called once per Context (windowed).
-/// Visuals are per-context.
+/// The exhaustiveness guard, compiled: every field is named in this
+/// arm, so the table can never gain a member that no code path reads.
+/// Geometry gets its sanity window here (the same clamps the draw sites
+/// re-apply to file-supplied values); colours have no range to check.
+const _: () = {
+    let Tokens {
+        ink: _, ink_alt: _, well: _, text: _, text_dim: _, text_faint: _,
+        border: _, accent: _, accent_hover: _, field_bg: _, field_hover: _,
+        field_active: _, selection_bg: _, selection_stroke: _,
+        radius_widget, radius_window, radius_menu,
+        item_spacing_x, item_spacing_y, button_padding_x, button_padding_y,
+        control_height, row_height, cell_h, cell_w, glyph_px,
+        font_label, font_caption, font_row, font_row_suffix,
+    } = Tokens::DARK;
+    assert!(radius_widget <= clamp::RADIUS && radius_window <= 24 && radius_menu <= 24);
+    assert!(item_spacing_x >= 0.0 && item_spacing_y >= 0.0);
+    assert!(button_padding_x >= 0.0 && button_padding_y >= 0.0);
+    assert!(
+        control_height >= clamp::CONTROL_H.0 && control_height <= clamp::CONTROL_H.1
+            && row_height >= clamp::CONTROL_H.0 && row_height <= clamp::CONTROL_H.1
+            && cell_h >= clamp::CELL.0 && cell_h <= clamp::CELL.1
+            && cell_w >= clamp::CELL.0 && cell_w <= clamp::CELL.1
+            && glyph_px >= clamp::GLYPH.0 && glyph_px <= clamp::GLYPH.1
+    );
+    assert!(
+        font_label >= clamp::FONT.0 && font_label <= clamp::FONT.1
+            && font_caption >= clamp::FONT.0 && font_caption <= clamp::FONT.1
+            && font_row >= clamp::FONT.0 && font_row <= clamp::FONT.1
+            && font_row_suffix >= clamp::FONT.0 && font_row_suffix <= clamp::FONT.1
+    );
+};
+
+/// The theme in force. Until M6.1 C puts the choice in the document,
+/// there is one, and it is dark - but every consumer already reads it
+/// through this one seam.
+#[must_use]
+pub fn current() -> Tokens {
+    Tokens::DARK
+}
+
+/// Install a token table into a context: visuals and spacing together,
+/// so no theme can half-apply (Prime Directive, chrome edition).
+pub fn apply_to(ctx: &egui::Context, t: &Tokens) {
+    let visuals = t.visuals();
+    let base = (*ctx.global_style()).clone();
+    ctx.set_global_style(t.style(&base));
+    ctx.set_visuals(visuals);
+}
+
+/// Install the live theme. Called per Context (windowed); the switcher
+/// re-calls it on change (M6.1 C).
 pub fn apply(ctx: &egui::Context) {
-    ctx.set_visuals(Palette::DARK.visuals());
+    apply_to(ctx, &current());
 }
