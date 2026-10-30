@@ -145,7 +145,7 @@ home.
 | Part clamping | ✅ | M3.2 (fixtures) |
 | Part loading | ✅ | M5.2 G.2 (bar feeder events on the stream; see RECOMMENDED) |
 | Part unloading | ✅ | M5.2 G.2 (bar feeder events on the stream; see RECOMMENDED) |
-| Part transfer | 📋 | M5.3 (automation) |
+| Part transfer | ✅ | M5.3 C (the handoff intent on the stream; see RECOMMENDED) |
 | Part inspection | 📋 | M5.3 (automation) |
 
 ---
@@ -1901,6 +1901,30 @@ Phase-5 shape law.
       `Arc<PriorState>` (a dexel field borrowed, never cloned);
       `region_for_src` retires into the seam. Kernels untouched - every
       .nc and .cl golden byte-identical. RECOMMENDED.md, M5.3 B.
+
+- ✅ **Part handling: the transfer choreography** (stage C, commit
+      7e81920): M5.2 G.2's feeder signals get their general form -
+      `Record::Transfer { from, to }` joins the lifecycle family as a
+      SIBLING arm (every existing Part site byte-unchanged), the
+      stream word `PART TRANSFER <from> <to>` carrying 1-based station
+      ordinals in the order the machine file states its spindles, a
+      missing or zero operand refused by name (an ordinal is not a
+      length - the micron lattice law is not its domain). The engine
+      voices it through `onPartTransfer` with `From`/`To` properties -
+      `onCommand` never sees a lifecycle record - and the PRELUDE
+      default is the comment `(PART TRANSFER 1->2)`: the engine
+      invents no M-code it was not handed. `Dump.part_transfer` puts
+      the handoff after the last cut and before the unload -
+      LOAD..cut..TRANSFER..UNLOAD - and the flag off writes nothing,
+      the 13 .nc goldens byte-identical again. Capability is the
+      program gate's question, never the post's: the checker counts
+      spindle-stating head parts of the `.mch` tree into
+      `Machine.spindles` (unstated is `None`, never a guessed 1), it
+      mirrors to scripts as `head.spindleCount` under the same name
+      through all three machine doors, and `check_document` refuses a
+      transfer on a machine stating fewer than two spindles - naming
+      the op, the machine and the count. The flag rides the stamp like
+      every post-visible signal. RECOMMENDED.md, M5.3 C.
 
 ---
 

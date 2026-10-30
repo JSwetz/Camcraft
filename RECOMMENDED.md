@@ -5380,3 +5380,55 @@ widening `selection.rs`'s existing `SelectionGeometry` alias to
 `pub(super)` and reusing it - one name for the tuple, no second spelling
 to drift. Gate: full app/ui ladder green (290+ tests), both clippy lanes
 clean, `git status crates/app/tests/golden` empty.
+
+## M5.3 C - Part transfer: an intent on the stream, a count on the machine
+
+**Chosen: `Record::Transfer` as a sibling arm, not a generalized
+`Record::Part` payload.** The one honest alternative was growing Part's
+`{ loading: bool, advance: f64 }` into something that could also mean
+"from spindle A to spindle B" - a tagged payload, or two dead fields on
+every feeder line. Rejected: every existing Part site (the parser body,
+the two PRELUDE hooks, the golden-proven serializer, the tests) stays
+byte-unchanged, and the stream keeps its one-word-one-meaning grammar -
+`PART LOAD`, `PART UNLOAD`, `PART TRANSFER` are three sentences, not one
+sentence with mood flags. The cost is one enum arm and one dispatch; the
+benefit is that nothing that ever worked had to work again.
+
+**The stream vocabulary is general (`from to`, any stations, 1-based in
+the order the file states its heads); the app's emission is the one
+convention it can honestly make (`1 -> 2`).** `Dump.part_transfer` is a
+bool because the app's Part op is one handoff of one parting op -
+multi-station choreography is a future automation story, and it grows
+into a stream that already speaks it. Noted: the stations are ORDINALS,
+so they ride plain integers and touch no unit law - the micron lattice
+belongs to lengths and feeds, and parsing `2` as `0.002 mm` is the kind
+of unit lie the coolant-rate refusal (M3.3 C) named itself to prevent.
+A missing, zero or non-numeric operand refuses by name: which spindles a
+hand-edited line meant is not a thing the reader may guess.
+
+**Capability is the program gate's question, never the post engine's.**
+The engine voices what the stream states (comment default + one
+dedicated hook, `onCommand` never seeing a lifecycle record - the
+SECTION-family contract, kept); `check_document` owns "does this machine
+have the second hand the comment asks for", exactly as it owns travel,
+rpm and the RTCP-tilt refusals. A post that blocked on capability would
+make the same stream mean different things in different directories; a
+gate that never checked it would let `(PART TRANSFER 1->2)` voice an
+invitation to reach for a spindle that isn't there. The machine answer
+comes from the file: `Machine.spindles` counts spindle-stating `head`
+parts by walking the WHOLE kinematics tree (nested sub-heads count; a
+head with no spindle is furniture; a file stating none keeps `None` -
+the unstated-limit law, never a guessed `Some(1)`). It mirrors to the
+script as `head.spindleCount`, and `script_props` reads it under the one
+name `machine.spindles` through all three machine doors (mirror form,
+serde field, raw `.mch` parts), so a dialect's `if (machine.spindles >
+1)` gets truth about the file in every caller's grammar.
+
+**Deviation recorded: existing Part ops read Stale once after this
+upgrade.** The stamp folds `bar_transfer` like every post-visible signal
+(1.0/0.0), so its first appearance changes cached stamps the same way
+M5.2 G.2's feeder fold did - the salt precedent, working as designed,
+one regenerate and they are fresh. Gate: 380 tests green across
+post/app/ui (post crate on the ladder for the first time since the
+split), clippy `-D warnings` clean on all three, all goldens
+byte-identical.
