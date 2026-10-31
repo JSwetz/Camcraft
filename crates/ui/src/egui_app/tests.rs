@@ -41,12 +41,14 @@ use egui_kittest::Harness;
 
 use camcraft_app::model;
 use camcraft_app::operation::{FeatureSel, Height, OpParams, SrcRef};
-use camcraft_app::schema::WCS_SLOTS;
+use camcraft_app::commands::theme_set;
+use camcraft_app::schema::{ThemeRef, WCS_SLOTS};
 use camcraft_app::units::{self, Unit};
 
 use crate::interact;
 use crate::state::{CommandKind, DragMode, GeoPick, PostView, State, UiTarget};
 
+use super::contrast;
 use super::icons::{Icon, IconSet};
 use super::panes::{self, Cmd};
 use super::painted;
@@ -1275,9 +1277,45 @@ fn headless_run_succeeds() {
 /// the knob, in this crate's root.
 #[test]
 fn egui_shell_snapshot() {
+    let _g = snapshot_guard();
     let mut harness = shell_harness();
     harness.run_steps(3);
     harness.snapshot("egui_app");
+}
+
+/// The pixels are process-global: `theme::current()` is ONE live table
+/// for the whole test binary, and the light golden flips it for its
+/// frames (the sync law is the shipping code, not a test-local poke).
+/// The dark snapshot tests read that same table through their frames,
+/// so all three share this lock - without it a parallel dark frame
+/// could catch the light table and fail its own golden, and vice versa.
+static SNAPSHOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn snapshot_guard() -> std::sync::MutexGuard<'static, ()> {
+    SNAPSHOT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// M6.1 D's paired golden: the light column rendered through the
+/// switcher's own door - the reference rides the world as a `ThemeRef`,
+/// the frame-edge sync lands it - so the pixels prove the PATH, not
+/// just the table (ROADMAP: "the light theme ships alongside as a
+/// second golden set"). Regenerate deliberately with
+/// UPDATE_SNAPSHOTS=1; the restore at the end leaves the house look
+/// every other frame expects.
+#[test]
+fn egui_shell_snapshot_light() {
+    let _g = snapshot_guard();
+    let mut harness = shell_harness();
+    theme_set(&harness.state_mut().state.world, &ThemeRef::Named("light".to_owned()));
+    harness.run_steps(3);
+    assert_eq!(theme::current(), theme::Tokens::LIGHT, "the frame-edge sync rode the world's reference");
+    // The ROADMAP's sentence, checked on the table that is on screen:
+    // a theme that cannot be read is a visible refusal, not a style
+    // preference - and the light column is not a refusal.
+    assert_eq!(contrast::readable(&theme::current()), None, "the light golden's own table reads");
+    harness.snapshot("egui_app_light");
+    theme_set(&harness.state_mut().state.world, &ThemeRef::Dark);
+    harness.run_steps(1); // leave LIVE dark for whatever frame follows.
 }
 
 /// M1.4: the graphical tool editor, end to end through the real drain. The
@@ -1362,6 +1400,7 @@ fn tool_editor_window_edits_live_and_stages_through_commands() {
 /// profile right, floating over the dock. Regenerate with UPDATE_SNAPSHOTS=1.
 #[test]
 fn tool_editor_snapshot() {
+    let _g = snapshot_guard();
     let mut harness = shell_harness();
     harness.state_mut().state.ui_target = UiTarget::Tool("EM-0600-4FL".to_owned());
     harness.run();

@@ -18,6 +18,8 @@
 
 use egui::{Color32, CornerRadius, Margin, Stroke, Style, Visuals, vec2};
 
+use super::contrast;
+
 /// One theme's whole truth: colours, then geometry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
@@ -150,8 +152,8 @@ impl Tokens {
     /// accent stepped down for contrast against light (a hover still
     /// lifts, a well still sinks - the RELATIVE laws of the dark column
     /// are what carry over; the numbers are ours, chosen so body text
-    /// clears 4.5:1 against every ground it sits on. The accessible
-    /// check itself rides the light golden in stage D). Geometry is
+    /// clears 4.5:1 against every ground it sits on - the check itself
+    /// rides `contrast::readable` and the light golden, M6.1 D). Geometry is
     /// identical in both columns - sizes are the shell's body, not its
     /// weather; a theme file is what restyles them, per document.
     pub const LIGHT: Tokens = Tokens {
@@ -243,12 +245,23 @@ impl Tokens {
         v.widgets.hovered.bg_fill = field_hover;
         v.widgets.hovered.weak_bg_fill = accent;
         v.widgets.hovered.bg_stroke = Stroke::new(1.0, accent_hover);
-        v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+        // The hovered widget's glyphs ride the ACCENT fill - M6.1 D's
+        // derivation replaces the hand-typed white. On dark's steel
+        // blue the arithmetic lands on WHITE (the snapshot's memory),
+        // and on a pale user accent it flips to black rather than
+        // rendering text nobody can read.
+        v.widgets.hovered.fg_stroke = Stroke::new(1.0, contrast::on_fill(accent));
         v.widgets.hovered.corner_radius = r;
         v.widgets.active.bg_fill = field_active;
         v.widgets.active.weak_bg_fill = accent_hover;
         v.widgets.active.bg_stroke = Stroke::new(1.0, accent_hover);
-        v.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+        // The active (pressed) fill is the HOVER accent, one step
+        // lighter - and there white only reads 3.8:1 on dark's blue.
+        // The derivation picks black (5.5:1): pressed chrome is
+        // momentary, readable chrome is the point. The first tables
+        // hand-typed white here; the arithmetic now overrules the
+        // habit, which is exactly what M6.1 D exists to do.
+        v.widgets.active.fg_stroke = Stroke::new(1.0, contrast::on_fill(accent_hover));
         v.widgets.active.corner_radius = r;
         v.widgets.open.bg_fill = field_bg;
         v.widgets.open.bg_stroke = stroke_1px;

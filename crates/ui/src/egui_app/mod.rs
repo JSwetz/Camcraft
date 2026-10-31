@@ -24,6 +24,10 @@
 // pub(crate) for its own unit tests and the shell's init path: the M4.2
 // GPU backend pick - parse, honest fallback chain, adapter log line.
 pub(crate) mod gpu;
+// pub: the M6.1 D readability golden reads it beside the two built-in
+// columns, and `theme::visuals` + `theme_files::parse` + `painted`'s
+// glyph tint are the consumers (ratio, on-fill, the follow law, the gate).
+pub mod contrast;
 mod icons;
 // pub(crate) past egui_app: `State::machine_editor` names its draft
 // type (M3.3 stage C), so state.rs has to see through the door.

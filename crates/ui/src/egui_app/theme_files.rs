@@ -8,9 +8,13 @@
 //! carried by the Rust constants - two theme files for the same
 //! numbers would be two truths; the note in RECOMMENDED.md owns the
 //! deviation). Unknown tokens refuse by name, never half-apply;
-//! unknown schema keys are reported, never silently dropped. No file
-//! paths live inside a theme - icons stay in `assets/ui/` by
-//! convention (M6.1's rule, kept).
+//! unknown schema keys are reported, never silently dropped. Since
+//! M6.1 D the reader also derives and gates: an accent-state the file
+//! leaves unspelled follows the file's accent (`contrast::follow_
+//! states`), and a table whose text cannot be read refuses BY NAME
+//! (`contrast::readable`) - an unreadable theme is a visible refusal,
+//! not a style preference. No file paths live inside a theme - icons
+//! stay in `assets/ui/` by convention (M6.1's rule, kept).
 //! Provenance: our own format, specced from the ROADMAP's M6.1 notes
 //! and the sibling repo's file-shape at the user's direction; every
 //! name, key and number here is ours.
@@ -24,6 +28,7 @@ use camcraft_app::schema::ThemeRef;
 use egui::Color32;
 use serde_json::Value;
 
+use super::contrast;
 use super::theme::{Tokens, clamp};
 
 /// The one format string this build reads; anything else refuses whole.
@@ -281,7 +286,17 @@ pub fn parse_text(text: &str, origin: &str) -> Result<Theme, String> {
         },
         _ => Err(format!("{origin}: geometry.{k} must be a number")),
     })?;
-    let tokens = apply_overlay(base, &colors, &geom);
+    let mut tokens = apply_overlay(base, &colors, &geom);
+    // M6.1 D, after the overlay and on the whole table: every accent
+    // state the file left unspelled follows its accent (generated, not
+    // trusted from a hand - each derivation says so), and a table
+    // whose text cannot be read refuses here, naming its pair and its
+    // ratio. Both built-in columns clear the gate by construction, so
+    // a file that spells no colours lands exactly its base.
+    notes.extend(contrast::follow_states(&mut tokens, &base, &|k| colors.contains_key(k)));
+    if let Some(why) = contrast::readable(&tokens) {
+        return Err(format!("{origin}: {why}"));
+    }
     Ok(Theme { name, creator, description, tokens, notes })
 }
 

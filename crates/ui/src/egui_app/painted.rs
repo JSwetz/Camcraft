@@ -78,13 +78,18 @@ pub fn cell(
         painter.add(Shape::rect_filled(rect, pal.radius_widget, bg));
     }
     if let Some(tex) = icon {
-        // White line art already carries the ink; the enabled/disabled
-        // rule rides the tint (imgui's x1.0 / x0.45).
+        // The line art rides the theme's on-fill ink, not a hand-typed
+        // white (M6.1 D): over the accent cell that is white by the
+        // arithmetic - over a pale user accent, or the light column's
+        // grounds, it is black, which is the whole point. The
+        // enabled/disabled rule still rides the alpha (imgui's
+        // x1.0 / x0.45), now on the chosen hue.
         let r = Rect::from_min_size(
             Pos2::new(rect.left() + (rect.width() - pal.glyph_px) * 0.5, rect.top()),
             Vec2::splat(pal.glyph_px),
         );
-        let tint = if enabled { Color32::WHITE } else { Color32::from_white_alpha(115) };
+        let ink = super::contrast::on_fill(bg.unwrap_or(pal.strip_fill()));
+        let tint = if enabled { ink } else { Color32::from_rgba_unmultiplied(ink.r(), ink.g(), ink.b(), 115) };
         painter.image(tex.id(), r, UV_FULL, tint);
     }
     let ink = if enabled { pal.text } else { pal.text_faint };
