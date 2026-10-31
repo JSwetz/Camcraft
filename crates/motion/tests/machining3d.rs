@@ -294,12 +294,22 @@ fn a_helix_that_fits_descends_in_arcs() {
 fn a_helix_that_does_not_fits_falls_back_to_a_plunge() {
     // The boss slab at its own silhouette: every row's span is the 7 mm
     // band between wall-erosion and boss-erosion, narrower than the
-    // widened disc (r + rh) of a 4 mm helix - no midpoint has room, at
-    // either plane. The level plunges instead: a slower dive, never a
-    // gouge.
+    // widened disc (r + rh) of a 4 mm helix. Eroding the ring by that
+    // much leaves an inverted annulus - the hole has swallowed the
+    // outer loop - and M8.1's containment guard refuses its phantom
+    // triangles, so the level lands the honest substitution: an axial
+    // dive on the floor's real room, SAID on the notes. A slower dive,
+    // never a gouge, never a silence. (Before the guard this posted a
+    // helix whose dive point sat in the boss - the phantom made the
+    // landing legal only in the tessellation's eye.)
     let f = slab_with_boss();
     let region = silhouette(&f);
     let t = pocket3d(&f, &region, &params(Entry3D::Helix, 4.0)).unwrap();
+    assert!(
+        t.notes.iter().any(|n| n.contains("widened disc")),
+        "the substitution must be said, got {:?}",
+        t.notes
+    );
     for level in [-5.0, -10.0] {
         let first = t
             .moves
@@ -307,6 +317,7 @@ fn a_helix_that_does_not_fits_falls_back_to_a_plunge() {
             .find(|m| m.to.z == level)
             .unwrap_or_else(|| panic!("level {level} was cut by nothing"));
         assert_eq!(first.kind, MoveKind::Plunge, "level {level} entry");
+        assert!(first.arc.is_none(), "no phantom orbit at {level}");
     }
     assert_eq!(verify_against(&f, &region, &t), Vec::new());
 }

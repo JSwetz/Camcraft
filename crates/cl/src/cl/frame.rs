@@ -254,6 +254,7 @@ impl TiltedFrame {
         Toolpath {
             moves,
             cycles: local.cycles.clone(),
+            notes: local.notes.clone(),
         }
     }
 

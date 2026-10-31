@@ -141,6 +141,7 @@ pub fn optimize_feed(
     let out = Toolpath {
         moves,
         cycles: path.cycles.clone(),
+        notes: path.notes.clone(),
     };
     if !out.all_finite() {
         return Err(GenError::Invalid("feed modulation broke the finite horizon".into()));

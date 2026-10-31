@@ -73,6 +73,33 @@ fn status_summary_counts_levels_and_arcs() {
 }
 
 #[test]
+fn notes_ride_the_path_and_the_status_line() {
+    // M8.1's diagnostics channel: a generator that substituted an
+    // entry motion says so on the path, and the status line carries
+    // the sentence. A quiet path renders exactly as it always did -
+    // the notes suffix is absent, not empty.
+    let mut b = PathBuilder::new(p(0.0, 0.0, 5.0));
+    b.push(MoveKind::Rapid, p(10.0, 0.0, 5.0), None);
+    let t = b.finish();
+    assert_eq!(t.notes.len(), 0);
+    assert!(
+        t.status_summary("P1", 0, Unit::Millimeters)
+            .ends_with("warning(s)"),
+        "a quiet path's line ends at the warning count"
+    );
+    let mut b = PathBuilder::new(p(0.0, 0.0, 5.0));
+    b.note("entry: the ramp's chord is blocked - axial dive on the floor instead");
+    b.push(MoveKind::Rapid, p(10.0, 0.0, 5.0), None);
+    let t = b.finish();
+    assert_eq!(t.notes.len(), 1, "the note rode the builder into the path");
+    let line = t.status_summary("P1", 0, Unit::Millimeters);
+    assert!(
+        line.ends_with("warning(s) - entry: the ramp's chord is blocked - axial dive on the floor instead"),
+        "the line says it: {line}"
+    );
+}
+
+#[test]
 fn arc_moves_are_planar_and_chain() {
     let mut b = PathBuilder::new(p(10.0, 0.0, -2.0));
     b.push_arc(MoveKind::Feed, p(0.0, 10.0, -2.0), Some(500.0), pt(0.0, 0.0), true);

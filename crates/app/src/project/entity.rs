@@ -49,6 +49,12 @@ pub struct PathDto {
     pub warnings: Vec<Warning>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cycles: Vec<CycleDto>,
+    /// The generator's status notes (M8.1): substitutions the entry
+    /// laws made at generation time. Absent is none - a pre-Phase-8
+    /// cache generated no notes, and the key never appears on a path
+    /// generated quiet (the cycles-v10/rev-v20 additive law).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// One cached cycle: the post's source of truth for a hole, stored beside
@@ -238,6 +244,7 @@ impl PathDto {
             moves: t.path.moves.iter().map(MoveDto::from_move).collect(),
             warnings: t.warnings.clone(),
             cycles: t.path.cycles.iter().map(CycleDto::from_cycle).collect(),
+            notes: t.path.notes.clone(),
         }
     }
 
@@ -249,6 +256,7 @@ impl PathDto {
             .copied()
             .map(CycleDto::to_cycle)
             .collect();
+        path.notes = self.notes.clone();
         ToolpathCache {
             path,
             warnings: self.warnings.clone(),

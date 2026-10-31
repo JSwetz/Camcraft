@@ -100,6 +100,19 @@ pub(super) fn waterline_passes(center: &Region, stepover: f64, climb: bool) -> R
             "waterline rings did not converge; check the stepover".into(),
         ));
     }
+    // M8.1: roughing order, interior-out. Rings were listed wall-first
+    // (k ascending), which made `passes[0]` the OUTERMOST loop - every
+    // level's first contact a dive onto the finished wall, and the
+    // entry family's links starting from the worst spot the floor has.
+    // Reversing the listing (a stable sort on descending offset, so
+    // same-ring families keep their area order) seeds every chain in
+    // the core and walks it outward: the first dive lands where the
+    // disc has room, the wall pass comes last, earned, over floor its
+    // neighbours already cleared. Ring geometry and the chaining laws
+    // are direction-blind - a chord between adjacent offsets is the
+    // same chord either way; only the walking order differs. FINISH
+    // waterline lives in `machining3d::rings` and is not touched here.
+    loops.sort_by_key(|(k, _)| std::cmp::Reverse(*k));
     // Phase 2: chain. A chord to a loop's entry point must clear the
     // region and properly cross neither any ring of the level nor any
     // chord of its own chain (earlier join chords are real cut paths

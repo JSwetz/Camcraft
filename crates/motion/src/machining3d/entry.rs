@@ -99,8 +99,15 @@ pub fn pocket3d_with_rest_prev(
     let zs_r = cut_levels(p.top_z, p.bottom_z, p.stepdown * 0.5);
     let start = coarse.moves.last().map_or_else(|| home(p), |m| m.to);
     let mut moves = coarse.moves;
+    // The coarse leg's notes join the rest leg's below, in program
+    // order (M8.1): the status line reads the substitutions as the
+    // machine lived them.
+    let mut notes = coarse.notes;
     match ladder(facets, footprint, p, &zs_r, Some(&dex), None, start) {
-        Ok(rp) => moves.extend(rp.moves),
+        Ok(rp) => {
+            moves.extend(rp.moves);
+            notes.extend(rp.notes);
+        }
         // Nothing stood above any rest plane: the coarse path was
         // already clean at lattice scale. A success, not a refusal.
         Err(GenError::Empty(_)) => {}
@@ -109,6 +116,7 @@ pub fn pocket3d_with_rest_prev(
     let path = Toolpath {
         moves,
         cycles: Vec::new(),
+        notes,
     };
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));

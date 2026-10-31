@@ -18,6 +18,12 @@ pub struct Toolpath {
     /// Empty for every non-drilling path; drilling keeps these in hole
     /// order and in agreement with `moves` (there is a law, and a test).
     pub cycles: Vec<Cycle>,
+    /// The generator's own statements about the path (M8.1): what it
+    /// substituted and why - the entry-law fallbacks the moves alone
+    /// cannot show. Never geometry, never posted to G-code; the status
+    /// line says them verbatim, so a silent fallback cannot exist.
+    /// Carried by the cache as an additive key (absent = none).
+    pub notes: Vec<String>,
 }
 
 impl Toolpath {
@@ -25,6 +31,7 @@ impl Toolpath {
         Toolpath {
             moves,
             cycles: Vec::new(),
+            notes: Vec::new(),
         }
     }
 
@@ -104,8 +111,16 @@ impl Toolpath {
             .find(|m| m.kind == MoveKind::Plunge)
             .and_then(|m| m.feed)
             .map_or(String::new(), |f| format!(" @ {}", crate::geometry::units::feed(f, unit)));
+        // The generator's substitutions ride the same line (M8.1): the
+        // status that shows a clean move count also states what the
+        // entry family could not do and where it dived instead.
+        let notes = if self.notes.is_empty() {
+            String::new()
+        } else {
+            format!(" - {}", self.notes.join(" - "))
+        };
         format!(
-            "generated {name}: {n} moves ({p} plunge(s){feed}, {} level(s), {a} arc(s)), {warnings} warning(s)",
+            "generated {name}: {n} moves ({p} plunge(s){feed}, {} level(s), {a} arc(s)), {warnings} warning(s){notes}",
             levels.len()
         )
     }
@@ -124,6 +139,7 @@ pub struct PathBuilder {
     at_pose: Option<[f64; 3]>,
     moves: Vec<Move>,
     cycles: Vec<Cycle>,
+    notes: Vec<String>,
 }
 
 impl PathBuilder {
@@ -134,7 +150,17 @@ impl PathBuilder {
             at_pose: None,
             moves: Vec::new(),
             cycles: Vec::new(),
+            notes: Vec::new(),
         }
+    }
+
+    /// State something about the path being built (M8.1): a
+    /// substitution the moves alone cannot show - an entry motion that
+    /// could not be honored and the motion taken in its place. Notes
+    /// ride the finished path to the status line; they are never
+    /// geometry and never posted. Log, never silence.
+    pub fn note(&mut self, msg: impl Into<String>) {
+        self.notes.push(msg.into());
     }
 
     pub fn at(&self) -> Point3 {
@@ -224,6 +250,7 @@ impl PathBuilder {
         Toolpath {
             moves: self.moves,
             cycles: self.cycles,
+            notes: self.notes,
         }
     }
 }

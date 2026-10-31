@@ -104,28 +104,84 @@ pub(crate) fn chord_hits_plan(a: Point2, b: Point2, passes: &[Vec<Point2>]) -> b
     passes.iter().any(|p| chord_crosses_path(a, b, p, false))
 }
 
-/// The helix's dive point: the midpoint of the longest straight run in
-/// the level plan that has room for the widened disc at both planes it
-/// crosses (the leg regions, each the level's center eroded by the
-/// helix radius plus a micron's insurance against buffer-of-buffer
-/// quantization). A row's midpoint is the furthest from every wall a
-/// planar pass offers; the scanline ends sit on the boundary by
-/// construction. First choice is the longest run - the most room, and
-/// the row a climb pass would most want to start mid-span on.
-pub(crate) fn dive_point(passes: &[Vec<Point2>], leg_prev: &Region, leg_here: &Region) -> Option<Point2> {
+/// The dive's landing spot: the centroid of the largest triangle of
+/// `center`'s own triangulation whose centre sits at least `margin`
+/// clear of the boundary - the widest open floor the region offers
+/// under a disc of that reach, not a search along the planned passes'
+/// chords. `margin` is a helix's `radius + a micron's insurance` (the
+/// swept disc must clear every wall through the whole orbit); an
+/// axial plunge passes 0.0 and needs only the center itself.
+///
+/// M8.1 replaced `dive_point`'s chord-midpoint scan with this after
+/// the scan's defect came to light: on an all-arcs plan (every
+/// tessellated waterline ring) the consecutive-pair midpoints sit on
+/// the ring lines, which the room (the center eroded again for the
+/// widened disc) has withdrawn from - so the scan resolved `None`,
+/// and the helix silently fell back to a wall plunge. A triangle of
+/// the ear-clip is material by construction (never a boundary chord),
+/// and by the superset law (a deeper level's center is a subset of
+/// every plane above), room at the destination level is room across
+/// the WHOLE depth the dive crosses.
+///
+/// The erosion is asked of the boundary, not of `Region::offset`:
+/// eroding an annulus by more than its own width makes the boolean's
+/// loops cross - the shrunk outer falls inside the grown hole - and
+/// the output is a symmetric-difference ring, consistent under its
+/// own `contains` yet material where the truth is empty (M8.1's boss
+/// band helix landed there). A distance test cannot lie that way: it
+/// measures the real clearance or says it is not there.
+/// `None` when no triangle's centroid clears the margin, the region
+/// is empty, or it is too dense to triangulate - a caller
+/// substitution in every case, never a silent choice: the fallback
+/// is said. (Public: the ladders use it, and the entry-family tests
+/// pin its laws directly.)
+pub fn dive_room(center: &Region, margin: f64) -> Option<Point2> {
     let mut best: Option<(f64, Point2)> = None;
-    for pass in passes {
-        for pair in pass.windows(2) {
-            let (a, b) = (pair[0], pair[1]);
-            let len = (b.x - a.x).hypot(b.y - a.y);
-            if len <= 0.0 || best.is_some_and(|(l, _)| l >= len) {
-                continue;
-            }
-            let mid = Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-            if leg_prev.contains(mid) && leg_here.contains(mid) {
-                best = Some((len, mid));
+    for t in center.triangles().ok()? {
+        let (ax, ay) = (t[1].x - t[0].x, t[1].y - t[0].y);
+        let (bx, by) = (t[2].x - t[0].x, t[2].y - t[0].y);
+        let area = (ax * by - ay * bx).abs() * 0.5;
+        if best.is_some_and(|(b, _)| b >= area) {
+            continue;
+        }
+        let c = Point2::new(
+            (t[0].x + t[1].x + t[2].x) / 3.0,
+            (t[0].y + t[1].y + t[2].y) / 3.0,
+        );
+        if !center.contains(c) || !boundary_clears(center, c, margin) {
+            continue;
+        }
+        best = Some((area, c));
+    }
+    best.map(|(_, d)| d)
+}
+
+/// Is `p` at least `d` clear of every edge of `region`'s boundaries -
+/// walls and islands alike? Exact membership in the region eroded by
+/// a disc of radius `d`, evaluated geometrically.
+fn boundary_clears(region: &Region, p: Point2, d: f64) -> bool {
+    if d <= 0.0 {
+        return true;
+    }
+    let d2 = d * d;
+    for l in region.loops() {
+        let pts = l.points();
+        let n = pts.len();
+        for i in 0..n {
+            let (a, b) = (pts[i], pts[(i + 1) % n]);
+            let (ex, ey) = (b.x - a.x, b.y - a.y);
+            let len2 = ex * ex + ey * ey;
+            // The parameter of p's projection, clamped to the segment.
+            let t = if len2 > 0.0 {
+                (((p.x - a.x) * ex + (p.y - a.y) * ey) / len2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let (qx, qy) = (a.x + t * ex - p.x, a.y + t * ey - p.y);
+            if qx * qx + qy * qy < d2 {
+                return false;
             }
         }
     }
-    best.map(|(_, d)| d)
+    true
 }

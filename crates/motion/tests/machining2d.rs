@@ -870,7 +870,25 @@ fn zigzag_fills_a_square_with_one_plunge_per_level() {
     let center = region.offset(-5.0).expect("offset");
     let t = pocket(&region, &pp()).expect("valid");
     assert!(t.is_chained() && t.all_finite());
-    assert_eq!(plunge_xy(&t).len(), 3, "one entry per level, rows stay engaged");
+    // M8.1's entry law on zigzag: the serpentine keeps its rows, but
+    // each level CHANGE first dives at the floor's room (Plunge never
+    // lands its level-change dive on a wall corner), then links to the
+    // row start - a chord across the rows' lines, so the hop-and-dive
+    // link. The skim's first entry stays the single honest dive.
+    // 3 levels: 1 + 2 * 2.
+    assert_eq!(plunge_xy(&t).len(), 5, "interior entry + row dive per level change");
+    let floor = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge && (m.to.z - 0.0).abs() > 1e-9)
+        .nth(1)
+        .expect("a level-change dive");
+    assert!(
+        center.contains(Point2::new(floor.to.x, floor.to.y)),
+        "the level-change dive at ({}, {}) is not inside the center area",
+        floor.to.x,
+        floor.to.y
+    );
 
     let pts = level_xy(&t, -6.0);
     let ys: Vec<f64> = {
@@ -911,8 +929,11 @@ fn zigzag_hops_over_islands_and_leaves_them_standing() {
     // the gouge check; the distance test is a loose physical cross-check.
     let center = region.offset(-5.0).expect("offset");
     let t = pocket(&region, &pp()).expect("valid");
-    // Four subpaths per level: one entry plus three island-crossing hops.
-    assert_eq!(plunge_xy(&t).len(), 12);
+    // M8.1: the skim level keeps its four subpaths (one entry plus
+    // three island-crossing hops); each level change adds the interior
+    // entry dive whose link to the row start the island forces to a
+    // hop. 4 + 5 + 5.
+    assert_eq!(plunge_xy(&t).len(), 14);
 
     for z in levels_3_zs() {
         let (pts, lifted) = polyline_at(&t, z);
@@ -1256,10 +1277,12 @@ fn waterline_rings_split_by_an_island_hop_below_clearance() {
 }
 
 /// A level change engages material the previous level never touched, so
-/// it must clear the whole stack no matter what retract plane is set.
-/// Zigzag is one serpentine pass per level, so it exercises the level
-/// transitions directly: every plunge comes down from clearance, never
-/// from the lower retract hop.
+/// its FIRST bite must clear the whole stack no matter what retract
+/// plane is set. M8.1 splits that law honestly: the level-change entry
+/// dive (at the floor's room) comes down from clearance; the dive that
+/// link then makes at the row start is a between-pass move - it, and
+/// every in-level hop, use the retract plane, which validation keeps at
+/// or above the stock top, so no hop ever slides through solid.
 #[test]
 fn zigzag_and_levels_still_lift_to_clearance() {
     let mut p = pp(); // zigzag, top 0, bottom -6, stepdown 3 -> 3 levels
@@ -1267,15 +1290,28 @@ fn zigzag_and_levels_still_lift_to_clearance() {
     p.retract_z = Some(2.0);
     let region = rect(0.0, 0.0, 30.0, 30.0);
     let t = pocket(&region, &p).expect("valid");
+    let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
+    let mut first_zs: Vec<f64> = Vec::new();
     for m in &t.moves {
         if m.kind == MoveKind::Plunge {
-            assert!(
-                (m.from.z - p.clearance_z).abs() < 1e-9,
-                "a zigzag level plunged from {} - level changes go to clearance",
-                m.from.z
-            );
+            if !first_zs.contains(&m.to.z) {
+                assert!(
+                    (m.from.z - p.clearance_z).abs() < 1e-9,
+                    "the first dive of level {} came from {}, not clearance",
+                    m.to.z,
+                    m.from.z
+                );
+                first_zs.push(m.to.z);
+            } else {
+                assert!(
+                    (m.from.z - hop).abs() < 1e-9 || (m.from.z - p.clearance_z).abs() < 1e-9,
+                    "a zigzag level plunged from {} - between-pass dives ride the hop",
+                    m.from.z
+                );
+            }
         }
     }
+    assert_eq!(first_zs.len(), 3, "each of the three levels engages once");
 }
 
 /// A retract plane inside the material would make a between-pass hop
@@ -1749,22 +1785,172 @@ fn a_helix_that_fits_on_the_plane_descends_in_arcs() {
 
 #[test]
 fn a_helix_with_no_room_on_the_plane_plunges() {
-    // Fail-safe the ladder proves: where the widened disc fits nowhere
-    // (a pocket barely wider than the tool), no dive is chosen and the
-    // crossing keeps the honest climb-and-dive - slower, never a gouge.
+    // Fail-safe the ladder proves (M8.1's wording): where the widened
+    // disc fits nowhere (a pocket barely wider than the tool) the
+    // crossing gives up the orbit but not the entry law - it dives on
+    // the FLOOR's own room, the one place the disc's axial column is
+    // proven open, and says so. Before Phase 8 this was the silent
+    // wall climb-and-dive; a substitution nobody reads is a lie.
     let region = rect(0.0, 0.0, 12.0, 12.0); // center is a 2 mm square
     let mut p = pp();
     p.entry = Entry3D::Helix;
-    p.helix_radius = 4.9; // r + rh ~ 9.9: no row midpoint has room
+    p.helix_radius = 4.9; // disc r + rh ~ 9.9: the band has no room
     let t = pocket(&region, &p).expect("still a valid pocket");
     let level2 = t
         .moves
         .iter()
         .find(|m| m.to.z == -3.0)
         .expect("the -3.0 level was cut by something");
-    assert_eq!(level2.kind, MoveKind::Plunge, "no dive, no arcs");
-    assert!(!t.moves.iter().any(|m| m.arc.is_some()), "the fallback is pure");
+    assert_eq!(level2.kind, MoveKind::Plunge, "no orbit, an axial dive");
+    assert!(
+        level2.arc.is_none()
+            && !t.moves.iter().any(|m| m.arc.is_some() && m.from.z != m.to.z),
+        "the substituted dive never orbits"
+    );
+    assert!(
+        t.notes.iter().any(|n| n.contains("widened disc")),
+        "the substitution must be said, got {:?}",
+        t.notes
+    );
     assert!(t.is_chained() && t.all_finite());
+    // The channel runs end to end: the note reaches the status line.
+    let line = t.status_summary(
+        "pocket",
+        0,
+        camcraft_motion::geometry::units::Unit::Millimeters,
+    );
+    assert!(line.contains("widened disc"), "the line says it: {line}");
+}
+
+#[test]
+fn the_helix_on_a_disc_spirals_from_the_core_not_the_wall() {
+    // M8.1's killer check: the tessellated disc is the geometry the old
+    // dive scan died on. Its waterline plan is all arcs, so every
+    // consecutive-pair midpoint sat ON a ring line - never inside the
+    // leg eroded again for the widened disc - the scan resolved None,
+    // and the helix entry silently became a wall climb-and-dive on
+    // every round pocket this app ever posted. Two laws meet here:
+    // the floor's own triangulation picks the landing (descending arcs
+    // post, with nothing to report), and the rings run inside-out, so
+    // the first contact is the core and the wall pass comes last.
+    let disc = Region::new(vec![Loop::new(ring_circle(20.0, 192)).unwrap()]).unwrap();
+    let mut p = pp();
+    p.strategy = PocketStrategy::Waterline;
+    p.entry = Entry3D::Helix;
+    p.helix_radius = 2.0;
+    let t = pocket(&disc, &p).expect("round helix valid");
+    assert!(
+        t.moves.iter().any(|m| {
+            m.arc.is_some() && m.kind == MoveKind::Feed && m.from.z != m.to.z
+        }),
+        "the level change descends in arcs, not a silent wall plunge"
+    );
+    assert!(t.notes.is_empty(), "room was found; nothing to say: {:?}", t.notes);
+    let dist = |m: &camcraft_motion::cl::Move| (m.to.x * m.to.x + m.to.y * m.to.y).sqrt();
+    // The path's very first contact: the core, not the Ø30 wall ring.
+    let first = t
+        .moves
+        .iter()
+        .find(|m| m.kind == MoveKind::Plunge)
+        .expect("some dive into the plane");
+    assert!(
+        dist(first) < 8.0,
+        "the first dive stands in the core, got {:?}",
+        first.to
+    );
+    // And the crossing that opens -3.0 lands where it lands: the
+    // helix's own arcs reach the plane inside the core (an earned
+    // orbit, not a dive - a substitution would have put a Plunge
+    // here, and the empty-notes assert above already refused one).
+    let open = t
+        .moves
+        .iter()
+        .find(|m| m.to.z == -3.0)
+        .expect("the -3.0 level was reached");
+    assert!(dist(open) < 12.0, "the level opens in the floor's room: {:?}", open.to);
+    assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn roughing_rings_run_inside_out_and_the_wall_walks_last() {
+    // The order law by itself, no entry family: roughing reaches the
+    // finished wall only over floor its neighbours already cleared.
+    // Wall-first made `passes[0]` the outermost ring - every level's
+    // first contact a dive onto the wall the part must keep - and
+    // pinned a hop behind every chain for no reason at all.
+    let region = rect(0.0, 0.0, 40.0, 40.0); // center: [5,35]^2
+    let mut p = pp();
+    p.strategy = PocketStrategy::Waterline;
+    let t = pocket(&region, &p).expect("waterline valid");
+    let d = |q: &camcraft_motion::cl::Move| {
+        ((q.to.x - 20.0).powi(2) + (q.to.y - 20.0).powi(2)).sqrt()
+    };
+    let first = t
+        .moves
+        .iter()
+        .find(|m| m.kind == MoveKind::Plunge)
+        .expect("the pocket dives somewhere");
+    assert!(d(first) < 8.0, "the pocket opens in the core, got {:?}", first.to);
+    let last_top = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Feed && m.to.z == 0.0)
+        .next_back()
+        .expect("the top level cuts");
+    assert!(d(last_top) >= 14.0, "the wall ring walks last, got {:?}", last_top.to);
+    assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn dive_room_never_lands_outside_the_region() {
+    // The M8.1 guard in `dive_room`: eroding an annulus by more than
+    // its own width leaves an inverted ring - the hole has swallowed
+    // the outer loop - and the ear-clip tessellates that to phantom
+    // triangles whose union is not the region. A dive that trusts a
+    // phantom orbits the tool into the void. Centroids are accepted
+    // only where `contains` agrees, so a phantom floor answers None
+    // and the caller substitutes loudly.
+    let outer = Loop::new(vec![
+        Point2::new(-14.0, -14.0),
+        Point2::new(14.0, -14.0),
+        Point2::new(14.0, 14.0),
+        Point2::new(-14.0, 14.0),
+    ])
+    .unwrap();
+    // A hole loop with opposite orientation is the region's void.
+    let hole = Loop::new(vec![
+        Point2::new(-12.0, -12.0),
+        Point2::new(-12.0, 12.0),
+        Point2::new(12.0, 12.0),
+        Point2::new(12.0, -12.0),
+    ])
+    .unwrap();
+    let ring = Region::new(vec![outer, hole]).unwrap();
+    assert_eq!(ring.area(), 784.0 - 576.0, "the 2 mm band by both measures");
+    // Ask for room a 1.5 mm disc fits: no point of a 2 mm band is
+    // 1.5 clear of both its edges, so the honest answer is None -
+    // while the same question put to `Region::offset` hands back a
+    // crossed-loops ring of phantom material.
+    if let Some(p) = camcraft_motion::entry::dive_room(&ring, 1.5) {
+        panic!("a 2 mm band has no 1.5 clearance anywhere, got {p:?}");
+    }
+    // The band itself has honest room for the axial arm: the margin
+    // test must not have become a blanket refusal.
+    let d = camcraft_motion::entry::dive_room(&ring, 0.0).expect("the band's own floor has room");
+    assert!(
+        ring.contains(d),
+        "the dive point must stand inside the center, got {d:?}"
+    );
+    // And a disc the band comfortably fits finds centroids in it:
+    // every ear of this ring has its centre within 2/3 mm of one
+    // edge, so the 0.5 question answers somewhere honest. (Centroid
+    // sampling can miss room on a hair-thin band - a real disc of
+    // half the width fits nowhere a triangle centre sits; the law
+    // accepts that as None, which is a said substitution, never a
+    // silent wrong dive.)
+    let tight = camcraft_motion::entry::dive_room(&ring, 0.5)
+        .expect("a 2 mm band offers centroids a 0.5 disc clears");
+    assert!(ring.contains(tight), "{tight:?} must stand in the band");
 }
 
 #[test]

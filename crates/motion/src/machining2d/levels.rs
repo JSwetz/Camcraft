@@ -1,7 +1,7 @@
 //! Split from `machining2d.rs` by M5.0.1; structure only.
 
 use crate::cl::{MoveKind, PathBuilder};
-use crate::entry::{Entry3D, chord_hits_plan, dive_point, helix_down};
+use crate::entry::{Entry3D, chord_hits_plan, dive_room, helix_down};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
@@ -139,61 +139,79 @@ pub(super) fn run_levels(
                     // whole ladder shares: it is the deepest cut at the
                     // crossing's bottom, every plane above crosses the
                     // same material columns already swept by the level
-                    // above, and one chord test covers the move.
+                    // above, and one chord test covers the move. A
+                    // blocked chord is substituted, not skipped: M8.1
+                    // sends the fallback to the floor's own dive room
+                    // (the wall dive it used to post is what the entry
+                    // law refuses), and says so.
                     let cur = b.at();
                     let leg = Point2::new(cur.x, cur.y);
-                    let prev_z = last_cut_z.unwrap_or(z);
+                    let prev_z = last_cut_z.unwrap_or(m.clearance_z);
                     if chord_clears(cen, leg, e) {
                         b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
                         b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(m.feed));
                     } else {
-                        b.push(MoveKind::Rapid, Point3::new(e.x, e.y, m.clearance_z), None);
-                        b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
+                        substituted_dive(b, cen, passes, e, z, m, "the ramp's chord is blocked");
                     }
                 }
                 (true, Entry3D::Helix, Some(cen)) => {
-                    // Pass ends sit on the walls by construction, so
-                    // the orbit is never legal about one: the dive
-                    // lives at the midpoint of the plan's longest run,
-                    // where the widened disc (tool radius + helix
-                    // radius) has room at both planes it crosses - the
-                    // same region twice, because the planes see the
-                    // same tiling. An erosion that fails (a plan too
-                    // narrow for the disc, a clipper edge) leaves the
-                    // dive None: the honest fallback is the climb and
-                    // dive the pocket has always posted.
+                    // The orbit's landing spot is the floor's own room
+                    // (M8.1): the destination center eroded by the
+                    // widened disc, taken at its widest open triangle.
+                    // The old chord-midpoint scan resolved None on every
+                    // all-arcs ring plan - the tessellated waterline's
+                    // midpoints sit on the ring lines, not in the eroded
+                    // leg - and the helix died silently into a wall
+                    // plunge. Room at the destination is room across the
+                    // whole crossed depth: the pocket's plan is one
+                    // region at every plane.
                     let cur = b.at();
                     let leg = Point2::new(cur.x, cur.y);
-                    let prev_z = last_cut_z.unwrap_or(z);
-                    let dive = cen
-                        .offset(-(m.helix_radius + 1e-3))
-                        .ok()
-                        .and_then(|leg_r| dive_point(passes, &leg_r, &leg_r));
+                    let prev_z = last_cut_z.unwrap_or(m.clearance_z);
+                    let dive = dive_room(cen, m.helix_radius + 1e-3);
                     if let Some(d) = dive {
                         if leg.x != d.x || leg.y != d.y {
                             b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.clearance_z), None);
                         }
                         b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
                         helix_down(b, d, prev_z, z, m.helix_radius, m.feed);
-                        if chord_clears(cen, d, e) && !chord_hits_plan(d, e, passes) {
-                            b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(m.feed));
-                        } else {
-                            b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.hop_z), None);
-                            b.push(MoveKind::Rapid, Point3::new(e.x, e.y, m.hop_z), None);
-                            b.push(
-                                MoveKind::Plunge,
-                                Point3::new(e.x, e.y, z),
-                                Some(m.plunge_feed),
-                            );
-                        }
+                        dive_link(b, cen, passes, d, e, z, m);
                     } else {
-                        b.push(MoveKind::Rapid, Point3::new(e.x, e.y, m.clearance_z), None);
-                        b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
+                        substituted_dive(
+                            b,
+                            cen,
+                            passes,
+                            e,
+                            z,
+                            m,
+                            "the widened disc fits nowhere at this level",
+                        );
                     }
                 }
-                // Plunge, a first entry, an in-level join, or a
-                // ladder that passed no center: the climb-and-dive
-                // this function has always posted.
+                (true, Entry3D::Plunge, Some(cen)) => {
+                    // The family's axial arm dives where the disc has
+                    // room at this level's floor, never at `passes[0]`
+                    // on the wall (M8.1). The link to the pass start
+                    // then runs over the level's own fresh plane.
+                    match dive_room(cen, 0.0) {
+                        Some(d) => {
+                            let cur = b.at();
+                            if cur.x != d.x || cur.y != d.y {
+                                b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.clearance_z), None);
+                            }
+                            b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z), Some(m.plunge_feed));
+                            dive_link(b, cen, passes, d, e, z, m);
+                        }
+                        None => {
+                            substituted_dive(b, cen, passes, e, z, m, "the disc fits nowhere here")
+                        }
+                    }
+                }
+                // A first entry, an in-level join, or a ladder that
+                // passed no center: the climb-and-dive this function
+                // has always posted - the surface's own honest dive,
+                // and the slot/trace shape no arm can change without
+                // proofs.
                 _ => {
                     b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lift_z), None);
                     b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
@@ -209,6 +227,65 @@ pub(super) fn run_levels(
                 }
             }
             last_cut_z = Some(z);
+        }
+    }
+}
+
+/// The link from a just-completed dive at `d` up to plane `z` to the
+/// pass start `e`: feed it when the chord is proven (inside the
+/// center, crossing none of the level's planned paths), fly it over -
+/// hop, traverse, dive - when it is not. Shared by every arm's entry
+/// so the law reads once: an unproven chord never drags the tool
+/// across a wall face it has no right to cross.
+fn dive_link(
+    b: &mut PathBuilder,
+    cen: &Region,
+    passes: &[Vec<Point2>],
+    d: Point2,
+    e: Point2,
+    z: f64,
+    m: &Motion,
+) {
+    if chord_clears(cen, d, e) && !chord_hits_plan(d, e, passes) {
+        b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(m.feed));
+    } else {
+        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.hop_z), None);
+        b.push(MoveKind::Rapid, Point3::new(e.x, e.y, m.hop_z), None);
+        b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
+    }
+}
+
+/// The entry family's honorable failure (M8.1): the stated motion
+/// could not be honored at this level for `why`, so the ladder
+/// substitutes the axial dive at the floor's own room - and says so on
+/// the status line. A floor with no room either (a region too dense to
+/// triangulate, an erosion that vanished) falls back to the wall dive
+/// the pocket used to post, still loud.
+fn substituted_dive(
+    b: &mut PathBuilder,
+    cen: &Region,
+    passes: &[Vec<Point2>],
+    e: Point2,
+    z: f64,
+    m: &Motion,
+    why: &str,
+) {
+    match dive_room(cen, 0.0) {
+        Some(d) => {
+            b.note(format!("entry: {why} - axial dive on the floor instead"));
+            let cur = b.at();
+            if cur.x != d.x || cur.y != d.y {
+                b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.clearance_z), None);
+            }
+            b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z), Some(m.plunge_feed));
+            dive_link(b, cen, passes, d, e, z, m);
+        }
+        None => {
+            b.note(format!(
+                "entry: {why} - the floor has no dive room either; dived at the pass start"
+            ));
+            b.push(MoveKind::Rapid, Point3::new(e.x, e.y, m.clearance_z), None);
+            b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
         }
     }
 }
