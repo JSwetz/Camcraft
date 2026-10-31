@@ -6059,3 +6059,112 @@ writes no key, stranger names land as written), posting 16/16 (the 13
 .nc goldens byte-identical, default path untouched), ui lib 119/119,
 theme_files 10/10, every snapshot binary green with zero golden
 churn, headless rc=0 View3D green, clippy -D warnings both crates.
+
+## M6.1 D - derived contrast: the follow law, the readability gate, the light golden
+
+**What the contrast module owns, and why it is its own file.**
+`crates/ui/src/egui_app/contrast.rs`: WCAG 2.1 luminance/ratio (public
+formula, W3C REC), the readable text-on-fill choice, the follow law, and
+the readability gate. Chosen: a new `pub mod contrast` - the arithmetic
+is pure colour maths over `Color32`, both consumers (`theme::visuals`,
+`theme_files::parse`) plus `painted`'s glyph tint and the golden read
+the ONE table, and the file stays well inside the 400-law. Considered
+and dropped: folding into `theme.rs` (375 -> ~530 LOC) or
+`theme_files.rs` (at the limit, and about parsing - the gate is not a
+parse concern). Provenance: the sibling project's
+derive-don't-trust-hand-typed-states architecture at the user's
+direction; thresholds, the linear-light form and every number ours.
+
+**The law: unspelled states ride the accent, in linear light.**
+A file that changes ACCENT and leaves `accent_hover`/`field_active`/
+`selection_bg` unspelled gets the base column's own per-channel
+linear-light step (`state - accent`) translated onto the new accent,
+re-gammas, clamps never wraps, a negative step undershooting black
+lands on 0 not NaN. Chosen over: HSL lightness steps (egui has no hsl,
+and the built-in hovers are NOT lightness multiples - dark's hover
+lifts +8%/-25%/-18.5% per channel; the delta translation reproduces
+that, which is the point: hover still lifts, active still sinks toward
+the field, whatever accent a file brings); and over requiring files to
+spell all four (the ROADMAP asked for states *generated from* the
+accent). Identity round-trips byte-exactly on both built-in columns
+(six golden asserts), so the law never churns a base. Accepted
+consequence, made visible: the translation is not hue-locked -
+teal-night's derived `field_active` is #005200 (the base's red-channel
+-2.5% floor clamps out of a teal-seeded step). A green-shifted
+selected-field is legible as intent (still the base's own distance
+from the accent), and every unspelled move prints an honest note in
+the theme's status line. Spelling always wins: a spelled state gets no
+touch and no note.
+
+**The stroke-rides-hover law.** An unspelled `selection_stroke` becomes
+the final `accent_hover`, spelled-or-derived: both built-in columns
+already store the stroke AT the hover - the file overlay broke that
+coincidence, the law restores it, so the focus line always matches the
+button the eye just followed. It notes only when it actually moved;
+`teal-night.json` spells a matching value and stays silent.
+
+**The gate, and its two honest exemptions.** `readable()`: text >= 4.5
+on all four shell grounds, text_dim >= 4.5 on the two strips,
+`selection_stroke` >= 3.0 on the window ground, and
+`ratio(on_fill(fill), fill) >= 4.5` on both accent fills. That last
+pair can never fail by the formula's shape - the better of white and
+black is always >= 4.583:1 - kept written as the law it guards,
+checkable should `on_fill` ever grow a third ink. `text_faint` is
+exempt: it is disabled-state ink, the one tier WCAG itself excuses
+(this also grandfathers LIGHT's faint at 2.93). Refusal lands at
+parse - the file's origin, the failing pair and its ratio named in the
+status line, the live look never changes (refusal-not-style, the Prime
+Directive's theme-case form). Both built-in columns pass their own
+table's gate; the golden asserts it - they define what readable means
+here.
+
+**The bug the arithmetic found.** `widgets.active.fg_stroke` was
+hand-typed `Color32::WHITE` since A: white on the hover/active accent
+is 3.83:1 dark / 4.29:1 light - under the AA floor in BOTH built-in
+columns, black clears both. Found by computing, not observing: a
+momentary pressed-state ink, never in a snapshot. Now
+`on_fill(accent_hover)`. DARK frames stay byte-identical everywhere by
+construction (hovered stroke resolves to WHITE on dark's steel blue;
+the painted glyph's white tint resolves to WHITE, its disabled alpha
+rides the same hue - the old `from_white_alpha(115)` pixel identity
+proven, and the gate's snapshots confirmed it).
+
+**The light golden.** `egui_shell_snapshot_light` drives the
+switcher's own door - the world carries `ThemeRef::Named("light")`,
+the frame-edge sync lands the column - so the pixels prove the PATH,
+not just the table, paired with `readable()` on the live table
+(ROADMAP: "the light theme ships alongside as a second golden set").
+The three snapshot tests share a process-wide mutex because
+`theme::current()` is ONE live static: without it a parallel dark
+frame could catch the light table and fail its own golden. The golden
+was generated deliberately once (UPDATE_SNAPSHOTS), eyes-checked
+(paper grounds, dark ink, the tree eye visible where hand-typed white
+had been invisible), and the dark goldens re-passed unchanged beside
+it.
+
+**ColorVision deferred, with the milestone's own word for it.** The
+ROADMAP names the protan/deutan/tritan layer "a cheap follow-on once
+the token table exists" - the table now exists, and the remap is a
+rendering-accessibility feature, not the readability law this stage
+guards. Chosen: land D complete, defer the follow-on rather than
+expand the stage; its input (the Tokens table + this module's ratio
+math) is pub, so it rides an M6.1-E-style slot at near-zero cost.
+
+**M6.1 marked done in the registry.** All seven of the milestone's
+bullets are satisfied by A+B+C+D; the only unbuilt thing is the
+above's named follow-on, which the milestone text itself puts outside
+the list ("once the token table exists"). Precedent read: M5.3 marked
+done with road-not-taken items in RECOMMENDED. The Phase-6 release
+(0.5.0) still belongs to M6.2's close-out, as the registry note says.
+
+**teal-night.json stays the derivation demonstration** (accent +
+geometry, one honest note when selected); a rust-accent file in the
+suite demonstrates the full four-note family.
+
+Gate: full ui ladder by the gate subagent - lib 119/119 (incl. the
+four new D tests), theme_files 14/14, gpu_render 7/7, app
+commands_undo 28/28, project_roundtrip 60/60, both dark snapshots
+byte-unchanged (the derivation's dark identity proven by pixels),
+clippy -D warnings zero, headless rc=0; then the light golden authored
+in-session and re-gated: full lib 120/120, all three snapshot tests
+green under the lock, clippy --tests clean.
