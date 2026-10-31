@@ -364,6 +364,15 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // not exist.
         file.version = 41;
     }
+    if file.version == 41 {
+        // v41 -> v42: the ribbon pin key arrives (M6.2) as one
+        // optional top-level field - absent decodes (via the serde
+        // default) to an unpinned ribbon, which is what every v41
+        // document has, and a pinned-none file re-saves without the
+        // key, byte for byte. No new tag, no new kind: a v41 file
+        // cannot contain it because the key did not exist.
+        file.version = 42;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -434,6 +443,10 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             None => crate::schema::ThemeRef::Dark,
         },
     );
+    // Opening lands the pins too - including the empty default, so a
+    // stale singleton from the previous document can never leak in
+    // (the theme's law, worn in the pin's clothes).
+    crate::ribbon::pinned_set(world, &file.pinned);
     for dto in file.entities {
         let kind = dto.kind.unwrap_or(EntityKind::Model);
         let entity = model::spawn(world, &dto.name);

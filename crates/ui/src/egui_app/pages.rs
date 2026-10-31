@@ -73,7 +73,7 @@ use crate::state::{
     CommandKind, ErrorScope, FixtureUi, GeoPick, ModelUi, PostView, State, UiTarget, quat_yaw_deg,
 };
 
-use super::panes::{TYPES, kind_name, retype};
+use super::panes::{kind_name, retype};
 use super::theme::Tokens;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
@@ -224,7 +224,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     let cur_kind_idx = kind_index(state.op_ui.params.kind());
     ui.label("Type");
     let mut kind = cur_kind_idx;
-    combo(ui, "op_type", &mut kind, &TYPES);
+    combo_sections(ui, "op_type", &mut kind, machine::kind_of(&state.world));
     if kind != cur_kind_idx {
         let cur = state.op_ui.params.clone();
         state.op_ui.params = retype(&cur, kind);
@@ -3295,6 +3295,41 @@ pub(crate) fn combo(ui: &mut Ui, id: &str, idx: &mut usize, names: &[&str]) {
 }
 
 /// Same, for owned name lists (tool/source lists built per frame).
+/// The Type combo, grouped (M6.2): the ribbon's sections are the combo's
+/// headers, so the two surfaces state the one taxonomy - `Section::ORDER`
+/// and `Family::admits` again, never a second list. A section the
+/// machine cannot run is left out (hiding, not darkening); the current
+/// kind's section stays listed even when the machine says no, so a
+/// mid-edit machine swap never erases the operation's own name from
+/// its closed combo - its rows are dimmed, and `family_gate` at the
+/// command door is what actually refuses.
+fn combo_sections(ui: &mut Ui, id: &str, idx: &mut usize, machine: machine::Kind) {
+    let kinds = camcraft_app::operation::KindInfo::ALL;
+    let here = kinds.get(*idx).map(|k| k.section);
+    let selected = kinds.get((*idx).min(kinds.len() - 1)).map_or("", |k| k.label);
+    ComboBox::from_id_salt(id)
+        .selected_text(selected)
+        .show_ui(ui, |ui| {
+            for s in operation::Section::ORDER {
+                let runnable = s.family().admits(machine);
+                if !runnable && here != Some(s) {
+                    continue;
+                }
+                // The header is the disabled half of add_enabled_ui:
+                // a dimmed, unclickable row - imgui's separator-text
+                // shape without importing a new idiom.
+                ui.add_enabled_ui(false, |ui| ui.selectable_label(false, s.label()));
+                ui.add_enabled_ui(runnable, |ui| {
+                    for i in s.kinds() {
+                        if let Some(k) = kinds.get(i) {
+                            ui.selectable_value(idx, i, k.label);
+                        }
+                    }
+                });
+            }
+        });
+}
+
 fn combo_owned(ui: &mut Ui, id: &str, idx: &mut usize, names: &[String]) {
     let cur: String = names
         .get((*idx).min(names.len().saturating_sub(1)))

@@ -1,6 +1,6 @@
 use super::*;
 
-pub const PROJECT_VERSION: u32 = 41;
+pub const PROJECT_VERSION: u32 = 42;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -57,6 +57,15 @@ pub struct ProjectFile {
     /// reverting the look of an intact document.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemeDto>,
+    /// The ribbon's pinned kinds (M6.2), v42+: registry indices in pin
+    /// order. An absent key pins nothing - what every v41 document is,
+    /// since the ribbon could not pin then. The indices are
+    /// registry-stable (the row order IS the product order, the combo
+    /// law), and out-of-range ones drop at read (`pinned_of`), so a
+    /// document pinned on a larger table still opens, showing only the
+    /// kinds this build can name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned: Vec<usize>,
     pub entities: Vec<EntityDto>,
 }
 

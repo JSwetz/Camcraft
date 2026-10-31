@@ -171,6 +171,10 @@ pub fn collect(world: &World) -> ProjectFile {
             crate::schema::ThemeRef::Named(name) => Some(ThemeDto::Named(name)),
             crate::schema::ThemeRef::File(path) => Some(ThemeDto::File(path)),
         },
+        // An unpinned ribbon writes no key (the theme's law, worn in
+        // the pin's clothes - and the default is what every pre-M6.2
+        // document is).
+        pinned: crate::ribbon::pinned_of(world),
         entities,
     }
 }

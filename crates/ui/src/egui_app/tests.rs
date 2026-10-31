@@ -351,9 +351,10 @@ fn file_ops_round_trip_through_commands() {
 /// previous program on disk is not touched (the gate writes nothing).
 #[test]
 fn post_cell_queues_and_the_file_arm_runs_the_gate() {
-    let (cells, _, _) = panes::ribbon_cells(
+    let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
     );
     let post = cells
         .iter()
@@ -1513,9 +1514,10 @@ fn file_keys_queue_their_commands() {
 fn ribbon_click_creates_through_the_actions_law() {
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _, _) = panes::ribbon_cells(
+    let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
     );
     let pocket = cells
         .iter()
@@ -1538,13 +1540,278 @@ fn ribbon_click_creates_through_the_actions_law() {
     );
 }
 
-/// The tip table is imgui's string law (ribbon.rs verbatim). Row-for-row,
-/// this is the guard against the drift M-f found on 7 of 18 cells - and the
-/// Create row's no-tool swap, the case the empty startup actually shows.
+// ------------------------------------------------------------ M6.2: sections
+
+fn mill_plan_at(w: f32) -> (Vec<panes::Cell>, Vec<panes::Drop>) {
+    mill_plan_pinned_at(w, &[])
+}
+
+/// The same layout, over a pinned list - the plan is a pure function
+/// of (machine, pins), so this is what the live ribbon draws.
+fn mill_plan_pinned_at(w: f32, pinned: &[usize]) -> (Vec<panes::Cell>, Vec<panes::Drop>) {
+    let strip = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(w, super::shell::RIBBON_H));
+    let (cells, _, _, drops) = panes::ribbon_cells(
+        strip,
+        &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, pinned),
+    );
+    (cells, drops)
+}
+
+/// The document's operation rows, counted (the dropdown test proves
+/// reach by exactly one more, whatever names they take).
+fn op_count(state: &State) -> usize {
+    model::named_entities(&state.world)
+        .into_iter()
+        .filter(|(_, e)| model::is_operation(&state.world, e))
+        .count()
+}
+
+fn create_at(cmds: &[panes::Cell]) -> Vec<usize> {
+    cmds.iter()
+        .filter_map(|c| match c.cmd {
+            Cmd::Create(i) => Some(i),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The reach law (M6.2): whatever the machine, every kind it can run
+/// has exactly one home this frame - inline in its section, or behind
+/// that section's door - and a kind it cannot run has none (the
+/// hiding law; a dark cell would be a lie with a new taxonomy).
+#[test]
+fn every_kind_has_a_home_on_every_machine() {
+    use camcraft_app::machine::Kind;
+    for machine in [Kind::Mill, Kind::Lathe, Kind::MillTurn] {
+        for w in [1280.0, 900.0] {
+            let strip =
+                egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(w, super::shell::RIBBON_H));
+            let pal = theme::current();
+            let plan = panes::ribbon_plan(machine, &[]);
+            let (cells, _, _, drops) = panes::ribbon_cells(strip, &pal, &plan);
+            let inline = create_at(&cells);
+            let behind: Vec<usize> = drops
+                .iter()
+                .flat_map(|d| d.rows.iter())
+                .filter_map(|(c, _)| match c {
+                    Cmd::Create(i) => Some(*i),
+                    _ => None,
+                })
+                .collect();
+            for (i, k) in camcraft_app::operation::KindInfo::ALL.iter().enumerate() {
+                let homes = inline.iter().filter(|j| **j == i).count()
+                    + behind.iter().filter(|j| **j == i).count();
+                let want = usize::from(k.family().admits(machine));
+                assert_eq!(
+                    homes, want,
+                    "kind {i} ({}) has {homes} homes on a {} at {w}px, wants {want}",
+                    k.label,
+                    machine.word()
+                );
+            }
+        }
+    }
+}
+
+/// The fold is width-driven and nothing else (M6.2): a wide shell
+/// shows every cell and opens no doors; the house width does fold,
+/// every door that exists answers to a More button on the ribbon, and
+/// no door fronts an empty list.
+#[test]
+fn a_roomy_window_never_folds_and_the_house_one_folds_fair() {
+    let (wide, doors) = mill_plan_at(2400.0);
+    assert!(doors.is_empty(), "2400 px must not fold: {} drops", doors.len());
+    assert_eq!(
+        create_at(&wide).len(),
+        18,
+        "a mill ribbon is 18 mill kinds inline when roomy"
+    );
+    let (narrow, doors) = mill_plan_at(1280.0);
+    assert!(!doors.is_empty(), "the house width must exercise the fold");
+    for d in &doors {
+        assert!(!d.rows.is_empty(), "a door must front a real list");
+        assert!(
+            narrow.iter().any(|c| c.cmd == Cmd::More(d.section)),
+            "each door's button must be on the ribbon"
+        );
+    }
+}
+
+/// The dropdown is not scenery: pressing a folded door opens it (the
+/// state names the section), and pressing a row creates exactly that
+/// operation through the actions law - then the door closes on its
+/// own way out.
+#[test]
+fn the_dropdown_reaches_a_folded_kind() {
+    let mut harness = shell_harness();
+    harness.run();
+    let (_, drops) = mill_plan_at(1280.0);
+    let drop = drops
+        .iter()
+        .find(|d| !d.rows.is_empty())
+        .expect("a folded door at house width");
+    let ops_before = op_count(&harness.state().state);
+    let at = drop.button.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    assert_eq!(
+        harness.state().state.ribbon_more,
+        Some(drop.section),
+        "pressing the door must open it"
+    );
+    let row_at = drop.rows[0].1.center();
+    set_pos(&mut harness, row_at);
+    button_at(&mut harness, egui::PointerButton::Primary, row_at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, row_at, false);
+    harness.run_steps(2);
+    assert_eq!(
+        op_count(&harness.state().state),
+        ops_before + 1,
+        "the row must create its kind (status: {})",
+        harness.state().state.status
+    );
+    assert_eq!(
+        harness.state().state.ribbon_more, None,
+        "a choice closes the door"
+    );
+}
+
+/// The pin gesture, at the level its law lives on (M6.2): the
+/// right-click writes the document's pinned list and says so, but
+/// never the history - undo replays the cut, not the layout, and the
+/// pin must still be there after the undo.
+#[test]
+fn right_click_pins_and_undo_replays_only_the_cuts() {
+    let mut harness = shell_harness();
+    harness.run();
+    let (cells, _) = mill_plan_at(1280.0);
+    let pocket = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Create(2))
+        .expect("Pocket inline at house width");
+    let at = pocket.rect.center();
+    // Cut first, so there is history to replay under the pin.
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    assert!(
+        model::find_by_name(&harness.state().state.world, "Operation2").is_some(),
+        "the cut must have landed first (status: {})",
+        harness.state().state.status
+    );
+    // Right-click: pinned, and the gesture's own record is the status line.
+    button_at(&mut harness, egui::PointerButton::Secondary, at, true);
+    button_at(&mut harness, egui::PointerButton::Secondary, at, false);
+    harness.run_steps(1);
+    assert_eq!(
+        camcraft_app::ribbon::pinned_of(&harness.state().state.world),
+        vec![2],
+        "the right-click must pin"
+    );
+    assert!(
+        harness.state().state.status.contains("pinned"),
+        "the toggle must say so: {}",
+        harness.state().state.status
+    );
+    // Undo the cut; the pin is layout, not a cut - it survives.
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    assert!(
+        model::find_by_name(&harness.state().state.world, "Operation2").is_none(),
+        "undo must have taken the operation back"
+    );
+    assert_eq!(
+        camcraft_app::ribbon::pinned_of(&harness.state().state.world),
+        vec![2],
+        "undo replays cuts, not layout (M6.2's pin law)"
+    );
+    // Right-click again: unpinned. The pin moved the layout (the
+    // Pinned group leads), so the target is re-read from the plan the
+    // live ribbon now draws - its first Pocket cell, the pinned one.
+    let (pinned_cells, _) = mill_plan_pinned_at(1280.0, &[2]);
+    let at = pinned_cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Create(2))
+        .expect("the pinned Pocket leads")
+        .rect
+        .center();
+    button_at(&mut harness, egui::PointerButton::Secondary, at, true);
+    button_at(&mut harness, egui::PointerButton::Secondary, at, false);
+    harness.run_steps(1);
+    assert!(camcraft_app::ribbon::pinned_of(&harness.state().state.world).is_empty());
+}
+
+/// The plan side of the pin law: pins lead the Create groups in pin
+/// order; a pin to work the machine cannot run is kept in the list
+/// and hidden on screen (survive-not-shown); and the section keeps
+/// its own row - the pin is a shortcut, not a move.
+#[test]
+fn the_pinned_group_leads_and_respects_the_machine() {
+    use camcraft_app::machine::Kind;
+    let plan = panes::ribbon_plan(Kind::Mill, &[2, 5]);
+    assert_eq!(plan[2].title, "Pinned");
+    assert_eq!(
+        plan[2].cells,
+        vec![Cmd::Create(2), Cmd::Create(5)],
+        "pin order is ribbon order"
+    );
+    assert!(
+        plan[3].cells.contains(&Cmd::Create(2)),
+        "the section keeps its own row - a pin is a shortcut, not a move"
+    );
+    let orphan = panes::ribbon_plan(Kind::Mill, &[28]);
+    assert!(
+        !orphan.iter().any(|g| g.title == "Pinned"),
+        "a lathe pin on a mill document is hidden, not darkened"
+    );
+    let both = panes::ribbon_plan(Kind::MillTurn, &[28]);
+    assert_eq!(both[2].cells, vec![Cmd::Create(28)]);
+}
+
+/// The stale door self-heals (M6.2): widen past the fold and the
+/// button leaves the ribbon, so the open state must not outlive it -
+/// the next frame finds no button and drops the state itself.
+#[test]
+fn widening_the_window_heals_a_stale_door() {
+    let mut harness = shell_harness();
+    harness.run();
+    let (_, drops) = mill_plan_at(1280.0);
+    let section = drops
+        .iter()
+        .find(|d| !d.rows.is_empty())
+        .expect("a folded door")
+        .section;
+    harness.state_mut().state.ribbon_more = Some(section);
+    harness.run();
+    assert_eq!(
+        harness.state().state.ribbon_more,
+        Some(section),
+        "still real at 1280"
+    );
+    harness.set_size(Vec2::new(2400.0, 720.0));
+    harness.run();
+    assert_eq!(
+        harness.state().state.ribbon_more, None,
+        "the button is gone, so the open state must be too"
+    );
+}
+
+/// The tip table, pinned row-for-row. The strings were imgui's verbatim
+/// until M6.2 restructured the ribbon (sections, the pin gesture, the
+/// overflow doors); that day the verbatim promise retired (the promise,
+/// not the guard - a tip is still a promise). Every advertised key is
+/// live: `shortcuts` implements the keys, and the right-click names
+/// itself because the cell answers to it.
 #[test]
 fn tips_match_the_imgui_table() {
     let with_tool = ShellUi::seeded().state;
     let empty = State::new();
+    use camcraft_app::operation::Section;
+    let pin = "\tRight-click to pin/unpin";
     let rows: &[(Cmd, &str)] = &[
         (Cmd::New, "New document\tCtrl+N"),
         (Cmd::Model, "Open a mesh model\tCtrl+O"),
@@ -1554,14 +1821,6 @@ fn tips_match_the_imgui_table() {
         (Cmd::Stock, "Stock definition"),
         (Cmd::Origin, "Work offset (WCS)"),
         (Cmd::Tools, "Tool library"),
-        (Cmd::Create(0), "Add a Face mill operation"),
-        (Cmd::Create(1), "Add a 2D Contour operation"),
-        (Cmd::Create(2), "Add a 2D Pocket operation"),
-        (Cmd::Create(3), "Add a Slot operation"),
-        (Cmd::Create(4), "Add a Trace operation"),
-        (Cmd::Create(5), "Add a Drill operation"),
-        (Cmd::Create(6), "Add a 3D Pocket operation"),
-        (Cmd::Create(7), "Add a 3D Finish operation"),
         (Cmd::Undo, "Undo\tCtrl+Z"),
         (Cmd::Redo, "Redo\tCtrl+Y"),
         (Cmd::Run, "Generate the selected operation"),
@@ -1574,7 +1833,35 @@ fn tips_match_the_imgui_table() {
     for (c, want) in rows {
         assert_eq!(&panes::tip_of(*c, &with_tool), want, "tip drifted for {c:?}");
     }
-    // Every Create button shares imgui's swap while the tool list is empty.
+    // The Create rows spell themselves from the registry (M6.2: thirty
+    // kinds, no hand-typed eight-cell block left), each plus the pin
+    // gesture the cell answers to - and on this mill document, the
+    // turning half says so and names the fix, the pair the command
+    // door enforces (the defense-in-depth branch of `enabled`).
+    for (i, t) in panes::TYPES.iter().enumerate() {
+        let is_turn = camcraft_app::operation::KindInfo::ALL[i].family()
+            == camcraft_app::operation::Family::Turn;
+        let want = if is_turn {
+            "The document's machine is a mill - turning operations do not drive it; mount a lathe or a mill-turn (Setup > Machine)".to_owned()
+        } else if i == 0 {
+            // imgui's own spelling of the first kind survives verbatim
+            // (a Face mill, not a "Face operation") - the one string
+            // the registry label did not replace.
+            format!("Add a Face mill operation{pin}")
+        } else {
+            format!("Add a {t} operation{pin}")
+        };
+        assert_eq!(panes::tip_of(Cmd::Create(i), &with_tool), want, "tip drifted for Create({i})");
+    }
+    // The doors name their section and what stands behind it.
+    for s in Section::ORDER {
+        assert_eq!(
+            panes::tip_of(Cmd::More(s), &with_tool),
+            format!("The rest of the {} kinds", s.label()),
+            "door tip drifted for {s:?}"
+        );
+    }
+    // Every Create button shares the swap while the tool list is empty.
     for i in 0..panes::TYPES.len() {
         assert_eq!(
             panes::tip_of(Cmd::Create(i), &empty),
@@ -1940,9 +2227,10 @@ fn bored_block() -> camcraft_app::geometry::Mesh {
 fn ribbon_drill_cell_creates_a_drill_operation() {
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _, _) = panes::ribbon_cells(
+    let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
     );
     let drill = cells
         .iter()
@@ -2095,12 +2383,14 @@ fn a_lathe_document_lights_the_turning_cell() {
     }
     assert_eq!(
         panes::tip_of(Cmd::Create(turn), st),
-        format!("Add a {} operation", panes::TYPES[turn]),
+        format!("Add a {} operation\tRight-click to pin/unpin", panes::TYPES[turn]),
         "a lit turning cell offers the op, it does not refuse it"
     );
     assert!(
         !panes::enabled(Cmd::Create(0), st),
-        "and the same mount darkens the mill cells the doc used to light"
+        "and the same mount shuts the mill cells: since M6.2 the plan hides \
+         them entirely, and this is the command door's law that stays false \
+         for whatever surface still renders one"
     );
     // (the undo law at this level: one command, both doors - put the
     // mount back through the history and the ribbon follows.)
@@ -2184,9 +2474,10 @@ fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() 
 fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _, _) = panes::ribbon_cells(
+    let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
     );
     let pocket3d = cells
         .iter()
@@ -2219,9 +2510,10 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
 fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _, _) = panes::ribbon_cells(
+    let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
     );
     let finish3d = cells
         .iter()
@@ -2813,9 +3105,10 @@ fn simulate_cell_arms_transport_and_stop_disarms() {
         !panes::enabled(Cmd::Simulate, &State::new()),
         "nothing to simulate on an empty document"
     );
-    let (cells, _, _) = panes::ribbon_cells(
+    let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
     );
     let cell = cells
         .iter()
@@ -2939,9 +3232,10 @@ fn deviate_cell_stores_the_verdict_as_view_state() {
         !panes::enabled(Cmd::Deviate, &State::new()),
         "nothing to judge on an empty document"
     );
-    let (cells, _, _) = panes::ribbon_cells(
+    let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
     );
     let cell = cells
         .iter()

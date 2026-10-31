@@ -850,6 +850,12 @@ pub struct State {
     /// command, never saved, retired by a document switch; an edit does
     /// not silently re-run it, re-arming re-judges.
     pub program_sim: Option<camcraft_app::stock_sim::ProgramSim>,
+    /// The open ribbon section dropdown (M6.2): while `Some`, that
+    /// section's overflow button stands pressed and its folded kinds
+    /// draw as a popup column. View state like the sim's playhead -
+    /// not undoable, not saved; the ribbon's draw retires it when a
+    /// machine or document change takes the section away.
+    pub ribbon_more: Option<camcraft_app::operation::Section>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -1029,6 +1035,7 @@ impl State {
             sim: None,
             post_view: None,
             program_sim: None,
+            ribbon_more: None,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,

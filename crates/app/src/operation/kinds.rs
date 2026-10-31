@@ -1146,16 +1146,98 @@ fn seed_rotary_offset(c: &Carried) -> OpParams {
 pub struct KindInfo {
     pub ty: OpType,
     pub label: &'static str,
-    /// The ribbon cell's short caption - imgui's wording, kept verbatim
-    /// as the product's UI dialect (the tips table test guards it).
+    /// The ribbon cell's short caption - the product's own UI dialect.
+    /// It was imgui's wording kept verbatim until M6.2 restructured the
+    /// ribbon; the promise is retired in RECOMMENDED.md, the strings
+    /// stay (a caption is a name, and names do not need churn).
     pub caption: &'static str,
     pub tag: u8,
     pub mode: Mode,
-    /// Whose machine this kind drives (M5.2 stage A): the family the
-    /// document's machine kind must admit for the op to exist at all -
-    /// the command-level gate reads this row, never a hand-typed list.
-    pub family: Family,
+    /// Which catalog section the kind belongs to (M6.2): the ribbon's
+    /// family sections, the type combo's grouping, and the machine
+    /// pairing all read this one field - `family` below is derived from
+    /// it, so no second taxonomy can drift from the first.
+    pub section: Section,
     pub seed: fn(&Carried) -> OpParams,
+}
+
+/// The catalog's taxonomy, as registry data (M6.2): the five sections
+/// the ROADMAP's Operation Catalog heads divide into, so the ribbon's
+/// family sections and the page's type combo quote the same table the
+/// tree and the sheet already read - no second truth. `Family` (the
+/// two machine kinds, M5.2 stage A) is derived, not stored: Turning is
+/// the lathe's work, the four mill sections are the mill's, and a
+/// mill-turn admits both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Section {
+    Mill2D,
+    Mill3D,
+    Drilling,
+    MultiAxis,
+    Turning,
+}
+
+impl Section {
+    /// The catalog's order, which is the ribbon's: the sections appear
+    /// left to right in exactly this sequence, each one's kinds in the
+    /// registry's own order (the row order is the product order).
+    pub const ORDER: [Section; 5] = [
+        Section::Mill2D,
+        Section::Mill3D,
+        Section::Drilling,
+        Section::MultiAxis,
+        Section::Turning,
+    ];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Section::Mill2D => "Milling 2D",
+            Section::Mill3D => "Milling 3D",
+            Section::Drilling => "Drilling",
+            Section::MultiAxis => "Multi-axis",
+            Section::Turning => "Turning",
+        }
+    }
+
+    /// Whose machine this section's kinds drive - the derivation that
+    /// replaces the stored `family` field (M6.2): one taxonomy column,
+    /// two read-outs, the command door and the ribbon cannot disagree.
+    #[must_use]
+    pub fn family(self) -> Family {
+        match self {
+            Section::Turning => Family::Turn,
+            _ => Family::Mill,
+        }
+    }
+
+    /// The kinds in this section, as registry indices (product order
+    /// within the section). A surface that lists a section walks this,
+    /// never a hand-typed slice of `KindInfo::ALL`.
+    #[must_use]
+    pub fn kinds(self) -> Vec<usize> {
+        KindInfo::ALL
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| k.section == self)
+            .map(|(i, _)| i)
+            .collect()
+    }
+}
+
+/// The sections a machine kind can run, in catalog order: the mill
+/// document's ribbon never shows a Turning section, a lathe's shows
+/// only that one, and a mill-turn shows all five. This is the hiding
+/// law's data (M6.2) - the ribbon's darkening (M3.2 E) is retired
+/// because cells for work the steel cannot spin should not be there
+/// to darken. `KindInfo::family_gate` enforces the same pairing at
+/// the command door.
+#[must_use]
+pub fn shown_for(machine: crate::machine::Kind) -> Vec<Section> {
+    Section::ORDER
+        .into_iter()
+        .filter(|s| s.family().admits(machine))
+        .collect()
 }
 
 /// The two machine families a document's `.mch` kind can belong to
@@ -1169,6 +1251,21 @@ pub enum Family {
     Turn,
 }
 
+impl Family {
+    /// The pairing in one place (M6.2): the command door, the ribbon's
+    /// hiding and the combo's filtering all read this - the table that
+    /// used to be hand-typed twice (panes' `admits`, the door's
+    /// `matches!`) is one function now.
+    #[must_use]
+    pub fn admits(self, machine: crate::machine::Kind) -> bool {
+        use crate::machine::Kind;
+        matches!(
+            (self, machine),
+            (_, Kind::MillTurn) | (Family::Mill, Kind::Mill) | (Family::Turn, Kind::Lathe)
+        )
+    }
+}
+
 impl KindInfo {
     pub const ALL: &'static [KindInfo] = &[
         KindInfo {
@@ -1178,7 +1275,7 @@ impl KindInfo {
             tag: 0,
             // Face trims the footprint silhouette: boundary laws rule.
             mode: Mode::Boundary,
-            family: Family::Mill,
+            section: Section::Mill2D,
             seed: seed_face,
         },
         KindInfo {
@@ -1187,7 +1284,7 @@ impl KindInfo {
             caption: "Contour",
             tag: 1,
             mode: Mode::Boundary,
-            family: Family::Mill,
+            section: Section::Mill2D,
             seed: seed_contour,
         },
         KindInfo {
@@ -1197,7 +1294,7 @@ impl KindInfo {
             tag: 2,
             // The pocket hollows the region's inside: area laws rule.
             mode: Mode::Area,
-            family: Family::Mill,
+            section: Section::Mill2D,
             seed: seed_pocket,
         },
         KindInfo {
@@ -1206,7 +1303,7 @@ impl KindInfo {
             caption: "Slot",
             tag: 3,
             mode: Mode::Area,
-            family: Family::Mill,
+            section: Section::Mill2D,
             seed: seed_slot,
         },
         KindInfo {
@@ -1216,7 +1313,7 @@ impl KindInfo {
             tag: 4,
             // The center runs ON the line: tangency laws stand down.
             mode: Mode::Engrave,
-            family: Family::Mill,
+            section: Section::Mill2D,
             seed: seed_trace,
         },
         KindInfo {
@@ -1232,7 +1329,7 @@ impl KindInfo {
             // sampling never fires) the cycle reach law in `verify`
             // checks over `path.cycles`.
             mode: Mode::Boundary,
-            family: Family::Mill,
+            section: Section::Drilling,
             seed: seed_drill,
         },
         KindInfo {
@@ -1245,7 +1342,7 @@ impl KindInfo {
             // is its silhouette, the per-level islands come from the
             // facets.
             mode: Mode::Area,
-            family: Family::Mill,
+            section: Section::Mill3D,
             seed: seed_pocket3d,
         },
         KindInfo {
@@ -1257,7 +1354,7 @@ impl KindInfo {
             // tangency: law (f) of `verify` scans the swept ball against
             // the mesh (the `finish_tol` field carries the budget).
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::Mill3D,
             seed: seed_finish3d,
         },
         KindInfo {
@@ -1271,7 +1368,7 @@ impl KindInfo {
             // ball leaves - and the shank's question is the stage-A
             // leaning band law's, run on the stamped moves.
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_contour5d,
         },
         KindInfo {
@@ -1280,7 +1377,7 @@ impl KindInfo {
             caption: "5-Axis Parallel",
             tag: 9,
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_parallel5d,
         },
         KindInfo {
@@ -1293,7 +1390,7 @@ impl KindInfo {
             // law is the finish's - the pose question (the blade lies
             // under a leaning shank) is the stage-A band law again.
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_swarf,
         },
         KindInfo {
@@ -1302,7 +1399,7 @@ impl KindInfo {
             caption: "Adv. Swarf",
             tag: 11,
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_advanced_swarf,
         },
         KindInfo {
@@ -1314,7 +1411,7 @@ impl KindInfo {
             // E): the ball's path decides the verdict, the fitted
             // axis and the lean answer only where the spindle points.
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_rotary_contour,
         },
         KindInfo {
@@ -1323,7 +1420,7 @@ impl KindInfo {
             caption: "Rotary Parallel",
             tag: 13,
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_rotary_parallel,
         },
         KindInfo {
@@ -1336,7 +1433,7 @@ impl KindInfo {
             // cannot lie to it on a bar lying or standing, and the
             // kind's tolerance is exactly that law's budget.
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_rotary_offset,
         },
         KindInfo {
@@ -1352,7 +1449,7 @@ impl KindInfo {
             // reading - the ladder itself chords by the pocket's own
             // lattice laws.
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_multiaxis_rough,
         },
         KindInfo {
@@ -1365,7 +1462,7 @@ impl KindInfo {
             // decides where the lines GO and the lean law where the
             // spindle points, and the measured scan judges both.
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_flow5d,
         },
         KindInfo {
@@ -1379,7 +1476,7 @@ impl KindInfo {
             // scan - rest-height errors at a vertex fan and a gouged
             // chain are exactly what the sweep measures.
             mode: Mode::Envelope,
-            family: Family::Mill,
+            section: Section::MultiAxis,
             seed: seed_multi_axis_contour,
         },
         KindInfo {
@@ -1395,7 +1492,7 @@ impl KindInfo {
             // the revolve verdict is the BLADE's, where no sphere
             // stands - the band is the tool.
             mode: Mode::Envelope,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_facing,
         },
         KindInfo {
@@ -1409,7 +1506,7 @@ impl KindInfo {
             // and the standing leave the verdict reports is what the
             // finish pass owns.
             mode: Mode::Envelope,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_profile_rough,
         },
         KindInfo {
@@ -1422,7 +1519,7 @@ impl KindInfo {
             // envelope's budget - the chord law the kernel settled
             // the ride with is the same promise the scan checks.
             mode: Mode::Envelope,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_profile_finish,
         },
         KindInfo {
@@ -1437,7 +1534,7 @@ impl KindInfo {
             // of the cuts against the silhouette, exact on E's own
             // lattice (M5.2 C).
             mode: Mode::Revolve,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_groove_rough,
         },
         KindInfo {
@@ -1450,7 +1547,7 @@ impl KindInfo {
             // reached rests by the window shell - silence is what a
             // missed pass must never buy (M5.2 C).
             mode: Mode::Revolve,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_groove_finish,
         },
         KindInfo {
@@ -1463,7 +1560,7 @@ impl KindInfo {
             // (the workpiece left with the scrap), and the verdict
             // that reads it is the same meridian scan (M5.2 C).
             mode: Mode::Revolve,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_part,
         },
         KindInfo {
@@ -1479,7 +1576,7 @@ impl KindInfo {
             // every `pitch` of station on the model's phase, and
             // the shell owns the crest above the thread.
             mode: Mode::Revolve,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_threading,
         },
         KindInfo {
@@ -1496,7 +1593,7 @@ impl KindInfo {
             // another op's jurisdiction - the scan's law, not a
             // silence.
             mode: Mode::Envelope,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_chamfer,
         },
         KindInfo {
@@ -1509,7 +1606,7 @@ impl KindInfo {
             // ball rolls over is the modeled skin within the
             // chord budget - one truth, ride and verdict alike.
             mode: Mode::Envelope,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_taper,
         },
         KindInfo {
@@ -1524,7 +1621,7 @@ impl KindInfo {
             // the leave it is told to stand - the last ride lands
             // ON the profile either way.
             mode: Mode::Envelope,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_multi_pass,
         },
         KindInfo {
@@ -1537,7 +1634,7 @@ impl KindInfo {
             // the band's edges, and the crest law keeps the shell
             // for what the crown never reaches (M5.2 E2).
             mode: Mode::Revolve,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_form,
         },
         KindInfo {
@@ -1554,10 +1651,19 @@ impl KindInfo {
             // min-envelope is its own skin, and only the axis
             // parity knows whether the nose stands in air.
             mode: Mode::Envelope,
-            family: Family::Turn,
+            section: Section::Turning,
             seed: seed_bore,
         },
     ];
+
+    /// Whose machine this kind drives - read off the row's section
+    /// (M6.2). The field it replaces was the pairing's stored half;
+    /// with `section` the truth is one column, and this method is the
+    /// door's and the sim's word for it.
+    #[must_use]
+    pub fn family(&self) -> Family {
+        self.section.family()
+    }
 }
 
 /// The kinds, in product order (combo, ribbon, digest tags).

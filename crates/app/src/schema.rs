@@ -230,6 +230,18 @@ pub enum ThemeRef {
     File(String),
 }
 
+/// Ribbon pins (M6.2): the kind indices the user pinned, in pin order -
+/// the ribbon's own Pinned section reads this singleton. A document
+/// SETTING like the theme reference (saved with the project), but NOT
+/// an undoable command: undo replays cuts, not layout, and this is
+/// layout (ROADMAP M6.2's law, stated against the command law). The
+/// indices are registry-stable - the row order is the product order -
+/// so a pin names its kind the way the theme names its built-in;
+/// an index past the table (a document from a larger registry) is
+/// dropped at read, never shown dark.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+pub struct RibbonPins(pub Vec<usize>);
+
 /// The single stock entity's name. Identity by name, like everything else:
 /// tree, undo, and save all reach stock through this.
 pub const STOCK_NAME: &str = "Stock";
@@ -255,6 +267,7 @@ pub fn register_schema(world: &World) {
     world.component::<MachineDef>();
     world.component::<PostRef>();
     world.component::<ThemeRef>();
+    world.component::<RibbonPins>();
     world.component::<SetupDef>();
     world.component::<ActiveSetup>();
     world.component::<FixtureDef>();

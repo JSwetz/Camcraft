@@ -111,8 +111,9 @@ pub fn shortcuts(ui: &mut Ui, state: &mut State) {
 // -------------------------------------------------------------------- ribbon
 
 /// One ribbon cell: command identity plus the state it reads for enabled,
-/// toggled, label and tip. The table is the whole group layout
-/// (ribbon.rs's, command for command).
+/// toggled, label and tip. The table is the whole group layout - command
+/// for command since M6.2 divided the Create row into the catalog's
+/// family sections; the only hand-typed group left is the anchors below.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Cmd {
     New,
@@ -124,6 +125,10 @@ pub(super) enum Cmd {
     Origin,
     Tools,
     Create(usize),
+    /// The dropdown button of a folded section (M6.2): it carries the
+    /// section's label, never a faceless chevron - the cell's whole
+    /// caption is that label plus the combo's own arrow glyph.
+    More(operation::Section),
     Undo,
     Redo,
     Run,
@@ -134,25 +139,72 @@ pub(super) enum Cmd {
     Deviate,
 }
 
-const GROUPS: [(&str, &[Cmd]); 5] = [
-    ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::Post]),
-    ("Setup", &[Cmd::Stock, Cmd::Origin, Cmd::Tools]),
-    (
-        "Create",
-        &[
-            Cmd::Create(0),
-            Cmd::Create(1),
-            Cmd::Create(2),
-            Cmd::Create(3),
-            Cmd::Create(4),
-            Cmd::Create(5),
-            Cmd::Create(6),
-            Cmd::Create(7),
-        ],
-    ),
-    ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]),
-    ("Inspect", &[Cmd::Frame, Cmd::Paths, Cmd::Simulate, Cmd::Deviate]),
-];
+/// The four anchor groups: file work opens the row, setup follows, and
+/// the run/judge groups close it. The middle is the registry's (below):
+/// the old hand-typed eight-cell Create group was M1.4.3's debt, home
+/// to kinds 0..=7 while the table grew to thirty.
+const FILE: (&str, &[Cmd]) =
+    ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::Post]);
+const SETUP: (&str, &[Cmd]) = ("Setup", &[Cmd::Stock, Cmd::Origin, Cmd::Tools]);
+const MODIFY: (&str, &[Cmd]) = ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]);
+const INSPECT: (&str, &[Cmd]) =
+    ("Inspect", &[Cmd::Frame, Cmd::Paths, Cmd::Simulate, Cmd::Deviate]);
+
+/// One ribbon group before layout: its caption and every cell it would
+/// show in a row that never ran out of width. `section` marks the
+/// registry-seeded Create groups - only those fold into a dropdown.
+#[derive(Clone, Debug)]
+pub(super) struct Group {
+    pub title: &'static str,
+    pub cells: Vec<Cmd>,
+    pub section: Option<operation::Section>,
+}
+
+/// The whole ribbon as data (M6.2's home law): the anchors, the user's
+/// pinned kinds, then every catalog section the document's machine can
+/// run. Hiding, not darkening - the mill document's table carries no
+/// Turning cells to grey out; `Family::admits` is the single pairing
+/// this filter and the command door share. The registry's `section`
+/// column is the only seed, and the row order is the product order, so
+/// a section's cells list the kinds in table sequence.
+#[must_use]
+pub(super) fn ribbon_plan(
+    machine: camcraft_app::machine::Kind,
+    pinned: &[usize],
+) -> Vec<Group> {
+    let mut plan = vec![
+        Group { title: FILE.0, cells: FILE.1.to_vec(), section: None },
+        Group { title: SETUP.0, cells: SETUP.1.to_vec(), section: None },
+    ];
+    // Pinned kinds first among the Create groups, in pin order - and
+    // only those the machine can run, so the hiding law has one more
+    // surface saying the same thing (a pin to other work survives in
+    // the list unread, waiting for the mill-turn document that shows
+    // it again). The group never folds: the promise of a pin is that
+    // it stays where the user put it, the one width rule pins are
+    // exempt from, stated here rather than hidden in layout math.
+    let pins: Vec<Cmd> = pinned
+        .iter()
+        .copied()
+        .filter(|i| {
+            operation::KindInfo::ALL
+                .get(*i)
+                .is_some_and(|k| k.family().admits(machine))
+        })
+        .map(Cmd::Create)
+        .collect();
+    if !pins.is_empty() {
+        plan.push(Group { title: "Pinned", cells: pins, section: None });
+    }
+    plan.extend(operation::shown_for(machine).into_iter().map(|s| Group {
+        title: s.label(),
+        cells: s.kinds().into_iter().map(Cmd::Create).collect(),
+        section: Some(s),
+    }));
+    plan.push(Group { title: MODIFY.0, cells: MODIFY.1.to_vec(), section: None });
+    plan.push(Group { title: INSPECT.0, cells: INSPECT.1.to_vec(), section: None });
+    plan
+}
 
 // The cell box is tokens, not constants (M6.1 A): `Tokens::cell_w`/
 // `cell_h` - icon over caption, ribbon.rs's cell: glyph + 2 + one line,
@@ -182,11 +234,17 @@ fn label_of(c: Cmd) -> &'static str {
         Cmd::Paths => "Paths",
         Cmd::Simulate => "Simulate",
         Cmd::Deviate => "Deviate",
+        Cmd::More(s) => s.label(),
     }
 }
 
 fn text_of(c: Cmd) -> String {
     match c {
+        // The overflow button wears the section's name plus an
+        // ellipsis - "Milling 3D…" reads as "the rest of this is in
+        // here", which is exactly the law the dropdown keeps (M6.2:
+        // a labeled door, never a faceless chevron).
+        Cmd::More(s) => format!("{}…", s.label()),
         // The ribbon caption is registry data (M5.0.2) - imgui's strings,
         // same order as the Create cells below. The list here is built
         // from the table, so an out-of-range index means a table bug:
@@ -203,23 +261,13 @@ fn text_of(c: Cmd) -> String {
     }
 }
 
-/// Which operation families a machine kind runs (M5.2 stage A): the
-/// registry's own pair, read - never re-derived - by the ribbon's
-/// darkening and tips. `CreateOperation` enforces the same table at
-/// the command door (the law); this is the courtesy that tells the
-/// truth about it. An unstated machine is a mill, per `kind_of`.
-fn admits(machine: camcraft_app::machine::Kind, family: camcraft_app::operation::Family) -> bool {
-    use camcraft_app::machine::Kind;
-    use camcraft_app::operation::Family;
-    matches!(
-        (family, machine),
-        (_, Kind::MillTurn) | (Family::Mill, Kind::Mill) | (Family::Turn, Kind::Lathe)
-    )
-}
-
-/// The tip table, imgui's strings verbatim (ribbon.rs:140-222) - the
-/// test `tips_match_the_imgui_table` keeps it that way. Every advertised
-/// key is live: `shortcuts` implements them all.
+/// The tip table, `tips_match_the_imgui_table`'s guard. The strings
+/// were imgui's verbatim (ribbon.rs:140-222) until M6.2 restructured
+/// the ribbon; the promise retired that day (RECOMMENDED.md) and the
+/// table became the product's own - the test still pins it row for
+/// row, because a tip is a promise and promises want a guard, not
+/// because the wording is borrowed. Every advertised key is live:
+/// `shortcuts` implements them all, and the pin gesture names itself.
 pub(super) fn tip_of(c: Cmd, state: &State) -> String {
     match c {
         Cmd::New => "New document\tCtrl+N".into(),
@@ -231,22 +279,26 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Origin => "Work offset (WCS)".into(),
         Cmd::Tools => "Tool library".into(),
         Cmd::Create(i) => {
-            // imgui's swap first - it is what the startup ribbon
-            // shows, and an empty tool list is the deeper trouble:
-            // nothing lights until a tool exists, whatever the
-            // machine is (ribbon.rs:138). Then the family truth
-            // (M5.2 stage A): a cell whose kinds the document's
-            // machine cannot run says so and names the fix - the
-            // same pair CreateOperation enforces at the door.
+            // The tool-less swap first (imgui's law, ribbon.rs:138):
+            // an empty tool list is the deeper trouble - nothing
+            // lights until a tool exists, whatever the machine is.
+            // Then the family truth (M5.2 stage A): since M6.2 the
+            // plan already hides what the machine cannot run, so the
+            // darkening branch is defense in depth for any surface
+            // that renders a plan the door would refuse - it says so
+            // and names the fix, the same pair CreateOperation
+            // enforces at the command. The pin hint rides every live
+            // tip: the gesture a ribbon cell answers to beyond the
+            // click, so the tip table is where it belongs.
             if state.tool_names().is_empty() {
                 "No tool yet - add one (Setup > Tools)".into()
             } else {
                 let machine = camcraft_app::machine::kind_of(&state.world);
                 let dark = camcraft_app::operation::KindInfo::ALL
                     .get(i)
-                    .is_some_and(|k| !admits(machine, k.family));
+                    .is_some_and(|k| !k.family().admits(machine));
                 if dark {
-                    let (fword, mword) = match camcraft_app::operation::KindInfo::ALL[i].family {
+                    let (fword, mword) = match camcraft_app::operation::KindInfo::ALL[i].family() {
                         camcraft_app::operation::Family::Mill => ("milling", "mill"),
                         camcraft_app::operation::Family::Turn => ("turning", "lathe"),
                     };
@@ -255,12 +307,13 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
                         machine.word()
                     )
                 } else if i == 0 {
-                    "Add a Face mill operation".into()
+                    "Add a Face mill operation\tRight-click to pin/unpin".into()
                 } else {
-                    format!("Add a {} operation", TYPES[i])
+                    format!("Add a {} operation\tRight-click to pin/unpin", TYPES[i])
                 }
             }
         }
+        Cmd::More(s) => format!("The rest of the {} kinds", s.label()),
         Cmd::Undo => "Undo\tCtrl+Z".into(),
         Cmd::Redo => "Redo\tCtrl+Y".into(),
         Cmd::Run => "Generate the selected operation".into(),
@@ -280,17 +333,21 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
         Cmd::Redo => state.history.can_redo(),
         Cmd::Run => state.selected_operation().is_some(),
         Cmd::Delete => state.has_selection(),
-        // Workspaces by machine kind (M3.2 stage E), by family since
-        // M5.2 A: the registry's own pair, not a blanket rule - a
-        // lathe document darkens the mill cells and lights the
-        // turning ones, and the tip says which is which.
+        // The family gate by pairing (M3.2 E, M5.2 A) is the command
+        // door's law; since M6.2 the ribbon's plan already hides
+        // what the machine cannot run, so this half stands as defense
+        // in depth - the live gate is the tool list: a kind with no
+        // tool cannot cut whatever its section says.
         Cmd::Create(i) => {
             let machine = camcraft_app::machine::kind_of(&state.world);
             let kind_admits = camcraft_app::operation::KindInfo::ALL
                 .get(i)
-                .is_none_or(|k| admits(machine, k.family));
+                .is_none_or(|k| k.family().admits(machine));
             kind_admits && !state.tool_names().is_empty()
         }
+        // A dropdown button is live whenever it is on the ribbon; the
+        // kinds behind it carry their own gates.
+        Cmd::More(_) => true,
         Cmd::Simulate => state.has_toolpaths(),
         // The same gate as Simulate: a program with no generated move
         // has nothing to judge - the cell stays dark until there is.
@@ -304,6 +361,10 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
         Cmd::Paths => state.show_all_paths,
         Cmd::Simulate => state.sim.is_some(),
         Cmd::Deviate => state.program_sim.is_some(),
+        // The open dropdown's button stands toggled while it is open
+        // (M6.2): the accent fill says "this door is the one you
+        // opened".
+        Cmd::More(s) => state.ribbon_more == Some(s),
         _ => false,
     }
 }
@@ -311,39 +372,43 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
 /// Command to bundled glyph: the same table the retired imgui icons.rs
 /// store keyed (and ribbon.rs's `Item.icon` chose per cell), so the ribbon,
 /// the browser's `spec.icon` slots and the store name one set of pixels.
-fn icon_of(c: Cmd) -> Icon {
+fn icon_of(c: Cmd) -> Option<Icon> {
     match c {
-        Cmd::New => Icon::New,
-        Cmd::Model => Icon::OpenModel,
-        Cmd::Project => Icon::OpenProject,
-        Cmd::Save => Icon::Save,
-        Cmd::Post => Icon::Post,
-        Cmd::Stock => Icon::Stock,
-        Cmd::Origin => Icon::WorkOffset,
-        Cmd::Tools => Icon::Tools,
+        Cmd::New => Some(Icon::New),
+        Cmd::Model => Some(Icon::OpenModel),
+        Cmd::Project => Some(Icon::OpenProject),
+        Cmd::Save => Some(Icon::Save),
+        Cmd::Post => Some(Icon::Post),
+        Cmd::Stock => Some(Icon::Stock),
+        Cmd::Origin => Some(Icon::WorkOffset),
+        Cmd::Tools => Some(Icon::Tools),
         // Icons stay a UI table (asset names do not belong in the app),
         // but an exhaustive match on the kind, not on the index: a new
         // registry row with no icon here stops at the compiler, never
         // silently borrows the last glyph (M5.0.2 - the old `_ =>` arm
         // was one of the three silent-drift catch-alls).
         Cmd::Create(i) => match camcraft_app::operation::KindInfo::ALL.get(i) {
-            Some(k) => op_icon(k.ty),
+            Some(k) => Some(op_icon(k.ty)),
             None => {
                 debug_assert!(false, "Create({i}) past the kind table");
                 eprintln!("ribbon: unknown op kind {i}");
-                Icon::Generate
+                Some(Icon::Generate)
             }
         },
-        Cmd::Undo => Icon::Undo,
-        Cmd::Redo => Icon::Redo,
-        Cmd::Run => Icon::Generate,
-        Cmd::Delete => Icon::Delete,
-        Cmd::Frame => Icon::FrameAll,
-        Cmd::Paths => Icon::Toolpaths,
-        Cmd::Simulate => Icon::Simulate,
+        // The overflow button carries no glyph (M6.2): the ellipsis in
+        // its label is the whole affordance, so no asset is minted for
+        // it and no font subset is trusted with a chevron.
+        Cmd::More(_) => None,
+        Cmd::Undo => Some(Icon::Undo),
+        Cmd::Redo => Some(Icon::Redo),
+        Cmd::Run => Some(Icon::Generate),
+        Cmd::Delete => Some(Icon::Delete),
+        Cmd::Frame => Some(Icon::FrameAll),
+        Cmd::Paths => Some(Icon::Toolpaths),
+        Cmd::Simulate => Some(Icon::Simulate),
         // The stock glyph, reused (RECOMMENDED.md's no-new-asset law):
         // what the cell shows IS the judged stock.
-        Cmd::Deviate => Icon::Stock,
+        Cmd::Deviate => Some(Icon::Stock),
     }
 }
 
@@ -431,7 +496,38 @@ fn run_cmd(c: Cmd, state: &mut State) {
             // never a world write), so the effect lives in actions.
             actions::toggle_deviate(state);
         }
+        // Immediate-mode view state (the Paths law): which door stands
+        // open is a frame fact, not a document fact - nothing to undo,
+        // and clicking the open door again closes it.
+        Cmd::More(s) => state.ribbon_more = (state.ribbon_more != Some(s)).then_some(s),
     }
+}
+
+/// The pin gesture (M6.2): toggle one kind's presence in the document's
+/// pinned list, through the app's `ribbon` seam - the only home of the
+/// singleton write. Deliberately NOT a command: ROADMAP's law for pins
+/// is "layout, not cuts" - undo replays the toolpath edits, and a pin
+/// neither cuts stock nor changes a program. The status line says what
+/// happened, because a silent toggle is a half-answer.
+fn toggle_pin(state: &mut State, i: usize) {
+    let Some(k) = operation::KindInfo::ALL.get(i) else {
+        debug_assert!(false, "toggle_pin({i}) past the kind table");
+        eprintln!("ribbon: unknown op kind {i}");
+        return;
+    };
+    let mut pins = camcraft_app::ribbon::pinned_of(&state.world);
+    let verb = match pins.iter().position(|p| *p == i) {
+        Some(at) => {
+            pins.remove(at);
+            "unpinned"
+        }
+        None => {
+            pins.push(i);
+            "pinned"
+        }
+    };
+    camcraft_app::ribbon::pinned_set(&state.world, &pins);
+    state.status = format!("{verb} {} on the ribbon", k.caption);
 }
 
 /// One laid-out ribbon cell: which command, where, and its id salt.
@@ -444,59 +540,174 @@ pub(super) struct Cell {
     pub salt: usize,
 }
 
-/// The ribbon's layout math, pure: cell rects, then the group captions
-/// (centre x, title) and the divider x's between groups. `ribbon` draws
-/// exactly this, and the tests click through it - one source of truth
-/// for where each command lives. FLOOR_W/GAP/PAD_H are ribbon.rs's; the
-/// cell box is the theme's (Tokens::cell_w/cell_h).
-pub(super) fn ribbon_cells(
-    strip: Rect,
-    pal: &Tokens,
-) -> (Vec<Cell>, Vec<(f32, &'static str)>, Vec<f32>) {
-    let mut cells = Vec::new();
-    let mut captions = Vec::new();
-    let mut dividers = Vec::new();
-    // The row is a flow, not the fixed imgui pitch: cells share the strip's
-    // width, so adding an operation kind can never push the last group off
-    // the edge of the window (M2.1a's seventh Create cell was what the
-    // fixed 56 px box could no longer hold at 1280). cell_w stands as the
-    // cap, so a roomy window still draws ribbon.rs's exact geometry; below
-    // FLOOR_W the row overflows on purpose rather than rendering illegible
-    // cells. Painted content is centered in each rect, so narrowing is
-    // pure geometry, no clipping law to re-learn.
-    let n_cells: usize = GROUPS.iter().map(|(_, g)| g.len()).sum();
-    let n_groups = GROUPS.len();
+/// One folded section's dropdown, pure geometry (M6.2): the More button
+/// that owns it and its hidden kinds' row rects, all in GLOBAL
+/// coordinates - so the layout math is testable (and the reach of every
+/// kind provable) without a frame, and the draw only relocates it into
+/// its Area. Rows are in registry order, the same order the section
+/// drew before it folded.
+pub(super) struct Drop {
+    pub section: operation::Section,
+    pub button: Rect,
+    pub rows: Vec<(Cmd, Rect)>,
+}
+
+/// The dropdown's own rhythm (ribbon constants law): wide enough for
+/// the longest registry label, rows one theme row tall.
+/// What one layout pass answers: cells to draw, group captions (mid x,
+/// title), divider x's, and the doors with their dropdown rows.
+pub(super) type RibbonGeom = (Vec<Cell>, Vec<(f32, &'static str)>, Vec<f32>, Vec<Drop>);
+const DROP_W: f32 = 200.0;
+const DROP_GAP: f32 = 2.0;
+
+/// The ribbon's layout math, pure: a plan (ribbon_plan's groups) and the
+/// strip give back cell rects, group captions (centre x, title), the
+/// divider x's between groups, and one `Drop` per folded section.
+/// `ribbon` draws exactly this, and the tests click through it - one
+/// source of truth for where each command lives. FLOOR_W/GAP/PAD_H are
+/// ribbon.rs's; the cell box is the theme's (Tokens::cell_w/cell_h).
+///
+/// The width law (M6.2): cells share the strip's width - a flow, not
+/// imgui's fixed pitch - and when the fair share drops under FLOOR_W
+/// the section with the largest inline remainder folds its last cell
+/// into a dropdown (ties go to the earlier section), repeating until
+/// every remaining cell can render legibly. The fold is width-driven
+/// and nothing else: a wide window never folds, and the first fold of
+/// a group is width-neutral (the cell leaves, the labeled More button
+/// arrives), which bounds the loop. Anchors and Pinned never fold; if
+/// even those cannot fit, the row overflows on purpose rather than
+/// rendering illegible cells, as before.
+pub(super) fn ribbon_cells(strip: Rect, pal: &Tokens, plan: &[Group]) -> RibbonGeom {
+    const FLOOR_W: f32 = 40.0;
+    // Each group's inline remainder and folded tail; plans start fully
+    // inline, the loop below moves cells across the seam.
+    let mut groups: Vec<(&Group, Vec<Cmd>, Vec<Cmd>)> = plan
+        .iter()
+        .map(|g| (g, g.cells.clone(), Vec::new()))
+        .collect();
+    let n_groups = groups.len();
+    loop {
+        let n: usize = groups
+            .iter()
+            .map(|(_, shown, hidden)| shown.len() + usize::from(!hidden.is_empty()))
+            .sum();
+        if n == 0 || n_groups == 0 {
+            break;
+        }
+        let overhead = 2.0 * PAD_H
+            + (n - n_groups) as f32 * GAP
+            + (n_groups - 1) as f32 * (GAP + 2.0);
+        if (strip.width() - overhead) / n as f32 >= FLOOR_W {
+            break;
+        }
+        // Fold the largest inline remainder among the section groups
+        // (the fair share says where the crowd is); ties go to the
+        // earlier section, so the fold order is a function of the plan
+        // and the width, never of iteration history.
+        let victim = groups
+            .iter()
+            .enumerate()
+            .filter(|(_, (g, shown, _))| g.section.is_some() && !shown.is_empty())
+            .max_by_key(|(gi, (_, shown, _))| (shown.len(), std::cmp::Reverse(*gi)))
+            .map(|(gi, _)| gi);
+        let Some(gi) = victim else { break };
+        // The victim filter kept `shown` non-empty, so the pop lands;
+        // an empty pop would mean the filter broke - name it, stop
+        // folding, never lose a cell silently (Prime Directive).
+        match groups[gi].1.pop() {
+            Some(cmd) => groups[gi].2.insert(0, cmd),
+            None => {
+                debug_assert!(false, "ribbon fold law: empty remainder chosen");
+                eprintln!("ribbon: internal layout error, folding stopped");
+                break;
+            }
+        }
+    }
+    let n_cells: usize = groups
+        .iter()
+        .map(|(_, shown, hidden)| shown.len() + usize::from(!hidden.is_empty()))
+        .sum();
     let overhead = 2.0 * PAD_H
         + (n_cells - n_groups) as f32 * GAP
         + (n_groups - 1) as f32 * (GAP + 2.0);
-    const FLOOR_W: f32 = 40.0;
-    let cell_w = ((strip.width() - overhead) / n_cells as f32).clamp(FLOOR_W, pal.cell_w);
+    let cell_w = ((strip.width() - overhead) / n_cells.max(1) as f32).clamp(FLOOR_W, pal.cell_w);
     // PAD_V (ribbon.rs): cells start 4 below the strip top.
     let cell_top = strip.top() + 4.0;
+    let mut cells = Vec::new();
+    let mut captions = Vec::new();
+    let mut dividers = Vec::new();
+    let mut drops = Vec::new();
     let mut x = strip.left() + PAD_H;
     let mut salt = 0usize;
-    for (gi, (title, group)) in GROUPS.iter().enumerate() {
+    for (gi, (group, shown, hidden)) in groups.iter().enumerate() {
         let start = x;
-        for c in *group {
+        let mut draw = |cmd: Cmd, x: &mut f32, cells: &mut Vec<Cell>| {
             cells.push(Cell {
-                cmd: *c,
+                cmd,
                 rect: Rect::from_min_size(
-                    egui::Pos2::new(x, cell_top),
+                    egui::Pos2::new(*x, cell_top),
                     Vec2::new(cell_w, pal.cell_h),
                 ),
-                salt,
+                salt: {
+                    salt += 1;
+                    salt - 1
+                },
             });
-            salt += 1;
+            *x += cell_w + GAP;
+        };
+        for c in shown {
+            draw(*c, &mut x, &mut cells);
+        }
+        // Only section groups ever accumulate a hidden tail (the fold
+        // loop touches nothing else), so the `section` test is a type
+        // guard, not a second opinion.
+        if let (Some(section), true) = (group.section, !hidden.is_empty()) {
+            // The section's door stands at the end of its inline run,
+            // and owns the dropdown of everything behind it.
+            let button = Rect::from_min_size(
+                egui::Pos2::new(x, cell_top),
+                Vec2::new(cell_w, pal.cell_h),
+            );
+            let row_h = pal.row_height;
+            let rows = hidden
+                .iter()
+                .enumerate()
+                .map(|(k, c)| {
+                    (
+                        *c,
+                        Rect::from_min_size(
+                            egui::Pos2::new(
+                                button.left(),
+                                button.bottom() + DROP_GAP + k as f32 * row_h,
+                            ),
+                            Vec2::new(DROP_W, row_h),
+                        ),
+                    )
+                })
+                .collect();
+            drops.push(Drop {
+                section,
+                button,
+                rows,
+            });
+            cells.push(Cell {
+                cmd: Cmd::More(section),
+                rect: button,
+                salt: {
+                    salt += 1;
+                    salt - 1
+                },
+            });
             x += cell_w + GAP;
         }
         x -= GAP;
-        captions.push(((start + x) * 0.5, *title));
+        captions.push(((start + x) * 0.5, group.title));
         if gi + 1 < n_groups {
             x += GAP + 2.0;
             dividers.push(x - (GAP + 2.0) / 2.0 - 1.0);
         }
     }
-    (cells, captions, dividers)
+    (cells, captions, dividers, drops)
 }
 
 /// The ribbon strip: painted cells over a fixed-height top panel. Group
@@ -513,7 +724,22 @@ pub fn ribbon(
     let rect = Rect::from_min_size(ui.cursor().min, ui.available_size());
     painted::strip_bg(ui.painter(), rect, pal);
     let base = ui.id().with("ribbon");
-    let (cells, captions, dividers) = ribbon_cells(rect, pal);
+    // The plan is read fresh every frame from the two facts it is a
+    // function of - the document's machine and its pins (M6.2). No
+    // cached shape: a machine mount or an unpin cannot leave a stale
+    // group standing.
+    let machine = camcraft_app::machine::kind_of(&state.world);
+    let plan = ribbon_plan(machine, &camcraft_app::ribbon::pinned_of(&state.world));
+    let (cells, captions, dividers, drops) = ribbon_cells(rect, pal, &plan);
+    // Self-heal first: a folded-away door (window widened, pin moved a
+    // cell inline, document swapped) must not leave `ribbon_more`
+    // naming a button that no longer exists.
+    if let Some(s) = state.ribbon_more
+        && !cells.iter().any(|cell| cell.cmd == Cmd::More(s))
+    {
+        state.ribbon_more = None;
+    }
+    let before = state.ribbon_more;
     for cell in &cells {
         let c = cell.cmd;
         let resp = painted::cell(
@@ -524,12 +750,22 @@ pub fn ribbon(
             pal,
             enabled(c, state),
             toggled(c, state),
-            icons.and_then(|s| s.texture(icon_of(c))),
+            icon_of(c).and_then(|i| icons.and_then(|s| s.texture(i))),
         );
+        // The pin gesture lives at the cell, not in a command: the
+        // right-click that answers it names itself in every live tip
+        // (tip_of), and its law - layout rides the document, undo
+        // replays cuts - is ROADMAP M6.2's, recorded in RECOMMENDED.md.
+        // Read before `on_hover_text` moves the response into the
+        // tooltip wiring.
         let fired = resp.clicked() && enabled(c, state);
+        let pin = resp.secondary_clicked();
         resp.on_hover_text(tip_of(c, state));
         if fired {
             run_cmd(c, state);
+        }
+        if let (Cmd::Create(i), true) = (c, pin) {
+            toggle_pin(state, i);
         }
     }
     for (mid, title) in captions {
@@ -540,6 +776,103 @@ pub fn ribbon(
     }
     for dx in dividers {
         painted::divider(ui.painter(), dx, rect, pal);
+    }
+    // The open door's dropdown: one Area at foreground order (egui's
+    // popup layer), anchored under its button, its rows the section's
+    // hidden kinds in registry
+    // order. Geometry arrives global (ribbon_cells); the Area-local
+    // rect is the global one minus the panel origin - one pair of
+    // numbers, no second layout.
+    if let Some(s) = state.ribbon_more {
+        // The self-heal above proved a door is on the ribbon; finding
+        // none means that proof broke, so the state drops itself -
+        // named, printed, never a silent unwrap.
+        match drops.iter().find(|d| d.section == s) {
+            None => {
+                debug_assert!(false, "ribbon: open door has no dropdown");
+                eprintln!("ribbon: closing a dropdown whose button is gone");
+                state.ribbon_more = None;
+            }
+            Some(drop) => {
+                // Every rect here is global: ribbon_cells computed the
+                // button and row rects in the strip's global frame, and
+                // egui paints and hit-tests this ui in global coords
+                // too. The Area adds only the layer - Foreground order,
+                // so a press on a row belongs to the row, never to the
+                // cell it happens to cover.
+                let panel = Rect::from_min_size(
+                    drop.button.left_bottom() + Vec2::new(0.0, DROP_GAP),
+                    Vec2::new(DROP_W, drop.rows.len() as f32 * pal.row_height),
+                );
+                let mut hit: Option<Cmd> = None;
+                let mut pinned_row: Option<usize> = None;
+                let rows = &drop.rows;
+                egui::Area::new(base.with(("drop", drop.section.label())))
+                    .fixed_pos(panel.min)
+                    .order(egui::Order::Foreground)
+                    .movable(false)
+                    .show(ui.ctx(), |ui| {
+                        let p = ui.painter();
+                        p.rect_filled(panel, pal.radius_menu, pal.ink);
+                        p.rect_stroke(
+                            panel,
+                            pal.radius_menu,
+                            egui::Stroke::new(1.0, pal.border),
+                            egui::StrokeKind::Outside,
+                        );
+                        for (k, (cmd, r)) in rows.iter().enumerate() {
+                            let resp = ui.interact(*r, base.with(("drop-row", k)), Sense::click());
+                            if resp.hovered() {
+                                p.rect_filled(*r, 0.0, pal.field_hover);
+                            }
+                            let en = enabled(*cmd, state);
+                            let label = match *cmd {
+                                Cmd::Create(i) => TYPES.get(i).copied().unwrap_or("op"),
+                                other => label_of(other),
+                            };
+                            p.text(
+                                r.left_center() + Vec2::new(8.0, 0.0),
+                                egui::Align2::LEFT_CENTER,
+                                label,
+                                egui::FontId::proportional(pal.font_row),
+                                if en { pal.text } else { pal.text_faint },
+                            );
+                            if resp.secondary_clicked()
+                                && let Cmd::Create(i) = *cmd
+                            {
+                                pinned_row = Some(i);
+                            }
+                            if resp.clicked() && en {
+                                hit = Some(*cmd);
+                            }
+                        }
+                    });
+                if let Some(i) = pinned_row {
+                    toggle_pin(state, i);
+                }
+                if let Some(c) = hit {
+                    run_cmd(c, state);
+                    state.ribbon_more = None;
+                } else if state.ribbon_more == before {
+                    // Primary press anywhere outside the door and its
+                    // rows closes it (egui's popup law, hand-drawn
+                    // because the panel is geometry, not a Widget). A
+                    // press that already toggled a door this frame
+                    // (`state.ribbon_more != before`) is the new
+                    // door's own business.
+                    let outside = ui.input(|i| {
+                        i.pointer.button_pressed(egui::PointerButton::Primary)
+                            && i.pointer.interact_pos().is_none_or(|p| {
+                                !drop.button.expand(DROP_GAP).contains(p)
+                                    && !drop.rows.iter().any(|(_, r)| r.contains(p))
+                            })
+                    });
+                    if outside {
+                        state.ribbon_more = None;
+                    }
+                }
+            }
+        }
     }
     ui.allocate_rect(rect, Sense::hover());
 }

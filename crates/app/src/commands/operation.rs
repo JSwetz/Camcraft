@@ -93,15 +93,10 @@ fn check_tool(world: &World, tool: &str) -> Result<(), CommandError> {
 /// op whose family the steel cannot spin never enters the document,
 /// and the refusal names both sides by name.
 fn family_gate(world: &World, params: &OpParams) -> Result<(), CommandError> {
-    use crate::machine::Kind;
     use crate::operation::Family;
-    let family = params.kind().info().family;
+    let family = params.kind().info().family();
     let machine = crate::machine::kind_of(world);
-    let admits = matches!(
-        (family, machine),
-        (_, Kind::MillTurn) | (Family::Mill, Kind::Mill) | (Family::Turn, Kind::Lathe)
-    );
-    if admits {
+    if family.admits(machine) {
         return Ok(());
     }
     Err(CommandError::Invalid(format!(

@@ -24,6 +24,7 @@ pub use camcraft_post::post;
 pub mod posting;
 pub mod project;
 pub mod rest;
+pub mod ribbon;
 pub mod schema;
 pub mod script;
 pub mod setup;

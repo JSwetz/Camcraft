@@ -127,7 +127,7 @@ pub fn simulate_document(
         // verdict that governs it is the revolved one, already binding
         // at generation; HERE the honest answer is that nothing was
         // judged. Refusal, not a guess - the rotated-stock precedent.
-        if op.params.kind().info().family == crate::operation::Family::Turn {
+        if op.params.kind().info().family() == crate::operation::Family::Turn {
             return Err(format!(
                 "{name}: a revolved path is not judgeable in the mill's dexel frame - its law is the revolved verdict at generation"
             ));
