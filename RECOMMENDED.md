@@ -5995,3 +5995,67 @@ Gate: debug `cargo test -p camcraft-motion --test finish3d` 13/13;
 release ignored lane 27/27 finish3d + 1/1 flow, zero FAILED crate-wide;
 clippy -p camcraft-motion --all-targets clean; 13 .nc goldens and every
 fixture byte-identical (the diff is one assert + comments).
+
+## M6.1 C - the switcher's seams, and a leak the switcher found
+
+Five hours unattended, five decisions. All reversible, all in
+`crates/app/src/commands/theme.rs` + `crates/ui/src/state.rs` +
+`egui_app/{theme,theme_files,pages,shell}.rs`.
+
+**Chosen: the switcher lives on the setup page, not the top-right corner**
+- ROADMAP sketched "top-right"; the ribbon is painted from `painted.rs`
+  with coordinate-located cells and test-fixed positions, and M6.2 owns
+  its sectioned restructure. Considered and dropped: (a) a ribbon
+  dropdown - it would rebuild furniture M6.2 is about to rebuild, and
+  the coordinate tests churn twice; (b) a dedicated window - more
+  chrome than the choice deserves. `theme_section` in the setup page
+  sits beside `machine_section`/`post_section`: same furniture row,
+  same law, zero painted-coordinate churn (the gate: no snapshot moved).
+
+**Chosen: the app validates the REFERENCE, the ui validates the PARSE**
+- `SetTheme::new` checks a `Named` against BUILTINS and a `File` for
+  existence; nothing in app names serde_json (layering: ui -> app ->
+  flecs, and app must not know the theme format's parser). The cost is
+  two refusal sites - the constructor (name, path) and the shell's
+  pre-step (a file that exists but is corrupt refuses before the
+  command is even created). Considered and dropped: (a) parsing in app
+  behind a trait - ceremony for a call-site the shell already owns;
+  (b) letting a corrupt file land and refusing only at draw - it works
+  (sync refuses by name, keeps the live ink), but a picker that queues
+  doomed commands is worse UX than one that refuses at the click.
+
+**Chosen: the look syncs at the frame edge, once per change**
+- `State::sync_theme` runs atop `shell_layout` (the one pass both live
+  frames and frame tests share), gated on `ThemeRef` equality - steady
+  state costs one clone + one compare, file mtime stats only on change
+  edges. Considered and dropped: per-draw resolution (touches the
+  parser on every frame - B's whole cache exists to avoid that) and
+  applying inside `run_command` (undo/redo would miss it; the sync
+  point is where history can drift, so that's where truth is read).
+  Refusals keep the live tokens and state themselves once in the
+  status - the look never half-changes, the Prime Directive in theme
+  clothes.
+
+**Chosen: NewDocument clears ALL singletons - and that found a real leak**
+- wiring `theme_set(&world, &ThemeRef::Dark)` into the NewDocument arm
+  made the neighbour's bug visible: M3.3 A gave PostRef undo and
+  persistence but never reset, so File>New silently kept the previous
+  document's user `.cps`. Fixed here (`post_set(... Builtin)`); the
+  leak class is stated: every future singleton must land in the same
+  arm, and the units law ("absence clears") was the precedent.
+
+**Chosen: discovery anchors CARGO_MANIFEST_DIR, labels come from the cache**
+- `theme_dir()` resolves `../../assets/themes` beside the crate, not
+  from CWD - snapshot suites run with CWD=crates/ui and everything
+  else from the root; one law for both. `peek_label` names discovered
+  files from the parse cache only (cached-OK themes), falling back to
+  the file stem - listing a folder must never parse it, the browser's
+  own law. ComboBox labels are `titled` (first char up) - "dark" reads
+  as a word, not a log line.
+
+Gate: full ladder by the gate subagent - app commands_undo 28/28 (the
+new theme law test), project_roundtrip 60/60 (v41 round-trips, dark
+writes no key, stranger names land as written), posting 16/16 (the 13
+.nc goldens byte-identical, default path untouched), ui lib 119/119,
+theme_files 10/10, every snapshot binary green with zero golden
+churn, headless rc=0 View3D green, clippy -D warnings both crates.
