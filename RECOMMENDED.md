@@ -6416,8 +6416,19 @@ level transitions only, level 0 byte-identical, all 13 .nc goldens and
 the other 18 .cl goldens unchanged (the ordering change is vacuous on
 their floors - stated above).
 
-Gate: cl 20/20; motion machining2d 54, machining3d 22, all binaries
-green (gate #2), app full suite green with the two re-blessed goldens
-(gate #1), UI 234/234 (gate #3), clippy `-D warnings` clean on
-cl/motion/app; release `--ignored` heavy lane green (verify_against
-silent on the new orders, gate #2).
+Gate: the honest sequence has two rounds. The first authoritative
+round came back RED on two counts the local ladder had missed -
+clippy::too_many_arguments on the two new `cen`-widened arms
+(ladder.rs:275/:300, eight arguments where the lint wants seven or
+fewer), and the re-blessed .cl goldens with stale DERIVED .nc: the .nc
+diff is exactly the M8.1 double-dive posting at each level change
+(interior axial dive, hop, traverse, wall dive), level 0 byte-identical,
+the sinumerik bulk block renumbering. Remediation 6f7fa3f: `LevelCtx`
+bundles the level a dive lands on (structure only - the five fields
+arrived together at every call site and always will), and
+`WRITE_GOLDEN=1 cargo test -p camcraft-app --test conformance` caught
+all five dialects up. Second round green: clippy `-D warnings` clean on
+motion (the refactor's claim to be behavior-preserving is pinned by
+machining2d 54/54 and machining3d 22/22 byte-identical), golden_cl
+20/20, conformance 4/4, fanuc_post 8/8; the earlier app full suite
+(UI 234/234, release heavy lane) stands - the fix moved no motion.
