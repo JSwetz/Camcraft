@@ -108,6 +108,13 @@ pub(super) fn ladder(
         // all skipped gets a true descending entry, not a silent
         // wall plunge.)
         let prev_z = prev_state.as_ref().map_or(p.clearance_z, |(q, _)| *q);
+        let lvl = LevelCtx {
+            cen: &center,
+            passes: &passes,
+            z,
+            hop_z,
+            p,
+        };
         match p.entry {
             // Ramp and helix are the coarse ladder's motions: a rest
             // pass starts inside planes that are already cut, where a
@@ -128,16 +135,7 @@ pub(super) fn ladder(
                     b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
                     b.push(MoveKind::Feed, Point3::new(entry.x, entry.y, z), Some(p.feed));
                 } else {
-                    substituted_dive(
-                        &mut b,
-                        &center,
-                        &passes,
-                        entry,
-                        z,
-                        hop_z,
-                        p,
-                        "the ramp's chord is blocked",
-                    );
+                    substituted_dive(&mut b, &lvl, entry, "the ramp's chord is blocked");
                 }
             }
             Entry3D::Helix if li > 0 && rest.is_none() => {
@@ -159,16 +157,12 @@ pub(super) fn ladder(
                     }
                     b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
                     helix_down(&mut b, d, prev_z, z, p.helix_radius, p.feed);
-                    dive_link(&mut b, &center, &passes, d, entry, z, hop_z, p);
+                    dive_link(&mut b, &lvl, d, entry);
                 } else {
                     substituted_dive(
                         &mut b,
-                        &center,
-                        &passes,
+                        &lvl,
                         entry,
-                        z,
-                        hop_z,
-                        p,
                         "the widened disc fits nowhere at this level",
                     );
                 }
@@ -188,19 +182,10 @@ pub(super) fn ladder(
                             Point3::new(d.x, d.y, z),
                             Some(p.plunge_feed),
                         );
-                        dive_link(&mut b, &center, &passes, d, entry, z, hop_z, p);
+                        dive_link(&mut b, &lvl, d, entry);
                     }
                     None => {
-                        substituted_dive(
-                            &mut b,
-                            &center,
-                            &passes,
-                            entry,
-                            z,
-                            hop_z,
-                            p,
-                            "the disc fits nowhere here",
-                        );
+                        substituted_dive(&mut b, &lvl, entry, "the disc fits nowhere here");
                     }
                 }
             }
@@ -266,28 +251,36 @@ pub(super) fn ladder(
     Ok(path)
 }
 
+/// The level a dive lands on, bundled once per iteration for the link
+/// and substitute arms: the cutter-center region, the level's planned
+/// paths, the plane, the hop height, and the op params. These five
+/// arrived together at every call site and always will - a dive
+/// without a level is not a question anyone can answer.
+struct LevelCtx<'a> {
+    cen: &'a Region,
+    passes: &'a [Vec<Point2>],
+    z: f64,
+    hop_z: f64,
+    p: &'a Pocket3DParams,
+}
+
 /// The link from a dive that just finished at `d` up on plane `z` to
 /// the pass start `e`: feed it when the chord is proven (inside this
 /// level's center, crossing none of the level's planned paths), fly it
 /// over - hop, traverse, dive - when it is not. Shared by every entry
 /// arm so the law reads once (the 3-D seat of the proof; the 2-D
 /// ladder runs the same law in `machining2d::levels`).
-fn dive_link(
-    b: &mut PathBuilder,
-    cen: &Region,
-    passes: &[Vec<Point2>],
-    d: Point2,
-    e: Point2,
-    z: f64,
-    hop_z: f64,
-    p: &Pocket3DParams,
-) {
-    if chord_clears(cen, d, e) && !chord_hits_plan(d, e, passes) {
-        b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(p.feed));
+fn dive_link(b: &mut PathBuilder, lvl: &LevelCtx, d: Point2, e: Point2) {
+    if chord_clears(lvl.cen, d, e) && !chord_hits_plan(d, e, lvl.passes) {
+        b.push(MoveKind::Feed, Point3::new(e.x, e.y, lvl.z), Some(lvl.p.feed));
     } else {
-        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, hop_z), None);
-        b.push(MoveKind::Rapid, Point3::new(e.x, e.y, hop_z), None);
-        b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(p.plunge_feed));
+        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, lvl.hop_z), None);
+        b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lvl.hop_z), None);
+        b.push(
+            MoveKind::Plunge,
+            Point3::new(e.x, e.y, lvl.z),
+            Some(lvl.p.plunge_feed),
+        );
     }
 }
 
@@ -297,32 +290,31 @@ fn dive_link(
 /// path's notes. A floor with no room either - an erosion that
 /// vanished, a region past the triangulation cap - falls back to the
 /// wall dive this ladder knew before Phase 8, still loudly.
-fn substituted_dive(
-    b: &mut PathBuilder,
-    cen: &Region,
-    passes: &[Vec<Point2>],
-    e: Point2,
-    z: f64,
-    hop_z: f64,
-    p: &Pocket3DParams,
-    why: &str,
-) {
-    match dive_room(cen, 0.0) {
+fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, why: &str) {
+    match dive_room(lvl.cen, 0.0) {
         Some(d) => {
             b.note(format!("entry: {why} - axial dive on the floor instead"));
             let at = b.at();
             if at.x != d.x || at.y != d.y {
-                b.push(MoveKind::Rapid, Point3::new(d.x, d.y, p.clearance_z), None);
+                b.push(MoveKind::Rapid, Point3::new(d.x, d.y, lvl.p.clearance_z), None);
             }
-            b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z), Some(p.plunge_feed));
-            dive_link(b, cen, passes, d, e, z, hop_z, p);
+            b.push(
+                MoveKind::Plunge,
+                Point3::new(d.x, d.y, lvl.z),
+                Some(lvl.p.plunge_feed),
+            );
+            dive_link(b, lvl, d, e);
         }
         None => {
             b.note(format!(
                 "entry: {why} - the floor has no dive room either; dived at the pass start"
             ));
-            b.push(MoveKind::Rapid, Point3::new(e.x, e.y, p.clearance_z), None);
-            b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(p.plunge_feed));
+            b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lvl.p.clearance_z), None);
+            b.push(
+                MoveKind::Plunge,
+                Point3::new(e.x, e.y, lvl.z),
+                Some(lvl.p.plunge_feed),
+            );
         }
     }
 }
