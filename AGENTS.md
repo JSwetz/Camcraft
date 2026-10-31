@@ -35,6 +35,24 @@ afterwards - the work must not bother them.
   running continuously, as "Never stop" above mandates - the main session
   plans, codes, and decides; the subagents verify, record, and graph.
 
+## Done ledger (ROADMAP.md → DONE.md)
+
+- **A phase moves out when it is all green.** When every milestone of a
+  phase reads ✅ in the ROADMAP registry table - i.e. its features are
+  done, their gates (including the heavy lane) passed, and the milestone's
+  provenance review is in - the phase's prose is CUT from `ROADMAP.md`
+  into `DONE.md` verbatim. The registry table and a pointer line stay in
+  `ROADMAP.md`; deferred/⏸ items ride along only in a still-open
+  milestone - the table decides, not memory.
+- **DONE.md is not read by choice.** It is the archive: sessions never
+  load it unless checking that something was done - a refactor crossing
+  old ground, a regression hunt, a "how did we do this" question. It is
+  append-only; corrections are made by amending the entry in place, with
+  the law's RECOMMENDED.md entry as the authority.
+- **The move is a documentation edit, not a milestone.** It rides the
+  close-out docs commit of the phase's final green gate, never its own
+  build lane.
+
 ## Clean-Room Protocol
 
 - No reading, decompiling, disassembling, or tracing HSMWorks binaries or
