@@ -6168,3 +6168,119 @@ byte-unchanged (the derivation's dark identity proven by pixels),
 clippy -D warnings zero, headless rc=0; then the light golden authored
 in-session and re-gated: full lib 120/120, all three snapshot tests
 green under the lock, clippy --tests clean.
+
+## M6.2 - the ribbon restructure: the taxonomy's seams, the fold's law, the pin's exemption
+
+**Section is the stored truth, Family the derived one.** `KindInfo` grows a
+`section` column (rows 0..4 Milling 2D, 5 Drilling, 6..7 Milling 3D, 8..17
+Multi-axis, 18..29 Turning - each a contiguous run of the table, proven by
+the partition test), and `family()` becomes a getter: Turning section means
+Turn, anything else Mill. Chosen over the symmetric alternative (store
+`Family`, derive sections): the ribbon and the combo organize by section,
+so the thing the surfaces quote is the thing the table stores, and the old
+mill/turn split - a fact about machines, not about menus - cannot drift
+from it. `Family::admits` stays the one machine-pairing home;
+`operation::shown_for(machine)` is the one hiding filter, and both ribbon
+and combo draw from it, so "which sections does this machine run" exists
+exactly once. Considered and dropped: a bool `is_turn` on KindInfo (the M3
+shape) - two fields, two truths, one test would still be needed to keep
+them agreed.
+
+**Hiding, not darkening, and the door is the reach.** The ROADMAP's law
+lands verbatim: a lathe document never shows waterline, so the eighteen
+mill cells are gone, not dimmed, and the a_lathe test's "darkens" promise
+moved to the hiding+door law with it. A dark cell under the new taxonomy
+would be a lie - the machine cannot run the kind, and the cell would say
+"click me anyway"; the tip keeps the remedy in words (mount a lathe or a
+mill-turn), naming the machine's own word from the post crate's
+`Kind::word` - one naming home, re-exported, not retyped.
+
+**The fold is width-driven and nothing else.** Cells share the strip
+fairly down to a 40px floor; when the fair share drops below it, the
+group with the most inline cells loses its tail cell to a door
+("{Section}..."), and the loop repeats. Chosen: fold the fattest, tail
+first, so every group's INLINE part stays a contiguous table run and the
+caption span under it remains honest; a per-group threshold
+("Mill3D always folds first because it's 'less used'") was dropped - it
+would be a second taxonomy, hand-maintained, contradicting the milestone.
+The first fold of a group is width-neutral (N cells out, N-1 plus one door
+in), later ones net -1, so the loop terminates - proven, not assumed, by
+the hand-math test: the house 1280 ends at 28 cells and every
+pre-M6.2 click-through target (Face/Face-mill/Pocket/Drill cells) is
+still inline at that width; the four old ribbon tests pass with only the
+layout call's signature moved. "..." over a chevron glyph: the door's
+label is the section's name + an ellipsis; no glyph, because the ROADMAP
+names the label as the thing the door carries, and the asset law keeps
+new glyphs original-only - a typographic dot-run needs no asset.
+
+**The pin rides the document, deliberately outside the history.** M6.2 is
+the first place ROADMAP lifts "everything is a command": pins are a
+`RibbonPins` flecs singleton saved into the project (v42, absent key =
+unpinned, `skip_serializing_if` keeps an unpinned document paying nothing
+- the mm/units law), toggled by right-click on the cell or a dropdown row.
+Undo replaying a pin would replay layout, and the roadmap says cuts, not
+layout; the interaction test proves exactly that seam: cut, pin, undo -
+the operation is back and the pin stays. Chosen over pin-as-command:
+every undo step would carry ribbon noise, and a pinned-then-deleted
+machine kind would leave the history inverting a setting the document no
+longer wants. Read-side stranger filter, write-side clean (duplicates,
+out-of-range dropped keeping order), load LANDS (not merges - the leak
+law a stale singleton can never survive an open), and the Pinned group
+leads the sections in pin order, never folds, and hides-not-drops a pin
+the current machine cannot run: switching a lathe document to a mill must
+not quietly forget what the user pinned.
+
+**The dropdown's coordinate law, and the bug that wrote it.** The first
+implementation drew the rows in Area-LOCAL rects (0..200 under the
+origin) and passed those same rects to `ui.interact` - and the rows never
+got a click: this app's panels, and the Area's child ui too, hit-test in
+GLOBAL coordinates, so the invisible widget rect sat in the window's top
+corner while the panel painted under the button. A press on a row fell
+through to the cell BEHIND the dropdown and created the wrong kind,
+silently as far as the dropdown was concerned. Found by instrumenting the
+click-through, fixed by one rule now written at the call site:
+ribbon_cells computes every rect global, and the Area is only the layer.
+(The Prime Directive's UI case: a control that looks pressed but answers
+a different widget is a silent wrong answer.) Close-on-outside-press is
+hand-drawn too, with the frame-order guard: a press that toggled a door
+THIS frame (`state.ribbon_more != before`) is the new door's own business
+and must not be eaten by the closing test - the click-two-doors fast case
+that egui's own popup layer handles but a painted panel must handle
+itself. A stale `ribbon_more` (window widened, door folded away)
+self-heals at the top of the next frame, so the state can never name a
+cell that no longer exists.
+
+**The combo earns the shape, with the selected kind's section exempt.**
+Same ORDER, same admits - and one judgment call recorded here: a section
+is skipped when the machine cannot run it AND it is not the current
+kind's section. Hiding the current type from a document whose kind
+disagrees with its (newly swapped) machine would leave the combo naming
+its own selection with no row to point at; the kind stays listed where
+it is, exactly once, so the mismatch is visible, nameable, fixable - the
+retype itself still refuses through the command gate (M3.2 E), so the
+surface tells the truth twice rather than hiding the fact once.
+
+**The verbatim-imgui promise retires here, as M6.2's test law said.**
+`tips_match_the_imgui_table` asserted imgui's literal string table; the
+ribbon's tips now carry the pin suffix and the section-shaped machine
+sentence, so the test became what it can honestly be: the anchor cells'
+verbatim tips + the format law for every Create cell + every door named
+by its section. The strings are ours (clean-room), the shape is the
+milestone's.
+
+**Goldens moved deliberately.** The strip gained captions, doors and the
+hiding law, so all three shell/tool-editor goldens changed; they were
+regenerated once with UPDATE_SNAPSHOTS, eyes-checked (28 cells at 1280,
+"Drilling" alone between Milling 3D and Multi-axis on a mill document,
+the Turning-only lathe row), and now pin the new shape.
+
+Gate: app lib ribbon 5/5 (the partition, the derived-family law, the
+filter table, the pin's read/write clean, v42 byte-shape + v41 step-up);
+ui lib 126/126 (six new M6.2 tests: every-kind-a-home on three machines
+at two widths, fold-fairness both directions, the dropdown's reach
+end-to-end, the pin-survives-undo seam, the Pinned group's lead order and
+machine respect, the stale-door heal); shell 19/19, ui operations 31/31,
+app operations 101/101, commands_undo 28/28, project_roundtrip 60/60,
+stock_sim_document 8/8, setups 11/11; clippy -D warnings clean on both
+crates (four hits taken: a doc continuation, the layout tuple's name,
+two let-chains).
