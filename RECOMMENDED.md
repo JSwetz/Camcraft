@@ -6284,3 +6284,140 @@ app operations 101/101, commands_undo 28/28, project_roundtrip 60/60,
 stock_sim_document 8/8, setups 11/11; clippy -D warnings clean on both
 crates (four hits taken: a doc continuation, the layout tuple's name,
 two let-chains).
+
+## M8.1 - The roughing ladders: the order as found, the order as fixed
+
+The visit's verdict, stated per the phase's law (rapid -> approach ->
+entry -> cut -> link -> retract). FOUND: rapid over `passes[0]`'s
+start - for a Waterline/Adaptive plan that is the OUTERMOST ring, so
+the approach aimed at the finished wall; entry - always the axial
+plunge at level 0 whatever family was selected (both ladders gated the
+arms on a level crossing: `!first &&` in `levels.rs`, `li > 0` in
+`ladder.rs`), and at crossings the helix's landing search
+(`dive_point`'s longest-chord-midpoint scan) resolved None on every
+all-arcs ring plan, so the helix silently degraded to climb-and-dive
+there too; cut - wall rings first, core last; link - feed when
+`chord_clears` proved containment, which on a holed floor let a chord
+cross every planned ring under it (the boss bug the plan test exists
+to refuse); retract - to clearance, unchanged. Verdict: WRONG, three
+ways - the chosen entry never met the stock, the dive landed on the
+wall, and the ring order was backwards for roughing. FIXED order:
+rapid to the floor's own dive room (interior, disc-clear), entry by
+the stated family at level 0 as well as at crossings, cut
+interior-out with the wall pass walking last, link feed only when the
+chord is proven against containment AND the level's planned paths,
+retract unchanged.
+
+**Chosen: `dive_room` (largest ear-centroid with a boundary-distance
+margin) replaces `dive_point`'s chord scan.** The scan's defect is
+structural: an all-arcs plan's consecutive pairs sit ON ring lines,
+so no midpoint is ever inside the eroded leg region - None - and None
+is a substitution the user could not see. A triangle of the region's
+own ear-clip is material by construction, and its centroid carries a
+measurable clearance, so the same code answers both "where" and "how
+much room", with the helix arm asking margin = radius + 1e-3 and the
+axial arms 0.0. By the superset law (a deeper center is a subset of
+every plane above it) room AT THE DESTINATION is room across the whole
+crossed depth - which is what let the `li > 0` / `!first &&` gates
+become proofs: level 0 dives from `clearance_z` (`prev_z` falls back
+to it), and the arm is honest there because the dive crosses only
+air, so the family is obeyed from the first level.
+Considered and dropped: (a) a largest-inscribed-circle search (the
+medial axis/straight skeleton - exact, but a new geometric engine for
+a landing spot; the ear centroid is within a triangle's width of the
+true center and the margin test proves what it claims); (b) seeding
+the dive on the planned passes themselves (it re-imports the wall:
+`passes[0]`'s start is exactly the spot the entry law refuses).
+Caveat kept honest: on a hair-thin band no ear centroid reaches
+mid-line (the 2/3 rule), so real room can answer None - that is a
+SAID substitution (`entry: ... the floor has no dive room either`),
+never a silent wrong dive.
+
+**Chosen: erosion by DISTANCE, not by boolean, for the room margin -
+`boundary_clears` walks every loop edge and measures point-to-segment
+distance.** Found mid-stage, from the 3-D boss-band test failing with
+a helix that "landed" inside the wall's own circle: `Region::offset(-d)`
+on an annulus NARROWER than `2d` makes the shrunk outer loop fall
+inside the grown hole - the boolean's loops cross and the output is a
+symmetric-difference ring that is self-consistent under its OWN
+`contains` yet material where the truth is empty. A containment-guard
+fix was insufficient (the phantom region contains its own phantom
+centroids); the distance test cannot lie that way - it measures the
+real clearance or says it is not there. The helix arm dropped the
+offset leg entirely (no `?` to propagate on that path), and
+`dive_room_never_lands_outside_the_region` pins the annulus directly:
+a ring with margin beyond half its width answers None, and any Some
+is `contains`-true. This is the Prime Directive read at the geometry
+seam: a boolean whose failure mode is "wrong but consistent" is not a
+law to build a dive on.
+
+**Chosen: roughing waterline runs inside-out by reversing the loop
+LISTING (`loops.sort_by_key(Reverse(k))`, stable, so same-ring
+families keep their area order) - ring geometry and the chaining laws
+untouched.** Chains then seed in the core and walk outward; a chord
+between adjacent offsets is the same chord either way, so only the
+walking order changed. FINISH waterline (`machining3d::rings`) keeps
+wall-first - it is the honest shape there, the phase text says so,
+and the file comment points at the split. Stated vacuity: on a floor
+whose band is narrower than the stepover the ring family collapses to
+k=0 alone and the reversal is a no-op - the wall loop IS the floor's
+only loop and diving at its start is not a wall-entry bug (the tool
+stands in clearance, never on a finished face it could mar). The
+plate-with-island goldens are exactly this shape (2 mm band, 3 mm
+stepover): their level-0 first entry is UNCHANGED by M8.1 by law, not
+by oversight - `roughing_rings_run_inside_out_and_the_wall_walks_last`
+pins the reversal on a multi-ring floor, and the goldens pin that a
+single-family floor stays byte-identical at level 0.
+Considered and dropped: a continuous inward spiral (link chords would
+cross rings at every family transition on holed floors - the chaining
+sweep already says those pairs belong in separate passes).
+
+**Chosen: `Adaptive` keeps its name; the label's promise was verified
+honest, and trochoidal wall-following is DEFERRED.** The visit's
+question - does the strategy deliver the HEM the name suggests? - has
+a two-part answer: the motion is rings, not a trochoid, but the
+documentation was amended at M5.1 H, not silently kept overpromising:
+pocket.rs's variant comment says "Constant-engagement rings", and the
+panel states the law under the combo ("rings step by tool_r x
+(1 - cos a)"). The engagement claim is true of what it does - each
+ring bites the wall by the sagitta-bound angle (M2.1c). A true
+trochoid (radial infeed with lateral wall clearance) is a new
+generator class; folding it in would re-run the whole engagement
+audit, and M8.1's scope is ORDER. Considered and dropped: renaming
+the combo entry ("Rings (constant engagement)") - the string is in
+UI snapshot goldens and no user-visible promise is broken by
+"Adaptive" once the panel says what it does; HEM within this stage -
+wrong milestone, right ledger line.
+
+**Chosen: substitutions are said - the notes channel (Toolpath.notes,
+PathBuilder::note, status_summary suffix, PathDto.notes as an
+additive `#[serde(default)]` key, no PROJECT_VERSION bump).** Every
+silent fallback this stage found (blocked ramp chord, disc fits
+nowhere, no dive room either) now appends one sentence naming the
+why and what it did instead ("entry: the ramp's chord is blocked -
+axial dive on the floor instead"), and the status line carries them.
+A quiet path renders exactly as it always did - the suffix is absent,
+not empty (`notes_ride_the_path_and_the_status_line`). Considered
+and dropped: Record::Warn-style diagnostics on the stream (the path's
+own notes ride the document, survive project save, and belong to the
+path that caused them; a stream warning would be at the wrong
+lifetime).
+
+**Chosen: the double-dive at a level change stays when the link chord
+is unproven - interior axial dive, hop, traverse, wall dive (+6 moves
+per level change in the two island goldens).** `dive_room` lands the
+entry in the floor's core; running the link as a feed at depth would
+cross planned rings, which `verify`'s Crossing law reports - and that
+law is ORDER-agnostic, so "rings already walked, so the chord is
+over-cut floor" is not a defense it accepts. The hop is 3 moves nobody
+can prove away; it is posted, and the notes say why when it is a
+substitution. Goldens re-blessed with the diff reviewed move-by-move:
+level transitions only, level 0 byte-identical, all 13 .nc goldens and
+the other 18 .cl goldens unchanged (the ordering change is vacuous on
+their floors - stated above).
+
+Gate: cl 20/20; motion machining2d 54, machining3d 22, all binaries
+green (gate #2), app full suite green with the two re-blessed goldens
+(gate #1), UI 234/234 (gate #3), clippy `-D warnings` clean on
+cl/motion/app; release `--ignored` heavy lane green (verify_against
+silent on the new orders, gate #2).

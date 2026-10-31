@@ -2376,7 +2376,10 @@ same sources `entry.rs` already names. No HSMWorks material.
 ### M8.1 - The roughing ladders: entry into metal first, then pass order
 **Goal: the entry family the user chose is what first engages the
 stock, and a roughing plan reaches the middle without biting the
-wall it must leave for the finisher.** — 📋
+wall it must leave for the finisher.** — ✅ (M8.1 code cc5d89d;
+`dive_room` erosion-by-distance, inside-out roughing rings,
+level-0 family obedience in both ladders, substitution notes on
+the status line; ledger in RECOMMENDED.md)
 
 - **Level 0 obeys the family**: `Helix` dives in from the safe plane
   along a true Z-descending helix whose landing spot has room for the
@@ -2475,7 +2478,7 @@ questions; cycle order and approach order get stated, not assumed.** — 📋
 | **M7.1** | Stock becomes a field | Narrow-band brick SDF from the mesh; closed-form swept-tool subtraction (`max` with the tool-frame distance, inverted-trajectory law); same stock_sim API, real distances at every verdict call site | 📋 |
 | **M7.2** | The machined volume in the 3D view | Sphere-traced viewport render on the egui-wgpu stack, progressive per-move playback, continuous deviation color map, on-demand marching-cubes mesh (a cache, never a truth), CPU fallback | 📋 |
 | **M7.3** | Dexel retirement | Both engines verdict-identical on the heavy lane (rest/gouge/deviation within declared epsilon), per-brick update cost law, column engine retires | 📋 |
-| **M8.1** | Roughing entry & order | Level-0 obeys the entry family (true helix/ramp into metal, no silent plunge fallback), roughing pass order reaches the middle off the wall, `Adaptive` trochoid-or-renamed, substitutions diagnosed | 📋 |
+| **M8.1** | Roughing entry & order | Level-0 obeys the entry family (true helix/ramp into metal, no silent plunge fallback), roughing pass order reaches the middle off the wall, `Adaptive` trochoid-or-renamed, substitutions diagnosed | ✅ |
 | **M8.2** | Finishing & planar order | Tangent-ring entry re-proved + ramped first-contact option, contour/slot Z-entry (M1.3 debt swept), tab/hop link order | 📋 |
 | **M8.3** | Canned/posed/revolved order | Cycle R-plane/peck/retract audit, helical bore entries, posed-axis first engagement, turning inside-out order per catalog row; registry annotated with verdicts | 📋 |
 
