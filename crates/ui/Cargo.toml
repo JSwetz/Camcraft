@@ -19,6 +19,10 @@ egui = { workspace = true }
 egui-winit = { workspace = true }
 egui-wgpu = { workspace = true }
 egui_dock = { workspace = true }
+# Theme files (M6.1 B): the camcraft-theme/1 reader walks serde_json
+# Values directly - every refusal names the key it tripped on, which a
+# derived deserializer's error soup cannot promise.
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # egui's own test harness, for the frame tests in the lib (egui_app) -

@@ -33,6 +33,9 @@ mod pages;
 mod panes;
 mod shell;
 mod theme;
+// pub: the M6.1 B format tests read it straight, and stage C's
+// switcher is the next reader (discover -> cache -> apply).
+pub mod theme_files;
 // pub(crate) past egui_app: the crate-level law tests read the scene
 // digest straight (the imgui panels' fold checks moved there at M-g), and
 // the view cube's pick law straight.

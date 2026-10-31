@@ -790,6 +790,7 @@ dependencies = [
  "image",
  "pollster 0.4.0",
  "rfd",
+ "serde_json",
  "winit",
 ]
 

@@ -1,0 +1,19 @@
+{
+  "format": "camcraft-theme/1",
+  "descriptor": {
+    "name": "Teal Night",
+    "creator": "camcraft",
+    "description": "Dark chrome with a teal accent - the worked example of the theme-file format"
+  },
+  "base": "dark",
+  "colors": {
+    "accent": "#2A7F79",
+    "accent_hover": "#3CA099",
+    "selection_bg": "#1F5A56",
+    "selection_stroke": "#3CA099"
+  },
+  "geometry": {
+    "radius_widget": 3,
+    "glyph_px": 22.0
+  }
+}
