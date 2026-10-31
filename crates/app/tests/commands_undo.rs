@@ -6,7 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use camcraft_app::commands::{
-    CommandError, DeleteEntity, History, ImportModel, SetStock, SetUnits, SetWcsOrigin, UpdateModel,
+    CommandError, DeleteEntity, History, ImportModel, SetStock, SetTheme, SetUnits, SetWcsOrigin,
+    UpdateModel, theme_of,
 };
 use camcraft_app::units::{self, Unit};
 use camcraft_app::geometry::{cube, Mesh, Point3, Triangle};
@@ -846,4 +847,59 @@ fn move_model_refuses_other_furniture_and_garbage() {
         Err(CommandError::Invalid(m)) if m.contains("work offset")
     ));
 
+}
+
+// M6.1 C: the theme choice is a command like every other piece of
+// setup furniture - SelectPost's twin. The law lives at command
+// construction (a stranger name or a missing file refuses by name,
+// re-selecting what is already worn is not a change); the parse lives
+// surface-side, so the File arm's law here is existence only.
+#[test]
+fn theme_choice_undoes_redoes_and_refuses() {
+    use camcraft_app::schema::ThemeRef;
+
+    let world = new_world();
+    let mut history = History::default();
+    // A fresh world has never been themed: the default wears itself.
+    assert_eq!(theme_of(&world), ThemeRef::Dark);
+
+    // Selecting the theme it already wears is not a change - no
+    // command, nothing on the stack.
+    assert!(matches!(
+        SetTheme::new(&world, ThemeRef::Dark),
+        Err(CommandError::Invalid(m)) if m.contains("already selected")
+    ));
+
+    // A named theme that is not a built-in refuses by name.
+    assert!(matches!(
+        SetTheme::new(&world, ThemeRef::Named("solarpunk".into())),
+        Err(CommandError::Invalid(m)) if m.contains("solarpunk")
+    ));
+
+    // A file that is not there refuses, naming the path.
+    let missing = std::env::temp_dir().join(format!("camcraft-gone-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&missing);
+    assert!(matches!(
+        SetTheme::new(&world, ThemeRef::File(missing.display().to_string())),
+        Err(CommandError::Invalid(m)) if m.contains("camcraft-gone")
+    ));
+
+    // The real choice: dark -> light, undo -> dark, redo -> light.
+    history.execute(&world, SetTheme::new(&world, ThemeRef::Named("light".into())).expect("light"));
+    assert_eq!(theme_of(&world), ThemeRef::Named("light".into()));
+    assert!(history.undo(&world));
+    assert_eq!(theme_of(&world), ThemeRef::Dark);
+    assert!(history.redo(&world));
+    assert_eq!(theme_of(&world), ThemeRef::Named("light".into()));
+
+    // A theme file's existence is all the app seam checks - a real
+    // file lands whatever its contents (parsing is the shell's
+    // pre-step; the ui tests carry that half of the law).
+    let file = std::env::temp_dir().join(format!("camcraft-theme-{}.json", std::process::id()));
+    std::fs::write(&file, "{}").expect("temp theme file");
+    history.execute(&world, SetTheme::new(&world, ThemeRef::File(file.display().to_string())).expect("file theme"));
+    assert_eq!(theme_of(&world), ThemeRef::File(file.display().to_string()));
+    assert!(history.undo(&world));
+    assert_eq!(theme_of(&world), ThemeRef::Named("light".into()));
+    let _ = std::fs::remove_file(&file);
 }

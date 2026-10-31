@@ -146,6 +146,47 @@ impl Tokens {
         font_row_suffix: 10.5,
     };
 
+    /// The same shell, inverted: paper grounds, dark ink, the steel
+    /// accent stepped down for contrast against light (a hover still
+    /// lifts, a well still sinks - the RELATIVE laws of the dark column
+    /// are what carry over; the numbers are ours, chosen so body text
+    /// clears 4.5:1 against every ground it sits on. The accessible
+    /// check itself rides the light golden in stage D). Geometry is
+    /// identical in both columns - sizes are the shell's body, not its
+    /// weather; a theme file is what restyles them, per document.
+    pub const LIGHT: Tokens = Tokens {
+        ink: Color32::from_rgb(0xEC, 0xEE, 0xF2),
+        ink_alt: Color32::from_rgb(0xF6, 0xF7, 0xF9),
+        well: Color32::from_rgb(0xDF, 0xE2, 0xE8),
+        text: Color32::from_rgb(0x1F, 0x24, 0x2A),
+        text_dim: Color32::from_rgb(0x53, 0x5B, 0x66),
+        text_faint: Color32::from_rgb(0x84, 0x8C, 0x97),
+        border: Color32::from_rgb(0xC4, 0xCA, 0xD3),
+        accent: Color32::from_rgb(0x2F, 0x66, 0x9E),
+        accent_hover: Color32::from_rgb(0x47, 0x7D, 0xB8),
+        field_bg: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+        field_hover: Color32::from_rgb(0xF0, 0xF3, 0xF7),
+        field_active: Color32::from_rgb(0xE2, 0xEB, 0xF5),
+        selection_bg: Color32::from_rgb(0xC6, 0xDC, 0xF0),
+        selection_stroke: Color32::from_rgb(0x47, 0x7D, 0xB8),
+        radius_widget: 2,
+        radius_window: 6,
+        radius_menu: 6,
+        item_spacing_x: 8.0,
+        item_spacing_y: 3.0,
+        button_padding_x: 4.0,
+        button_padding_y: 1.0,
+        control_height: 18.0,
+        row_height: 20.0,
+        cell_h: 35.0,
+        cell_w: 56.0,
+        glyph_px: 20.0,
+        font_label: 11.5,
+        font_caption: 10.0,
+        font_row: 12.5,
+        font_row_suffix: 10.5,
+    };
+
     /// The panel ground behind the ribbon/browser strips (painted.rs).
     #[must_use]
     pub const fn strip_fill(&self) -> Color32 {
@@ -249,7 +290,8 @@ impl Tokens {
 /// arm, so the table can never gain a member that no code path reads.
 /// Geometry gets its sanity window here (the same clamps the draw sites
 /// re-apply to file-supplied values); colours have no range to check.
-const _: () = {
+/// Both built-in columns wear the check (M6.1 C).
+const fn geom_legal(t: &Tokens) -> bool {
     let Tokens {
         ink: _, ink_alt: _, well: _, text: _, text_dim: _, text_faint: _,
         border: _, accent: _, accent_hover: _, field_bg: _, field_hover: _,
@@ -258,31 +300,63 @@ const _: () = {
         item_spacing_x, item_spacing_y, button_padding_x, button_padding_y,
         control_height, row_height, cell_h, cell_w, glyph_px,
         font_label, font_caption, font_row, font_row_suffix,
-    } = Tokens::DARK;
-    assert!(radius_widget <= clamp::RADIUS && radius_window <= 24 && radius_menu <= 24);
-    assert!(item_spacing_x >= 0.0 && item_spacing_y >= 0.0);
-    assert!(button_padding_x >= 0.0 && button_padding_y >= 0.0);
-    assert!(
-        control_height >= clamp::CONTROL_H.0 && control_height <= clamp::CONTROL_H.1
-            && row_height >= clamp::CONTROL_H.0 && row_height <= clamp::CONTROL_H.1
-            && cell_h >= clamp::CELL.0 && cell_h <= clamp::CELL.1
-            && cell_w >= clamp::CELL.0 && cell_w <= clamp::CELL.1
-            && glyph_px >= clamp::GLYPH.0 && glyph_px <= clamp::GLYPH.1
-    );
-    assert!(
-        font_label >= clamp::FONT.0 && font_label <= clamp::FONT.1
-            && font_caption >= clamp::FONT.0 && font_caption <= clamp::FONT.1
-            && font_row >= clamp::FONT.0 && font_row <= clamp::FONT.1
-            && font_row_suffix >= clamp::FONT.0 && font_row_suffix <= clamp::FONT.1
-    );
-};
+    } = *t;
+    radius_widget <= clamp::RADIUS
+        && radius_window <= 24
+        && radius_menu <= 24
+        && item_spacing_x >= 0.0
+        && item_spacing_y >= 0.0
+        && button_padding_x >= 0.0
+        && button_padding_y >= 0.0
+        && control_height >= clamp::CONTROL_H.0
+        && control_height <= clamp::CONTROL_H.1
+        && row_height >= clamp::CONTROL_H.0
+        && row_height <= clamp::CONTROL_H.1
+        && cell_h >= clamp::CELL.0
+        && cell_h <= clamp::CELL.1
+        && cell_w >= clamp::CELL.0
+        && cell_w <= clamp::CELL.1
+        && glyph_px >= clamp::GLYPH.0
+        && glyph_px <= clamp::GLYPH.1
+        && font_label >= clamp::FONT.0
+        && font_label <= clamp::FONT.1
+        && font_caption >= clamp::FONT.0
+        && font_caption <= clamp::FONT.1
+        && font_row >= clamp::FONT.0
+        && font_row <= clamp::FONT.1
+        && font_row_suffix >= clamp::FONT.0
+        && font_row_suffix <= clamp::FONT.1
+}
 
-/// The theme in force. Until M6.1 C puts the choice in the document,
-/// there is one, and it is dark - but every consumer already reads it
-/// through this one seam.
+const _: () = assert!(geom_legal(&Tokens::DARK));
+const _: () = assert!(geom_legal(&Tokens::LIGHT));
+
+/// The live theme in force, one cell per process. Every consumer reads
+/// it through `current()`; the ONLY writer is `set_current`, and the
+/// only caller of that is the shell's per-frame theme sync (M6.1 C) -
+/// no pane, command, or system pokes a table in. The default is DARK,
+/// so a process that never syncs (the kittest frames, the headless
+/// proof) renders exactly the pre-C shell.
+static LIVE: std::sync::OnceLock<std::sync::RwLock<Tokens>> = std::sync::OnceLock::new();
+
+fn live() -> &'static std::sync::RwLock<Tokens> {
+    LIVE.get_or_init(|| std::sync::RwLock::new(Tokens::DARK))
+}
+
+/// The theme in force. A poisoned cell still answers (Tokens is Copy,
+/// so a panicked writer left either the old or the new table - both
+/// legal); the read never crashes the frame.
 #[must_use]
 pub fn current() -> Tokens {
-    Tokens::DARK
+    *live().read().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Install a token table as the live theme WITHOUT touching any
+/// context - the half of the swap the sync chooses not to take (a
+/// refused file theme keeps the previous table live; only the status
+/// line says so). `apply` is the paired install; nothing else writes.
+pub fn set_current(t: &Tokens) {
+    *live().write().unwrap_or_else(|p| p.into_inner()) = *t;
 }
 
 /// Install a token table into a context: visuals and spacing together,

@@ -19,7 +19,8 @@ use camcraft_app::commands::{
     DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks,
     EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine, MoveFixture,
     MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry, SetOperationSetup,
-    SetStock, SetUnits, SetWcsOrigin, TagFixture, UntagFixture, UpdateModel,
+    SetStock, SetTheme, SetUnits, SetWcsOrigin, TagFixture, UntagFixture, UpdateModel, theme_of,
+    theme_set,
 };
 use camcraft_app::geometry::{
     Point3, feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point,
@@ -27,13 +28,14 @@ use camcraft_app::geometry::{
 use camcraft_app::operation::{
     self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef,
 };
-use camcraft_app::schema::{Location, Operation as OperationDef, PostRef, WCS_SLOTS};
+use camcraft_app::schema::{Location, Operation as OperationDef, PostRef, ThemeRef, WCS_SLOTS};
 use camcraft_app::stock::{self, StockShape};
 use camcraft_app::tools::{Tool, ToolKind, catalog};
 use camcraft_app::units::{self, Unit};
 use camcraft_app::{machine, model, posting, project, world::new_world};
 use flecs_ecs::prelude::World;
 
+use crate::egui_app::{theme, theme_files};
 use crate::viewport::Camera;
 
 #[derive(Debug)]
@@ -106,6 +108,14 @@ pub enum CommandKind {
     /// is the name, so a registry re-growth never re-points a saved
     /// file's post.
     SelectPostNamed(String),
+    /// The document's theme (M6.1 C), `SelectPost`'s twin: the two
+    /// built-ins and a discovered file arrive as a reference (what the
+    /// headless tests queue too), and the dialog arm opens the picker.
+    /// A `File` theme is parse-checked BEFORE the command is built -
+    /// the surface holds the JSON parser (layering), so a corrupt
+    /// theme refuses at the pick, never enters the history.
+    SelectTheme(ThemeRef),
+    SelectThemeDialog,
     /// Work offset: slot origin plus full orientation as yaw-pitch-roll
     /// degrees (R = Rz ⊗ Ry ⊗ Rx). The world stores a unit quaternion;
     /// pure-yaw setups use roll = pitch = 0.
@@ -899,6 +909,16 @@ pub struct State {
     /// edit are a copy of the machine until Apply pushes `LoadMachine`,
     /// which is the command, which is the undo.
     pub machine_editor: Option<crate::egui_app::machine_editor::MachineEditor>,
+    /// M6.1 C's resolution furniture (never a command, never saved -
+    /// the camera's law): the parse cache for `File` themes, the
+    /// discovered theme files behind the switcher's rows, and the last
+    /// reference the tokens were resolved for - the guard that keeps
+    /// resolve/refuse work off the per-frame path. The live table
+    /// itself is `theme::current()`'s cell; the key here only says
+    /// whether that cell still matches the document.
+    pub(crate) theme_cache: theme_files::Cache,
+    pub(crate) theme_paths: Vec<PathBuf>,
+    theme_key: ThemeRef,
     /// `doc_version` the setup drafts were last refetched at.
     ui_synced_doc: u64,
     /// (draft identity, `doc_version` it was fetched at) per pane; see
@@ -1038,6 +1058,12 @@ impl State {
             },
             tool_editor: None,
             machine_editor: None,
+            theme_cache: theme_files::Cache::new(),
+            // One walk per window, at construction: the switcher's file
+            // rows are furniture, not live filesystem polling (the
+            // parse cache re-stats per file on the sync's change edge).
+            theme_paths: theme_files::discover(&theme_dir()).0,
+            theme_key: ThemeRef::Dark,
             ui_synced_doc: 0,
             op_synced: (String::new(), 0),
             tool_synced: (String::new(), 0),
@@ -1697,6 +1723,12 @@ impl State {
                 // inherits the last document's limits.
                 units::set(&self.world, Unit::default());
                 machine::set(&self.world, "", None);
+                // The post and the theme (M3.3 A, M6.1 C) are the same
+                // furniture and sat outside this reset: a blank used to
+                // inherit the last document's script - a leak found
+                // while wiring the theme's twin, fixed for both here.
+                posting::post_set(&self.world, &PostRef::Builtin);
+                theme_set(&self.world, &ThemeRef::Dark);
                 self.history.clear();
                 // Frozen evidence of the old document retires with it.
                 self.post_view = None;
@@ -1874,6 +1906,12 @@ impl State {
                 self.select_post(PostRef::File(path.display().to_string()));
             }
             CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
+            CommandKind::SelectTheme(next) => self.select_theme(next),
+            CommandKind::SelectThemeDialog => {
+                if let Some(path) = pick_theme_file() {
+                    self.select_theme(ThemeRef::File(path.display().to_string()));
+                }
+            }
             CommandKind::StockFit {
                 margin,
                 shape: radio,
@@ -2563,6 +2601,115 @@ impl State {
         }
     }
 
+    /// Choose the theme (M6.1 C). `SelectPost`'s twin with the
+    /// validation split by layering: `SetTheme::new` owns the cheap
+    /// existence/built-in law, and the full parse - which the app
+    /// cannot name (layering: the JSON reader lives on the surface
+    /// side) - is pre-checked HERE, so a corrupt theme is a visible
+    /// refusal at the pick and never enters the history. The look
+    /// itself lands on the next sync, not here: a selection writes
+    /// the reference; resolution is one change-edge on the read side.
+    fn select_theme(&mut self, next: ThemeRef) {
+        if let ThemeRef::File(path) = &next
+            && let Err(why) = &*self.theme_cache.get(Path::new(path))
+        {
+            self.refuse(ErrorScope::Setup, format!("theme not selected: {why}"));
+            return;
+        }
+        match SetTheme::new(&self.world, next) {
+            Ok(command) => {
+                self.history.execute(&self.world, command);
+                self.doc_version += 1;
+                self.status = format!("theme: {}", theme_label(&self.world));
+            }
+            Err(err) => self.refuse(ErrorScope::Setup, format!("theme not selected: {err}")),
+        }
+    }
+
+    /// Install the document's theme (M6.1 C): the world singleton is
+    /// the truth, and this frame's job is to say whether it changed
+    /// since the last - an undo, a redo, a picker, or a project load
+    /// can all move it between frames, and none of them reaches into
+    /// egui from app (layering; the command-law's other half). A
+    /// refused reference - the file vanished, a corrupt parse, a
+    /// stranger name - names itself in the status line ONCE per change
+    /// and leaves the live tokens untouched: the screen never loses
+    /// its look to a missing accessory mid-session, and never
+    /// half-applies.
+    pub fn sync_theme(&mut self, ctx: &egui::Context) {
+        let next = theme_of(&self.world);
+        if next == self.theme_key {
+            return;
+        }
+        self.theme_key = next.clone();
+        match theme_files::resolve(&mut self.theme_cache, &next) {
+            Ok((tokens, notes)) => {
+                theme::set_current(&tokens);
+                theme::apply(ctx);
+                if !notes.is_empty() {
+                    // Reported, never silently dropped (B's law, kept
+                    // through C's swap path): the first note rides the
+                    // status line beside the theme's name.
+                    self.status = format!("theme: {} - {}", theme_label(&self.world), notes[0]);
+                }
+            }
+            Err(why) => {
+                self.status = format!("theme refused: {why} (keeping the current look)");
+            }
+        }
+    }
+
+    /// The switcher's rows (M6.1 C): the two built-ins, the discovered
+    /// files (label: the descriptor name when it parses, the file stem
+    /// when it does not - a listed file is pickable enough to name why
+    /// not), and Browse for anywhere else. Labels are screen furniture;
+    /// what the document stores is the reference each row queues.
+    #[must_use]
+    pub fn theme_options(&self) -> Vec<(String, CommandKind)> {
+        let mut rows: Vec<(String, CommandKind)> = vec![
+            ("Dark".into(), CommandKind::SelectTheme(ThemeRef::Dark)),
+            (
+                "Light".into(),
+                CommandKind::SelectTheme(ThemeRef::Named("light".into())),
+            ),
+        ];
+        for path in &self.theme_paths {
+            let label = match self.theme_cache.peek_label(path) {
+                Some(name) => name,
+                None => path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+            };
+            rows.push((
+                label,
+                CommandKind::SelectTheme(ThemeRef::File(path.display().to_string())),
+            ));
+        }
+        rows.push(("Browse...".into(), CommandKind::SelectThemeDialog));
+        rows
+    }
+
+    /// The switcher's selected text: which row the document matches.
+    /// A file not in the discovered list still shows its path - the
+    /// `post_label` law, one truth for what the screen wears.
+    #[must_use]
+    pub fn theme_selection_text(&self) -> String {
+        match theme_of(&self.world) {
+            ThemeRef::Dark => "Dark".to_owned(),
+            ThemeRef::Named(name) => titled(&name),
+            ThemeRef::File(path) => {
+                for p in &self.theme_paths {
+                    if p.display().to_string() == path {
+                        return self.theme_cache.peek_label(p).unwrap_or_default();
+                    }
+                }
+                path
+            }
+        }
+    }
+
     fn open_project_path(&mut self, path: PathBuf) {
         self.abandon_imports();
         model::clear_named(&self.world);
@@ -2680,6 +2827,44 @@ fn pick_post_file() -> Option<PathBuf> {
     // (M3.3 A) - plain JavaScript, the user's own; the filter names it.
     rfd::FileDialog::new()
         .add_filter("Post Script", &["cps"])
+        .pick_file()
+}
+
+/// What the status line calls the document's theme: built-ins by name,
+/// a file by path - the `post_label` law, one truth for what the screen
+/// wears. (The switcher's row labels may read richer for a discovered
+/// file; the reference is the law, the label is furniture.)
+#[must_use]
+pub fn theme_label(world: &World) -> String {
+    match theme_of(world) {
+        ThemeRef::Dark => "Dark".to_owned(),
+        ThemeRef::Named(name) => titled(&name),
+        ThemeRef::File(path) => path,
+    }
+}
+
+fn titled(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// The discovered-theme directory (M6.1 C): the repo's assets folder,
+/// anchored to this crate the way the icons are (CARGO_MANIFEST_DIR),
+/// so the headless suites see the same rows from any CWD. A missing
+/// directory is `discover`'s normal empty state, not a diagnostic.
+fn theme_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/themes")
+}
+
+fn pick_theme_file() -> Option<PathBuf> {
+    // `.json` is OUR OWN `camcraft-theme/1` format (M6.1 B) - the
+    // filter names it; the selection-time parse decides it.
+    rfd::FileDialog::new()
+        .add_filter("CamCraft Theme", &["json"])
+        .set_directory(theme_dir())
         .pick_file()
 }
 

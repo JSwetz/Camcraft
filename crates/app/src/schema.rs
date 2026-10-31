@@ -212,6 +212,24 @@ pub enum PostRef {
     File(String),
 }
 
+/// Which theme the document wears (M6.1 C), a flecs singleton like
+/// `PostRef`: setup furniture, never a browser row. `Dark` is the
+/// shipped default - the meaning of a file with no theme key at all;
+/// `Named` addresses a built-in theme BY NAME (the post law, M3.3 B:
+/// names survive growth, indices don't); `File` names the user's
+/// `.json` theme by path. The constructor validates (registry names
+/// exist, files are there and within the byte budget - the JSON parse
+/// itself is the ui seam's, since the parser lives there); a value
+/// landed from a project file reads as written and refuses by name at
+/// apply time, never silently swapping back to the default.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+pub enum ThemeRef {
+    #[default]
+    Dark,
+    Named(String),
+    File(String),
+}
+
 /// The single stock entity's name. Identity by name, like everything else:
 /// tree, undo, and save all reach stock through this.
 pub const STOCK_NAME: &str = "Stock";
@@ -236,6 +254,7 @@ pub fn register_schema(world: &World) {
     world.component::<Units>();
     world.component::<MachineDef>();
     world.component::<PostRef>();
+    world.component::<ThemeRef>();
     world.component::<SetupDef>();
     world.component::<ActiveSetup>();
     world.component::<FixtureDef>();

@@ -32,7 +32,11 @@ mod painted;
 mod pages;
 mod panes;
 mod shell;
-mod theme;
+// pub past egui_app from M6.1 C: the switcher's resolution seam
+// (state.rs) installs the live table, the format tests read the
+// columns beside their parser, and every draw site already read
+// `current()` through this module.
+pub mod theme;
 // pub: the M6.1 B format tests read it straight, and stage C's
 // switcher is the next reader (discover -> cache -> apply).
 pub mod theme_files;

@@ -144,12 +144,12 @@ fn the_refusal_battery() {
         (r#"{"format":"camcraft-theme/1","base":"dark"}"#, "missing \"descriptor\""),
         (r#"{"format":"camcraft-theme/1","descriptor":{},"base":"dark"}"#, "name is required"),
         (
-            r#"{"format":"camcraft-theme/1","descriptor":{"name":"n"},"base":"light"}"#,
-            "M6.1 C",
-        ),
-        (
             r#"{"format":"camcraft-theme/1","descriptor":{"name":"n"},"base":"solarpunk"}"#,
             "unknown theme base",
+        ),
+        (
+            r#"{"format":"camcraft-theme/1","descriptor":{"name":"n"}}"#,
+            "missing \"base\"",
         ),
         (
             r#"{"format":"camcraft-theme/1","descriptor":{"name":"n"},"base":"dark","colors":["x"]}"#,
@@ -193,6 +193,30 @@ fn the_refusal_battery() {
         let err = tf::parse_text(text, "battery").expect_err(&format!("must refuse: {want}"));
         assert!(err.contains(want), "wanted {want:?}, got {err}");
     }
+}
+
+/// The battery case that refused `base:"light"` "when M6.1 C lands"
+/// flipped to a support check: the light column is a real table, so a
+/// file may build on it, and an overlay on top of light lands on
+/// light's numbers - not dark's.
+#[test]
+fn a_light_base_is_a_real_starting_point() {
+    use camcraft_ui::egui_app::theme::Tokens;
+    let t = tf::parse_text(
+        r#"{"format":"camcraft-theme/1","descriptor":{"name":"L"},"base":"light"}"#,
+        "light",
+    )
+    .expect("M6.1 C landed: light is a base now");
+    assert_eq!(t.tokens.text, Tokens::LIGHT.text);
+    let u = tf::parse_text(
+        r##"{"format":"camcraft-theme/1","descriptor":{"name":"L2"},"base":"light",
+            "colors":{"accent":"#FF0000"}}"##,
+        "light",
+    )
+    .expect("an overlay rides the light base");
+    assert_eq!(u.tokens.accent, Color32::from_rgb(0xFF, 0x00, 0x00));
+    assert_eq!(u.tokens.text, Tokens::LIGHT.text); // untouched: light's
+    assert_eq!(u.tokens.cell_h, Tokens::LIGHT.cell_h); // geometry: same in both
 }
 
 #[test]

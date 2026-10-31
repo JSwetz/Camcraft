@@ -355,6 +355,15 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // key did not exist.
         file.version = 40;
     }
+    if file.version == 40 {
+        // v40 -> v41: the theme key arrives (M6.1 C) as one optional
+        // top-level field - absent decodes (via the serde default) to
+        // the built-in `dark` every v40 document wears, and a no-theme
+        // file re-saves without the key, byte for byte. No new tag, no
+        // new kind: a v40 file cannot contain it because the key did
+        // not exist.
+        file.version = 41;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }
@@ -410,6 +419,19 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             Some(PostDto::Named(name)) => crate::schema::PostRef::Named(name),
             Some(PostDto::File(path)) => crate::schema::PostRef::File(path),
             None => crate::schema::PostRef::Builtin,
+        },
+    );
+    // Opening lands the theme choice too - including the default, so a
+    // stale singleton from the previous document can never leak in (the
+    // post's law, worn in the theme's clothes). Names and paths land as
+    // written; the shell resolves at draw and a stranger refuses by
+    // name in the status line, never silently wearing `dark`'s ink.
+    crate::commands::theme_set(
+        world,
+        &match file.theme {
+            Some(ThemeDto::Named(name)) => crate::schema::ThemeRef::Named(name),
+            Some(ThemeDto::File(path)) => crate::schema::ThemeRef::File(path),
+            None => crate::schema::ThemeRef::Dark,
         },
     );
     for dto in file.entities {

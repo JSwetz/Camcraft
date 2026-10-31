@@ -1,9 +1,9 @@
 //! Themes as files (M6.1 B): the `camcraft-theme/1` JSON format, its
 //! hostile-input caps, the disk discovery walk, and the parse cache.
-//! A theme file names a base (`dark` - the light column lands with
-//! M6.1 C) and overrides individual tokens BY NAME, so a custom theme
-//! is a handful of lines and the compiled-in `Tokens::DARK` stays the
-//! single truth for the defaults: a binary with no assets directory
+//! A theme file names a base (`dark` or, since M6.1 C, `light` - the
+//! two compiled-in columns) and overrides individual tokens BY NAME, so
+//! a custom theme is a handful of lines and `Tokens::DARK`/`LIGHT` stay
+//! the single truth for the defaults: a binary with no assets directory
 //! themes exactly as it always did (the roadmap's include_str! intent,
 //! carried by the Rust constants - two theme files for the same
 //! numbers would be two truths; the note in RECOMMENDED.md owns the
@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use camcraft_app::schema::ThemeRef;
 use egui::Color32;
 use serde_json::Value;
 
@@ -182,6 +183,42 @@ impl Cache {
         }
         loaded
     }
+
+    /// The parsed theme's name if this path is already cached AND
+    /// loaded - a label read for the switcher's rows and selected
+    /// text, which must never trigger a parse or a re-read (the pick
+    /// itself is where a file is first paid for).
+    #[must_use]
+    pub fn peek_label(&self, path: &Path) -> Option<String> {
+        self.entries.get(path).and_then(|(_, held)| match &**held {
+            Ok(theme) => Some(theme.name.clone()),
+            Err(_) => None,
+        })
+    }
+}
+
+/// Resolve a document's theme reference into the table to wear, and
+/// the notes gathered on the way (M6.1 C - the switcher's read).
+/// Built-ins land their compiled columns - `Dark` and `Named("dark")`
+/// are the same table, per the omission law - and a file lands its
+/// overlay, parsed at most once per change. Anything that cannot land
+/// - a stranger name, a vanished file, a corrupt parse - refuses BY
+///   NAME with no silent fallback to dark (the `script_source` law
+///   worn in theme clothes); the CALLER keeps the live tokens on
+///   refusal, which is what makes the refusal safe to state once.
+pub fn resolve(cache: &mut Cache, reference: &ThemeRef) -> Result<(Tokens, Vec<String>), String> {
+    match reference {
+        ThemeRef::Dark => Ok((Tokens::DARK, Vec::new())),
+        ThemeRef::Named(name) => match name.as_str() {
+            "dark" => Ok((Tokens::DARK, Vec::new())),
+            "light" => Ok((Tokens::LIGHT, Vec::new())),
+            other => Err(format!("built-in theme {other} is not one of dark, light")),
+        },
+        ThemeRef::File(path) => match &*cache.get(Path::new(path)) {
+            Ok(theme) => Ok((theme.tokens, theme.notes.clone())),
+            Err(why) => Err(why.clone()),
+        },
+    }
 }
 
 /// Parse one theme's text. Split from `load` so a test (and the C
@@ -222,13 +259,12 @@ pub fn parse_text(text: &str, origin: &str) -> Result<Theme, String> {
     let description = opt_str(desc, "description", MAX_DESCRIPTION_LEN, origin)?;
     let base = match top.get("base") {
         Some(Value::String(b)) if b == "dark" => Tokens::DARK,
-        Some(Value::String(b)) if b == "light" => {
-            return Err(format!(
-                "{origin}: base \"light\" is not in this build yet - the light column lands with M6.1 C"
-            ));
-        }
+        // The arm that refused light "when M6.1 C lands" is C landing:
+        // Tokens::LIGHT is a real table now, and it is the law that
+        // both built-ins are base-able.
+        Some(Value::String(b)) if b == "light" => Tokens::LIGHT,
         Some(Value::String(b)) => return Err(format!("{origin}: unknown theme base \"{b}\"")),
-        _ => return Err(format!("{origin}: missing \"base\" (\"dark\" in this build)")),
+        _ => return Err(format!("{origin}: missing \"base\" (\"dark\" or \"light\")")),
     };
     let colors = read_map(&top, "colors", COLOR_NAMES, origin, &mut |k, v| match v {
         Value::String(s) => parse_hex(s)

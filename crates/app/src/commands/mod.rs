@@ -14,6 +14,8 @@ pub mod select_entity;
 pub mod set_stock;
 pub mod setup;
 pub mod set_units;
+// M6.1 C: the document's theme choice, `SelectPost`'s twin.
+pub mod theme;
 pub mod set_wcs;
 pub mod tool;
 pub mod update_model;
@@ -36,6 +38,7 @@ pub use select_entity::SelectEntity;
 pub use set_stock::SetStock;
 pub use setup::{ActivateSetup, CreateSetup, DeleteSetup, SetOperationSetup};
 pub use set_units::SetUnits;
+pub use theme::{theme_of, theme_set, SetTheme};
 pub use set_wcs::SetWcsOrigin;
 pub use tool::{AddTool, ChangeTool, DeleteTool};
 pub use update_model::UpdateModel;

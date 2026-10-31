@@ -164,6 +164,13 @@ pub fn collect(world: &World) -> ProjectFile {
             crate::schema::PostRef::Named(name) => Some(PostDto::Named(name)),
             crate::schema::PostRef::File(path) => Some(PostDto::File(path)),
         },
+        // The default theme matches every pre-v41 document, so it
+        // writes no key (the post's law, worn in the theme's clothes).
+        theme: match crate::commands::theme_of(world) {
+            crate::schema::ThemeRef::Dark => None,
+            crate::schema::ThemeRef::Named(name) => Some(ThemeDto::Named(name)),
+            crate::schema::ThemeRef::File(path) => Some(ThemeDto::File(path)),
+        },
         entities,
     }
 }

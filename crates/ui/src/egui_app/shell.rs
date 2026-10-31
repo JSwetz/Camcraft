@@ -528,6 +528,13 @@ pub(crate) fn shell_layout(
     viewport_points: &mut [f32; 2],
     left_press: &mut Option<[f32; 2]>,
 ) {
+    // The document's theme lands here, on the frame edge (M6.1 C): the
+    // world singleton is the truth (command law - undo, the picker, and
+    // a project load all move it between frames), and resolution lives
+    // on this side of the seam (layering). The per-frame cost is a
+    // clone and an equality test; the parse and the style swap happen
+    // only on the change edge, before `current()` is read below.
+    state.sync_theme(ui.ctx());
     // Ephemeral hover clears every frame before anything recomputes it (the
     // imgui App::draw law); the viewport's update_hover and the property-page
     // chip hovers then own it until the pointer moves on.

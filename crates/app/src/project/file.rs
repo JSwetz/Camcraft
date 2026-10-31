@@ -1,6 +1,6 @@
 use super::*;
 
-pub const PROJECT_VERSION: u32 = 40;
+pub const PROJECT_VERSION: u32 = 41;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -47,7 +47,28 @@ pub struct ProjectFile {
     /// falling back (`script_source`'s law).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post: Option<PostDto>,
+    /// The document's theme (M6.1 C), same law as `post`: an absent key
+    /// is the built-in `dark` - what every earlier document wears - so
+    /// the default writes nothing. `{"named": ...}` is a built-in by
+    /// name, `{"file": path}` a user `.json` theme; landed values are
+    /// not re-validated on open (the `SelectTheme` constructor and the
+    /// shell's parse pre-step did), and one that went missing refuses
+    /// by name at apply time in the status line, never silently
+    /// reverting the look of an intact document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<ThemeDto>,
     pub entities: Vec<EntityDto>,
+}
+
+/// The file mirror of the `ThemeRef` singleton (M6.1 C), spelled like
+/// `PostDto`: a built-in name or a path, never one string standing
+/// ambiguously for both. `dark` is the default and needs no key, so a
+/// `{"named": "dark"}` is as legal as an omission - it reads the same.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeDto {
+    Named(String),
+    File(String),
 }
 
 /// The file mirror of the `PostRef` singleton (M3.3): exactly the two
