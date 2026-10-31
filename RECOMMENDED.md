@@ -5829,6 +5829,66 @@ operations 31 + machine 6 + fixtures 7 = 195 passed, serial with
 CWD=crates\ui; clippy -D warnings clean on camcraft-ui --all-targets;
 the .nc goldens untouched (motion not in this diff).
 
+## M6.1 B - the camcraft-theme/1 files: named refusals, clamped landings
+
+**Chosen: the compiled-in default is the Rust `Tokens::DARK` const, not an
+`include_str!` JSON** - the ROADMAP line said "include_str! the light and
+dark defaults". Considered and dropped: shipping `assets/themes/default-
+dark.json` and embedding it - that puts the same 30 numbers in two files
+that can silently disagree, exactly the drift M6.1 A's single-table law
+exists to kill. The goal the sentence serves (a binary with no assets
+directory still themes correctly) is met harder by a const: it cannot be
+missing. Light will land the same way, as `Tokens::LIGHT` in stage C.
+
+**Chosen: ramp arrays refuse by name** (`"...carries a ramp array - not
+implemented..."`). The ROADMAP offered `"#rrggbb"/"#rrggbbaa", or an array
+for ramps` in the colors map. Considered and dropped: parsing one or two
+entries of an array as a fallback - a theme that set a ramp and got a
+flat colour half-applied, which is the Prime Directive's "never
+half-apply" with extra steps. Ramps are a derived-contrast question
+(stage D's hover/active steps); until then the refusal says so.
+
+**Chosen: `"base":"light"` refuses naming M6.1 C** until `Tokens::LIGHT`
+exists - accepting it would parse a file whose base cannot be rendered,
+then silently theme off DARK. The refusal is by name in the battery; when
+C lands the const, C deletes the arm and the battery case flips to a
+support check.
+
+**Chosen: unknown KEYS report, unknown TOKENS refuse**, with the
+wrong-map hint: a `cell_h` under `"colors"` (or an `ink` under
+`"geometry"`) says `belongs under "geometry"` by name. A paste mistake
+becomes a sentence instead of a vocabulary dump. The check reads the
+*other* map's vocab - the first run had it consulting its own map's list
+(hint never fired); the misplaced-token test is what caught that.
+
+**Chosen: caps before content** - 256 KiB byte budget enforced with
+`Read::take` (a fat file refuses without loading it into memory), 64
+entries per override map, 48-byte keys, 64-byte name, 64 discovered
+files. Unknown top-level and descriptor keys collect into `Theme.notes`
+for the switcher's honest line, never into refusals.
+
+**Chosen: discovery takes an explicit directory** - no implicit
+`assets/themes` CWD walk inside the reader. Stage C's switcher picks the
+place to look (install dir vs dev repo is its decision, one seam); a
+missing directory is a normal state (an install without assets), listed
+as zero files with no diagnostic. The parse cache keys on mtime, so a
+realtime swap costs one `stat` per unchanged file - `Arc::ptr_eq` is the
+test.
+
+Also in this stage: `serde_json` never lets an out-of-range literal
+(`1e999`) reach the module's finite-number guard - it refuses at the
+parse step - so the battery pins THAT text and the guard stays as
+defense-in-depth. And a correction to stage A's entry: the geometry table
+is 16 fields, not 17 (colours 14 + geometry 16 = 30; A's "17"
+miscounted `font_row_suffix`).
+
+Gate: ui full-crate ladder serial with CWD=crates\ui - lib 119 +
+theme_files 9 (new) + the seven integration suites 76 = 204 passed, 0
+failed (195 baseline + the 9 new); clippy -D warnings clean on
+camcraft-ui after three lint fixes (`collapsible_if` -> a let-chain on
+the cache hit, two `manual_contains`); the app crate is not in this diff,
+so its ladder did not run.
+
 ## Phase 8 opened - Cutting order: the generator review & refactor
 
 User report: a pocket done "adaptive" starts at the hole's outer edge
