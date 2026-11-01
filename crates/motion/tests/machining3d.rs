@@ -291,6 +291,40 @@ fn a_helix_that_fits_descends_in_arcs() {
 }
 
 #[test]
+fn the_entry_family_is_obeyed_at_the_first_level_3d() {
+    // The ladder's side of M8.1's level-0 law (the probe reopened the
+    // stage on exactly this): what the user STATED for entry is read
+    // at the first level, not only at crossings. The helix spirals
+    // into the first plane - no straight plunge meets it; the Plunge
+    // default, the shape every plain pocket posts, dives in the
+    // floor's room, never on `passes[0]`'s corner.
+    let f = slab();
+    let region = rect(-30.0, -30.0, 30.0, 30.0);
+    let t = pocket3d(&f, &region, &params(Entry3D::Helix, 1.0)).unwrap();
+    let reach = t
+        .moves
+        .iter()
+        .find(|m| (m.to.z - 0.0).abs() < 1e-9 && m.kind != MoveKind::Rapid)
+        .expect("the first plane is entered by something");
+    assert!(reach.arc.is_some(), "entered by the spiral, not a wall dive: {reach:?}");
+    assert!(t.notes.is_empty(), "room exists; nothing to substitute: {:?}", t.notes);
+    assert_eq!(verify_against(&f, &region, &t), Vec::new());
+    let t2 = pocket3d(&f, &region, &params(Entry3D::Plunge, 1.0)).unwrap();
+    let dive = t2
+        .moves
+        .iter()
+        .find(|m| m.kind == MoveKind::Plunge)
+        .expect("a dive at the first level");
+    let cen = region.offset(-4.0).expect("the skim plane's center");
+    assert!(
+        cen.contains(Point2::new(dive.to.x, dive.to.y)),
+        "the level 0 dive is interior, got {:?}",
+        dive.to
+    );
+    assert!(t2.notes.is_empty(), "the axial arm found its room: {:?}", t2.notes);
+}
+
+#[test]
 fn a_helix_that_does_not_fits_falls_back_to_a_plunge() {
     // The boss slab at its own silhouette: every row's span is the 7 mm
     // band between wall-erosion and boss-erosion, narrower than the
@@ -327,8 +361,18 @@ fn a_ramp_over_open_floor_feeds_down_in_one_diagonal() {
     let f = slab();
     let region = rect(-30.0, -30.0, 30.0, 30.0);
     let t = pocket3d(&f, &region, &params(Entry3D::Ramp, 1.0)).unwrap();
-    // The first level can only plunge; a later one earns the diagonal.
-    assert_eq!(t.moves[1].kind, MoveKind::Plunge, "the dive into the top");
+    // M8.1 reads the family at level 0 too: home stands over open
+    // floor, so even the skim's chord is proven and the FIRST plane
+    // is entered on the slope.
+    let open = t
+        .moves
+        .iter()
+        .find(|m| (m.to.z - 0.0).abs() < 1e-9 && m.kind != MoveKind::Rapid)
+        .expect("the first plane is entered by something");
+    assert!(
+        open.kind == MoveKind::Feed && open.from.z != open.to.z,
+        "level 0 rides the ramp, not a wall dive: {open:?}"
+    );
     assert!(
         t.moves.iter().any(|m| {
             m.kind == MoveKind::Feed

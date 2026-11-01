@@ -183,7 +183,13 @@ pub(super) fn wrap_exit(
             }
         }
     }
-    let path = b.finish();
+    let mut path = b.finish();
+    // The plan's notes ride the wrap (M8.1's channel, this leg): an
+    // entry substitution said on the developed path must still be
+    // readable on the revolved one - the map re-emits every move, and
+    // rebuilding the path without the notes would silence the very
+    // verdict the entry law posts loudly.
+    path.notes.extend(base.notes.iter().cloned());
     if !path.all_finite() {
         return Err(GenError::Invalid(
             "a rotary offset path left the finite horizon".into(),

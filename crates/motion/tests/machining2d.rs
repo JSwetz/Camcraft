@@ -870,13 +870,13 @@ fn zigzag_fills_a_square_with_one_plunge_per_level() {
     let center = region.offset(-5.0).expect("offset");
     let t = pocket(&region, &pp()).expect("valid");
     assert!(t.is_chained() && t.all_finite());
-    // M8.1's entry law on zigzag: the serpentine keeps its rows, but
-    // each level CHANGE first dives at the floor's room (Plunge never
-    // lands its level-change dive on a wall corner), then links to the
-    // row start - a chord across the rows' lines, so the hop-and-dive
-    // link. The skim's first entry stays the single honest dive.
-    // 3 levels: 1 + 2 * 2.
-    assert_eq!(plunge_xy(&t).len(), 5, "interior entry + row dive per level change");
+    // M8.1's entry law on zigzag, from level 0: the serpentine keeps
+    // its rows, but every level - the first included (Plunge never
+    // lands its dive on a wall corner, not even the stock's own
+    // surface corner) - first dives at the floor's room, then links
+    // to the row start - a chord across the rows' lines, so the
+    // hop-and-dive link. 3 levels: 2 * 3.
+    assert_eq!(plunge_xy(&t).len(), 6, "interior entry + row dive at every level");
     let floor = t
         .moves
         .iter()
@@ -929,11 +929,10 @@ fn zigzag_hops_over_islands_and_leaves_them_standing() {
     // the gouge check; the distance test is a loose physical cross-check.
     let center = region.offset(-5.0).expect("offset");
     let t = pocket(&region, &pp()).expect("valid");
-    // M8.1: the skim level keeps its four subpaths (one entry plus
-    // three island-crossing hops); each level change adds the interior
-    // entry dive whose link to the row start the island forces to a
-    // hop. 4 + 5 + 5.
-    assert_eq!(plunge_xy(&t).len(), 14);
+    // M8.1 read from level 0: every level posts five dives - the
+    // interior entry dive whose link to the row start the island
+    // forces to a hop, plus three island-crossing hops. 5 + 5 + 5.
+    assert_eq!(plunge_xy(&t).len(), 15);
 
     for z in levels_3_zs() {
         let (pts, lifted) = polyline_at(&t, z);
@@ -1743,14 +1742,21 @@ fn adaptive_is_the_engagement_law_on_the_plane() {
 fn a_ramp_down_the_plane_feeds_in_one_diagonal() {
     // The 3-D ladder's ramp on a planar pocket: every level shares one
     // center area, so a chord that clears it is legal at every plane
-    // the diagonal crosses. The first level can only plunge (no open
-    // floor above it); the -3.0 level is entered on the slope.
+    // the diagonal crosses. Level 0 takes the arm too (M8.1): home
+    // stands outside the center, so its chord is unproven - the arm
+    // substitutes the axial dive at the floor's room and SAYS so,
+    // while the -3.0 level, entering from cut floor, rides the slope.
     let region = rect(0.0, 0.0, 30.0, 30.0);
     let mut p = pp();
     p.entry = Entry3D::Ramp;
     let t = pocket(&region, &p).expect("ramp valid");
     let first_plunge = t.moves.iter().find(|m| m.to.z == 0.0).expect("level 0 cut");
-    assert_eq!(first_plunge.kind, MoveKind::Plunge, "the dive into the top");
+    assert_eq!(first_plunge.kind, MoveKind::Plunge, "the substituted dive");
+    assert!(
+        t.notes.iter().any(|n| n.contains("ramp's chord is blocked")),
+        "the level 0 substitution must be said, got {:?}",
+        t.notes
+    );
     assert!(
         t.moves.iter().any(|m| {
             m.kind == MoveKind::Feed
@@ -1762,6 +1768,46 @@ fn a_ramp_down_the_plane_feeds_in_one_diagonal() {
         "the -3.0 level is entered on a ramp"
     );
     assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn the_entry_family_is_obeyed_at_the_first_level() {
+    // The probe that reopened M8.1: an entry stated as Helix opened a
+    // pocket with a straight Plunge at level 0 all the same, because
+    // both ladders gated the arms on crossing a level (`!first &&` /
+    // `li > 0`). The family is a promise about every move onto fresh
+    // material, and the first one is the most public of all. Helix
+    // first: the motion that reaches the surface plane is the orbit's
+    // own arc, not a wall dive.
+    let region = rect(0.0, 0.0, 30.0, 30.0);
+    let mut p = pp();
+    p.entry = Entry3D::Helix;
+    p.helix_radius = 2.0;
+    let t = pocket(&region, &p).expect("helix valid");
+    let reach = t
+        .moves
+        .iter()
+        .find(|m| (m.to.z - 0.0).abs() < 1e-9 && m.kind != MoveKind::Rapid)
+        .expect("something reaches the surface plane");
+    assert_eq!(reach.kind, MoveKind::Feed, "the first level is entered in arcs: {reach:?}");
+    assert!(reach.arc.is_some(), "and the arc is the helix's own");
+    assert!(t.notes.is_empty(), "room exists; nothing to substitute: {:?}", t.notes);
+    // Plunge next - the DEFAULT, so this is the shape every pocket
+    // posts: the first dive stands in the floor's room, never on the
+    // corner of `passes[0]`.
+    let t2 = pocket(&region, &pp()).expect("plunge valid");
+    let center = region.offset(-5.0).expect("offset");
+    let dive = t2
+        .moves
+        .iter()
+        .find(|m| m.kind == MoveKind::Plunge)
+        .expect("a dive at level 0");
+    assert!(
+        center.contains(Point2::new(dive.to.x, dive.to.y)),
+        "the level 0 dive is interior, got {:?}",
+        dive.to
+    );
+    assert!(t2.notes.is_empty(), "the axial arm found its room: {:?}", t2.notes);
 }
 
 #[test]
@@ -1894,8 +1940,7 @@ fn roughing_rings_run_inside_out_and_the_wall_walks_last() {
     let last_top = t
         .moves
         .iter()
-        .filter(|m| m.kind == MoveKind::Feed && m.to.z == 0.0)
-        .next_back()
+        .rfind(|m| m.kind == MoveKind::Feed && m.to.z == 0.0)
         .expect("the top level cuts");
     assert!(d(last_top) >= 14.0, "the wall ring walks last, got {:?}", last_top.to);
     assert!(t.is_chained() && t.all_finite());

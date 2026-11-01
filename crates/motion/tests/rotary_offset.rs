@@ -392,10 +392,32 @@ fn a_ramp_entry_runs_the_ladder_too() {
     };
     let got = rotary_offset(&lathe_bar(16), &p, &control(0.0, 0.0, None))
         .expect("the pocket's own entry laws ride the wrap");
-    let ramps = got
+    // The ramp's law on the revolved solid, post-M8.1: every level
+    // crossing either descends diagonally - a Feed whose radius
+    // changes, the slope mapped back into the world - or substitutes
+    // the axial dive and SAYS so. On a bar the band of open floor
+    // narrows spiral-ward with depth, so the destination's chord
+    // almost never clears and the honest verdict is the substitution;
+    // what must never happen is silence. (M8.1 gap this test pins:
+    // wrap_exit rebuilt the path and dropped the notes channel, so
+    // the verdict the plan spoke vanished across the map.)
+    let rad = |q: Point3| (q.x * q.x + q.y * q.y).sqrt();
+    let descends = got
         .moves
         .iter()
-        .filter(|m| m.kind == MoveKind::Feed && (tangent(m.to) - tangent(m.from)).abs() > 1e-9)
-        .count();
-    assert!(ramps > 0, "a ramp entry actually descended between levels");
+        .any(|m| m.kind == MoveKind::Feed && (rad(m.to) - rad(m.from)).abs() > 1e-6);
+    let declared = got
+        .notes
+        .iter()
+        .any(|n| n.contains("ramp's chord is blocked"));
+    assert!(
+        descends || declared,
+        "no ramp descent and no substitution verdict: the entry law went silent on the wrap"
+    );
+    assert!(declared, "on this narrowing bar the substitution must be readable");
+    let axial_dive = got
+        .moves
+        .iter()
+        .any(|m| m.kind == MoveKind::Plunge && (rad(m.to) - rad(m.from)).abs() > 1e-6);
+    assert!(axial_dive, "the substituted dive stands on the floor's own room, radially");
 }

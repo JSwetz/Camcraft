@@ -88,10 +88,10 @@ impl Motion {
 
 /// `center` is the level plan's cutter-center area - the same region at
 /// every level, because a planar pocket's passes are one tiling walked
-/// at each plane. `Some` lets a non-`Plunge` entry family prove its
-/// level-crossing chords against it (the pocket); `None` keeps the
-/// climb-and-dive every crossing used before M5.1 H (slot, trace),
-/// which no arm can change without new proofs.
+/// at each plane. `Some` lets the entry family prove its descents
+/// against it, at the first level and at every crossing (M8.1); `None`
+/// keeps the climb-and-dive slot and trace have always posted, which
+/// no arm can change without new proofs.
 pub(super) fn run_levels(
     b: &mut PathBuilder,
     passes: &[Vec<Point2>],
@@ -125,15 +125,19 @@ pub(super) fn run_levels(
                 b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, lift_z), None);
             }
             let e = Point2::new(entry.x, entry.y);
-            // A plane crossing (the tool last cut at another z, and
-            // this is not the path's very first entry). The entry
-            // family's arms replace the climb-and-dive here; every
-            // arm ends standing at (e, z), so the walk below is
+            // A move onto fresh material: a plane crossing (the tool
+            // last cut at another z) or the path's very first entry -
+            // the entry family's arms replace the climb-and-dive on
+            // BOTH (M8.1's law reads the family from level 0, not
+            // only at crossings; the `!first` gate cc5d89d left in
+            // place made a chosen Helix open with a straight wall
+            // plunge, the founding defect wearing a different hat).
+            // Every arm ends standing at (e, z), so the walk below is
             // shared. Between-pass moves WITHIN a level never take an
             // arm - their floors are already swept; that is the
             // ladder.rs split too.
-            let crossing = !first && last_cut_z != Some(z);
-            match (crossing, m.entry, center) {
+            let entering = first || last_cut_z != Some(z);
+            match (entering, m.entry, center) {
                 (true, Entry3D::Ramp, Some(cen)) => {
                     // The diagonal's legality is the single center the
                     // whole ladder shares: it is the deepest cut at the
@@ -207,11 +211,11 @@ pub(super) fn run_levels(
                         }
                     }
                 }
-                // A first entry, an in-level join, or a ladder that
-                // passed no center: the climb-and-dive this function
-                // has always posted - the surface's own honest dive,
-                // and the slot/trace shape no arm can change without
-                // proofs.
+                // An in-level join, or a ladder that passed no
+                // center: the climb-and-dive this function has
+                // always posted - the floor its neighbours already
+                // cleared, and the slot/trace shape no arm can
+                // change without proofs.
                 _ => {
                     b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lift_z), None);
                     b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
@@ -236,8 +240,10 @@ pub(super) fn run_levels(
 /// center, crossing none of the level's planned paths), fly it over -
 /// hop, traverse, dive - when it is not. Shared by every arm's entry
 /// so the law reads once: an unproven chord never drags the tool
-/// across a wall face it has no right to cross.
-fn dive_link(
+/// across a wall face it has no right to cross. `pub(super)` since
+/// M8.2 A: the contour ladder runs the same law with its rings as
+/// the plan.
+pub(super) fn dive_link(
     b: &mut PathBuilder,
     cen: &Region,
     passes: &[Vec<Point2>],
@@ -260,8 +266,10 @@ fn dive_link(
 /// substitutes the axial dive at the floor's own room - and says so on
 /// the status line. A floor with no room either (a region too dense to
 /// triangulate, an erosion that vanished) falls back to the wall dive
-/// the pocket used to post, still loud.
-fn substituted_dive(
+/// the pocket used to post, still loud. `pub(super)` since M8.2 A:
+/// the contour ladder's substitutions need the same words spoken the
+/// same way.
+pub(super) fn substituted_dive(
     b: &mut PathBuilder,
     cen: &Region,
     passes: &[Vec<Point2>],

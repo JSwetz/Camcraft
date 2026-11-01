@@ -46,7 +46,7 @@ pub(super) fn ladder(
     // most crowded the entry motions of the next level can meet (a
     // deeper level's target only grows). None until one has cut.
     let mut prev_state: Option<(f64, Region)> = None;
-    for (li, &z) in zs.iter().enumerate() {
+    for &z in zs {
         // The level law, in two region ops: islands from the model, the
         // cutter-center area by one erosion.
         let islands = material_above(facets, z)?;
@@ -97,16 +97,17 @@ pub(super) fn ladder(
             b.push(MoveKind::Rapid, Point3::new(at.x, at.y, p.clearance_z), None);
         }
         let leg = Point2::new(at.x, at.y);
-        // The plane a level-change entry descends from: the previous
-        // cutting level's own, or - nothing has cut below the surface
-        // yet, because the skim plane was all air or these steps fall
+        // The plane an entry descends from: the previous cutting
+        // level's own, or - nothing has cut below the surface yet,
+        // because the skim plane was all air or these steps fall
         // under the part's first solid - the safe plane. The superset
         // law makes both honest: room at the destination is room
-        // across every plane above it. (M8.1: this made the `li > 0`
-        // gates proofs, not excuses - the gate is now only the skim,
-        // where the dive IS the surface, and a level whose predecessors
-        // all skipped gets a true descending entry, not a silent
-        // wall plunge.)
+        // across every plane above it. (M8.1: the arms read this at
+        // the FIRST level too - the `li > 0` gates stayed in cc5d89d
+        // and left the family's word unwritten at level 0, where a
+        // chosen Helix still opened with a straight wall plunge; with
+        // the gates gone, this fallback is the whole story of
+        // prev_z.)
         let prev_z = prev_state.as_ref().map_or(p.clearance_z, |(q, _)| *q);
         let lvl = LevelCtx {
             cen: &center,
@@ -122,15 +123,18 @@ pub(super) fn ladder(
             // vertical dive needs no such proof (the nesting law
             // carries it), so every rest entry lands in the plunge arm
             // below, at the wall entry the nesting law specced.
-            Entry3D::Ramp if li > 0 && rest.is_none() => {
-                // The diagonal's legality is asked of the PREVIOUS
-                // level's center: it is the deepest cut so far, its
-                // islands stand above everything this descent passes,
-                // and every shallower plane's target is a superset -
-                // one chord test covers the whole interpolated move.
-                let open = prev_state
-                    .as_ref()
-                    .is_some_and(|(_, pc)| chord_clears(pc, leg, entry));
+            Entry3D::Ramp if rest.is_none() => {
+                // The diagonal's legality is asked of THIS level's
+                // center: islands only grow downward, so the plane
+                // the descent ENDS in is its deepest and most
+                // crowded, and the destination's room is a subset of
+                // every corridor above it - one chord test covers the
+                // whole interpolated move, at level 0 included.
+                // (M8.1: asking the PREVIOUS level's center was sound
+                // only where walls stand vertical; on a slope it
+                // tested the widest plane of the corridor and missed
+                // the narrowest.)
+                let open = chord_clears(&center, leg, entry);
                 if open {
                     b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
                     b.push(MoveKind::Feed, Point3::new(entry.x, entry.y, z), Some(p.feed));
@@ -138,7 +142,7 @@ pub(super) fn ladder(
                     substituted_dive(&mut b, &lvl, entry, "the ramp's chord is blocked");
                 }
             }
-            Entry3D::Helix if li > 0 && rest.is_none() => {
+            Entry3D::Helix if rest.is_none() => {
                 // The widened disc lands on this level's own floor
                 // (M8.1): the destination center eroded by the helix
                 // radius, taken at its widest open triangle. By the
@@ -167,7 +171,7 @@ pub(super) fn ladder(
                     );
                 }
             }
-            Entry3D::Plunge if li > 0 && rest.is_none() => {
+            Entry3D::Plunge if rest.is_none() => {
                 // The family's axial arm at a material level dives
                 // where the disc has room, not at `passes[0]`'s start
                 // on a wall (M8.1); the link runs over this level's
@@ -189,11 +193,11 @@ pub(super) fn ladder(
                     }
                 }
             }
-            // The first level's plane IS the stock surface: there is
-            // nothing to ramp or spiral into, and a dive there cuts
-            // air. One honest Plunge move says so. The rest ladder's
-            // level changes ride here too, on the nesting law's
-            // warrant, as the comment above states.
+            // What is left under this arm is the rest ladder's entry:
+            // it starts inside planes the coarse run already swept,
+            // so it rides the vertical dive at the wall entry the
+            // nesting law specced, as the comment above the match
+            // states.
             _ => {
                 if leg.x != entry.x || leg.y != entry.y {
                     b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, p.clearance_z), None);
