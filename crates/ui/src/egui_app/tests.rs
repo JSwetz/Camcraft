@@ -1513,16 +1513,21 @@ fn file_keys_queue_their_commands() {
 #[test]
 fn ribbon_click_creates_through_the_actions_law() {
     let mut harness = shell_harness();
+    // The bar carries Create cells only through pins (the ribbon law:
+    // unpinned kinds live behind their section door), so the
+    // actions-law proof rides a pinned Pocket - pin the kind through
+    // the app's own seam and click the cell the live ribbon draws.
+    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[2]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
-        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[2]),
     );
     let pocket = cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(2))
-        .expect("the Create group carries a Pocket cell");
+        .expect("the pinned Pocket stands on the bar");
     let at = pocket.rect.center();
     set_pos(&mut harness, at);
     button_at(&mut harness, egui::PointerButton::Primary, at, true);
@@ -1614,27 +1619,33 @@ fn every_kind_has_a_home_on_every_machine() {
     }
 }
 
-/// The fold is width-driven and nothing else (M6.2): a wide shell
-/// shows every cell and opens no doors; the house width does fold,
-/// every door that exists answers to a More button on the ribbon, and
-/// no door fronts an empty list.
+/// The fold is structural now (the ribbon law, retiring M6.2's width
+/// law): whatever the window's width, a section's kinds live behind
+/// their door - no unpinned Create cell stands on the bar, every
+/// section the machine can run answers with its button, and no door
+/// fronts an empty list. The user asked for exactly this: a crowd
+/// that only folds when squeezed is still a crowd.
 #[test]
-fn a_roomy_window_never_folds_and_the_house_one_folds_fair() {
-    let (wide, doors) = mill_plan_at(2400.0);
-    assert!(doors.is_empty(), "2400 px must not fold: {} drops", doors.len());
-    assert_eq!(
-        create_at(&wide).len(),
-        18,
-        "a mill ribbon is 18 mill kinds inline when roomy"
-    );
-    let (narrow, doors) = mill_plan_at(1280.0);
-    assert!(!doors.is_empty(), "the house width must exercise the fold");
-    for d in &doors {
-        assert!(!d.rows.is_empty(), "a door must front a real list");
+fn every_section_lives_behind_its_door_at_every_width() {
+    use camcraft_app::operation::Section;
+    for w in [2400.0, 1280.0, 900.0] {
+        let (cells, doors) = mill_plan_at(w);
         assert!(
-            narrow.iter().any(|c| c.cmd == Cmd::More(d.section)),
-            "each door's button must be on the ribbon"
+            create_at(&cells).is_empty(),
+            "unpinned kinds never stand inline (at {w}px)"
         );
+        assert_eq!(
+            doors.iter().map(|d| d.section).collect::<Vec<_>>(),
+            vec![Section::Mill2D, Section::Mill3D, Section::Drilling, Section::MultiAxis],
+            "a mill document shows its four sections as doors (at {w}px)"
+        );
+        for d in &doors {
+            assert!(!d.rows.is_empty(), "a door must front a real list");
+            assert!(
+                cells.iter().any(|c| c.cmd == Cmd::More(d.section)),
+                "each door's button must be on the ribbon"
+            );
+        }
     }
 }
 
@@ -1685,25 +1696,44 @@ fn the_dropdown_reaches_a_folded_kind() {
 /// pin must still be there after the undo.
 #[test]
 fn right_click_pins_and_undo_replays_only_the_cuts() {
+    use camcraft_app::operation::Section;
     let mut harness = shell_harness();
     harness.run();
-    let (cells, _) = mill_plan_at(1280.0);
-    let pocket = cells
+    let (_cells, drops) = mill_plan_at(1280.0);
+    let door = drops
         .iter()
-        .find(|c| c.cmd == Cmd::Create(2))
-        .expect("Pocket inline at house width");
-    let at = pocket.rect.center();
-    // Cut first, so there is history to replay under the pin.
+        .find(|d| d.section == Section::Mill2D)
+        .expect("the 2-D section stands behind its door");
+    let pocket_row = door
+        .rows
+        .iter()
+        .find(|(c, _)| *c == Cmd::Create(2))
+        .map(|(_, r)| *r)
+        .expect("Pocket stands behind the 2-D door");
+    let at = door.button.center();
+    // Cut first, through the door, so there is history to replay
+    // under the pin (the ribbon law's route to an unpinned kind).
     set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    let at = pocket_row.center();
     button_at(&mut harness, egui::PointerButton::Primary, at, true);
     button_at(&mut harness, egui::PointerButton::Primary, at, false);
     harness.run_steps(2);
     assert!(
         model::find_by_name(&harness.state().state.world, "Operation2").is_some(),
-        "the cut must have landed first (status: {})",
+        "the door's row must have cut through the actions law (status: {})",
         harness.state().state.status
     );
-    // Right-click: pinned, and the gesture's own record is the status line.
+    // Open the door again and right-click the row: pinned. The pin
+    // gesture answers at the row as it does at a cell - the folded
+    // half of the ribbon carries the whole law.
+    let at = door.button.center();
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    let at = pocket_row.center();
     button_at(&mut harness, egui::PointerButton::Secondary, at, true);
     button_at(&mut harness, egui::PointerButton::Secondary, at, false);
     harness.run_steps(1);
@@ -1729,14 +1759,14 @@ fn right_click_pins_and_undo_replays_only_the_cuts() {
         vec![2],
         "undo replays cuts, not layout (M6.2's pin law)"
     );
-    // Right-click again: unpinned. The pin moved the layout (the
-    // Pinned group leads), so the target is re-read from the plan the
-    // live ribbon now draws - its first Pocket cell, the pinned one.
+    // Right-click again - now at the inline cell the pin created (one
+    // home: the bar, not the door too): unpinned, the door takes the
+    // kind back.
     let (pinned_cells, _) = mill_plan_pinned_at(1280.0, &[2]);
     let at = pinned_cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(2))
-        .expect("the pinned Pocket leads")
+        .expect("the pinned Pocket stands on the bar")
         .rect
         .center();
     button_at(&mut harness, egui::PointerButton::Secondary, at, true);
@@ -1746,9 +1776,11 @@ fn right_click_pins_and_undo_replays_only_the_cuts() {
 }
 
 /// The plan side of the pin law: pins lead the Create groups in pin
-/// order; a pin to work the machine cannot run is kept in the list
-/// and hidden on screen (survive-not-shown); and the section keeps
-/// its own row - the pin is a shortcut, not a move.
+/// order, the bar's op budget is MAX_PINS deep, and a pin has exactly
+/// one home - the kind leaves its section's door as it steps onto the
+/// bar (one home, the ribbon law's corollary). A pin to work the
+/// machine cannot run is kept in the list and hidden on screen
+/// (survive-not-shown).
 #[test]
 fn the_pinned_group_leads_and_respects_the_machine() {
     use camcraft_app::machine::Kind;
@@ -1760,8 +1792,8 @@ fn the_pinned_group_leads_and_respects_the_machine() {
         "pin order is ribbon order"
     );
     assert!(
-        plan[3].cells.contains(&Cmd::Create(2)),
-        "the section keeps its own row - a pin is a shortcut, not a move"
+        plan[3..].iter().all(|g| !g.cells.contains(&Cmd::Create(2))),
+        "the pinned Pocket has one home: the bar, not its door too"
     );
     let orphan = panes::ribbon_plan(Kind::Mill, &[28]);
     assert!(
@@ -1770,33 +1802,165 @@ fn the_pinned_group_leads_and_respects_the_machine() {
     );
     let both = panes::ribbon_plan(Kind::MillTurn, &[28]);
     assert_eq!(both[2].cells, vec![Cmd::Create(28)]);
+    // The budget (the ribbon law): a list longer than the bar's op
+    // budget renders the first MAX_PINS admitted pins inline.
+    let five = panes::ribbon_plan(Kind::MillTurn, &[0, 1, 2, 3, 5]);
+    assert_eq!(
+        five[2].cells,
+        vec![
+            Cmd::Create(0),
+            Cmd::Create(1),
+            Cmd::Create(2),
+            Cmd::Create(3)
+        ],
+        "the bar keeps four pins - the fifth waits behind its door"
+    );
+    assert!(
+        five[3..].iter().all(|g| ![0usize, 1, 2, 3]
+            .iter()
+            .any(|i| g.cells.contains(&Cmd::Create(*i)))),
+        "a kind standing on the bar is not also behind a door - \
+         and kind 5, over the budget, has its one home behind its door"
+    );
+    assert!(
+        five[3..].iter().any(|g| g.cells.contains(&Cmd::Create(5))),
+        "the fifth pin waits behind its section door, reachable"
+    );
 }
 
-/// The stale door self-heals (M6.2): widen past the fold and the
-/// button leaves the ribbon, so the open state must not outlive it -
-/// the next frame finds no button and drops the state itself.
+/// The stale door self-heals, in the fold law's new shape: width can
+/// no longer retire a door (they stand at every size), but the
+/// machine can - mount a lathe and the mill's doors leave the ribbon,
+/// so an open one must not outlive its button. The next frame finds
+/// no button and drops the state itself.
 #[test]
-fn widening_the_window_heals_a_stale_door() {
+fn changing_the_machine_heals_a_stale_door() {
+    use camcraft_app::machine::Kind;
     let mut harness = shell_harness();
     harness.run();
     let (_, drops) = mill_plan_at(1280.0);
     let section = drops
         .iter()
         .find(|d| !d.rows.is_empty())
-        .expect("a folded door")
+        .expect("a section door on the mill ribbon")
         .section;
     harness.state_mut().state.ribbon_more = Some(section);
     harness.run();
     assert_eq!(
         harness.state().state.ribbon_more,
         Some(section),
-        "still real at 1280"
+        "still real while the document mills"
     );
-    harness.set_size(Vec2::new(2400.0, 720.0));
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::LoadBuiltinMachine("Lathe".to_owned()));
     harness.run();
     assert_eq!(
+        camcraft_app::machine::kind_of(&harness.state().state.world),
+        Kind::Lathe,
+        "the mount must have landed (status: {})",
+        harness.state().state.status
+    );
+    assert_eq!(
         harness.state().state.ribbon_more, None,
-        "the button is gone, so the open state must be too"
+        "the mill's door left the ribbon, so the open state must be gone too"
+    );
+}
+
+/// The machine door, end to end (the ribbon law): the door stands on
+/// the Setup group, wears the running workspace as its caption, and
+/// opens the list of all three. The current mode is inert - pressing
+/// it closes the list and mounts nothing - and pressing another
+/// switches the document through the command queue, so undo switches
+/// back exactly. The operations follow the mount: a mill kind goes
+/// dark on the lathe and lives again after the undo (the family gate
+/// `a_lathe_machine_darkens_the_mill_cells` proves for the file
+/// picker, proven here for the door the user asked for).
+#[test]
+fn the_machine_door_switches_workspaces_and_rides_undo() {
+    use camcraft_app::machine::Kind;
+    let mut harness = shell_harness();
+    harness.run();
+    let (cells, _) = mill_plan_at(1280.0);
+    let button = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Machine)
+        .expect("the machine door stands on the bar")
+        .rect;
+    let rows = panes::machine_rows(button, theme::current().row_height);
+    assert_eq!(rows.len(), 3, "Milling, Turning, Mill-turning");
+    // Open the door.
+    let at = button.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    assert!(
+        harness.state().state.ribbon_mode_open,
+        "pressing the door must open the list"
+    );
+    // The first row is the mode already running: a choice, but a
+    // silent one - the list closes and no machine mounts.
+    let before = harness.state().state.history.can_undo();
+    let at = rows[0].1.center();
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    assert!(
+        !harness.state().state.ribbon_mode_open && harness.state().state.history.can_undo() == before,
+        "the current row closes without mounting (status: {})",
+        harness.state().state.status
+    );
+    assert_eq!(
+        camcraft_app::machine::kind_of(&harness.state().state.world),
+        Kind::Mill,
+        "the mill keeps running"
+    );
+    // Reopen and switch to Turning: the queue carries the mount, the
+    // world follows, and the status names the workspace.
+    let at = button.center();
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    let at = rows[1].1.center();
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    assert_eq!(
+        camcraft_app::machine::kind_of(&harness.state().state.world),
+        Kind::Lathe,
+        "the Turning row must mount the library lathe (status: {})",
+        harness.state().state.status
+    );
+    assert!(
+        // The mode gesture's own line ("machine mode: Turning") rides
+        // the queue; the mount's landing message then speaks with the
+        // machine's own voice - which is the truth the status line owes.
+        harness.state().state.status.contains("Lathe"),
+        "the switch must say what mounted: {}",
+        harness.state().state.status
+    );
+    assert!(!harness.state().state.ribbon_mode_open, "a choice closes the list");
+    // The operations follow the workspace (the user's ask): the mill
+    // kinds go dark behind the doors...
+    assert!(
+        !panes::enabled(Cmd::Create(1), &harness.state().state),
+        "a mill operation must be dark on a lathe document"
+    );
+    // ...and Ctrl+Z's law holds: undo is the switch back.
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run_steps(2);
+    assert_eq!(
+        camcraft_app::machine::kind_of(&harness.state().state.world),
+        Kind::Mill,
+        "undo must restore the mill (status: {})",
+        harness.state().state.status
+    );
+    assert!(
+        panes::enabled(Cmd::Create(1), &harness.state().state),
+        "and the mill kinds live again"
     );
 }
 
@@ -1821,6 +1985,10 @@ fn tips_match_the_imgui_table() {
         (Cmd::Stock, "Stock definition"),
         (Cmd::Origin, "Work offset (WCS)"),
         (Cmd::Tools, "Tool library"),
+        (
+            Cmd::Machine,
+            "Switch the workspace: Milling, Turning or Mill-turning (mounts the kind's built-in machine, undoable)",
+        ),
         (Cmd::Undo, "Undo\tCtrl+Z"),
         (Cmd::Redo, "Redo\tCtrl+Y"),
         (Cmd::Run, "Generate the selected operation"),
@@ -2226,16 +2394,21 @@ fn bored_block() -> camcraft_app::geometry::Mesh {
 #[test]
 fn ribbon_drill_cell_creates_a_drill_operation() {
     let mut harness = shell_harness();
+    // The Drill cell stands on the bar only as a pin (the ribbon law:
+    // unpinned kinds live behind their section door, reached through
+    // `the_dropdown_reaches_a_folded_kind`) - pin kind 5 and the
+    // default-parameter proof rides the live cell.
+    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[5]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
-        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[5]),
     );
     let drill = cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(5))
-        .expect("the Create group carries a sixth, Drill cell");
+        .expect("the pinned Drill stands on the bar");
     let at = drill.rect.center();
     set_pos(&mut harness, at);
     button_at(&mut harness, egui::PointerButton::Primary, at, true);
@@ -2473,16 +2646,19 @@ fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() 
 #[test]
 fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     let mut harness = shell_harness();
+    // Pinned, so the cell stands on the bar (the ribbon law) - the
+    // default-parameter proof rides the live cell.
+    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[6]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
-        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[6]),
     );
     let pocket3d = cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(6))
-        .expect("the Create group carries a seventh, 3D Pocket cell");
+        .expect("the pinned 3D Pocket stands on the bar");
     let at = pocket3d.rect.center();
     set_pos(&mut harness, at);
     button_at(&mut harness, egui::PointerButton::Primary, at, true);
@@ -2509,16 +2685,19 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
 #[test]
 fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     let mut harness = shell_harness();
+    // Pinned, so the cell stands on the bar (the ribbon law) - the
+    // default-parameter proof rides the live cell.
+    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[7]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
-        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[]),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[7]),
     );
     let finish3d = cells
         .iter()
         .find(|c| c.cmd == Cmd::Create(7))
-        .expect("the Create group carries an eighth, 3D Finish cell");
+        .expect("the pinned 3D Finish stands on the bar");
     let at = finish3d.rect.center();
     set_pos(&mut harness, at);
     button_at(&mut harness, egui::PointerButton::Primary, at, true);

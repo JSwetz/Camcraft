@@ -856,6 +856,11 @@ pub struct State {
     /// not undoable, not saved; the ribbon's draw retires it when a
     /// machine or document change takes the section away.
     pub ribbon_more: Option<camcraft_app::operation::Section>,
+    /// The machine door's open flag (the ribbon law): same law as
+    /// `ribbon_more` - a frame fact, not a document fact, retired by
+    /// any choice or outside press; at most one dropdown is open at a
+    /// time, so the two toggles close each other.
+    pub ribbon_mode_open: bool,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -1036,6 +1041,7 @@ impl State {
             post_view: None,
             program_sim: None,
             ribbon_more: None,
+            ribbon_mode_open: false,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,
