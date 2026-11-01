@@ -1040,11 +1040,21 @@ arriving behind it.
 - **Overflow dropdowns**: kinds beyond a section's width fold into a
       dropdown carrying the section's label - never an iconless
       chevron. The 5.x set will not fit one row; the law is reach, not
-      row count.
+      row count. (Rebuilt at the user's hand-test verdict: the
+      width-driven fold became the structural fold - every family
+      behind one labeled door at any width; see the M6.2 rebuild entry
+      in RECOMMENDED.md.)
 - **Pin to ribbon**: any catalog item can be pinned/unpinned by the
       user; pins are a document setting persisted with the project
       (like panel docking), not an undoable command - undo replays
-      cuts, not layout.
+      cuts, not layout. (Budgeted by the rebuild: at most four pins
+      show, and a pinned kind leaves its section door - one home per
+      kind on the bar.)
+- **The machine door** (added by the rebuild): one cell in the Setup
+      group switching Milling / Turning / Mill-turning by mounting
+      that kind's reference machine as a `LoadBuiltinMachine` command,
+      so the switch rides the undo history and the ribbon's family
+      filter follows the mounted machine - the mode IS the machine.
 - **The combo earns the same shape**: the operations page's type picker
       groups by family the way the ribbon does - one taxonomy, two
       surfaces.

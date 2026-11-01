@@ -6554,3 +6554,44 @@ words); `contour_along_chain` exported for the open-run entry
 in M8.2's next stage); the ~20 ContourParams literal updates made
 explicit rather than a Default impl (every call site states the
 entry it wants).
+
+## M6.2 rebuild - the ribbon remake: the fold made structural, the pin budget, the machine door
+
+The user's hand-test verdict on the M6.2 ribbon: still too crowded, and
+no visible way to move between Milling / Turning / Mill-turning. The
+width-driven fold was the flaw: at every plausible window size most
+sections unfolded side by side and their tails showed as loose cells -
+a crowd that only folds when squeezed is still a crowd. Chosen: the
+structural fold - at ANY width, the bar shows the user's pins (budget:
+`MAX_PINS = 4`, the pins list truncated by `take()`, surplus stay listed
+behind their section doors so nothing becomes unreachable) and every
+family lives behind exactly one labeled door. Dropped: keeping the
+40px-floor squeeze loop (a layout heuristic for a taxonomy problem),
+and per-family unfolded tails (two truths about where a kind lives -
+the door and the row at once).
+
+**Chosen: a pin leaves its section's door list.** One home per kind on
+the bar - the pin IS its front placement; double-homing (pin cell plus
+door row) would let one click mean two things. Pins stay a document
+setting outside the history (M6.2's original law, untouched): undo
+replays cuts, not layout.
+
+**Chosen: the workspace switch rides the undo history as a command.**
+The machine door (Setup group, caption reads `machine::kind_of`) picks
+among MACHINE_MODES, and each row pushes `LoadBuiltinMachine` - the
+same front-door law the CLI path already honored; no bare field poke,
+so Ctrl+Z restores the previous machine and, with it, the families the
+ribbon shows. Dropped: a mode enum of its own (second truth about what
+machine runs - the mounted machine IS the mode) and darkening rows
+that are current (guard returns early; the row says "(current)").
+
+**Chosen: the door's mutual exclusion is immediate-mode state.**
+`ribbon_more` / `ribbon_mode_open` - one door open at a time (Paths
+law); the machine door shares the close-on-second-click law. No new
+glyphs (the no-new-asset promise holds): the machine door wears its
+Title-case word.
+
+**Chosen (gate hygiene): three pixel goldens regenerated in this
+commit's lane.** The ribbon's shape IS the change; the snapshots
+record it deliberately, per M6.2's test law about moving the tables
+with the shape on purpose.
