@@ -6595,3 +6595,64 @@ Title-case word.
 commit's lane.** The ribbon's shape IS the change; the snapshots
 record it deliberately, per M6.2's test law about moving the tables
 with the shape on purpose.
+
+## M8.2 B - the ramped first contact: a flag, a normal, and refusals that speak
+
+**Chosen: `Finish3DParams::entry_ramp` is opt-in, default `false`, and
+`false` means v0.4's path byte for byte.** The re-proof (B1) showed the
+vertical plunge already never cuts above its ring - even on a 60° cone -
+so nothing was broken and a fix must not move anyone's goldens. The
+13 `.nc` goldens and the `.cl` dumps are byte-identical at the gate,
+verified by `git diff` on the golden dir. Considered and dropped:
+ramp-by-default (rewrites every waterline golden for a cosmetic entry
+change the law never forbade).
+
+**Chosen: the ramp stands one tool-radius out along the contact
+normal, and the normal is measured, not assumed.** The diagonal starts
+at `c + r·n̂` where `n̂` is the unit vector from the nearest facet point
+to the tangent center - the classic lead-in-equals-tool-radius, voiced
+for a ball on a faceted surface. `n.z ≤ 0.25` refuses (a near-horizontal
+or downward normal would make the entry a lateral in-feed at depth,
+which is not an entry motion at all); `tilt < SPLIT_MZ` skips silently
+- on gentle tangents the vertical plunge is the honest move and a note
+there would be noise. Every refusal writes a `Toolpath.notes` line
+naming the z and the reason; the vertical entry then stands unchanged.
+Dropped: ramping toward a fixed -45° vector (the "ramp_angle" the
+between-family law uses) - at a tangent entry the surface's own normal,
+not a user angle, is what keeps the ball out of the wall.
+
+**Chosen: certification samples the two legs (vertical column +
+diagonal) against `dist(center, facet) > r - tolerance`.** Same currency
+as B1's law probe - tessellation chord-sag (≈3e-4 mm at this fixture's
+96 lon) dwarfs any epsilon, so `tolerance` is the honest budget, and
+the ring walk's own promise is the budget the ramp must not beat. The
+test (`the_ramp_enters_a_steep_ring_on_its_contact_normal`) samples
+each diagonal at 9 points and lifts the center straight up from the
+entry end, so the ramp is measured, not asserted, and
+`diagonals == columns` proves every diagonal rode its certified column.
+
+**Chosen: the digest stamps `entry_ramp`; the DTO field is
+`#[serde(default)]` with no PROJECT_VERSION bump.** The flag rewrites
+every ring's entry legs, so it rewrites the path - the staleness law
+(M4.4) says a move-changing word stamps the digest, and `operations.rs
+::the_ramp_flag_stamps_the_digest_and_clears_on_undo` proves the round
+trip (edit → Stale, regen → Ok, undo ×2 → byte-identical to the
+pre-edit path). Absent in a pre-v0.5 file reads `false` = the old
+behavior, exactly like `ramp` rides its DTO.
+
+**Chosen (gate hygiene): the UI checkbox lives in the Ramping group's
+neighborhood but reads as its own law.** "Ramp ring entries" sits under
+the ring parameters with a one-line tooltip stating the refusal law -
+it is not the `ramp` between-family flag and the label must not blur
+them; `pages.rs` destructures the variant so a new field can never be
+silently invisible to the panel again.
+
+**Disclosure (gate bookkeeping): the M8.2 B gate ran in two rounds.**
+The first subagent report carried two failures that were artifacts of
+its build snapshotting mid-edit source (the digest test and the cone
+law test against a binary compiled between edits); every named check
+was re-run serially after the last edit - `operations.rs` twice green,
+the finish3d suite green, clippy clean on all three crates with
+`--all-targets`, goldens byte-verified - and THAT is what commit
+bda85c1 carries. Same tree, calmer order: the report you can trust is
+the one that matches the commit's parentage.
