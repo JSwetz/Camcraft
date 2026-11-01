@@ -1674,6 +1674,9 @@ fn the_dropdown_reaches_a_folded_kind() {
         "pressing the door must open it"
     );
     let row_at = drop.rows[0].1.center();
+    let Cmd::Create(want) = drop.rows[0].0 else {
+        panic!("a door's first row must create a kind");
+    };
     set_pos(&mut harness, row_at);
     button_at(&mut harness, egui::PointerButton::Primary, row_at, true);
     button_at(&mut harness, egui::PointerButton::Primary, row_at, false);
@@ -1684,10 +1687,72 @@ fn the_dropdown_reaches_a_folded_kind() {
         "the row must create its kind (status: {})",
         harness.state().state.status
     );
+    // The count alone would pass even if the row created the WRONG
+    // kind (a label/order drift) - the quick-add lands as
+    // `UiTarget::Operation`, which reads as "a dialog asking me to
+    // pick it again" if it does. Name it and type it: the row's
+    // index, in the registry's own order.
+    let st = &harness.state().state;
+    let created = model::named_entities(&st.world)
+        .into_iter()
+        .find(|(n, _)| n.starts_with("Operation"))
+        .expect("the click created an Operation-named entity");
+    assert_eq!(
+        model::operation_of(&st.world, &created.1)
+            .expect("created entity is an operation")
+            .params
+            .kind()
+            .ordinal(),
+        want,
+        "the row must create exactly the kind it was labeled with"
+    );
     assert_eq!(
         harness.state().state.ribbon_more, None,
         "a choice closes the door"
     );
+}
+
+/// The gated-row law (the ribbon's never-silent half): a fresh
+/// document holds no tool, so no operation can start - but a click
+/// on a dark row must still ANSWER: the refusal named on the status
+/// line, pointing at the fix, and the door closing on the way out.
+/// The silent dead pixel this replaces is what made the folded
+/// ribbon read as broken. `Shell::new`'s blank startup is the
+/// document this describes.
+#[test]
+fn a_gated_dropdown_row_click_answers_and_closes() {
+    let mut harness = Harness::builder()
+        .with_size(Vec2::new(1280.0, 720.0))
+        .build_ui_state(frame, ShellUi::blank());
+    harness.run();
+    let (_, drops) = mill_plan_at(1280.0);
+    let drop = drops
+        .iter()
+        .find(|d| !d.rows.is_empty())
+        .expect("a folded door at house width");
+    let at = drop.button.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    assert_eq!(
+        harness.state().state.ribbon_more,
+        Some(drop.section),
+        "the door opens over a blank document too"
+    );
+    let row_at = drop.rows[0].1.center();
+    set_pos(&mut harness, row_at);
+    button_at(&mut harness, egui::PointerButton::Primary, row_at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, row_at, false);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    assert!(
+        st.status.contains("no tool") && st.status.contains("Tools"),
+        "a gated click must name the reason and the fix (status: {})",
+        st.status
+    );
+    assert_eq!(op_count(st), 0, "a gated click creates nothing");
+    assert_eq!(st.ribbon_more, None, "the answered click closes the door");
 }
 
 /// The pin gesture, at the level its law lives on (M6.2): the

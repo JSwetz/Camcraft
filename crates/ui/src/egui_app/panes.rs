@@ -407,6 +407,46 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
     }
 }
 
+/// The refusal a gated Create answer - a cell on the bar or a row
+/// behind a door - speaks when it is clicked anyway: named, loud on
+/// the status line, pointing at the fix. It reads the same two truths
+/// `enabled` reads, in the same order of depth (no tool first, then
+/// the machine's family), phrased as `actions::add_operation` phrases
+/// its own refusal. Silence on a click reads as a dead button - the
+/// law `State::apply_operation_params` already keeps for the pane -
+/// so a gate that can be clicked must be able to answer. `None` when
+/// the command is actually live, so no caller overwrites a status an
+/// enabled command already owns.
+fn gate_note(c: Cmd, state: &State) -> Option<String> {
+    let Cmd::Create(i) = c else { return None };
+    if enabled(c, state) {
+        return None;
+    }
+    if state.tool_names().is_empty() {
+        return Some(String::from(
+            "cannot add an operation: no tool in the document - add one (Setup > Tools)",
+        ));
+    }
+    let machine = camcraft_app::machine::kind_of(&state.world);
+    let dark = camcraft_app::operation::KindInfo::ALL
+        .get(i)
+        .filter(|k| !k.family().admits(machine));
+    match dark {
+        Some(k) => {
+            let (fword, mword) = match k.family() {
+                camcraft_app::operation::Family::Mill => ("milling", "mill"),
+                camcraft_app::operation::Family::Turn => ("turning", "lathe"),
+            };
+            Some(format!(
+                "cannot add a {} operation: {fword} operations do not drive the document's {} - mount a {mword} or a mill-turn (Setup > Machine)",
+                k.label,
+                machine.word(),
+            ))
+        }
+        None => None,
+    }
+}
+
 pub(super) fn toggled(c: Cmd, state: &State) -> bool {
     match c {
         Cmd::Paths => state.show_all_paths,
@@ -828,10 +868,20 @@ pub fn ribbon(
         // Read before `on_hover_text` moves the response into the
         // tooltip wiring.
         let fired = resp.clicked() && enabled(c, state);
+        // A dark Create cell that gets clicked is not a dead pixel:
+        // the refusal speaks (gate_note), the same answer the
+        // dropdown rows give. Hover already taught it; the click
+        // proves it.
+        let gated = resp.clicked() && !fired && matches!(c, Cmd::Create(_));
         let pin = resp.secondary_clicked();
         resp.on_hover_text(tip_of(c, state));
         if fired {
             run_cmd(c, state);
+        }
+        if gated
+            && let Some(why) = gate_note(c, state)
+        {
+            state.status = why;
         }
         if let (Cmd::Create(i), true) = (c, pin) {
             toggle_pin(state, i);
@@ -874,6 +924,7 @@ pub fn ribbon(
                     Vec2::new(DROP_W, drop.rows.len() as f32 * pal.row_height),
                 );
                 let mut hit: Option<Cmd> = None;
+                let mut gated_row: Option<Cmd> = None;
                 let mut pinned_row: Option<usize> = None;
                 let rows = &drop.rows;
                 egui::Area::new(base.with(("drop", drop.section.label())))
@@ -906,13 +957,26 @@ pub fn ribbon(
                                 egui::FontId::proportional(pal.font_row),
                                 if en { pal.text } else { pal.text_faint },
                             );
-                            if resp.secondary_clicked()
+                            // Read the click flags before
+                            // `on_hover_text` moves the response -
+                            // the cell law again, one line lower. The
+                            // hint on a row is the bar's tip for the
+                            // same command: what it creates, or why
+                            // it cannot yet.
+                            let clicked = resp.clicked();
+                            let secondary = resp.secondary_clicked();
+                            resp.on_hover_text(tip_of(*cmd, state));
+                            if secondary
                                 && let Cmd::Create(i) = *cmd
                             {
                                 pinned_row = Some(i);
                             }
-                            if resp.clicked() && en {
-                                hit = Some(*cmd);
+                            if clicked {
+                                if en {
+                                    hit = Some(*cmd);
+                                } else {
+                                    gated_row = Some(*cmd);
+                                }
                             }
                         }
                     });
@@ -921,6 +985,16 @@ pub fn ribbon(
                 }
                 if let Some(c) = hit {
                     run_cmd(c, state);
+                    state.ribbon_more = None;
+                } else if let Some(c) = gated_row {
+                    // The dark row answered: the refusal named on the
+                    // status line, the door closed on the way out. A
+                    // click into silence is what made the folded
+                    // ribbon read as dead - this branch is why it
+                    // never is.
+                    if let Some(why) = gate_note(c, state) {
+                        state.status = why;
+                    }
                     state.ribbon_more = None;
                 } else if state.ribbon_more == before {
                     // Primary press anywhere outside the door and its
