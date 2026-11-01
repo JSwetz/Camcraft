@@ -689,6 +689,7 @@ fn seed_finish3d(c: &Carried) -> OpParams {
         // at the law's own 45 degrees.
         min_step: None,
         ramp_angle: 45.0,
+        entry_ramp: false,
     }
 }
 

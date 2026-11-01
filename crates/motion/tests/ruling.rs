@@ -42,6 +42,8 @@ fn finish(top_z: f64, bottom_z: f64) -> Finish3DParams {
         ramp: false,
         min_step: None,
         ramp_angle: 45.0,
+        // M8.2 B: the ring entry keeps its plunge unless asked.
+        entry_ramp: false,
     }
 }
 

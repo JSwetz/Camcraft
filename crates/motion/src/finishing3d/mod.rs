@@ -66,7 +66,15 @@
 //!   tangent point grows monotonically); overhangs violate the
 //!   premise, and the envelope measurement reports that, loudly, as
 //!   a gouge. No lead-in arcs for M2.2a - the ring is smooth at its
-//!   own entry by construction.
+//!   own entry by construction. M8.2 B's `entry_ramp` is the opt-in
+//!   that says when the plunge, though innocent, is inhospitable: on
+//!   flanks past the 45° split the ball meets the wall at full
+//!   contact, so the entry may instead slide in along its contact
+//!   normal - one radius out, down a certified column, in along a
+//!   certified diagonal, certification spending the SAME currency as
+//!   this law's own probe (centers never bite past `tol`). Where the
+//!   normal cannot be read, lies under the horizon, or bites, the
+//!   plunge stands and the path carries a note saying so.
 //! - **Level changes climb to `clearance_z`; rings within one level
 //!   hop at `retract_z` clamped to clearance** - the shared ladder
 //!   law of every depth-stepping operation in this codebase.

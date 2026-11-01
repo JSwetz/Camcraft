@@ -1437,6 +1437,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             ramp,
             min_step,
             ramp_angle,
+            entry_ramp,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -1561,6 +1562,10 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         num_plain(ui, ramp_angle);
                         ui.label("the steepest descent a chain may carry; past it a link is a plunge in a diagonal coat, and the hop holds the line");
                     }
+                    ui.checkbox(entry_ramp, "Ramp ring entries");
+                    ui.label(
+                        "on flanks steeper than the split, a ring's first contact slides in along its contact normal instead of dropping; where the normal cannot certify the way in, the plunge stands and the path says why",
+                    );
                 }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);

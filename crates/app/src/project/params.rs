@@ -269,6 +269,11 @@ pub enum ParamsDto {
         /// always, like `ramp`.
         #[serde(default = "default_ramp_angle")]
         ramp_angle: f64,
+        /// Absent means the vertical plunge - the tangent entry every
+        /// pre-0.5 file cut, byte for byte (M8.2 B). Written always,
+        /// like `ramp`.
+        #[serde(default)]
+        entry_ramp: bool,
     },
     /// Declared at v24 with the simultaneous-axis kinds (M5.1 stage
     /// C). The renames state the tags for the familiar reason - the

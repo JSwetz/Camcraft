@@ -276,6 +276,7 @@ impl OpParams {
                 ramp,
                 min_step,
                 ramp_angle,
+                entry_ramp,
             } => {
                 // v16: the pattern chooses a different kinematic (and
                 // the raster fields only answer to Parallel), so they
@@ -315,6 +316,10 @@ impl OpParams {
                     None => h.write_u8(0),
                 }
                 w(h, *ramp_angle);
+                // v0.5 (M8.2 B): the ramped first contact rewrites the
+                // entry legs of every ring, so it stamps the digest
+                // like every other move-changing word.
+                h.write_u8(u8::from(*entry_ramp));
             }
             // The 5-axis twins and plain swarf (tags 8/9/10): the
             // finish's scalar law with the pattern byte dropped - the

@@ -3796,6 +3796,7 @@ fn finish_params(top_z: f64, bottom_z: f64, tolerance: f64) -> OpParams {
         ramp: false,
         min_step: None,
         ramp_angle: 45.0,
+        entry_ramp: false,
     }
 }
 
@@ -3844,6 +3845,67 @@ fn finish3d_waterline_generates_and_verifies_clean() {
             .all(|m| m.to.z <= 25.0 + 1e-9 && m.from.z <= 25.0 + 1e-9),
         "nothing starts above clearance"
     );
+}
+
+#[test]
+fn the_ramp_flag_stamps_the_digest_and_clears_on_undo() {
+    // v0.5 (M8.2 B): entry_ramp rewrites a ring's entry legs, so it
+    // stamps the digest like every other move-changing word - the ask
+    // changed, so the op says Stale until the regen applies it. On this
+    // dome every tangent is gentler than the split, so the silent-skip
+    // law leaves the path itself alone: a stamp, not a change.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Ramp1",
+            "BN-0600",
+            SrcRef::Entity("dome".into()),
+            finish_params(18.0, DOME_RIM_Z, 0.1),
+        )
+        .expect("create"),
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Ramp1").expect("generate"),
+    );
+    assert_eq!(status(&world, "Ramp1"), OpStatus::Ok);
+    let base = cache(&world, "Ramp1").expect("cached").path;
+
+    let mut ask = finish_params(18.0, DOME_RIM_Z, 0.1);
+    let OpParams::Finish3D { entry_ramp, .. } = &mut ask else {
+        panic!("finish3d params expected");
+    };
+    *entry_ramp = true;
+    history.execute(
+        &world,
+        EditOperationParams::new(&world, "Ramp1", ask).expect("edit"),
+    );
+    assert_eq!(
+        status(&world, "Ramp1"),
+        OpStatus::Stale,
+        "the entry ask changed; the stamp must notice"
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Ramp1").expect("regen"),
+    );
+    let t = cache(&world, "Ramp1").expect("cached").path;
+    assert!(t.notes.is_empty(), "a gentle tangent says nothing: {:?}", t.notes);
+    assert_eq!(t.moves, base.moves, "silent skip means the same path");
+
+    // Undo the regen, then the edit: the default flag is a digest
+    // no-op, so two steps back lands on v0.4's stamp and path again.
+    history.undo(&world);
+    assert_eq!(status(&world, "Ramp1"), OpStatus::Stale);
+    history.undo(&world);
+    assert_eq!(status(&world, "Ramp1"), OpStatus::Ok);
+    assert_eq!(cache(&world, "Ramp1").expect("cached").path.moves, base.moves);
 }
 
 #[test]

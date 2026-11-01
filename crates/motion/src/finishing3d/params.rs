@@ -71,10 +71,27 @@ pub struct Finish3DParams {
     /// wherever [`diagonal_ok`] can certify it - the ball never sinks
     /// below its promised surface en route and never leaves the
     /// region. Where it can't certify (a hill between the lines, open
-    /// air, a flank crossing), the hop stands, unchanged. First
-    /// contacts and between-family transits are never ramped: the
-    /// diagonal is a chain between cuts, not a way into a new one.
+    /// air, a flank crossing), the hop stands, unchanged. Between-
+    /// family transits are never ramped by this flag: the diagonal
+    /// here is a chain between cuts, not a way into a new one. First
+    /// contacts are the domain of [`Finish3DParams::entry_ramp`]
+    /// (M8.2 B) - the one place a diagonal IS a way into a cut.
     pub ramp: bool,
+    /// Ramp the FIRST contacts on steep tangents (M8.2 B): the ring
+    /// law promises the vertical plunge never cuts above its level,
+    /// but on a flank steeper than the 45° split the ball MEETS the
+    /// wall all at once. With this on, such an entry slides in along
+    /// its contact normal instead: a certified diagonal Feed from an
+    /// air point down to the tangent, engaging the wall in order. The
+    /// certification currency is the same as the law's test: sampled
+    /// centers never bite past `tolerance`. Where the normal can't be
+    /// read, points at or below the horizon (an overhang, or a flank
+    /// too near-vertical to lift off - a lateral in-feed at depth is
+    /// not an entry), can't start below the clearance plane, or bites
+    /// along the way, the vertical plunge stands and the path carries
+    /// a note saying why. `false` is v0.4's behavior byte for byte;
+    /// the ring walk itself is never touched.
+    pub entry_ramp: bool,
     /// Floor for the adaptive march's refinement, mm (M2.2e): the
     /// march bisects a chord whenever its middle sinks past the
     /// quarter budget, down to `delta0/4096` by its own right. Set

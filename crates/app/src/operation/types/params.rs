@@ -297,6 +297,10 @@ pub enum OpParams {
         /// exactly 1:1 - so the default certifies exactly what
         /// v17's chain certified. Inert while `ramp` is false.
         ramp_angle: f64,
+        /// Enter the ring's first contact along its contact normal
+        /// where the tangent is steep (M8.2 B). `false` is every
+        /// pre-0.5 file: the vertical plunge, byte for byte.
+        entry_ramp: bool,
     },
     /// Simultaneous 5-axis level finishing (M5.1 stage C): the waterline
     /// ring ladder a [`Self::Finish3D`] Waterline cuts, with a tool-axis

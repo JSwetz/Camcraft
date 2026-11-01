@@ -98,6 +98,77 @@ fn cone(n_lon: usize) -> Vec<Triangle> {
     facets
 }
 
+/// A solid cone, apex at (0, 0, 34.641), base disc r = 20 at z = 0:
+/// walls at 60 deg - STEEPER than the 45° equality case, so the
+/// tangent point sits far below the center plane and a plunge column
+/// has more finished flank above it to bite. M8.2 B's re-proof stage.
+fn steep_cone(n_lon: usize) -> Vec<Triangle> {
+    let h = 20.0 * (PI / 3.0).tan(); // h = R·tan(60°): 34.641
+    let mut facets = Vec::new();
+    let apex = p3(0.0, 0.0, h);
+    let base: Vec<Point3> = (0..n_lon)
+        .map(|j| {
+            let th = TAU * j as f64 / n_lon as f64;
+            p3(20.0 * th.cos(), 20.0 * th.sin(), 0.0)
+        })
+        .collect();
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, base[j], base[(j + 1) % n_lon]));
+    }
+    let center = p3(0.0, 0.0, 0.0);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(center, base[(j + 1) % n_lon], base[j]));
+    }
+    facets
+}
+
+/// Distance from a point to a triangle - the same Voronoi-region
+/// closest-point law as `finishing3d`'s support scan (Ericson,
+/// Real-Time Collision Detection, published geometry); written here
+/// so the law test asks its own question of the facets.
+fn pt_tri_dist(p: Point3, t: &Triangle) -> f64 {
+    let dot = |u: Point3, v: Point3| u.dot(v);
+    let nn = |u: Point3| (dot(u, u)).sqrt();
+    let lerp3 = |a: Point3, b: Point3, s: f64| {
+        Point3::new(a.x + (b.x - a.x) * s, a.y + (b.y - a.y) * s, a.z + (b.z - a.z) * s)
+    };
+    let (ab, ac, ap) = (t.b - t.a, t.c - t.a, p - t.a);
+    let (d1, d2) = (dot(ab, ap), dot(ac, ap));
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return nn(ap);
+    }
+    let bp = p - t.b;
+    let (d3, d4) = (dot(ab, bp), dot(ac, bp));
+    if d3 >= 0.0 && d4 <= d3 {
+        return nn(bp);
+    }
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        return nn(p - lerp3(t.a, t.b, d1 / (d1 - d3)));
+    }
+    let cp = p - t.c;
+    let (d5, d6) = (dot(ab, cp), dot(ac, cp));
+    if d6 >= 0.0 && d5 <= d6 {
+        return nn(cp);
+    }
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        return nn(p - lerp3(t.a, t.c, d2 / (d2 - d6)));
+    }
+    let va = d3 * d6 - d5 * d4;
+    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+        return nn(p - lerp3(t.b, t.c, (d4 - d3) / ((d4 - d3) + (d5 - d6))));
+    }
+    let denom = 1.0 / (va + vb + vc);
+    let (v, w) = (vb * denom, vc * denom);
+    let q = Point3::new(
+        t.a.x + ab.x * v + ac.x * w,
+        t.a.y + ab.y * v + ac.y * w,
+        t.a.z + ab.z * v + ac.z * w,
+    );
+    nn(p - q)
+}
+
 /// A 20 x 20 x 10 box centered on the Z axis, z in 0..10.
 fn box_facets() -> Vec<Triangle> {
     let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
@@ -142,6 +213,8 @@ fn params(top_z: f64, bottom_z: f64) -> Finish3DParams {
         // grants. Every existing test rides these untouched.
         min_step: None,
         ramp_angle: 45.0,
+        // M8.2 B: the ring entry keeps its plunge unless asked.
+        entry_ramp: false,
     }
 }
 
@@ -359,6 +432,172 @@ fn rings_close_and_the_chain_is_continuous() {
     let last = t.moves.last().expect("non-empty path");
     assert_eq!(last.kind, MoveKind::Rapid);
     assert_eq!(last.to.z, 25.0, "the path ends at clearance");
+}
+
+#[test]
+fn the_tangent_plunge_never_cuts_above_its_ring() {
+    // M8.2 B re-proves the entry law on a STEEPER flank than the 45°
+    // equality cone: at 60° the tangent point sits far below where the
+    // level plane crosses the surface, so more finished band stands
+    // above every plunge than the old fixture ever presented. The
+    // claim is geometric: lift the ball center straight up off a
+    // tangent ring's tangent center and it recedes from the surface
+    // (the locally convex premise) - so at every sampled center
+    // strictly ABOVE a ring's tangent center, the distance to every
+    // facet must stay inside the deviation budget the ring law itself
+    // promises. The tessellated locus sits tol-sagged inside the true
+    // one, so the honest currency here is `tol`, not epsilon: a bite
+    // beyond tol is a cut above the ring's level, past what the whole
+    // family's finish_tol already licenses. Measured, not assumed.
+    let facets = steep_cone(96);
+    let t = waterline(&facets, &params(18.0, 4.0)).expect("steep cone waterline");
+    let mut rings = 0;
+    for m in &t.moves {
+        if m.kind != MoveKind::Plunge {
+            continue;
+        }
+        assert!(
+            (m.to.x - m.from.x).abs() <= 1e-9 && (m.to.y - m.from.y).abs() <= 1e-9,
+            "first contact must be the vertical plunge the law states"
+        );
+        rings += 1;
+        let (x, y) = (m.to.x, m.to.y);
+        let mut cz = m.to.z + R + 1e-6;
+        while cz <= 25.0 + R + 1e-9 {
+            let c = p3(x, y, cz);
+            for f in &facets {
+                let d = pt_tri_dist(c, f);
+                assert!(
+                    d > R - TOL,
+                    "plunge into the ring ending at tip z {:.4} has center z {:.4} biting \
+                     {:.6} mm into the facet past the {} mm budget, {} above the ring's level",
+                    m.to.z,
+                    cz,
+                    R - d,
+                    TOL,
+                    cz - (m.to.z + R)
+                );
+            }
+            cz += R * 0.5;
+        }
+    }
+    assert!(rings >= 4, "expected several steep-flank rings, saw {rings}");
+}
+
+/// M8.2 B's ramp: with `entry_ramp` set, the first contact of a steep
+/// ring slides in along the contact normal instead of dropping, and
+/// the diagonal's cut is certified by the same probe the vertical
+/// plunge just passed - the tangent law holds on the slanted way in.
+#[test]
+fn the_ramp_enters_a_steep_ring_on_its_contact_normal() {
+    let f = steep_cone(96);
+    let mut p = params(18.0, 4.0);
+    p.entry_ramp = true;
+    let t = waterline(&f, &p).expect("ramped cone waterline");
+    // The cone's flank (60 deg from horizontal) is inside the steep
+    // window, and its tip is a point no facet touches - every entry
+    // must certify, silently; a refusal note here means the ramp's own
+    // gate mis-reads a flank it was made for.
+    for n in &t.notes {
+        assert!(!n.contains("refused"), "ramp refused a certifiable flank: {n}");
+    }
+    let (mut diagonals, mut columns) = (0, 0);
+    for m in &t.moves {
+        let (adx, ady) = ((m.to.x - m.from.x).abs(), (m.to.y - m.from.y).abs());
+        // A ramped entry is a diagonal Feed at plunge feed descending
+        // into the ring, preceded by a vertical Plunge column ending
+        // one radius below where the diagonal starts.
+        let diag = m.kind == MoveKind::Feed && m.feed == Some(100.0) && m.from.z > m.to.z && (adx > 1e-9 || ady > 1e-9);
+        let col = m.kind == MoveKind::Plunge;
+        if !diag && !col {
+            continue;
+        }
+        if diag {
+            diagonals += 1;
+        } else {
+            columns += 1;
+        }
+        // The ball center along the entry leg, then straight up off it:
+        // the same probe the vertical-only law passes (locally convex
+        // flank recedes from a lifted center; tol is the tessellation
+        // budget, not epsilon).
+        let mut cz = m.to.z + R + 1e-6;
+        while cz <= 25.0 + R + 1e-9 {
+            let c = p3(m.to.x, m.to.y, cz);
+            for facet in &f {
+                let d = pt_tri_dist(c, facet);
+                assert!(
+                    d > R - TOL,
+                    "{tag} center ({c:?}) bit {r:.4} mm into a facet above the entry: ({x:?}, {y:?}, {z:?})",
+                    tag = if diag { "diagonal" } else { "column" },
+                    r = R - d,
+                    x = facet.a.x,
+                    y = facet.a.y,
+                    z = facet.a.z,
+                );
+            }
+            cz += R * 0.5;
+        }
+        if diag {
+            for k in 0..=8 {
+                let s = k as f64 / 8.0;
+                let c = p3(
+                    m.from.x + s * (m.to.x - m.from.x),
+                    m.from.y + s * (m.to.y - m.from.y),
+                    m.from.z + s * (m.to.z - m.from.z) + R,
+                );
+                for facet in &f {
+                    let d = pt_tri_dist(c, facet);
+                    assert!(
+                        d > R - TOL,
+                        "diagonal ({m:?}) at t {s:.3} bit {r:.4} mm into a facet: ({x:?}, {y:?}, {z:?})",
+                        r = R - d,
+                        x = facet.a.x,
+                        y = facet.a.y,
+                        z = facet.a.z,
+                    );
+                }
+            }
+        }
+    }
+    assert!(diagonals >= 4, "expected ramped entries, saw {diagonals}");
+    assert_eq!(diagonals, columns, "every diagonal needs its vertical column leg");
+}
+
+/// The flag is opt-in: off (the default, every pre-0.5 document) the
+/// choreography is the vertical plunge, byte for byte, notes empty.
+#[test]
+fn the_ramp_is_off_until_asked() {
+    let f = steep_cone(96);
+    let t = waterline(&f, &params(18.0, 4.0)).expect("default cone waterline");
+    assert!(t.notes.is_empty(), "a default run wrote notes: {:?}", t.notes);
+    assert!(
+        !t.moves
+            .iter()
+            .any(|m| m.kind == MoveKind::Feed && m.feed == Some(100.0) && (m.from.x != m.to.x || m.from.y != m.to.y)),
+        "the default path carries a diagonal entry"
+    );
+}
+
+/// The wall that cannot lift a ramp: a vertical box flank reads its
+/// contact normal at the horizon, and cutting in along it would be a
+/// lateral plunge at depth - the ramp refuses itself, notes why, and
+/// the honest vertical entry stands unchanged.
+#[test]
+fn the_ramp_refuses_the_vertical_wall_and_still_cuts() {
+    let f = box_facets();
+    let mut p = params(8.0, 2.0);
+    p.entry_ramp = true;
+    let t = waterline(&f, &p).expect("a refusal is a note, never an error");
+    assert!(
+        t.notes.iter().any(|n| n.contains("ramp entry") && n.contains("refused")),
+        "the vertical wall wrote no refusal: {:?}",
+        t.notes
+    );
+    assert!(
+        t.moves.iter().any(|m| m.kind == MoveKind::Plunge),
+        "the refusal must leave the vertical entry standing"
+    );
 }
 
 #[test]

@@ -374,6 +374,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             ramp,
             min_step,
             ramp_angle,
+            entry_ramp,
             ..
         } => {
             // Ball jurisdiction: the rings are the tangent locus of a
@@ -410,6 +411,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp: *ramp,
                 min_step: *min_step,
                 ramp_angle: *ramp_angle,
+                entry_ramp: *entry_ramp,
             };
             // The pattern picks the generator; Waterline never
             // reaches the raster code at all.
@@ -506,6 +508,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp: false,
                 min_step: None,
                 ramp_angle: 45.0,
+                entry_ramp: false,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -590,6 +593,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp: false,
                 min_step: None,
                 ramp_angle: 45.0,
+                entry_ramp: false,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -673,6 +677,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp: false,
                 min_step: None,
                 ramp_angle: 45.0,
+                entry_ramp: false,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -899,6 +904,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp: false,
                 min_step: None,
                 ramp_angle: 45.0,
+                entry_ramp: false,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
