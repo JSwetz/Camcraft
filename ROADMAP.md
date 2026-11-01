@@ -1350,8 +1350,9 @@ same sources `entry.rs` already names. No HSMWorks material.
 stock, and a roughing plan reaches the middle without biting the
 wall it must leave for the finisher.** — ✅ (M8.1 code cc5d89d;
 `dive_room` erosion-by-distance, inside-out roughing rings,
-level-0 family obedience in both ladders, substitution notes on
-the status line; ledger in RECOMMENDED.md)
+substitution notes on the status line; level-0 family obedience in
+both ladders became TRUE only at the fix 1edb0c5 — the gate round
+verified counts, not shapes; ledger in RECOMMENDED.md)
 
 - **Level 0 obeys the family**: `Helix` dives in from the safe plane
   along a true Z-descending helix whose landing spot has room for the

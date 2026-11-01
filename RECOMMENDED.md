@@ -6432,3 +6432,125 @@ motion (the refactor's claim to be behavior-preserving is pinned by
 machining2d 54/54 and machining3d 22/22 byte-identical), golden_cl
 20/20, conformance 4/4, fanuc_post 8/8; the earlier app full suite
 (UI 234/234, release heavy lane) stands - the fix moved no motion.
+
+## M8.1 correction - the level-0 claim was still false, and a probe test is why we know
+
+The green second round above verified counts, not shapes: no test
+asked what the FIRST cut level opens with. The
+`the_entry_family_is_obeyed_at_the_first_level` probes (this round's
+addition) answered: it does not. cc5d89d shipped the family's
+crossings and left both level-0 gates in place - `!first` in
+`levels.rs`, `li > 0` in `ladder.rs` - so a chosen Helix or Ramp still
+opened with a straight wall plunge at level 0, notes empty. The
+founding M8.1 defect, wearing the gate's hat: every count in the law
+tests (the 5→6, 14→15 updates above) was derived from the dive-at-wall
+behavior the ledger claimed replaced.
+
+**Chosen: remove the gates, don't paper them.** Both ladders' entry
+match now arms on a move onto fresh material -
+`first || last_cut_z != Some(z)` (2-D), `rest.is_none()` (3-D) - with
+the `prev_z` fallbacks (`unwrap_or(clearance_z)`,
+`map_or(clearance_z, …)`) already honest for the first level.
+Considered and dropped: a level-0 special case that dives interior
+only when the family is Helix - a second law to maintain, and the
+fallbacks make the uniform one sound.
+
+**Chosen: the ramp's legality question moves to the DESTINATION's
+center.** `chord_clears(&center, leg, entry)` replaces the previous
+level's test: islands only grow downward, so the plane the descent
+ENDS in is the tightest corridor - and one test then covers every
+plane above it (the superset law). The old prev-center test was sound
+only where walls stand vertical; on a tapering model it checked the
+widest plane and could gouge the narrowest. Latent, unfixed before
+this round; now closed by the same line.
+
+**Chosen (finding, not preference): on the rotary bar, the ramp law
+honestly posts SUBSTITUTED dives - and the real bug was the silent
+notes channel.** The failing `a_ramp_entry_runs_the_ladder_too`
+showed no diagonals and no notes: every chord refuses the
+destination's eroded strip (the open band spirals inward with depth,
+so the leg-in never lies inside the next level's center), the arms
+substitute as specced - and `wrap_exit`, which rebuilds the revolved
+path move by move, dropped `base.notes` on the floor. M8.1's notes
+channel never visited that leg of the map; a verdict spoken on the
+developed plan went silent on the real one. Fixed with the merge into
+the finished path (`path.notes.extend(base.notes…)`), and the test
+now asserts the law's honest disjunction - descends diagonally OR
+says "ramp's chord is blocked" - plus the radial substituted dive.
+Considered and dropped: forcing the rotary to descend by arc instead
+- the wrap's ramp angle law is the finish3d's business, not the
+offset pocket's, and inventing it here would be M8.2 work smuggled
+into a correction.
+
+**Golden consequence (amends the "level 0 byte-identical" claims
+above - true of cc5d89d's gated code, never of the law it stated):**
+the two island-pocket fixtures' FIRST entries move by the same +3
+head as their level changes (interior dive, hop, wall dive), .cl
+58→61 and 138→141, the other 18 .cl byte-identical - the only two
+islandless-pocket goldens that exist, do not: the rest of the set is
+contour/slot/trace (no center passed to `run_levels` - the family
+reaches none of their entries by design), drill/face/tap, and the
+finish3d family (its own law, M8.2's visit). The two root + four dialect .nc catch up with
+their fixtures (sinumerik renumbers). App `operations` (101) and the
+UI suite (234) unchanged. `clippy::filter_next` on a test's
+`filter().next_back()` became `rfind` - mechanical.
+
+Decisions taken unattended: new pin tests count (55/23); the disjunctive
+shape of the rotary assert (a law test that only fits today's geometry
+rots); the ledger's correction style (this section adds, no prior text
+rewritten).
+
+## M8.2 A - contour's entry family: what certifies a descent in an already-open bore
+
+The contour op dove straight down at its start on every level — the
+one family of generators Phase 8 found with no entry law at all.
+
+**Chosen: `Side::Inside` is the air that certifies the descent.** A
+bounded inside orbit circles a hole that already exists: the column
+above the bore floor is empty, so what the dive needs is room to
+LAND — `dive_room`'s erosion-by-distance verdict on the destination
+level — not the roughing overlap law (which proves room along a
+swept corridor metal was removed from). Same helpers as the ladders,
+different warrant, stated in the law comment. Considered and
+dropped: reusing the roughing `chord_clears` corridor test — it would
+refuse every legal bore entry, there is no corridor to prove.
+
+**Chosen: wall-side opt-in is refused BY NOTE, grazing kept.** An
+outside contour's descent has no bounded air; posting the family's
+helix there would cut up through the finished wall. The op still
+runs (the graze arc is the wall's own tangent law) and says so in
+`Toolpath.notes` — a substitution verdict, never silence.
+Considered and dropped: hard refusal — an existing document must
+keep generating; the verdict channel is what the Prime Directive
+asks for.
+
+**Chosen: validation is positivity-only on `helix_radius`** (not
+machining3d's `<= -tool_radius` overlap door): the contour orbit
+fits by certification per level, and a wrong sign is a bad number,
+not a law violation.
+
+**Chosen: the wire ride stays additive.** `project/params.rs` DTO
+gains the entry fields under `serde(default)` — PROJECT_VERSION
+untouched, every older project still loads and its contours inherit
+Plunge (today's behavior: the plain dive). The digest carries the
+entry as one byte so an edit marks the contour stale and re-runs
+generation (`an_entry_edit_marks_the_contour_stale_and_the_wall_
+regen_moves_nothing` pins both halves).
+
+**Chosen (housekeeping): a Phase 1–2 archive of the Done-ledger was
+reverted before commit.** The ROADMAP-splitting agent, after landing
+5e61bed (Phases 3–6, all ✅ — legal), continued into Phases 1–2. The
+foot registry says otherwise: M2.4/M2.5 read 📋 and the M2.5
+families (pencil, geodesic, morphed spiral, steep-and-shallow,
+deburr) exist nowhere in the code — the ⚠️ rows too: M1.3's
+spiral/helical entry debt is this very phase's open work. The move
+rides the table's verdict, not memory; the prose stays in ROADMAP.md
+until those rows go green.
+
+Decisions taken unattended: the entry combo rides SEC_LEADS beside
+the existing lead settings (one section owns approach-and-entry
+words); `contour_along_chain` exported for the open-run entry
+(entry law speaks on chained runs first — open runs take the family
+in M8.2's next stage); the ~20 ContourParams literal updates made
+explicit rather than a Default impl (every call site states the
+entry it wants).
