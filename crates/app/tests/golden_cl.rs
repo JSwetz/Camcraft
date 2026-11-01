@@ -105,6 +105,8 @@ fn contour_disc_hole_matches_golden() {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     let t = contour(&region, &p).unwrap();
     assert!(t.has_arcs(), "a fine polygon bore rim must fit to arcs");
@@ -137,6 +139,8 @@ fn contour_tangential_lead_matches_golden() {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     let t = contour(&region, &p).unwrap();
     assert!(t.has_arcs());
@@ -209,6 +213,8 @@ fn contour_plate_with_hole_matches_golden() {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     let t = contour(&plate_with_hole(), &p).unwrap();
     write_golden("contour_plate_with_hole.cl", &gen_to_cltext(&t));

@@ -146,6 +146,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             tab_count,
             tab_width,
             tab_height,
+            entry,
+            helix_radius,
             ..
         } => {
             // Backstop for a committed file that carries Inside on a
@@ -171,6 +173,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 tab_count: *tab_count,
                 tab_width: *tab_width,
                 tab_height: *tab_height,
+                entry: *entry,
+                helix_radius: *helix_radius,
             };
             let (region, path) = match &src {
                 SrcRef::Selection(_) => {

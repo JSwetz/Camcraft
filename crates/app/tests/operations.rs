@@ -69,6 +69,8 @@ fn contour_params() -> OpParams {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     }
 }
 
@@ -582,6 +584,95 @@ fn a_model_update_marks_entity_sourced_operations_stale() {
     assert_eq!(status(&world, "Contour1"), OpStatus::Ok, "the cube is back");
     assert!(history.redo(&world));
     assert_eq!(status(&world, "Contour1"), OpStatus::Stale);
+}
+
+#[test]
+fn an_entry_edit_marks_the_contour_stale_and_the_wall_regen_moves_nothing() {
+    // The M8.2 A digest law in one run: `entry` and the radius feed the
+    // contour stamp, so the family edit reads Stale once and clears with
+    // a regen - and on the wall side the regen cuts the SAME path,
+    // because the Plunge default IS that law. Staleness is derived, so
+    // walking the edit back re-derives it without asking the generator.
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Contour1",
+            "EM-0600-4FL",
+            SrcRef::Entity("part".into()),
+            contour_params(),
+        )
+        .expect("create"),
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("generate"),
+    );
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
+
+    let mut edited = contour_params();
+    let OpParams::Contour {
+        ref mut entry,
+        ref mut helix_radius,
+        ..
+    } = edited
+    else {
+        unreachable!("contour_params is a Contour");
+    };
+    *entry = camcraft_app::machining3d::Entry3D::Helix;
+    *helix_radius = 2.0;
+    history.execute(
+        &world,
+        EditOperationParams::new(&world, "Contour1", edited).expect("edit"),
+    );
+    assert_eq!(
+        status(&world, "Contour1"),
+        OpStatus::Stale,
+        "the entry bytes ride the digest"
+    );
+    let before = cache(&world, "Contour1").expect("cached").path;
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Contour1").expect("regen"),
+    );
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok);
+    let after = cache(&world, "Contour1").expect("cached").path;
+    assert_eq!(
+        before.moves, after.moves,
+        "the wall-side graze is unchanged by the stated arm"
+    );
+    // The only delta is what the refusal law obliges: the stated arm is
+    // said on the notes channel, once, and the dive stands in unchanged.
+    assert!(
+        before.notes.iter().all(|n| !n.starts_with("entry:")),
+        "the dive names nothing: {:?}",
+        before.notes
+    );
+    assert_eq!(
+        after
+            .notes
+            .iter()
+            .filter(|n| n.starts_with("entry:") && n.contains("needs bounded air"))
+            .count(),
+        1,
+        "the refused helix is said exactly once: {:?}",
+        after.notes
+    );
+
+    // Undo re-derives: the params digest walks back to the Plunge stamp,
+    // which no cached path carries any more (the regen stamped it with
+    // the Helix digest) - Stale again, honestly, until a regen.
+    assert!(history.undo(&world));
+    assert_eq!(status(&world, "Contour1"), OpStatus::Stale, "derived, both ways");
+    assert!(history.redo(&world));
+    assert_eq!(status(&world, "Contour1"), OpStatus::Ok, "and exact");
 }
 
 #[test]
@@ -2161,6 +2252,8 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     history.execute(
         &world,
@@ -2968,6 +3061,8 @@ fn selection_notes_report_stitching_and_extension() {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     let notes = operation::selection_notes(&world, None, &items, &contour);
     assert!(
@@ -3011,6 +3106,8 @@ fn contour_at(side: Side, z: f64) -> OpParams {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     }
 }
 
@@ -3028,12 +3125,27 @@ fn bore_patch_pick(world: &World, name: &str) -> Vec<GeoSel> {
 
 /// Distance of every cut point (plunges and feeds) from the XY origin.
 fn feed_radii(world: &World, name: &str) -> Vec<f64> {
+    // The ring walk itself: the XY landing radius of every cutting move.
     cache(world, name)
         .expect("cache")
         .path
         .moves
         .iter()
-        .filter(|m| m.kind != MoveKind::Rapid)
+        .filter(|m| m.kind == MoveKind::Feed)
+        .map(|m| (m.to.x * m.to.x + m.to.y * m.to.y).sqrt())
+        .collect()
+}
+
+fn dive_radii(world: &World, name: &str) -> Vec<f64> {
+    // Where each level stands up the tool: the XY radius of the plunges.
+    // Since M8.2 A an Inside contour answers this from the floor's room,
+    // while a wall graze answers it from the ring itself.
+    cache(world, name)
+        .expect("cache")
+        .path
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
         .map(|m| (m.to.x * m.to.x + m.to.y * m.to.y).sqrt())
         .collect()
 }
@@ -3103,6 +3215,11 @@ fn contour_bore_wall_pick_defaults_inside() {
         radii.iter().all(|d| (8.0..=10.0).contains(d)),
         "inside the bore, on the eroded ring: {radii:?}"
     );
+    let dives = dive_radii(&world, "BoreC");
+    assert!(
+        dives.iter().all(|d| *d < 8.0),
+        "a bore bores in through its floor's room, not its wall: {dives:?}"
+    );
 }
 
 #[test]
@@ -3142,6 +3259,11 @@ fn contour_boss_pick_defaults_outside() {
         radii.iter().all(|d| (14.0..=16.0).contains(d)),
         "outside the boss, on the grown ring: {radii:?}"
     );
+    let dives = dive_radii(&world, "BossC");
+    assert!(
+        dives.iter().all(|d| (14.0..=16.0).contains(d)),
+        "the wall's dive grazes at the lead-in, unchanged: {dives:?}"
+    );
 }
 
 #[test]
@@ -3174,6 +3296,11 @@ fn contour_outside_forces_outside_on_bore() {
     assert!(
         radii.iter().all(|d| (14.0..=16.0).contains(d)),
         "explicit Outside must stand, bore or no bore: {radii:?}"
+    );
+    let dives = dive_radii(&world, "BoreO");
+    assert!(
+        dives.iter().all(|d| (14.0..=16.0).contains(d)),
+        "and a wall dive still grazes at the lead-in: {dives:?}"
     );
 }
 
@@ -3210,6 +3337,11 @@ fn contour_inside_forces_inside_on_boss() {
     assert!(
         radii.iter().all(|d| (8.0..=10.0).contains(d)),
         "explicit Inside must stand on the boss too: {radii:?}"
+    );
+    let dives = dive_radii(&world, "BossI");
+    assert!(
+        dives.iter().all(|d| *d < 8.0),
+        "and Inside means the tool enters through the bounded room, every level: {dives:?}"
     );
 }
 

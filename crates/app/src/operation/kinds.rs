@@ -543,6 +543,11 @@ fn seed_contour(c: &Carried) -> OpParams {
         tab_count: 0,
         tab_width: 5.0,
         tab_height: 1.0,
+        // M8.2 A: the wall ladder seeds at the graze the kind always
+        // posted; the numbers ride the pockets' defaults so a switched
+        // entry starts from a legal one.
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
         tilt: c.tilt,
     }
 }

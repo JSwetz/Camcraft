@@ -116,6 +116,8 @@ impl OpParams {
                 tab_width,
                 tab_height,
                 climb,
+                entry,
+                helix_radius,
                 tilt,
             } => {
                 w(h, *stock_to_leave);
@@ -151,6 +153,18 @@ impl OpParams {
                     Side::Auto => 0,
                     Side::Inside => 1,
                     Side::Outside => 2,
+                });
+                // Appended at M8.2 A's entry field, the pocket doors'
+                // word: a pre-entry contour op goes Stale once and
+                // regenerates byte-identically on the Outside side (the
+                // Plunge default IS that law); on a bore the second
+                // generation is the interior dive - the fix, saying so
+                // through the same mechanism.
+                w(h, *helix_radius);
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
                 });
                 wt(h, *tilt);
             }

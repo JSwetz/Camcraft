@@ -130,6 +130,8 @@ fn contour_side(side: Side) -> ContourParams {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: crate::entry::Entry3D::Plunge,
+        helix_radius: 1.0,
     }
 }
 
@@ -163,13 +165,21 @@ fn contour_inside_shrinks_and_flips_travel() {
     let region = Region::new(vec![sq(20.0, 20.0, 40.0, 40.0)]).expect("test square");
     let path = contour(&region, &contour_side(Side::Inside)).expect("inside contour");
     let pts = cut_xy(&path);
+    // M8.2 A: the level's first cut is the certified dive into the bore's
+    // bounded air, then the link joins the ring at its entry vertex.
+    let (dive, ring) = pts.split_first().expect("a dive and a ring");
     let edge = |v: f64| (v - 23.0).abs() < 1e-6 || (v - 37.0).abs() < 1e-6;
     assert!(
-        pts.iter().all(|p| edge(p.x) && edge(p.y)),
+        !edge(dive.x) && !edge(dive.y) && dive.x > 23.0 && dive.x < 37.0 && dive.y > 23.0
+        && dive.y < 37.0,
+        "the dive must land inside the inset, not on its wall: {dive:?}"
+    );
+    assert!(
+        ring.iter().all(|p| edge(p.x) && edge(p.y)),
         "cut points off the inset square: {pts:?}"
     );
     let corner = |cx: f64, cy: f64| {
-        pts.iter()
+        ring.iter()
             .any(|p| (p.x - cx).abs() < 1e-6 && (p.y - cy).abs() < 1e-6)
     };
     assert!(
@@ -179,7 +189,7 @@ fn contour_inside_shrinks_and_flips_travel() {
             && corner(23.0, 37.0),
         "inset ring corners missing: {pts:?}"
     );
-    assert!(signed_walk(&pts) < 0.0, "expected clockwise travel");
+    assert!(signed_walk(ring) < 0.0, "expected clockwise travel");
 }
 
 #[test]
@@ -191,8 +201,14 @@ fn conventional_inside_travels_forward() {
     p.climb = false;
     let path = contour(&region, &p).expect("inside contour");
     let pts = cut_xy(&path);
-    assert!(pts.iter().all(|q| (q.x - 23.0).abs() < 1e-6 || (q.x - 37.0).abs() < 1e-6));
-    assert!(signed_walk(&pts) > 0.0, "expected counterclockwise travel");
+    // M8.2 A: the certified dive leads, the stored CCW ring follows.
+    let (dive, ring) = pts.split_first().expect("a dive and a ring");
+    assert!(
+        dive.x > 23.0 && dive.x < 37.0 && dive.y > 23.0 && dive.y < 37.0,
+        "the dive must land inside the inset, not on its wall: {dive:?}"
+    );
+    assert!(ring.iter().all(|q| (q.x - 23.0).abs() < 1e-6 || (q.x - 37.0).abs() < 1e-6));
+    assert!(signed_walk(ring) > 0.0, "expected counterclockwise travel");
 }
 
 #[test]

@@ -353,6 +353,8 @@ mod height_row_tests {
             tab_count: 0,
             tab_width: 5.0,
             tab_height: 1.0,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
         }
     }
 

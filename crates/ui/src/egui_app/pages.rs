@@ -773,6 +773,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             tab_count,
             tab_width,
             tab_height,
+            entry,
+            helix_radius,
             tilt,
         } => {
             if tab == SEC_GEO {
@@ -870,6 +872,26 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         num(ui, u, radius);
                     }
                     Lead::None => {}
+                }
+                field(ui, "Entry");
+                let mut e_idx = match entry {
+                    camcraft_app::machining3d::Entry3D::Plunge => 0,
+                    camcraft_app::machining3d::Entry3D::Ramp => 1,
+                    camcraft_app::machining3d::Entry3D::Helix => 2,
+                };
+                let before = e_idx;
+                combo(ui, "c_entry", &mut e_idx, &ENTRY_KINDS);
+                if e_idx != before {
+                    *entry = match e_idx {
+                        1 => camcraft_app::machining3d::Entry3D::Ramp,
+                        2 => camcraft_app::machining3d::Entry3D::Helix,
+                        _ => camcraft_app::machining3d::Entry3D::Plunge,
+                    };
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
+                    field(ui, "Helix lead radius");
+                    num(ui, u, helix_radius);
+                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
                 }
                 field(ui, "Tab count");
                 let mut tabs = f64::from(*tab_count);

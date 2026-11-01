@@ -12,9 +12,9 @@ use camcraft_motion::cl::{MoveKind, Toolpath};
 use camcraft_motion::entry::Entry3D;
 use camcraft_motion::geo2d::{Loop, Point2, Region};
 use camcraft_motion::machining2d::{
-    ARC_FIT_TOL, chord_clears, contour, face, on_boundary, pocket, ring_is_circular, slot, trace,
-    ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, Side, SlotParams,
-    TraceParams,
+    ARC_FIT_TOL, chord_clears, contour, contour_along_chain, face, on_boundary, pocket,
+    ring_is_circular, slot, trace, ContourParams, FaceParams, GenError, Lead, PocketParams,
+    PocketStrategy, Side, SlotParams, TraceParams,
 };
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Region {
@@ -324,6 +324,8 @@ fn cp() -> ContourParams {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
     }
 }
 
@@ -779,6 +781,16 @@ fn contour_refuses_bad_input() {
             p.feed = f64::NAN;
             p
         },
+        {
+            // The contour helix door: positivity only. machining3d's
+            // <= -tool-radius law is the roughing overlap law; a
+            // contour orbit descends an already-open bore and its fit
+            // is certified per level by dive_room (M8.2 A).
+            let mut p = cp();
+            p.entry = Entry3D::Helix;
+            p.helix_radius = 0.0;
+            p
+        },
     ];
     for p in cases {
         assert!(matches!(contour(&sq, &p), Err(GenError::Invalid(_))), "{p:?}");
@@ -787,6 +799,133 @@ fn contour_refuses_bad_input() {
         contour(&Region::empty(), &cp()),
         Err(GenError::Empty(_))
     ));
+}
+
+#[test]
+fn an_open_chain_run_refuses_the_entry_family_by_name() {
+    // No area, no air to certify against: the chain keeps its dive at
+    // the run start and says the refusal once - the moves do not change.
+    let pts = [
+        Point2::new(0.0, 0.0),
+        Point2::new(20.0, 0.0),
+        Point2::new(30.0, 8.0),
+    ];
+    let base = contour_along_chain(&pts, &cp()).expect("chain valid");
+    let mut p = cp();
+    p.entry = Entry3D::Helix;
+    p.helix_radius = 3.0;
+    let t = contour_along_chain(&pts, &p).expect("chain valid");
+    assert_eq!(t.moves, base.moves, "the refusal must not move the path");
+    assert_eq!(
+        t.notes.iter().filter(|n| n.contains("open centerline run")).count(),
+        1,
+        "said once, named: {:?}",
+        t.notes
+    );
+    assert!(base.notes.is_empty(), "Plunge default says nothing: {:?}", base.notes);
+    assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn the_inside_contour_dives_in_the_bore_floor() {
+    // M8.2 A, level-0 voice: the eroded region states the bore's bounded
+    // air, so the family is obeyed on the FIRST entry too - the Plunge
+    // stands in the floor's room, never dwells on a finished-wall vertex.
+    let mut p = cp();
+    p.side = Side::Inside;
+    let t = contour(&rect(0.0, 0.0, 30.0, 30.0), &p).expect("inside contour");
+    let dives: Vec<_> = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Plunge)
+        .collect();
+    assert_eq!(dives.len(), 1, "one certified dive for one level: {:?}", t.moves);
+    let d = &dives[0];
+    assert!(
+        d.to.x > 5.0 && d.to.x < 25.0 && d.to.y > 5.0 && d.to.y < 25.0,
+        "the dive must stand inside the r = 5 inset, not on its wall: {d:?}"
+    );
+    assert!(t.notes.is_empty(), "room was found; nothing to say: {:?}", t.notes);
+    assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn the_inside_contour_bore_opens_with_a_helix() {
+    // The helix's own arcs reach the surface plane - no wall dive
+    // anywhere - and the orbit's fit is the widened-disc test, not the
+    // roughing overlap law (a contour orbit cuts nothing on the way in).
+    let mut p = cp();
+    p.side = Side::Inside;
+    p.entry = Entry3D::Helix;
+    p.helix_radius = 3.0;
+    let t = contour(&rect(0.0, 0.0, 30.0, 30.0), &p).expect("helix bore valid");
+    assert!(
+        !t.moves.iter().any(|m| m.kind == MoveKind::Plunge),
+        "a helix enters with no axial dive: {:?}",
+        t.moves
+    );
+    let reach = t
+        .moves
+        .iter()
+        .find(|m| m.to.z.abs() < 1e-9 && m.kind != MoveKind::Rapid)
+        .expect("something reaches the cut plane");
+    assert_eq!(reach.kind, MoveKind::Feed, "the plane is entered in arcs: {reach:?}");
+    assert!(reach.arc.is_some(), "and the arc is the helix's own");
+    assert!(t.notes.is_empty(), "the bore holds the orbit: {:?}", t.notes);
+    assert!(t.is_chained() && t.all_finite());
+}
+
+#[test]
+fn a_wall_side_entry_is_refused_by_name_grazing_unchanged() {
+    // The grown region contains the part's own interior, so a chord or a
+    // dive certified on it would lie - on the wall side the arms are
+    // refused by name, once, and the graze this generator has always
+    // posted stands. Byte-for-byte: the refusal costs no move.
+    let base = contour(&rect(0.0, 0.0, 30.0, 30.0), &cp()).expect("plunge graze");
+    for (arm, e) in [("ramp", Entry3D::Ramp), ("helix", Entry3D::Helix)] {
+        let mut p = cp();
+        p.side = Side::Outside;
+        p.entry = e;
+        p.helix_radius = 3.0;
+        let t = contour(&rect(0.0, 0.0, 30.0, 30.0), &p).expect("wall contour valid");
+        assert_eq!(t.moves, base.moves, "the {arm} must not move the wall-side path");
+        assert_eq!(
+            t.notes.iter().filter(|n| n.contains("needs bounded air")).count(),
+            1,
+            "the {arm} refusal is said exactly once: {:?}",
+            t.notes
+        );
+    }
+}
+
+#[test]
+fn a_blocked_bore_entry_substitutes_and_says_it() {
+    // Prime Directive voice: an arm whose certification fails falls back
+    // to the axial dive AT the lead-in and the note names the reason.
+    // Ramp: home XY sits outside the bore, so its chord is unproven.
+    let mut p = cp();
+    p.side = Side::Inside;
+    p.entry = Entry3D::Ramp;
+    let t = contour(&rect(0.0, 0.0, 30.0, 30.0), &p).expect("ramp valid");
+    assert!(
+        t.notes.iter().any(|n| n.contains("ramp's chord is blocked")),
+        "the level-0 substitution must be said, got {:?}",
+        t.notes
+    );
+    assert!(t.is_chained() && t.all_finite());
+    // Helix: an orbit wider than the room left inside the inset cannot
+    // fit - the widened disc says so and the dive stands in.
+    let mut p = cp();
+    p.side = Side::Inside;
+    p.entry = Entry3D::Helix;
+    p.helix_radius = 10.0; // inset is 20 wide: no centre clears r + 1e-3
+    let t = contour(&rect(0.0, 0.0, 30.0, 30.0), &p).expect("fat helix valid");
+    assert!(
+        t.notes.iter().any(|n| n.contains("widened disc fits nowhere")),
+        "the no-fit helix must be said, got {:?}",
+        t.notes
+    );
+    assert!(t.is_chained() && t.all_finite());
 }
 
 #[test]

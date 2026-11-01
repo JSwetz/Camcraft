@@ -216,6 +216,8 @@ fn clean_contour_verifies_silent() {
             tab_count: 0,
             tab_width: 0.0,
             tab_height: 0.0,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
         },
     )
     .unwrap();

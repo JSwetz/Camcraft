@@ -76,6 +76,16 @@ pub enum ParamsDto {
         /// Auto resolves at generate, so the stored path never changes.
         #[serde(default)]
         side: SideDto,
+        /// Absent means `plunge` - the graze at the lead-in every
+        /// contour posted before M8.2 A gave the wall ladder an entry
+        /// field at all (additive defaults: the format version does
+        /// not move).
+        #[serde(default)]
+        entry: EntryDto,
+        /// Read only when `entry` is Helix; absent means the seed's
+        /// 1.0 mm, the same default the pockets carry.
+        #[serde(default = "default_helix_radius")]
+        helix_radius: f64,
         /// 3+2 index; see the Face arm.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,

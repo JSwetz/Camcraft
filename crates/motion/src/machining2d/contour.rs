@@ -1,13 +1,15 @@
 //! Split from `machining2d.rs` by M5.0.1; structure only.
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::entry::{Entry3D, dive_room, helix_down};
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
 
-use super::face::GenError;
-use super::levels::cut_levels;
 use super::arcs::{fit_arcs, lead_in, lead_out, push_segs, walk_tangent};
+use super::levels::{Motion, cut_levels, dive_link, substituted_dive};
 use super::ring::Ring;
+use super::face::GenError;
+use super::slots::chord_clears;
 /// Entry/exit motion appended to each contour subpath. Every lead that
 /// is not [`Lead::None`] keeps the tool from dwelling (and gouging) at a
 /// plunge point directly on the finished wall: it starts the cut already
@@ -52,7 +54,9 @@ pub enum Side {
     Auto,
     /// Cutter inside the boundary: the region erodes by `r + leave` and
     /// each loop's traversal reverses, so material stays on the left and
-    /// leads bulge into the bounded air - the wall of a bore.
+    /// leads bulge into the bounded air - the wall of a bore. That
+    /// bounded air is exactly what certifies the entry family's descents
+    /// across the level planes (M8.2 A).
     Inside,
     /// Today's law: the region grows by `r + leave`, the tool grazes the
     /// boundary from the material side - a boss or an outside wall.
@@ -95,6 +99,20 @@ pub struct ContourParams {
     pub tab_count: u32,
     pub tab_width: f64,
     pub tab_height: f64,
+    /// How a level crossing engages (M8.2 A): the family the pocket
+    /// ladders already read. It applies where the descent can be
+    /// certified - `Side::Inside`, whose bounded air the eroded region
+    /// states exactly. On the wall side it is refused by name in the
+    /// path's notes, and the graze this generator has always posted
+    /// stands (the grown region would certify a chord across the
+    /// part's own interior - a lie, and M8.1's distance law is the
+    /// reason it is not told).
+    pub entry: Entry3D,
+    /// Helix centerline circle radius (mm); read only when `entry` is
+    /// Helix, and certified per level by `dive_room`'s margin, not by
+    /// the roughing overlap law: a contour orbit descends air, so a
+    /// radius above the tool's is legal wherever the bore holds it.
+    pub helix_radius: f64,
 }
 
 impl ContourParams {
@@ -153,6 +171,15 @@ impl ContourParams {
         if self.tab_count > 0 && (self.tab_width <= 0.0 || self.tab_height < 0.0) {
             return Err(GenError::Invalid("tabs need positive width".into()));
         }
+        if self.entry == Entry3D::Helix && self.helix_radius <= 0.0 {
+            // Only positivity: the roughing ladders cap the radius at
+            // the tool's so successive turns overlap, but a contour
+            // orbit descends an already-open bore and cuts nothing on
+            // the way down - fit is certified per level by `dive_room`
+            // against the wall, which is where a too-wide disc is
+            // refused (loudly, as a substitution).
+            return Err(GenError::Invalid("helix radius must be positive".into()));
+        }
         Ok(())
     }
 
@@ -182,7 +209,10 @@ impl ContourParams {
 /// higher than the clearance move it replaced, with the clamp echoed in
 /// the panel - rapids across in air, and plunges again. A level change
 /// still lifts to full `clearance_z`: the new level engages material the
-/// previous one never touched. Rapids inside the footprint below the
+/// previous one never touched, and crosses into it by the `entry`
+/// family (M8.2 A) - every arm certified against the one center this
+/// ladder shares, on the bore side where that center is bounded air.
+/// Rapids inside the footprint below the
 /// safe plane are the verifier's business (step 7), flagged, never
 /// hidden.
 pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError> {
@@ -206,10 +236,39 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     let mut loops: Vec<&Loop> = center.loops().iter().collect();
     loops.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
 
+    // The rings every level plans to walk, as closed polylines - the
+    // link chords of M8.1's plan law get proven against these. Tabbed
+    // levels walk a subset, which errs conservative: an unproven chord
+    // hops rather than dragging across a ring line.
+    let plan: Vec<Vec<Point2>> = loops
+        .iter()
+        .map(|l| {
+            let mut v: Vec<Point2> = if p.climb != inside {
+                l.points().to_vec()
+            } else {
+                l.points().iter().rev().copied().collect()
+            };
+            if v.len() > 1 {
+                let (first, last) = (v[0], v[v.len() - 1]);
+                if first.x != last.x || first.y != last.y {
+                    v.push(first);
+                }
+            }
+            v
+        })
+        .collect();
+    // The shared motion envelope: dive_link and substituted_dive read
+    // their lifts and feeds through it, so the contour's arms speak
+    // the pocket ladders' word verbatim (hop = retract clamped at
+    // clearance, exactly what `hop` below computes).
+    let m = Motion::new(p.clearance_z, Some(p.retract_z), p.feed, p.plunge_feed)
+        .with_entry(p.entry, p.helix_radius);
+    let mut refused_said = false;
+
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let hop = p.retract_z.min(p.clearance_z);
     let mut first_entry = true;
-    for &z in &zs {
+    for (zi, &z) in zs.iter().enumerate() {
         let tabbed = p.tab_count > 0 && z < p.bottom_z + p.tab_height;
         for (li, l) in loops.iter().enumerate() {
             // Canonical orientation is material-on-the-left travel;
@@ -241,27 +300,152 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 // the fitter just smoothed.
                 let t0 = walk_tangent(&walk, &poly, true);
                 let (entry, lead) = lead_in(poly[0], t0, air_side(t0, p.climb), p);
+                let e2 = Point2::new(entry.x, entry.y);
                 if k == 0 && li > 0 && !first_entry {
                     // Loop to loop within one level: the tab-hop
                     // template - up to the hop plane, across, plunge.
                     let cur = b.at();
                     b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
-                    b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, hop), None);
+                    b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop), None);
+                    b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
                 } else if k == 0 {
+                    // The level's first engagement: a crossing (the
+                    // tool last cut at `prev_z`) or the path's first
+                    // entry, where nothing has cut and prev_z falls
+                    // back to clearance - the level-0 law M8.1 wrote
+                    // into both roughing ladders, voiced for the wall
+                    // here (the `li > 0` shape this arm replaces read
+                    // the family from crossings only). New material
+                    // engages from the one plane safe over all of it.
+                    let cur = b.at();
                     if !first_entry {
-                        // Level to level: new material engages from the
-                        // one plane that is safe over all of it.
-                        let cur = b.at();
                         b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
                     }
-                    let cur = b.at();
-                    b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
+                    let prev_z = if zi == 0 { p.clearance_z } else { zs[zi - 1] };
+                    if inside {
+                        // The bore side: the eroded region states the
+                        // bounded air exactly, so every arm certifies
+                        // against it with the pocket ladders' own
+                        // machinery - the dive stands in the floor's
+                        // room, never dwells on the finished wall.
+                        match p.entry {
+                            Entry3D::Plunge => match dive_room(&center, 0.0) {
+                                Some(d) => {
+                                    let cur = b.at();
+                                    if cur.x != d.x || cur.y != d.y {
+                                        b.push(
+                                            MoveKind::Rapid,
+                                            Point3::new(d.x, d.y, p.clearance_z),
+                                            None,
+                                        );
+                                    }
+                                    b.push(
+                                        MoveKind::Plunge,
+                                        Point3::new(d.x, d.y, z),
+                                        Some(p.plunge_feed),
+                                    );
+                                    dive_link(&mut b, &center, &plan, d, e2, z, &m);
+                                }
+                                None => substituted_dive(
+                                    &mut b,
+                                    &center,
+                                    &plan,
+                                    e2,
+                                    z,
+                                    &m,
+                                    "the disc fits nowhere here",
+                                ),
+                            },
+                            Entry3D::Ramp => {
+                                // One chord test covers the whole
+                                // interpolated descent: the region is
+                                // one at every plane, and the
+                                // destination's room bounds every
+                                // plane above it (M8.1's superset law,
+                                // here at its simplest - a planar
+                                // contour's single center).
+                                let cur = b.at();
+                                let leg = Point2::new(cur.x, cur.y);
+                                if chord_clears(&center, leg, e2) {
+                                    b.push(
+                                        MoveKind::Rapid,
+                                        Point3::new(leg.x, leg.y, prev_z),
+                                        None,
+                                    );
+                                    b.push(MoveKind::Feed, Point3::new(e2.x, e2.y, z), Some(p.feed));
+                                } else {
+                                    substituted_dive(
+                                        &mut b,
+                                        &center,
+                                        &plan,
+                                        e2,
+                                        z,
+                                        &m,
+                                        "the ramp's chord is blocked",
+                                    );
+                                }
+                            }
+                            Entry3D::Helix => {
+                                let cur = b.at();
+                                let leg = Point2::new(cur.x, cur.y);
+                                match dive_room(&center, p.helix_radius + 1e-3) {
+                                    Some(d) => {
+                                        if leg.x != d.x || leg.y != d.y {
+                                            b.push(
+                                                MoveKind::Rapid,
+                                                Point3::new(d.x, d.y, p.clearance_z),
+                                                None,
+                                            );
+                                        }
+                                        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
+                                        helix_down(&mut b, d, prev_z, z, p.helix_radius, p.feed);
+                                        dive_link(&mut b, &center, &plan, d, e2, z, &m);
+                                    }
+                                    None => substituted_dive(
+                                        &mut b,
+                                        &center,
+                                        &plan,
+                                        e2,
+                                        z,
+                                        &m,
+                                        "the widened disc fits nowhere at this level",
+                                    ),
+                                }
+                            }
+                        }
+                    } else {
+                        // The wall side (explicit Outside, and every
+                        // direct Auto): the graze this generator has
+                        // always posted, and the only one that can be
+                        // certified - the grown region holds the
+                        // part's own interior, so a dive_room or a
+                        // chord on it would certify descents THROUGH
+                        // the body (M8.1's rule: not a law to build a
+                        // dive on). The other two arms are refused by
+                        // name - once, because the reason is
+                        // structural, not level-dependent.
+                        if p.entry != Entry3D::Plunge && !refused_said {
+                            let arm = match p.entry {
+                                Entry3D::Ramp => "ramp",
+                                Entry3D::Helix => "helix",
+                                Entry3D::Plunge => "plunge",
+                            };
+                            b.note(format!(
+                                "entry: the {arm} needs bounded air only a bore (Side::Inside) \
+                                 has - grazing dive at the lead-in, unchanged"
+                            ));
+                            refused_said = true;
+                        }
+                        let cur = b.at();
+                        b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, cur.z), None);
+                        b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
+                    }
                 } else {
                     let cur = b.at();
                     b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
-                    b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, hop), None);
+                    b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop), None);
+                    b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
                 }
-                b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(p.plunge_feed));
                 first_entry = false;
                 push_segs(&mut b, &lead, z, p.feed);
                 push_segs(&mut b, &walk, z, p.feed);
@@ -325,6 +509,22 @@ pub fn contour_along_chain(
     let out = lead_out(poly[n - 1], t1, air_side(t1, p.climb), p);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    // An open run bounds no area, so no dive on it can be certified
+    // against air that exists: the chosen entry family is refused by
+    // name once, and every level dives at the lead-in's start as the
+    // chain has always done (M8.2 A - the same word the wall side of
+    // `contour` speaks for its unbounded outside).
+    if p.entry != Entry3D::Plunge {
+        let arm = match p.entry {
+            Entry3D::Ramp => "ramp",
+            Entry3D::Helix => "helix",
+            Entry3D::Plunge => "plunge",
+        };
+        b.note(format!(
+            "entry: an open centerline run bounds no air to certify the {arm} against - dive \
+             at the run start, unchanged"
+        ));
+    }
     for (k, &z) in zs.iter().enumerate() {
         if k > 0 {
             let cur = b.at();

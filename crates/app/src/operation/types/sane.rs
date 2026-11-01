@@ -56,8 +56,14 @@ impl OpParams {
                 tolerance,
                 tab_width,
                 tab_height,
+                helix_radius,
                 ..
             } => {
+                // Structural only, the pocket doors' word (M8.2 A): a
+                // Plunge entry never consults the radius, and where a
+                // Helix does, the generator certifies it against the
+                // bore's wall per level - dive room is the refusal of
+                // record there, said in the path's notes.
                 nneg(*stock_to_leave)
                     && clearance_z.is_sane()
                     && retract_z.is_sane()
@@ -69,6 +75,7 @@ impl OpParams {
                     && pos(*tolerance)
                     && nneg(*tab_width)
                     && nneg(*tab_height)
+                    && pos(*helix_radius)
                     && lead_sane(lead)
             }
             OpParams::Pocket {

@@ -422,6 +422,8 @@ mod path_tests {
                     tab_count: 0,
                     tab_width: 0.0,
                     tab_height: 0.0,
+                    entry: camcraft_app::machining3d::Entry3D::Plunge,
+                    helix_radius: 1.0,
                 },
             )
             .expect("operation"),
@@ -1147,6 +1149,8 @@ mod height_plane_tests {
             tab_count: 0,
             tab_width: 0.0,
             tab_height: 0.0,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
         }
     }
 
@@ -1471,6 +1475,8 @@ mod height_plane_tests {
             tab_count: 0,
             tab_width: 0.0,
             tab_height: 0.0,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
         };
         let mut state = state_with("C1", params);
         // G54 at z 3.0: stock top (20) + 5 = 25, G54 - 1 = 2.
@@ -1534,6 +1540,8 @@ mod height_plane_tests {
             tab_count: 0,
             tab_width: 0.0,
             tab_height: 0.0,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
         };
         let state = state_with("C1", params);
         assert!(

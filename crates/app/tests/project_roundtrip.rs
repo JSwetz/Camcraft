@@ -488,6 +488,8 @@ fn arc_move_round_trips() {
                 tab_count: 0,
                 tab_width: 0.0,
                 tab_height: 0.0,
+                entry: camcraft_app::machining3d::Entry3D::Plunge,
+                helix_radius: 1.0,
             },
         )
         .expect("create"),
@@ -1092,6 +1094,8 @@ fn a_selection_round_trips_and_stays_ok() {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     history.execute(
         &world,
@@ -1188,6 +1192,87 @@ fn side_roundtrip_v6_defaults_to_auto() {
             && saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
         "the migration writes the v7 shape: {saved}"
     );
+}
+
+#[test]
+fn contour_entry_family_is_a_step_up_on_the_wire() {
+    // M8.2 A, the pocket doors' word: additive keys, so the format
+    // version does not move - and an absent `entry` reads exactly as
+    // the pre-entry file was, the dive, with the seed's radius unread.
+    let text = r#"{
+        "version": 42,
+        "entities": [
+            {"name": "C1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T", "src": "stock", "params": {"contour": {
+                 "stock_to_leave": 0.0, "clearance_z": 10.0, "retract_z": 8.0,
+                 "top_z": 5.0, "bottom_z": 3.0, "stepdown": 8.0,
+                 "feed": 800.0, "plunge_feed": 200.0, "climb": true,
+                 "lead": "none", "tolerance": 0.01,
+                 "tab_count": 0, "tab_width": 0.0, "tab_height": 0.0}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, text).expect("a contour without the entry keys must read");
+    let e = model::find_by_name(&world, "C1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Contour {
+        entry,
+        helix_radius,
+        ..
+    } = &o.params
+    else {
+        panic!("contour params expected, got {:?}", o.params);
+    };
+    assert_eq!(
+        *entry,
+        camcraft_app::machining3d::Entry3D::Plunge,
+        "absent means the dive"
+    );
+    assert_eq!(*helix_radius, 1.0, "the absent radius is the seed's number");
+
+    // The stated grammar, hand-written so the tags are pinned: the same
+    // op with the family named on the wire.
+    let stated = text.replace(
+        "\"tab_height\": 0.0}",
+        "\"tab_height\": 0.0, \"entry\": \"helix\", \"helix_radius\": 2.5}",
+    );
+    assert_ne!(stated, text, "the test must reach the contour grammar");
+    let world2 = new_world();
+    project::open(&world2, &stated).expect("the entry grammar must read");
+    let e2 = model::find_by_name(&world2, "C1").expect("op");
+    let o2 = model::operation_of(&world2, &e2).expect("operation");
+    let OpParams::Contour {
+        entry,
+        helix_radius,
+        ..
+    } = &o2.params
+    else {
+        panic!("contour params expected, got {:?}", o2.params);
+    };
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix);
+    assert_eq!(*helix_radius, 2.5);
+
+    // Save writes the keys, reload keeps them, and write-parse-write
+    // is the fixed point.
+    let path = tmp_path("centry");
+    project::save(&world2, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(
+        first.contains("\"entry\": \"helix\"") && first.contains("\"helix_radius\": 2.5"),
+        "the choice rides the wire: {first}"
+    );
+    let world3 = new_world();
+    project::load(&world3, &path).expect("reload");
+    let e3 = model::find_by_name(&world3, "C1").expect("reloaded op");
+    let o3 = model::operation_of(&world3, &e3).expect("operation");
+    let OpParams::Contour { entry, .. } = &o3.params else {
+        panic!("contour params expected");
+    };
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix, "reload keeps the arm");
+    project::save(&world3, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the entry shape round-trips byte-identically");
 }
 
 #[test]
@@ -2507,6 +2592,8 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
                 tab_count: 0,
                 tab_width: 0.0,
                 tab_height: 0.0,
+                entry: camcraft_app::machining3d::Entry3D::Plunge,
+                helix_radius: 1.0,
             },
         )
         .expect("create"),
@@ -2577,6 +2664,8 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
                 tab_count: 0,
                 tab_width: 0.0,
                 tab_height: 0.0,
+                entry: camcraft_app::machining3d::Entry3D::Plunge,
+                helix_radius: 1.0,
             },
         )
         .expect("create C2"),

@@ -40,6 +40,8 @@ impl ParamsDto {
                 tab_width,
                 tab_height,
                 side,
+                entry,
+                helix_radius,
                 tilt,
             } => ParamsDto::Contour {
                 stock_to_leave: *stock_to_leave,
@@ -66,6 +68,12 @@ impl ParamsDto {
                     Side::Inside => SideDto::Inside,
                     Side::Outside => SideDto::Outside,
                 },
+                entry: match entry {
+                    Entry3D::Plunge => EntryDto::Plunge,
+                    Entry3D::Ramp => EntryDto::Ramp,
+                    Entry3D::Helix => EntryDto::Helix,
+                },
+                helix_radius: *helix_radius,
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Pocket {
@@ -909,6 +917,8 @@ impl ParamsDto {
                 tab_width,
                 tab_height,
                 side,
+                entry,
+                helix_radius,
                 tilt,
             } => OpParams::Contour {
                 stock_to_leave: *stock_to_leave,
@@ -935,6 +945,14 @@ impl ParamsDto {
                     SideDto::Inside => Side::Inside,
                     SideDto::Outside => Side::Outside,
                 },
+                // Absent keys ride the DTO defaults: the dive, the
+                // seed's 1 mm helix (M8.2 A - the pocket doors' word).
+                entry: match entry {
+                    EntryDto::Plunge => Entry3D::Plunge,
+                    EntryDto::Ramp => Entry3D::Ramp,
+                    EntryDto::Helix => Entry3D::Helix,
+                },
+                helix_radius: *helix_radius,
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Pocket {

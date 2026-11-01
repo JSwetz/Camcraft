@@ -98,6 +98,17 @@ pub enum OpParams {
         tab_count: u32,
         tab_width: f64,
         tab_height: f64,
+        /// How a level crossing engages; the family
+        /// [`crate::machining3d::Entry3D`] names, plumbed to the wall
+        /// ladder in M8.2 A. `Plunge` is every pre-M8.2 file - and
+        /// stays the law on the Outside side, where no bounded air
+        /// certifies a descent; the other arms speak their refusal in
+        /// the path's notes there.
+        entry: Entry3D,
+        /// Helix centerline radius, mm; read only when `entry` is
+        /// Helix, and certified against the bore's wall per level by
+        /// the generator's dive room, not by the roughing overlap law.
+        helix_radius: f64,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },

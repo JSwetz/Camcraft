@@ -375,6 +375,8 @@ fn tilt_on_a_picked_selection_refuses_by_name() {
         tab_count: 0,
         tab_width: 0.0,
         tab_height: 0.0,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     // The prismatic control: the same pick on the same part is legal.
     history.execute(
