@@ -100,6 +100,7 @@ fn hole(
         entry_z,
         floor_z,
         through,
+        stepped: false,
     }
 }
 

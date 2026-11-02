@@ -1,6 +1,6 @@
 //! Split from `drilling.rs` by M5.0.1; structure only.
 
-use super::hole::{CHIP_BREAK, CycleChoice, CycleParams, Hole, SPOT_DEPTH, THROUGH_CLEAR, auto_kind};
+use super::hole::{CHIP_BREAK, CycleChoice, CycleParams, FIT_TOL, Hole, SPOT_DEPTH, THROUGH_CLEAR, auto_kind};
 
 use crate::cl::{lattice, Cycle, CycleKind, MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::Point2;
@@ -43,6 +43,7 @@ pub fn drill(p: &CycleParams) -> Result<Toolpath, GenError> {
             entry_z: lattice(h.entry_z),
             floor_z: lattice(h.floor_z),
             through: h.through,
+            stepped: h.stepped,
         })
         .collect();
 
@@ -59,7 +60,11 @@ pub fn drill(p: &CycleParams) -> Result<Toolpath, GenError> {
         let floor_bottom = h.floor_z - if h.through { THROUGH_CLEAR } else { 0.0 };
         let bottom = match p.bottom_z {
             Some(z) => z,
-            None if matches!(p.cycle, CycleChoice::Spot) => (p.r_z - SPOT_DEPTH).max(h.floor_z),
+            // SPOT_DEPTH's own words: the dimple hangs off the ENTRY
+            // plane - the hole's mouth - not the R plane, so a hole on
+            // a pocket floor gets its dimple and not an air cut
+            // (M8.3; the radial frame already read the mouth, cross.rs).
+            None if matches!(p.cycle, CycleChoice::Spot) => (h.entry_z - SPOT_DEPTH).max(h.floor_z),
             None => floor_bottom,
         };
         if bottom >= p.r_z {
@@ -72,6 +77,29 @@ pub fn drill(p: &CycleParams) -> Result<Toolpath, GenError> {
             CycleChoice::Auto => auto_kind(p.tool.kind, p.r_z - bottom, d),
             _ => resolve_choice(p),
         };
+        // The bore door (M8.3): the slide's whole cutting diameter
+        // travels inside the hole's wall, so a tool wider than the
+        // wall's radius is a wall-cutting plunge. And a stepped hole
+        // (a folded counterbore) has a ring the cycle's single radius
+        // cannot reach. Refused here, by name, not left to the
+        // verifier's generic gouge after the fact.
+        if matches!(kind, CycleKind::Bore | CycleKind::BackBore) {
+            if h.stepped {
+                return Err(GenError::Invalid(format!(
+                    "bore cycle at ({}, {}): that hole is a counterbore - the cycle would bore \
+                     the narrow dia. {} through and miss the ring",
+                    h.xy.x, h.xy.y, 2.0 * h.radius
+                )));
+            }
+            if 0.5 * d > h.radius + FIT_TOL {
+                return Err(GenError::Invalid(format!(
+                    "bore tool dia. {d} will not enter the dia. {} hole at ({}, {})",
+                    2.0 * h.radius,
+                    h.xy.x,
+                    h.xy.y
+                )));
+            }
+        }
         let fm = b.moves_len();
         let mut peck = 0.0;
         match kind {

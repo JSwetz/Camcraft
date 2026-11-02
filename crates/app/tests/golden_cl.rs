@@ -376,6 +376,7 @@ fn drill_plate_matches_golden() {
             entry_z: 0.0,
             floor_z: -4.0,
             through: true,
+            stepped: false,
         },
         Hole {
             xy: Point2::new(30.0, 10.0),
@@ -383,6 +384,7 @@ fn drill_plate_matches_golden() {
             entry_z: 0.0,
             floor_z: -3.0,
             through: false,
+            stepped: false,
         },
     ];
     let p = CycleParams {
@@ -419,6 +421,7 @@ fn drill_peck_matches_golden() {
         entry_z: 0.0,
         floor_z: -23.0,
         through: true,
+        stepped: false,
     }];
     let p = CycleParams {
         clearance_z: 6.0,
@@ -452,6 +455,7 @@ fn tap_plate_matches_golden() {
         entry_z: 0.0,
         floor_z: -12.0,
         through: false,
+        stepped: false,
     }];
     let p = CycleParams {
         clearance_z: 5.0,

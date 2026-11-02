@@ -380,6 +380,7 @@ fn a_mixed_list_refuses_by_name() {
             entry_z: 15.0,
             floor_z: 0.0,
             through: false,
+            stepped: false,
         });
     }
     let e = operation::generate(&world, &op(p), "").expect_err("a mixed list cannot run");
@@ -470,6 +471,7 @@ fn a_z_only_drill_file_never_writes_the_cross_key() {
             entry_z: 15.0,
             floor_z: 5.0,
             through: false,
+            stepped: false,
         }],
         cross: vec![],
     };

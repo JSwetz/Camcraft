@@ -3725,6 +3725,7 @@ fn a_hole_deeper_than_the_drill_reaches_warns_and_still_generates() {
         entry_z: 130.0,
         floor_z: 0.0,
         through: true,
+        stepped: false,
     };
     history.execute(
         &world,

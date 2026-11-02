@@ -725,6 +725,9 @@ impl OpParams {
                     w(h, hole.entry_z);
                     w(h, hole.floor_z);
                     h.write_u8(u8::from(hole.through));
+                    h.write_u8(u8::from(hole.stepped)); // changes what the
+                    // bore door says, so it belongs in the digest (M8.3):
+                    // a re-detect that folds a step marks the op Stale.
                 }
                 // The radial list digests too (M5.2 F2): same law -
                 // detection output or a typed edit is params data, and

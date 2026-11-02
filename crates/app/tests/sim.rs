@@ -71,6 +71,7 @@ fn holes_at(pts: &[(f64, f64)], floor_z: f64, through: bool) -> Vec<Hole> {
             entry_z: 0.0,
             floor_z,
             through,
+            stepped: false,
         })
         .collect()
 }

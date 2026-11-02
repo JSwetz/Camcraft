@@ -77,6 +77,7 @@ fn hole(xy: (f64, f64), r: f64, entry: f64, floor: f64, through: bool) -> Hole {
         entry_z: entry,
         floor_z: floor,
         through,
+        stepped: false,
     }
 }
 
@@ -336,6 +337,57 @@ fn bore_backbore_and_spot_shapes() {
     p2.cycle = CycleChoice::Spot;
     let t2 = drill(&p2).unwrap();
     assert!((one(&t2).bottom_z - 9.0).abs() < 1e-9, "spot stops at the floor");
+}
+
+#[test]
+fn bore_door_refuses_a_tool_that_will_not_enter() {
+    let mut tool = drill_tool(8.0); // the slide's full cutting dia.
+    tool.kind = ToolKind::Bore;
+    let wall = [hole((10.0, 10.0), 3.0, 10.0, 4.0, false)]; // a dia. 6 hole
+    let e = drill(&params(&tool, &wall)).unwrap_err();
+    assert!(format!("{e:?}").contains("will not enter"), "{e:?}");
+    // Inside the FIT_TOL band is snap noise, not a wrong tool: silent.
+    let snug = [hole((10.0, 10.0), 3.9995, 10.0, 4.0, false)];
+    assert!(drill(&params(&tool, &snug)).is_ok(), "the fit band stays silent");
+    // Auto routes a Bore-kind tool to the same cycle, so the door reads
+    // the answer, not just the user's word.
+    let mut p = params(&tool, &wall);
+    p.cycle = CycleChoice::Auto;
+    assert!(drill(&p).is_err(), "the Auto answer reads the tool; the door reads the answer");
+}
+
+#[test]
+fn bore_refuses_a_stepped_hole_a_drill_does_not() {
+    // A folded counterbore: the narrow record hides a real ring, and a
+    // bore cycle would machine the bore through and miss it - refused
+    // by name, per the Prime Directive's unfinished over silently-wrong.
+    let mut tool = drill_tool(8.0);
+    tool.kind = ToolKind::Bore;
+    let counter = [Hole {
+        stepped: true,
+        ..hole((10.0, 10.0), 4.0, 10.0, 2.0, false)
+    }];
+    let e = drill(&params(&tool, &counter)).unwrap_err();
+    assert!(format!("{e:?}").contains("counterbore"), "{e:?}");
+    // The very same hole list drills honest: the ring is another
+    // operation's promise (recognize.rs's merge law, M5.0 words).
+    let emt = drill_tool(8.0);
+    assert!(drill(&params(&emt, &counter)).is_ok(), "a drill cycle owes nothing to the ring");
+}
+
+#[test]
+fn spot_dims_the_mouth_under_the_r_plane() {
+    // A hole standing on a pocket floor, its mouth 4.0 under the R
+    // plane: SPOT_DEPTH hangs off the ENTRY plane (hole.rs), so the
+    // dimple sits on the mouth - measuring it off R would spot the air
+    // above the floor and call it a cycle (M8.3).
+    let tool = drill_tool(4.0);
+    let pocketed = [hole((10.0, 10.0), 2.0, 6.0, 0.0, false)];
+    let mut p = params(&tool, &pocketed);
+    p.cycle = CycleChoice::Spot;
+    let t = drill(&p).unwrap();
+    let c = one(&t);
+    assert!((c.bottom_z - 4.0).abs() < 1e-9, "2.0 below the mouth at 6.0");
 }
 
 #[test]

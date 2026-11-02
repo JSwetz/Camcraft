@@ -19,6 +19,14 @@ pub struct Hole {
     /// the mesh's bottom.
     pub floor_z: f64,
     pub through: bool,
+    /// Set when recognition folded Z-stepped members (a counterbore, a
+    /// chamfer) into this hole: `radius` is then the NARROW bore and
+    /// the fold left a wider ring no field records (M8.3). A drilled
+    /// hole owes nothing to that ring - it is another operation's
+    /// promise - but a bore cycle finishing "the hole" would silently
+    /// miss it, so [`crate::drilling::cycle::drill`] declines stepped
+    /// holes for `Bore | BackBore` by name.
+    pub stepped: bool,
 }
 
 impl Hole {
@@ -133,6 +141,18 @@ pub const THROUGH_CLEAR: f64 = 1.0;
 /// G73 chip-break hop: up about a millimeter, snap the chip, continue.
 /// Published general practice for chip-breaking peck cycles.
 pub const CHIP_BREAK: f64 = 1.0;
+
+/// How far a RECOGNIZED radius may sit from the truth: the fitted
+/// circle's own tolerance, 20 um - over our tessellation's chord noise,
+/// under any real taper. It is one physical quantity wearing three
+/// laws (M8.3): the vertex residual a cylinder must meet to be one
+/// (`recognize.rs`), the radius gap that makes a folded wall pair a
+/// real step rather than the same wall twice, and the bore door's band
+/// in `cycle.rs` - a slide this much over the hole is snap noise, not
+/// a wrong tool; beyond it, refuse by name. A hand-entered radius is
+/// exact, so the band only ever gives the fit's benefit of the doubt
+/// to geometry the machine could not measure better.
+pub const FIT_TOL: f64 = 0.02;
 
 /// The Auto cycle law: the tool's kind speaks first (a tap taps, a
 /// boring bar bores); otherwise it is depth against the diameter -

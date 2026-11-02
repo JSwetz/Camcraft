@@ -140,6 +140,7 @@ fn analyze(tris: &[Triangle]) -> (Vec<Hole>, Vec<CrossHole>) {
             entry_z: lattice(f.smax),
             floor_z: lattice(f.smin),
             through: f.through,
+            stepped: false, // a single wall is not a step; merge_z decides
         })
         .collect();
     holes = merge_z(holes, mins[2]);
@@ -466,6 +467,15 @@ fn merge_z(holes: Vec<Hole>, mesh_min_z: f64) -> Vec<Hole> {
                         entry_z: h.entry_z.max(holes[j].entry_z),
                         floor_z: h.floor_z.min(holes[j].floor_z),
                         through: false,
+                        // The fold keeps the narrow wall and loses the
+                        // wide one - if the radii differ by more than
+                        // the circle-fit noise, say so (M8.3): below
+                        // FIT_TOL the two walls are the same wall as
+                        // far as we can tell, above it the ring is a
+                        // real feature the record cannot show. The
+                        // bore door in cycle.rs reads this flag.
+                        stepped: h.stepped
+                            || (h.radius - holes[j].radius).abs() > FIT_TOL,
                     };
                     h.through = (h.floor_z - mesh_min_z).abs() <= 1e-6;
                     grew = true;

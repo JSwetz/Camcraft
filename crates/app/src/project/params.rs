@@ -800,6 +800,12 @@ pub struct HoleDto {
     pub entry_z: f64,
     pub floor_z: f64,
     pub through: bool,
+    /// Recognition's counterbore witness (M8.3). Additive: a file
+    /// written before the flag reads `false` - the pre-M8.3 truth,
+    /// since nothing older than the flag's first commit could carry a
+    /// stepped reading. No version bump.
+    #[serde(default)]
+    pub stepped: bool,
 }
 
 impl HoleDto {
@@ -813,6 +819,7 @@ impl HoleDto {
             entry_z: lattice(h.entry_z),
             floor_z: lattice(h.floor_z),
             through: h.through,
+            stepped: h.stepped,
         }
     }
 
@@ -823,6 +830,7 @@ impl HoleDto {
             entry_z: self.entry_z,
             floor_z: self.floor_z,
             through: self.through,
+            stepped: self.stepped,
         }
     }
 }
