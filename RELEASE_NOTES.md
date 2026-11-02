@@ -1,17 +1,16 @@
-# CamCraft 0.5.0 (clean-room implementation)
+# CamCraft 0.6.0 (clean-room implementation)
 
-Fifth public release: Phases 6 and 8 — the interface learns manners and
-the generators review the order of their cuts. The UI is no longer one
-hard-coded dark skin: every color, radius and spacing rides a named
-token table, user themes load from JSON and are refused by name when
-unreadable, and the ribbon gives every operation kind one honest home —
-family doors, pinning, and a machine-kind switch that rides the undo
-history. Then every motion generator was visited and asked the same
-question again: how does the tool first meet metal, and in what order?
-The answers changed real laws — the entry family now reaches the first
-level, a cert proves the ramp before it is trusted, the bore's door
-refuses what will not fit, and a five-axis dive leads with the cut it
-lands into, not the plunge that brought it there.
+Sixth public release: Phase 9 — the workpane remake, every operation
+opens its own page. The dropdown that hid the ribbon is retired: press a
+kind in the ribbon and it creates that operation and opens *that
+operation's* pane; select its row in the tree and it edits in place. The
+six tab groups fold into one stacked pane — geometry, heights, passes,
+leads, feeds and machine limits at a glance, sections where the kind has
+them, gone where it doesn't. And the pane carries a law tested across
+all thirty registry kinds: every section header renders exactly when
+its kind has fields for it, and no field renders twice — the law that
+caught a real header/field collision on its first run and renamed it
+out of existence.
 
 This is an independent, clean-room reimplementation of user-visible
 HSMWorks behavior, specced from published documentation and general
@@ -19,32 +18,25 @@ machining knowledge. "HSMWorks" is a trademark of Autodesk; this project
 is unaffiliated (see AGENTS.md). Third-party notices:
 `assets/ui/LICENSES.md`.
 
-## What's new since 0.4.0
+## What's new since 0.5.0
 
-- **Themeable UI (M6.1)**: one named `Tokens` table drives every widget
-  and painted surface; a `camcraft-theme/1` JSON format loads user
-  themes from disk with caps and named refusals, a WCAG contrast module
-  derives unreadable states instead of shipping them, and switching is
-  a command — the light theme undoes like anything else.
-- **A home for every operation (M6.2)**: the ribbon's family sections
-  come from the kind registry — hiding, not darkening, per mounted
-  machine; every family behind one labeled door with pins, and the
-  Setup group switches Milling/Turning/Mill-turning by mounting that
-  kind's reference machine, through the undo history.
-- **Cutting order (Phase 8)**: a generator-by-generator review —
-  roughing (M8.1), finishing and planar (M8.2), canned, posed and
-  revolved (M8.3). Selected entries now reach metal as selected (true
-  helix or ramp into the first level, no silent plunge fallback);
-  contour, waterline and slot entries are certified against the air
-  above their destination before the ramp is trusted; the adaptive
-  ladder's trochoid and substitution law was held to account and
-  diagnosed; drilling grew a bore-fit door that refuses an oversize
-  tool or a stepped hole by name; the multi-axis stamp learned that a
-  dive's lead belongs to the cut it lands into; turning's order law
-  stands where the catalog rows already promised it. The whole registry
-  table carries its order-of-operations verdict.
-- **Projects**: persistence v40→v42 (theme reference, ribbon pins);
-  old files step up silently.
+- **Click-through creation (M9.1 A)**: the create dialog and the grouped
+  Type dropdown are retired — the ribbon creates or opens by kind, a
+  tree selection opens the existing operation in place, and the retype
+  verb rides the context menu as a command, so every open-and-edit is
+  undoable like anything else.
+- **One stacked pane (M9.1 B)**: the six section tabs fold into a single
+  scrolling pane with collapsing headers, per the Blender-style verdict
+  — `op_tab` retires (pure view state with nothing left to view), and
+  the field-placement drift guard is restated at exact strength: one
+  frame, every field located by label geometry, each rendered once.
+- **The pane law walks the registry (M9.1 C)**: one test per law across
+  all thirty kinds, headers checked against the same predicate the pane
+  consumes; it caught the swarf ladder's `Passes` field echoing its own
+  group header — now `Pass count` — where the old tab UI could hide the
+  ambiguity.
+- **Projects**: persistence format unchanged (v42) — the remake lives
+  in the UI; toolpath and G-code goldens byte-identical across it.
 
 ## What works
 
@@ -97,7 +89,8 @@ is unaffiliated (see AGENTS.md). Third-party notices:
   numbers (micron tolerances, exact counts) in CI, all platforms alike.
 - **Interface**: token theming with user JSON themes and a contrast
   gate, a dark and a light golden, the family-door ribbon, pinned
-    kinds, and the grouped command combo.
+  kinds, the grouped command combo, and one stacked operation pane per
+  kind — click-through creation, no type dropdown.
 
 ## How to run
 
@@ -115,17 +108,14 @@ is unaffiliated (see AGENTS.md). Third-party notices:
   and `assets/machines/`; the scripter's types in `assets/scripts/`;
   theme files ride the user themes door (Setup page).
 
-## Known limits in 0.5.0
+## Known limits in 0.6.0
 
 - The 2D/3D strategy catalogs from M2.4/M2.5 are still open (2D adaptive
   and offset roughing, engrave, chamfer mills, helical thread milling,
   steep-and-shallow, pencil, ramp, morphed spiral, geodesic); flowline
   landed with M5.1; surface-finish parameters from M2.2 remain open;
   IGES import is deferred.
-- Every kind has a ribbon home now, but every home still doors into one
-  generic property page: the workpane remake (M9.1) — one pane per
-  operation kind, click-through creation — is the next task.
-- The SDF stock engine (Phase 7) is queued behind it: the machined
+- The SDF stock engine (Phase 7) is the next build-out: the machined
   volume is still a height field, not yet a field you can see.
 - The WASM rung is a compile-only guarantee today — a web UI is its own
   future phase.
@@ -140,6 +130,13 @@ camcraft-ui -p camcraft-app -p camcraft-post`. CI runs the golden and
 numerical regression suites, all tests, the release-profile verdicts,
 clippy with warnings denied, and the headless app run
 (.github/workflows/ci.yml).
+
+## 0.5.0
+
+Fifth public release: Phases 6 and 8 — a token-themed interface with a
+home for every operation, and every generator re-asked how the tool
+first meets metal. See the git history (tag `v0.5.0`) for its full
+notes.
 
 ## 0.4.0
 
