@@ -7114,3 +7114,85 @@ layout-identical.
   no HSMWorks material (text, icons, posts) was consulted in the
   restructure - it was specced from the user's Blender reference and
   our own KindInfo registry.
+
+## M2.4 A - the two roughing names: full twins, mid-run rows, no new goldens (2026-11-02, stage A)
+
+- Two new OpParams variants (Adaptive2D, Offset2D), each the Pocket's
+  field list minus the fields its pinned strategy makes unreachable,
+  chosen over a Pocket variant with a kind-alias flag, because the
+  registry law every milestone since M5.0.2 enforces is one variant
+  per catalog name: the pane, the digest, the sane-gate and the
+  project file are exhaustive matches on the enum, and an alias would
+  make all four lie about which kind the document holds. Considered
+  and dropped: one `Rough2D { strategy }` twin-carrying variant -
+  it hides a catalog name inside a field the ribbon cannot sort by.
+- Tags 5/6: the twins ride the 2D mill's run right after Trace, NOT
+  appended at the table end as first planned. The gate's M6.2 ribbon
+  test (`sections_partition_the_registry`) proves each family's rows
+  form one contiguous run - an append would put two Mill2D kinds
+  inside the turning ladder and fail that law. The cost of the
+  middle insert is stated honestly: every later row shifts +2, so
+  Drill..BoringTurning's cached stamps read Stale exactly once (the
+  tag is the digest's head byte) and regenerate byte-identically;
+  saved ribbon pins, which are table indices, ride a new v42 -> v43
+  ladder rung in `apply.rs` (`idx >= 5 -> idx + 2` - the PostDto
+  law: names survive growth, indices need a rung), and a test in
+  ribbon.rs walks a v42 file to prove it. Two laws came out of the
+  fix that the append first hid: the OpType ENUM's declaration order
+  IS the table order (`OpType as usize` is used as a table index in
+  six test files), now pinned by `row.ty as usize == i` in the
+  registry law; and every ordinal read in a test went from a bare
+  literal to `OpType::X.ordinal()` / `as usize`, so the next
+  mid-run move cannot silently retarget a test.
+- 2D Offset has NO engagement field at all (the variant drops it),
+  while its kernel call pins `max_engagement: 45.0` - inert, because
+  the pocket kernel only reads that number under the Adaptive
+  strategy. Chosen over carrying the field and ignoring it: a pane
+  must not render a door the kind cannot open (the strategy combo
+  is gone from both twins' panes for the same reason - the kind IS
+  the strategy), and 45.0 is inside the sane gate's (0, 90] door so
+  the pinned value can never itself refuse.
+- PROJECT_VERSION 42 -> 43: the two ParamsDto arms are NEW VARIANTS,
+  not additive fields - a v42 build meeting them fails on the unknown
+  variant name, which is the wrong refusal to read (it names a
+  variant instead of a version). The bump makes it a version refusal
+  before a serde one; nothing in the v42 shape moved, so v43 files
+  keep every other key byte-identical.
+- Digest law: the kind tag at the head of the stream already pins
+  which ladder runs, so the twins' digest is the pocket's minus the
+  strategy byte (and, for Offset, minus the engagement value that
+  no longer exists). A retype Pocket(Adaptive) -> 2D Adaptive goes
+  Stale exactly once - different tag - and regenerates byte-
+  identically; roughing2d.rs's stamp test is the proof of the
+  first half, the path-equality tests of the second.
+- No new golden files, chosen over dumping `adaptive2d_plate.cl` /
+  `offset2d_plate.cl`: the twins are LAW-EQUAL to the pocket run
+  they pin, and the equivalence tests assert that against the
+  pocket path generated in the same run, which a frozen golden
+  cannot (a golden drifts silently the day the pocket itself
+  legitimately moves). The pocket's ladders already carry goldens
+  (`pocket_waterline_plate_with_island.cl` in the file lane, the
+  adaptive engagement discipline in the machining2d suite).
+- The gate found one seam the compiler could not: `section_z_of`'s
+  top_z match listed Contour|Pocket|Trace but not the twins, so
+  `region_for`'s `unwrap_or(Ok(0.0))` fallback sectioned a twin at
+  world z=0 - for the test's stock that refused loudly ("no
+  material at z = 0.000", never a silent wrong cut - the Prime
+  Directive's fallback design working), for a real job it would
+  have machined at a plane no height ever named. Fixed to read the
+  twins' top_z like the pocket's; the lesson (matches! guards
+  compile under exhaustiveness sweeps) got the roughing2d.rs
+  doc-level generation tests, which the kernel-level goldens alone
+  would have missed it too.
+- The pane renders through one shared `roughing2d_pane` helper (the
+  pocket's section map with the strategy row removed), the glyph is
+  Icon::Pocket (no-new-asset law, the Pocket3D precedent), and the
+  closed-chain selection refusal now names the kind the user
+  actually picked ("a 2D Adaptive cannot end mid-edge") instead of
+  the pocket's word for it - M6.x's refusals-name-the-thing law
+  applied at the first site a retype makes the old sentence a lie.
+- Provenance review: the two names and their captions are Autodesk's
+  published user-documentation vocabulary used behaviorally (what the
+  operation does, not how); the ladders themselves are the kernel's
+  own M8.1 engagement study and the pocket's waterline tiling, and
+  no HSMWorks posts, params tables or text were consulted.

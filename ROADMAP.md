@@ -62,8 +62,8 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 | Slot | ✅ | M1.3 |
 | Trace | ✅ | M1.3 |
 | 2D Pocket (zig / winding) | ✅ | M1.3 |
-| 2D Adaptive roughing | 📋 | M2.4 |
-| 2D Offset pocket roughing | 📋 | M2.4 |
+| 2D Adaptive roughing | ✅ | M2.4 |
+| 2D Offset pocket roughing | ✅ | M2.4 |
 | Engrave | 📋 | M2.4 |
 | 2D Chamfer | 📋 | M2.4 |
 | Circular (pocket / vault) | 📋 | M2.4 |
