@@ -199,3 +199,49 @@ fn drill_cycles_refuse_the_stamp_by_name() {
     let e = stamp_axes(&path, &pitched_plane(), r, &AxisControl::default(), None).err();
     assert!(matches!(e, Some(GenError::Invalid(_))), "got {e:?}");
 }
+
+#[test]
+fn the_stamp_leans_a_dive_with_the_cut_it_lands_into() {
+    // M8.3's entry restatement: a dive dead down onto a flank carries
+    // travel, but none ALONG a cut that has not started - the lead
+    // must lean with the feed the dive lands into (the answer the
+    // drive-curve family already gives), not inside the plunge plane.
+    // The old law leaned the dive in (normal, vertical): a z tilt of
+    // sin(lead); this world says the tilt belongs in y.
+    let r = 3.0;
+    let wall = |y: f64, z: f64| p(0.0, y, z);
+    let facets = vec![
+        Triangle::new(wall(-60.0, -60.0), wall(60.0, -60.0), wall(60.0, 60.0)),
+        Triangle::new(wall(-60.0, -60.0), wall(60.0, 60.0), wall(-60.0, 60.0)),
+    ];
+    let ms = vec![
+        Move::new(MoveKind::Rapid, p(r, 0.0, 10.0), p(r, 0.0, 5.0), None),
+        Move::new(MoveKind::Plunge, p(r, 0.0, 5.0), p(r, 0.0, 0.0), Some(200.0)),
+        Move::new(MoveKind::Feed, p(r, 0.0, 0.0), p(r, 10.0, 0.0), Some(800.0)),
+    ];
+    let out = stamp_axes(
+        &Toolpath::new(ms),
+        &facets,
+        r,
+        &AxisControl {
+            lead_deg: 15.0,
+            lag_deg: 0.0,
+            max_tilt_deg: None,
+        },
+        None,
+    )
+    .unwrap();
+    let n = p(1.0, 0.0, 0.0);
+    for mv in [&out.moves[1], &out.moves[2]] {
+        let a = axis_of(mv.axis.expect("a dive onto a flank poses"));
+        assert!(
+            (angle_between(n, a) - 15f64.to_radians()).abs() < 1e-9,
+            "the lead identity must hold on the dive: {a:?}"
+        );
+        assert!(a.z.abs() < 1e-9, "the dive must not lean in the plunge plane: {a:?}");
+        assert!(
+            (a.y.abs() - 15f64.to_radians().sin()).abs() < 1e-9,
+            "the lean rides the cut the dive lands into (+y): {a:?}"
+        );
+    }
+}

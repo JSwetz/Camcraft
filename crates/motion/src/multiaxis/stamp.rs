@@ -254,8 +254,17 @@ fn pose_law(
     }
     // The feed direction: this move's travel; a vertical entry has
     // none of its own, so the next move's states where the cut goes.
+    // M8.3 made the sentence true the comment always claimed: a dive
+    // DEAD DOWN onto a flank has travel, but none ALONG a cut that
+    // has not started - its own vector would lean the lead inside
+    // the plunge plane. The cut the dive lands into is the next
+    // move's, which is what the drive-curve family already stamps
+    // its first station with (curve.rs); both answers now read
+    // "lead along the cut". A dive that lands on nothing (the path
+    // ends here) keeps its own vector: there is no cut to lead by,
+    // and the law says so at the end of this fn.
     let mut t = p - mv.from;
-    if tl(t) <= 1e-9 {
+    if tl(t) <= 1e-9 || (t.x * t.x + t.y * t.y <= 1e-18 && 1.0 - n.z * n.z > 1e-18) {
         t = rest
             .iter()
             .map(|m| m.to - p)
