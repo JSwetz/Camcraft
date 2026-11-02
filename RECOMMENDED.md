@@ -6768,3 +6768,223 @@ lands with it: the comp data enters the stream where the generators
 enter, not in a retrofit. The registry's remaining ⚠️ rows (M1.1
 IGES, M1.4/M1.5's deferred items) get a verdict pass at M7.3's
 all-green sweep, where every row must read green or say why not.
+
+## M8.3 drilling - the bore's fit door, the fold's flag, and where a refusal belongs
+
+The drilling family's order-of-operations visit: the R-plane law read
+satisfied for every cycle kind (hop `.max(r_z)`, chains starting at
+r_z, G73's `.min(p.r_z)` hop), the radial frame clean (mouth-based
+already, Tap/Bore/BackBore refused by name at cross.rs), and three
+REAL findings, all fixed in the generator, all byte-identical on the
+goldens.
+
+**Chosen: the tool-fit refusal lives in `cycle.rs`, not in the command
+layer or the verifier.** A slide whose cutting diameter will not enter
+the hole is refused where the cycle resolves `kind` - the one place
+that holds tool, hole, and cycle simultaneously. Considered and
+dropped: a command-construction door (validation-time has no mesh -
+recognition's folds land after the command is accepted, so the door
+would guard only hand-entered holes); a verifier-only fix (it exists
+today, post-hoc and generic - a gouge warning after the toolpath is
+built; the Prime Directive's "validate early" wants the named refusal
+at the generator, with the verifier kept as the backstop it always
+was). The family's own precedent is the tap-feed law: doors that read
+generated context live in `cycle.rs`.
+
+**Chosen: one FIT_TOL (0.02 mm) wearing three laws, over a tight 1e-3
+door band.** First cut at the door used 1e-3 (ten lattice steps).
+Wrong: a RECOGNIZED radius carries the circle fit's own uncertainty -
+legitimately ~0.02 - so a snug tool on a real hole would trip a door
+stricter than the measurement it gates (a false refusal of a correctly
+sized reamer). 0.02 is the same physical quantity in all three places:
+the vertex residual a cylinder must meet (`recognize.rs`'s old private
+const, value unchanged there), the radius gap that makes a folded wall
+pair a real step rather than the same wall twice, and the door's band.
+Past the band the refusal is certain; inside it the verifier still
+watches with its 0.01 gouge tolerance, so a truly oversize slide is
+flagged late-and-generically rather than silently passed - the band
+gives the doubt to geometry, never to the wrong tool.
+
+**Chosen: Tap gets no fit door - by fixture, not by oversight.**
+`tap_plate` threads a Ø10 tap into a Ø5 pilot: a Tap wider than its
+hole is the entire process. Same proof reads why the door matches
+only `Bore | BackBore`: the boring slide travels its WHOLE diameter
+inside the wall; a drill and a tap are sized to the hole they make,
+not the hole they enter.
+
+**Chosen: the counterbore fold says `stepped`, the bore declines, and
+per-step cycle emission is deferred.** Recognition's merge_z keeps the
+narrow wall and drops the wide ring - a fact no single-radius record
+could show, and a Bore cycle finishing "the hole" would silently miss
+it. `Hole::stepped` rides the DTO as `#[serde(default)]` (old files
+read false - the honest pre-M8.3 truth, no PROJECT_VERSION bump) and
+the Drill digest (a re-detect that folds a step marks the op Stale).
+`CrossHole` gains no flag: radial Bore is refused by name in v1, so a
+flag there would guard nothing. Considered and dropped: emitting the
+folded counterbore as a drill-then-bore pair (or G86+step cycles) -
+the ring's diameter and depth are exactly what the fold THREW AWAY;
+faithful cycles need the wide wall remembered, which is a recognition
+feature (ROADMAP-scale), not a cycle law. The door refuses by name
+until then: "that hole is a counterbore - the cycle would bore the
+narrow dia. through and miss the ring."
+
+**Chosen: Spot hangs its dimple off the mouth, not the R plane.**
+SPOT_DEPTH's doc always said "below the entry plane"; the axial law
+had drifted to `r_z - SPOT_DEPTH`, so a hole on a pocket floor got an
+air cut above the floor instead of its locating dimple. One line
+(`(h.entry_z - SPOT_DEPTH).max(h.floor_z)`), harmonizing with the
+radial frame, which already read the mouth. Byte-identical whenever
+Top-of-Part == the hole's entry, which is every fixture.
+
+**Disclosure (gate bookkeeping): zero golden movement.** All 13 .nc
+goldens byte-identical at this commit; every fixture has
+`entry_z == r_z` and drills at Auto (never Bore), so all three laws
+are no-ops on committed output. Motion lib, drilling_cross, golden_cl,
+operations, posting, sim, project_roundtrip, commands_undo, ui suites
+green; clippy -D warnings clean on motion/app/ui. Code commit 604adf4.
+
+**Verdict on the visit's open question ("a bored one may" want a
+helix): no helix joins the canned bore, and the fit door is what the
+question was really asking.** A slide's whole body travels inside the
+wall - the only lateral motion it could make IS the cut, so a helical
+bore entry would be a single-point tool orbiting, which is a milling
+strategy (contour/Helix on a hole region), not a cycle verb. What a
+too-wide slide genuinely needs is not a wider door but the honest
+answer: it does not fit - refuse by name (the door), or orbit it in
+the operation layer with the finishing family's proofs. The catalog
+rows already offer that path; the cycle declines it.
+
+## M8.3 multi-axis - the dive's three entry answers, and which one to believe
+
+The posed family's visit asked what the dive's first engagement
+really is, what the cone dodge leaves standing at entry, and how
+lead/lag answers the dive. The audit answered all three; one law was
+wrong, two are verdicts, one is a wording correction.
+
+**Chosen (and fixed): a dive's lead rides the CUT it lands into, not
+the plunge.** `pose_law` had the sentence right and the predicate
+wrong: "a vertical entry has none of its own, so the next move's
+states where the cut goes" fired only on ZERO-travel moves. A dive
+dead down onto a flank has travel - all of it down - so the lead
+rotation leaned inside the (normal, vertical) plunge plane. The
+drive-curve family already solves the same station question the
+other way (`curve.rs`: neighbor-tangent through the entry, posed
+explicitly onto the first dive), and `wrap_exit` gives a third,
+deliberate answer on the azimuth. Fix: exactly-vertical travel
+meeting an off-vertical contact asks the next move for the feed
+(`stamp.rs`, one `||` in the predicate); a ramped dive keeps its own
+vector (it IS a cut direction), and a dive that lands where the path
+ends keeps today's "nowhere to lead, hold the normal" tail. Considered
+and dropped: harmonizing all three families' entry frames - curve's
+tangent-from-neighbors and wrap's azimuth are correct FOR their
+motion; the stamp's was the only one contradicting its own comment.
+Byte-identical at lead = lag = 0 (the rotation is the identity),
+which is every committed golden: the lead-15 flow fixture passes
+unchanged, and `the_stamp_leans_a_dive_with_the_cut_it_lands_into`
+fails the old law on its z clause. Code commit a006f13.
+
+**Chosen: the escape cone's endpoint-only station stays; the dive's
+swept column is the verifier's named, blocking verdict.** Generation
+tests the shank at `mv.to` alone (`stamp.rs:164`, `avoid.rs:79-86`):
+a pose clear at the endpoint can sweep steel mid-dive, and the
+generator gets no dodge chance for it. What catches it is loud and
+specific: (c3)'s mid-path sweep (`sweep.rs`, the 4x5 grid between
+threaded from/to poses, cut moves) warns by move index, and a warned
+path blocks the post (`posting.rs:194`). Considered and dropped:
+2-4 lerped `shank_hits` stations inside `cut_axis` - it would
+duplicate (c3)'s grid in the generator, change bytes for paths the
+post already refuses honestly, and re-implement badly what M7.1's
+stock-as-field will do exactly (one SDF lookup per sampled station,
+no tessellated column). The verdict line states the division: the
+generator aims, the verifier sweeps, the post blocks.
+
+**Chosen: the wrap families' radial-entry assumption is recorded,
+not papered over.** `rotary_offset` certifies in developed space and
+`wrap_exit` maps a developed plunge through as "the single radial
+line it is" with no facets in hand - below rho_max, a radial dive is
+ASSUMED free, the s-metric stands at rho_max scale, and neither
+rotary twin takes a shank (`params.rs:468-477` says so by exclusion).
+A small-radius boss under a dive's azimuth is the hole; the world-
+space (c)/(c3)/gouge laws are the backstop that names it at post.
+Considered and dropped for this milestone: threading `facets` into
+`wrap_exit` and post-mapping each dive - a real feature (world re-
+certification of developed paths), it wants M7.1's field to be cheap,
+and building it tessellated now would be the third swept-volume
+implementation in the tree. The registry verdict line says "assumed
+free below the skin's widest radius" in exactly those words.
+
+**Verdict (no fix): the ladder's air links re-pose before every
+lateral rapid.** Hops are Feed-up-then-Rapid (`rings.rs:247`,
+`march.rs:309`): the air-ending Feed states no pose = vertical, so
+the traverse that follows runs straight up the machine's home axis.
+verify reads rapids as HELD pose (`sim.rs:584`) and law (d) position-
+checks lateral travel under stock, but (c)'s band walk skips rapids
+by filter (`engine.rs:115,194`) - the exposure a tilt-POSED rapid
+would open is real in law text and unreachable in every shipped
+generator's choreography. The verdict line keeps it visible for the
+day a generator does link face-first.
+
+**ROADMAP wording correction coming with the close-out annotation:**
+the dive is AT the posed axis (orientation is the endpoint's, carried
+from the move's first line; positions ride straight down), not ALONG
+it - "along" reads as a radial approach, which is the wrap family's
+law, not the ladder's.
+
+## M8.3 turning - the order the catalog already promises, and where a lathe's laws stand down
+
+The revolved family's visit asked the inside-out law (M5.2 F) re-asked
+as an ORDER question: does every turning generator compute the part
+profile BEFORE it sequences its operations, and do the mill-shaped
+verifier laws read a lathe honestly? Verdict: yes and yes - the
+family was clean; the audit's finding is the record of where each law
+stands and why, not a fix.
+
+**Chosen: the catalog row stays the order's home, not a new UI field.**
+"rough OD -> face -> drill/bore -> finish, per op, stated in the
+catalog rows" is what M8.3 asked; the rows (ROADMAP's Turning section)
+carry ✅ homes, the generators sequence per-op from the computed
+profile, and `KindInfo` (kinds.rs:1154) deliberately holds no "runs
+after:" slot - a tooltip order clause would be a second truth beside
+the generators' own choreography. The registry row's verdict text is
+this family's statement.
+
+**Chosen (confirmed, not changed): the mill's rapids law stands down
+for the lathe, with its reasons in the law text.** Verify's law (d)
+skips `Mode::Revolve | Mode::Radial` (engine.rs:383-398): a turning
+insert is a POINT in XY and its form lives in the meridian - the XY
+column convicts every full-depth threading retract for a collision
+the meridian scan knows cannot happen. Fixture steel (d2) still
+stands, "it is a box". The turning rapids' safety promise is the
+kernel's own and structural: blade.rs travels rapids at
+`rho_clear = r_max + tol` (blade.rs:22,148) - every rapid, every
+family; there is no parting rapid through X0.0 to collide with, and
+the threading pull-out slides along its own kerf's flanks. Law (c)'s
+band walk skips rapids in ALL modes (engine.rs:115,194) - the posed
+families' hop law re-poses to vertical on the air-ending retract
+BEFORE any lateral rapid (stamp.rs's held rule), so no shipped
+generator traverses under load with a tilt, and the (c3) mid-path
+sweep covers what remains. Considered and dropped: a meridian rapids
+law - the promise is by-construction; a law checking a construction
+is documentation with a false-positive budget.
+
+**Chosen (confirmed): no turning family can leave a standing step the
+next one silently rides through.** Profile roughing refuses
+`stepdown > 2 * nose_radius` BY NAME (prof.rs:195, the standing-ridge
+law) and steps its ladder down to a uniform `stock_to_leave` that the
+finisher's ride at d = nose takes off; facing is a radial-pass ladder
+through the axis, station by station (mod.rs stage-A law); boring
+enters only through a pre-existing hole or bored pilot - the M5.2 F
+door law is the entry, measured as the hole, and the Radial mode's
+stands-downs read from exactly that promise. The meridian verdict
+(revolve.rs) unions feed bands only - "a rapids' band moves air, not
+edges" - because rapids cannot cut, and the scan measures the part,
+not the machine's transit.
+
+**Verdict on the `warnings` channel: closed loop, named consumers.**
+Generators push (blade/thread/form_warnings, generate.rs:1894-1936),
+the cache carries (schema.rs:174), the project persists
+(entity.rs:245), the post gate BLOCKS on them (posting.rs:194), the
+operation page walls them (pages.rs:352-372) and the tree counts them
+(panes.rs:1361) - nothing writes a warning that no one reads, and
+nothing reads one that no generator stands behind. Recorded so a
+future audit spends its minutes elsewhere.

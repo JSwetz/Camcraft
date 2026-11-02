@@ -1113,6 +1113,7 @@ table at the foot of this file, and their decisions in `RECOMMENDED.md`.
 - **Phase 4 - Refactoring and reuseability.** (M4.1-M4.4, M4.2b) — ✅
 - **Phase 5 — Power: Multi-Axis, Turning, Scale** (M5.0-M5.3, Release 0.4.0) — ✅
 - **Phase 6 — UI refactoring.** (M6.1-M6.2) — ✅
+- **Phase 8 - Cutting order: the generator review & refactor.** (M8.1-M8.3, Release 0.5.0) — ✅
 
 ---
 
@@ -1283,146 +1284,6 @@ NVIDIA sparse distance fields). Everything composed from these public
 sources; all Rust/wgpu/WGSL code here is ours; no HSMWorks or vendor
 material of any kind.
 
-## Phase 8 - Cutting order: the generator review & refactor.
-
-**Start order: this phase runs as soon as Phase 6's UI milestones are out
-of the way - before Phase 7.** The SDF engine changes what the sim
-*knows*; it changes nothing about the order in which a tool reaches
-metal. An entry that dives straight into a finished wall is wrong in
-both stock engines, and fixing it must not wait on either.
-
-The founding findings, verified at the phase's opening in the shipped
-code (`crates/motion`):
-
-- **The chosen entry family never meets the first level.** Both pocket
-  ladders apply `Plunge`/`Ramp`/`Helix` only at LEVEL CROSSINGS:
-  `machining2d/levels.rs` gates the arms on `crossing = !first &&
-  last_cut_z != Some(z)`, and `machining3d/ladder.rs` gates them on
-  `li > 0`. The first dive into uncut stock always takes the fallback
-  arm - rapid over `passes[0]`'s start and a straight axial plunge at
-  `plunge_feed` - whatever the user selected. A "helix entry" pocket
-  enters material with a plunge.
-- **And the plunge lands on the wall.** A Waterline/`Adaptive` plan's
-  `passes[0]` is the OUTERMOST ring (`pocket.rs::waterline_passes`:
-  ring k is the area eroded by `k * stepover`), so an adaptive pocket
-  of a round hole starts by diving full-depth at the finished wall -
-  100 % wall engagement on the surface the operation exists to leave
-  clean - then marches rings toward the center, leaving the core
-  attached until last. Backwards order for roughing.
-- **The helix that does run is in-plane at the places it matters.**
-  `entry::helix_down` is a true Z-descending dive (it spirals one
-  stepdown between planes), but the ladders place it with
-  `entry::dive_point`, which picks the plan's longest chord - any
-  consecutive point pair, line or arc segment alike - whose midpoint
-  sits inside BOTH leg regions eroded by the helix radius. There is no
-  straightness test; containment is what bites. An all-arcs ring plan -
-  exactly what a round pocket tiles to - has its chords ON the ring
-  boundary, so every midpoint lies inside the cut, never in the eroded
-  clear regions; the dive resolves `None` and the arm falls back to
-  climb-and-plunge. On round geometry the helix entry rarely engages at
-  all, silently.
-- **`Adaptive` is rings, not trochoids.** The strategy spaces
-  waterline rings at the engagement-law step (M2.1c's sagitta); the
-  bound holds only each ring's own wall bite. The name promises HEM;
-  the pass order delivers offset rings.
-
-The phase is a VISIT, not a rewrite: every generator in the registry,
-one by one, asked the same three questions - (1) how does the tool
-FIRST engage uncut material, and does that answer honor the user's
-entry choice? (2) in what ORDER does the plan traverse the material,
-and is that the right order for the op's job (rough: air and floor
-before walls, engagement bounded everywhere; finish: entry at the
-least-harmful tangent, never a dive on the finished face)? (3) what do
-the LINK moves between passes do, and can any of them cross live
-material or a planned pass? Each visit ends in a RECOMMENDED.md entry
-stating the order of operations (rapid → approach → entry → cut →
-link → retract) as found, verdict right/wrong, and if wrong the fix
-with its goldens regenerated only for the genuinely-changed order and
-the heavy envelope/verify lanes green as the referee.
-
-Provenance: entry motions from the public G-code literature (linear
-ramp and helical interpolation, RS-274 canned cycles); pass-order and
-engagement claims from published trochoidal/HEM computations - the
-same sources `entry.rs` already names. No HSMWorks material.
-
-### M8.1 - The roughing ladders: entry into metal first, then pass order
-**Goal: the entry family the user chose is what first engages the
-stock, and a roughing plan reaches the middle without biting the
-wall it must leave for the finisher.** — ✅ (M8.1 code cc5d89d;
-`dive_room` erosion-by-distance, inside-out roughing rings,
-substitution notes on the status line; level-0 family obedience in
-both ladders became TRUE only at the fix 1edb0c5 — the gate round
-verified counts, not shapes; ledger in RECOMMENDED.md)
-
-- **Level 0 obeys the family**: `Helix` dives in from the safe plane
-  along a true Z-descending helix whose landing spot has room for the
-  widened disc across the WHOLE depth it crosses (a center-eroded
-  plan's own floor, not a straight-run search), `Ramp` takes its
-  diagonal from above; only `Plunge` may dive axially, and then at a
-  legal interior point, not on `passes[0]` on the wall. The `li > 0`
-  gates become proofs, not excuses: legality at the first level is
-  "the column the disc sweeps is inside the cutter-center area", the
-  crossing arms' superset law generalized to the surface dive.
-- **Roughing order, stated per strategy**: wall-ring-first stays for
-  FINISH waterline (it is the honest shape there); the roughing
-  branches get interior-out or a continuous inward spiral with an
-  earned wall pass last. Zigzag keeps its rows; its first dive obeys
-  the same entry law.
-- **`Adaptive` earns its name or says so**: either trochoidal wall
-  following per the engagement law's own literature, or the label and
-  the panel's promise amended to "constant-engagement rings" - the
-  RECOMMENDED entry picks one and the UI quotes it.
-- Silent fallbacks (dive `None` → plunge) become diagnostics: the
-  status line names the substitution - Prime Directive, honest-output
-  edition.
-
-### M8.2 - The finishing and planar families
-**Goal: the same three questions answered for every finishing and 2.5D
-kind, with M1.3's open debt (spiral/helical entries) swept at the
-contour side.** — ✅ (M8.2 code 95d50b3 bda85c1 6d2c424; contour's Z
-entry rides the family certified against the destination's air, the
-wall refuses by name (A); tangent-ring entries re-proved vertical,
-ramped first contact opt-in with refusal notes (B); slot certified on
-the closed-form convex stadium, arms stood down where a tab is metal,
-the hop rides a tall tab's top, trace's plunge theorem stated (C);
-heavy lane green at 6d2c424; ledger in RECOMMENDED.md)
-
-- finishing3d waterline/parallel/polar/flow: the tangent-ring entry
-  ("a vertical plunge at a tangent-ring entry never cuts above the
-  ring's level", `finishing3d/mod.rs`) gets re-proved on steep parts
-  and gains a ramped first-contact option where the tangent is not
-  gentle; ring-to-ring links keep their floor-hop law.
-- 2D contour/slot/trace/chamfer/face: in-plane tangential leads exist
-  (`contour.rs` `Lead::Arc` law); the Z entry they ride - plunge at
-  the lead's wall point - is the M1.3 open item: a helical or ramped
-  entry to depth at a legal spot replaces the dive where the tool
-  enters on a wall, and `Lead::None` stays the machine-simple default.
-- Tabs/bridges and hop planes: order checked so no link crosses a
-  standing tab's air; the verifier's rapid-inside-footprint rule
-  quoted per family.
-
-### M8.3 - Drilling, multi-axis, turning
-**Goal: the canned, posed and revolved families answer the same
-questions; cycle order and approach order get stated, not assumed.** — 📋
-
-- drilling cycles: spot → peck → bottom → retract orders audited
-  against the G73/G83 semantics already posted (`drilling/cycle.rs`),
-  the R-plane law per cycle, and hole-recognition defaults checked
-  against the entry family question (a drilled hole needs no helix; a
-  bored one may - helical bore entries join this visit).
-- multi-axis: the posed ladder's first engagement is a dive ALONG THE
-  POSED AXIS - what the cone dodge leaves standing at entry, and the
-  wrap/rotary families' radial entries, get the same verdict lines;
-  lead/lag law restated as this family's entry answer.
-- turning: profile approaches from the OD obey promised-face; boring
-  enters through the pre-existing hole or a bored pilot, never
-  through the core face - the inside-out law (M5.2 F) re-asked as an
-  ORDER question: rough OD → face → drill/bore → finish, per op,
-  stated in the catalog rows.
-- Close-out: the whole registry table annotated with its order-of-
-  operations verdict; the heavy lane runs every family's goldens;
-  tag with the next release (0.5.0, with the Phase 6 UI items in it).
-
 ## Phase 9 — The workpane: every operation opens its own page.
 
 **Why this phase exists (2026-11-01, user verdict with a reference
@@ -1510,7 +1371,7 @@ gone, and existing operations edit in place.** — 📋
 | **M7.3** | Dexel retirement | Both engines verdict-identical on the heavy lane (rest/gouge/deviation within declared epsilon), per-brick update cost law, column engine retires | 📋 |
 | **M8.1** | Roughing entry & order | Level-0 obeys the entry family (true helix/ramp into metal, no silent plunge fallback), roughing pass order reaches the middle off the wall, `Adaptive` trochoid-or-renamed, substitutions diagnosed | ✅ |
 | **M8.2** | Finishing & planar order | Done: contour Z-entry on the entry family, certified against the destination bore air, wall-side opt-in refused by note (A); waterline tangent-ring entry re-proved on steep parts, ramped first contact opt-in, normals measured not assumed (B); slot ramp/helix certified on the convex cutter-center stadium (`Cert`), full-width substitution says its name, tabbed levels stand the arms down on the pre-A byte, tall-tab hop raise, trace plunge theorem (C); M1.3's spiral/helical debt swept; heavy lane green | ✅ |
-| **M8.3** | Canned/posed/revolved order | Cycle R-plane/peck/retract audit, helical bore entries, posed-axis first engagement, turning inside-out order per catalog row; registry annotated with verdicts | 📋 |
+| **M8.3** | Canned/posed/revolved order | Done: drilling - R-plane law kept per cycle, the bore's fit door refuses an oversize tool and a stepped (counterbore-folded) hole by name, Spot dims off the mouth, FIT_TOL unified as one trust wearing three laws; helical bore entries declined as a verdict (a wide slide is contour's verb); multi-axis - a dive's lead now rides the cut it lands into (the stamp matches curve.rs's first station; ALONG→AT corrected in the archived prose), cone-dodge-at-entry, wrap radial dives and tilt-posed rapids recorded as verdicts with their backstop chains; turning - order law stated in the catalog rows, the verifier's stands-downs documented, no entry-defect analog (ridge, kerf-slide and rho_clear laws refuse or prevent by name); whole registry annotated, heavy lane green on every family | ✅ |
 | **M9.1** | The operation opens its own page | Ribbon click-through (the create dialog + Type dropdown retired), one pane per kind from the KindInfo table, existing ops edit in place (selection → pane), Blender-style live creation | 📋 |
 
 ## Open questions & deferred
