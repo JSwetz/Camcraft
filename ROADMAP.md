@@ -1379,7 +1379,13 @@ verified counts, not shapes; ledger in RECOMMENDED.md)
 ### M8.2 - The finishing and planar families
 **Goal: the same three questions answered for every finishing and 2.5D
 kind, with M1.3's open debt (spiral/helical entries) swept at the
-contour side.** — 📋
+contour side.** — ✅ (M8.2 code 95d50b3 bda85c1 6d2c424; contour's Z
+entry rides the family certified against the destination's air, the
+wall refuses by name (A); tangent-ring entries re-proved vertical,
+ramped first contact opt-in with refusal notes (B); slot certified on
+the closed-form convex stadium, arms stood down where a tab is metal,
+the hop rides a tall tab's top, trace's plunge theorem stated (C);
+heavy lane green at 6d2c424; ledger in RECOMMENDED.md)
 
 - finishing3d waterline/parallel/polar/flow: the tangent-ring entry
   ("a vertical plunge at a tangent-ring entry never cuts above the
@@ -1503,7 +1509,7 @@ gone, and existing operations edit in place.** — 📋
 | **M7.2** | The machined volume in the 3D view | Sphere-traced viewport render on the egui-wgpu stack, progressive per-move playback, continuous deviation color map, on-demand marching-cubes mesh (a cache, never a truth), CPU fallback | 📋 |
 | **M7.3** | Dexel retirement | Both engines verdict-identical on the heavy lane (rest/gouge/deviation within declared epsilon), per-brick update cost law, column engine retires | 📋 |
 | **M8.1** | Roughing entry & order | Level-0 obeys the entry family (true helix/ramp into metal, no silent plunge fallback), roughing pass order reaches the middle off the wall, `Adaptive` trochoid-or-renamed, substitutions diagnosed | ✅ |
-| **M8.2** | Finishing & planar order | Tangent-ring entry re-proved + ramped first-contact option, contour/slot Z-entry (M1.3 debt swept), tab/hop link order | 📋 |
+| **M8.2** | Finishing & planar order | Done: contour Z-entry on the entry family, certified against the destination bore air, wall-side opt-in refused by note (A); waterline tangent-ring entry re-proved on steep parts, ramped first contact opt-in, normals measured not assumed (B); slot ramp/helix certified on the convex cutter-center stadium (`Cert`), full-width substitution says its name, tabbed levels stand the arms down on the pre-A byte, tall-tab hop raise, trace plunge theorem (C); M1.3's spiral/helical debt swept; heavy lane green | ✅ |
 | **M8.3** | Canned/posed/revolved order | Cycle R-plane/peck/retract audit, helical bore entries, posed-axis first engagement, turning inside-out order per catalog row; registry annotated with verdicts | 📋 |
 | **M9.1** | The operation opens its own page | Ribbon click-through (the create dialog + Type dropdown retired), one pane per kind from the KindInfo table, existing ops edit in place (selection → pane), Blender-style live creation | 📋 |
 

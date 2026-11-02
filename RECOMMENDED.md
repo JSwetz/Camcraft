@@ -6739,3 +6739,32 @@ at the commit's parent: motion machining2d 65/65 (5 new), app lib 27,
 operations 31, project_roundtrip 62, golden_cl 20, ui lib 128,
 shell 19, egui_app 3, clippy clean on all three crates. Code commit
 6d2c424.
+
+## M8.2 close-out - the heavy lane's verdict, and the roadmap queue beyond Phase 8
+
+**Chosen: M8.2 goes ✅ on the release `--ignored` lane run at the
+committed tree (6d2c424), not at the working tree.** app: 3 passed /
+0 failed (the 10M-facet stream wall, both envelope verdicts); motion:
+28 passed / 0 failed (finish3d 27 including the scallop diagonal
+crossing, dome flow); sim and ui have no ignored tests — their slow
+suites are the non-ignored snapshot/gpu ones, and the absence is
+recorded, not papered over. `git status --short crates` clean after
+the run: no committed golden was rewritten. The root `tests/` dir's
+`.new.png` candidates predate the lane (known CWD artifact of UI
+snapshot suites run outside `crates/ui`) — untracked, unstaged, no
+committed golden involved.
+
+**Chosen: the queue order after Phase 8 is M9.1 → M2.4 → M7.1-7.3 →
+M2.5.** Considered: numeric order (M2.4 before the UI remake) —
+dropped, because M2.4 births seven new kinds and M9.1's law is that
+every kind owns its pane: building kinds into the one-dropdown page
+would mean touching that page seven more times to tear it apart
+afterward. M2.5 waits for M7.1 because its two hardest families
+(pencil = the distance field's ridge; steep-and-shallow = the
+normal-z split over the field) are field-native — the inside-out
+lesson again: build on the representation the family's definition
+lives in. M2.4's G41/G42 output ride-along (M1.3's last ⚠️ word)
+lands with it: the comp data enters the stream where the generators
+enter, not in a retrofit. The registry's remaining ⚠️ rows (M1.1
+IGES, M1.4/M1.5's deferred items) get a verdict pass at M7.3's
+all-green sweep, where every row must read green or say why not.
