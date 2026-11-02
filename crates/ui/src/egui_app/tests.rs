@@ -511,9 +511,8 @@ fn click_apply_edits_operation_through_commands() {
         _ => false,
     };
     assert!(staged_climb(&harness));
-    // M1.4 sectioning: the checkbox lives on the Feeds tab now, and a tab
-    // cell is the way in - navigation first, then the click law itself.
-    harness.get_by_label("Feeds").click();
+    // The stacked pane (M9.1 B): the Feeds-group checkbox is in the tree
+    // from the first frame - nothing to navigate to, just the click law.
     harness.run();
     harness.get_by_label("Climb milling").scroll_to_me();
     harness.run();
@@ -583,17 +582,23 @@ fn status_bar_offers_regenerate_all_when_something_is_stale() {
     );
 }
 
-/// The first SpinButton node's center: the Contour page's "Stock to
-/// leave" DragValue. Tree order is submission order; the only
-/// role-SpinButton nodes anywhere are DragValues (the painted strips
-/// carry no a11y marks), and with the Passes tab open it is the pane's
-/// only number (M1.4 sectioning) - the caller navigates before asking.
-fn stock_to_leave_center(h: &Harness<'static, ShellUi>) -> egui::Pos2 {
+/// The Contour pane's "Stock to leave" DragValue. The stacked page (M9.1 B)
+/// shows every section at once, so "the pane's only number" no longer holds;
+/// the field-label row pins it instead: the number is the DragValue that
+/// sits directly below its `field()` label (tree nodes are submission order
+/// and the page flows top-down; the role query is DragValues only - the
+/// painted strips carry no a11y marks).
+fn stock_to_leave_rect(h: &Harness<'static, ShellUi>) -> egui::Rect {
+    let lab = h.get_by_label("Stock to leave").rect();
     h.get_all_by_role(egui::accesskit::Role::SpinButton)
-        .next()
-        .expect("the properties pane owns DragValues")
-        .rect()
-        .center()
+        .map(|n| n.rect())
+        .filter(|r| r.top() >= lab.bottom() - 1.0)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the Stock to leave field draws its DragValue below its label")
+}
+
+fn stock_to_leave_center(h: &Harness<'static, ShellUi>) -> egui::Pos2 {
+    stock_to_leave_rect(h).center()
 }
 
 /// DragValue parity (divergence D5's proof, M-c): the drag path and the
@@ -603,10 +608,12 @@ fn stock_to_leave_center(h: &Harness<'static, ShellUi>) -> egui::Pos2 {
 #[test]
 fn drag_and_type_edit_the_same_staged_number() {
     let mut harness = shell_harness();
-    // M1.4 sectioning: "Stock to leave" is on the Passes tab - navigate
-    // there, and it becomes the only DragValue the pane renders.
-    harness.get_by_label("Passes").click();
+    // "Stock to leave" is one DragValue among the stacked pane's numbers
+    // now (M9.1 B) - the helper pins it by its field label, no navigation;
+    // the one thing the old tab click bought was bringing the field on
+    // screen, and that is now a plain scroll_into_view before measuring.
     harness.run();
+    harness.get_by_label("Stock to leave").scroll_to_me();
     harness.run();
     let leave = |h: &Harness<'static, ShellUi>| match h.state().state.op_ui.params {
         OpParams::Contour {
@@ -649,16 +656,20 @@ fn drag_and_type_edit_the_same_staged_number() {
 
     // The typed entry: click focuses (the DragValue re-renders itself as
     // a TextEdit with select-all), typing replaces, and
-    // update_while_editing commits the parse live.
+    // update_while_editing commits the parse live. The click pins the row
+    // by rect; while editing the widget may widen, so the row's top edge
+    // is the stable locator for the keystroke's node (the text event goes
+    // to the focused widget - any node on that row carries it).
+    let want = stock_to_leave_rect(&harness);
     harness
         .get_all_by_role(egui::accesskit::Role::SpinButton)
-        .next()
+        .find(|n| n.rect() == want)
         .unwrap()
         .click();
     harness.run();
     harness
         .get_all_by_role(egui::accesskit::Role::SpinButton)
-        .next()
+        .find(|n| (n.rect().top() - want.top()).abs() < 1.0)
         .unwrap()
         .type_text("25");
     harness.run();
@@ -690,12 +701,11 @@ fn drag_and_type_edit_the_same_staged_number() {
     );
 }
 
-/// M1.4's sectioning law, as a drift guard in the tips-match style:
-/// every named field of every kind renders on exactly ONE tab (visible
-/// when its tab is open, absent from the tree otherwise), and a kind's
-/// tab bar shows exactly the sections it has fields for - no dead tabs.
-/// If a field moves sections, a label changes, or a guard drops a field,
-/// this fails.
+/// M1.4's sectioning law in its M9.1 B shape - one pane per kind: every
+/// named field of every kind renders EXACTLY ONCE in the single stacked
+/// frame, and a group header rides the pane iff the kind has fields for
+/// that section (the tab bar's no-dead-tabs law, unstabbed). If a field
+/// moves sections, a label changes, or a guard drops a field, this fails.
 #[test]
 fn every_field_lives_on_exactly_one_section() {
     let mut harness = shell_harness();
@@ -761,7 +771,7 @@ fn every_field_lives_on_exactly_one_section() {
         (
             // A drill has no climb (the cycle owns the retract), no
             // Leads & Links (no wall to enter), and its Passes are the
-            // cycle's own numbers - the tab law this row pins.
+            // cycle's own numbers - the section law this row pins.
             "Drill",
             vec![
                 ("Geometry", vec!["Click selects:", "Holes", "Detect holes"]),
@@ -783,7 +793,7 @@ fn every_field_lives_on_exactly_one_section() {
         (
             // The 3-D pocket picks no geometry (the mesh silhouette is
             // the region - islands are computed, never selected): its
-            // Geometry tab is the bare pick law, and its Passes carry
+            // Geometry group is the bare pick law, and its Passes carry
             // the entry ladder's own fields. "Retract Z", "Helix lead
             // radius" and "Max engagement (deg)" are guard-rendered
             // (retype's defaults have none of them on), so they are not
@@ -846,60 +856,57 @@ fn every_field_lives_on_exactly_one_section() {
             ],
         ),
     ];
+    // One pane per kind (M9.1 B): the stack draws at once, no tab to
+    // open - so the law reads off a single frame. Every field of the
+    // kind's table renders EXACTLY ONCE (a field double-guarded under two
+    // headers shows as count 2, the drift this guard is for), and a group
+    // header rides the pane iff the kind has fields for its section - the
+    // tab bar's no-dead-tabs law, unstabbed: there is nothing to be dead.
     for (ki, (kind_name, sections)) in table.iter().enumerate() {
         let cur = harness.state().state.op_ui.params.clone();
         let retyped = crate::operations::retype(&cur, ki);
         harness.state_mut().state.op_ui.params = retyped;
-        let mut placement: Vec<(&str, usize)> = Vec::new();
-        for (sname, labels) in sections {
-            let si = all
-                .iter()
-                .position(|s| s == sname)
-                .expect("the table names the SECTIONS");
-            for l in labels.iter() {
-                placement.push((*l, si));
-            }
-        }
-        for (si, tab_name) in all.iter().enumerate() {
-            harness.state_mut().state.op_tab = si;
-            harness.run();
-            let has_tab = sections.iter().any(|(n, _)| *n == *tab_name);
+        harness.run();
+        for sname in all.iter() {
+            let has = sections.iter().any(|(n, _)| n == sname);
             assert_eq!(
-                harness.query_by_label(tab_name).is_some(),
-                has_tab,
-                "{kind_name}: the tab bar must show '{tab_name}' iff the kind has fields for it",
+                harness.query_by_label(sname).is_some(),
+                has,
+                "{kind_name}: the pane shows the '{sname}' group iff the kind has fields for it",
             );
-            // A kind cannot show a section it has no fields for - an
-            // out-of-set op_tab falls back to Geometry (0), the law the
-            // page's resolution line states.
-            let effective = if has_tab { si } else { 0 };
-            for (label, want) in &placement {
-                assert_eq!(
-                    harness.query_by_label(label).is_some(),
-                    *want == effective,
-                    "{kind_name}: '{label}' visible on tab {si}, it belongs to tab {want} - \
-                     one placement per field, always",
-                );
+        }
+        let mut seen: Vec<&str> = Vec::new();
+        for (_, labels) in sections {
+            for l in labels.iter().copied() {
+                if !seen.contains(&l) {
+                    seen.push(l);
+                    let n = harness.query_all_by_label(l).count();
+                    assert_eq!(
+                        n, 1,
+                        "{kind_name}: '{l}' renders {n} times - exactly one placement is the law",
+                    );
+                }
             }
         }
     }
 }
 
-/// A tab click is navigation, nothing more: the pane's state field moves,
-/// no command is queued, and the section's fields replace the previous
-/// ones (the view-state law from M1.4's toggle decision, same shape).
+/// The stacked pane needs no navigation (M9.1 B): what the old tab bar
+/// made two frames and a click show - a Geometry field and a Heights
+/// field side by side - the page now draws in one frame, and no click
+/// queues anything because there is nothing left to click.
 #[test]
-fn tab_click_navigates_and_queues_nothing() {
+fn the_stacked_pane_shows_every_section_unasked() {
     let mut harness = shell_harness();
     harness.run();
-    assert!(harness.query_by_label("Side").is_some(), "Geometry opens by default");
-    harness.get_by_label("Heights").click();
-    harness.run();
+    assert!(harness.query_by_label("Side").is_some(), "Geometry fields stand unasked");
+    assert!(
+        harness.query_by_label("Clearance Z").is_some(),
+        "Heights fields stand in the same frame"
+    );
+    assert!(harness.query_by_label("Heights").is_some(), "under their own header");
     let st = &harness.state().state;
-    assert_eq!(st.op_tab, 1, "the Heights cell did not open the Heights section");
-    assert!(st.pending.is_empty(), "opening a section must not queue a command");
-    assert!(harness.query_by_label("Clearance Z").is_some());
-    assert!(harness.query_by_label("Side").is_none(), "the closed tab's fields leave the tree");
+    assert!(st.pending.is_empty(), "a pane that renders must still queue nothing");
 }
 
 // ------------------------------------------------------- gesture plumbing
@@ -2861,7 +2868,6 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     assert_eq!(s0, None);
     {
         let sh = harness.state_mut();
-        sh.state.op_tab = 2; // Passes
         sh.state.sync_ops_ui();
         if let OpParams::Finish3D { pattern, stepover, .. } = &mut sh.state.op_ui.params {
             *pattern = camcraft_app::finishing3d::FinishPattern::Waterline;
@@ -3070,11 +3076,10 @@ fn detect_holes_refuses_recognizes_and_undo_empties_again() {
     let mut harness = shell_harness();
     crate::actions::add_operation(&mut harness.state_mut().state, 5);
     harness.run_steps(2);
-    // The pane now targets the new Drill op; its Geometry tab is the
+    // The pane now targets the new Drill op; the Geometry group is the
     // Detect button's home, and the draft reads the created params.
     {
         let sh = harness.state_mut();
-        sh.state.op_tab = 0;
         sh.state.sync_ops_ui();
     }
     harness.run();
@@ -3287,7 +3292,6 @@ fn radial_detect_fills_the_cross_list_on_a_millturn() {
     harness.run_steps(2);
     {
         let sh = harness.state_mut();
-        sh.state.op_tab = 0;
         sh.state.sync_ops_ui();
         sh.state.pending.push_back(CommandKind::LoadMachineFile(mt.clone()));
         let (world, history) = (&sh.state.world, &mut sh.state.history);
