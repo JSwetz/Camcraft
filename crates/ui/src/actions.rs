@@ -241,20 +241,25 @@ pub(crate) fn open_tool_editor(state: &mut State, name: &str) {
     state.tool_editor = Some(name.to_owned());
 }
 
-/// Quick-add an operation of `kind` (index into the `OpType` order the
-/// Create group buttons follow): name it past the existing ones, give it
-/// the newest tool, cut the stock with retyped default params, then make
-/// it both selected and targeted so the Operations pane lands on it.
-/// Without a tool the refusal is loud on the status line - the ribbon
-/// disables the button too, but every surface shares this one effect.
+/// Quick-add an operation of `kind` (index into the registry the ribbon's
+/// Create cells follow): name it after the kind it is - "2D Pocket2" says
+/// what geometry is coming, the way a pressed tool previews its work
+/// (M9.1) - give it the newest tool, cut the stock with retyped default
+/// params, then make it both selected and targeted so the operation's
+/// own pane lands on the click. Without a tool the refusal is loud on
+/// the status line - the ribbon disables the button too, but every
+/// surface shares this one effect.
 pub(crate) fn add_operation(state: &mut State, kind: usize) {
     let Some(tool) = state.tool_names().pop() else {
         state.status = String::from("cannot add an operation: no tool in the document");
         return;
     };
-    let mut n = state.operation_count() + 1;
+    let label = camcraft_app::operation::KindInfo::ALL
+        .get(kind)
+        .map_or("Operation", |k| k.label);
+    let mut n = 1;
     let name = loop {
-        let candidate = format!("Operation{n}");
+        let candidate = format!("{label}{n}");
         if camcraft_app::model::find_by_name(&state.world, &candidate).is_none() {
             break candidate;
         }

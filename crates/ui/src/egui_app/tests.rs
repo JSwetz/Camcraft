@@ -700,9 +700,9 @@ fn drag_and_type_edit_the_same_staged_number() {
 fn every_field_lives_on_exactly_one_section() {
     let mut harness = shell_harness();
     let all = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds"];
-    // Kind order == pages::kind_index == the Type combo's TYPES order;
-    // `retype` is the law the combo itself runs, so the draft takes the
-    // same shape the user would drive it into.
+    // Kind order == KindInfo::ALL table order == the ribbon's TYPES;
+    // `retype` is the law the quick-adds and the retype menu's command
+    // run, so the draft takes the same shape the buttons drive it into.
     let table = [
         (
             "Face",
@@ -848,7 +848,7 @@ fn every_field_lives_on_exactly_one_section() {
     ];
     for (ki, (kind_name, sections)) in table.iter().enumerate() {
         let cur = harness.state().state.op_ui.params.clone();
-        let retyped = panes::retype(&cur, ki);
+        let retyped = crate::operations::retype(&cur, ki);
         harness.state_mut().state.op_ui.params = retyped;
         let mut placement: Vec<(&str, usize)> = Vec::new();
         for (sname, labels) in sections {
@@ -1535,13 +1535,49 @@ fn ribbon_click_creates_through_the_actions_law() {
     harness.run_steps(2);
     let st = &harness.state().state;
     assert!(
-        model::find_by_name(&st.world, "Operation2").is_some(),
+        model::find_by_name(&st.world, "2D Pocket1").is_some(),
         "the Pocket click did not create through the actions layer (status: {})",
         st.status
     );
     assert!(
-        matches!(&st.ui_target, UiTarget::Operation(n) if n == "Operation2"),
+        matches!(&st.ui_target, UiTarget::Operation(n) if n == "2D Pocket1"),
         "quick-add must leave its target on the new operation"
+    );
+}
+
+/// The quick-add naming law (M9.1): a press names its operation after the
+/// kind's own label, and the number runs past the TAKEN names, not the
+/// count - a document holding "2D Pocket1" and "2D Pocket3" must land the
+/// next Pocket on "2D Pocket2", so no press ever looks dead. The names may
+/// carry spaces ("2D Pocket1"): the label is quoted verbatim, exactly what
+/// the ribbon cell and the retype menu row say.
+#[test]
+fn quick_add_names_past_taken_names_with_the_kind_label() {
+    let mut harness = shell_harness();
+    {
+        let sh = harness.state_mut();
+        for name in ["2D Pocket1", "2D Pocket3"] {
+            sh.state.pending.push_back(CommandKind::CreateOperation {
+                name: name.into(),
+                tool: "EM-0600-4FL".into(),
+                src: SrcRef::Stock,
+                params: crate::operations::quick_params(2),
+            });
+        }
+    }
+    harness.run_steps(2);
+    crate::actions::add_operation(&mut harness.state_mut().state, 2);
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    assert!(
+        model::find_by_name(&st.world, "2D Pocket2").is_some(),
+        "the hole should fill, not widen (status: {})",
+        st.status
+    );
+    assert!(
+        matches!(&st.ui_target, UiTarget::Operation(n) if n == "2D Pocket2"),
+        "the press click-throughs to the op it just named: {:?}",
+        st.ui_target
     );
 }
 
@@ -1690,13 +1726,15 @@ fn the_dropdown_reaches_a_folded_kind() {
     // The count alone would pass even if the row created the WRONG
     // kind (a label/order drift) - the quick-add lands as
     // `UiTarget::Operation`, which reads as "a dialog asking me to
-    // pick it again" if it does. Name it and type it: the row's
-    // index, in the registry's own order.
+    // pick it again" if it does. Name it and type it: M9.1 names the
+    // new op after its kind's label, so the created row carries the
+    // registry's own word for `want`, not a generic "Operation-n".
     let st = &harness.state().state;
+    let label = camcraft_app::operation::KindInfo::ALL[want].label;
     let created = model::named_entities(&st.world)
         .into_iter()
-        .find(|(n, _)| n.starts_with("Operation"))
-        .expect("the click created an Operation-named entity");
+        .find(|(n, _)| n.starts_with(label))
+        .unwrap_or_else(|| panic!("the click created a {label}-named entity"));
     assert_eq!(
         model::operation_of(&st.world, &created.1)
             .expect("created entity is an operation")
@@ -1787,7 +1825,7 @@ fn right_click_pins_and_undo_replays_only_the_cuts() {
     button_at(&mut harness, egui::PointerButton::Primary, at, false);
     harness.run_steps(2);
     assert!(
-        model::find_by_name(&harness.state().state.world, "Operation2").is_some(),
+        model::find_by_name(&harness.state().state.world, "2D Pocket1").is_some(),
         "the door's row must have cut through the actions law (status: {})",
         harness.state().state.status
     );
@@ -1816,7 +1854,7 @@ fn right_click_pins_and_undo_replays_only_the_cuts() {
     harness.state_mut().state.pending.push_back(CommandKind::Undo);
     harness.run();
     assert!(
-        model::find_by_name(&harness.state().state.world, "Operation2").is_none(),
+        model::find_by_name(&harness.state().state.world, "2D Pocket1").is_none(),
         "undo must have taken the operation back"
     );
     assert_eq!(
@@ -2480,7 +2518,7 @@ fn ribbon_drill_cell_creates_a_drill_operation() {
     button_at(&mut harness, egui::PointerButton::Primary, at, false);
     harness.run_steps(2);
     let st = &harness.state().state;
-    let op = model::find_by_name(&st.world, "Operation2")
+    let op = model::find_by_name(&st.world, "Drill1")
         .as_ref()
         .and_then(|e| model::operation_of(&st.world, e))
         .expect("the Drill cell created its operation through the actions law");
@@ -2730,7 +2768,7 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     button_at(&mut harness, egui::PointerButton::Primary, at, false);
     harness.run_steps(2);
     let st = &harness.state().state;
-    let op = model::find_by_name(&st.world, "Operation2")
+    let op = model::find_by_name(&st.world, "3D Pocket1")
         .as_ref()
         .and_then(|e| model::operation_of(&st.world, e))
         .expect("the 3D Pocket cell created its operation through the actions law");
@@ -2769,7 +2807,7 @@ fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     button_at(&mut harness, egui::PointerButton::Primary, at, false);
     harness.run_steps(2);
     let st = &harness.state().state;
-    let op = model::find_by_name(&st.world, "Operation2")
+    let op = model::find_by_name(&st.world, "3D Finish1")
         .as_ref()
         .and_then(|e| model::operation_of(&st.world, e))
         .expect("the 3D Finish cell created its operation through the actions law");
@@ -2845,7 +2883,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     harness.get_by_label("Apply Parameters").click();
     harness.run();
     let st = &harness.state().state;
-    let op = model::find_by_name(&st.world, "Operation2")
+    let op = model::find_by_name(&st.world, "3D Finish1")
         .and_then(|e| model::operation_of(&st.world, &e));
     let live = op.map(|o| match o.params {
         OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
@@ -2874,7 +2912,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     });
     harness.run_steps(2);
     let st = &harness.state().state;
-    let back = model::find_by_name(&st.world, "Operation2")
+    let back = model::find_by_name(&st.world, "3D Finish1")
         .and_then(|e| model::operation_of(&st.world, &e))
         .map(|o| match o.params {
             OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
@@ -2901,7 +2939,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     harness.get_by_label("Apply Parameters").click();
     harness.run();
     let st = &harness.state().state;
-    let op = model::find_by_name(&st.world, "Operation2")
+    let op = model::find_by_name(&st.world, "3D Finish1")
         .and_then(|e| model::operation_of(&st.world, &e))
         .map(|o| match o.params {
             OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
@@ -2925,7 +2963,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     });
     harness.run_steps(2);
     let st = &harness.state().state;
-    let back = model::find_by_name(&st.world, "Operation2")
+    let back = model::find_by_name(&st.world, "3D Finish1")
         .and_then(|e| model::operation_of(&st.world, &e))
         .map(|o| match o.params {
             OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
@@ -2950,7 +2988,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     harness.get_by_label("Apply Parameters").click();
     harness.run();
     let st = &harness.state().state;
-    let ramped = model::find_by_name(&st.world, "Operation2")
+    let ramped = model::find_by_name(&st.world, "3D Finish1")
         .and_then(|e| model::operation_of(&st.world, &e))
         .map(|o| match o.params {
             OpParams::Finish3D { ramp, .. } => ramp,
@@ -2970,7 +3008,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     });
     harness.run_steps(2);
     let st = &harness.state().state;
-    let back = model::find_by_name(&st.world, "Operation2")
+    let back = model::find_by_name(&st.world, "3D Finish1")
         .and_then(|e| model::operation_of(&st.world, &e))
         .map(|o| match o.params {
             OpParams::Finish3D { ramp, .. } => ramp,
@@ -2998,7 +3036,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     harness.get_by_label("Apply Parameters").click();
     harness.run();
     let st = &harness.state().state;
-    let floored = model::find_by_name(&st.world, "Operation2")
+    let floored = model::find_by_name(&st.world, "3D Finish1")
         .and_then(|e| model::operation_of(&st.world, &e))
         .map(|o| match o.params {
             OpParams::Finish3D { min_step, .. } => min_step.is_some(),
@@ -3018,7 +3056,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     });
     harness.run_steps(2);
     let st = &harness.state().state;
-    let back = model::find_by_name(&st.world, "Operation2")
+    let back = model::find_by_name(&st.world, "3D Finish1")
         .and_then(|e| model::operation_of(&st.world, &e))
         .map(|o| match o.params {
             OpParams::Finish3D { min_step, .. } => min_step,
@@ -3063,7 +3101,7 @@ fn detect_holes_refuses_recognizes_and_undo_empties_again() {
     {
         let sh = harness.state_mut();
         sh.state.pending.push_back(CommandKind::EditOperationLinks {
-            name: "Operation2".into(),
+            name: "Drill1".into(),
             tool: None,
             src: Some(SrcRef::Entity("Plate".into())),
         });
@@ -3078,10 +3116,10 @@ fn detect_holes_refuses_recognizes_and_undo_empties_again() {
     harness.run_steps(2);
     let op_params = {
         let st = &harness.state().state;
-        model::find_by_name(&st.world, "Operation2")
+        model::find_by_name(&st.world, "Drill1")
             .as_ref()
             .and_then(|e| model::operation_of(&st.world, e))
-            .expect("Operation2 survives")
+            .expect("Drill1 survives")
             .params
             .clone()
     };
@@ -3095,7 +3133,7 @@ fn detect_holes_refuses_recognizes_and_undo_empties_again() {
     harness.state_mut().state.pending.push_back(CommandKind::Undo);
     harness.run_steps(2);
     let st = &harness.state().state;
-    let op = model::find_by_name(&st.world, "Operation2")
+    let op = model::find_by_name(&st.world, "Drill1")
         .as_ref()
         .and_then(|e| model::operation_of(&st.world, e))
         .unwrap();
@@ -3255,7 +3293,7 @@ fn radial_detect_fills_the_cross_list_on_a_millturn() {
         let (world, history) = (&sh.state.world, &mut sh.state.history);
         history.execute(world, camcraft_app::commands::ImportModel::from_mesh("Bar", bar));
         sh.state.pending.push_back(CommandKind::EditOperationLinks {
-            name: "Operation2".into(),
+            name: "Drill1".into(),
             tool: None,
             src: Some(SrcRef::Entity("Bar".into())),
         });
@@ -3271,10 +3309,10 @@ fn radial_detect_fills_the_cross_list_on_a_millturn() {
             "a turret document must not refuse its own cross-bores: {}",
             st.status
         );
-        model::find_by_name(&st.world, "Operation2")
+        model::find_by_name(&st.world, "Drill1")
             .as_ref()
             .and_then(|e| model::operation_of(&st.world, e))
-            .expect("Operation2 survives")
+            .expect("Drill1 survives")
             .params
             .clone()
     };
@@ -3288,7 +3326,7 @@ fn radial_detect_fills_the_cross_list_on_a_millturn() {
     harness.state_mut().state.pending.push_back(CommandKind::Undo);
     harness.run_steps(2);
     let st = &harness.state().state;
-    let op = model::find_by_name(&st.world, "Operation2")
+    let op = model::find_by_name(&st.world, "Drill1")
         .as_ref()
         .and_then(|e| model::operation_of(&st.world, e))
         .unwrap();

@@ -15,12 +15,12 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use camcraft_app::commands::{
-    ActivateSetup, AddTool, ChangeTool, CommandError, CreateOperation, CreateSetup, DeleteEntity,
-    DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool, EditOperationLinks,
-    EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine, MoveFixture,
-    MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry, SetOperationSetup,
-    SetStock, SetTheme, SetUnits, SetWcsOrigin, TagFixture, UntagFixture, UpdateModel, theme_of,
-    theme_set,
+    ActivateSetup, AddTool, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
+    CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
+    EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
+    MoveFixture, MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry,
+    SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin, TagFixture, UntagFixture,
+    UpdateModel, theme_of, theme_set,
 };
 use camcraft_app::geometry::{
     Point3, feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point,
@@ -150,6 +150,12 @@ pub enum CommandKind {
     EditOperationParams {
         name: String,
         params: OpParams,
+    },
+    /// The op's context-menu retype (M9.1): change the operation's kind
+    /// in place, numbers carried by the one retype law, one undo unit.
+    ChangeOperationKind {
+        name: String,
+        kind: usize,
     },
     /// Retarget an operation's tool and/or source (combo changes).
     EditOperationLinks {
@@ -349,8 +355,9 @@ pub struct ModelUi {
 /// Editable fields of the Properties pane's operation page. Transient UI
 /// state, never authoritative: the world's `Operation` component is,
 /// refetched by [`State::sync_ops_ui`] whenever the selection or the
-/// document moves under the pane (same typing rule as [`StockUi`]). With
-/// no operation selected the same draft is the "new operation" form.
+/// document moves under the pane (same typing rule as [`StockUi`]). Since
+/// M9.1 it is only ever a mirror: the "new operation" form it once doubled
+/// as is gone, and creation rides the ribbon doors and the tree.
 #[derive(Clone, Debug)]
 pub struct OpUi {
     /// Operation this draft mirrors; empty = nothing selected.
@@ -382,7 +389,7 @@ impl Default for OpUi {
             // the stock top, skimming the stock top itself. `retype`
             // carries this clearance into every kind, so the draft
             // default must already be the seed shape the panes display -
-            // quick-add and the creation form then say the same thing.
+            // quick-add and the retype menu then say the same thing.
             params: OpParams::Face {
                 tilt: None,
                 stepover: 3.0,
@@ -861,6 +868,12 @@ pub struct State {
     /// any choice or outside press; at most one dropdown is open at a
     /// time, so the two toggles close each other.
     pub ribbon_mode_open: bool,
+    /// The browser row whose retype menu stands open (M9.1): the op's
+    /// name, anchored to its row and recomputed per frame like the
+    /// ribbon's dropdowns - a frame fact, not a document fact; the
+    /// draw retires it on any choice, outside press, or a row whose
+    /// operation is gone.
+    pub tree_menu: Option<String>,
     pub pending: VecDeque<CommandKind>,
     pub request_quit: bool,
     /// Receiver for the in-flight import worker (None when idle). The worker
@@ -1042,6 +1055,7 @@ impl State {
             program_sim: None,
             ribbon_more: None,
             ribbon_mode_open: false,
+            tree_menu: None,
             pending: VecDeque::new(),
             request_quit: false,
             import_rx: None,
@@ -1059,12 +1073,13 @@ impl State {
             fixture_ui: FixtureUi::default(),
             model_ui: ModelUi::default(),
             import_as_fixture: None,
-            // First-launch drafts carry plausible names: an empty Name
-            // field made the Add buttons look dead (refused silently).
-            op_ui: OpUi {
-                name: String::from("Operation1"),
-                ..OpUi::default()
-            },
+            // The tool draft carries a plausible name from the first
+            // frame: an empty Name field made Add look dead (refused
+            // silently). The operation draft has no form to prefill
+            // since M9.1 - the page mirrors a real operation or shows
+            // the empty state - so it starts blank and stays blank
+            // until a target gives it a reality to mirror.
+            op_ui: OpUi::default(),
             tool_ui: ToolUi {
                 name: String::from("Tool1"),
                 ..ToolUi::default()
@@ -1218,10 +1233,10 @@ impl State {
     }
 
     /// Refetch the Properties pane's draft after any document or selection
-    /// change. While a real operation is targeted (or falls out of the
-    /// selection) its draft always mirrors the world; the "new operation"
-    /// form survives document bumps, since there is no reality to refetch
-    /// until it is added.
+    /// change. Since M9.1 the operation page's target is always a real
+    /// operation - the "new operation" draft form died with its Type
+    /// dropdown and Add footer, creation goes through the ribbon's doors
+    /// or the tree - so this only ever mirrors the world into the pane.
     pub fn sync_ops_ui(&mut self) {
         let ident = match self.pane_target() {
             UiTarget::Operation(name) => name,
@@ -1230,34 +1245,15 @@ impl State {
         if self.op_synced == (ident.clone(), self.doc_version) {
             return;
         }
-        let identity_changed = self.op_synced.0 != ident;
         self.op_synced = (ident, self.doc_version);
-        if !self.op_synced.0.is_empty() {
-            let name = self.op_synced.0.clone();
-            if let Some(entity) = model::find_by_name(&self.world, &name)
-                && let Some(op) = model::operation_of(&self.world, &entity)
-            {
-                self.op_ui = OpUi::from_op(&name, &op);
-            }
-        } else if identity_changed {
-            // Number the prefilled name past the *taken* names, not just
-            // past the count - a document with holes in its numbering (a
-            // deleted middle op) would otherwise prefill one that is in
-            // use and make Add look dead. Same loop the ribbon quick-add
-            // walks (`actions::add_operation`).
-            let mut n = self.operation_count() + 1;
-            let name = loop {
-                let candidate = format!("Operation{n}");
-                if model::find_by_name(&self.world, &candidate).is_none() {
-                    break candidate;
-                }
-                n += 1;
-            };
-            self.op_ui = OpUi {
-                name,
-                tool: self.tool_names().pop().unwrap_or_default(),
-                ..OpUi::default()
-            };
+        let name = self.op_synced.0.clone();
+        if name.is_empty() {
+            return;
+        }
+        if let Some(entity) = model::find_by_name(&self.world, &name)
+            && let Some(op) = model::operation_of(&self.world, &entity)
+        {
+            self.op_ui = OpUi::from_op(&name, &op);
         }
     }
 
@@ -1658,14 +1654,6 @@ impl State {
             .filter(|(_, e)| model::is_tool(&self.world, e))
             .map(|(name, _)| name)
             .collect()
-    }
-
-    #[must_use]
-    pub(crate) fn operation_count(&self) -> usize {
-        model::named_entities(&self.world)
-            .into_iter()
-            .filter(|(_, e)| model::is_operation(&self.world, e))
-            .count()
     }
 
     /// Flip one name's visibility in a browser eye list.
@@ -2069,6 +2057,21 @@ impl State {
                         self.refuse(
                             ErrorScope::Operation,
                             format!("parameters not updated: {err}"),
+                        );
+                    }
+                }
+            }
+            CommandKind::ChangeOperationKind { name, kind } => {
+                match ChangeOperationKind::new(&self.world, &name, kind) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("operation {name} retyped");
+                    }
+                    Err(err) => {
+                        self.refuse(
+                            ErrorScope::Operation,
+                            format!("operation kind not changed: {err}"),
                         );
                     }
                 }

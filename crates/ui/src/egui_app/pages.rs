@@ -37,8 +37,11 @@
 //! `(= Z …)` echo - the pair that overflowed imgui's narrow pane now simply
 //! stacks, because egui rows wrap nothing.
 //!
-//! `retype` (the type-change draft rule) is shared with the ribbon's Create
-//! cells from `panes` - one law, one implementation.
+//! The kind is not a page field (M9.1): the operation page has no Type
+//! combo - the button that made the operation decided what it is, and the
+//! browser row's right-click is the only retype verb. Every surface that
+//! retypes (the quick-adds, the menu's command) rides `crate::operations`'
+//! one law, so they cannot disagree about what a retype preserves.
 //!
 //! Provenance: our own port, specced from imgui operations.rs/setup.rs
 //! (our code) and the egui vendored sources; no HSMWorks material involved.
@@ -73,7 +76,7 @@ use crate::state::{
     CommandKind, ErrorScope, FixtureUi, GeoPick, ModelUi, PostView, State, UiTarget, quat_yaw_deg,
 };
 
-use super::panes::{kind_name, retype};
+use super::panes::kind_name;
 use super::theme::Tokens;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
@@ -154,8 +157,8 @@ pub fn properties(ui: &mut Ui, state: &mut State, _pal: &Tokens) {
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| match t {
-            UiTarget::None => operation_page(ui, state, None),
-            UiTarget::Operation(n) => operation_page(ui, state, Some(n.as_str())),
+            UiTarget::None => no_operation_page(ui, state),
+            UiTarget::Operation(n) => operation_page(ui, state, n.as_str()),
             UiTarget::Tool(n) => tool_page(ui, state, &n),
             UiTarget::Stock => {
                 state.sync_setup_ui();
@@ -195,19 +198,22 @@ fn setup_error(ui: &mut Ui, state: &State) {
 
 // ------------------------------------------------------------ operation page
 
-fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
+/// The empty state of the properties pane when nothing is targeted and
+/// nothing is selected (M9.1): the create-everything form is retired -
+/// the kind comes from the button you pressed, so this page points at
+/// the doors that press it. No dropdown stands between a click and a
+/// kind's own pane.
+fn no_operation_page(ui: &mut Ui, _state: &mut State) {
+    ui.heading("Operations");
+    ui.separator();
+    ui.label("No operation to show.");
+    ui.label("Click one in the browser, or pick a kind from the ribbon's family doors - the new operation opens its own page straight away.");
+}
+
+fn operation_page(ui: &mut Ui, state: &mut State, name: &str) {
     state.sync_ops_ui();
-    match editing {
-        Some(name) => {
-            ui.heading(format!("Operation: {name}"));
-        }
-        None => {
-            // Typing the name is not an event; it rides the next Add command.
-            ui.label("Name");
-            ui.add(TextEdit::singleline(&mut state.op_ui.name).desired_width(f32::INFINITY));
-        }
-    }
-    let target = state.op_ui.name.clone();
+    ui.heading(format!("Operation: {name}"));
+    let target = name.to_owned();
     let live: Option<Operation> = model::find_by_name(&state.world, &target)
         .as_ref()
         .filter(|e| model::is_operation(&state.world, e))
@@ -215,20 +221,13 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     let exists = live.is_some();
     // The heights' context is the operation's declared setup, never the
     // active cursor: what the page echoes is what that operation's
-    // generate will see. A not-yet-created operation reads `None` - the
-    // first setup, the implicit-setup law (M3.2 A).
+    // generate will see.
     let live_setup = live.as_ref().and_then(|o| o.setup.as_deref());
     ui.separator();
 
-    // Type.
-    let cur_kind_idx = kind_index(state.op_ui.params.kind());
-    ui.label("Type");
-    let mut kind = cur_kind_idx;
-    combo_sections(ui, "op_type", &mut kind, machine::kind_of(&state.world));
-    if kind != cur_kind_idx {
-        let cur = state.op_ui.params.clone();
-        state.op_ui.params = retype(&cur, kind);
-    }
+    // The kind is not a field: what you are machining is decided by the
+    // button that made the operation (M9.1); changing it is the op's
+    // context-menu verb, one command, never a dropdown in its own page.
 
     // Tool.
     let mut tools = state.tool_names();
@@ -316,7 +315,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     let setups = camcraft_app::setup::names(&state.world);
     if setups.is_empty() {
         ui.label("Global stock and offsets - this document has no setups yet.");
-    } else if exists {
+    } else {
         let cur = live
             .as_ref()
             .and_then(|o| o.setup.clone())
@@ -334,14 +333,6 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
                 setup: Some(n),
             });
         }
-    } else {
-        // A draft has no membership until Add declares it: the command
-        // stamps the active setup at construction (the one-order law).
-        let eff = camcraft_app::setup::active(&state.world);
-        ui.label(format!(
-            "Will machine in {}.",
-            eff.unwrap_or_else(|| "the first setup".to_owned())
-        ));
     }
 
     // Status above the tab bar (it sat below the Geometry block in the
@@ -505,74 +496,32 @@ fn operation_page(ui: &mut Ui, state: &mut State, editing: Option<&str>) {
     }
     ui.separator();
 
-    // Footer.
-    if exists {
-        let unchanged = live
-            .as_ref()
-            .is_some_and(|o| o.params == state.op_ui.params);
-        ui.horizontal(|ui| {
-            let apply = ui.add_enabled(!unchanged, egui::Button::new("Apply Parameters"));
-            if apply.clicked() {
-                state.apply_operation_params(&target);
-            }
-            if ui.button("Generate").clicked() {
-                state.generate_operation(&target);
-            }
-            if ui.button("Delete").clicked() {
-                state
-                    .pending
-                    .push_back(CommandKind::DeleteOperation(target.clone()));
-            }
-        });
-        if unchanged {
-            ui.label("Apply is a no-op until a parameter differs from the operation.");
+    // Footer. Creation is not a page event: the ribbon's button makes the
+    // operation (kind-previewed name, one command + a Select); this page
+    // edits the operation it was opened on.
+    let unchanged = live
+        .as_ref()
+        .is_some_and(|o| o.params == state.op_ui.params);
+    ui.horizontal(|ui| {
+        let apply = ui.add_enabled(!unchanged, egui::Button::new("Apply Parameters"));
+        if apply.clicked() {
+            state.apply_operation_params(&target);
         }
-    } else {
-        let name_ok = !state.op_ui.name.trim().is_empty();
-        let dup = name_ok && model::find_by_name(&state.world, &state.op_ui.name.clone()).is_some();
-        let tool_ok = !state.op_ui.tool.trim().is_empty()
-            && model::find_by_name(&state.world, &state.op_ui.tool.clone())
-                .is_some_and(|e| model::is_tool(&state.world, &e));
-        let mut block = String::new();
-        if !name_ok {
-            block = "Name the operation first.".into();
-        } else if dup {
-            block = "That name is already in the document.".into();
-        } else if !tool_ok {
-            block = "No tool to cut with yet - add one from the Tools page.".into();
+        if ui.button("Generate").clicked() {
+            state.generate_operation(&target);
         }
-        let name = state.op_ui.name.trim().to_owned();
-        let tool = state.op_ui.tool.clone();
-        let src = state.op_ui.src();
-        let params = state.op_ui.params.clone();
-        let add = ui.add_enabled(block.is_empty(), egui::Button::new("Add Operation"));
-        if add.clicked() {
-            state.pending.push_back(CommandKind::CreateOperation {
-                name: name.clone(),
-                tool,
-                src,
-                params,
-            });
+        if ui.button("Delete").clicked() {
             state
                 .pending
-                .push_back(CommandKind::Select(Some(name.clone())));
-            state.ui_target = UiTarget::Operation(name);
+                .push_back(CommandKind::DeleteOperation(target.clone()));
         }
-        if !block.is_empty() {
-            ui.horizontal(|ui| {
-                ui.label(block);
-            });
-        }
-        if let Some(msg) = state.error_for(ErrorScope::Operation).map(str::to_owned) {
-            ui.colored_label(RED, msg);
-        }
+    });
+    if unchanged {
+        ui.label("Apply is a no-op until a parameter differs from the operation.");
     }
-}
-
-fn kind_index(kind: OpType) -> usize {
-    // The registry's table order (M5.0.2) - the same index the ribbon's
-    // Create cells and TYPES use, by construction.
-    kind.ordinal()
+    if let Some(msg) = state.error_for(ErrorScope::Operation).map(str::to_owned) {
+        ui.colored_label(RED, msg);
+    }
 }
 
 // --------------------------------------------------------------- param rows
@@ -3344,41 +3293,6 @@ pub(crate) fn combo(ui: &mut Ui, id: &str, idx: &mut usize, names: &[&str]) {
 }
 
 /// Same, for owned name lists (tool/source lists built per frame).
-/// The Type combo, grouped (M6.2): the ribbon's sections are the combo's
-/// headers, so the two surfaces state the one taxonomy - `Section::ORDER`
-/// and `Family::admits` again, never a second list. A section the
-/// machine cannot run is left out (hiding, not darkening); the current
-/// kind's section stays listed even when the machine says no, so a
-/// mid-edit machine swap never erases the operation's own name from
-/// its closed combo - its rows are dimmed, and `family_gate` at the
-/// command door is what actually refuses.
-fn combo_sections(ui: &mut Ui, id: &str, idx: &mut usize, machine: machine::Kind) {
-    let kinds = camcraft_app::operation::KindInfo::ALL;
-    let here = kinds.get(*idx).map(|k| k.section);
-    let selected = kinds.get((*idx).min(kinds.len() - 1)).map_or("", |k| k.label);
-    ComboBox::from_id_salt(id)
-        .selected_text(selected)
-        .show_ui(ui, |ui| {
-            for s in operation::Section::ORDER {
-                let runnable = s.family().admits(machine);
-                if !runnable && here != Some(s) {
-                    continue;
-                }
-                // The header is the disabled half of add_enabled_ui:
-                // a dimmed, unclickable row - imgui's separator-text
-                // shape without importing a new idiom.
-                ui.add_enabled_ui(false, |ui| ui.selectable_label(false, s.label()));
-                ui.add_enabled_ui(runnable, |ui| {
-                    for i in s.kinds() {
-                        if let Some(k) = kinds.get(i) {
-                            ui.selectable_value(idx, i, k.label);
-                        }
-                    }
-                });
-            }
-        });
-}
-
 fn combo_owned(ui: &mut Ui, id: &str, idx: &mut usize, names: &[String]) {
     let cur: String = names
         .get((*idx).min(names.len().saturating_sub(1)))

@@ -6988,3 +6988,53 @@ operation page walls them (pages.rs:352-372) and the tree counts them
 (panes.rs:1361) - nothing writes a warning that no one reads, and
 nothing reads one that no generator stands behind. Recorded so a
 future audit spends its minutes elsewhere.
+
+## M9.1 A - the operation page opens on its own terms: no type dropdown, retype rides the row
+
+The workpane remake's first stage took the Blender hand-test verdict
+("not all the functionality is visible") at its root: the kind of an
+operation is a CREATION decision, but the page kept exposing it as a
+live Type combo - a field that promises an edit and then refuses one.
+The dropdown and the "new operation" draft form it served are gone.
+
+**Chosen: the empty state, not a pre-filled form.** With no target and
+no selection the operation page now says what is true (pick or create),
+instead of pricing a ghost draft the user must first un-type. Creation
+rides the ribbon's Create cells and the tree's doors, each naming the
+operation after its kind - so the form's old job (a blank with a name
+and a type to pick) is gone with it. Considered and dropped: keeping
+the form for keyboard-only flows - it needs no dropdown to do that, one
+menu press per kind covers it, and the pane stays one truth.
+
+**Chosen: retype is the browser row's context menu, and it is a
+command.** Right-click an operation row and the kind list opens
+grouped by the ribbon's own section order (Section::ORDER), kinds the
+machine's family cannot run listed dimmed - and a dimmed row still
+QUEUES its command, because the refusal belongs to the door
+(`ChangeOperationKind::new`: family_gate -> is_sane -> depth_sane ->
+side_sane) and that door already speaks in one voice for every surface.
+Marking the rows dead at the menu would fork the law. The undo unit is
+the whole retype: numbers ride `operation::retype_params`, the shared
+carry, exactly what quick-add seeds with - the old panes::retype
+wrapper retired so the ribbon, the seed, and the menu share one path
+and cannot disagree. The menu follows the popup house style (hand-drawn
+Area, Foreground, self-heal, outside-press close), not egui's
+Popup::context_menu - the app draws its menus one way.
+Considered and dropped: a "Change Type" menu item on the row (one more
+click, and the row already knows its kinds belong to a list).
+
+**Chosen: kind-previewed names quote the label verbatim, spaces and
+all.** Quick-add names "2D Pocket2", the same string the ribbon cell
+and the retype row show - a name that silently strips ("2DPocket2")
+would be a second spelling of the kind in the document. Entity names
+legally carry spaces; the tree row already renders the label. The
+number runs past TAKEN names (fill-the-hole), the old form's law
+moved with the numbering, not the count, into the unit tests.
+
+**Chosen: first launch starts the operation draft blank.** It is now
+only ever a mirror of a real operation (`sync_ops_ui` mirrors or holds,
+never invents); at startup there is nothing to mirror. The tool pane's
+named drafts are untouched - they are creation forms, and creation
+there never was the questionable half. The refusal text for a
+parameter edit that smuggles a kind change now names the retype menu,
+keeping "the refusal tells you the door" honest.

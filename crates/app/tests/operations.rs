@@ -137,12 +137,13 @@ fn edit_operation_params_refuses_a_type_change() {
     // The `OpParams` variant IS the operation's kind: an "edit" carrying a
     // foreign variant would retype the operation in place - the hand-test
     // report's "generating this operation replaced the face operation".
-    // The command refuses it by name instead of writing the ghost.
+    // The command refuses it by name instead of writing the ghost, and
+    // points at the door that does retype: the browser row's menu (M9.1).
     let Err(err) = EditOperationParams::new(&world, "Face1", contour_params()) else {
         panic!("a kind change is not a parameter edit and must be refused");
     };
     assert!(matches!(err, CommandError::Invalid(_)), "{err:?}");
-    assert!(err.to_string().contains("new operation"), "{err}");
+    assert!(err.to_string().contains("retype menu"), "{err}");
     // Nothing was written: the operation keeps its exact params and its
     // fresh stamp - a refusal that silently half-applied would be worse
     // than the retype it replaces.

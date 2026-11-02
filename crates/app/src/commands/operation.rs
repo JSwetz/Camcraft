@@ -210,11 +210,12 @@ impl EditOperationParams {
         // The `OpParams` variant IS the operation's kind, so an edit that
         // carries a different variant would retype the operation in place -
         // replacing one kind's work with another's and reading as the op
-        // vanishing from the list. The pane locks its Type control to the
-        // creation form; this is the defense-in-depth refusal behind it.
+        // vanishing from the list. The page carries no kind control at
+        // all (M9.1); this is the defense-in-depth refusal behind it, and
+        // it names the real door: ChangeOperationKind, the row's menu.
         if params.kind() != prev.params.kind() {
             return Err(CommandError::Invalid(format!(
-                "'{name}' is a {} operation; change its kind by adding a new operation",
+                "'{name}' is a {} operation; change its kind with the retype menu on its browser row",
                 prev.params.kind()
             )));
         }
@@ -243,6 +244,70 @@ impl EditOperationParams {
 }
 
 impl Command for EditOperationParams {
+    fn apply(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            entity.entity_view(world).set(self.next.clone());
+        }
+    }
+
+    fn invert(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            entity.entity_view(world).set(self.prev.clone());
+        }
+    }
+}
+
+/// Change an operation's kind in place (M9.1): the retype the page's
+/// Type combo used to do as a draft edit plus an Apply, now one honest
+/// command from the op's context menu. The numbers ride
+/// `operation::retype_params` - the SAME carry law a ribbon quick-add
+/// and the old combo used, so re-typing never throws away feeds and
+/// heights - and the result passes every door a creation passes:
+/// family against the mounted machine, sanity, depth, side. The stamp
+/// drops (the work definition changed; the cached path is another
+/// kind's answer), and undo puts the whole old operation back.
+pub struct ChangeOperationKind {
+    name: String,
+    prev: Operation,
+    next: Operation,
+}
+
+impl ChangeOperationKind {
+    pub fn new(world: &World, name: &str, kind: usize) -> Result<Self, CommandError> {
+        let Some(entity) = model::find_by_name(world, name) else {
+            return Err(CommandError::NotFound(name.to_string()));
+        };
+        let prev = model::operation_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))?;
+        let params = operation::retype_params(&prev.params, kind);
+        if params.kind() == prev.params.kind() {
+            return Err(CommandError::Invalid(format!(
+                "'{name}' is already a {} operation",
+                prev.params.kind()
+            )));
+        }
+        family_gate(world, &params)?;
+        if !params.is_sane() {
+            return Err(CommandError::Invalid(format!(
+                "operation parameters are not usable for a {} operation",
+                params.kind()
+            )));
+        }
+        if !crate::operation::depth_sane(world, prev.setup.as_deref(), &params) {
+            return Err(CommandError::Invalid(format!(
+                "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
+                params.kind()
+            )));
+        }
+        if let Some(msg) = crate::operation::side_sane(&params, &prev.src) {
+            return Err(CommandError::Invalid(msg));
+        }
+        let next = Operation { params, stamp: None, ..prev.clone() };
+        Ok(ChangeOperationKind { name: name.to_string(), prev, next })
+    }
+}
+
+impl Command for ChangeOperationKind {
     fn apply(&self, world: &World) {
         if let Some(entity) = model::find_by_name(world, &self.name) {
             entity.entity_view(world).set(self.next.clone());

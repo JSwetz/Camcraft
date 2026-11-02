@@ -23,7 +23,7 @@
 use egui::{Key, Label, Rect, RichText, Sense, Ui, Vec2};
 
 use camcraft_app::model;
-use camcraft_app::operation::{self, OpParams, OpType};
+use camcraft_app::operation::{self, OpType};
 use camcraft_app::schema::WCS_SLOTS;
 use camcraft_app::tools::ToolKind;
 
@@ -1453,19 +1453,145 @@ pub fn browser(
             }
         }
     }
+    // The op row's right-click is the retype verb's door (M9.1): the
+    // menu belongs to the row's operation, moves to whichever row
+    // asks, closes when the same row asks twice, and retires on any
+    // row that is not an operation.
+    if let Some(ix) = hit.menu {
+        if let Leaf::Op(n) = leaves[ix].clone() {
+            state.tree_menu = (state.tree_menu.as_deref() != Some(n.as_str())).then_some(n);
+        } else {
+            state.tree_menu = None;
+        }
+    }
+    tree_menu(ui, state, pal, rect, &leaves);
     ui.allocate_rect(rect, Sense::hover());
 }
 
-// --------------------------------------------------------------- parameters
-
-/// The parameters' type-change law. Since M-f this is a thin pointer to
-/// `crate::operations::retype` - the SAME function `crate::actions::add_
-/// operation` builds quick-adds with (through `quick_params`) and the
-/// imgui panel retypes with. The ribbon's Create cells and pages.rs's
-/// Type combo cannot disagree about what a retype preserves, because
-/// there is exactly one of them. The former egui mirror of this law is
-/// retired with M-f.
-pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
-    crate::operations::retype(cur, kind)
+/// The operation's retype menu (M9.1): what replaced the page's Type
+/// combo. Grouping is the retired combo's law restated once -
+/// `Section::ORDER` headers, `Family::admits` hiding a section the
+/// machine cannot run, and the current kind's section staying listed
+/// even when the machine says no, so a mid-edit machine swap never
+/// erases the operation's own name. A row's click queues
+/// `ChangeOperationKind` - one undo unit, the numbers carried by the
+/// one retype law below; a dark row is queued too, because the refusal
+/// belongs at the command door (`family_gate`), where it names itself
+/// on the status line - never a silent dead pixel. Hand-drawn like the
+/// ribbon's dropdowns (the panel is geometry, not a Widget): an Area
+/// at Foreground order, so a press on a row belongs to the row, never
+/// to the tree behind it; any other primary press closes it.
+fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &[Leaf]) {
+    let Some(name) = state.tree_menu.clone() else {
+        return;
+    };
+    // Self-heal, twice over: the named operation must still have its
+    // row and its component. A frame that proves otherwise retires the
+    // menu by dropping it - never a stale popup outliving its subject.
+    let row_ix = leaves
+        .iter()
+        .position(|l| matches!(l, Leaf::Op(n) if *n == name));
+    let op = model::find_by_name(&state.world, &name).and_then(|e| model::operation_of(&state.world, &e));
+    let (Some(ix), Some(op)) = (row_ix, op) else {
+        state.tree_menu = None;
+        return;
+    };
+    let here = op.params.kind().ordinal();
+    let machine = camcraft_app::machine::kind_of(&state.world);
+    // The rows: section headers and kinds, in registry order, read
+    // from the same taxonomy as the ribbon's cells - never a list.
+    let mut lines: Vec<(&'static str, bool, Option<usize>)> = Vec::new();
+    let here_section = operation::KindInfo::ALL.get(here).map(|k| k.section);
+    for s in operation::Section::ORDER {
+        let runnable = s.family().admits(machine);
+        if !runnable && here_section != Some(s) {
+            continue;
+        }
+        lines.push((s.label(), false, None));
+        for i in s.kinds() {
+            if let Some(k) = operation::KindInfo::ALL.get(i) {
+                lines.push((k.label, runnable, Some(i)));
+            }
+        }
+    }
+    let anchor = egui::Pos2::new(
+        rect.left(),
+        rect.top() + (ix + 1) as f32 * pal.row_height + DROP_GAP,
+    );
+    let panel = Rect::from_min_size(
+        anchor,
+        Vec2::new(DROP_W, lines.len() as f32 * pal.row_height),
+    );
+    let mut chosen: Option<usize> = None;
+    egui::Area::new(ui.id().with(("tree-menu", name.clone())))
+        .fixed_pos(anchor)
+        .order(egui::Order::Foreground)
+        .movable(false)
+        .show(ui.ctx(), |ui| {
+            let p = ui.painter();
+            p.rect_filled(panel, pal.radius_menu, pal.ink);
+            p.rect_stroke(
+                panel,
+                pal.radius_menu,
+                egui::Stroke::new(1.0, pal.border),
+                egui::StrokeKind::Outside,
+            );
+            for (k, (label, runnable, item)) in lines.iter().enumerate() {
+                let r = Rect::from_min_size(
+                    egui::Pos2::new(anchor.x, anchor.y + k as f32 * pal.row_height),
+                    Vec2::new(DROP_W, pal.row_height),
+                );
+                let is_current = item.is_some_and(|i| i == here);
+                if is_current {
+                    p.rect_filled(r, 0.0, pal.selection_bg);
+                }
+                let resp = item.map(|_| {
+                    ui.interact(r, ui.id().with(("tree-menu-row", k)), Sense::click())
+                });
+                if let Some(resp) = &resp
+                    && resp.hovered()
+                    && !is_current
+                {
+                    p.rect_filled(r, 0.0, pal.field_hover);
+                }
+                let text = if is_current {
+                    format!("{label} (current)")
+                } else {
+                    (*label).to_owned()
+                };
+                p.text(
+                    r.left_center() + Vec2::new(8.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    &text,
+                    egui::FontId::proportional(pal.font_row),
+                    match item {
+                        None => pal.text_dim,
+                        Some(_) if !runnable || is_current => pal.text_faint,
+                        Some(_) => pal.text,
+                    },
+                );
+                if let Some(resp) = resp
+                    && resp.clicked()
+                {
+                    chosen = *item;
+                }
+            }
+        });
+    if let Some(i) = chosen {
+        if i != here {
+            state.pending.push_back(CommandKind::ChangeOperationKind {
+                name: name.clone(),
+                kind: i,
+            });
+        }
+        state.tree_menu = None;
+    } else if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+        // The dropdowns' close law: a primary press that is nobody's
+        // row is the menu's - it never stacks and never stalks a
+        // document the user has moved on from.
+        state.tree_menu = None;
+    }
 }
+
+// --------------------------------------------------------------- parameters
 

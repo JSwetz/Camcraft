@@ -120,8 +120,11 @@ pub(crate) fn unresolved_note(
 /// is a single plane, so a deeper reference would cut through the whole
 /// stock in the default op - the same safe z retype produced before).
 ///
-/// One law, both callers: the page's type combo and the ribbon's Create
-/// cells (via `crate::actions::add_operation`) both come through here.
+/// One law behind every door (M9.1): the ribbon's Create cells come here
+/// and the browser's retype menu goes straight to
+/// `camcraft_app::operation::retype_params`, which this is a pointer to -
+/// the type combo that used to be a third door retired with the creation
+/// form, so no surface can disagree about what a retype keeps.
 pub(crate) fn retype(cur: &OpParams, kind: usize) -> OpParams {
     camcraft_app::operation::retype_params(cur, kind)
 }

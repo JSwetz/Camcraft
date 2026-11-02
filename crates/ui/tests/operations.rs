@@ -270,13 +270,15 @@ fn selecting_an_operation_mirrors_it_into_the_draft() {
     assert_eq!(state.op_ui.src_kind, 0, "stock source reads as Stock");
     assert_eq!(state.op_ui.params, face_params());
 
-    // With nothing selected the draft becomes the new-operation form,
-    // pre-named past the existing operations.
+    // With nothing selected there is no new-operation form to fall back
+    // to (M9.1): the page shows its empty state and the draft holds the
+    // last mirror it had, so nothing re-prices a ghost name.
     state.pending.push_back(CommandKind::Select(None));
     state.drain_actions();
     state.sync_ops_ui();
-    assert_eq!(state.op_ui.name, "Operation2");
-    assert_eq!(state.op_ui.tool, "EM-0400-2FL", "prefilled with the last tool");
+    assert_eq!(state.pane_target(), UiTarget::None, "no target, no selection");
+    assert_eq!(state.op_ui.name, "Face1", "the draft holds its last mirror");
+    assert_eq!(state.op_ui.tool, "EM-0400-2FL", "as does the tool it mirrors");
 }
 
 #[test]
@@ -392,10 +394,13 @@ fn retargeting_a_tool_and_bad_params() {
 }
 
 #[test]
-fn first_launch_drafts_carry_names_not_blanks() {
+fn first_launch_op_draft_is_blank_the_tool_draft_is_named() {
     let state = State::new();
     assert_eq!(state.tool_ui.name, "Tool1", "Add is never aimed at an empty name");
-    assert_eq!(state.op_ui.name, "Operation1");
+    // M9.1: the op draft is a mirror only - at first launch there is no
+    // operation to mirror, so it starts blank and the page is the empty
+    // state, not a pre-filled form.
+    assert_eq!(state.op_ui.name, "");
     // New drafts number past what the document already holds.
     let mut state = state;
     state.pending.push_back(box_stock(20.0));
@@ -504,7 +509,7 @@ fn targeting_an_operation_mirrors_the_draft_without_selection() {
 }
 
 #[test]
-fn new_operation_falls_from_target_and_selection_to_the_form() {
+fn the_page_falls_from_target_and_selection_to_the_empty_state() {
     let mut state = State::new();
     stock_and_tool(&mut state);
     create_face(&mut state);
@@ -512,14 +517,26 @@ fn new_operation_falls_from_target_and_selection_to_the_form() {
     state.drain_actions();
     state.sync_ops_ui();
     assert_eq!(state.op_ui.name, "Face1");
-    // The menu action: blank the target and clear the selection (that is
-    // the command part), and the pane re-prices the creation form.
-    state.ui_target = UiTarget::None;
+    assert!(
+        matches!(&state.pane_target(), UiTarget::Operation(n) if n == "Face1"),
+        "selection resolves the page: {:?}",
+        state.pane_target()
+    );
+    // An explicit target wins over the selection...
+    state.ui_target = UiTarget::Operation("Face1".into());
     state.pending.push_back(CommandKind::Select(None));
     state.drain_actions();
+    assert!(
+        matches!(&state.pane_target(), UiTarget::Operation(n) if n == "Face1"),
+        "the target still resolves: {:?}",
+        state.pane_target()
+    );
+    // ...and with target and selection both gone (M9.1) the page falls to
+    // its empty state - no ghost form re-prices itself, no name prefills.
+    state.ui_target = UiTarget::None;
     state.sync_ops_ui();
     assert_eq!(state.pane_target(), UiTarget::None);
-    assert_eq!(state.op_ui.name, "Operation2");
+    assert_eq!(state.op_ui.name, "Face1", "the draft keeps its last mirror");
 }
 
 #[test]
@@ -921,11 +938,12 @@ fn contour_draft() -> OpParams {
 }
 
 // ---------------------------------------------------------------------------
-// M1.5.2 step 1: an operation's kind is fixed at creation - the Type combo
-// belongs to the creation form, and anything that still reaches the command
-// with a foreign variant is refused by name; Generate never runs under a
-// dirty draft; and the creation form's prefilled name lands free even when
-// the document's numbering has holes in it.
+// M1.5.2 step 1: an operation's kind is fixed at creation, and anything
+// that still reaches the parameter-edit command with a foreign variant is
+// refused by name; Generate never runs under a dirty draft. Since M9.1 the
+// kind is not a page field at all - the Type combo's creation form is
+// gone, retype rides the browser row's context menu - but the refusal
+// door here is the same law.
 
 #[test]
 fn retyping_a_live_operation_is_refused_not_silent() {
@@ -941,7 +959,7 @@ fn retyping_a_live_operation_is_refused_not_silent() {
     state.drain_actions();
     assert!(state.status.starts_with("parameters not updated"), "{:?}", state.status);
     assert!(
-        state.error_for(ErrorScope::Operation).is_some_and(|m| m.contains("new operation")),
+        state.error_for(ErrorScope::Operation).is_some_and(|m| m.contains("retype menu")),
         "the refusal names the way to change kind: {:?}",
         state.error_for(ErrorScope::Operation)
     );
@@ -1011,29 +1029,21 @@ fn generate_never_flushes_a_draft_from_another_page() {
 }
 
 #[test]
-fn new_operation_name_prefill_skips_taken_names() {
+fn the_draft_never_invents_a_name() {
     let mut state = State::new();
     stock_and_tool(&mut state);
-    // Numbering with a hole that a high name fills: count+1 (2 operations)
-    // would prefill the taken "Operation3" and make Add look dead.
-    for name in ["Operation1", "Operation3"] {
-        state.pending.push_back(CommandKind::CreateOperation {
-            name: name.into(),
-            tool: "EM-0400-2FL".into(),
-            src: SrcRef::Stock,
-            params: face_params(),
-        });
-    }
-    state.drain_actions();
-    // Mirror one op into the draft, then fall back to the creation form:
-    // the prefill arm runs on that identity change.
-    state.ui_target = UiTarget::Operation("Operation1".into());
+    create_face(&mut state);
+    // M9.1 retired the creation form and its prefill arm with it: naming
+    // is the ribbon quick-add's number loop (pinned in the egui_app unit
+    // tests), and the draft either mirrors a real operation or holds its
+    // last mirror - it never conjures a ghost name past the taken ones.
+    state.ui_target = UiTarget::Operation("Face1".into());
     state.sync_ops_ui();
-    assert_eq!(state.op_ui.name, "Operation1");
+    assert_eq!(state.op_ui.name, "Face1");
     state.ui_target = UiTarget::None;
     state.sync_ops_ui();
-    assert_eq!(state.op_ui.name, "Operation4", "numbered past the taken names, not the count");
-    assert!(model::find_by_name(&state.world, &state.op_ui.name).is_none());
+    assert_eq!(state.op_ui.name, "Face1", "an untargeted draft is held, not renamed");
+    assert!(model::find_by_name(&state.world, "Operation1").is_none(), "no ghost op in the model");
 }
 
 #[test]
