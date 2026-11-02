@@ -909,6 +909,40 @@ fn the_stacked_pane_shows_every_section_unasked() {
     assert!(st.pending.is_empty(), "a pane that renders must still queue nothing");
 }
 
+/// The registry half of M9.1's one pane per kind: the drift guard above
+/// tables the eight milling kinds' FIELD LABELS; this one walks the whole
+/// KindInfo registry and pins the GROUP law for every kind that can be
+/// created or retyped into - the pane opens for each (Tool and Source
+/// above the stack, the section groups below), and a header rides the
+/// pane exactly where `has_section` says (Geometry/Heights/Feeds always;
+/// Passes except Trace; Leads & Links only Contour; Machine only the
+/// Part op, which is created, never retyped, so it is out of this loop
+/// by construction). A new kind that forgets its pane, or a section law
+/// that drifts from the table's meaning, fails here.
+#[test]
+fn every_registry_kind_gets_its_stacked_pane() {
+    let mut harness = shell_harness();
+    harness.run();
+    for (ki, k) in camcraft_app::operation::KindInfo::ALL.iter().enumerate() {
+        let cur = harness.state().state.op_ui.params.clone();
+        let retyped = crate::operations::retype(&cur, ki);
+        let kind = retyped.kind();
+        harness.state_mut().state.op_ui.params = retyped;
+        harness.run();
+        let st = &harness.state().state;
+        assert!(st.pending.is_empty(), "{}: opening the pane queues nothing", k.label);
+        assert!(harness.query_by_label("Tool").is_some(), "{}: the pane opens on the tool row", k.label);
+        for (si, sname) in super::pages::SECTIONS.iter().enumerate() {
+            assert_eq!(
+                harness.query_all_by_label(sname).next().is_some(),
+                super::pages::has_section(kind, si),
+                "{}: '{sname}' header must follow has_section({si}) - the pane shows groups the kind has fields for, and only those",
+                k.label,
+            );
+        }
+    }
+}
+
 // ------------------------------------------------------- gesture plumbing
 //
 // The harness has no mouse loop, so pointer gestures are built from egui's

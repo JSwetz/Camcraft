@@ -123,7 +123,7 @@ const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
 /// instead of long stacks"), in tab-bar order. The guard indices in
 /// `params_fields` are these same numbers - one placement law, table and
 /// guards read each other.
-const SECTIONS: [&str; 6] = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds", "Machine"];
+pub(crate) const SECTIONS: [&str; 6] = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds", "Machine"];
 const SEC_GEO: usize = 0;
 const SEC_HEIGHTS: usize = 1;
 const SEC_PASSES: usize = 2;
@@ -138,7 +138,7 @@ const SEC_MACHINE: usize = 5;
 /// are the one lifecycle group no cutting tab names (M5.2 G.2). The
 /// page stacks exactly these groups: no dead tabs, and none to click
 /// (M9.1 B).
-fn has_section(kind: OpType, s: usize) -> bool {
+pub(crate) fn has_section(kind: OpType, s: usize) -> bool {
     match s {
         SEC_GEO | SEC_HEIGHTS | SEC_FEEDS => true,
         // Trace cuts no passes; a drill's Passes are the cycle's own -
@@ -3062,11 +3062,13 @@ fn swarf_editor(
         } else {
             ui.label("from tolerance and tool by the scallop law, across the ruling");
         }
-        // The ladder's rung count, the tab-count law: a plain number
+        // The ladder's rung count, the rung-count law: a plain number
         // clamped into the generator's named range at the draft, so
-        // no panel edit ever holds a 0 or a 9.
+        // no panel edit ever holds a 0 or a 9. Named "Pass count" - in
+        // the stacked pane a field reading exactly "Passes" would echo
+        // its own group header (M9.1 B named this by pinning headers).
         if let Some(passes) = passes {
-            field(ui, "Passes");
+            field(ui, "Pass count");
             let mut n = f64::from(*passes);
             num_plain(ui, &mut n);
             *passes = n.clamp(1.0, 4.0).round() as u32;
