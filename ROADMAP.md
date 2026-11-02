@@ -50,7 +50,8 @@ The complete list of operations the product must offer, grouped the way the
 ribbon shows them (M1.4.3). Status is what shipped by 0.2.0; Home is the
 milestone that owns each name. A new operation is added here first — if it
 isn't on this list it isn't on the roadmap, and if it is, it has a ribbon
-home.
+home - and, from M10.1, a declared set of tool kinds that can cut it
+(the tool law).
 
 ### Milling — 2D
 
@@ -1275,6 +1276,65 @@ every golden, then the voxel preview engine retires.**
   identical - one clean commit, goldens byte-comparable where the
   verdicts are, and the Open-questions note below closed with a link.
 
+## Phase 10 — The tool law: an operation opens only where a tool can cut it
+
+M3.3's machine-kind gate says which op families a setup may offer; it
+says nothing about the tool list. Today a setup holding one 10 mm
+4-flute endmill will take a grooving operation - the op is legal for the
+machine, the tool is illegal for the op, and nothing refuses until the
+generator reads whatever numbers it can off the wrong tool. A drill op
+wants a drill, a groove wants a grooving blade, a turned form wants a
+form gauge. The gate belongs where the mistake is made: at creation,
+named, never silent.
+
+### M10.1 - Tool/operation compatibility
+**Goal: an operation cannot be created, assigned or generated against a
+tool that cannot machine it - and every refusal names the tool kind
+missing.** — 📋
+
+- **A - the table**: every `KindInfo` row declares `tool_kinds: &[ToolKind]`
+      - the registry is the one truth (M5.0's one-table-row cost), no
+      per-panel match arms. Family defaults: the 2D/3D milling strategies
+      take the mill forms their geometry actually reads (EndMill /
+      BallNose / BullNose, waterline-class tangent laws still preferring
+      round noses); the drilling cycles take the tool the cycle expands
+      into (drill families Drill, tap cycles Tap, bore cycles Bore -
+      Spot is never automatic, M1.6's rule restated); the turning
+      families take their blade (facing/profile Turning, grooving and
+      parting Groove, threading Thread, form turning Form, boring Bore,
+      live-tooling drilling Drill on a mill-turn). The generators' own
+      shape refusals (Waterline's flat tool, the blade verdicts) stay
+      exactly where they are - the table gates the family match, the
+      generators still gate the shape; neither replaces the other.
+- **B - the gates, all at command creation**: `CreateOperation` refuses a
+      kind with no compatible tool in the active setup's tool list -
+      by name, before any entity exists (validate early, Prime
+      Directive), so the UI, the CLI, boa verbs and undo replay all hit
+      the same wall. The ribbon pre-validates it (M1.4's law): the
+      button darkens, the tooltip says "No drill in Setup1's tools".
+      Darkening, not hiding - unlike M6.2's machine door the fix is one
+      library click away, so the button must stay there to explain
+      itself. `ChangeTool` and a tool retype through `EditOperationParams`
+      refuse the mismatch the same way; opening an existing operation
+      is never gated - viewing is not cutting.
+- **C - the honest after-state**: a tool edited or deleted out from under
+      a referencing operation leaves it visible and blocked, never
+      silently mached: a named warning in the tree and its page says
+      which kind is missing, generation refuses, the project file is
+      untouched - old files load as they are (format = compatibility
+      contract, no PROJECT_VERSION bump, no migration rewrites user
+      data), surfacing the same warning the moment an op reads stale.
+- **D - the law tests**: every registry row names a non-empty kind set
+      and every ToolKind is claimed by some family (no orphan tools);
+      a command-layer refusal per family edge - the endmill-in-a-groove
+      hand-test case and its mirror; a ribbon test that the create
+      button darkens with the reason when the setup's tool list has
+      nothing that fits.
+
+Stretch, deferred: the refusal naming a starter-catalog entry
+("add a 8 mm drill from the catalog?") - the library is one click
+away today, so the door stays open, not urgent.
+
 Provenance: composite adaptively-sampled distance fields for NC milling
 simulation (MERL TR2012-025 - the swept-tool Boolean difference, the
 inverted-trajectory evaluation, the octree-BVH localization); GPU SDF
@@ -1329,6 +1389,7 @@ material of any kind.
 | **M8.2** | Finishing & planar order | Done: contour Z-entry on the entry family, certified against the destination bore air, wall-side opt-in refused by note (A); waterline tangent-ring entry re-proved on steep parts, ramped first contact opt-in, normals measured not assumed (B); slot ramp/helix certified on the convex cutter-center stadium (`Cert`), full-width substitution says its name, tabbed levels stand the arms down on the pre-A byte, tall-tab hop raise, trace plunge theorem (C); M1.3's spiral/helical debt swept; heavy lane green | ✅ |
 | **M8.3** | Canned/posed/revolved order | Done: drilling - R-plane law kept per cycle, the bore's fit door refuses an oversize tool and a stepped (counterbore-folded) hole by name, Spot dims off the mouth, FIT_TOL unified as one trust wearing three laws; helical bore entries declined as a verdict (a wide slide is contour's verb); multi-axis - a dive's lead now rides the cut it lands into (the stamp matches curve.rs's first station; ALONG→AT corrected in the archived prose), cone-dodge-at-entry, wrap radial dives and tilt-posed rapids recorded as verdicts with their backstop chains; turning - order law stated in the catalog rows, the verifier's stands-downs documented, no entry-defect analog (ridge, kerf-slide and rho_clear laws refuse or prevent by name); whole registry annotated, heavy lane green on every family | ✅ |
 | **M9.1** | The operation opens its own page | Done: the retype dropdown and its dialog retired - the ribbon creates or opens by kind, the tree selection opens the same pane in place (A); the six tabs folded into one stacked pane of collapsing sections per the Blender verdict, `op_tab` retired, the drift guard restated exact (B); the pane law walks all 30 registry kinds - one header per group, fields exactly once, catching the Passes header/field collision, renamed Pass count (C); toolpath goldens byte-identical, snapshots re-blessed; heavy lane green; ledger in RECOMMENDED.md | ✅ |
+| **M10.1** | A tool that can cut the operation | The tool law: `KindInfo.tool_kinds` one table (mill forms / cycle tools / lathe blades per family), `CreateOperation` + `ChangeTool` refuse the mismatch at command construction by name, the ribbon darkens with the reason (fix is a library click away - darken, not hide), tool edits leave ops visible-and-blocked not silently machined, old files load untouched; generator shape refusals stand as the backstop | 📋 |
 
 ## Open questions & deferred
 
