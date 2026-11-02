@@ -184,11 +184,15 @@ fn stamp_follows_every_input() {
     // stage B's two profile rows carry the count to 21 - stage C's
     // three blade rows to 24 - stage D's wave row to its true 25 -
     // stage E's three contour rides to 28 - stage E2's crown row to
-    // 29 - stage F's boring row to 30.)
-    assert_eq!(KindInfo::ALL.len(), 30);
+    // 29 - stage F's boring row to 30 - M2.4 A's roughing twins to 32.)
+    assert_eq!(KindInfo::ALL.len(), 32);
     for (i, row) in KindInfo::ALL.iter().enumerate() {
         assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
         assert_eq!(row.tag as usize, i, "digest tag must equal table order");
+        // The declaration order IS the table order (M2.4 A): tests and
+        // the UI pass `OpType as usize` where an ordinal is wanted,
+        // so a row inserted mid-table must move its variant too.
+        assert_eq!(row.ty as usize, i, "row {i} out of step with the enum");
         assert_eq!(KindInfo::ALL[row.ty.ordinal()].ty, row.ty);
         assert_eq!(row.ty.to_string(), ALL_LABELS[i], "label drift");
     }

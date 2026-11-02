@@ -112,6 +112,61 @@ impl OpParams {
                         && (!matches!(strategy, PocketStrategy::Adaptive)
                             || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
             }
+            // The twins' doors are the pocket's, read with the
+            // strategy already decided (M2.4 A): Adaptive's engagement
+            // angle is bounded always because its kind IS the read,
+            // and Offset has no angle to check - the ring-vs-tool
+            // tiling check stays the generator's refusal of record.
+            OpParams::Adaptive2D {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                helix_radius,
+                max_engagement,
+                ..
+            } => {
+                pos(*stepover)
+                    && nneg(*stock_to_leave)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && pos(*helix_radius)
+                    && (*max_engagement > 0.0 && *max_engagement <= 90.0)
+            }
+            OpParams::Offset2D {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                helix_radius,
+                ..
+            } => {
+                pos(*stepover)
+                    && nneg(*stock_to_leave)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && pos(*helix_radius)
+            }
             OpParams::Pocket3D {
                 stepover,
                 stock_to_leave,

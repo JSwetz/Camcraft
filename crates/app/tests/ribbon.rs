@@ -40,11 +40,11 @@ fn sections_partition_the_registry() {
 #[test]
 fn family_is_derived_not_forked() {
     // The old `family` field's truth, restated as a law over `section`:
-    // the turning rows (18..=29, the M5.2 ladder) are the Turning
+    // the turning rows (20..=31, the M5.2 ladder) are the Turning
     // section and nothing Turn-likes lives elsewhere - so
     // `KindInfo::family()` cannot drift from `Section::family()`.
     for (i, k) in KindInfo::ALL.iter().enumerate() {
-        let want = if i >= 18 {
+        let want = if i >= 20 {
             Family::Turn
         } else {
             Family::Mill
@@ -128,4 +128,27 @@ fn pins_ride_the_project_and_the_default_writes_no_key() {
     let world3 = new_world();
     project::open(&world3, r#"{"version": 41, "entities": []}"#).expect("v41 opens");
     assert!(pinned_of(&world3).is_empty(), "absent means unpinned");
+}
+
+#[test]
+fn v42_pins_shift_for_the_twins_row_insert() {
+    // M2.4 A put two rows in the MIDDLE of the 2D mill's run, so a
+    // v42 file's pin indices name rows that moved: 0..=4 still name
+    // the same kind, and from the Drill row up each gains the two
+    // new rows' worth. The PostDto law seen from the other side -
+    // names survive growth, indices need a rung.
+    let world = new_world();
+    project::open(
+        &world,
+        r#"{"version": 42, "pinned": [4, 5, 29], "entities": []}"#,
+    )
+    .expect("a v42 pinned file steps up");
+    let pins = pinned_of(&world);
+    assert_eq!(
+        pins,
+        vec![4, 7, 31],
+        "Trace stays, the Drill row and the last turning row shift by two"
+    );
+    assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
+    assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
 }

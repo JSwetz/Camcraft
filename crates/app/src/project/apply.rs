@@ -373,6 +373,23 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // cannot contain it because the key did not exist.
         file.version = 42;
     }
+    if file.version == 42 {
+        // v42 -> v43: the two 2D roughing kinds arrive (M2.4 A) IN
+        // THE MIDDLE of the 2D mill's run - the ribbon's contiguity
+        // law says a section's rows are a run, so the new tags are
+        // 5 and 6 and everything from the old Drill row up shifts by
+        // two. A v42 file cannot contain the new variants (the
+        // arrival law), but it CAN carry pins by index, and the
+        // table those indices named has moved: from 5 up, +2. Every
+        // other number in the file is a name or a tag-by-value, and
+        // both survived the insert untouched.
+        for idx in &mut file.pinned {
+            if *idx >= 5 {
+                *idx += 2;
+            }
+        }
+        file.version = 43;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

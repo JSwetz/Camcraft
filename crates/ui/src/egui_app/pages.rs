@@ -528,6 +528,112 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str) {
 /// field appear exactly once per pane (M9.1 B). Numbers are DragValue
 /// instead of InputDouble (divergence D5, S4 report): egui has no
 /// InputDouble; DragValue edits + commits with no custom state.
+/// The roughing twins' shared pane (M2.4 A): the pocket's fields minus
+/// the Strategy combo - the kind IS the strategy, so the choice that
+/// would undo the name is not offered. `tag` scopes the height-editor
+/// ids ("adaptive"/"offset"); the engagement door rides along as an
+/// Option so the law "a section header renders exactly when its kind
+/// has fields" stays one code path for both catalog names.
+#[allow(clippy::too_many_arguments)]
+fn roughing2d_pane(
+    ui: &mut Ui,
+    world: &flecs_ecs::prelude::World,
+    op_ctx: Option<&str>,
+    u: Unit,
+    tab: usize,
+    tag: &str,
+    stepover: &mut f64,
+    stock_to_leave: &mut f64,
+    clearance_z: &mut Height,
+    retract_z: &mut Option<Height>,
+    top_z: &mut Height,
+    bottom_z: &mut Height,
+    stepdown: &mut f64,
+    feed: &mut f64,
+    plunge_feed: &mut f64,
+    climb: &mut bool,
+    entry: &mut camcraft_app::machining3d::Entry3D,
+    helix_radius: &mut f64,
+    max_engagement: Option<&mut f64>,
+    tilt: &mut Option<Tilt>,
+) {
+    if tab == SEC_HEIGHTS {
+        orientation_editor(ui, u, tilt);
+        field(ui, "Clearance Z");
+        height_editor(ui, world, op_ctx, clearance_z, &format!("{tag}.clearance"));
+        field(ui, "Retract plane");
+        let mut hop = retract_z.is_some();
+        if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+            *retract_z = if hop {
+                Some(Height::of(top_z.reference, top_z.offset + 1.0))
+            } else {
+                None
+            };
+        }
+        if let Some(r) = retract_z {
+            field(ui, "Retract Z");
+            height_editor(ui, world, op_ctx, r, &format!("{tag}.retract"));
+            if let (Some(rz), Some(cz)) = (r.z(world), clearance_z.z(world))
+                && rz > cz
+            {
+                ui.label(format!(
+                    "above clearance - the hop travels at {} (min of the two)",
+                    units::len(cz, u, 3)
+                ));
+            }
+        }
+        field(ui, "Top Z");
+        height_editor(ui, world, op_ctx, top_z, &format!("{tag}.top"));
+        field(ui, "Bottom Z");
+        height_editor(ui, world, op_ctx, bottom_z, &format!("{tag}.bottom"));
+        field(ui, "Stepdown");
+        num(ui, u, stepdown);
+    }
+    if tab == SEC_PASSES {
+        field(ui, "Stepover");
+        num(ui, u, stepover);
+        field(ui, "Stock to leave");
+        num(ui, u, stock_to_leave);
+        match max_engagement {
+            Some(m) => {
+                field(ui, "Max engagement (deg)");
+                num_plain(ui, m);
+                ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
+            }
+            None => {
+                ui.label("concentric rings from the boundary inward, one stepover apart");
+            }
+        }
+        field(ui, "Entry");
+        let mut e_idx = match entry {
+            camcraft_app::machining3d::Entry3D::Plunge => 0,
+            camcraft_app::machining3d::Entry3D::Ramp => 1,
+            camcraft_app::machining3d::Entry3D::Helix => 2,
+        };
+        let before = e_idx;
+        combo(ui, &format!("{tag}_entry"), &mut e_idx, &ENTRY_KINDS);
+        if e_idx != before {
+            *entry = match e_idx {
+                1 => camcraft_app::machining3d::Entry3D::Ramp,
+                2 => camcraft_app::machining3d::Entry3D::Helix,
+                _ => camcraft_app::machining3d::Entry3D::Plunge,
+            };
+        }
+        if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
+            field(ui, "Helix lead radius");
+            num(ui, u, helix_radius);
+            ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+        }
+    }
+    if tab == SEC_FEEDS {
+        field(ui, &format!("Feed ({})", u.feed_suffix()));
+        num_feed(ui, u, feed);
+        field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+        num_feed(ui, u, plunge_feed);
+        ui.checkbox(climb, "Climb milling");
+    }
+}
+
 fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let u = state.units();
     let mut side_note: Option<String> = None;
@@ -979,6 +1085,83 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.checkbox(climb, "Climb milling");
             }
         }
+        // The roughing twins (M2.4 A): the pocket's pane with the
+        // Strategy combo retired - the kind IS the strategy, so the
+        // choice that would undo the name is not offered. Adaptive
+        // shows the engagement door; Offset has none to show.
+        OpParams::Adaptive2D {
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            max_engagement,
+            tilt,
+        } => roughing2d_pane(
+            ui,
+            &state.world,
+            op_ctx.as_deref(),
+            u,
+            tab,
+            "adaptive",
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            Some(max_engagement),
+            tilt,
+        ),
+        OpParams::Offset2D {
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            tilt,
+        } => roughing2d_pane(
+            ui,
+            &state.world,
+            op_ctx.as_deref(),
+            u,
+            tab,
+            "offset",
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            None,
+            tilt,
+        ),
         OpParams::Slot {
             a,
             b,

@@ -769,6 +769,40 @@ fn every_field_lives_on_exactly_one_section() {
             ],
         ),
         (
+            // The roughing twins (M2.4 A): the pocket's pane with the
+            // Strategy combo retired - the kind IS the strategy, so the
+            // choice that would undo the name is not offered. Geometry
+            // is the bare pick law like Pocket's: stock silhouette by
+            // default, picks may bound it (the rim law's closed-chain
+            // refusal is proved over a Selection src). Adaptive shows
+            // the engagement door the name pins open; Offset has no
+            // such field. "Retract Z" and "Helix lead radius" are
+            // guard-rendered (the draft has them off), so they are not
+            // in these rows.
+            "2D Adaptive",
+            vec![
+                ("Geometry", vec!["Click selects:"]),
+                (
+                    "Heights",
+                    vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
+                ),
+                ("Passes", vec!["Stepover", "Stock to leave", "Max engagement (deg)", "Entry"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
+            "2D Offset",
+            vec![
+                ("Geometry", vec!["Click selects:"]),
+                (
+                    "Heights",
+                    vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
+                ),
+                ("Passes", vec!["Stepover", "Stock to leave", "Entry"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
             // A drill has no climb (the cycle owns the retract), no
             // Leads & Links (no wall to enter), and its Passes are the
             // cycle's own numbers - the section law this row pins.
@@ -2538,20 +2572,21 @@ fn bored_block() -> camcraft_app::geometry::Mesh {
 #[test]
 fn ribbon_drill_cell_creates_a_drill_operation() {
     let mut harness = shell_harness();
+    let kind = camcraft_app::operation::OpType::Drill as usize;
     // The Drill cell stands on the bar only as a pin (the ribbon law:
     // unpinned kinds live behind their section door, reached through
-    // `the_dropdown_reaches_a_folded_kind`) - pin kind 5 and the
-    // default-parameter proof rides the live cell.
-    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[5]);
+    // `the_dropdown_reaches_a_folded_kind`) - pin the Drill's kind and
+    // the default-parameter proof rides the live cell.
+    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[kind]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
-        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[5]),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[kind]),
     );
     let drill = cells
         .iter()
-        .find(|c| c.cmd == Cmd::Create(5))
+        .find(|c| c.cmd == Cmd::Create(kind))
         .expect("the pinned Drill stands on the bar");
     let at = drill.rect.center();
     set_pos(&mut harness, at);
@@ -2566,7 +2601,7 @@ fn ribbon_drill_cell_creates_a_drill_operation() {
     // Empty holes at creation is legal (the page shows the list's
     // placeholder); the generator is what refuses, at Generate time.
     let OpParams::Drill { holes, cycle, .. } = &op.params else {
-        panic!("the sixth cell must create a Drill operation, got {:?}", op.params.kind())
+        panic!("the Drill cell must create a Drill operation, got {:?}", op.params.kind())
     };
     assert!(holes.is_empty(), "a fresh drill starts without a hole list");
     assert_eq!(*cycle, camcraft_app::drilling::CycleChoice::Auto);
@@ -2790,18 +2825,19 @@ fn the_machine_group_mounts_the_library_and_the_editor_writes_through_history() 
 #[test]
 fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     let mut harness = shell_harness();
+    let kind = camcraft_app::operation::OpType::Pocket3D as usize;
     // Pinned, so the cell stands on the bar (the ribbon law) - the
     // default-parameter proof rides the live cell.
-    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[6]);
+    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[kind]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
-        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[6]),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[kind]),
     );
     let pocket3d = cells
         .iter()
-        .find(|c| c.cmd == Cmd::Create(6))
+        .find(|c| c.cmd == Cmd::Create(kind))
         .expect("the pinned 3D Pocket stands on the bar");
     let at = pocket3d.rect.center();
     set_pos(&mut harness, at);
@@ -2818,7 +2854,7 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
     // kind because the region is the model's silhouette.
     let OpParams::Pocket3D { strategy, entry, .. } = &op.params else {
         panic!(
-            "the seventh cell must create a 3D Pocket operation, got {:?}",
+            "the 3D Pocket cell must create a 3D Pocket operation, got {:?}",
             op.params.kind()
         )
     };
@@ -2829,18 +2865,19 @@ fn ribbon_pocket3d_cell_creates_a_3d_pocket_operation() {
 #[test]
 fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     let mut harness = shell_harness();
+    let kind = camcraft_app::operation::OpType::Finish3D as usize;
     // Pinned, so the cell stands on the bar (the ribbon law) - the
     // default-parameter proof rides the live cell.
-    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[7]);
+    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[kind]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
         &theme::current(),
-        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[7]),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[kind]),
     );
     let finish3d = cells
         .iter()
-        .find(|c| c.cmd == Cmd::Create(7))
+        .find(|c| c.cmd == Cmd::Create(kind))
         .expect("the pinned 3D Finish stands on the bar");
     let at = finish3d.rect.center();
     set_pos(&mut harness, at);
@@ -2867,7 +2904,7 @@ fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     } = &op.params
     else {
         panic!(
-            "the eighth cell must create a 3D Finish operation, got {:?}",
+            "the 3D Finish cell must create a 3D Finish operation, got {:?}",
             op.params.kind()
         )
     };
@@ -2891,7 +2928,7 @@ fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
 #[test]
 fn finish3d_pattern_and_stepover_apply_through_commands() {
     let mut harness = shell_harness();
-    crate::actions::add_operation(&mut harness.state_mut().state, 7);
+    crate::actions::add_operation(&mut harness.state_mut().state, camcraft_app::operation::OpType::Finish3D as usize);
     harness.run_steps(2);
     let staged = |h: &Harness<'static, ShellUi>| match h.state().state.op_ui.params {
         OpParams::Finish3D { pattern, stepover, .. } => (pattern, stepover),
@@ -3108,7 +3145,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
 #[test]
 fn detect_holes_refuses_recognizes_and_undo_empties_again() {
     let mut harness = shell_harness();
-    crate::actions::add_operation(&mut harness.state_mut().state, 5);
+    crate::actions::add_operation(&mut harness.state_mut().state, camcraft_app::operation::OpType::Drill as usize);
     harness.run_steps(2);
     // The pane now targets the new Drill op; the Geometry group is the
     // Detect button's home, and the draft reads the created params.
@@ -3322,7 +3359,7 @@ fn radial_detect_fills_the_cross_list_on_a_millturn() {
     .expect("write machine file");
 
     let mut harness = shell_harness();
-    crate::actions::add_operation(&mut harness.state_mut().state, 5);
+    crate::actions::add_operation(&mut harness.state_mut().state, camcraft_app::operation::OpType::Drill as usize);
     harness.run_steps(2);
     {
         let sh = harness.state_mut();

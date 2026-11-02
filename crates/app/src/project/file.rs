@@ -1,6 +1,15 @@
 use super::*;
 
-pub const PROJECT_VERSION: u32 = 42;
+/// v43: the ParamsDto grows the two 2D roughing kinds (M2.4 A). The
+/// arms are NEW VARIANTS, not additive fields — a v42 build reading a
+/// v43 file fails on the unknown variant by name, which is the honest
+/// refusal; the bump makes it a version refusal before a serde one.
+/// The kinds join the 2D mill's run in place (the ribbon's contiguity
+/// law), so every registry index from the old Drill row up shifted by
+/// two — the only numbers a v42 file carries by index are the ribbon
+/// pins, and the ladder remaps them (the PostDto law seen from the
+/// other side: names survive growth, indices need a rung).
+pub const PROJECT_VERSION: u32 = 43;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -59,11 +68,14 @@ pub struct ProjectFile {
     pub theme: Option<ThemeDto>,
     /// The ribbon's pinned kinds (M6.2), v42+: registry indices in pin
     /// order. An absent key pins nothing - what every v41 document is,
-    /// since the ribbon could not pin then. The indices are
-    /// registry-stable (the row order IS the product order, the combo
-    /// law), and out-of-range ones drop at read (`pinned_of`), so a
-    /// document pinned on a larger table still opens, showing only the
-    /// kinds this build can name.
+    /// since the ribbon could not pin then. The indices ride the
+    /// table: an append never disturbs them (the row order IS the
+    /// product order, the combo law), and a mid-run insert shifts them
+    /// in the version ladder - v43's rung maps idx >= 5 to idx + 2 for
+    /// the twins' place in the 2D mill's run - so a pinned row keeps
+    /// naming the kind it named when it was saved. Out-of-range ones
+    /// drop at read (`pinned_of`), so a document pinned on a larger
+    /// table still opens, showing only the kinds this build can name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned: Vec<usize>,
     pub entities: Vec<EntityDto>,

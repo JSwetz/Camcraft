@@ -371,6 +371,10 @@ pub(super) fn section_z_of(
     let top_z = match params {
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
+        // The roughing twins read the pocket's section plane - the
+        // same z whose ladder `region_core` cuts (M2.4 A).
+        | OpParams::Adaptive2D { top_z, .. }
+        | OpParams::Offset2D { top_z, .. }
         | OpParams::Trace { top_z, .. } => *top_z,
         _ => return None,
     };
@@ -460,7 +464,13 @@ pub(super) fn region_core(
         | OpParams::BoringTurning { .. } => {
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
-        OpParams::Contour { .. } | OpParams::Pocket { .. } | OpParams::Trace { .. } => {
+        // The twins hollow the region's inside exactly like the pocket
+        // does (M2.4 A) - same section, same machine area.
+        OpParams::Contour { .. }
+        | OpParams::Pocket { .. }
+        | OpParams::Adaptive2D { .. }
+        | OpParams::Offset2D { .. }
+        | OpParams::Trace { .. } => {
             let z = z?;
             section(&material.facets, z - oz)
         }

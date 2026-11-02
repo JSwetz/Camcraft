@@ -518,6 +518,22 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             bottom_z,
             ..
         }
+        // The twins' four heights are the pocket's, column for
+        // column (M2.4 A).
+        | OpParams::Adaptive2D {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::Offset2D {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
+        }
         | OpParams::Slot {
             clearance_z,
             retract_z,

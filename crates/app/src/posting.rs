@@ -578,6 +578,21 @@ impl HeightRefs for OpParams {
                 bottom_z,
                 ..
             }
+            // The twins reference the pocket's four heights (M2.4 A).
+            | OpParams::Adaptive2D {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
+            | OpParams::Offset2D {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
             | OpParams::Slot {
                 clearance_z,
                 retract_z,

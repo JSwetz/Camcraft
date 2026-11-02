@@ -177,7 +177,12 @@ pub(super) fn selection_geometry_impl(
     mut notes: Option<&mut Vec<String>>,
 ) -> Result<SelectionGeometry, GenError> {
     let facing = matches!(params, OpParams::Face { .. });
-    let pocket = matches!(params, OpParams::Pocket { .. });
+    // The pocket law is the roughing twins' law too (M2.4 A): all
+    // three hollow a closed region, so none may end mid-edge.
+    let pocket = matches!(
+        params,
+        OpParams::Pocket { .. } | OpParams::Adaptive2D { .. } | OpParams::Offset2D { .. }
+    );
     let contour = matches!(params, OpParams::Contour { .. });
     let contour_side = match params {
         OpParams::Contour { side, .. } => *side,
@@ -303,7 +308,8 @@ pub(super) fn selection_geometry_impl(
                     }
                     if pocket {
                         return Err(GenError::Invalid(format!(
-                            "{label} is an open run - a 2D Pocket cannot end mid-edge; select a closed chain"
+                            "{label} is an open run - a {} cannot end mid-edge; select a closed chain",
+                            params.kind().info().label
                         )));
                     }
                     if contour {

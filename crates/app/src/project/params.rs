@@ -124,6 +124,51 @@ pub enum ParamsDto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,
     },
+    /// 2D Adaptive (M2.4 A): the pocket arm without the strategy tag -
+    /// the kind fixes the ladder; every default the pocket needs, this
+    /// arm states (the fields arrived with the kind, v43).
+    Adaptive2D {
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        #[serde(default)]
+        entry: EntryDto,
+        #[serde(default = "default_helix_radius")]
+        helix_radius: f64,
+        #[serde(default = "default_engagement_deg")]
+        max_engagement: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
+    },
+    /// 2D Offset (M2.4 A): the same arm minus the engagement door -
+    /// style-A rings are spaced by the stepover alone.
+    Offset2D {
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        #[serde(default)]
+        entry: EntryDto,
+        #[serde(default = "default_helix_radius")]
+        helix_radius: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
+    },
     Slot {
         a: [f64; 2],
         b: [f64; 2],

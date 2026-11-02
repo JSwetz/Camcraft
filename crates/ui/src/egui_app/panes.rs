@@ -148,7 +148,8 @@ pub(super) enum Cmd {
 /// The four anchor groups: file work opens the row, setup follows, and
 /// the run/judge groups close it. The middle is the registry's (below):
 /// the old hand-typed eight-cell Create group was M1.4.3's debt, home
-/// to kinds 0..=7 while the table grew to thirty.
+/// to kinds 0..=7 while the table grew - the registry counts the
+/// kinds, this comment never must.
 const FILE: (&str, &[Cmd]) =
     ("File", &[Cmd::New, Cmd::Model, Cmd::Project, Cmd::Save, Cmd::Post]);
 const SETUP: (&str, &[Cmd]) =
@@ -516,6 +517,10 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Face => Icon::Face,
         OpType::Contour => Icon::Contour,
         OpType::Pocket => Icon::Pocket,
+        // The roughing twins ARE the pocket ladder under two catalog
+        // names (M2.4 A) - the Pocket3D precedent says: same word,
+        // same pixels.
+        OpType::Adaptive2D | OpType::Offset2D => Icon::Pocket,
         OpType::Slot => Icon::Slot,
         OpType::Trace => Icon::Trace,
         OpType::Drill => Icon::Drill,

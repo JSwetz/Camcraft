@@ -1141,6 +1141,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
     let hop = match draft {
         operation::OpParams::Contour { retract_z, .. } => Some(*retract_z),
         operation::OpParams::Pocket { retract_z, .. }
+        // The roughing twins hop like their parent ladder (M2.4 A).
+        | operation::OpParams::Adaptive2D { retract_z, .. }
+        | operation::OpParams::Offset2D { retract_z, .. }
         | operation::OpParams::Pocket3D { retract_z, .. }
         | operation::OpParams::Finish3D { retract_z, .. }
         | operation::OpParams::Contour5D { retract_z, .. }
@@ -1254,6 +1257,10 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // up top, snapped last one below (M5.1 stage C).
         operation::OpParams::Contour { top_z, bottom_z, .. }
         | operation::OpParams::Pocket { top_z, bottom_z, .. }
+        // The twins run the pocket's ladder: first level up top, the
+        // floor below, the levels between the section's own (M2.4 A).
+        | operation::OpParams::Adaptive2D { top_z, bottom_z, .. }
+        | operation::OpParams::Offset2D { top_z, bottom_z, .. }
         | operation::OpParams::Pocket3D { top_z, bottom_z, .. }
         | operation::OpParams::Finish3D { top_z, bottom_z, .. }
         | operation::OpParams::Contour5D { top_z, bottom_z, .. }

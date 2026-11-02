@@ -318,16 +318,16 @@ mod height_row_tests {
 
     #[test]
     fn a_fresh_drill_starts_empty_auto_and_floorless() {
-        // Kind 5's own contract (M1.6): the shared law covers it - R
+        // The drill's own contract (M1.6): the shared law covers it - R
         // plane at the model top, rapids above the stock - but its
         // bottom is deliberately None: a drilled hole's floor is the
         // hole's own, recorded by recognition, not a work-offset
         // plane. Creation with no holes is legal (the generator
         // refuses to run one, by name), and the cycle rides Auto.
         let OpParams::Drill { top_z, bottom_z, clearance_z, cycle, holes, peck, dwell, retract_z, .. } =
-            quick_params(5)
+            quick_params(camcraft_app::operation::OpType::Drill.ordinal())
         else {
-            panic!("kind 5 is a Drill");
+            panic!("the Drill row is a Drill");
         };
         assert_eq!(top_z.reference, HeightReference::TopOfModel);
         assert!(bottom_z.is_none(), "hole floors ride the holes, not G54");
@@ -367,10 +367,11 @@ mod height_row_tests {
         // contour -> drill -> pocket; the drill's hole list can only
         // arrive through a command, never through a type change; and a
         // drill's climb-less nature retypes to the milling default.
+        let drill = camcraft_app::operation::OpType::Drill.ordinal();
         let OpParams::Drill { top_z, feed, plunge_feed, holes, cycle, retract_z, .. } =
-            retype(&cont_seed(), 5)
+            retype(&cont_seed(), drill)
         else {
-            panic!("kind 5 is a Drill");
+            panic!("the Drill row is a Drill");
         };
         assert_eq!(top_z, Height::fixed(-1.0), "the contour's top becomes the R plane");
         assert_eq!((feed, plunge_feed), (700.0, 90.0));
@@ -378,7 +379,7 @@ mod height_row_tests {
         assert_eq!(cycle, camcraft_app::drilling::CycleChoice::Auto);
         assert!(retract_z.is_none(), "like the pocket family, a fresh hop plane is None");
         let OpParams::Pocket { top_z, feed, climb, stepdown, .. } =
-            retype(&retype(&cont_seed(), 5), 2)
+            retype(&retype(&cont_seed(), drill), 2)
         else {
             panic!("kind 2 is a Pocket");
         };

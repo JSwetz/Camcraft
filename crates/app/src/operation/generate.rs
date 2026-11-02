@@ -271,6 +271,94 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             )?;
             (region, path)
         }
+        // The roughing twins (M2.4 A) are the pocket's own machinery
+        // with the strategy pinned out of the params: Adaptive spaces
+        // its rings by the engagement door, Offset runs the
+        // concentric tiling at the stepover (its engagement field is
+        // inert in the generator, so the legal constant stands in).
+        OpParams::Adaptive2D {
+            stepover,
+            stock_to_leave,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            max_engagement,
+            ..
+        } => {
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            let path = machining2d::pocket(
+                &region,
+                &PocketParams {
+                    tool_diameter: d,
+                    stepover: *stepover,
+                    stock_to_leave: *stock_to_leave,
+                    clearance_z: hl.clearance,
+                    retract_z: hl.retract,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    stepdown: *stepdown,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                    strategy: PocketStrategy::Adaptive,
+                    entry: *entry,
+                    helix_radius: *helix_radius,
+                    max_engagement: *max_engagement,
+                },
+            )?;
+            (region, path)
+        }
+        OpParams::Offset2D {
+            stepover,
+            stock_to_leave,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            ..
+        } => {
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            let path = machining2d::pocket(
+                &region,
+                &PocketParams {
+                    tool_diameter: d,
+                    stepover: *stepover,
+                    stock_to_leave: *stock_to_leave,
+                    clearance_z: hl.clearance,
+                    retract_z: hl.retract,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    stepdown: *stepdown,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                    strategy: PocketStrategy::Waterline,
+                    entry: *entry,
+                    helix_radius: *helix_radius,
+                    max_engagement: 45.0,
+                },
+            )?;
+            (region, path)
+        }
         OpParams::Pocket3D {
             stepover,
             stock_to_leave,
@@ -1727,6 +1815,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         | OpParams::BoringTurning { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
+        // The twins leave the pocket's shelf, same law (M2.4 A).
+        | OpParams::Adaptive2D { stock_to_leave, .. }
+        | OpParams::Offset2D { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
         | OpParams::Pocket3D { stock_to_leave, .. }
         // The ladder is the one rotary that LEAVES a shelf on purpose:

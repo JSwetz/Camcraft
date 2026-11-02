@@ -65,6 +65,17 @@ pub enum OpType {
     Pocket,
     Slot,
     Trace,
+    /// 2D Adaptive roughing (M2.4 A): the pocket's constant-engagement
+    /// ladder under its own catalog name — rings spaced by the
+    /// engagement law instead of a authored stepover (see
+    /// [`crate::machining2d::pocket`]). Declared where the registry
+    /// rows it (the table's order IS the declaration order -
+    /// `OpType as usize` is the table index everywhere).
+    Adaptive2D,
+    /// 2D Offset roughing, style A (M2.4 A): concentric rings from the
+    /// boundary inward at the roughing stepover — the pocket's
+    /// waterline tiling, named (see [`crate::machining2d::pocket`]).
+    Offset2D,
     Drill,
     /// Mesh-driven Z-level pocketing: the model is the final part, every
     /// level's islands are computed from it (see [`crate::machining3d`]).

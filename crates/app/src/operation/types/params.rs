@@ -142,6 +142,60 @@ pub enum OpParams {
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },
+    /// 2D Adaptive roughing (M2.4 A): the pocket's constant-engagement
+    /// ladder as its own catalog name. The rings are the `Adaptive`
+    /// strategy's - `engagement_step` spaces them, so `stepover` rides
+    /// the retype law inert, exactly as it does on a Pocket set to
+    /// Adaptive. `machining2d::pocket` does the work; the kind is the
+    /// name, the seed, and the golden.
+    Adaptive2D {
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: Height,
+        /// Hop plane between passes of one level; None hops to
+        /// clearance - the pocket family's shape.
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// How the cutter engages each level; see [`OpParams::Pocket`].
+        entry: Entry3D,
+        /// Helix centerline radius, mm; read only when `entry` is Helix.
+        helix_radius: f64,
+        /// Degrees of cutter contact the ladder keeps its ring step
+        /// under; the law `PocketStrategy::Adaptive` reads.
+        max_engagement: f64,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
+    },
+    /// 2D Offset pocket roughing, style A (M2.4 A): concentric rings
+    /// from the boundary inward at the roughing stepover - the pocket's
+    /// `Waterline` tiling under a roughing schedule, the same island
+    /// and clearance math the staircase uses. No engagement angle: the
+    /// stated `stepover` spaces the rings here.
+    Offset2D {
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: Height,
+        /// Hop plane between passes of one level; None hops to
+        /// clearance - the pocket family's shape.
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// How the cutter engages each level; see [`OpParams::Pocket`].
+        entry: Entry3D,
+        /// Helix centerline radius, mm; read only when `entry` is Helix.
+        helix_radius: f64,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
+    },
     Slot {
         a: Point2,
         b: Point2,
@@ -833,6 +887,8 @@ impl OpParams {
             OpParams::Face { .. } => OpType::Face,
             OpParams::Contour { .. } => OpType::Contour,
             OpParams::Pocket { .. } => OpType::Pocket,
+            OpParams::Adaptive2D { .. } => OpType::Adaptive2D,
+            OpParams::Offset2D { .. } => OpType::Offset2D,
             OpParams::Slot { .. } => OpType::Slot,
             OpParams::Trace { .. } => OpType::Trace,
             OpParams::Drill { .. } => OpType::Drill,
@@ -873,6 +929,8 @@ impl OpParams {
             OpParams::Face { tilt, .. }
             | OpParams::Contour { tilt, .. }
             | OpParams::Pocket { tilt, .. }
+            | OpParams::Adaptive2D { tilt, .. }
+            | OpParams::Offset2D { tilt, .. }
             | OpParams::Slot { tilt, .. }
             | OpParams::Trace { tilt, .. } => *tilt,
             // The 5-axis kinds (M5.1 C) are the third answer, not the
@@ -937,6 +995,8 @@ impl OpParams {
             OpParams::Face { clearance_z, .. }
             | OpParams::Contour { clearance_z, .. }
             | OpParams::Pocket { clearance_z, .. }
+            | OpParams::Adaptive2D { clearance_z, .. }
+            | OpParams::Offset2D { clearance_z, .. }
             | OpParams::Slot { clearance_z, .. }
             | OpParams::Trace { clearance_z, .. }
             | OpParams::Drill { clearance_z, .. }
@@ -977,6 +1037,8 @@ impl OpParams {
             OpParams::Face { top_z, cut_z, .. } => top_z.unwrap_or(*cut_z),
             OpParams::Contour { top_z, .. }
             | OpParams::Pocket { top_z, .. }
+            | OpParams::Adaptive2D { top_z, .. }
+            | OpParams::Offset2D { top_z, .. }
             | OpParams::Slot { top_z, .. }
             | OpParams::Trace { top_z, .. }
             | OpParams::Drill { top_z, .. }
@@ -1043,6 +1105,15 @@ impl OpParams {
                 f(*bottom_z);
             }
             OpParams::Pocket { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            // The two roughing twins carry the pocket family's four
+            // fields verbatim (M2.4 A) - same ladder, same heights.
+            OpParams::Adaptive2D { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::Offset2D { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);

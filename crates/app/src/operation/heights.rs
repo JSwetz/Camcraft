@@ -96,6 +96,9 @@ pub fn region_z(
             .unwrap_or_else(|| resolve_height(world, setup, *cut_z)),
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
+        // The roughing twins name the pocket's high station (M2.4 A).
+        | OpParams::Adaptive2D { top_z, .. }
+        | OpParams::Offset2D { top_z, .. }
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
         | OpParams::Drill { top_z, .. }
@@ -188,6 +191,10 @@ pub fn resolve_params(
             Some(req("Retract Z", *retract_z)?),
         ),
         OpParams::Pocket { clearance_z, retract_z, top_z, bottom_z, .. }
+        // The roughing twins carry the pocket's four heights verbatim
+        // (M2.4 A) - same ladder shape, same hop.
+        | OpParams::Adaptive2D { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Offset2D { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Slot { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Pocket3D { clearance_z, retract_z, top_z, bottom_z, .. }

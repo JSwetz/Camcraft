@@ -215,6 +215,75 @@ impl OpParams {
                 wh_opt(h, *retract_z);
                 wt(h, *tilt);
             }
+            // The roughing twins (M2.4 A): the pocket's digest minus
+            // the strategy byte - the kind tag at the head already
+            // pins which ladder runs, and a field that cannot move
+            // has nothing to say about staleness.
+            OpParams::Adaptive2D {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                entry,
+                helix_radius,
+                max_engagement,
+                tilt,
+            } => {
+                w(h, *stepover);
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
+                });
+                wh_opt(h, *retract_z);
+                wt(h, *tilt);
+            }
+            OpParams::Offset2D {
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                entry,
+                helix_radius,
+                tilt,
+            } => {
+                w(h, *stepover);
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
+                });
+                wh_opt(h, *retract_z);
+                wt(h, *tilt);
+            }
             OpParams::Pocket3D {
                 stepover,
                 stock_to_leave,
