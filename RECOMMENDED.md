@@ -6656,3 +6656,86 @@ the finish3d suite green, clippy clean on all three crates with
 `--all-targets`, goldens byte-verified - and THAT is what commit
 bda85c1 carries. Same tree, calmer order: the report you can trust is
 the one that matches the commit's parentage.
+
+## M8.2 C - the slot's stadium, the tab's blind spot: certifying descents where the air lies
+
+The planar family's turn: the slot dove at its starter end on every
+level like the contour used to, and Phase 8's visit found a worse one -
+the contour's M8.2 A arms certified against FULL-DEPTH floor air, which
+on a tabbed level is a lie: a standing tab is material inside that air.
+
+**Chosen: `Cert` - a closed-form convex stadium is the slot's
+certification, not the tessellated one.** A slot's legal-center area is
+the axis segment's stadium, and the row law stands legitimate cutter
+centers EXACTLY on its boundary: rows at |d| = h, cap-arc endpoints at
+q² + d² = h². An inscribed 512-chord polygon sits ~1.9e-5·h inside the
+true arcs (1.3e-4 mm at h = 7; ~0.019 mm at h = 1000), so the polygon
+endpoint test refused the path's own endpoints - the ramp substituted
+into a dive on every level of a plain straight slot. A stadium is
+convex: endpoints within h of the axis ⟹ the whole chord is inside,
+EXACT, no tessellation in sight. The polygon rides along for
+`dive_room` only - triangle centroids are strictly interior points,
+where an inscribed region can refuse an orbit the true stadium allows
+(sub-micron, honest) but can never bless a gouge. Considered and
+dropped: a blanket epsilon on `chord_clears` (h·1e-5 + 1e-4 tried
+first) - wrong at scale: 0.1 mm of blessed gouge on a meter slot,
+and `chord_clears` was never the faulty predicate; the endpoint
+containment against the inscribed boundary was.
+
+**Chosen: the tabbed level stands the arms DOWN; the byte shape is
+M8.2 A's parent's.** `tabbed = tab_count > 0 && z < bottom_z +
+tab_height`: there, the inside-side entry posts exactly the pre-A
+shape (`git show 95d50b3^`: rapid across at the current z, axial
+plunge at the lead-in) and says why once per generation - "no arm
+stands where a tab is material no certification can see". Considered
+and dropped: re-certifying against a tab-aware region - the family's
+currency is floor AIR (an erosion of the cutter-center area); tabs
+are columns of standing METAL at named XY spots, a different shape
+no `Region` of this pipeline carries. The certification the arms
+would read does not exist at this level; pretending otherwise is the
+gouge. The law reads the level, not the knob: a chosen Helix still
+helixes on every tab-free level of the same op.
+
+**Chosen: the tall tab raises the hop, provably for free.** On a
+tabbed level `hop_z = max(retract, bottom_z + tab_height)`: between
+tabs the hop travels over floor already swept and air everywhere
+else, but a tab standing ABOVE the hop plane turns the between-pass
+rapid into a line through solid. For every file where tabs sit under
+the retract plane (all of them, sanely) the clamp is a no-op - it
+bites exactly in the self-inflicted case. `contour_hop_rides_the_tall_tab_top`
+measures both halves: tab_height 12 puts a rapid at z 6, tab_height 2
+puts none.
+
+**Chosen: the trace's verdict is a theorem, not a TODO.** A zero-width
+kerf has no area to stand a descent in: no region to erode, no chord
+to clear, so plunge is the ONLY legal entry, and no knob changes that
+without new proofs. Documented in `slots.rs` where the family's
+comments live; trace stays with the ladder's climb-and-dive, honest
+and silent because nothing was substituted.
+
+**Chosen: full-width slot says its substitution out loud.** h ≤ 0
+(tool width spans the slot) admits no arm; the center is `None`, the
+old wall dive runs byte-identical, and ONE note names it - "the
+channel has no room the descent could stand in". `Plunge` never even
+builds the tessellation: the default path skips the geometry entirely
+(no allocation, no sagitta, nothing to certify - the wall dive needs
+no warrant because the whole column above is what a plunge is for).
+
+**Chosen: wire and digest ride exactly the contour's M8.2 A pattern.**
+`entry` + `helix_radius` (default 1.0) on `SlotParams`,
+`#[serde(default)]` on the DTO, no PROJECT_VERSION bump; the digest
+stamps both (edit → Stale → regen → different path, and undo ×2
+restores the bytes - `operations.rs::an_entry_edit_marks_the_slot_
+stale_and_the_orbit_proves_itself`). A slot without `entry` keys
+loads as `plunge` + 1.0 (`slot_entry_family_is_a_step_up_on_the_
+wire`); `"spiral"` is Corrupt, not a typo honored - three words is
+the family's vocabulary.
+
+**Disclosure (gate bookkeeping): the default path moved no bytes.**
+No committed golden is tabbed (every fixture tab_count: 0), the slot
+default is Plunge (no tessellation built, wall dive unchanged), and
+the contour deferral only fires on tabbed levels. All law tests green
+at the commit's parent: motion machining2d 65/65 (5 new), app lib 27,
+operations 31, project_roundtrip 62, golden_cl 20, ui lib 128,
+shell 19, egui_app 3, clippy clean on all three crates. Code commit
+6d2c424.
