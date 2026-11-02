@@ -6,7 +6,7 @@ use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
 
 use super::arcs::{fit_arcs, lead_in, lead_out, push_segs, walk_tangent};
-use super::levels::{Motion, cut_levels, dive_link, substituted_dive};
+use super::levels::{Cert, Motion, cut_levels, dive_link, substituted_dive};
 use super::ring::Ring;
 use super::face::GenError;
 use super::slots::chord_clears;
@@ -264,12 +264,28 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     let m = Motion::new(p.clearance_z, Some(p.retract_z), p.feed, p.plunge_feed)
         .with_entry(p.entry, p.helix_radius);
     let mut refused_said = false;
+    let mut tabbed_said = false;
+    let cert = Cert::Region(&center);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let hop = p.retract_z.min(p.clearance_z);
     let mut first_entry = true;
     for (zi, &z) in zs.iter().enumerate() {
         let tabbed = p.tab_count > 0 && z < p.bottom_z + p.tab_height;
+        // A tab-hop template traverses at `hop` between windows, and a
+        // standing tab is material AT the window down to the level -
+        // below `bottom_z + tab_height` the hop plane itself runs
+        // through the tab. On tabbed levels the traverse therefore
+        // rides the tab top when that is higher. Sane files are
+        // unaffected twice over: validate keeps `retract >= top_z`,
+        // and a tab no taller than the cut ends at or below the
+        // surface, so the raise is a no-op unless the tab truly stands
+        // above the plane - which is exactly when it must.
+        let hop_z = if tabbed {
+            hop.max(p.bottom_z + p.tab_height)
+        } else {
+            hop
+        };
         for (li, l) in loops.iter().enumerate() {
             // Canonical orientation is material-on-the-left travel;
             // conventional climbing reverses it. Air is the other side.
@@ -305,8 +321,8 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                     // Loop to loop within one level: the tab-hop
                     // template - up to the hop plane, across, plunge.
                     let cur = b.at();
-                    b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
-                    b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop), None);
+                    b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop_z), Some(p.feed));
+                    b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop_z), None);
                     b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
                 } else if k == 0 {
                     // The level's first engagement: a crossing (the
@@ -322,7 +338,38 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                         b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
                     }
                     let prev_z = if zi == 0 { p.clearance_z } else { zs[zi - 1] };
-                    if inside {
+                    if inside && tabbed {
+                        // M8.2 C: the arm stands down where a tab is
+                        // material. dive_room and chord_clears certify
+                        // against the eroded region - the FULL-depth
+                        // air - but a standing tab is material INSIDE
+                        // that region at this level: a helix orbit or
+                        // a ramp chord certified here could run
+                        // straight through the tab it was told to
+                        // leave. Tabbed levels therefore take the
+                        // shape this generator posted before the
+                        // certification existed: clearance traverse,
+                        // axial dive at the lead-in, the same window
+                        // the walking cut already reaches by wall-
+                        // parallel feed. Sane and provably no worse
+                        // than the pre-A byte; the tab gets its
+                        // cleanup at the level above, where it is air.
+                        if p.entry != Entry3D::Plunge && !tabbed_said {
+                            b.note(
+                                "entry: no arm stands where a tab is material no \
+                                 certification can see - axial dive at the lead-in on \
+                                 tabbed levels",
+                            );
+                            tabbed_said = true;
+                        }
+                        let cur = b.at();
+                        b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, cur.z), None);
+                        b.push(
+                            MoveKind::Plunge,
+                            Point3::new(e2.x, e2.y, z),
+                            Some(p.plunge_feed),
+                        );
+                    } else if inside {
                         // The bore side: the eroded region states the
                         // bounded air exactly, so every arm certifies
                         // against it with the pocket ladders' own
@@ -344,11 +391,11 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                                         Point3::new(d.x, d.y, z),
                                         Some(p.plunge_feed),
                                     );
-                                    dive_link(&mut b, &center, &plan, d, e2, z, &m);
+                                    dive_link(&mut b, &cert, &plan, d, e2, z, &m);
                                 }
                                 None => substituted_dive(
                                     &mut b,
-                                    &center,
+                                    &cert,
                                     &plan,
                                     e2,
                                     z,
@@ -376,7 +423,7 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                                 } else {
                                     substituted_dive(
                                         &mut b,
-                                        &center,
+                                        &cert,
                                         &plan,
                                         e2,
                                         z,
@@ -399,11 +446,11 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                                         }
                                         b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
                                         helix_down(&mut b, d, prev_z, z, p.helix_radius, p.feed);
-                                        dive_link(&mut b, &center, &plan, d, e2, z, &m);
+                                        dive_link(&mut b, &cert, &plan, d, e2, z, &m);
                                     }
                                     None => substituted_dive(
                                         &mut b,
-                                        &center,
+                                        &cert,
                                         &plan,
                                         e2,
                                         z,
@@ -442,8 +489,8 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                     }
                 } else {
                     let cur = b.at();
-                    b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
-                    b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop), None);
+                    b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop_z), Some(p.feed));
+                    b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop_z), None);
                     b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
                 }
                 first_entry = false;

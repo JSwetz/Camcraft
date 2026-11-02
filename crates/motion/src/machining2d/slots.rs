@@ -1,11 +1,12 @@
 //! Split from `machining2d.rs` by M5.0.1; structure only.
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
+use crate::entry::Entry3D;
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
 
 use super::face::{GenError, band};
-use super::levels::{Motion, cut_levels, run_levels};
+use super::levels::{Cert, Motion, cut_levels, run_levels};
 use super::ring::on_boundary;
 /// Slotting: a straight channel between two XY points, cleared in rows
 /// parallel to its axis. The channel is the stadium swept by a disc of
@@ -44,6 +45,21 @@ pub struct SlotParams {
     pub plunge_feed: f64,
     /// The first row runs from `a` toward `b`; rows alternate from there.
     pub climb: bool,
+    /// How a level crossing engages (M8.2 C): the family the pocket and
+    /// contour ladders already read. The serpentine's pass start is a
+    /// stadium-boundary point - a wall - so the legacy dive this ladder
+    /// posts there is exactly the dive the entry law questions.
+    /// `Plunge` keeps it untouched (the goldens' shape, and the shape
+    /// no center is passed for); `Ramp`/`Helix` certify against the
+    /// closed-form cutter-center stadium - the same region the rows
+    /// band - and refuse per level, as substitutions, where it has no
+    /// room the descent can stand in.
+    pub entry: Entry3D,
+    /// Helix centerline circle radius, mm; read only when `entry` is
+    /// Helix. Fit is certified per level by `dive_room` against the
+    /// stadium wall (the contour law), not by a static cap: a full-
+    /// width slot (h = 0) has no room for any orbit, and says so.
+    pub helix_radius: f64,
 }
 
 impl SlotParams {
@@ -82,6 +98,12 @@ impl SlotParams {
         }
         if self.width <= 0.0 {
             return Err(GenError::Invalid("slot width must be positive".into()));
+        }
+        if self.entry == Entry3D::Helix && self.helix_radius <= 0.0 {
+            // Only positivity (the contour law): whether the corridor
+            // can HOLD the orbit is certified per level by `dive_room`
+            // against the stadium, where too wide is refused loudly.
+            return Err(GenError::Invalid("helix radius must be positive".into()));
         }
         if self.stock_to_leave < 0.0 {
             return Err(GenError::Invalid("stock to leave must not be negative".into()));
@@ -132,8 +154,30 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
 
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     let mut bld = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
-    run_levels(&mut bld, &[pass], &zs, &motion, None, None);
+    let mut motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
+    // `Plunge` passes no center and the ladder dives at the pass start
+    // as it always did - the goldens' shape. The ramped families certify
+    // against the cutter-center stadium, the same band the rows walk:
+    // chords by closed form (convex - the row law's own boundary points
+    // certify clean), orbits by the inscribed tessellation (centroids
+    // are strictly interior, so a tessellation error can only refuse,
+    // never bless). A channel with no width to certify (h = 0) hands
+    // the ladder nothing, and says so once - the descent it then posts
+    // is the correct one (the starter hole IS the plunge at h=0).
+    let tess = if p.entry == Entry3D::Plunge {
+        None
+    } else {
+        motion = motion.with_entry(p.entry, p.helix_radius);
+        let t = stadium_center(a, b, h);
+        if t.is_none() {
+            bld.note(
+                "entry: the channel has no room the descent could stand in - axial dive at the starter end, unchanged",
+            );
+        }
+        t
+    };
+    let center = tess.as_ref().map(|t| Cert::Stadium { a, b, h, tess: t });
+    run_levels(&mut bld, &[pass], &zs, &motion, None, center.as_ref());
     let cur = bld.at();
     bld.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
@@ -142,6 +186,52 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }
     Ok(path)
+}
+
+/// The cutter-center stadium of half-width `h` on `a` -> `b`,
+/// tessellated for `dive_room`'s orbit test (see `Cert::Stadium` in
+/// `levels.rs` for why the chords are certified by closed form and
+/// not here). The round ends ride inscribed 512-segment semicircles:
+/// a centroid is strictly interior, so this tessellation can refuse
+/// an orbit the true stadium would allow (sagitta `h·1.9e-5`,
+/// sub-micron for any real slot), never bless a gouge. `h <= 0` is
+/// the degenerate channel - a line has no area an orbit could stand
+/// in - and answers `None`.
+fn stadium_center(a: Point2, b: Point2, h: f64) -> Option<Region> {
+    if h <= 0.0 || !h.is_finite() {
+        return None;
+    }
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len == 0.0 || !len.is_finite() {
+        return None;
+    }
+    let u = Point2::new(dx / len, dy / len);
+    let n = Point2::new(-u.y, u.x);
+    let seg = std::f64::consts::PI / 512.0; // 512 chords per cap
+    let mut pts = Vec::with_capacity(2 + 2 * 512);
+    // Boundary order: far cap of `b` from its +n tangent through the
+    // tip `b + h u` to the -n tangent, the straight -n side to `a`,
+    // then `a`'s cap mirrored the same way back to the start.
+    pts.push(Point2::new(b.x + n.x * h, b.y + n.y * h));
+    for k in 1..=512 {
+        let t = seg * k as f64;
+        let (c, s) = (t.cos(), t.sin());
+        pts.push(Point2::new(
+            b.x + h * (n.x * c + u.x * s),
+            b.y + h * (n.y * c + u.y * s),
+        ));
+    }
+    for k in 1..=512 {
+        let t = seg * k as f64;
+        let (c, s) = (t.cos(), t.sin());
+        pts.push(Point2::new(
+            a.x - h * (n.x * c + u.x * s),
+            a.y - h * (n.y * c + u.y * s),
+        ));
+    }
+    Loop::new(pts).ok().and_then(|l| Region::new(vec![l]).ok())
 }
 
 /// 2D tracing: the cutter center runs exactly on the region's loops at
@@ -229,6 +319,17 @@ pub fn trace(region: &Region, p: &TraceParams) -> Result<Toolpath, GenError> {
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     // Trace engraves the region's own vertices - the point is to ride
     // the boundary as picked, so no arc fitter runs here.
+    //
+    // The M8.2 C entry verdict for this generator: NO knob, and that is
+    // a theorem, not a gap. The cutter center rides the design line
+    // itself - a zero-width kerf. A ramp or a helix certifies against
+    // bounded air around the pass start; here every neighborhood of the
+    // start straddles the line, so no region exists the descent laws
+    // could read, and any "entry angle" control would promise a
+    // certification the geometry can never supply. The vertical plunge
+    // onto the engraved point is the only legal first engagement (and
+    // for an engraved line the whole cut is one kerf deep - nothing
+    // above the level is material to avoid).
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
     run_levels(&mut b, &passes, &zs, &motion, None, None);
     let cur = b.at();

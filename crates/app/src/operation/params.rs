@@ -636,6 +636,8 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 climb,
+                entry,
+                helix_radius,
                 tilt,
             } => {
                 wp2(h, *a);
@@ -650,6 +652,16 @@ impl OpParams {
                 }
                 h.write_u8(u8::from(*climb));
                 wh_opt(h, *retract_z);
+                // Appended at M8.2 C's entry fields: a pre-entry slot
+                // op goes Stale once and regenerates byte-identically
+                // (the Plunge default IS the old law) - the same
+                // handshake the contour's M8.2 A append made.
+                w(h, *helix_radius);
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
+                });
                 wt(h, *tilt);
             }
             OpParams::Trace {

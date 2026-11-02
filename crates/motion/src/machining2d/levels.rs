@@ -7,6 +7,60 @@ use crate::geometry::Point3;
 
 use super::arcs::{Seg, fit_arcs, push_segs};
 use super::slots::chord_clears;
+
+/// The certified legal-center area a descent is proved against (M8.2
+/// C). Usually a real [`Region`]; for the slot the closed-form
+/// cutter-center stadium. The tessellated form of a stadium cannot
+/// certify a slot: the row law stands legitimate cutter centers
+/// EXACTLY on its boundary, and an inscribed tessellation sits
+/// ~1.9e-5·h inside the true arcs - a ramp landing on its own row's
+/// endpoint would be refused by the polygon test, over and over. A
+/// stadium is convex, so for it the endpoint test IS the chord test:
+/// endpoints within h of the axis put the whole chord inside the true
+/// stadium, no tessellation error in sight. The polygon rides along
+/// only for `dive_room`, which reads triangle centroids - strictly
+/// interior points, where an inscribed region can refuse an orbit but
+/// never bless a gouge.
+pub(super) enum Cert<'a> {
+    Region(&'a Region),
+    Stadium { a: Point2, b: Point2, h: f64, tess: &'a Region },
+}
+
+impl Cert<'_> {
+    /// The region `dive_room` triangulates.
+    fn room(&self) -> &Region {
+        match self {
+            Cert::Region(r) => r,
+            Cert::Stadium { tess, .. } => tess,
+        }
+    }
+
+    /// A descent's chord, certified. `1e-7` absorbs float noise in
+    /// endpoints the generators construct on the boundary; it is a
+    /// tenth of a micrometer, below any cut tolerance and any gouge
+    /// that could matter.
+    fn chord_ok(&self, p: Point2, q: Point2) -> bool {
+        match self {
+            Cert::Region(r) => chord_clears(r, p, q),
+            Cert::Stadium { a, b, h, .. } => {
+                dist_to_seg(p, *a, *b) <= h + 1e-7 && dist_to_seg(q, *a, *b) <= h + 1e-7
+            }
+        }
+    }
+}
+
+/// Distance from `p` to the segment `a -> b`: the stadium membership
+/// test (a point is in the stadium of half-width h iff it is within
+/// h of the axis segment).
+fn dist_to_seg(p: Point2, a: Point2, b: Point2) -> f64 {
+    let d = Point2::new(b.x - a.x, b.y - a.y);
+    let dd = d.x * d.x + d.y * d.y;
+    if dd == 0.0 || !dd.is_finite() {
+        return (p.x - a.x).hypot(p.y - a.y);
+    }
+    let t = (((p.x - a.x) * d.x + (p.y - a.y) * d.y) / dd).clamp(0.0, 1.0);
+    (p.x - a.x - t * d.x).hypot(p.y - a.y - t * d.y)
+}
 /// Cut levels from `top` down to `bottom`, snapped so the last level is
 /// `bottom` exactly. Shared by depth-stepping operations.
 pub(crate) fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
@@ -63,8 +117,10 @@ impl Motion {
     /// lift a full climb. A set plane is clamped at clearance, so a
     /// pre-validation file whose retract sits above clearance still
     /// crosses at the plane the machine already obeyed. The entry
-    /// family starts at `Plunge`: slot and trace cross levels the way
-    /// they always have, and only the pocket opts into [`with_entry`].
+    /// family starts at `Plunge`: the pocket (M8.1), the contour
+    /// (M8.2 A) and the slot (M8.2 C) opt into [`with_entry`]; trace
+    /// never does - its zero-width kerf admits no arm (the verdict
+    /// comment in `slots.rs`).
     pub(super) fn new(clearance_z: f64, retract_z: Option<f64>, feed: f64, plunge_feed: f64) -> Self {
         Self {
             clearance_z,
@@ -98,7 +154,7 @@ pub(super) fn run_levels(
     zs: &[f64],
     m: &Motion,
     fit: Option<f64>,
-    center: Option<&Region>,
+    center: Option<&Cert<'_>>,
 ) {
     let runs: Vec<Vec<Seg>> = match fit {
         Some(tol) => passes.iter().map(|p| fit_arcs(p, tol)).collect(),
@@ -151,7 +207,7 @@ pub(super) fn run_levels(
                     let cur = b.at();
                     let leg = Point2::new(cur.x, cur.y);
                     let prev_z = last_cut_z.unwrap_or(m.clearance_z);
-                    if chord_clears(cen, leg, e) {
+                    if cen.chord_ok(leg, e) {
                         b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
                         b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(m.feed));
                     } else {
@@ -172,7 +228,7 @@ pub(super) fn run_levels(
                     let cur = b.at();
                     let leg = Point2::new(cur.x, cur.y);
                     let prev_z = last_cut_z.unwrap_or(m.clearance_z);
-                    let dive = dive_room(cen, m.helix_radius + 1e-3);
+                    let dive = dive_room(cen.room(), m.helix_radius + 1e-3);
                     if let Some(d) = dive {
                         if leg.x != d.x || leg.y != d.y {
                             b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.clearance_z), None);
@@ -197,7 +253,7 @@ pub(super) fn run_levels(
                     // room at this level's floor, never at `passes[0]`
                     // on the wall (M8.1). The link to the pass start
                     // then runs over the level's own fresh plane.
-                    match dive_room(cen, 0.0) {
+                    match dive_room(cen.room(), 0.0) {
                         Some(d) => {
                             let cur = b.at();
                             if cur.x != d.x || cur.y != d.y {
@@ -245,14 +301,14 @@ pub(super) fn run_levels(
 /// the plan.
 pub(super) fn dive_link(
     b: &mut PathBuilder,
-    cen: &Region,
+    cen: &Cert,
     passes: &[Vec<Point2>],
     d: Point2,
     e: Point2,
     z: f64,
     m: &Motion,
 ) {
-    if chord_clears(cen, d, e) && !chord_hits_plan(d, e, passes) {
+    if cen.chord_ok(d, e) && !chord_hits_plan(d, e, passes) {
         b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(m.feed));
     } else {
         b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.hop_z), None);
@@ -271,14 +327,14 @@ pub(super) fn dive_link(
 /// same way.
 pub(super) fn substituted_dive(
     b: &mut PathBuilder,
-    cen: &Region,
+    cen: &Cert,
     passes: &[Vec<Point2>],
     e: Point2,
     z: f64,
     m: &Motion,
     why: &str,
 ) {
-    match dive_room(cen, 0.0) {
+    match dive_room(cen.room(), 0.0) {
         Some(d) => {
             b.note(format!("entry: {why} - axial dive on the floor instead"));
             let cur = b.at();

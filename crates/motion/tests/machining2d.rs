@@ -1560,6 +1560,8 @@ fn sp() -> SlotParams {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
     }
 }
 
@@ -1743,6 +1745,177 @@ fn slot_is_deterministic() {
     let y = slot(a, b, &p).unwrap();
     assert_eq!(x, y);
     assert!(x.is_chained() && x.all_finite());
+}
+
+// --- M8.2 C: the slot's entry arms, certified against the stadium ---
+
+#[test]
+fn slot_helix_orbits_in_the_certified_channel() {
+    // Tool 6 in a channel 20 wide: h = 10 - 3 = 7 of cutter-center
+    // room, and a 1.5 orbit stands in it easy.
+    let p = SlotParams {
+        tool_diameter: 6.0,
+        width: 20.0,
+        stepover: 4.0,
+        entry: Entry3D::Helix,
+        helix_radius: 1.5,
+        ..sp()
+    };
+    let (a, b) = (Point2::new(0.0, 0.0), Point2::new(40.0, 0.0));
+    let t = slot(a, b, &p).expect("valid");
+    assert!(t.notes.is_empty(), "the channel has room; nothing to say: {:?}", t.notes);
+    assert!(t.is_chained() && t.all_finite());
+    let arc_moves: Vec<_> = t.moves.iter().filter(|m| m.arc.is_some()).collect();
+    assert!(!arc_moves.is_empty(), "a chosen helix must actually descend");
+    for m in &arc_moves {
+        // The orbit's standing center keeps a full orbit radius clear of
+        // the stadium wall - dive_room eroded by radius + 1e-3.
+        assert!(
+            seg_dist((m.arc.unwrap().center.x, m.arc.unwrap().center.y), (0.0, 0.0), (40.0, 0.0))
+                <= 7.0 - 1.5 + 1e-3,
+            "helix center stands in the wall: {:?}",
+            m.arc.unwrap().center
+        );
+        for (_, q) in m.chords(FLATTEN_TOL) {
+            assert!(
+                seg_dist((q.x, q.y), (0.0, 0.0), (40.0, 0.0)) <= 7.0 + 2.0 * FLATTEN_TOL,
+                "the orbit crossed the channel it certified: {q:?}"
+            );
+        }
+    }
+    // The wall dive this law replaces had no arcs at all.
+    let base = slot(a, b, &SlotParams { entry: Entry3D::Plunge, ..p }).expect("valid");
+    assert_eq!(base.moves.iter().filter(|m| m.arc.is_some()).count(), 0);
+    assert_ne!(t.moves, base.moves, "the helix changed the entry");
+}
+
+#[test]
+fn slot_ramp_walks_down_the_certified_channel() {
+    let p = SlotParams {
+        tool_diameter: 6.0,
+        width: 20.0,
+        stepover: 4.0,
+        entry: Entry3D::Ramp,
+        ..sp()
+    };
+    let (a, b) = (Point2::new(0.0, 0.0), Point2::new(40.0, 0.0));
+    let t = slot(a, b, &p).expect("valid");
+    assert!(t.notes.is_empty(), "the chord cleared; nothing to say: {:?}", t.notes);
+    assert!(t.is_chained() && t.all_finite());
+    // Every level opens on a diagonal - a Feed that spends XY and Z at
+    // once - never a vertical dive: the wall the pre-C law drilled.
+    for z in levels_3_zs() {
+        let diag = t.moves.iter().any(|m| {
+            m.kind == MoveKind::Feed
+                && m.to.z == z
+                && (m.from.z - m.to.z).abs() > 1e-9
+                && (m.from.x - m.to.x).hypot(m.from.y - m.to.y) > 1e-9
+        });
+        assert!(diag, "level {z} opened with a dive, not a ramp");
+        let vdives = t
+            .moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Plunge && m.to.z == z)
+            .count();
+        assert_eq!(vdives, 0, "level {z} still drilled the wall");
+    }
+}
+
+#[test]
+fn slot_full_width_admits_no_arm_and_says_so() {
+    // sp() is the full-width channel: h = 0, a line, no area a descent
+    // could stand in. The law substitutes the axial dive it always
+    // posted - byte for byte - and refuses by name.
+    let (a, b) = (Point2::new(0.0, 0.0), Point2::new(40.0, 0.0));
+    let base = slot(a, b, &sp()).expect("valid");
+    assert!(base.notes.is_empty(), "Plunge default says nothing: {:?}", base.notes);
+    for entry in [Entry3D::Ramp, Entry3D::Helix] {
+        let t = slot(a, b, &SlotParams { entry, ..sp() }).expect("valid");
+        assert_eq!(t.notes.len(), 1, "{entry:?} substituted once: {:?}", t.notes);
+        assert!(
+            t.notes[0].contains("no room the descent could stand in"),
+            "refused without naming it: {:?}",
+            t.notes
+        );
+        assert_eq!(t.moves, base.moves, "{entry:?} in a channelless slot must post the old dive");
+    }
+}
+
+#[test]
+fn contour_tabs_stand_down_the_entry_arms() {
+    // A bore held by four 2-high tabs: below -4 the tab is material
+    // INSIDE the certified region - no arm may descend through it.
+    let mk = |entry: Entry3D| {
+        let mut p = cp();
+        p.side = Side::Inside;
+        p.top_z = 0.0;
+        p.bottom_z = -6.0;
+        p.stepdown = 3.0;
+        p.tab_count = 4;
+        p.tab_width = 6.0;
+        p.tab_height = 2.0;
+        p.entry = entry;
+        p.helix_radius = 1.5;
+        contour(&rect(0.0, 0.0, 20.0, 20.0), &p).expect("valid")
+    };
+    let t = mk(Entry3D::Helix);
+    assert!(
+        t.notes.iter().any(|n| n.contains("no arm stands where a tab is material")),
+        "the arms stood anyway: {:?}",
+        t.notes
+    );
+    // No orbit reaches a tabbed plane; the levels above -4 keep their
+    // certified helix entries.
+    assert!(t.moves.iter().any(|m| m.arc.is_some()), "the clean levels lost their arm");
+    assert!(
+        t.moves.iter().all(|m| m.arc.is_none() || m.to.z > -4.0),
+        "a helix descended into a standing tab"
+    );
+    // At the tabbed plane the dives are the pre-certification lead-in
+    // axial ones - four windows, and no floor dive through the web.
+    let floor_dive = t
+        .moves
+        .iter()
+        .any(|m| m.kind == MoveKind::Plunge && m.to.z == -6.0 && (m.to.x - 10.0).abs() < 0.5 && (m.to.y - 10.0).abs() < 0.5);
+    assert!(!floor_dive, "a certified floor dive stands where the tab does");
+    let p = mk(Entry3D::Plunge);
+    assert!(p.notes.is_empty(), "the deferral shape is plunge's own - say nothing: {:?}", p.notes);
+    assert!(t.is_chained() && t.all_finite() && p.is_chained());
+}
+
+#[test]
+fn contour_hop_rides_the_tall_tab_top() {
+    // A tab taller than the hop plane: between windows the tool must
+    // cross ABOVE the tab, or it drags its shank through the tab it was
+    // left to hold the part. (tab_height past top_z is a pathological
+    // but legal file; the law is the max, not a clamp.)
+    let mk = |tab_height: f64| {
+        let mut p = cp();
+        p.side = Side::Inside;
+        p.top_z = 0.0;
+        p.bottom_z = -6.0;
+        p.stepdown = 3.0;
+        p.tab_count = 4;
+        p.tab_width = 6.0;
+        p.tab_height = tab_height;
+        contour(&rect(0.0, 0.0, 20.0, 20.0), &p).expect("valid")
+    };
+    let tall = mk(12.0); // tab top at +6, above the 3.0 hop plane
+    assert!(tall.notes.is_empty(), "plunge-shaped deferral: {:?}", tall.notes);
+    assert!(
+        tall.moves
+            .iter()
+            .any(|m| m.kind == MoveKind::Rapid && m.from.z == 6.0 && m.to.z == 6.0),
+        "no window-hop ever rode the tab top"
+    );
+    let sane = mk(2.0); // tab top at -4, below the hop plane: the raise is a no-op
+    assert!(
+        sane.moves
+            .iter()
+            .all(|m| m.kind != MoveKind::Rapid || m.from.z != 6.0 || m.to.z != 6.0),
+        "the hop plane moved on a sane tab file"
+    );
+    assert!(sane.is_chained() && tall.is_chained());
 }
 
 #[test]

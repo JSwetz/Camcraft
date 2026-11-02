@@ -74,6 +74,30 @@ fn contour_params() -> OpParams {
     }
 }
 
+/// Slot1's fixture (M8.2 C): a 40 mm channel 12 wide, cut to z = -6 in
+/// three levels. With the 6 mm EM the cutter-center stadium stands 3 mm
+/// either side of the axis - room for a 2 mm orbit, none for a 4 mm one.
+fn slot_params() -> OpParams {
+    OpParams::Slot {
+        a: camcraft_app::geo2d::Point2::new(0.0, 10.0),
+        b: camcraft_app::geo2d::Point2::new(40.0, 10.0),
+        width: 12.0,
+        stock_to_leave: 0.0,
+        clearance_z: Height::fixed(5.0),
+        retract_z: None,
+        top_z: Height::fixed(0.0),
+        bottom_z: Height::fixed(-6.0),
+        stepdown: 3.0,
+        stepover: 4.0,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        tilt: None,
+    }
+}
+
 fn box_stock(world: &World, history: &mut History, dx: f64, dy: f64, dz: f64) {
     let cmd = SetStock::new(world, StockShape::Box { dx, dy, dz }, Location::default());
     history.execute(world, cmd.expect("box stock"));
@@ -673,6 +697,83 @@ fn an_entry_edit_marks_the_contour_stale_and_the_wall_regen_moves_nothing() {
     assert_eq!(status(&world, "Contour1"), OpStatus::Stale, "derived, both ways");
     assert!(history.redo(&world));
     assert_eq!(status(&world, "Contour1"), OpStatus::Ok, "and exact");
+}
+
+#[test]
+fn an_entry_edit_marks_the_slot_stale_and_the_orbit_proves_itself() {
+    // The M8.2 C digest law on the slot's own stamp: flipping the entry
+    // makes the op Stale once, a regen clears it - and the regen really
+    // moved, because this channel has room the orbit stands in (12 wide,
+    // 6 tool: the stadium reaches 3 mm off-axis, the orbit 2).
+    let world = new_world();
+    let mut history = History::default();
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "Slot1",
+            "EM-0600-4FL",
+            SrcRef::Stock,
+            slot_params(),
+        )
+        .expect("create"),
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Slot1").expect("generate"),
+    );
+    assert_eq!(status(&world, "Slot1"), OpStatus::Ok);
+    let before = cache(&world, "Slot1").expect("cached").path;
+    assert!(before.notes.is_empty(), "the wall dive says nothing: {:?}", before.notes);
+    assert_eq!(
+        before.moves.iter().filter(|m| m.arc.is_some()).count(),
+        0,
+        "Plunge means no orbit in the file"
+    );
+
+    let mut edited = slot_params();
+    let OpParams::Slot {
+        ref mut entry,
+        ref mut helix_radius,
+        ..
+    } = edited
+    else {
+        unreachable!("slot_params is a Slot");
+    };
+    *entry = camcraft_app::machining3d::Entry3D::Helix;
+    *helix_radius = 2.0;
+    history.execute(
+        &world,
+        EditOperationParams::new(&world, "Slot1", edited).expect("edit"),
+    );
+    assert_eq!(
+        status(&world, "Slot1"),
+        OpStatus::Stale,
+        "the entry bytes ride the digest"
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Slot1").expect("regen"),
+    );
+    assert_eq!(status(&world, "Slot1"), OpStatus::Ok);
+    let after = cache(&world, "Slot1").expect("cached").path;
+    assert!(
+        after.moves.iter().any(|m| m.arc.is_some()),
+        "a channel this wide certifies the orbit - it must land"
+    );
+    assert!(after.notes.is_empty(), "certified, nothing to say: {:?}", after.notes);
+    assert_ne!(
+        before.moves, after.moves,
+        "the entry edit changed the path, not just the stamp"
+    );
+
+    // Undo re-derives in both directions, the contour's law unchanged.
+    assert!(history.undo(&world));
+    assert_eq!(status(&world, "Slot1"), OpStatus::Stale, "derived, both ways");
+    assert!(history.redo(&world));
+    assert_eq!(status(&world, "Slot1"), OpStatus::Ok, "and exact");
 }
 
 #[test]

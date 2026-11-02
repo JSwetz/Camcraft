@@ -6,7 +6,7 @@ use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
 use super::face::{GenError, band};
-use super::levels::{Motion, cut_levels, run_levels};
+use super::levels::{Cert, Motion, cut_levels, run_levels};
 use super::arcs::ARC_FIT_TOL;
 use super::ring::ring_is_circular;
 use super::waterscan::{scan_row, waterline_passes};
@@ -259,7 +259,14 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     };
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed)
         .with_entry(p.entry, p.helix_radius);
-    run_levels(&mut b, &passes, &zs, &motion, fit, Some(&center));
+    run_levels(
+        &mut b,
+        &passes,
+        &zs,
+        &motion,
+        fit,
+        Some(&Cert::Region(&center)),
+    );
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 

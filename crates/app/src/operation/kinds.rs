@@ -593,6 +593,8 @@ fn seed_slot(c: &Carried) -> OpParams {
         feed: c.feed,
         plunge_feed: c.plunge,
         climb: c.climb,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
         tilt: c.tilt,
     }
 }

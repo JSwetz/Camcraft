@@ -868,6 +868,71 @@ fn pocket_entry_family_is_a_step_up_on_the_wire() {
 }
 
 #[test]
+fn slot_entry_family_is_a_step_up_on_the_wire() {
+    // M8.2 C grew the slot arm with serde defaults, so the format
+    // version did not move: an old file means exactly the wall dive at
+    // the starter end every slot posted before the family existed, and
+    // the new keys round-trip like the pocket's.
+    let plain = r#"{
+        "version": 30,
+        "entities": [
+            {"name": "Op1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"slot": {
+                 "a": [0.0, 10.0], "b": [40.0, 10.0], "width": 12.0,
+                 "stock_to_leave": 0.0, "clearance_z": 5.0,
+                 "top_z": 0.0, "bottom_z": -6.0, "stepdown": 3.0,
+                 "stepover": 4.0, "feed": 800.0, "plunge_feed": 200.0,
+                 "climb": true}}}}
+        ]
+    }"#;
+    let world = new_world();
+    project::open(&world, plain).expect("a pre-C slot file must read verbatim");
+    let e = model::find_by_name(&world, "Op1").expect("op");
+    let o = model::operation_of(&world, &e).expect("operation");
+    let OpParams::Slot { entry, helix_radius, .. } = &o.params else {
+        panic!("slot params expected, got {:?}", o.params);
+    };
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Plunge, "absent means the dive");
+    assert_eq!(*helix_radius, 1.0, "absent means the seed's lead radius");
+
+    // The explicit shape, hand-written so the tags are pinned.
+    let text = plain.replace(
+        "\"climb\": true}}",
+        "\"climb\": true, \"entry\": \"helix\", \"helix_radius\": 2.5}}",
+    );
+    let world2 = new_world();
+    project::open(&world2, &text).expect("the grown slot grammar must read");
+    let e2 = model::find_by_name(&world2, "Op1").expect("op");
+    let o2 = model::operation_of(&world2, &e2).expect("operation");
+    let OpParams::Slot { entry, helix_radius, .. } = &o2.params else {
+        panic!("slot params expected, got {:?}", o2.params);
+    };
+    assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix);
+    assert_eq!(*helix_radius, 2.5);
+
+    // Write-parse-write is a fixed point, and the entry tag is snake_case.
+    let path = tmp_path("csentry");
+    project::save(&world2, &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let world3 = new_world();
+    project::load(&world3, &path).expect("reload");
+    project::save(&world3, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("reread");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second, "the grown slot shape round-trips byte-identically");
+    assert!(first.contains("\"entry\": \"helix\""), "{first}");
+    assert!(first.contains("\"helix_radius\": 2.5"), "{first}");
+
+    // An unknown entry tag is corrupt text, refused, not defaulted.
+    let bad = text.replace("\"helix\"", "\"spiral\"");
+    let world4 = new_world();
+    assert!(
+        matches!(project::open(&world4, &bad), Err(ProjectError::Corrupt(_))),
+        "must refuse a slot entry tag outside the vocabulary"
+    );
+}
+
+#[test]
 fn v5_roundtrips_retract_and_auto() {
     // The step-5 fields, once actually set, round-trip exactly: the
     // pocket's hop plane and Auto choice, and the trace's hop plane.

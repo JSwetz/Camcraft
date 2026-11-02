@@ -1006,6 +1006,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             feed,
             plunge_feed,
             climb,
+            entry,
+            helix_radius,
             ..
         } => {
             let path = machining2d::slot(
@@ -1013,6 +1015,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 *b,
                 &SlotParams {
                     tool_diameter: d,
+                    entry: *entry,
+                    helix_radius: *helix_radius,
                     width: *width,
                     stock_to_leave: *stock_to_leave,
                     clearance_z: hl.clearance,

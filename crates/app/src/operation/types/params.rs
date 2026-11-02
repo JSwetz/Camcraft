@@ -156,6 +156,17 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// How a level crossing engages (M8.2 C); the
+        /// [`crate::machining3d::Entry3D`] family the pocket and
+        /// contour ladders read. A slot's pass start is a
+        /// stadium-boundary point - a wall - so `Plunge` keeps the
+        /// everyday shape (and the goldens), while the ramped arms
+        /// certify against the closed-form cutter-center stadium.
+        entry: Entry3D,
+        /// Helix centerline radius, mm; read only when `entry` is
+        /// Helix, certified per level against the stadium (a
+        /// full-width channel has no room for an orbit and says so).
+        helix_radius: f64,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },

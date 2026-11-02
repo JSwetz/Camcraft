@@ -139,6 +139,16 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// Absent means `plunge` - the wall dive at the pass start
+        /// every slot posted before M8.2 C gave the ladder an entry
+        /// field at all (additive defaults: the format version does
+        /// not move).
+        #[serde(default)]
+        entry: EntryDto,
+        /// Read only when `entry` is Helix; absent means the seed's
+        /// 1.0 mm, the same default the pockets carry.
+        #[serde(default = "default_helix_radius")]
+        helix_radius: f64,
         /// 3+2 index; see the Face arm.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,

@@ -803,6 +803,8 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                entry,
+                helix_radius,
                 tilt,
             } => ParamsDto::Slot {
                 a: [a.x, a.y],
@@ -818,6 +820,12 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                entry: match entry {
+                    Entry3D::Plunge => EntryDto::Plunge,
+                    Entry3D::Ramp => EntryDto::Ramp,
+                    Entry3D::Helix => EntryDto::Helix,
+                },
+                helix_radius: *helix_radius,
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Trace {
@@ -1666,6 +1674,8 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                entry,
+                helix_radius,
                 tilt,
             } => OpParams::Slot {
                 a: Point2::new(a[0], a[1]),
@@ -1681,6 +1691,12 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                entry: match entry {
+                    EntryDto::Plunge => Entry3D::Plunge,
+                    EntryDto::Ramp => Entry3D::Ramp,
+                    EntryDto::Helix => Entry3D::Helix,
+                },
+                helix_radius: *helix_radius,
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Trace {

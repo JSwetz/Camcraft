@@ -288,6 +288,8 @@ fn slot_fullwidth_centerline_matches_golden() {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     let t = slot(Point2::new(0.0, 0.0), Point2::new(60.0, 0.0), &p).unwrap();
     write_golden("slot_fullwidth_centerline.cl", &gen_to_cltext(&t));
@@ -311,6 +313,8 @@ fn slot_wide_channel_rows_matches_golden() {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
     };
     let t = slot(Point2::new(-10.0, 0.0), Point2::new(50.0, 0.0), &p).unwrap();
     write_golden("slot_wide_channel_rows.cl", &gen_to_cltext(&t));
