@@ -7081,3 +7081,36 @@ label's row, scrolled into view first (the scroll is what the tab
 click used to buy). Three shell/tool goldens re-blessed: the pixels
 moved where the tab bar row used to be; field rows themselves are
 layout-identical.
+
+## M9.1 C - the pane law walks the whole registry (2026-11-02, stage C)
+
+- Registry-wide test over the stacked pane, chosen over per-family
+  hand-written tables, because the 8-kind drift table covers 8 of 30
+  kinds and the two laws the new panes rest on are universal: every
+  group header appears exactly once when (and only when) `has_section`
+  says the kind has that group's fields, and `params_fields` never
+  renders a group twice (one call per section per frame - the
+  brace-walk proof made a table by hand). `every_registry_kind_gets_
+  its_stacked_pane` loops `KindInfo::ALL`, retype->draft->run, and
+  checks header presence against the same `has_section` the pane's
+  loop consumes - the law and the render share one predicate, so they
+  cannot drift silently. "Part" rides no row: it is not in the
+  registry, it is created by the setup lifecycle and its Machine
+  group is pinned by M5.2 G's turning tests.
+- The first run caught a real production collision: swarf_editor drew
+  `field(ui, "Passes")` - in the old tab UI a field reading exactly
+  like the other tab's name was harmless, but the stacked pane puts
+  the field under its OWN "Passes" header, an echo. Renamed "Pass
+  count" (the ladder's rung count; clamped at the draft, so the name
+  carries no new law) rather than exempting the label in the test:
+  the header-vocabulary collision is the kind of ambiguity the M9.1
+  restructure exists to remove. `query_by_label` panics on two
+  matches - the test asserts with `query_all_by_label(...).next()`,
+  multiplicity-safe, so one collision reports instead of aborting.
+- Provenance review of the pane map (close-out bullet): the six group
+  names are generic machining vocabulary, every field label and help
+  text is ours from the generators' own parameters, the glyph set is
+  the Tabler MIT bundle already listed in assets/ui/LICENSES.md, and
+  no HSMWorks material (text, icons, posts) was consulted in the
+  restructure - it was specced from the user's Blender reference and
+  our own KindInfo registry.

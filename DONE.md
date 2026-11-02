@@ -13,6 +13,8 @@ M6.1-M6.2) - releases 0.3.0 and 0.4.0 shipped inside them.
 
 Archived 2026-11-02: Phase 8 (M8.1-M8.3) - release 0.5.0 shipped inside it.
 
+Archived 2026-11-02: Phase 9 (M9.1) - release 0.6.0 ships with it.
+
 ---
 
 ## Phase 3 — Associative CAM & Production Workflow
@@ -1214,3 +1216,58 @@ questions; cycle order and approach order get stated, not assumed.** — 📋
 - Close-out: the whole registry table annotated with its order-of-
   operations verdict; the heavy lane runs every family's goldens;
   tag with the next release (0.5.0, with the Phase 6 UI items in it).
+
+
+---
+
+## Phase 9 — The workpane: every operation opens its own page.
+
+**Why this phase exists (2026-11-01, user verdict with a reference
+screenshot - Blender's tool panel):** M6.2 gave every kind a ribbon home,
+but every home still doors into ONE generic page: a ribbon cell creates an
+operation and opens the shared `operation_page` - six global sections
+(Geometry/Heights/Passes/Leads & Links/Feeds/Machine) pruned by a
+`has_section` switch, with a grouped Type combo (pages.rs) to pick the kind
+from a dropdown. So "add a Slot" really means "open *the* operation page
+and change a dropdown" - and the reported bug that ribbon operations are
+"not clickable, a dialog opens selecting the operation picked from the
+dropdown instead" is the same root showing its symptom. The reference
+workflow inverts it: the operation you picked in the ribbon opens *that
+operation's own* pane, carrying only that operation's options - proper
+separation is the feature, one pane per kind, not one form with a
+dropdown. Low coupling, high cohesion, applied to the UI.
+
+### M9.1 - Operation-specific panes ✅
+**Goal: the ribbon's operation button starts that operation and opens its
+own pane; the generic create-everything form and its kind dropdown are
+gone, and existing operations edit in place.** — 📋
+
+- Click-through first (the reported bug): a ribbon cell for a kind creates
+  AND focuses that operation in one action - `Cmd::Create(kind)` lands the
+  new op as the properties pane's target; no dialog, no dropdown
+  standing between the click and the work.
+- One pane per kind: the operation page renders from the kind's own
+  parameter table (`KindInfo::ALL` / `params_fields` - the M5.0
+  one-table-row cost law), not from six shared sections with
+  `has_section` switches. A Slot operation shows Slot options and nothing
+  else; no dead tabs by construction, no other kind's numbers reachable.
+- No type dropdown at creation: the kind comes from the button you
+  pressed. Retype of an existing op stays (the draft-law change, one
+  undo unit) but moves out of the page header into the op's context
+  menu - changing WHAT you are machining is never a field of it.
+- Existing operations are first-class: clicking an op in the browser
+  tree, the ops list or the viewport selects it and shows its own pane
+  (selection → pane, never selection → dialog).
+- Blender-style live creation: the pressed tool creates the op (name
+  previews its geometry), its pane is live immediately, and every field
+  writes through a command (`EditOperationParams`), so creation plus
+  first edits stay one honest undo story.
+- Gates: law tests render the pane for every kind in the registry and
+  assert it carries exactly that kind's fields (table-driven, one test
+  per family); the ribbon click-through test from the bug report; the
+  toolpath goldens ride untouched; snapshots refreshed.
+- Close-out: provenance review of the pane map (which strings/labels are
+  ours, per the Clean-Room Protocol); tag with the next release -
+  0.5.0 if green before Phase 8's close, otherwise the release right
+  after.
+

@@ -1120,6 +1120,7 @@ table at the foot of this file, and their decisions in `RECOMMENDED.md`.
 - **Phase 5 — Power: Multi-Axis, Turning, Scale** (M5.0-M5.3, Release 0.4.0) — ✅
 - **Phase 6 — UI refactoring.** (M6.1-M6.2) — ✅
 - **Phase 8 - Cutting order: the generator review & refactor.** (M8.1-M8.3, Release 0.5.0) — ✅
+- **Phase 9 - The workpane: every operation opens its own page.** (M9.1, Release 0.6.0) - ✅
 
 ---
 
@@ -1290,57 +1291,6 @@ NVIDIA sparse distance fields). Everything composed from these public
 sources; all Rust/wgpu/WGSL code here is ours; no HSMWorks or vendor
 material of any kind.
 
-## Phase 9 — The workpane: every operation opens its own page.
-
-**Why this phase exists (2026-11-01, user verdict with a reference
-screenshot - Blender's tool panel):** M6.2 gave every kind a ribbon home,
-but every home still doors into ONE generic page: a ribbon cell creates an
-operation and opens the shared `operation_page` - six global sections
-(Geometry/Heights/Passes/Leads & Links/Feeds/Machine) pruned by a
-`has_section` switch, with a grouped Type combo (pages.rs) to pick the kind
-from a dropdown. So "add a Slot" really means "open *the* operation page
-and change a dropdown" - and the reported bug that ribbon operations are
-"not clickable, a dialog opens selecting the operation picked from the
-dropdown instead" is the same root showing its symptom. The reference
-workflow inverts it: the operation you picked in the ribbon opens *that
-operation's own* pane, carrying only that operation's options - proper
-separation is the feature, one pane per kind, not one form with a
-dropdown. Low coupling, high cohesion, applied to the UI.
-
-### M9.1 - Operation-specific panes
-**Goal: the ribbon's operation button starts that operation and opens its
-own pane; the generic create-everything form and its kind dropdown are
-gone, and existing operations edit in place.** — 📋
-
-- Click-through first (the reported bug): a ribbon cell for a kind creates
-  AND focuses that operation in one action - `Cmd::Create(kind)` lands the
-  new op as the properties pane's target; no dialog, no dropdown
-  standing between the click and the work.
-- One pane per kind: the operation page renders from the kind's own
-  parameter table (`KindInfo::ALL` / `params_fields` - the M5.0
-  one-table-row cost law), not from six shared sections with
-  `has_section` switches. A Slot operation shows Slot options and nothing
-  else; no dead tabs by construction, no other kind's numbers reachable.
-- No type dropdown at creation: the kind comes from the button you
-  pressed. Retype of an existing op stays (the draft-law change, one
-  undo unit) but moves out of the page header into the op's context
-  menu - changing WHAT you are machining is never a field of it.
-- Existing operations are first-class: clicking an op in the browser
-  tree, the ops list or the viewport selects it and shows its own pane
-  (selection → pane, never selection → dialog).
-- Blender-style live creation: the pressed tool creates the op (name
-  previews its geometry), its pane is live immediately, and every field
-  writes through a command (`EditOperationParams`), so creation plus
-  first edits stay one honest undo story.
-- Gates: law tests render the pane for every kind in the registry and
-  assert it carries exactly that kind's fields (table-driven, one test
-  per family); the ribbon click-through test from the bug report; the
-  toolpath goldens ride untouched; snapshots refreshed.
-- Close-out: provenance review of the pane map (which strings/labels are
-  ours, per the Clean-Room Protocol); tag with the next release -
-  0.5.0 if green before Phase 8's close, otherwise the release right
-  after.
-
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units (IGES deferred) | ⚠️ |
@@ -1378,7 +1328,7 @@ gone, and existing operations edit in place.** — 📋
 | **M8.1** | Roughing entry & order | Level-0 obeys the entry family (true helix/ramp into metal, no silent plunge fallback), roughing pass order reaches the middle off the wall, `Adaptive` trochoid-or-renamed, substitutions diagnosed | ✅ |
 | **M8.2** | Finishing & planar order | Done: contour Z-entry on the entry family, certified against the destination bore air, wall-side opt-in refused by note (A); waterline tangent-ring entry re-proved on steep parts, ramped first contact opt-in, normals measured not assumed (B); slot ramp/helix certified on the convex cutter-center stadium (`Cert`), full-width substitution says its name, tabbed levels stand the arms down on the pre-A byte, tall-tab hop raise, trace plunge theorem (C); M1.3's spiral/helical debt swept; heavy lane green | ✅ |
 | **M8.3** | Canned/posed/revolved order | Done: drilling - R-plane law kept per cycle, the bore's fit door refuses an oversize tool and a stepped (counterbore-folded) hole by name, Spot dims off the mouth, FIT_TOL unified as one trust wearing three laws; helical bore entries declined as a verdict (a wide slide is contour's verb); multi-axis - a dive's lead now rides the cut it lands into (the stamp matches curve.rs's first station; ALONG→AT corrected in the archived prose), cone-dodge-at-entry, wrap radial dives and tilt-posed rapids recorded as verdicts with their backstop chains; turning - order law stated in the catalog rows, the verifier's stands-downs documented, no entry-defect analog (ridge, kerf-slide and rho_clear laws refuse or prevent by name); whole registry annotated, heavy lane green on every family | ✅ |
-| **M9.1** | The operation opens its own page | Ribbon click-through (the create dialog + Type dropdown retired), one pane per kind from the KindInfo table, existing ops edit in place (selection → pane), Blender-style live creation | 📋 |
+| **M9.1** | The operation opens its own page | Done: the retype dropdown and its dialog retired - the ribbon creates or opens by kind, the tree selection opens the same pane in place (A); the six tabs folded into one stacked pane of collapsing sections per the Blender verdict, `op_tab` retired, the drift guard restated exact (B); the pane law walks all 30 registry kinds - one header per group, fields exactly once, catching the Passes header/field collision, renamed Pass count (C); toolpath goldens byte-identical, snapshots re-blessed; heavy lane green; ledger in RECOMMENDED.md | ✅ |
 
 ## Open questions & deferred
 
