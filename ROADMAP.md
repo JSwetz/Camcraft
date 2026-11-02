@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> _Last updated: 2026-11-01_
+> _Last updated: 2026-11-02_
 
 ## North Star
 
@@ -767,9 +767,15 @@ degrades by rule, none guesses silently:
 - ✅ **Post engine + CPS posts**: not a hard-coded writer - the Fusion 360
       post architecture adopted as file-format conventions, specced
       from Autodesk's published post-processor documentation
-      (behavior only) per the Clean-Room Protocol; the engine is our
-      own, written from scratch in Rust - three file roles and one
-      engine:
+      (behavior only) per the Clean-Room Protocol; the word semantics
+      the engine emits - RS-274 address words, modal groups,
+      canned-cycle geometry (G73/G80-G89/G84), G41/G42 compensation,
+      G90/G91 distance modes, tolerance math - are specced from the
+      public NIST reference NISTIR 6556, "The NIST RS274NGC Interpreter
+      - Version 3" (Kramer/Proctor/Messina 2000), ingested at
+      `raw/nist_823374.pdf` and in the knowledge graph as the
+      RS274NGC spec community; the engine is our own, written from
+      scratch in Rust - three file roles and one engine:
   - **`.cps` post scripts** (our own format implementation, our own
         text): a manifest header (`description`, `vendor`, `legal`,
         `certificationLevel`, `minimumRevision`, `extension`,

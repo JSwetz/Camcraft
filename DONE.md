@@ -1128,7 +1128,11 @@ with its goldens regenerated only for the genuinely-changed order and
 the heavy envelope/verify lanes green as the referee.
 
 Provenance: entry motions from the public G-code literature (linear
-ramp and helical interpolation, RS-274 canned cycles); pass-order and
+ramp and helical interpolation, RS-274 canned cycles - their exact
+controller-side semantics per NISTIR 6556, "The NIST RS274NGC
+Interpreter - Version 3" (Kramer/Proctor/Messina 2000), ingested at
+`raw/nist_823374.pdf`: the reference both for what posts and for which
+pass orders a controller will execute as planned); pass-order and
 engagement claims from published trochoidal/HEM computations - the
 same sources `entry.rs` already names. No HSMWorks material.
 
@@ -1193,7 +1197,8 @@ heavy lane green at 6d2c424; ledger in RECOMMENDED.md)
 questions; cycle order and approach order get stated, not assumed.** — 📋
 
 - drilling cycles: spot → peck → bottom → retract orders audited
-  against the G73/G83 semantics already posted (`drilling/cycle.rs`),
+  against the G73/G83 semantics already posted (`drilling/cycle.rs`;
+  the cycle word semantics are NISTIR 6556's, `raw/nist_823374.pdf`),
   the R-plane law per cycle, and hole-recognition defaults checked
   against the entry family question (a drilled hole needs no helix; a
   bored one may - helical bore entries join this visit).

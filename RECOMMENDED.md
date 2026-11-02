@@ -7038,3 +7038,46 @@ named drafts are untouched - they are creation forms, and creation
 there never was the questionable half. The refusal text for a
 parameter edit that smuggles a kind change now names the retype menu,
 keeping "the refusal tells you the door" honest.
+
+## M9.1 B - the tab bar folds into one pane (2026-11-02, stage B)
+
+**Chosen: the stacked pane - every section the kind has, one under the
+next, under `ui.strong` headers, no clicks.** ROADMAP's "one pane per
+operation kind, click-through, no type dropdown" reads the stack as the
+goal, and the tab bar was only ever a paging device for it. What the
+bar cost: two frames per field change, invisible fields (the Blender
+verdict's exact complaint), and a dead-tab class of bug the drift guard
+policed by asserting which tab each label sat on. Considered and
+dropped: collapsible `CollapsingHeader`s (a fold is a click that hides
+state again - the pane is supposed to show the whole truth of the
+operation in one scroll, folds included); and restructuring params_fields's
+82 `if tab == SEC_*` guards into a placement TABLE (a second source of
+truth for where fields live - the guards ARE the placement law, proven
+exact this round: a Python brace-walk of all 82 blocks found zero
+ungated renders and no arm revisiting a section, so asking each kind's
+sections once, in SECTIONS order, reproduces every tab's content
+exactly, in the same within-section order).
+
+**Chosen: `op_tab` retires entirely rather than becoming a scroll
+anchor.** It was ephemeral view state (never a command, never saved -
+the M1.4 toggle law), so its removal costs no history and no file. The
+page's own ScrollArea keeps the whole field set reachable; a remembered
+fold position would be new state with no law behind it. The tab-click
+law test (`tab_click_navigates_and_queues_nothing`) dies with the
+field, replaced by `the_stacked_pane_shows_every_section_unasked` -
+the same "navigation queues nothing" proof, stated as "there is no
+navigation, and the frame still queues nothing".
+
+**Chosen: the drift guard keeps its exact-strength law, restated.**
+"visible iff its tab is open" becomes "renders EXACTLY ONCE in the one
+frame" (`query_all_by_label(...).count() == 1` per table label) plus
+"header present iff the kind has fields for the section" - the
+no-dead-tabs law survives as a no-dead-headers law. One field of the
+old suite depended on the tab hiding the pane's other numbers
+(`drag_and_type_edit_the_same_staged_number`'s "first SpinButton is
+Stock to leave"): the stacked pane shows every number, so the locator
+moved from tree-order luck to geometry - the DragValue on the field
+label's row, scrolled into view first (the scroll is what the tab
+click used to buy). Three shell/tool goldens re-blessed: the pixels
+moved where the tab bar row used to be; field rows themselves are
+layout-identical.
