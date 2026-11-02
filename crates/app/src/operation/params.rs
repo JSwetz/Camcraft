@@ -754,6 +754,101 @@ impl OpParams {
                 wh_opt(h, *retract_z);
                 wt(h, *tilt);
             }
+            // The engrave twin (M2.4 B): the trace's bytes, the tag
+            // at the head saying which name authored them.
+            OpParams::Engrave {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                tilt,
+            } => {
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                wh_opt(h, *retract_z);
+                wt(h, *tilt);
+            }
+            // The chamfer ride digests its whole promise: the land,
+            // the angle, the side the cone rides, the chord budget,
+            // and the ONE height it stands on - the depth is derived
+            // from width and angle, so nothing else to write (M2.4 B).
+            OpParams::Chamfer2D {
+                width,
+                angle_deg,
+                clearance_z,
+                retract_z,
+                top_z,
+                feed,
+                plunge_feed,
+                climb,
+                side,
+                tolerance,
+                tilt,
+            } => {
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                for v in [*width, *angle_deg, *tolerance, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u8(match side {
+                    Side::Auto => 0,
+                    Side::Inside => 1,
+                    Side::Outside => 2,
+                });
+                wh_opt(h, *retract_z);
+                wt(h, *tilt);
+            }
+            // The circular ladder digests the pocket family's bytes
+            // plus the authored disk: center, radius, and the dome
+            // law's one bit (M2.4 B).
+            OpParams::Circular {
+                center,
+                radius,
+                vault,
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                entry,
+                helix_radius,
+                tilt,
+            } => {
+                wp2(h, *center);
+                w(h, *radius);
+                h.write_u8(u8::from(*vault));
+                w(h, *stepover);
+                w(h, *stock_to_leave);
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u8(match entry {
+                    Entry3D::Plunge => 0,
+                    Entry3D::Ramp => 1,
+                    Entry3D::Helix => 2,
+                });
+                wh_opt(h, *retract_z);
+                wt(h, *tilt);
+            }
             OpParams::Drill {
                 clearance_z,
                 retract_z,

@@ -390,6 +390,20 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         }
         file.version = 43;
     }
+    if file.version == 43 {
+        // v43 -> v44: the engrave twin, the chamfer ride and the
+        // circular ladder arrive (M2.4 B) after Trace in the 2D mill's
+        // run - the ribbon's contiguity law again, so the new tags are
+        // 7, 8 and 9 and everything from the old Drill row up shifts
+        // by three. A v43 file cannot contain the new variants (the
+        // arrival law), but it CAN carry pins by index: from 7 up, +3.
+        for idx in &mut file.pinned {
+            if *idx >= 7 {
+                *idx += 3;
+            }
+        }
+        file.version = 44;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

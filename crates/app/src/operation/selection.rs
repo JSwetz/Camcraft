@@ -335,9 +335,13 @@ pub(super) fn selection_geometry_impl(
                         )?);
                     } else {
                         // Trace used to drop the run in silence; the
-                        // Prime Directive's answer is a named refusal.
+                        // Prime Directive's answer is a named refusal -
+                        // and the name is the kind the user picked:
+                        // Engrave is the trace's twin (M2.4 B), and a
+                        // trace row's truth is this row's truth.
                         return Err(GenError::Invalid(format!(
-                            "{label} is an open run - Trace machines a closed boundary; use a 2D Contour or close the pick into a chain"
+                            "{label} is an open run - {} machines a closed boundary; use a 2D Contour or close the pick into a chain",
+                            params.kind().info().label
                         )));
                     }
                     continue;

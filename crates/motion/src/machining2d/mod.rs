@@ -19,6 +19,8 @@
 
 
 mod arcs;
+mod chamfer;
+mod circular;
 mod contour;
 mod face;
 mod levels;
@@ -29,11 +31,16 @@ mod waterscan;
 
 #[cfg(test)]
 #[allow(unused_imports)]
-use {arcs::*, contour::*, face::*, levels::*, pocket::*, ring::*, slots::*, waterscan::*};
+use {
+    arcs::*, chamfer::*, circular::*, contour::*, face::*, levels::*, pocket::*, ring::*,
+    slots::*, waterscan::*,
+};
 #[cfg(test)]
 mod tests;
 
 pub use arcs::{fit_arcs, Seg, ARC_FIT_TOL};
+pub use chamfer::{chamfer, ChamferParams};
+pub use circular::{circular, CircularParams};
 pub use contour::{contour, contour_along_chain, ContourParams, Lead, Side};
 pub use face::{face, FaceParams, GenError};
 pub(crate) use levels::cut_levels;

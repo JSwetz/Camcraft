@@ -169,6 +169,75 @@ pub enum ParamsDto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,
     },
+    /// Engraving (M2.4 B): the trace arm verbatim under the new tag -
+    /// the twin law again, so the arms state the same shape by
+    /// construction (the fields arrived with the kind, v44).
+    Engrave {
+        clearance_z: HeightDto,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// 3+2 index; see the Face arm.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
+    },
+    /// 2D chamfer (M2.4 B): the two authored face numbers and three
+    /// heights - no bottom key exists, because the face's depth is
+    /// derived (the variant docs' law: a second number for the same
+    /// line could only disagree with the first). The tag follows the
+    /// 2D family's shipped grammar (`adaptive2_d`, `offset2_d`), not
+    /// the `pocket3d` rename - the twins' word shape is the newer
+    /// precedent the table already speaks.
+    Chamfer2D {
+        width: f64,
+        angle_deg: f64,
+        clearance_z: HeightDto,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default)]
+        side: SideDto,
+        tolerance: f64,
+        /// 3+2 index; see the Face arm.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
+    },
+    /// Circular pocket / vault (M2.4 B): the pocket's arm with the
+    /// authored disk's two numbers in place of a picked region -
+    /// `center` rides the wire like the slot's endpoints, as `vault`
+    /// is the dome law's one bool (the fields arrived with the
+    /// kind, v44).
+    Circular {
+        center: [f64; 2],
+        radius: f64,
+        vault: bool,
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: HeightDto,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        #[serde(default)]
+        entry: EntryDto,
+        #[serde(default = "default_helix_radius")]
+        helix_radius: f64,
+        /// 3+2 index; see the Face arm.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<TiltDto>,
+    },
     Slot {
         a: [f64; 2],
         b: [f64; 2],

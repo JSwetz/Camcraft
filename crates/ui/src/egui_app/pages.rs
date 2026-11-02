@@ -81,7 +81,7 @@ use super::panes::kind_name;
 use super::theme::Tokens;
 
 /// Tool kind labels, same order as `ToolKind` (mirrors the tool page).
-const TOOL_KINDS: [&str; 10] = [
+const TOOL_KINDS: [&str; 11] = [
     "End mill",
     "Ball nose",
     "Bull nose",
@@ -92,6 +92,7 @@ const TOOL_KINDS: [&str; 10] = [
     "Grooving blade",
     "Threading insert",
     "Form gauge",
+    "Chamfer mill",
 ];
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
@@ -143,7 +144,10 @@ pub(crate) fn has_section(kind: OpType, s: usize) -> bool {
         SEC_GEO | SEC_HEIGHTS | SEC_FEEDS => true,
         // Trace cuts no passes; a drill's Passes are the cycle's own -
         // peck depth and bottom dwell, the numbers that shape its hops.
-        SEC_PASSES => !matches!(kind, OpType::Trace),
+        // The engrave twin is Trace's shape verbatim, and the chamfer
+        // ride's floor is DERIVED from width and angle - neither has a
+        // stepover or a leave to show (M2.4 B).
+        SEC_PASSES => !matches!(kind, OpType::Trace | OpType::Engrave | OpType::Chamfer2D),
         SEC_LEADS => matches!(kind, OpType::Contour),
         SEC_MACHINE => matches!(kind, OpType::Part),
         _ => false,
@@ -745,6 +749,11 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         });
     }
 
+    // Which Trace-shape name the arm below renders: the engrave twin
+    // IS Trace's field shape (M2.4 B), so they share one arm and only
+    // the height-editor ids switch. Read before the match's borrow.
+    let engrave = matches!(&state.op_ui.params, OpParams::Engrave { .. });
+
     match &mut state.op_ui.params {
         OpParams::Face {
             stepover,
@@ -1243,6 +1252,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
             }
         }
+        // The engrave twin (M2.4 B): Trace's fields verbatim under the
+        // catalog name - the arm is shared exactly because a second
+        // pane body could only fork the equivalence.
         OpParams::Trace {
             clearance_z,
             retract_z,
@@ -1253,7 +1265,19 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             plunge_feed,
             climb,
             tilt,
+        }
+        | OpParams::Engrave {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            tilt,
         } => {
+            let tg = if engrave { "engrave" } else { "trace" };
             if tab == SEC_HEIGHTS {
                 orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
@@ -1262,7 +1286,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     &state.world,
                     op_ctx.as_deref(),
                     clearance_z,
-                    "trace.clearance",
+                    &format!("{tg}.clearance"),
                 );
                 field(ui, "Retract plane");
                 let mut hop = retract_z.is_some();
@@ -1304,6 +1328,202 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
                 num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
+            }
+        }
+        // The chamfer ride (M2.4 B): the edge is picked like Trace's
+        // chains, the two authored numbers state the cone's line, and
+        // the floor is DERIVED from them - so there is no bottom_z or
+        // stepdown to edit (Passes is out by has_section) and the pane
+        // reads the corner Z back so the derived number is visible,
+        // never merely implied.
+        OpParams::Chamfer2D {
+            width,
+            angle_deg,
+            clearance_z,
+            retract_z,
+            top_z,
+            feed,
+            plunge_feed,
+            climb,
+            side,
+            tolerance,
+            tilt,
+        } => {
+            if tab == SEC_GEO {
+                field(ui, "Chamfer width");
+                num(ui, u, width);
+                field(ui, "Chamfer angle (deg)");
+                num_plain(ui, angle_deg);
+                ui.label("the face's slope off the top plane; the depth follows as width x tan(angle) - authored here, never second-guessed by a depth field");
+                field(ui, "Side");
+                let mut s_idx = match side {
+                    Side::Auto => 0,
+                    Side::Inside => 1,
+                    Side::Outside => 2,
+                };
+                combo(ui, "ch_side", &mut s_idx, side_names());
+                *side = match s_idx {
+                    1 => Side::Inside,
+                    2 => Side::Outside,
+                    _ => Side::Auto,
+                };
+                if let Some(note) = &side_note {
+                    ui.label(note.clone());
+                }
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+            }
+            if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
+                field(ui, "Clearance Z");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "chamfer.clearance",
+                );
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "chamfer.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "chamfer.top");
+                if let Some(tz) = top_z.z(&state.world) {
+                    let corner = tz - *width * angle_deg.to_radians().tan();
+                    ui.label(format!(
+                        "the corner stands at {} - derived: width x tan(angle) below the top plane",
+                        units::len(corner, u, 3)
+                    ));
+                }
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
+        // The circular ladder (M2.4 B): the pocket family about an
+        // AUTHORED centre - geometry typed like Slot's endpoints, no
+        // pick to disagree with the circles; heights and passes are the
+        // pocket's shape, and `vault` stands the floor on the dome law
+        // instead of at Bottom Z.
+        OpParams::Circular {
+            center,
+            radius,
+            vault,
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            tilt,
+        } => {
+            if tab == SEC_GEO {
+                field(ui, "Center X");
+                num(ui, u, &mut center.x);
+                field(ui, "Center Y");
+                num(ui, u, &mut center.y);
+                field(ui, "Radius");
+                num(ui, u, radius);
+                ui.checkbox(vault, "Vault - dome floor");
+                ui.label("flat floors stand at Bottom Z; the vault sinks each ring by (r/R)^2 of the Top-to-Bottom span - a parabolic reflector, every ring a circle the spindle simply holds");
+            }
+            if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
+                field(ui, "Clearance Z");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "circ.clearance",
+                );
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    field(ui, "Retract Z");
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "circ.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "Top Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "circ.top");
+                field(ui, "Bottom Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), bottom_z, "circ.bottom");
+                field(ui, "Stepdown");
+                num(ui, u, stepdown);
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Stock to leave");
+                num(ui, u, stock_to_leave);
+                field(ui, "Stepover");
+                num(ui, u, stepover);
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+                field(ui, "Entry");
+                let mut e_idx = match entry {
+                    camcraft_app::machining3d::Entry3D::Plunge => 0,
+                    camcraft_app::machining3d::Entry3D::Ramp => 1,
+                    camcraft_app::machining3d::Entry3D::Helix => 2,
+                };
+                let before = e_idx;
+                combo(ui, "circ_entry", &mut e_idx, &ENTRY_KINDS);
+                if e_idx != before {
+                    *entry = match e_idx {
+                        1 => camcraft_app::machining3d::Entry3D::Ramp,
+                        2 => camcraft_app::machining3d::Entry3D::Helix,
+                        _ => camcraft_app::machining3d::Entry3D::Plunge,
+                    };
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
+                    field(ui, "Helix lead radius");
+                    num(ui, u, helix_radius);
+                }
             }
         }
         OpParams::Drill {
@@ -4673,6 +4893,15 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                                 state.tool_ui.nose_radius = 6.0;
                             }
                         }
+                        // The chamfer mill (M2.4 B): the shop's 90 -
+                        // the supplement of the 45-degree face the
+                        // catalog's chamfer seed stands at.
+                        if state.tool_ui.kind == 10
+                            && (state.tool_ui.tip_angle.is_nan()
+                                || !(0.0..180.0).contains(&state.tool_ui.tip_angle))
+                        {
+                            state.tool_ui.tip_angle = 90.0;
+                        }
                     }
                     field(ui, "Diameter");
                     num(ui, u, &mut state.tool_ui.diameter);
@@ -4720,6 +4949,11 @@ pub(crate) fn tool_editor_window(ctx: &egui::Context, state: &mut State) {
                         field(ui, "Crown radius");
                         num(ui, u, &mut state.tool_ui.nose_radius);
                         ui.label("the arc of the ground edge in the work's meridian - the sagitta the verdict bends by");
+                    }
+                    if state.tool_ui.kind == 10 {
+                        field(ui, "Cone angle (deg)");
+                        num_plain(ui, &mut state.tool_ui.tip_angle);
+                        ui.label("the included angle of the taper - 180 minus twice the chamfer's slope, so 90 cuts a 45-degree face");
                     }
                     if state.tool_ui.kind != 4 {
                         field(ui, "Corner radius");

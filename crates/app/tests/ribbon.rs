@@ -40,11 +40,18 @@ fn sections_partition_the_registry() {
 #[test]
 fn family_is_derived_not_forked() {
     // The old `family` field's truth, restated as a law over `section`:
-    // the turning rows (20..=31, the M5.2 ladder) are the Turning
+    // the turning rows (the trailing run - the M5.2 ladder, wherever
+    // the middle insertions have shifted it since) are the Turning
     // section and nothing Turn-likes lives elsewhere - so
-    // `KindInfo::family()` cannot drift from `Section::family()`.
+    // `KindInfo::family()` cannot drift from `Section::family()`. The
+    // boundary is the table's, not a remembered number: a middle
+    // insertion moves the rows, not the law (M2.4 B).
+    let turn_start = KindInfo::ALL
+        .iter()
+        .position(|k| k.section == Section::Turning)
+        .expect("turning rows exist");
     for (i, k) in KindInfo::ALL.iter().enumerate() {
-        let want = if i >= 20 {
+        let want = if i >= turn_start {
             Family::Turn
         } else {
             Family::Mill
@@ -135,8 +142,11 @@ fn v42_pins_shift_for_the_twins_row_insert() {
     // M2.4 A put two rows in the MIDDLE of the 2D mill's run, so a
     // v42 file's pin indices name rows that moved: 0..=4 still name
     // the same kind, and from the Drill row up each gains the two
-    // new rows' worth. The PostDto law seen from the other side -
-    // names survive growth, indices need a rung.
+    // new rows' worth. The rungs CHAIN (M2.4 B proved it from the
+    // other side): v42 -> v43 by the twins' rung, then v43 -> v44 by
+    // the M2.4 B rung, so the old Drill row lands three + two past
+    // its old home in the final table. The PostDto law seen from the
+    // other side - names survive growth, indices need a rung.
     let world = new_world();
     project::open(
         &world,
@@ -146,9 +156,29 @@ fn v42_pins_shift_for_the_twins_row_insert() {
     let pins = pinned_of(&world);
     assert_eq!(
         pins,
-        vec![4, 7, 31],
-        "Trace stays, the Drill row and the last turning row shift by two"
+        vec![4, 10, 34],
+        "Trace stays; the Drill row and the last turning row take both rungs"
     );
+    assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
+    assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
+}
+
+#[test]
+fn v43_pins_shift_for_the_m24b_row_insert() {
+    // The same law one rung closer: M2.4 B put three rows after
+    // Trace (tags 7, 8, 9), so a v43 file's indices 0..=6 still name
+    // their kinds and 7 up gains three. The Offset row (6) is the
+    // run's last old name; the Drill row (7) is the run's first
+    // shifted one.
+    let world = new_world();
+    project::open(
+        &world,
+        r#"{"version": 43, "pinned": [6, 7, 31], "entities": []}"#,
+    )
+    .expect("a v43 pinned file steps up");
+    let pins = pinned_of(&world);
+    assert_eq!(pins, vec![6, 10, 34], "below the insert stays, from Drill up shifts");
+    assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Offset2D);
     assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
     assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
 }

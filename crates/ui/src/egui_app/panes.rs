@@ -523,6 +523,14 @@ fn op_icon(kind: OpType) -> Icon {
         OpType::Adaptive2D | OpType::Offset2D => Icon::Pocket,
         OpType::Slot => Icon::Slot,
         OpType::Trace => Icon::Trace,
+        // The 2D run's new names keep their family's pixels (M2.4 B,
+        // the twins' reuse law): the engrave twin IS Trace's field
+        // shape, the chamfer ride is a contour peeling a derived
+        // corner, and the circular ladder is the pocket family
+        // around a centre.
+        OpType::Engrave => Icon::Trace,
+        OpType::Chamfer2D => Icon::Contour,
+        OpType::Circular => Icon::Pocket,
         OpType::Drill => Icon::Drill,
         OpType::Pocket3D => Icon::Pocket,
         OpType::Finish3D => Icon::Finish3D,
@@ -1226,6 +1234,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
         ToolKind::Groove => "grooving blade",
         ToolKind::Thread => "threading insert",
         ToolKind::Form => "form gauge",
+        ToolKind::Taper => "chamfer mill",
     }
 }
 

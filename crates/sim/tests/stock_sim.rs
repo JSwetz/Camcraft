@@ -402,8 +402,8 @@ fn program_chains_ops_in_order() {
         plunge(-2.5, -2.5, 1.0, 5.0),
     ];
     let ops = [
-        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false },
-        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false },
+        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false, cone: None },
+        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false, cone: None },
     ];
     stock_sim::simulate(&mut d, &ops).expect("chain");
     let model = flat_top(2.0, 3.2);
@@ -438,9 +438,9 @@ fn program_chains_ops_in_order() {
     // the gouge still stands.
     let o3 = [feed(p(-3.2, 0.0, 2.0), p(3.2, 0.0, 2.0))];
     let ops3 = [
-        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false },
-        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false },
-        stock_sim::SimOp { moves: &o3, radius: 3.2, ball: false },
+        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false, cone: None },
+        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false, cone: None },
+        stock_sim::SimOp { moves: &o3, radius: 3.2, ball: false, cone: None },
     ];
     let mut d2 = Dexel::from_shape(&box_stock, cell).unwrap();
     stock_sim::simulate(&mut d2, &ops3).expect("chain 3");
@@ -456,7 +456,7 @@ fn program_chains_ops_in_order() {
     let band = [feed(p(-3.0, 0.0, 2.0), p(3.0, 0.0, 2.0))];
     stock_sim::simulate(
         &mut d3,
-        &[stock_sim::SimOp { moves: &band, radius: 3.5, ball: false }],
+        &[stock_sim::SimOp { moves: &band, radius: 3.5, ball: false, cone: None }],
     )
     .expect("sweep");
     let dev3 = stock_sim::deviate(&d3, &flat_top(2.0, 3.2), 0.01).expect("deviate 3");
@@ -476,7 +476,7 @@ fn the_cylinders_world_is_air_beside_the_round() {
     let moves = [feed(p(0.0, 0.0, 1.0), p(8.0, 0.0, 1.0))];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &moves, radius: 2.0, ball: false }],
+        &[stock_sim::SimOp { moves: &moves, radius: 2.0, ball: false, cone: None }],
     )
     .expect("sweep");
     // The witness column the first drafts missed: it must stand in
@@ -506,7 +506,7 @@ fn model_stock_stocks_the_model_itself() {
     let moves = [plunge(0.0, 0.0, 1.0, 5.0)];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &moves, radius: 1.0, ball: false }],
+        &[stock_sim::SimOp { moves: &moves, radius: 1.0, ball: false, cone: None }],
     )
     .expect("cut");
     assert!(near(d.top_at(inside), 1.0));
@@ -536,17 +536,17 @@ fn simulate_refuses_before_touching_anything() {
     let mut d = Dexel::from_shape(&box_stock, 0.5).unwrap();
     let before = d.clone();
     let bad_moves = [plunge(0.0, 0.0, f64::NAN, 5.0)];
-    let ops = [stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false }];
+    let ops = [stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false, cone: None }];
     assert!(stock_sim::simulate(&mut d, &ops).is_err());
     assert_eq!(d, before, "the refusal cut anyway");
     let good = [plunge(0.0, 0.0, 1.0, 5.0)];
     let ops = [
-        stock_sim::SimOp { moves: &good, radius: 2.0, ball: false },
-        stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false },
+        stock_sim::SimOp { moves: &good, radius: 2.0, ball: false, cone: None },
+        stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false, cone: None },
     ];
     assert!(stock_sim::simulate(&mut d, &ops).is_err(), "op 2's poison ran the program");
     assert_eq!(d, before, "a refused program left its first op cut into the stock");
-    let ops = [stock_sim::SimOp { moves: &good, radius: 0.0, ball: false }];
+    let ops = [stock_sim::SimOp { moves: &good, radius: 0.0, ball: false, cone: None }];
     assert!(stock_sim::simulate(&mut d, &ops).is_err());
 }
 
@@ -578,8 +578,8 @@ fn the_sim_is_deterministic_including_its_nans() {
         stock_sim::simulate(
             &mut d,
             &[
-                stock_sim::SimOp { moves: &m1, radius: 1.5, ball: false },
-                stock_sim::SimOp { moves: &m2, radius: 1.0, ball: true },
+                stock_sim::SimOp { moves: &m1, radius: 1.5, ball: false, cone: None },
+                stock_sim::SimOp { moves: &m2, radius: 1.0, ball: true, cone: None },
             ],
         )
         .unwrap();
@@ -618,7 +618,7 @@ fn a_cut_pays_only_the_tiles_it_reaches() {
     let m = [plunge(-4.0, -4.0, 1.0, 2.0)];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false }],
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None }],
     )
     .expect("sweep");
     assert!(
@@ -644,7 +644,7 @@ fn equality_reads_values_not_bytes() {
     let m = [plunge(0.0, 0.0, 5.0, 6.0)];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false }],
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None }],
     )
     .expect("sweep");
     assert_eq!(d.tiles_allocated(), 0, "a cut to the standing height is not a cut");
@@ -653,7 +653,7 @@ fn equality_reads_values_not_bytes() {
     let m = [plunge(0.0, 0.0, 1.0, 2.0)];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false }],
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None }],
     )
     .expect("cut");
     assert!(d.tiles_allocated() > 0, "a real cut paid a real tile");
@@ -694,4 +694,44 @@ fn model_stock_collapses_uniform_runs() {
     let air = d.col(Point2::new(-40.4, -40.4)).unwrap(); // margin cell
     assert!(d.top_at(air) == f64::NEG_INFINITY, "the margin is air");
     assert!(d.tiles_allocated() < 9, "the mesh's own face costs no per-cell memory");
+}
+
+#[test]
+fn the_cone_atom_leaves_the_face_the_chamfer_promised() {
+    // M2.4 B's verdict: the CL convention says a chamfer path's moves
+    // carry the virtual sharp ON the wall at the corner depth, and the
+    // face law says the surviving surface is 45 degrees from there.
+    // This runs the cone atom - the chamfer mill, tip-first, `cone`
+    // the cotangent of the half-angle from the axis (cot(45) = 1 for
+    // the shop's 90-degree tool) - over a wall and reads the answer
+    // off the field: a column at distance d from the axis stands at
+    // `corner + |d|` while that is under the top plane, and nothing
+    // anywhere stands below the corner. The kernel promised the face;
+    // the sim is what keeps it honest.
+    let mut d = Dexel::block(0.0, 0.0, 10.0, 10.0, 5.0, 1.0).unwrap();
+    let wall_x = 9.0; // the corner depth the kernel posts for top 5,
+    let corner_z = 3.0; // width 2 at 45 degrees: 5 - 2 * tan(45).
+    let o = [feed(p(wall_x, 1.0, corner_z), p(wall_x, 9.0, corner_z))];
+    let ops = [stock_sim::SimOp { moves: &o, radius: 3.0, ball: false, cone: Some(1.0) }];
+    stock_sim::simulate(&mut d, &ops).expect("cone op");
+    // Row whose centers stand on the traverse: iy = 5 reads y = 5.5.
+    for ix in 0..d.nx {
+        let dist = (ix as f64 + 0.5 - wall_x).abs();
+        let want = (corner_z + dist).min(5.0);
+        assert!(
+            (top_of(&d, ix, 5) - want).abs() <= 0.15,
+            "column {ix} (|d| = {dist}) reads {}, the face says {want}",
+            top_of(&d, ix, 5)
+        );
+        assert!(top_of(&d, ix, 5) >= corner_z - 1e-9, "a gouge below the corner at column {ix}");
+    }
+    // The slope in numbers: inside the reach, every cell steps one
+    // cell's height - tan(45) read across the grid.
+    for ix in 0..d.nx - 1 {
+        let a = top_of(&d, ix, 5);
+        let b = top_of(&d, ix + 1, 5);
+        if a < 4.9 && b < 4.9 {
+            assert!((a - b).abs() <= 1.0 + 0.3, "the face steepened or flattened between {ix} and {}", ix + 1);
+        }
+    }
 }

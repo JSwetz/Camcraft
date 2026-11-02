@@ -51,6 +51,7 @@ pub fn current_stamp(
         crate::tools::ToolKind::Groove => 7,
         crate::tools::ToolKind::Thread => 8,
         crate::tools::ToolKind::Form => 9,
+        crate::tools::ToolKind::Taper => 10,
     });
     for v in [
         tool.diameter,
@@ -93,6 +94,11 @@ pub fn current_stamp(
         // radius rides the global nose_radius row above, read at
         // the gate that makes it mean anything (M5.2 E2).
         crate::tools::ToolKind::Form => w(&mut h, tool.width),
+        // The chamfer mill digests its cone angle from its first
+        // build (M2.4 B): the congruence door reads it against the
+        // face's angle, so a re-cut cone is a different chamfer even
+        // when width, depth and the wall itself never moved.
+        crate::tools::ToolKind::Taper => w(&mut h, tool.tip_angle),
         _ => {}
     }
     params.stamp_with(world, setup, &mut h);

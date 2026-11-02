@@ -96,9 +96,15 @@ pub fn region_z(
             .unwrap_or_else(|| resolve_height(world, setup, *cut_z)),
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
-        // The roughing twins name the pocket's high station (M2.4 A).
+        // The roughing twins name the pocket's high station (M2.4 A),
+        // and so do the circular ladder and the engrave ride; the
+        // chamfer's top plane is where its cone's apex stands - the
+        // ride's only height (M2.4 B).
         | OpParams::Adaptive2D { top_z, .. }
         | OpParams::Offset2D { top_z, .. }
+        | OpParams::Engrave { top_z, .. }
+        | OpParams::Chamfer2D { top_z, .. }
+        | OpParams::Circular { top_z, .. }
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
         | OpParams::Drill { top_z, .. }
@@ -192,9 +198,12 @@ pub fn resolve_params(
         ),
         OpParams::Pocket { clearance_z, retract_z, top_z, bottom_z, .. }
         // The roughing twins carry the pocket's four heights verbatim
-        // (M2.4 A) - same ladder shape, same hop.
+        // (M2.4 A) - same ladder shape, same hop. The engrave twin
+        // and the circular ladder do too (M2.4 B).
         | OpParams::Adaptive2D { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Offset2D { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Engrave { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Circular { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Slot { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. }
         | OpParams::Pocket3D { clearance_z, retract_z, top_z, bottom_z, .. }
@@ -222,6 +231,17 @@ pub fn resolve_params(
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),
+            None,
+            opt("Retract Z", *retract_z)?,
+        ),
+        // The 2-D chamfer resolves TWO heights: the clearance and the
+        // plane the cone's apex stands at. Its floor is derived - the
+        // wall's own width · tan(angle) below the apex - so `bottom`
+        // stays None, Face's skipped-field the other way (M2.4 B).
+        OpParams::Chamfer2D { clearance_z, retract_z, top_z, .. } => (
+            req("Clearance Z", *clearance_z)?,
+            Some(req("Top of Part Z", *top_z)?),
+            None,
             None,
             opt("Retract Z", *retract_z)?,
         ),

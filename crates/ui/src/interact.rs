@@ -1160,7 +1160,13 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Flow5D { retract_z, .. }
         | operation::OpParams::MultiAxisContour { retract_z, .. }
         | operation::OpParams::Slot { retract_z, .. }
+        // The engrave twin hops where trace hops, the circular ladder
+        // where the pocket hops, and the chamfer ride between its
+        // chains the trace's way (M2.4 B) - all the store-either shape.
         | operation::OpParams::Trace { retract_z, .. }
+        | operation::OpParams::Engrave { retract_z, .. }
+        | operation::OpParams::Chamfer2D { retract_z, .. }
+        | operation::OpParams::Circular { retract_z, .. }
         | operation::OpParams::Drill { retract_z, .. } => *retract_z,
         // The wrap ladder stores no hop at all - its rapids ride
         // the kernel's law off the skin (M5.1 stage E2) - exactly
@@ -1286,6 +1292,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Flow5D { top_z, bottom_z, .. }
         | operation::OpParams::MultiAxisContour { top_z, bottom_z, .. }
         | operation::OpParams::Slot { top_z, bottom_z, .. }
+        // The engrave twin draws the trace's ladder - first level up
+        // top, floor below - and the circular ladder its rings' two
+        // rungs: vault or flat, the dome law's stations live between
+        // the same pair (M2.4 B).
+        | operation::OpParams::Engrave { top_z, bottom_z, .. }
+        | operation::OpParams::Circular { top_z, bottom_z, .. }
         // The facing ladder reads the same two rungs (M5.2 A): stock
         // top above, the facing plane below - world Z planes standing
         // as stations on the fitted axis, the rungs between them the
@@ -1349,6 +1361,25 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                     name: "Parting",
                     corner: 3,
                     skip_rect: false,
+                });
+            }
+        }
+        // The chamfer ride draws its one authored plane: the top edge's
+        // own Z, where the cone's apex stands. The face's floor is
+        // DERIVED (width·tan(angle), variant docs) - a rectangle at a
+        // z no height author could disagree with is honest, and Part's
+        // law above says an advertised window the path cannot be
+        // measured against is not. The corner Z rides the pane's read
+        // of the same two numbers.
+        operation::OpParams::Chamfer2D { top_z, .. } => {
+            if let Some(z) = top_z.z(world) {
+                out.push(HeightPlane {
+                    z,
+                    src: *top_z,
+                    rgb: REGION_RGB,
+                    name: "Top",
+                    corner: 2,
+                    skip_rect: stands(z),
                 });
             }
         }

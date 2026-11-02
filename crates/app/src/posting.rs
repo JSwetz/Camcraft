@@ -607,6 +607,23 @@ impl HeightRefs for OpParams {
                 bottom_z,
                 ..
             }
+            // The engrave twin states trace's four verbatim, and the
+            // circular ladder is the pocket family's shape - vault or
+            // flat floors, both read top and bottom (M2.4 B).
+            | OpParams::Engrave {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
+            | OpParams::Circular {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
             | OpParams::Pocket3D {
                 clearance_z,
                 retract_z,
@@ -695,6 +712,20 @@ impl HeightRefs for OpParams {
                 ..
             } => {
                 let mut v = vec![clearance_z, top_z, bottom_z];
+                v.extend(retract_z.iter());
+                v
+            }
+            // The chamfer ride resolves three: its floor is DERIVED
+            // from width and angle, so there is no bottom plane to
+            // reference - the top plane is the only height the ride
+            // reads (M2.4 B, variant docs).
+            OpParams::Chamfer2D {
+                clearance_z,
+                retract_z,
+                top_z,
+                ..
+            } => {
+                let mut v = vec![clearance_z, top_z];
                 v.extend(retract_z.iter());
                 v
             }

@@ -372,9 +372,14 @@ pub(super) fn section_z_of(
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
         // The roughing twins read the pocket's section plane - the
-        // same z whose ladder `region_core` cuts (M2.4 A).
+        // same z whose ladder `region_core` cuts (M2.4 A). The
+        // engrave twin sections like the trace, and the chamfer's
+        // ride plane is the apex plane - the edge the cone lies
+        // along (M2.4 B).
         | OpParams::Adaptive2D { top_z, .. }
         | OpParams::Offset2D { top_z, .. }
+        | OpParams::Engrave { top_z, .. }
+        | OpParams::Chamfer2D { top_z, .. }
         | OpParams::Trace { top_z, .. } => *top_z,
         _ => return None,
     };
@@ -465,16 +470,32 @@ pub(super) fn region_core(
             slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)
         }
         // The twins hollow the region's inside exactly like the pocket
-        // does (M2.4 A) - same section, same machine area.
+        // does (M2.4 A) - same section, same machine area. The
+        // engrave twin sections the same plane (M2.4 B).
         OpParams::Contour { .. }
         | OpParams::Pocket { .. }
         | OpParams::Adaptive2D { .. }
         | OpParams::Offset2D { .. }
+        | OpParams::Engrave { .. }
         | OpParams::Trace { .. } => {
             let z = z?;
             section(&material.facets, z - oz)
         }
+        // The chamfer ride's machine area is the edge the cone lies
+        // along: the section at the apex plane - a boundary ride the
+        // contour's way (M2.4 B).
+        OpParams::Chamfer2D { .. } => {
+            let z = z?;
+            section(&material.facets, z - oz)
+        }
         OpParams::Slot { a, b, width, .. } => stadium(*a, *b, width * 0.5),
+        // The circular ladder's machine area is the AUTHORED disk -
+        // the slot's authored-geometry law with a circle for a
+        // stadium; the generator refuses a disk that meets no
+        // material, by name (M2.4 B).
+        OpParams::Circular { center, radius, .. } => {
+            Ok(Region::new(vec![disk_loop(*center, *radius)?])?)
+        }
         OpParams::Drill { holes, cross, .. } => {
             // A radial list asks for the silhouette only (M5.2 F2):
             // a cross hole opens on the bar's SKIN, so its mouth is
@@ -536,13 +557,20 @@ pub(super) fn rim_segments(r: f64) -> usize {
 /// drill region. `Region::new` orients by nesting, so the winding here
 /// is free.
 pub(super) fn rim_loop(h: Hole) -> Result<Loop, GenError> {
-    let n = rim_segments(h.radius);
+    disk_loop(h.xy, h.radius)
+}
+
+/// A polygonal circle about `center` - the drill rim's builder with an
+/// authored center and radius, which is exactly what the circular
+/// ladder's disk is (M2.4 B).
+pub(super) fn disk_loop(center: Point2, radius: f64) -> Result<Loop, GenError> {
+    let n = rim_segments(radius);
     let mut pts = Vec::with_capacity(n);
     for i in 0..n {
         let th = std::f64::consts::TAU * i as f64 / n as f64;
         pts.push(Point2::new(
-            h.xy.x + h.radius * th.cos(),
-            h.xy.y + h.radius * th.sin(),
+            center.x + radius * th.cos(),
+            center.y + radius * th.sin(),
         ));
     }
     Ok(Loop::new(pts)?)

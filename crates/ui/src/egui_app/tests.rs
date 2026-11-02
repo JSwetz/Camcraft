@@ -803,6 +803,58 @@ fn every_field_lives_on_exactly_one_section() {
             ],
         ),
         (
+            // The engrave twin (M2.4 B): Trace's row verbatim - the
+            // shared arm renders the shared shape; only the height
+            // editor's ids carry the catalog name ("Retract Z" rides
+            // the hop's guard, off in the draft, as Trace's row notes).
+            "Engrave",
+            vec![
+                ("Geometry", vec!["Click selects:"]),
+                ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
+            // The chamfer ride (M2.4 B): the cone's two authored
+            // numbers and the contour's side/tolerance pair live in
+            // Geometry; there is NO Passes group - the floor is
+            // derived (has_section's exclusion) and a depth field
+            // could only disagree with width x tan(angle). The corner
+            // Z read is derived text, not a field; "Retract Z" rides
+            // the hop's guard.
+            "2D Chamfer",
+            vec![
+                (
+                    "Geometry",
+                    vec!["Click selects:", "Chamfer width", "Chamfer angle (deg)", "Side", "Tolerance"],
+                ),
+                ("Heights", vec!["Clearance Z", "Retract plane", "Top Z"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
+            // The circular ladder (M2.4 B): the geometry is authored
+            // like Slot's (a centre and a radius, no pick to disagree
+            // with the circles - "Click selects:" still heads the
+            // group, the shared pick law). Heights and Passes are the
+            // pocket's shape; the vault is one checkbox. "Helix lead
+            // radius" is guard-rendered (the draft enters by plunge),
+            // so it is not in this row.
+            "Circular",
+            vec![
+                (
+                    "Geometry",
+                    vec!["Click selects:", "Center X", "Center Y", "Radius", "Vault - dome floor"],
+                ),
+                (
+                    "Heights",
+                    vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
+                ),
+                ("Passes", vec!["Stock to leave", "Stepover"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling", "Entry"]),
+            ],
+        ),
+        (
             // A drill has no climb (the cycle owns the retract), no
             // Leads & Links (no wall to enter), and its Passes are the
             // cycle's own numbers - the section law this row pins.
@@ -944,7 +996,7 @@ fn the_stacked_pane_shows_every_section_unasked() {
 }
 
 /// The registry half of M9.1's one pane per kind: the drift guard above
-/// tables the eight milling kinds' FIELD LABELS; this one walks the whole
+/// tables the eleven milling kinds' FIELD LABELS; this one walks the whole
 /// KindInfo registry and pins the GROUP law for every kind that can be
 /// created or retyped into - the pane opens for each (Tool and Source
 /// above the stack, the section groups below), and a header rides the

@@ -74,6 +74,12 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Pocket { feed, .. }
         | OpParams::Adaptive2D { feed, .. }
         | OpParams::Offset2D { feed, .. }
+        // The engrave ride and the chamfer ride feed along the curve
+        // like the contour's; the circular ladder feeds along its
+        // rings (M2.4 B).
+        | OpParams::Engrave { feed, .. }
+        | OpParams::Chamfer2D { feed, .. }
+        | OpParams::Circular { feed, .. }
         | OpParams::Pocket3D { feed, .. }
         | OpParams::Slot { feed, .. }
         | OpParams::Trace { feed, .. }
@@ -129,6 +135,13 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Pocket { plunge_feed, .. }
         | OpParams::Adaptive2D { plunge_feed, .. }
         | OpParams::Offset2D { plunge_feed, .. }
+        // The engrave twin plunges into the line like the trace; the
+        // chamfer ride enters over the shoulder at the plunge number;
+        // the circular ladder plunges through open disk like the
+        // pocket (M2.4 B).
+        | OpParams::Engrave { plunge_feed, .. }
+        | OpParams::Chamfer2D { plunge_feed, .. }
+        | OpParams::Circular { plunge_feed, .. }
         | OpParams::Pocket3D { plunge_feed, .. }
         | OpParams::Slot { plunge_feed, .. }
         | OpParams::Trace { plunge_feed, .. }
@@ -181,6 +194,13 @@ fn climb_of(p: &OpParams) -> bool {
         | OpParams::Pocket { climb, .. }
         | OpParams::Adaptive2D { climb, .. }
         | OpParams::Offset2D { climb, .. }
+        // The engrave center runs on the line, which flank leads is
+        // still the author's climb number; the chamfer cone rides the
+        // wall like a contour; the circular rings are the pocket's
+        // (M2.4 B).
+        | OpParams::Engrave { climb, .. }
+        | OpParams::Chamfer2D { climb, .. }
+        | OpParams::Circular { climb, .. }
         | OpParams::Pocket3D { climb, .. }
         | OpParams::Slot { climb, .. }
         | OpParams::Trace { climb, .. }
@@ -237,6 +257,9 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         | OpParams::Pocket { stepover, .. }
         | OpParams::Adaptive2D { stepover, .. }
         | OpParams::Offset2D { stepover, .. }
+        // The circular ladder's ring spacing is the pocket's plain
+        // number (M2.4 B).
+        | OpParams::Circular { stepover, .. }
         | OpParams::Pocket3D { stepover, .. }
         // The wrap ladder's spacing is a plain number like the
         // pocket's, not the twins' derived Option (variant docs).
@@ -249,7 +272,12 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         // raster's is: a derivation by default, so the fold reads the
         // field as "not authored by a number to carry" - the retype
         // starts a fresh derived line set, never a borrowed override.
+        // The engrave ride follows one chain - the trace's answer,
+        // no spacing to carry; the chamfer is one ride of the cone,
+        // the authored wall is the pattern (M2.4 B).
         OpParams::Contour { .. }
+        | OpParams::Engrave { .. }
+        | OpParams::Chamfer2D { .. }
         | OpParams::Trace { .. }
         | OpParams::Drill { .. }
         | OpParams::Finish3D { .. }
@@ -302,6 +330,12 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         | OpParams::Pocket { stepdown, .. }
         | OpParams::Adaptive2D { stepdown, .. }
         | OpParams::Offset2D { stepdown, .. }
+        // The engrave twin steps down through the sheet like the
+        // trace; the circular ladder is the pocket's rung law
+        // (M2.4 B). The chamfer has no stepdown arm: its depth is
+        // the wall's own, derived (below, in the None list).
+        | OpParams::Engrave { stepdown, .. }
+        | OpParams::Circular { stepdown, .. }
         | OpParams::Pocket3D { stepdown, .. }
         // The ladder's infeed is radial here, but it is still the
         // number the retype carries.
@@ -347,7 +381,10 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // skin (M5.2 F).
         | OpParams::FormTurning { .. }
         | OpParams::BoringTurning { .. }
-        | OpParams::MultiAxisContour { .. } => None,
+        | OpParams::MultiAxisContour { .. }
+        // The 2-D chamfer is one ride: between the shoulder and the
+        // derived depth there is no infeed to step (M2.4 B).
+        | OpParams::Chamfer2D { .. } => None,
     }
 }
 
@@ -360,6 +397,12 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::Pocket { top_z, .. }
         | OpParams::Adaptive2D { top_z, .. }
         | OpParams::Offset2D { top_z, .. }
+        // The engrave and circular tops are the pocket family's; the
+        // chamfer's top plane is where the cone's apex stands - the
+        // ride's only height (M2.4 B).
+        | OpParams::Engrave { top_z, .. }
+        | OpParams::Chamfer2D { top_z, .. }
+        | OpParams::Circular { top_z, .. }
         | OpParams::Pocket3D { top_z, .. }
         | OpParams::Slot { top_z, .. }
         | OpParams::Trace { top_z, .. }
@@ -411,6 +454,11 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         | OpParams::Pocket { bottom_z, .. }
         | OpParams::Adaptive2D { bottom_z, .. }
         | OpParams::Offset2D { bottom_z, .. }
+        // The engrave twin and the circular ladder both finish on an
+        // authored plane; the chamfer's floor is the wall's own,
+        // derived from width and angle - no plane to carry (M2.4 B).
+        | OpParams::Engrave { bottom_z, .. }
+        | OpParams::Circular { bottom_z, .. }
         | OpParams::Pocket3D { bottom_z, .. }
         | OpParams::Slot { bottom_z, .. }
         | OpParams::Trace { bottom_z, .. }
@@ -454,6 +502,9 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         OpParams::Drill { bottom_z, .. } => *bottom_z,
+        // The chamfer's floor is derived - width · tan(angle) below
+        // the top plane the cone's apex stands at (M2.4 B).
+        OpParams::Chamfer2D { .. } => None,
         OpParams::Face { .. } => None,
     }
 }
@@ -466,6 +517,11 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         OpParams::Pocket { retract_z, .. }
         | OpParams::Adaptive2D { retract_z, .. }
         | OpParams::Offset2D { retract_z, .. }
+        // The three new kinds hop between loops like their parents:
+        // the trace, the contour and the pocket (M2.4 B).
+        | OpParams::Engrave { retract_z, .. }
+        | OpParams::Chamfer2D { retract_z, .. }
+        | OpParams::Circular { retract_z, .. }
         | OpParams::Pocket3D { retract_z, .. }
         | OpParams::Slot { retract_z, .. }
         | OpParams::Trace { retract_z, .. }
@@ -622,6 +678,64 @@ fn seed_adaptive2d(c: &Carried) -> OpParams {
 /// the pane must not show.
 fn seed_offset2d(c: &Carried) -> OpParams {
     OpParams::Offset2D {
+        stepover: c.stepover,
+        stock_to_leave: 0.0,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        stepdown: c.stepdown,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        entry: Entry3D::Plunge,
+        helix_radius: 1.0,
+        tilt: c.tilt,
+    }
+}
+
+/// Engrave (M2.4 B): the trace's seed verbatim - the twin law again,
+/// the name carries the shop task, the numbers ride the same law.
+fn seed_engrave(c: &Carried) -> OpParams {
+    OpParams::Engrave {
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        bottom_z: c.bottom,
+        stepdown: c.stepdown,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        tilt: c.tilt,
+    }
+}
+
+/// 2D Chamfer (M2.4 B): the shop's chamfer seed - a 0.8 mm land at
+/// 45°, the drawing's commonest edge, and the contour's chord budget
+/// so the offset center line arcs as the boundary does.
+fn seed_chamfer2d(c: &Carried) -> OpParams {
+    OpParams::Chamfer2D {
+        width: 0.8,
+        angle_deg: 45.0,
+        clearance_z: c.clearance,
+        retract_z: None,
+        top_z: c.top,
+        feed: c.feed,
+        plunge_feed: c.plunge,
+        climb: c.climb,
+        side: Side::Auto,
+        tolerance: 0.01,
+        tilt: c.tilt,
+    }
+}
+
+/// Circular (M2.4 B): a disk the pane's author can see - 25 mm
+/// radius flat floors at the pocket family's numbers.
+fn seed_circular(c: &Carried) -> OpParams {
+    OpParams::Circular {
+        center: Point2::new(0.0, 0.0),
+        radius: 25.0,
+        vault: false,
         stepover: c.stepover,
         stock_to_leave: 0.0,
         clearance_z: c.clearance,
@@ -1409,10 +1523,46 @@ impl KindInfo {
             seed: seed_offset2d,
         },
         KindInfo {
+            ty: OpType::Engrave,
+            label: "Engrave",
+            caption: "Engrave",
+            tag: 7,
+            // The trace's twin (M2.4 B): the center runs ON the line,
+            // the same tangency stand-down - the name speaks the shop
+            // task, the kernel is Trace's verbatim.
+            mode: Mode::Engrave,
+            section: Section::Mill2D,
+            seed: seed_engrave,
+        },
+        KindInfo {
+            ty: OpType::Chamfer2D,
+            label: "2D Chamfer",
+            caption: "Chamfer",
+            tag: 8,
+            // One ride with the cone lying ON the wall: boundary laws
+            // rule, and the wall itself is the authored promise the
+            // tool's cone must be able to keep (M2.4 B).
+            mode: Mode::Boundary,
+            section: Section::Mill2D,
+            seed: seed_chamfer2d,
+        },
+        KindInfo {
+            ty: OpType::Circular,
+            label: "Circular",
+            caption: "Circular",
+            tag: 9,
+            // Rings hollow an authored disk: area laws rule, the
+            // pattern's inside-out like the pocket's, the circles
+            // authored like the slot's geometry (M2.4 B).
+            mode: Mode::Area,
+            section: Section::Mill2D,
+            seed: seed_circular,
+        },
+        KindInfo {
             ty: OpType::Drill,
             label: "Drill",
             caption: "Drill",
-            tag: 7,
+            tag: 10,
             // Drill verifies as Boundary on purpose: its region's rim
             // loops put the gouge law's tangency test at the hole wall,
             // where a matched drill passes and an oversized tool is
@@ -1428,7 +1578,7 @@ impl KindInfo {
             ty: OpType::Pocket3D,
             label: "3D Pocket",
             caption: "3D Pocket",
-            tag: 8,
+            tag: 11,
             // The 3-D pocket verifies as Area with the mesh in hand
             // (the `model` field `VerifyContext` carries): the region
             // is its silhouette, the per-level islands come from the
@@ -1441,7 +1591,7 @@ impl KindInfo {
             ty: OpType::Finish3D,
             label: "3D Finish",
             caption: "3D Finish",
-            tag: 9,
+            tag: 12,
             // The waterline's verdict is measured, not deduced from
             // tangency: law (f) of `verify` scans the swept ball against
             // the mesh (the `finish_tol` field carries the budget).
@@ -1453,7 +1603,7 @@ impl KindInfo {
             ty: OpType::Contour5D,
             label: "5-Axis Contour",
             caption: "5-Axis Contour",
-            tag: 10,
+            tag: 13,
             // Same measured envelope law (M5.1 stage C): the ball is
             // the cutter and a sphere's envelope is rotation-invariant,
             // so the pose changes what the SHANK sees, not what the
@@ -1467,7 +1617,7 @@ impl KindInfo {
             ty: OpType::Parallel5D,
             label: "5-Axis Parallel",
             caption: "5-Axis Parallel",
-            tag: 11,
+            tag: 14,
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_parallel5d,
@@ -1476,7 +1626,7 @@ impl KindInfo {
             ty: OpType::Swarf,
             label: "Swarf",
             caption: "Swarf",
-            tag: 12,
+            tag: 15,
             // The same measured envelope, read along the ruling (M5.1
             // stage D): the ball's path is the raster's, so the verdict
             // law is the finish's - the pose question (the blade lies
@@ -1489,7 +1639,7 @@ impl KindInfo {
             ty: OpType::AdvancedSwarf,
             label: "Advanced Swarf",
             caption: "Adv. Swarf",
-            tag: 13,
+            tag: 16,
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_advanced_swarf,
@@ -1498,7 +1648,7 @@ impl KindInfo {
             ty: OpType::RotaryContour,
             label: "Rotary Contour",
             caption: "Rotary Contour",
-            tag: 14,
+            tag: 17,
             // The rings are the finish's, posed radially (M5.1 stage
             // E): the ball's path decides the verdict, the fitted
             // axis and the lean answer only where the spindle points.
@@ -1510,7 +1660,7 @@ impl KindInfo {
             ty: OpType::RotaryParallel,
             label: "Rotary Parallel",
             caption: "Rotary Parallel",
-            tag: 15,
+            tag: 18,
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_rotary_parallel,
@@ -1519,7 +1669,7 @@ impl KindInfo {
             ty: OpType::RotaryOffset,
             label: "Rotary Offset",
             caption: "Rotary Offset",
-            tag: 16,
+            tag: 19,
             // The rough ladder's verdict is the measured envelope too
             // (M5.1 stage E2): law (f) sweeps a sphere, so the pose
             // cannot lie to it on a bar lying or standing, and the
@@ -1532,7 +1682,7 @@ impl KindInfo {
             ty: OpType::MultiAxisRough,
             label: "Multi-Axis Rough",
             caption: "Multi-Axis Rough",
-            tag: 17,
+            tag: 20,
             // The positions are the pocket ladder's, bit for bit, and
             // a sphere's envelope is rotation-invariant about its own
             // center: law (f) measures what the vertical rough would
@@ -1548,7 +1698,7 @@ impl KindInfo {
             ty: OpType::Flow5D,
             label: "5-Axis Flow",
             caption: "5-Axis Flow",
-            tag: 18,
+            tag: 21,
             // The parallel's verdict law on lines that turn (M5.1 I):
             // a sphere's envelope is rotation-invariant, so the field
             // decides where the lines GO and the lean law where the
@@ -1561,7 +1711,7 @@ impl KindInfo {
             ty: OpType::MultiAxisContour,
             label: "Multi-Axis Contour",
             caption: "Multi-Axis Contour",
-            tag: 19,
+            tag: 22,
             // The ball rides the picked chains wherever they stand
             // (M5.1 J): there is no authored pattern for a law to
             // distrust, and the verdict is the same sphere-envelope
@@ -1575,7 +1725,7 @@ impl KindInfo {
             ty: OpType::Facing,
             label: "Facing",
             caption: "Facing",
-            tag: 20,
+            tag: 23,
             // The facing verdict is measured like the finish's (law
             // f): the ball is the insert nose circle swept true - and
             // a meridian circle revolved IS a sphere about the axis,
@@ -1591,7 +1741,7 @@ impl KindInfo {
             ty: OpType::ProfileRough,
             label: "Profile Rough",
             caption: "Profile Rough",
-            tag: 21,
+            tag: 24,
             // The rungs' verdict is the same sphere-envelope law
             // (M5.2 B): a nose circle revolved IS a sphere about the
             // axis, so the scan measures each rung's shell exactly -
@@ -1605,7 +1755,7 @@ impl KindInfo {
             ty: OpType::ProfileFinish,
             label: "Profile Finish",
             caption: "Profile Finish",
-            tag: 22,
+            tag: 25,
             // The ride is the pattern: no authored spacing for a law
             // to distrust, and the tolerance is exactly the
             // envelope's budget - the chord law the kernel settled
@@ -1618,7 +1768,7 @@ impl KindInfo {
             ty: OpType::GrooveRough,
             label: "Groove Rough",
             caption: "Groove Rough",
-            tag: 23,
+            tag: 26,
             // No sphere can judge a band: a grooved part is undercut
             // BY DESIGN, and material standing beside the groove is
             // out of every ball's reach along Z. The verdict is the
@@ -1633,7 +1783,7 @@ impl KindInfo {
             ty: OpType::GrooveFinish,
             label: "Groove Finish",
             caption: "Groove Finish",
-            tag: 24,
+            tag: 27,
             // The same meridian law, leave-free: one plunge per
             // center to the band's floor, and the floor no band
             // reached rests by the window shell - silence is what a
@@ -1646,7 +1796,7 @@ impl KindInfo {
             ty: OpType::Part,
             label: "Parting",
             caption: "Part",
-            tag: 25,
+            tag: 28,
             // Separation as a band cut: the through-axis kerf is
             // judged silent inside its own kerf and right of it
             // (the workpiece left with the scrap), and the verdict
@@ -1659,7 +1809,7 @@ impl KindInfo {
             ty: OpType::Threading,
             label: "Threading",
             caption: "Threading",
-            tag: 26,
+            tag: 29,
             // The blade verdict with the wave clause (M5.2 D): the
             // tool's V, not a boxcar, is the footprint - at every
             // center's station the floor stands deeper by the flank
@@ -1675,7 +1825,7 @@ impl KindInfo {
             ty: OpType::Chamfering,
             label: "Chamfering",
             caption: "Chamfer",
-            tag: 27,
+            tag: 30,
             // The promised-face rides (M5.2 E) judge like the
             // profile finish, and for the profile finish's reason:
             // the nose-ball sweeps the MODEL's own offset, so the
@@ -1692,7 +1842,7 @@ impl KindInfo {
             ty: OpType::TaperTurning,
             label: "Taper Turning",
             caption: "Taper",
-            tag: 28,
+            tag: 31,
             // The same envelope law across the cone: the authored
             // diameters spent themselves at the door, and what the
             // ball rolls over is the modeled skin within the
@@ -1705,7 +1855,7 @@ impl KindInfo {
             ty: OpType::MultiPassTurning,
             label: "Multi-Pass Turning",
             caption: "Multi-Pass",
-            tag: 29,
+            tag: 32,
             // Rough and finish in one program: the rungs' shells
             // and the spring rides' midpoints all stand at a
             // nose's distance-or-more from the skin, so the same
@@ -1720,7 +1870,7 @@ impl KindInfo {
             ty: OpType::FormTurning,
             label: "Form Turning",
             caption: "Form",
-            tag: 30,
+            tag: 33,
             // The crown floor of the meridian scan: the gauge's
             // arc, not the nose circle, says what stands between
             // the band's edges, and the crest law keeps the shell
@@ -1733,7 +1883,7 @@ impl KindInfo {
             ty: OpType::BoringTurning,
             label: "Boring",
             caption: "Bore",
-            tag: 31,
+            tag: 34,
             // The profile finish's inside twin (M5.2 F): the nose
             // stands ON the wall and the bar rides it, so the
             // envelope scan - rolled about the centers with the
@@ -1796,6 +1946,9 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[29].label,
     KindInfo::ALL[30].label,
     KindInfo::ALL[31].label,
+    KindInfo::ALL[32].label,
+    KindInfo::ALL[33].label,
+    KindInfo::ALL[34].label,
 ];
 
 impl OpType {
@@ -1811,31 +1964,34 @@ impl OpType {
             OpType::Trace => 4,
             OpType::Adaptive2D => 5,
             OpType::Offset2D => 6,
-            OpType::Drill => 7,
-            OpType::Pocket3D => 8,
-            OpType::Finish3D => 9,
-            OpType::Contour5D => 10,
-            OpType::Parallel5D => 11,
-            OpType::Swarf => 12,
-            OpType::AdvancedSwarf => 13,
-            OpType::RotaryContour => 14,
-            OpType::RotaryParallel => 15,
-            OpType::RotaryOffset => 16,
-            OpType::MultiAxisRough => 17,
-            OpType::Flow5D => 18,
-            OpType::MultiAxisContour => 19,
-            OpType::Facing => 20,
-            OpType::ProfileRough => 21,
-            OpType::ProfileFinish => 22,
-            OpType::GrooveRough => 23,
-            OpType::GrooveFinish => 24,
-            OpType::Part => 25,
-            OpType::Threading => 26,
-            OpType::Chamfering => 27,
-            OpType::TaperTurning => 28,
-            OpType::MultiPassTurning => 29,
-            OpType::FormTurning => 30,
-            OpType::BoringTurning => 31,
+            OpType::Engrave => 7,
+            OpType::Chamfer2D => 8,
+            OpType::Circular => 9,
+            OpType::Drill => 10,
+            OpType::Pocket3D => 11,
+            OpType::Finish3D => 12,
+            OpType::Contour5D => 13,
+            OpType::Parallel5D => 14,
+            OpType::Swarf => 15,
+            OpType::AdvancedSwarf => 16,
+            OpType::RotaryContour => 17,
+            OpType::RotaryParallel => 18,
+            OpType::RotaryOffset => 19,
+            OpType::MultiAxisRough => 20,
+            OpType::Flow5D => 21,
+            OpType::MultiAxisContour => 22,
+            OpType::Facing => 23,
+            OpType::ProfileRough => 24,
+            OpType::ProfileFinish => 25,
+            OpType::GrooveRough => 26,
+            OpType::GrooveFinish => 27,
+            OpType::Part => 28,
+            OpType::Threading => 29,
+            OpType::Chamfering => 30,
+            OpType::TaperTurning => 31,
+            OpType::MultiPassTurning => 32,
+            OpType::FormTurning => 33,
+            OpType::BoringTurning => 34,
         }
     }
 

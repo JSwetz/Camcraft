@@ -9,7 +9,12 @@ use super::*;
 /// two — the only numbers a v42 file carries by index are the ribbon
 /// pins, and the ladder remaps them (the PostDto law seen from the
 /// other side: names survive growth, indices need a rung).
-pub const PROJECT_VERSION: u32 = 43;
+/// v44: the same shape twice more (M2.4 B) — the ParamsDto grows the
+/// Engrave/Chamfer2D/Circular arms, the ToolDto kind grammar the
+/// `taper` word, and the three rows join the 2D mill's run after
+/// Trace, so the ladder shifts every pin index from the old Drill row
+/// up by three.
+pub const PROJECT_VERSION: u32 = 44;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -71,8 +76,9 @@ pub struct ProjectFile {
     /// since the ribbon could not pin then. The indices ride the
     /// table: an append never disturbs them (the row order IS the
     /// product order, the combo law), and a mid-run insert shifts them
-    /// in the version ladder - v43's rung maps idx >= 5 to idx + 2 for
-    /// the twins' place in the 2D mill's run - so a pinned row keeps
+    /// in the version ladder - v43's rung maps idx >= 5 to idx + 2 and
+    /// v44's maps idx >= 7 to idx + 3, each for its kinds' place in
+    /// the 2D mill's run - so a pinned row keeps
     /// naming the kind it named when it was saved. Out-of-range ones
     /// drop at read (`pinned_of`), so a document pinned on a larger
     /// table still opens, showing only the kinds this build can name.
@@ -231,6 +237,11 @@ pub enum ToolKindDto {
     /// `nose_radius` keys both already filed, the crown taking the
     /// nose circle's place in the row for this kind alone.
     Form,
+    /// The chamfer mill's cone (M2.4 B): the same arrival law - v43
+    /// files never carried the word, and the `tip_angle` key it reads
+    /// (the cone's INCLUDED angle, the Drill's law restated) has been
+    /// filed since v10.
+    Taper,
 }
 
 impl ToolDto {
@@ -247,6 +258,7 @@ impl ToolDto {
                 ToolKind::Groove => ToolKindDto::Groove,
                 ToolKind::Thread => ToolKindDto::Thread,
                 ToolKind::Form => ToolKindDto::Form,
+                ToolKind::Taper => ToolKindDto::Taper,
             },
             diameter: t.diameter,
             corner_r: t.corner_r,
@@ -278,6 +290,7 @@ impl ToolDto {
                 ToolKindDto::Groove => ToolKind::Groove,
                 ToolKindDto::Thread => ToolKind::Thread,
                 ToolKindDto::Form => ToolKind::Form,
+                ToolKindDto::Taper => ToolKind::Taper,
             },
             diameter: self.diameter,
             corner_r: self.corner_r,

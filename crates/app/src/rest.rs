@@ -78,6 +78,11 @@ struct Ahead {
     path: u64,
     radius: f64,
     ball: bool,
+    /// Cot of the half-angle, Some only for a chamfer mill (M2.4 B):
+    /// the rest grid must sweep the same cone the program sim does, or
+    /// a predecessor's chamfer would evaporate a full disc of
+    /// material that is really still standing.
+    cone: Option<f64>,
     cut: bool,
     moves: Vec<Move>,
 }
@@ -162,6 +167,12 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
             ball: tool
                 .as_ref()
                 .is_some_and(|t| t.kind == crate::tools::ToolKind::BallNose),
+            cone: tool
+                .as_ref()
+                .filter(|t| t.kind == crate::tools::ToolKind::Taper)
+                .map(|t| (t.tip_angle.to_radians() * 0.5).tan())
+                .filter(|x| x.is_finite() && *x > 0.0)
+                .map(|x| 1.0 / x),
             cut,
             moves,
         });
@@ -185,6 +196,15 @@ fn digest_of(ahead: &[Ahead]) -> u64 {
             h.write_u64(a.path);
             h.write(&a.radius.to_bits().to_le_bytes());
             h.write_u8(u8::from(a.ball));
+            // The cone's slope is part of the atom the grid depends
+            // on, so a re-coned chamfer mill churns the stamp.
+            match a.cone {
+                Some(c) => {
+                    h.write_u8(1);
+                    h.write(&c.to_bits().to_le_bytes());
+                }
+                None => h.write_u8(0),
+            }
         } else {
             h.write_u8(0);
         }
@@ -244,6 +264,7 @@ pub fn prior_state(
             moves: &a.moves,
             radius: a.radius,
             ball: a.ball,
+            cone: a.cone,
         })
         .collect();
     stock_sim::simulate(&mut dex, &ops)

@@ -58,8 +58,8 @@ use crate::geometry::revision;
 use crate::geometry::slice::{self, SliceError};
 use crate::geometry::{Point3, transform_point};
 use crate::machining2d::{
-    self, ContourParams, FaceParams, GenError, Lead, PocketParams, PocketStrategy, Side,
-    SlotParams, TraceParams,
+    self, ChamferParams, CircularParams, ContourParams, FaceParams, GenError, Lead, PocketParams,
+    PocketStrategy, Side, SlotParams, TraceParams,
 };
 use crate::machining3d::{self, Entry3D, Pocket3DParams};
 use crate::model;

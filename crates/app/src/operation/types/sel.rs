@@ -76,6 +76,25 @@ pub enum OpType {
     /// boundary inward at the roughing stepover — the pocket's
     /// waterline tiling, named (see [`crate::machining2d::pocket`]).
     Offset2D,
+    /// Engraving (M2.4 B): the trace's chain-follow at an engraver's
+    /// depth under its own catalog name - the twin law again (the
+    /// kernel is [`crate::machining2d::trace`], as it was for the
+    /// roughing twins and the pocket). The V-bit tool family is
+    /// M10.1's tool-law work; until it lands the name says what the
+    /// path is, not what the tool must be.
+    Engrave,
+    /// 2D chamfer (M2.4 B): one ride of a taper tool's CONE lying ON
+    /// the authored wall - apex at the top plane, offset solved so the
+    /// cone coincides with the chamfer face (see
+    /// [`crate::machining2d::chamfer`]). A tool whose cone cannot lie
+    /// on the wall is refused by name, never approximated.
+    Chamfer2D,
+    /// Circular pocket / vault (M2.4 B): concentric rings about an
+    /// AUTHORED center and radius - the geometry authored like
+    /// [`Self::Slot`]'s endpoints, not picked; flat floors, or the
+    /// vault's dome depth law under the same name (see
+    /// [`crate::machining2d::circular`]).
+    Circular,
     Drill,
     /// Mesh-driven Z-level pocketing: the model is the final part, every
     /// level's islands are computed from it (see [`crate::machining3d`]).

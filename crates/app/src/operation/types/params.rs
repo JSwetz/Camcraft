@@ -196,6 +196,89 @@ pub enum OpParams {
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },
+    /// Engraving (M2.4 B): the trace's numbers under the catalog name -
+    /// the twin law again (as `Adaptive2D` is the pocket's). The chain
+    /// ride, the stepdown ladder and the heights are Trace's verbatim;
+    /// `machining2d::trace` does the work, the kind is the name, the
+    /// seed and the equivalence.
+    Engrave {
+        clearance_z: Height,
+        /// Hop plane between chains; None hops to clearance - the
+        /// trace's shape.
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
+    },
+    /// 2D chamfer (M2.4 B): one ride whose center line stands so the
+    /// taper tool's CONE lies on the chamfer face the two authored
+    /// numbers state - `width` along the top plane, `angle_deg` off it.
+    /// There is no `bottom_z` to author: the face's depth is
+    /// `width·tan(angle)`, and a second number for the same line could
+    /// only disagree with the first. The cut edge is picked like
+    /// [`Self::Trace`]'s chains; `side` says which wall the cone lies
+    /// on, exactly as contour's does.
+    Chamfer2D {
+        /// The chamfer face's width, measured in the top plane.
+        width: f64,
+        /// The face's slope off the top plane, degrees, in (0, 90).
+        angle_deg: f64,
+        clearance_z: Height,
+        /// Hop plane between chains; None hops to clearance - the
+        /// trace's shape.
+        retract_z: Option<Height>,
+        /// The plane the chamfer starts FROM - the top edge's own Z.
+        top_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// Which side of the boundary the cone rides; see
+        /// [`machining2d::Side`].
+        side: Side,
+        /// Chord budget of the offset center line, mm - the contour's
+        /// arc-fit law.
+        tolerance: f64,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
+    },
+    /// Circular pocket / vault (M2.4 B): concentric rings about an
+    /// AUTHORED center at an AUTHORED radius - the geometry authored
+    /// like [`Self::Slot`]'s endpoints, no pick to disagree with the
+    /// circles. Flat floors stand at `bottom_z` like the pocket's;
+    /// `vault` instead sinks each ring on the dome law
+    /// `bottom_z + (top_z − bottom_z)·(r/R)²` - the parabolic
+    /// reflector, every ring a circle the spindle simply holds.
+    Circular {
+        /// The pattern's center, work coordinates.
+        center: Point2,
+        /// The disk's radius, mm; > 0 at the door.
+        radius: f64,
+        /// The dome law instead of the flat floors (variant docs).
+        vault: bool,
+        stepover: f64,
+        stock_to_leave: f64,
+        clearance_z: Height,
+        /// Hop plane between rings of one level; None hops to
+        /// clearance - the pocket family's shape.
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Height,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        /// How the cutter engages each level; see [`OpParams::Pocket`].
+        entry: Entry3D,
+        /// Helix centerline radius, mm; read only when `entry` is Helix.
+        helix_radius: f64,
+        /// 3+2 index; see [`OpParams::Face`]'s field.
+        tilt: Option<Tilt>,
+    },
     Slot {
         a: Point2,
         b: Point2,
@@ -889,6 +972,9 @@ impl OpParams {
             OpParams::Pocket { .. } => OpType::Pocket,
             OpParams::Adaptive2D { .. } => OpType::Adaptive2D,
             OpParams::Offset2D { .. } => OpType::Offset2D,
+            OpParams::Engrave { .. } => OpType::Engrave,
+            OpParams::Chamfer2D { .. } => OpType::Chamfer2D,
+            OpParams::Circular { .. } => OpType::Circular,
             OpParams::Slot { .. } => OpType::Slot,
             OpParams::Trace { .. } => OpType::Trace,
             OpParams::Drill { .. } => OpType::Drill,
@@ -931,6 +1017,11 @@ impl OpParams {
             | OpParams::Pocket { tilt, .. }
             | OpParams::Adaptive2D { tilt, .. }
             | OpParams::Offset2D { tilt, .. }
+            // The M2.4 B trio are planar rides like the five above -
+            // the index reads their plane the same way.
+            | OpParams::Engrave { tilt, .. }
+            | OpParams::Chamfer2D { tilt, .. }
+            | OpParams::Circular { tilt, .. }
             | OpParams::Slot { tilt, .. }
             | OpParams::Trace { tilt, .. } => *tilt,
             // The 5-axis kinds (M5.1 C) are the third answer, not the
@@ -997,6 +1088,9 @@ impl OpParams {
             | OpParams::Pocket { clearance_z, .. }
             | OpParams::Adaptive2D { clearance_z, .. }
             | OpParams::Offset2D { clearance_z, .. }
+            | OpParams::Engrave { clearance_z, .. }
+            | OpParams::Chamfer2D { clearance_z, .. }
+            | OpParams::Circular { clearance_z, .. }
             | OpParams::Slot { clearance_z, .. }
             | OpParams::Trace { clearance_z, .. }
             | OpParams::Drill { clearance_z, .. }
@@ -1039,6 +1133,9 @@ impl OpParams {
             | OpParams::Pocket { top_z, .. }
             | OpParams::Adaptive2D { top_z, .. }
             | OpParams::Offset2D { top_z, .. }
+            | OpParams::Engrave { top_z, .. }
+            | OpParams::Chamfer2D { top_z, .. }
+            | OpParams::Circular { top_z, .. }
             | OpParams::Slot { top_z, .. }
             | OpParams::Trace { top_z, .. }
             | OpParams::Drill { top_z, .. }
@@ -1125,7 +1222,25 @@ impl OpParams {
                 f(*top_z);
                 f(*bottom_z);
             }
-            OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. } => {
+            OpParams::Trace { clearance_z, retract_z, top_z, bottom_z, .. }
+            // Engrave is the trace's twin (M2.4 B): the same four.
+            | OpParams::Engrave { clearance_z, retract_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            // The chamfer's face DEPTH is derived (variant docs): the
+            // top plane is the only height the ride reads; the cone's
+            // reach below it belongs to width and angle.
+            OpParams::Chamfer2D { clearance_z, retract_z, top_z, .. } => {
+                f(*clearance_z);
+                opt(retract_z, &mut f);
+                f(*top_z);
+            }
+            // Circular's ladder is the pocket family's four (M2.4 B),
+            // vault law or flat floors - both read top and bottom.
+            OpParams::Circular { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);

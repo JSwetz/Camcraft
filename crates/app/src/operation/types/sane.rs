@@ -167,6 +167,87 @@ impl OpParams {
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
             }
+            // The engrave door (M2.4 B) is the trace's verbatim -
+            // the twin law says the numbers are asked the same
+            // questions, only the name differs.
+            OpParams::Engrave {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                ..
+            } => {
+                clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
+            // The 2-D chamfer's door (M2.4 B): the authored promise -
+            // a land wider than nothing, cut at an angle that is a
+            // chamfer and not a flat (0) or a wall (90): the ride
+            // would descend nothing or everything. Whether the TOOL's
+            // cone can lie on that promise is the generator's
+            // question, refused there by name.
+            OpParams::Chamfer2D {
+                width,
+                angle_deg,
+                clearance_z,
+                retract_z,
+                top_z,
+                feed,
+                plunge_feed,
+                tolerance,
+                ..
+            } => {
+                pos(*width)
+                    && (0.0..90.0).contains(angle_deg)
+                    && pos(*tolerance)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
+            // The circular door (M2.4 B): the pocket's numbers beside
+            // the authored disk - a center that is a place and a
+            // radius wider than the ring spacing it seeds. Ring-vs-
+            // tool and the vault's dome law are the generator's,
+            // refused there by name.
+            OpParams::Circular {
+                center,
+                radius,
+                stepover,
+                stock_to_leave,
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stepdown,
+                feed,
+                plunge_feed,
+                helix_radius,
+                ..
+            } => {
+                center.x.is_finite()
+                    && center.y.is_finite()
+                    && pos(*radius)
+                    && pos(*stepover)
+                    && nneg(*stock_to_leave)
+                    && clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && pos(*helix_radius)
+            }
             OpParams::Pocket3D {
                 stepover,
                 stock_to_leave,

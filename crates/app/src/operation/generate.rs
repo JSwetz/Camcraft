@@ -1158,6 +1158,169 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             )?;
             (region, path)
         }
+        // The engrave twin (M2.4 B): the trace's own machinery,
+        // verbatim - same zero-width-kerf ride, same no-entry-knob
+        // theorem, the difference being only the registry's name for
+        // the pick (text on a face, not a boundary line). A V-bit
+        // would cut it wider than the kerf's claim; that tooling
+        // question is M10.1's, and until then the disc law says so
+        // with the sim, honestly.
+        OpParams::Engrave {
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            ..
+        } => {
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            let path = machining2d::trace(
+                &region,
+                &TraceParams {
+                    clearance_z: hl.clearance,
+                    retract_z: hl.retract,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    stepdown: *stepdown,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                },
+            )?;
+            (region, path)
+        }
+        // The 2D chamfer (M2.4 B): a cone ride on the picked edge.
+        // The congruence doors live HERE, where the Tool is visible:
+        // the kernel states the law on the face alone. The tool must
+        // be a chamfer mill whose cone is the supplement of the
+        // authored angle (a 45-degree chamfer takes the shop's
+        // 90-degree tool), and its diameter must reach the face's
+        // full width - `width / tan(alpha)` of cone height is exactly
+        // the corner depth, so the reach door is the whole flute law
+        // for a well-made cone. `side` cannot change the ride - the
+        // cone meets its wall the same circle whether the material
+        // stands inside it (bore) or outside (boss) - it says which
+        // wall the region picks, and the sim judges.
+        OpParams::Chamfer2D {
+            width,
+            angle_deg,
+            feed,
+            plunge_feed,
+            climb,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Taper {
+                return Err(GenError::Invalid(format!(
+                    "2D Chamfer rides its face on a cone - it needs a chamfer mill, '{}' is a {}",
+                    tool_name, tool.kind
+                )));
+            }
+            let want = 180.0 - 2.0 * angle_deg;
+            if (tool.tip_angle - want).abs() > 1e-6 {
+                return Err(GenError::Invalid(format!(
+                    "a {angle_deg}-degree chamfer takes a {want:.0}-degree cone; '{}' has {} degrees",
+                    tool_name, tool.tip_angle
+                )));
+            }
+            if tool.diameter < 2.0 * width - 1e-9 {
+                return Err(GenError::Invalid(format!(
+                    "a {width} mm chamfer reaches {} mm from the wall; '{}' is only {} mm across",
+                    width, tool_name, tool.diameter
+                )));
+            }
+            if tool.flute_len < width * angle_deg.to_radians().tan() - 1e-9 {
+                // The depth is DERIVED, and a derived float must not
+                // reach the user as its bits: tan(45 degrees) is
+                // 0.9999999999999999, and a refusal that quotes
+                // "3.9999999999999996 mm" reads as a bug, not a law.
+                // A tenth is the shop's reading precision.
+                return Err(GenError::Invalid(format!(
+                    "the cone of '{}' is {} mm of flute, short of the {:.1} mm depth this face stands at",
+                    tool_name,
+                    tool.flute_len,
+                    width * angle_deg.to_radians().tan()
+                )));
+            }
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            let path = machining2d::chamfer(
+                &region,
+                &ChamferParams {
+                    width: *width,
+                    angle_deg: *angle_deg,
+                    clearance_z: hl.clearance,
+                    retract_z: hl.retract,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                },
+            )?;
+            (region, path)
+        }
+        // Circular interpolation (M2.4 B): concentric rings about an
+        // authored center - the pocket family's heights and doors
+        // with the region authored like the slot's, and the kernel
+        // needs no tool-kind gate: the rings are the disc law, and a
+        // ball on them would just be the 3D finish's job (which
+        // refuses non-balls at its own door).
+        OpParams::Circular {
+            center,
+            radius,
+            vault,
+            stepover,
+            stock_to_leave,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            ..
+        } => {
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            let path = machining2d::circular(
+                &region,
+                &CircularParams {
+                    center: *center,
+                    radius: *radius,
+                    vault: *vault,
+                    bottom_z: req_z(hl.bottom, "Bottom of Part Z")?,
+                    top_z: req_z(hl.top, "Top of Part Z")?,
+                    tool_diameter: d,
+                    stock_to_leave: *stock_to_leave,
+                    stepover: *stepover,
+                    stepdown: *stepdown,
+                    clearance_z: hl.clearance,
+                    retract_z: hl.retract,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                    climb: *climb,
+                    entry: *entry,
+                    helix_radius: *helix_radius,
+                },
+            )?;
+            (region, path)
+        }
         OpParams::Drill {
             cycle,
             peck,
@@ -1760,6 +1923,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     let stl = match &params {
         OpParams::Face { .. }
         | OpParams::Trace { .. }
+        // The engrave twin leaves no kerf shelf (M2.4 B), and the
+        // chamfer cone owns its face outright - the ride IS the
+        // finished surface, a leave number could only move the rest
+        // verdict (the contour-rides' answer, spoken on a mill).
+        | OpParams::Engrave { .. }
+        | OpParams::Chamfer2D { .. }
         | OpParams::Drill { .. }
         | OpParams::Finish3D { .. }
         // The 5-axis kinds leave no stock - the ball path is the
@@ -1819,6 +1988,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         | OpParams::Adaptive2D { stock_to_leave, .. }
         | OpParams::Offset2D { stock_to_leave, .. }
         | OpParams::Slot { stock_to_leave, .. }
+        // The circular ladder leaves the pocket's shelf, ring 0 eroded
+        // off the wall by it (M2.4 B).
+        | OpParams::Circular { stock_to_leave, .. }
         | OpParams::Pocket3D { stock_to_leave, .. }
         // The ladder is the one rotary that LEAVES a shelf on purpose:
         // the finishing kinds own the ledge under a column's last cut,

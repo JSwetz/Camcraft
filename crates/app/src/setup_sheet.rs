@@ -534,6 +534,22 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             bottom_z,
             ..
         }
+        // The engrave twin and the circular ladder ride the family's
+        // four columns, the optional hop among them (M2.4 B).
+        | OpParams::Engrave {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::Circular {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
+        }
         | OpParams::Slot {
             clearance_z,
             retract_z,
@@ -641,6 +657,21 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             ("RET", "Retract Z", *retract_z),
             ("TOP", "Top of Part Z", Some(*top_z)),
             ("BOT", "Bottom of Part Z", Some(*bottom_z)),
+        ],
+        // The chamfer ride states three rows: the BOT column is empty
+        // because the face's depth is DERIVED - width and angle author
+        // the floor, and no height stands there to print (M2.4 B,
+        // variant docs).
+        OpParams::Chamfer2D {
+            clearance_z,
+            retract_z,
+            top_z,
+            ..
+        } => [
+            ("CLR", "Clearance Z", Some(*clearance_z)),
+            ("RET", "Retract Z", *retract_z),
+            ("TOP", "Top of Part Z", Some(*top_z)),
+            ("BOT", "Bottom of Part Z", None),
         ],
         // The rough ladder states the sheet with no RET row - the
         // kernel's hop plane is a law, not a height (M5.1 stage E2).

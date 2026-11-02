@@ -107,13 +107,16 @@ pub fn simulate_document(
 
     // Tools and cached paths, resolved once, in program order. The
     // atom follows the tool kind (stage A's law): a ball nose sweeps
-    // the exact sphere; everything whose cut IS its cylinder - end
-    // mills, drills, taps, bores - and the bull nose with its stated
-    // corner bias sweep the disc.
+    // the exact sphere; a chamfer mill sweeps its exact cone (M2.4 B
+    // - the disc would phantom-gouge every chamfer wall against the
+    // full radius at the corner depth); everything whose cut IS its
+    // cylinder - end mills, drills, taps, bores - and the bull nose
+    // with its stated corner bias sweep the disc.
     struct Planned {
         moves: Vec<Move>,
         radius: f64,
         ball: bool,
+        cone: Option<f64>,
         setup: Option<String>,
     }
     let mut planned: Vec<Planned> = Vec::with_capacity(ops.len());
@@ -137,10 +140,27 @@ pub fn simulate_document(
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
         let cache = model::toolpath_of(world, e)
             .ok_or_else(|| format!("{name}: lost its toolpath"))?;
+        // The cone's slope, cot of the half-angle from the axis -
+        // the number the dexel atom reads directly, so the sim and
+        // the congruence door in `generate` see the same steel.
+        let cone = if tool.kind == crate::tools::ToolKind::Taper {
+            let tan_half = (tool.tip_angle.to_radians() * 0.5).tan();
+            if tan_half.is_finite() && tan_half > 0.0 {
+                Some(1.0 / tan_half)
+            } else {
+                return Err(format!(
+                    "{name}: chamfer mill {} carries no sane cone (tip angle {})",
+                    op.tool, tool.tip_angle
+                ));
+            }
+        } else {
+            None
+        };
         planned.push(Planned {
             moves: cache.path.moves,
             radius: tool.diameter / 2.0,
             ball: tool.kind == crate::tools::ToolKind::BallNose,
+            cone,
             setup: op.setup,
         });
     }
@@ -175,7 +195,7 @@ pub fn simulate_document(
             clip_to_setup_stock(&mut dex, world, eff.as_deref(), min_r)?;
             prev_setup = eff;
         }
-        let sim_ops = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball }];
+        let sim_ops = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone }];
         simulate(&mut dex, &sim_ops).map_err(|e| e.to_string())?;
     }
 

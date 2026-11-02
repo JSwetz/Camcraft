@@ -190,6 +190,129 @@ impl Dexel {
         }
     }
 
+    /// The cone atom (M2.4 B): a cone of half-angle `alpha` from the
+    /// axis, widening UPWARD from its virtual sharp, whose TIP
+    /// (apex) travels the straight, Z-linear chord `a -> b`; `cot` is
+    /// cot(alpha). Above a cell center `q` at horizontal distance
+    /// `d(t)` from the axis at instant `t`, the cone's lowest steel
+    /// sits at `z(t) + d(t) * cot` - the surface itself - so the cut
+    /// is the minimum of that over the reach window (`reach` at the
+    /// cone's full radius: beyond it there is no steel, exactly like
+    /// the ball's horizon). Unlike `cut_ball` the bottom function is
+    /// convex in `t` the same way (`|w - d t|` is convex, `+` linear),
+    /// so the minimum is again at a window end or the single interior
+    /// stationary point: `g'(t) = k + cot (t*D2 - w.d)/rho`, whose
+    /// squaring gives the quadratic below and the unsquared law keeps
+    /// only roots where `(t*D2 - w.d)` is opposite `k` in sign (for
+    /// `k = 0`, the constant-Z ride, the double root IS the
+    /// XY-nearest instant `t_c` - always evaluated too, so a root
+    /// lost to rounding degrades toward an endpoint, never past it).
+    /// The `min` with the column's own top makes the atom
+    /// self-limiting: a column beyond the surface's reach simply
+    /// keeps its stock, which is why no footprint cap is needed here.
+    pub fn cut_cone(&mut self, a: Point3, b: Point3, r: f64, cot: f64) {
+        if !(a.is_finite() && b.is_finite()) || !(r.is_finite() && r >= 0.0) {
+            return; // the cut_chord gate: validation lives upstream
+        }
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let dd = dx * dx + dy * dy;
+        let k = b.z - a.z;
+        let fx = |v: f64| ((v - self.x0) / self.cell).floor();
+        let fy = |v: f64| ((v - self.y0) / self.cell).floor();
+        let lo_x = fx(a.x.min(b.x) - r).max(0.0) as usize;
+        let hi_x = fx(a.x.max(b.x) + r).clamp(0.0, self.nx as f64 - 1.0) as usize;
+        let lo_y = fy(a.y.min(b.y) - r).max(0.0) as usize;
+        let hi_y = fy(a.y.max(b.y) + r).clamp(0.0, self.ny as f64 - 1.0) as usize;
+        if lo_x >= self.nx || lo_y >= self.ny {
+            return;
+        }
+        for iy in lo_y..=hi_y {
+            for ix in lo_x..=hi_x {
+                let q = self.center(ix, iy);
+                let (wx, wy) = (q.x - a.x, q.y - a.y);
+                let Some((t0, t1)) = reach(wx, wy, dx, dy, r) else {
+                    continue;
+                };
+                let f = |t: f64| {
+                    let ex = wx - dx * t;
+                    let ey = wy - dy * t;
+                    a.z + k * t + cot * (ex * ex + ey * ey).sqrt()
+                };
+                let t_c = if dd > f64::EPSILON {
+                    (wx * dx + wy * dy) / dd
+                } else {
+                    0.0
+                };
+                let mut cut = f(t0).min(f(t1)).min(f(t_c.clamp(t0, t1)));
+                if dd > f64::EPSILON {
+                    // (t*dd - wd)^2 = (k*tan a)^2 * rho(t)^2, tan a = 1/cot.
+                    let wd = wx * dx + wy * dy;
+                    let ww = wx * wx + wy * wy;
+                    let s2 = (k / cot).powi(2);
+                    let qa = dd * (dd - s2);
+                    let qb = 2.0 * s2 * wd - 2.0 * dd * wd;
+                    let qc = wd * wd - s2 * ww;
+                    if qa.abs() <= 1e-300 || !qa.is_finite() {
+                        // The move runs along the cone's own slope
+                        // (qa = 0): the stationary equation is linear.
+                        if qb.abs() > 1e-300 && qb.is_finite() {
+                            let t = -qc / qb;
+                            if t > t0 && t < t1 && (t * dd - wd) * k <= 0.0 {
+                                cut = cut.min(f(t));
+                            }
+                        }
+                    } else {
+                        let mut disc = qb * qb - 4.0 * qa * qc;
+                        if disc < 0.0 && disc > -qb * qb * 1e-12 {
+                            disc = 0.0; // a tangential double root erased by rounding
+                        }
+                        if disc >= 0.0 && disc.is_finite() {
+                            let sd = disc.sqrt();
+                            for t in [(-qb - sd) / (2.0 * qa), (-qb + sd) / (2.0 * qa)] {
+                                if t > t0 && t < t1 && (t * dd - wd) * k <= 0.0 && t.is_finite() {
+                                    cut = cut.min(f(t));
+                                }
+                            }
+                        }
+                    }
+                }
+                self.lower(ix + iy * self.nx, cut);
+            }
+        }
+    }
+
+    /// Cone version of `subtract`: moves carry TIP (= virtual sharp)
+    /// positions, the codebase's tip-first convention read on the cone
+    /// the chamfer mill actually is, so the axis path IS the move path
+    /// and no center lift applies (a ball's center is above its tip;
+    /// a cone's apex is its tip). Arcs reduce to chords under the same
+    /// uniform-Z law as `subtract`.
+    pub fn subtract_cone(&mut self, m: &Move, r: f64, cot: f64, chord_tol: f64) {
+        if m.kind == MoveKind::Rapid || !m.is_finite() {
+            return;
+        }
+        match m.arc {
+            None => self.cut_cone(m.from, m.to, r, cot),
+            Some(arc) => {
+                let a2 = Point2::new(m.from.x, m.from.y);
+                let b2 = Point2::new(m.to.x, m.to.y);
+                let cs = crate::cl::arc_chords(a2, b2, arc, chord_tol);
+                let n = cs.len().max(1) as f64;
+                let dz = m.to.z - m.from.z;
+                for (j, (ca, cb)) in cs.into_iter().enumerate() {
+                    let za = m.from.z + dz * (j as f64 / n);
+                    let zb = m.from.z + dz * ((j + 1) as f64 / n);
+                    self.cut_cone(
+                        Point3::new(ca.x, ca.y, za),
+                        Point3::new(cb.x, cb.y, zb),
+                        r,
+                        cot,
+                    );
+                }
+            }
+        }
+    }
+
     /// Ball-nose version of `subtract`: moves carry TIP positions (the
     /// whole codebase stores toolpaths tip-first), so the CENTER path
     /// is the tip path lifted by `r` in Z and the swept solid is a

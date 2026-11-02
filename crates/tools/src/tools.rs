@@ -65,6 +65,13 @@ pub enum ToolKind {
     /// judged on the meridian, and `geom` never carries this one).
     /// Only `Form` reads either.
     Form,
+    /// Chamfer mill (M2.4 B): a cone widening upward from its virtual
+    /// sharp tip, straight land above. `tip_angle` is the cone's
+    /// INCLUDED angle across the axis - the same field the drill's
+    /// point and the thread's V ride - and the 2D chamfer's congruence
+    /// door reads it: a 45-degree chamfer takes a 90-degree cone, the
+    /// shop's catalog law. Only `Taper` reads it among the mill kinds.
+    Taper,
 }
 
 impl core::fmt::Display for ToolKind {
@@ -80,6 +87,7 @@ impl core::fmt::Display for ToolKind {
             ToolKind::Groove => "grooving blade",
             ToolKind::Thread => "threading insert",
             ToolKind::Form => "form gauge",
+            ToolKind::Taper => "chamfer mill",
         };
         f.write_str(s)
     }
@@ -237,6 +245,12 @@ impl Tool {
                         && self.nose_radius > 0.0
                         && self.width <= 2.0 * self.nose_radius
                 }
+                // A cone that opens no angle at all is a cylinder
+                // wearing the name - the chamfer's generatrix would
+                // meet the wall nowhere, and the congruence door
+                // would divide on nothing (kind-scoped, as above;
+                // the global bound keeps it under a flat).
+                ToolKind::Taper => self.tip_angle > 0.0,
                 _ => true,
             }
     }
@@ -323,7 +337,11 @@ impl Tool {
             // not off this cylinder.
             ToolKind::EndMill | ToolKind::Tap | ToolKind::Bore | ToolKind::Turning
             | ToolKind::Groove | ToolKind::Thread | ToolKind::Form => add_pt(&mut p, 0.0, r),
-            ToolKind::Drill => {
+            // The chamfer mill's cone is the same picture read the
+            // other way in purpose - apex at the tip center opening
+            // upward to the full radius - so it shares the drill's
+            // line math exactly (a 90-degree cone meets r at z = r).
+            ToolKind::Drill | ToolKind::Taper => {
                 // The point cone: apex at the tip center, opening at
                 // half the included angle, meeting the full radius at
                 // z = r / tan(tip/2) - or the flute top first, clamped,
@@ -453,6 +471,13 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("DR-0300", cy(ToolKind::Drill, 3.0, 118.0, 0.0, 9.0, 3.0, 12000.0, 120.0)),
         ("DR-0400", cy(ToolKind::Drill, 4.0, 118.0, 0.0, 12.0, 4.0, 10000.0, 130.0)),
         ("DR-0600", cy(ToolKind::Drill, 6.0, 118.0, 0.0, 18.0, 6.0, 7500.0, 115.0)),
+        // Chamfer mills (M2.4 B): the 90-degree cone is the everyday
+        // 45-degree chamfer tool; single-flute carbide, the handbook's
+        // stock sizes. Speeds track the end-mill ladder at the same
+        // diameter - a chamfer ride is light, and light wants rpm.
+        ("CM-0400-90", cy(ToolKind::Taper, 4.0, 90.0, 0.0, 6.0, 6.0, 12000.0, 1500.0)),
+        ("CM-0600-90", cy(ToolKind::Taper, 6.0, 90.0, 0.0, 10.0, 8.0, 10000.0, 2000.0)),
+        ("CM-1000-90", cy(ToolKind::Taper, 10.0, 90.0, 0.0, 16.0, 10.0, 6000.0, 3000.0)),
         ("TAP-M4", cy(ToolKind::Tap, 4.0, 0.0, 0.7, 18.0, 4.5, 800.0, 560.0)),
         ("TAP-M6", cy(ToolKind::Tap, 6.0, 0.0, 1.0, 20.0, 6.0, 600.0, 600.0)),
         // The catalog boring bar, with the ground nose a boring tip
@@ -606,5 +631,14 @@ mod tests {
         let tap = catalog().into_iter().find(|(n, _)| *n == "TAP-M6").unwrap().1;
         let p = tap.profile();
         assert_eq!(&p[..2], &[(0.0, 0.0), (0.0, tap.diameter * 0.5)]);
+        // Chamfer mill: the cone the 2D chamfer's congruence door
+        // reads - a 90-degree included angle opens at 45 degrees from
+        // the axis, meeting the full radius at z = r / tan(45) = r,
+        // the handbook picture of the shop's own catalog page.
+        let cm = catalog().into_iter().find(|(n, _)| *n == "CM-0400-90").unwrap().1;
+        let p = cm.profile();
+        assert!(p[1].0 > 0.0 && p[1].1 > 0.0, "a cone opens from its virtual sharp, not a flat rim");
+        assert!(p.iter().any(|&(z, rad)| (z - cm.diameter * 0.5).abs() < 1e-6 && (rad - cm.diameter * 0.5).abs() < 1e-6));
+        assert!(!Tool { tip_angle: 0.0, ..cm.clone() }.is_sane(), "a zero cone is a cylinder in disguise");
     }
 }

@@ -13,11 +13,17 @@ use crate::geometry::Triangle;
 /// corner's lowest point, which over-reports removal beside a fillet
 /// wall - the law above's one known-biased atom, stated at the type
 /// so no caller mistakes a fillet's clean grid for a proven fillet.
+/// `cone` picks the exact cone atom for a chamfer mill (M2.4 B): the
+/// cotangent of the cone's half-angle from the axis, moves read as the
+/// path of the virtual sharp on the axis. `ball` and `cone` are the
+/// kind's exclusive choice upstream, and `simulate` refuses the
+/// contradictory pair rather than silently preferring one atom.
 #[derive(Clone, Copy, Debug)]
 pub struct SimOp<'a> {
     pub moves: &'a [Move],
     pub radius: f64,
     pub ball: bool,
+    pub cone: Option<f64>,
 }
 
 /// The lattice law, stated once (and the same numbers `envelope_scan`
@@ -141,6 +147,17 @@ pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
                 "op {i} carries a non-finite move - the sim refuses instead of cutting nothing silently"
             )));
         }
+        if op.ball && op.cone.is_some() {
+            return Err(StockError::Invalid(format!(
+                "op {i} asks for a ball and a cone at once - no tool is both"
+            )));
+        }
+        if op.cone.is_some_and(|c| !(c.is_finite() && c > 0.0)) {
+            return Err(StockError::Invalid(format!(
+                "op {i} cone slope {:?} is not finite-positive",
+                op.cone
+            )));
+        }
     }
     // A display lattice cut: the chord budget follows the cell the
     // viewer chose, which is honest for what this is - a picture of
@@ -150,10 +167,10 @@ pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
     let chord_tol = (dex.cell * 0.25).max(1e-9);
     for op in ops {
         for m in op.moves {
-            if op.ball {
-                dex.subtract_ball(m, op.radius, chord_tol);
-            } else {
-                dex.subtract(m, op.radius, chord_tol);
+            match op.cone {
+                Some(cot) => dex.subtract_cone(m, op.radius, cot, chord_tol),
+                None if op.ball => dex.subtract_ball(m, op.radius, chord_tol),
+                None => dex.subtract(m, op.radius, chord_tol),
             }
         }
     }
