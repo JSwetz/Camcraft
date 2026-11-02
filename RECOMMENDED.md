@@ -7196,3 +7196,84 @@ layout-identical.
   operation does, not how); the ladders themselves are the kernel's
   own M8.1 engagement study and the pocket's waterline tiling, and
   no HSMWorks posts, params tables or text were consulted.
+
+## M2.4 B - the trio: a twin that speaks, a ride the tool defines, a disk authored whole (2026-11-02, stage B)
+
+- Engrave is the trace, renamed: one shared dispatch arm calling
+  `machining2d::trace` verbatim, and the acceptance suite proves it
+  byte-for-byte (the same numbers under the other name write the same
+  program). Chosen over a distinct kernel: engraving a picked closed
+  boundary on a face IS what the trace kernel does; a forked copy
+  could only drift. The honest gap - a V-bit would cut wider than the
+  kerf's claim - is M10.1's tooling question, and until then the disc
+  law says so with the sim, not paper.
+- The trace-class open-run refusal was the one place the name was a
+  literal: the selection.rs catch-all said "Trace machines a closed
+  boundary" for every kind that reaches it, so Engrave was refused
+  with its twin's word. Fixed the same way M2.4 A fixed the pocket
+  arm: the sentence reads `params.kind().info().label`, and the
+  trace's own text is unchanged because the registry says "Trace".
+- The chamfer's congruence doors (cone kind, cone angle = the
+  supplement 180-2*angle, diameter >= 2*width, flute >= width*tan)
+  live in the app's dispatch, not the kernel: only there is the Tool
+  visible. The kernel states the face law alone (its own numbers'
+  doors refuse in the motion suite). Chosen over threading a Tool
+  through the kernel - machining2d stays a geometry module that
+  knows cut parameters, not catalog objects.
+- The flute door quotes a DERIVED depth, and the gate caught it
+  speaking float bits: tan(45 degrees) is 0.9999999999999999, so a
+  4 mm chamfer was refused as "short of the 3.9999999999999996 mm
+  depth". The message now says a tenth (`{:.1}`): the shop's reading
+  precision, and a refusal that reads like a bug trains the user to
+  distrust refusals. Chosen over an exact-fraction dance or trailing
+  -zero trimming: one format spec, honest at every angle (30-degree
+  land: "1.7 mm"), no new helper for one message. The door's
+  COMPARISON still uses the raw float with its epsilon - only the
+  sentence rounds.
+- The chamfer has NO bottom_z anywhere - the corner depth
+  `top - width*tan(angle)` is computed in one place (`corner_z()`)
+  and the pane shows it as a readout, not a field. A second promise
+  would be a second law the ride does not keep; the sim verdict (the
+  cone atom's face = the kernel's claimed face, to a cell) is what
+  makes the derived floor safe rather than merely tidy.
+- ToolKind::Taper (Display "chamfer mill", tip_angle = the INCLUDED
+  cone angle) and the sim's `cone: Option<f64>` atom (the cotangent
+  of the half-angle from the axis, tip-first: the axis path IS the
+  move path, per the codebase's own convention - no center lift like
+  the ball's). ball+cone together is refused at validation. Chosen
+  over modeling the cone from diameter/length ratios: one number
+  states the whole cone, and the atom's exactness is what the
+  verdict test can then read off the field.
+- Circular runs ring-major (each ring's whole ladder before the next
+  ring), unlike the pocket's z-major grid: on the vault, ring k's
+  planes are cut between the bowl at its band's OUTER edge and the
+  previous band's - so every cut stands at or above the bowl under
+  every column it sweeps, and the dome is provably never-gouge. The
+  center scallop that leaves (the last ring's floor stands above the
+  axis floor) is stated in the test, not hidden: rest the rings
+  cannot reach is the waterline law's honest remainder. Chosen over
+  a column-major z-ladder, which would re-cross settled dome air
+  between rings.
+- The trio is three new ParamsDto variants, so PROJECT_VERSION
+  stepped 43 -> 44 (the v43 rung shifts pin indices by the three
+  mid-run row insertions - ribbon.rs walks both rungs chained, and
+  the family test's turning boundary is now DERIVED from the table
+  instead of a remembered index, so the next mid-run move cannot
+  silently retarget it either).
+- Retype carries between the twins exactly (every field shared), but
+  the trio is not a clique: the chamfer row seeds its own land
+  (0.8 mm at 45 degrees) and takes only the heights it has, and the
+  circular's disk (center, radius 25, vault off) is authored - a
+  trace's bottom would be a lie about a floor the disk never had.
+- No new golden files for the trio, same law as M2.4 A: the engrave
+  equivalence asserts against the trace generated in the same run,
+  and the chamfer/circular laws are exact-number tests (corner
+  depth, ring radii, bowl planes) a frozen golden states weaker. The
+  13 .nc goldens rode through untouched - the default document's
+  path never meets a new kind.
+- Provenance review: the three names and captions follow Autodesk's
+  published user documentation behaviorally (what the operation
+  does); the cone-ride geometry is machine-toolbook law written
+  clean-room, the vault is our own stated paraboloid, and the ring
+  tiling is the pocket waterline law restricted to a disk. No
+  HSMWorks posts, params tables or text consulted.
