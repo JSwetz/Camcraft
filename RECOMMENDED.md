@@ -7382,3 +7382,45 @@ layout-identical.
   strategy completeness", the honest home for an offset-shell
   rougher. The prose keeps a pointer at the old seat so the move is
   traceable from either end.
+
+- M2.5 A stage decisions (steep-and-shallow + flat-area finishing):
+- SteepShallow is the parallel kernel's TWIN, not a new generator:
+  the partition rides `emit_rings` as an `Option<Vec<Sup>>` gate, and
+  every other pattern keeps `None` and walks its loops byte for byte
+  - the 13 goldens could not drift by construction, not by re-check.
+  Considered and dropped: a standalone split generator - it would
+  own a second copy of the ladder's choreography (hop, snap, entry),
+  and every future law added to the rings would need filing twice.
+- The border verdict: a ring sample that touches nothing (a gap in
+  the tessellation, a numerically unclassifiable point) RIDES the
+  ring - a redundant cut is recoverable, a skipped strip is a
+  silent gouge's invitation. All-steep loops pass whole (the
+  waterline's exact geometry), all-shallow loops drop to the march.
+- Flat-area finishing speaks PHYSICS on the closed dome: the rim
+  disc is real floor but unreachable (the cap overhangs it by 2.86
+  against a 6 mm ball's belly), and the pole's bands are convex
+  chords a resting ball cannot hold. Flat's honest answer is the
+  Empty refusal "no floor flatter than one tolerance...", surfaced
+  at the command door (status stays Never - nothing wrong can post)
+  rather than a toolpath that would gouge the crown on its way to
+  the disc. Chosen over shadow-casting the disc "reachable anyway"
+  or quietly cutting the pole: both are the silent-wrong answer the
+  Prime Directive names as the worst failure.
+- On prismatic ground the split is SILENT: the plateau door test
+  asserts steep-and-shallow == parallel BYTE FOR BYTE, because the
+  march already owns every floor there and the wall rings all touch
+  steep. The equality is the law's own test - the partition must
+  never drop a cut it does not own. Where it does speak (a dome's
+  shallow cap rings) the motion twin pins the difference.
+- App-layer Finish3D tests learned their lane: `GenerateOperation`
+  carries the full envelope `verify` for the finish family, so the
+  operation layer is the verdict lane's cost even for a door test.
+  The door rides the five-face plateau (seconds); the dome physics
+  rides the motion kernel door (also seconds); the 12x96 dome under
+  app verify is minutes in debug and stays OUT of both - no test
+  earns a 10-minute ladder slot for a fact the kernel already spoke.
+- `steep_stepover` joins the params inert-but-stamped: the ladder
+  reads it only under SteepShallow, the digest carries it under all
+  patterns (an ask changed is an ask changed), and the v45 -> v46
+  DTO rung is pure step-up - old projects keep their paths, the new
+  word defaults to the scallop law.

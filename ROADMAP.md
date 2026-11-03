@@ -83,8 +83,8 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 | Spiral | ✅ | M2.2 |
 | Radial | ✅ | M2.2 |
 | Project | ✅ | M2.2 |
-| Steep and shallow | 📋 | M2.5 |
-| Flat (flat-area finishing) | 📋 | M2.5 |
+| Steep and shallow | ✅ | M2.5 |
+| Flat (flat-area finishing) | ✅ | M2.5 |
 | Pencil | 📋 | M2.5 |
 | Ramp | 📋 | M2.5 |
 | Morphed spiral | 📋 | M2.5 |
