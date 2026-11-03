@@ -439,6 +439,15 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // the grammar, not a wrong answer.
         file.version = 46;
     }
+    if file.version == 46 {
+        // v46 -> v47: the crease pair arrives (M2.5 B) inside the
+        // Finish3D arm - one optional key (`pencil_reference`), whose
+        // absence decodes to "no reference ball named", exactly what
+        // every v46 file ran - and the pattern grammar grows two
+        // words a v46 file cannot contain (the arrival law). No row
+        // seats or moves, so the pins stand: pure step-up again.
+        file.version = 47;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

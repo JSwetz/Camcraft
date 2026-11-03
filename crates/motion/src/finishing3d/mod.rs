@@ -83,7 +83,9 @@
 //! The machinery lives in the per-domain files below; the M5.0.1 split is
 //! structure only - behaviour is byte-identical to the flat file it replaces.
 
+mod crease;
 mod flat;
+mod pencil;
 mod flow;
 mod march;
 mod params;
@@ -98,6 +100,7 @@ pub use params::{
     scallop_stepdown, scallop_stepover, Finish3DParams, FinishPattern,
 };
 pub use flat::flat;
+pub use pencil::{corner, pencil};
 pub use flow::flow;
 // The 5-axis stamp's contact question (M5.1 C): the same Voronoi
 // closest-point law the raster clearance uses, crate-visible.

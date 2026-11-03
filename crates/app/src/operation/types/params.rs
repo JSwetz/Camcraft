@@ -457,6 +457,13 @@ pub enum OpParams {
         /// same "a stated number outranks a derived one, the verdict
         /// keeps the promise" grammar `stepover` keeps for the raster.
         steep_stepover: Option<f64>,
+        /// The reference ball's diameter, mm (M2.5 B): Pencil keeps
+        /// the corner bands THIS tool cannot reach but that bigger
+        /// ball leaves standing. `None` says no bigger ball was ever
+        /// named - every concave corner is fair game. Must exceed
+        /// the op's tool diameter or the pencil refuses by name;
+        /// every other pattern ignores it as if it never arrived.
+        pencil_reference: Option<f64>,
     },
     /// Simultaneous 5-axis level finishing (M5.1 stage C): the waterline
     /// ring ladder a [`Self::Finish3D`] Waterline cuts, with a tool-axis

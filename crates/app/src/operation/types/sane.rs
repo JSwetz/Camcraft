@@ -298,6 +298,7 @@ impl OpParams {
                 min_step,
                 ramp_angle,
                 steep_stepover,
+                pencil_reference,
                 ..
             } => {
                 // No stepdown to check: the scallop law derives it from
@@ -309,6 +310,11 @@ impl OpParams {
                     // M2.5 A: the flank's own number is a spacing
                     // like the raster's - finite and positive, or absent.
                     && steep_stepover.is_none_or(pos)
+                    // M2.5 B: the reference ball is a diameter like
+                    // the tool's - finite and positive, or absent
+                    // (which bigger is whose law is the kernel's to
+                    // refuse by name; sanity only asks for a number).
+                    && pencil_reference.is_none_or(pos)
                     && clearance_z.is_sane()
                     && retract_z.is_none_or(|r| r.is_sane())
                     && top_z.is_sane()

@@ -4775,7 +4775,7 @@ fn v45_file_steps_to_v46_and_the_ladder_grammar_round_trips() {
     let saved = std::fs::read_to_string(&p).expect("read");
     assert!(
         saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
-        "the migration writes the v46 stamp: {saved}"
+        "the migration writes the rung's stamp: {saved}"
     );
     assert_eq!(
         read(&world),
@@ -4788,7 +4788,7 @@ fn v45_file_steps_to_v46_and_the_ladder_grammar_round_trips() {
     // save, reload, resave - a fixed point like every grammar before it.
     let stated = finish(", \"pattern\": \"steep_shallow\", \"steep_stepover\": 2.5");
     let world2 = new_world();
-    project::open(&world2, &stated).expect("the v46 ladder grammar must read");
+    project::open(&world2, &stated).expect("the ladder grammar must read");
     assert_eq!(
         read(&world2),
         (camcraft_app::finishing3d::FinishPattern::SteepShallow, Some(2.5)),
@@ -4815,5 +4815,99 @@ fn v45_file_steps_to_v46_and_the_ladder_grammar_round_trips() {
     assert!(
         matches!(project::open(&world5, &bad), Err(ProjectError::Corrupt(_))),
         "a ladder that does not advance is refused, not defaulted"
+    );
+}
+
+#[test]
+fn v46_file_steps_to_v47_and_the_crease_grammar_round_trips() {
+    // M2.5 B's pure step-up: the v46 finish3d row grows one optional
+    // key - `pencil_reference` - whose absence decodes to "no
+    // reference ball named", exactly the answer every v46 file ran.
+    // No entity moved, so a v46 file reads with the same answer it
+    // wrote, and the only change is the stamp. The two new pattern
+    // words are the arrival law's: a v46 file cannot contain them.
+    let finish = |keys: &str| {
+        let mut t = String::from(
+            r#"{
+        "version": 46,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "F1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"finish3d": {
+                 "tolerance": 0.1,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true"#,
+        );
+        t.push_str(keys);
+        t.push_str("}}}}\n        ]\n    }");
+        t
+    };
+    let read = |world: &flecs_ecs::prelude::World| {
+        let e = model::find_by_name(world, "F1").expect("op");
+        let o = model::operation_of(world, &e).expect("operation");
+        let OpParams::Finish3D { pattern, pencil_reference, .. } = &o.params else {
+            panic!("finish3d params expected, got {:?}", o.params);
+        };
+        (*pattern, *pencil_reference)
+    };
+
+    let world = new_world();
+    project::open(&world, &finish("")).expect("a reference-less v46 file must migrate");
+    let p = tmp_path("v47a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v47 stamp: {saved}"
+    );
+    assert_eq!(
+        read(&world),
+        (camcraft_app::finishing3d::FinishPattern::Waterline, None),
+        "absence is the waterline with every corner unhidden"
+    );
+    assert!(!saved.contains("pencil_reference"), "None is absent, not null: {saved}");
+
+    // Stated, the pair round-trips: the word and its number, through
+    // save, reload, resave - a fixed point like every grammar before it.
+    let stated = finish(", \"pattern\": \"pencil\", \"pencil_reference\": 8.0");
+    let world2 = new_world();
+    project::open(&world2, &stated).expect("the v47 crease grammar must read");
+    assert_eq!(
+        read(&world2),
+        (camcraft_app::finishing3d::FinishPattern::Pencil, Some(8.0)),
+        "the authored pen is the file's, verbatim"
+    );
+    project::save(&world2, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    assert!(first.contains("\"pencil\""), "the tag is the word: {first}");
+    assert!(first.contains("\"pencil_reference\": 8.0"), "{first}");
+    let world3 = new_world();
+    project::load(&world3, &p).expect("reload");
+    project::save(&world3, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    assert_eq!(first, second, "the crease shape round-trips byte-identically");
+
+    // The other new word, the mute key on Corner, and the nonsense
+    // the loader refuses.
+    let world4 = new_world();
+    project::open(&world4, &finish(", \"pattern\": \"corner\", \"pencil_reference\": 99.0"))
+        .expect("the two-face word must read");
+    assert_eq!(
+        read(&world4),
+        (camcraft_app::finishing3d::FinishPattern::Corner, Some(99.0)),
+        "the file may hold an inert pen; Corner reads it and ignores it"
+    );
+    let _ = std::fs::remove_file(&p);
+    let bad = finish(", \"pattern\": \"pencil\", \"pencil_reference\": 0.0");
+    let world5 = new_world();
+    assert!(
+        matches!(project::open(&world5, &bad), Err(ProjectError::Corrupt(_))),
+        "a pen that cuts nothing is refused, not defaulted"
     );
 }

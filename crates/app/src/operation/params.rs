@@ -347,6 +347,7 @@ impl OpParams {
                 ramp_angle,
                 entry_ramp,
                 steep_stepover,
+                pencil_reference,
             } => {
                 // v16: the pattern chooses a different kinematic (and
                 // the raster fields only answer to Parallel), so they
@@ -397,6 +398,19 @@ impl OpParams {
                 // number 0. The two new patterns themselves ride the
                 // pattern byte untouched: append-only ordinals.
                 match steep_stepover {
+                    Some(s) => {
+                        h.write_u8(1);
+                        w(h, *s);
+                    }
+                    None => h.write_u8(0),
+                }
+                // v47 (M2.5 B): the crease pair. pencil_reference
+                // authors which corners Pencil keeps (and digests
+                // nothing new for Corner, where it is inert - inert
+                // numbers still ride the digest, the same honesty
+                // `stepover` keeps under Waterline); the two new
+                // patterns ride the pattern byte, append-only.
+                match pencil_reference {
                     Some(s) => {
                         h.write_u8(1);
                         w(h, *s);

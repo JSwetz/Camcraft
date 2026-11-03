@@ -10,13 +10,14 @@
 //! strategy's jurisdiction, so the envelope must stay silent on them).
 //!
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::stock_sim, camcraft_motion::verify.
-//! Lane shape (M4.4): 24 law tests run here in seconds; 28 envelope-VERDICT and
+//! Lane shape (M4.4): 33 law tests run here in seconds (M2.5 B adds
+//! the crease pair); 28 envelope-VERDICT and
 //! dome-generation tests are #[ignore]d - run them with
 //! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
 
 use camcraft_motion::cl::{lattice, MoveKind, Toolpath};
 use camcraft_motion::finishing3d::{
-    contour, flat, parallel, project, radial, scallop_stepdown, scallop_stepover, spiral,
+    contour, corner, flat, parallel, pencil, project, radial, scallop_stepdown, scallop_stepover, spiral,
     waterline, Finish3DParams, FinishPattern,
 };
 use camcraft_motion::geometry::{slice, Point3, Triangle};
@@ -216,6 +217,7 @@ fn params(top_z: f64, bottom_z: f64) -> Finish3DParams {
         // M8.2 B: the ring entry keeps its plunge unless asked.
         entry_ramp: false,
         steep_stepover: None,
+        pencil_reference: None,
     }
 }
 
@@ -2310,4 +2312,248 @@ fn the_split_leaves_nothing_uncut_on_either_side_of_the_border() {
     let t = flat(&pocket, &ppattern(10.0, 0.0, FinishPattern::Flat)).expect("floors");
     let rep = envelope(&pocket, &t);
     assert!(rep.gouge_mm <= gate(rep.cell), "flat gouged {} mm", rep.gouge_mm);
+}
+
+// ---------- M2.5 B: the crease pair ----------
+
+/// A prism with a V-groove across its top: the valley floor line is
+/// x=0, z=5; the flanks rise at `alpha_deg` to crests at x=+-8. The
+/// valley's dihedral is 180 - 2 alpha, so alpha=12.5 gives theta=155
+/// (a 0.665 band on the R3 ball) and alpha=1 gives theta=178 (a
+/// 0.052 band: flat to the corner's eye, a pen's work).
+fn v_groove(alpha_deg: f64) -> Vec<Triangle> {
+    let t = (alpha_deg * PI / 180.0).tan();
+    let ze = 5.0 + 8.0 * t; // the crest height
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let mut f = Vec::new();
+    // Flanks, CCW from the groove side, and the box that closes them.
+    f.extend(quad([p3(0.0, -8.0, 5.0), p3(0.0, 8.0, 5.0), p3(-8.0, 8.0, ze), p3(-8.0, -8.0, ze)]));
+    f.extend(quad([p3(8.0, -8.0, ze), p3(8.0, 8.0, ze), p3(0.0, 8.0, 5.0), p3(0.0, -8.0, 5.0)]));
+    f.extend(quad([p3(-8.0, -8.0, 0.0), p3(-8.0, 8.0, 0.0), p3(8.0, 8.0, 0.0), p3(8.0, -8.0, 0.0)]));
+    f.extend(quad([p3(-8.0, -8.0, 0.0), p3(-8.0, -8.0, ze), p3(-8.0, 8.0, ze), p3(-8.0, 8.0, 0.0)]));
+    f.extend(quad([p3(8.0, -8.0, 0.0), p3(8.0, 8.0, 0.0), p3(8.0, 8.0, ze), p3(8.0, -8.0, ze)]));
+    let fan = |p: [Point3; 5]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+            Triangle::new(p[0], p[3], p[4]),
+        ]
+    };
+    f.extend(fan([p3(-8.0, -8.0, 0.0), p3(-8.0, -8.0, ze), p3(0.0, -8.0, 5.0), p3(8.0, -8.0, ze), p3(8.0, -8.0, 0.0)]));
+    f.extend(fan([p3(-8.0, 8.0, 0.0), p3(8.0, 8.0, 0.0), p3(8.0, 8.0, ze), p3(0.0, 8.0, 5.0), p3(-8.0, 8.0, ze)]));
+    f
+}
+
+/// Every ball-center below the clearance, plunge heads included.
+fn centers(t: &Toolpath) -> Vec<Point3> {
+    t.moves
+        .iter()
+        .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge) && m.to.z < 25.0 - 1e-6)
+        .map(|m| m.to)
+        .collect()
+}
+
+#[test]
+fn corner_rings_the_pocket_and_stands_in_the_mouths() {
+    // The step pocket's concave seams: four floor-wall corners (90
+    // deg, band r = 3 > tol) and four verticals at the pocket's
+    // upright corners. The floor-wall loci stand z = floor + r, clip
+    // where the neighbouring wall's plane would let the ball cross
+    // it, and weld at the four (3,3,8)-type points into one closed
+    // ring; the verticals ride the mouth, clipped at the bottom by
+    // the tip's window and kept exact at the top edge.
+    let f = step_pocket();
+    let t = corner(&f, &ppattern(10.0, 5.0, FinishPattern::Corner)).expect("pocket corners");
+    assert_eq!(n_kind(&t, MoveKind::Plunge), 5, "one run per corner, ring + 4 mouths");
+    // The ring: a closed run whose last point sits back on its first.
+    let ring: Vec<Point3> = centers(&t)
+        .into_iter()
+        .filter(|p| (p.z - 8.0).abs() < 1e-9 && (p.x.abs() - 3.0).abs() < 1e-9 && (p.y.abs() - 3.0).abs() < 1e-9)
+        .collect();
+    assert_eq!(ring.len(), 5, "a four-point closed ring: {ring:?}");
+    assert_eq!(ring[0], ring[4], "the weld did not close bit-for-bit");
+    // The mouths: each stands on a corner diagonal, exact at the top.
+    let mouths: Vec<Point3> = centers(&t)
+        .into_iter()
+        .filter(|p| (p.z - 8.0).abs() > 1e-9)
+        .collect();
+    assert_eq!(mouths.len(), 8, "four two-point mouth runs: {mouths:?}");
+    for m in &mouths {
+        assert!((m.x.abs() - 3.0).abs() < 1e-9 && (m.y.abs() - m.x.abs()).abs() < 1e-9, "mouth off the diagonal: {m:?}");
+        assert!(m.z > 8.0 && m.z <= 10.0 + 1e-9, "mouth past the corner line: {m:?}");
+    }
+    assert!(mouths.iter().any(|m| (m.z - 10.0).abs() < 1e-9), "the mouth lost its exact top");
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "the crease pass gouged {} mm", rep.gouge_mm);
+}
+
+#[test]
+fn the_ladder_hops_between_different_features() {
+    // Corner runs are features, not levels: every run is announced
+    // by a rapid over its start and a plunge straight down its
+    // tangent column, and every travel between runs rides clearance.
+    let f = step_pocket();
+    let t = corner(&f, &ppattern(10.0, 5.0, FinishPattern::Corner)).expect("pocket corners");
+    let mut prev: Option<Point3> = None;
+    for m in &t.moves {
+        match m.kind {
+            MoveKind::Rapid => {
+                assert!((m.to.z - 25.0).abs() < 1e-9, "a travel below clearance: {m:?}");
+            }
+            MoveKind::Plunge => {
+                let head = prev.expect("a plunge without an announcing rapid");
+                assert!((head.x - m.to.x).abs() < 1e-9 && (head.y - m.to.y).abs() < 1e-9, "a plunge that drifted: {head:?} -> {m:?}");
+            }
+            _ => {}
+        }
+        if matches!(m.kind, MoveKind::Rapid | MoveKind::Plunge | MoveKind::Feed) {
+            prev = Some(m.to);
+        }
+    }
+}
+
+#[test]
+fn the_corner_is_its_own_reference() {
+    // Corner IS pencil with the tool's own ball: the band question
+    // "what could this ball not clean" answers itself identically -
+    // byte for byte on the pocket, and the authored reference is
+    // mute for Corner as if it had never arrived.
+    let f = step_pocket();
+    let plain = corner(&f, &ppattern(10.0, 5.0, FinishPattern::Corner)).expect("corner");
+    let named = corner(
+        &f,
+        &Finish3DParams { pattern: FinishPattern::Corner, pencil_reference: Some(99.0), ..params(10.0, 5.0) },
+    )
+    .expect("corner with a named reference");
+    assert_eq!(plain.moves, named.moves, "Corner obeyed a reference ball");
+    let pen = pencil(&f, &ppattern(10.0, 5.0, FinishPattern::Pencil)).expect("pencil, no reference");
+    assert_eq!(plain.moves, pen.moves, "an unnamed pencil cut other corners than the ball's own band");
+}
+
+#[test]
+fn a_convex_part_has_no_corner_to_clean() {
+    // Box and plateau bend only the convex way: the faces' own
+    // thirds say so, and the pass refuses rather than ride ridges.
+    for (f, name) in [(box_facets(), "box"), (plateau(), "plateau")] {
+        let e = corner(&f, &ppattern(10.0, 0.0, FinishPattern::Corner)).expect_err(name);
+        assert!(matches!(e, GenError::Empty(_)), "{name}: {e:?}");
+        assert!(e.to_string().contains("no concave corner"), "{name}: {e}");
+        let e = pencil(&f, &ppattern(10.0, 0.0, FinishPattern::Pencil)).expect_err(name);
+        assert!(matches!(e, GenError::Empty(_)), "{name} pencil: {e:?}");
+    }
+}
+
+#[test]
+fn the_valley_rides_its_bisector_column() {
+    // The 155-deg groove: locus line stands 3 / cos(alpha) above the
+    // valley floor, tangent to both flanks at exactly r - the
+    // deepest center that touches both faces and cuts neither.
+    let a = 12.5f64;
+    let f = v_groove(a);
+    let t = corner(&f, &ppattern(7.0, 0.0, FinishPattern::Corner)).expect("the groove has a valley");
+    let c = centers(&t);
+    let z = 5.0 + R / (a * PI / 180.0).cos();
+    assert_eq!(c.len(), 2, "one run: plunge head + locus end: {c:?}");
+    for p in &c {
+        assert!(p.x.abs() < 1e-9, "off the bisector plane: {p:?}");
+        assert!((p.z - z).abs() < 1e-9, "not the tangent center: {p:?} vs z={z}");
+    }
+    assert!(c.iter().any(|p| (p.y + 8.0).abs() < 1e-9) && c.iter().any(|p| (p.y - 8.0).abs() < 1e-9), "the run lost an exact end");
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "the valley pass gouged {} mm", rep.gouge_mm);
+}
+
+#[test]
+fn the_band_decides_who_cuts() {
+    // 178 degrees: the corner's own band is 0.052 - below the
+    // tolerance, so Corner says there is nothing to clean. A pen of
+    // diameter 20 reads (10 - 3) / 57.29 = 0.122: Pencil cuts.
+    let f = v_groove(1.0);
+    let e = corner(&f, &ppattern(7.0, 0.0, FinishPattern::Corner)).expect_err("flat to the corner's eye");
+    assert!(matches!(e, GenError::Empty(_)), "{e:?}");
+    let t = pencil(
+        &f,
+        &Finish3DParams { pattern: FinishPattern::Pencil, pencil_reference: Some(20.0), ..params(7.0, 0.0) },
+    )
+    .expect("the pen's leftover band");
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "pencil gouged {} mm", rep.gouge_mm);
+    // 155 degrees: pen 8 clears a 0.222 band - cuts; pen 6.5 hides a
+    // 0.055 one - refuses by name; and a pen that is not fatter than
+    // the ball is not a reference at all.
+    let g = v_groove(12.5);
+    let cut = |d: f64, f: &[Triangle]| {
+        pencil(f, &Finish3DParams { pattern: FinishPattern::Pencil, pencil_reference: Some(d), ..params(7.0, 0.0) })
+    };
+    assert!(cut(8.0, &g).is_ok(), "a 0.222 band hid from the pen");
+    for d in [6.5, 6.0] {
+        let e = cut(d, &g).expect_err("a hiding pen");
+        assert!(
+            (d > 6.0 && matches!(e, GenError::Empty(_)) && e.to_string().contains("pencil"))
+                || (d == 6.0 && matches!(e, GenError::Invalid(_)) && e.to_string().contains("does not exceed")),
+            "pen {d}: {e:?}"
+        );
+    }
+}
+
+#[test]
+fn a_flipped_winding_is_skipped_by_note() {
+    // Both faces must run the shared edge opposite ways. Flip one
+    // pocket wall's windings and its seam's corner goes to the
+    // note, never to a guess; the other seams keep their runs.
+    let mut f = step_pocket();
+    let mut flipped = false;
+    for t in &mut f {
+        let on = |p: &Point3| (p.x - 6.0).abs() < 1e-9;
+        // The x=6 wall's floor-side triangle, wound along the seam.
+        if on(&t.a) && on(&t.b) && on(&t.c) && (t.a.z - 5.0).abs() < 1e-9 && (t.b.z - 5.0).abs() < 1e-9 && (t.c.z - 10.0).abs() < 1e-9 && !flipped {
+            std::mem::swap(&mut t.b, &mut t.c);
+            flipped = true;
+        }
+    }
+    assert!(flipped, "the fixture lost its wall x=6");
+    let t = corner(&f, &ppattern(10.0, 5.0, FinishPattern::Corner)).expect("the other seams stand");
+    assert!(
+        t.notes.iter().any(|n| n.contains("winding")),
+        "the flip went unannounced: {:?}",
+        t.notes
+    );
+}
+
+#[test]
+fn the_crease_pair_is_deterministic() {
+    // Segment, candidate and run order are all fixed by sorting:
+    // the same facets twice write the same path twice.
+    let f = step_pocket();
+    let g = v_groove(12.5);
+    let p1 = ppattern(10.0, 5.0, FinishPattern::Corner);
+    let p2 = ppattern(10.0, 5.0, FinishPattern::Pencil);
+    let p3p = ppattern(7.0, 0.0, FinishPattern::Corner);
+    assert_eq!(corner(&f, &p1).expect("a").moves, corner(&f, &p1).expect("b").moves, "corner drifted");
+    assert_eq!(pencil(&f, &p2).expect("a").moves, pencil(&f, &p2).expect("b").moves, "pencil drifted");
+    assert_eq!(corner(&g, &p3p).expect("a").moves, corner(&g, &p3p).expect("b").moves, "valley drifted");
+}
+
+#[test]
+fn the_reference_number_validates_like_the_others() {
+    // Nonsense authoring refuses at the gate on every door, whether
+    // or not the pattern reads the field - the ladder law again.
+    for s in [0.0, -2.0, f64::NAN, f64::INFINITY] {
+        for door in [FinishPattern::Pencil, FinishPattern::Corner, FinishPattern::Waterline] {
+            let q = Finish3DParams { pattern: door, pencil_reference: Some(s), ..params(10.0, 0.0) };
+            let r = if door == FinishPattern::Corner {
+                corner(&box_facets(), &q)
+            } else if door == FinishPattern::Pencil {
+                pencil(&box_facets(), &q)
+            } else {
+                waterline(&box_facets(), &q)
+            };
+            assert!(matches!(r, Err(GenError::Invalid(_))), "{door:?} took pencil_reference {s}");
+        }
+    }
 }

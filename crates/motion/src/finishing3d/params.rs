@@ -33,7 +33,13 @@ use crate::machining2d::{cut_levels, GenError};
 /// stated). Flat (M2.5 A) finishes the floors only: the near-level
 /// facets' footprints, shrunk one stepover per pass at constant
 /// tip-Z - the shadow family's choreography on the ground the
-/// waterline's rest verdict always refused to claim.
+/// waterline's rest verdict always refused to claim. Pencil and
+/// Corner (M2.5 B) are the crease pair: each rides the locus of
+/// centers tangent to BOTH faces of a concave edge at once, and the
+/// band `p/tan(theta/2)` - the skirt a ball of radius p can never
+/// clean - says which of the two speaks: Corner for the tool's own
+/// p = r, Pencil for a stated reference's p = R, keeping only where
+/// the bigger ball's shadow stands past the tolerance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FinishPattern {
     Waterline,
@@ -48,6 +54,14 @@ pub enum FinishPattern {
     SteepShallow,
     /// Floors only, planar, one pass per floor.
     Flat,
+    /// The concave corner loci a reference ball leaves standing,
+    /// ridden by this op's smaller ball (M2.5 B): `pencil_reference`
+    /// is the pen, and absent means every corner.
+    Pencil,
+    /// The simultaneous two-face tangent pass with the operation's
+    /// own ball - where the tool's own band beats the tolerance
+    /// (M2.5 B). `pencil_reference` is inert here.
+    Corner,
 }
 
 /// Everything the 3D finishers need that the tool and geometry don't
@@ -141,6 +155,18 @@ pub struct Finish3DParams {
     /// `2√(r·tol)`, byte for byte, as if this field had never
     /// arrived.
     pub steep_stepover: Option<f64>,
+    /// The reference ball's diameter, mm (M2.5 B): Pencil cleans the
+    /// corner bands this tool's ball cannot reach but that a bigger
+    /// ball of diameter `d` leaves standing - it cuts where
+    /// `(d/2 − r)/tan(θ/2)` beats the tolerance. `None` says "no
+    /// bigger ball was ever named": every concave corner the tool's
+    /// locus rests on is fair game. The number must exceed the op's
+    /// own tool diameter - a reference not bigger than the tool
+    /// hides under no band, and that is refused by name, not
+    /// shrunk. Every other pattern ignores it, exactly as the
+    /// raster fields ignore Waterline, inert as if it had never
+    /// arrived.
+    pub pencil_reference: Option<f64>,
 }
 
 /// The stepdown the scallop law prescribes: cusp height
@@ -260,6 +286,7 @@ pub(super) fn validate(p: &Finish3DParams, facets: &[Triangle]) -> Result<(), Ge
         && p.bottom_z.is_finite()
         && p.stepover.is_none_or(|s| s.is_finite() && s > 0.0)
         && p.steep_stepover.is_none_or(|s| s.is_finite() && s > 0.0)
+        && p.pencil_reference.is_none_or(|d| d.is_finite() && d > 0.0)
         && p.retract_z.is_none_or(|rz| rz.is_finite())
         && p.min_step.is_none_or(|s| s.is_finite() && s > 0.0)
         // The ramp angle is refused OUTSIDE (0, 90) even while

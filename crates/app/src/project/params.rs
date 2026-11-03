@@ -405,6 +405,12 @@ pub enum ParamsDto {
         /// numbers already in the file, not stored a third time.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         steep_stepover: Option<f64>,
+        /// Absent means "no reference ball was named": Pencil keeps
+        /// every concave corner its locus rests on, Corner always cuts
+        /// its own band (M2.5 B). Absent spells None exactly like
+        /// `stepover`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pencil_reference: Option<f64>,
     },
     /// Declared at v24 with the simultaneous-axis kinds (M5.1 stage
     /// C). The renames state the tags for the familiar reason - the
@@ -893,6 +899,10 @@ pub enum FinishPatternDto {
     SteepShallow,
     /// M2.5 A, same law: the floors only, one pass per shrink.
     Flat,
+    /// M2.5 B, same law: the corner loci a reference ball leaves.
+    Pencil,
+    /// M2.5 B, same law: the two-face tangent pass, own ball.
+    Corner,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -908,6 +918,8 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::Project => crate::finishing3d::FinishPattern::Project,
             FinishPatternDto::SteepShallow => crate::finishing3d::FinishPattern::SteepShallow,
             FinishPatternDto::Flat => crate::finishing3d::FinishPattern::Flat,
+            FinishPatternDto::Pencil => crate::finishing3d::FinishPattern::Pencil,
+            FinishPatternDto::Corner => crate::finishing3d::FinishPattern::Corner,
         }
     }
 }
@@ -925,6 +937,8 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::Project => FinishPatternDto::Project,
             crate::finishing3d::FinishPattern::SteepShallow => FinishPatternDto::SteepShallow,
             crate::finishing3d::FinishPattern::Flat => FinishPatternDto::Flat,
+            crate::finishing3d::FinishPattern::Pencil => FinishPatternDto::Pencil,
+            crate::finishing3d::FinishPattern::Corner => FinishPatternDto::Corner,
         }
     }
 }

@@ -343,6 +343,7 @@ impl ParamsDto {
                 ramp_angle,
                 entry_ramp,
                 steep_stepover,
+                pencil_reference,
             } => ParamsDto::Finish3D {
                 pattern: (*pattern).into(),
                 stepover: *stepover,
@@ -359,6 +360,7 @@ impl ParamsDto {
                 ramp_angle: *ramp_angle,
                 entry_ramp: *entry_ramp,
                 steep_stepover: *steep_stepover,
+                pencil_reference: *pencil_reference,
             },
             // The 5-axis twins (M5.1 stage C): one shape, mirrored.
             // The contour arm has no stepover to name, so the pattern
@@ -1441,6 +1443,7 @@ impl ParamsDto {
                 ramp_angle,
                 entry_ramp,
                 steep_stepover,
+                pencil_reference,
             } => OpParams::Finish3D {
                 pattern: (*pattern).into(),
                 stepover: *stepover,
@@ -1457,6 +1460,7 @@ impl ParamsDto {
                 ramp_angle: *ramp_angle,
                 entry_ramp: *entry_ramp,
                 steep_stepover: *steep_stepover,
+                pencil_reference: *pencil_reference,
             },
             // The 5-axis twins (M5.1 stage C): the same shape read
             // back - the contour has no stepover key to lose, and the

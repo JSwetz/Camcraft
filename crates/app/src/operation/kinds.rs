@@ -945,6 +945,7 @@ fn seed_finish3d(c: &Carried) -> OpParams {
         // the flank's own spacing (M2.5 A) - and only the Steep-and-
         // shallow pattern would ever read it.
         steep_stepover: None,
+        pencil_reference: None,
     }
 }
 

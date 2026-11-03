@@ -464,6 +464,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             ramp_angle,
             entry_ramp,
             steep_stepover,
+            pencil_reference,
             ..
         } => {
             // Ball jurisdiction: the rings are the tangent locus of a
@@ -502,6 +503,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp_angle: *ramp_angle,
                 entry_ramp: *entry_ramp,
                 steep_stepover: *steep_stepover,
+                pencil_reference: *pencil_reference,
             };
             // The pattern picks the generator; Waterline never
             // reaches the raster code at all. SteepShallow is the
@@ -524,6 +526,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 finishing3d::FinishPattern::Contour => finishing3d::contour(&material.facets, &fp)?,
                 finishing3d::FinishPattern::Project => finishing3d::project(&material.facets, &fp)?,
                 finishing3d::FinishPattern::Flat => finishing3d::flat(&material.facets, &fp)?,
+                // The crease pair (M2.5 B): the same locus walk in
+                // pencil.rs, and the band filter's reference is the
+                // only thing that differs - Corner asks its own
+                // ball's band, Pencil the stated reference's.
+                finishing3d::FinishPattern::Pencil => finishing3d::pencil(&material.facets, &fp)?,
+                finishing3d::FinishPattern::Corner => finishing3d::corner(&material.facets, &fp)?,
             };
             (region, path)
         }
@@ -606,6 +614,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp_angle: 45.0,
                 entry_ramp: false,
                 steep_stepover: None,
+                pencil_reference: None,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -692,6 +701,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp_angle: 45.0,
                 entry_ramp: false,
                 steep_stepover: None,
+                pencil_reference: None,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -777,6 +787,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp_angle: 45.0,
                 entry_ramp: false,
                 steep_stepover: None,
+                pencil_reference: None,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -1005,6 +1016,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ramp_angle: 45.0,
                 entry_ramp: false,
                 steep_stepover: None,
+                pencil_reference: None,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,

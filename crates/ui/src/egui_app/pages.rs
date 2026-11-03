@@ -101,7 +101,7 @@ const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
 const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
 /// The 3-D finish kinematics, in the order the combo maps them.
-const FINISH_PATTERNS: [&str; 10] = [
+const FINISH_PATTERNS: [&str; 12] = [
     "Waterline",
     "Parallel",
     "Parallel - multi",
@@ -112,6 +112,8 @@ const FINISH_PATTERNS: [&str; 10] = [
     "Project",
     "Steep and shallow",
     "Flat",
+    "Pencil",
+    "Corner",
 ];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
@@ -2022,6 +2024,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             ramp_angle,
             entry_ramp,
             steep_stepover,
+            pencil_reference,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -2078,6 +2081,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::finishing3d::FinishPattern::Project => 7,
                     camcraft_app::finishing3d::FinishPattern::SteepShallow => 8,
                     camcraft_app::finishing3d::FinishPattern::Flat => 9,
+                    camcraft_app::finishing3d::FinishPattern::Pencil => 10,
+                    camcraft_app::finishing3d::FinishPattern::Corner => 11,
                 };
                 let before = pat_idx;
                 combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
@@ -2092,11 +2097,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         7 => camcraft_app::finishing3d::FinishPattern::Project,
                         8 => camcraft_app::finishing3d::FinishPattern::SteepShallow,
                         9 => camcraft_app::finishing3d::FinishPattern::Flat,
+                        10 => camcraft_app::finishing3d::FinishPattern::Pencil,
+                        11 => camcraft_app::finishing3d::FinishPattern::Corner,
                         _ => camcraft_app::finishing3d::FinishPattern::Waterline,
                     };
                 }
                 ui.label(
-                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette - then the rings take the flanks. Steep and shallow draws that split as a border: the rings keep their hands off shallow ground, and the flanks answer to their own spacing. Flat rides the floors only, one pass per shrink.",
+                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette - then the rings take the flanks. Steep and shallow draws that split as a border: the rings keep their hands off shallow ground, and the flanks answer to their own spacing. Flat rides the floors only, one pass per shrink. Pencil and Corner read the bends instead of the slope: each rides the line of centres tangent to both faces of every concave corner, Corner with the op's own ball and Pencil with a fatter reference ball, cleaning only what that pen leaves standing.",
                 );
                 if !matches!(pattern, camcraft_app::finishing3d::FinishPattern::Waterline) {
                     field(ui, "Stepover");
@@ -2177,6 +2184,25 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                             ui.label("the flank's own level spacing - state it and the ladder obeys; the cusp it leaves is still measured, never assumed");
                         } else {
                             ui.label("from tolerance and tool by the scallop law, 2 x sqrt(r x tolerance)");
+                        }
+                    }
+                    if matches!(
+                        pattern,
+                        camcraft_app::finishing3d::FinishPattern::Pencil
+                    ) {
+                        field(ui, "Reference ball");
+                        let mut named = pencil_reference.is_some();
+                        if ui.checkbox(&mut named, "Name a fatter pen").changed() {
+                            // Four times the reference R3 ball's own
+                            // diameter - a pen a band can hide under
+                            // is no reference; the field is then free.
+                            *pencil_reference = if named { Some(24.0) } else { None };
+                        }
+                        if let Some(d) = pencil_reference {
+                            num(ui, u, d);
+                            ui.label("the pen whose leftovers this op cleans - it must be fatter than the op's ball, and the path names it if it is not");
+                        } else {
+                            ui.label("no pen named: every concave corner whose locus rests on the solid is cleaned");
                         }
                     }
                 }

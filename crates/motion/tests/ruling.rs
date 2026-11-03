@@ -45,6 +45,7 @@ fn finish(top_z: f64, bottom_z: f64) -> Finish3DParams {
         // M8.2 B: the ring entry keeps its plunge unless asked.
         entry_ramp: false,
         steep_stepover: None,
+        pencil_reference: None,
     }
 }
 

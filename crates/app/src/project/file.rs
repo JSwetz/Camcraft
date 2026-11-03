@@ -25,7 +25,12 @@ use super::*;
 /// words (steep_and_shallow, flat); no row moves, so no pin shifts —
 /// an absent key decodes to the scallop law, exactly what every v45
 /// file ran, and the new words cannot exist in one (the arrival law).
-pub const PROJECT_VERSION: u32 = 46;
+/// v47: the pure step-up again (M2.5 B) — the Finish3D arm grows one
+/// optional key (`pencil_reference`) and the pattern grammar grows two
+/// words (pencil, corner); no row moves, so no pin shifts — an absent
+/// key decodes to "no reference ball named", exactly what every v46
+/// file ran, and the new words cannot exist in one (the arrival law).
+pub const PROJECT_VERSION: u32 = 47;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {

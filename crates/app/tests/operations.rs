@@ -3901,6 +3901,7 @@ fn finish_params(top_z: f64, bottom_z: f64, tolerance: f64) -> OpParams {
         ramp_angle: 45.0,
         entry_ramp: false,
         steep_stepover: None,
+        pencil_reference: None,
     }
 }
 
@@ -6544,4 +6545,110 @@ fn multiaxis_contour_quiet_shank_moves_nothing() {
         );
         assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z));
     }
+}
+
+#[test]
+fn the_crease_pair_generates_through_the_operation_layer() {
+    // M2.5 B, the split's choreography: the dispatch doors, not the
+    // kernels. The step pocket is the corner's honest witness - four
+    // floor seams weld into a ring, four mouths stand in the corners
+    // - and the app's envelope verdict reads it in seconds. The
+    // physics (band refusals, weld exactness, the bisector column)
+    // are pinned at the kernel door by the motion twin; here only
+    // the doors ride, plus the two answers the layer must show the
+    // user: a refusal by name, and a status that cuts nothing.
+    use camcraft_app::geometry::Triangle;
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let (t, f) = (10.0, 5.0); // pocket top, floor
+    let pt = Point3::new;
+    let mut facets = Vec::new();
+    facets.extend(quad([pt(-12.0, -12.0, t), pt(12.0, -12.0, t), pt(12.0, -6.0, t), pt(-12.0, -6.0, t)]));
+    facets.extend(quad([pt(-12.0, 6.0, t), pt(12.0, 6.0, t), pt(12.0, 12.0, t), pt(-12.0, 12.0, t)]));
+    facets.extend(quad([pt(-12.0, -6.0, t), pt(-6.0, -6.0, t), pt(-6.0, 6.0, t), pt(-12.0, 6.0, t)]));
+    facets.extend(quad([pt(6.0, -6.0, t), pt(12.0, -6.0, t), pt(12.0, 6.0, t), pt(6.0, 6.0, t)]));
+    facets.extend(quad([pt(6.0, -6.0, f), pt(-6.0, -6.0, f), pt(-6.0, -6.0, t), pt(6.0, -6.0, t)]));
+    facets.extend(quad([pt(6.0, 6.0, f), pt(6.0, -6.0, f), pt(6.0, -6.0, t), pt(6.0, 6.0, t)]));
+    facets.extend(quad([pt(-6.0, 6.0, f), pt(6.0, 6.0, f), pt(6.0, 6.0, t), pt(-6.0, 6.0, t)]));
+    facets.extend(quad([pt(-6.0, -6.0, f), pt(-6.0, 6.0, f), pt(-6.0, 6.0, t), pt(-6.0, -6.0, t)]));
+    facets.extend(quad([pt(-6.0, -6.0, f), pt(6.0, -6.0, f), pt(6.0, 6.0, f), pt(-6.0, 6.0, f)]));
+    facets.extend(quad([pt(-12.0, -12.0, 0.0), pt(12.0, -12.0, 0.0), pt(12.0, -12.0, t), pt(-12.0, -12.0, t)]));
+    facets.extend(quad([pt(12.0, -12.0, 0.0), pt(12.0, 12.0, 0.0), pt(12.0, 12.0, t), pt(12.0, -12.0, t)]));
+    facets.extend(quad([pt(12.0, 12.0, 0.0), pt(-12.0, 12.0, 0.0), pt(-12.0, 12.0, t), pt(12.0, 12.0, t)]));
+    facets.extend(quad([pt(-12.0, 12.0, 0.0), pt(-12.0, -12.0, 0.0), pt(-12.0, -12.0, t), pt(-12.0, 12.0, t)]));
+    history.execute(&world, ImportModel::from_mesh("pocket", Mesh::from_facets(facets)));
+    history.execute(&world, ImportModel::from_mesh("cube", cube(pt(0.0, 0.0, 0.0), pt(10.0, 10.0, 10.0))));
+    let pat = |which: camcraft_app::finishing3d::FinishPattern, d: Option<f64>| {
+        let mut ask = finish_params(t, f, 0.1);
+        let OpParams::Finish3D { pattern, pencil_reference, .. } = &mut ask else {
+            panic!("finish3d params expected");
+        };
+        *pattern = which;
+        *pencil_reference = d;
+        ask
+    };
+    for (name, ask) in [
+        ("KC", pat(camcraft_app::finishing3d::FinishPattern::Corner, None)),
+        ("KP", pat(camcraft_app::finishing3d::FinishPattern::Pencil, Some(8.0))),
+    ] {
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("pocket".into()), ask)
+                .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        assert_eq!(status(&world, name), OpStatus::Ok, "{name} must seat and cut");
+        let moves = cache(&world, name).expect("cached").path.moves;
+        let ring = moves.iter().any(|m| {
+            matches!(m.kind, camcraft_app::cl::MoveKind::Feed)
+                && (m.to.z - 8.0).abs() < 1e-9
+                && (m.to.x.abs() - 3.0).abs() < 1e-9
+                && (m.to.y.abs() - 3.0).abs() < 1e-9
+        });
+        assert!(ring, "{name} left the floor seams' ring uncut");
+    }
+    // A reference that is not fatter than the ball is no reference:
+    // the pencil door refuses by name and the op cuts nothing.
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "KR",
+            "BN-0600",
+            SrcRef::Entity("pocket".into()),
+            pat(camcraft_app::finishing3d::FinishPattern::Pencil, Some(6.0)),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "KR").err().expect("a pen that is not fatter must refuse") else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("does not exceed"), "{msg}");
+    assert_eq!(status(&world, "KR"), OpStatus::Never, "a refusal cuts nothing");
+    // And a convex part has no corner at all: the Empty answer
+    // reaches the user the same way, by name.
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "KB",
+            "BN-0600",
+            SrcRef::Entity("cube".into()),
+            pat(camcraft_app::finishing3d::FinishPattern::Corner, None),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "KB").err().expect("a cube has no concave corner") else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("no concave corner"), "{msg}");
+    assert_eq!(status(&world, "KB"), OpStatus::Never);
 }
