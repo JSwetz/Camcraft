@@ -1167,7 +1167,11 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Engrave { retract_z, .. }
         | operation::OpParams::Chamfer2D { retract_z, .. }
         | operation::OpParams::Circular { retract_z, .. }
-        | operation::OpParams::Drill { retract_z, .. } => *retract_z,
+        // The boring ride and the thread mill hop between holes the
+        // drill's way - the same store-either shape (M2.4 C).
+        | operation::OpParams::Drill { retract_z, .. }
+        | operation::OpParams::Bore { retract_z, .. }
+        | operation::OpParams::Thread { retract_z, .. } => *retract_z,
         // The wrap ladder stores no hop at all - its rapids ride
         // the kernel's law off the skin (M5.1 stage E2) - exactly
         // Face's answer of "hop at clearance, say nothing extra".
@@ -1386,8 +1390,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // A drill's Top is its R plane - where the feed move starts in
         // every hole - and its Bottom exists only as an override: the
         // hole floors ride the holes themselves, and a floor per hole
-        // is not a plane.
-        operation::OpParams::Drill { top_z, bottom_z, .. } => {
+        // is not a plane. The boring ride and the thread mill keep
+        // the same promise: they are hole-list kinds, one ring or one
+        // helix per hole (M2.4 C).
+        operation::OpParams::Drill { top_z, bottom_z, .. }
+        | operation::OpParams::Bore { top_z, bottom_z, .. }
+        | operation::OpParams::Thread { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,

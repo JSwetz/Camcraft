@@ -1669,6 +1669,218 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 num_feed(ui, u, plunge_feed);
             }
         }
+        // The standalone boring ride (M2.4 C): the drill's hole-list
+        // shape - the same Geometry list, the same R-plane/Depth
+        // promise - but its Passes are the pocket family's (a leave,
+        // a tolerance for the ring's chords) and its ladder is the
+        // stepdown's, spoken on one circle per hole.
+        OpParams::Bore {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stock_to_leave,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            tolerance,
+            holes,
+        } => {
+            if tab == SEC_GEO {
+                field(ui, "Holes");
+                if holes.is_empty() {
+                    ui.label("none yet - Detect holes reads them from the model");
+                }
+                for (i, h) in holes.iter().enumerate() {
+                    let floor = if h.through {
+                        "through".to_owned()
+                    } else {
+                        format!("floor {}", units::len(h.floor_z, u, 3))
+                    };
+                    ui.label(format!(
+                        "{}  X {}  Y {}  Ø{}  entry {}  {floor}",
+                        i + 1,
+                        units::len(h.xy.x, u, 3),
+                        units::len(h.xy.y, u, 3),
+                        units::len(2.0 * h.radius, u, 3),
+                        units::len(h.entry_z, u, 3),
+                    ));
+                }
+                if ui.button("Detect holes").clicked() {
+                    detect_holes = true;
+                }
+                ui.label("a stepped hole is declined by name at generate - this ride wants one finished wall per hole");
+            }
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "bore.clearance",
+                );
+                field(ui, "Retract plane (between holes)");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "bore.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "R plane (feed starts here)");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "bore.top");
+                field(ui, "Depth");
+                let mut over = bottom_z.is_some();
+                if ui.checkbox(&mut over, "Override the hole floors").changed() {
+                    *bottom_z = if over {
+                        Some(Height::of(top_z.reference, top_z.offset - 1.0))
+                    } else {
+                        None
+                    };
+                }
+                match bottom_z {
+                    Some(b) => {
+                        height_editor(ui, &state.world, op_ctx.as_deref(), b, "bore.bottom")
+                    }
+                    None => {
+                        ui.label("every hole stops at its own floor from the model");
+                    }
+                }
+                field(ui, "Stepdown");
+                num(ui, u, stepdown);
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Stock to leave");
+                num(ui, u, stock_to_leave);
+                field(ui, "Tolerance");
+                num(ui, u, tolerance);
+                ui.label("the ring is chords to this tolerance - the same fit law the pocket walls keep");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
+        // The helical thread mill (M2.4 C): the hole list again - the
+        // ride is one helix per hole - and its Passes says the only
+        // thing the drill's cycle had no word for: how deep each
+        // ring's infeed goes. The pitch lives on the TOOL; the pane
+        // says so in one line, because a silent number the tool owns
+        // is how staleness hides (the stamp's law).
+        OpParams::Thread {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            infeed,
+            feed,
+            plunge_feed,
+            climb,
+            holes,
+        } => {
+            if tab == SEC_GEO {
+                field(ui, "Holes");
+                if holes.is_empty() {
+                    ui.label("none yet - Detect holes reads them from the model");
+                }
+                for (i, h) in holes.iter().enumerate() {
+                    let floor = if h.through {
+                        "through".to_owned()
+                    } else {
+                        format!("floor {}", units::len(h.floor_z, u, 3))
+                    };
+                    ui.label(format!(
+                        "{}  X {}  Y {}  Ø{}  entry {}  {floor}",
+                        i + 1,
+                        units::len(h.xy.x, u, 3),
+                        units::len(h.xy.y, u, 3),
+                        units::len(2.0 * h.radius, u, 3),
+                        units::len(h.entry_z, u, 3),
+                    ));
+                }
+                if ui.button("Detect holes").clicked() {
+                    detect_holes = true;
+                }
+            }
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "thread.clearance",
+                );
+                field(ui, "Retract plane (between holes)");
+                let mut hop = retract_z.is_some();
+                if ui.checkbox(&mut hop, "Hop below clearance").changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    height_editor(ui, &state.world, op_ctx.as_deref(), r, "thread.retract");
+                    if let (Some(rz), Some(cz)) = (r.z(&state.world), clearance_z.z(&state.world))
+                        && rz > cz
+                    {
+                        ui.label(format!(
+                            "above clearance - the hop travels at {} (min of the two)",
+                            units::len(cz, u, 3)
+                        ));
+                    }
+                }
+                field(ui, "R plane (feed starts here)");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "thread.top");
+                field(ui, "Depth");
+                let mut over = bottom_z.is_some();
+                if ui.checkbox(&mut over, "Override the hole floors").changed() {
+                    *bottom_z = if over {
+                        Some(Height::of(top_z.reference, top_z.offset - 1.0))
+                    } else {
+                        None
+                    };
+                }
+                match bottom_z {
+                    Some(b) => {
+                        height_editor(ui, &state.world, op_ctx.as_deref(), b, "thread.bottom")
+                    }
+                    None => {
+                        ui.label("every hole stops at its own floor from the model");
+                    }
+                }
+            }
+            if tab == SEC_PASSES {
+                field(ui, "Radial infeed per pass");
+                num(ui, u, infeed);
+                ui.label("rings from the tangent start to the finished wall; the pitch is the TOOL's number, not a parameter here");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
+                ui.checkbox(climb, "Climb milling");
+            }
+        }
         OpParams::Pocket3D {
             stepover,
             stock_to_leave,

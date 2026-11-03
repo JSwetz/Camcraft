@@ -95,7 +95,23 @@ pub enum OpType {
     /// vault's dome depth law under the same name (see
     /// [`crate::machining2d::circular`]).
     Circular,
+    /// Helical thread milling (M2.4 C): 3-axis interpolation to an
+    /// internal thread - pitch per turn down, one ISO 724 depth of
+    /// radial infeed out, retract back up the ride (see
+    /// [`crate::machining2d::thread_mill`]). Declared at the 2D mill's
+    /// tail, where the registry rows it. The spindle-sync word a
+    /// rigid tap wants rides the M3.3 machine definitions; a machine
+    /// that declares no sync refuses the TAP cycle as M1.6
+    /// established, and this kind needs nothing of it.
+    Thread,
     Drill,
+    /// Standalone boring (M2.4 C): a cutter SMALLER than the finished
+    /// hole rides its center circle until the rim stands on the wall -
+    /// circular interpolation, not the slide. Beside M1.6's boring
+    /// cycles under its own catalog name (see
+    /// [`crate::machining2d::bore`]); a counterbore-folded hole is
+    /// declined for it by name, the cycle's own word.
+    Bore,
     /// Mesh-driven Z-level pocketing: the model is the final part, every
     /// level's islands are computed from it (see [`crate::machining3d`]).
     Pocket3D,

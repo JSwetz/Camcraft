@@ -194,6 +194,10 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
             op.params,
             OpParams::Slot { .. }
                 | OpParams::Drill { .. }
+                // The hole-list rides take their boundary from the
+                // holes, never from a pick (M2.4 C).
+                | OpParams::Bore { .. }
+                | OpParams::Thread { .. }
                 | OpParams::Pocket3D { .. }
                 | OpParams::Finish3D { .. }
                 // The drive-curve contour's picks are the PATH, not a
@@ -277,6 +281,11 @@ pub(super) fn selection_drives_region(params: &OpParams) -> bool {
         params,
         OpParams::Slot { .. }
             | OpParams::Drill { .. }
+            // The hole-list rides: the recognized circles author the
+            // boundary; a pick could only disagree with them
+            // (M2.4 C).
+            | OpParams::Bore { .. }
+            | OpParams::Thread { .. }
             | OpParams::Pocket3D { .. }
             | OpParams::Finish3D { .. }
             // The 5-axis kinds are mesh-driven like the finish: the
@@ -519,6 +528,26 @@ pub(super) fn region_core(
             // radius - far more than the gouge law's slack at drill
             // diameters - and the law would read that tessellation as
             // tool bite. The hole's parameters are the truth here.
+            let base = slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)?;
+            if holes.is_empty() {
+                return Ok(base);
+            }
+            let mut loops: Vec<Loop> = base
+                .loops()
+                .iter()
+                .filter(|l| !holes.iter().any(|h| rim_is(l, *h)))
+                .cloned()
+                .collect();
+            for hole in holes {
+                loops.push(rim_loop(*hole)?);
+            }
+            Ok(Region::new(loops)?)
+        }
+        // The boring ride and the thread mill take the drill's rim
+        // law verbatim (M2.4 C): the wall the model shows IS the
+        // region, so the gouge test's tangency stands at the circle
+        // the ring rides. No cross list - these are mill kinds.
+        OpParams::Bore { holes, .. } | OpParams::Thread { holes, .. } => {
             let base = slice::project(&material.facets, FOOTPRINT_SAMPLES).map_err(from_slice)?;
             if holes.is_empty() {
                 return Ok(base);

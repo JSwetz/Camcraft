@@ -19,8 +19,10 @@
 
 
 mod arcs;
+mod bore;
 mod chamfer;
 mod circular;
+mod thread_mill;
 mod contour;
 mod face;
 mod levels;
@@ -32,13 +34,14 @@ mod waterscan;
 #[cfg(test)]
 #[allow(unused_imports)]
 use {
-    arcs::*, chamfer::*, circular::*, contour::*, face::*, levels::*, pocket::*, ring::*,
-    slots::*, waterscan::*,
+    arcs::*, bore::*, chamfer::*, circular::*, contour::*, face::*, levels::*, pocket::*,
+    ring::*, slots::*, thread_mill::*, waterscan::*,
 };
 #[cfg(test)]
 mod tests;
 
 pub use arcs::{fit_arcs, Seg, ARC_FIT_TOL};
+pub use bore::{bore, BoreHole, BoreParams};
 pub use chamfer::{chamfer, ChamferParams};
 pub use circular::{circular, CircularParams};
 pub use contour::{contour, contour_along_chain, ContourParams, Lead, Side};
@@ -47,5 +50,6 @@ pub(crate) use levels::cut_levels;
 pub use pocket::{pocket, PocketParams, PocketStrategy};
 pub use ring::{on_boundary, ring_is_circular};
 pub use slots::{chord_clears, slot, trace, SlotParams, TraceParams};
+pub use thread_mill::{thread_mill, ThreadHole, ThreadParams, THREAD_DEPTH_PER_PITCH};
 pub(crate) use pocket::plan_passes;
 pub(crate) use waterscan::chord_crosses_path;

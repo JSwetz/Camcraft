@@ -764,7 +764,23 @@ impl HeightRefs for OpParams {
             | OpParams::FormTurning { clearance_z, top_z, bottom_z, .. }
             | OpParams::BoringTurning { clearance_z, top_z, bottom_z, .. } =>
                 vec![clearance_z, top_z, bottom_z],
+            // Bore and Thread reference the drill's four (M2.4 C) -
+            // the same optional-floor, optional-hop shape.
             OpParams::Drill {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
+            | OpParams::Bore {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                ..
+            }
+            | OpParams::Thread {
                 clearance_z,
                 retract_z,
                 top_z,

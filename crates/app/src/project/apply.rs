@@ -404,6 +404,29 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         }
         file.version = 44;
     }
+    if file.version == 44 {
+        // v44 -> v45: the boring ride and the thread mill arrive
+        // (M2.4 C) IN the runs they belong to - the partition law
+        // (ribbon.rs) says a section's rows are a contiguous run,
+        // and the family law says the turning rows stay the table's
+        // tail, so a tail-append is not a legal seat: Thread closes
+        // the Mill2D run at 10, Bore joins Drilling behind the
+        // drill at 12. The two insertions cut at two boundaries, so
+        // the rung is the M2.4 A/B choreography with two steps:
+        // the old Drill row (10) takes the Thread's +1, and from
+        // the old Pocket3D row (11) up both new rows count, +2. A
+        // v44 file cannot contain the new variants (the arrival
+        // law); its pins are indices, and the table they named
+        // moved under them.
+        for idx in &mut file.pinned {
+            if *idx >= 11 {
+                *idx += 2;
+            } else if *idx == 10 {
+                *idx += 1;
+            }
+        }
+        file.version = 45;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

@@ -1325,12 +1325,24 @@ impl State {
         } else {
             op.params.clone()
         };
-        let OpParams::Drill { holes, cross, .. } = &mut params else {
-            self.refuse(
-                ErrorScope::Operation,
-                format!("'{name}' is not a drilling operation"),
-            );
-            return;
+        // The hole-list family (M2.4 C): the drill, the boring ride
+        // and the thread mill all store the same `holes` shape, so
+        // recognition fills whichever list the operation has. The
+        // radial half is the drill's alone - it is the only variant
+        // with a cross list to put them in, and a turned machine's
+        // radial holes on a plain mill's op stay the empty list.
+        let is_drill = matches!(params, OpParams::Drill { .. });
+        let holes: &mut Vec<_> = match &mut params {
+            OpParams::Drill { holes, .. }
+            | OpParams::Bore { holes, .. }
+            | OpParams::Thread { holes, .. } => holes,
+            _ => {
+                self.refuse(
+                    ErrorScope::Operation,
+                    format!("'{name}' is not a drilling operation"),
+                );
+                return;
+            }
         };
         // A document whose machine holds a turret gets the radial
         // reading beside the mill's (M5.2 F2): the same mesh, its
@@ -1338,7 +1350,7 @@ impl State {
         // mill asks nothing of the mesh's sides; its cross list stays
         // the empty one it was (an op typed at a machine that cannot
         // plunge it is the generator's refusal, not this click's).
-        let radial = if machine::kind_of(&self.world) == machine::Kind::Mill {
+        let radial = if !is_drill || machine::kind_of(&self.world) == machine::Kind::Mill {
             Ok(Vec::new())
         } else {
             operation::cross_holes_of(&self.world, op.setup.as_deref(), &op.src)
@@ -1350,11 +1362,18 @@ impl State {
             (Err(err), _) | (_, Err(err)) => self.refuse(ErrorScope::Operation, err.to_string()),
             (Ok(z), Ok(x)) if z.is_empty() && x.is_empty() => self.refuse(
                 ErrorScope::Operation,
-                "no drilled holes found in the source model - Z or radial".to_string(),
+                if is_drill {
+                    "no drilled holes found in the source model - Z or radial".to_string()
+                } else {
+                    "no Z-axis holes found in the source model - this ride reads only those"
+                        .to_string()
+                },
             ),
             (Ok(z), Ok(x)) => {
                 *holes = z;
-                *cross = x;
+                if let OpParams::Drill { cross, .. } = &mut params {
+                    *cross = x;
+                }
                 if draft {
                     self.op_ui.params = params.clone();
                 }

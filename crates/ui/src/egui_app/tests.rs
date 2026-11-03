@@ -855,6 +855,30 @@ fn every_field_lives_on_exactly_one_section() {
             ],
         ),
         (
+            // The thread mill (M2.4 C) seats here, closing the 2D
+            // mill's run: the hole list again - one helix per hole -
+            // and a Passes group with the one number the drill's
+            // cycle never spoke (radial infeed). The pitch is the
+            // TOOL's, and the pane says so in prose, not a field.
+            "Thread",
+            vec![
+                ("Geometry", vec!["Click selects:", "Holes", "Detect holes"]),
+                (
+                    "Heights",
+                    vec![
+                        "Clearance Z",
+                        "R plane (feed starts here)",
+                        "Retract plane (between holes)",
+                        "Hop below clearance",
+                        "Depth",
+                        "Override the hole floors",
+                    ],
+                ),
+                ("Passes", vec!["Radial infeed per pass"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+            ],
+        ),
+        (
             // A drill has no climb (the cycle owns the retract), no
             // Leads & Links (no wall to enter), and its Passes are the
             // cycle's own numbers - the section law this row pins.
@@ -874,6 +898,30 @@ fn every_field_lives_on_exactly_one_section() {
                 ),
                 ("Passes", vec!["Cycle", "Peck depth", "Dwell at bottom (s)"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)"]),
+            ],
+        ),
+        (
+            // The boring ride (M2.4 C) joins drilling beside its
+            // cousin: the drill's hole-list shape, the pocket's
+            // Passes (a leave and a chord tolerance), and the
+            // stepdown's ladder spoken on one circle per hole.
+            "Bore",
+            vec![
+                ("Geometry", vec!["Click selects:", "Holes", "Detect holes"]),
+                (
+                    "Heights",
+                    vec![
+                        "Clearance Z",
+                        "R plane (feed starts here)",
+                        "Retract plane (between holes)",
+                        "Hop below clearance",
+                        "Depth",
+                        "Override the hole floors",
+                        "Stepdown",
+                    ],
+                ),
+                ("Passes", vec!["Stock to leave", "Tolerance"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
         (

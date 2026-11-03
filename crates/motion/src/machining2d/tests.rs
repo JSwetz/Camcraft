@@ -233,3 +233,154 @@ fn inside_on_small_bore_refuses() {
         other => panic!("expected a named Empty refusal, got {other:?}"),
     }
 }
+
+// --- M2.4 C: the boring ride and the thread helix ---------------------
+
+fn bore_hole(xy: [f64; 2], radius: f64, stepped: bool) -> BoreHole {
+    BoreHole {
+        xy: Point2::new(xy[0], xy[1]),
+        radius,
+        top_z: 0.0,
+        floor_z: -4.0,
+        through: false,
+        stepped,
+    }
+}
+
+fn bore_params(holes: Vec<BoreHole>, dia: f64) -> BoreParams {
+    BoreParams {
+        holes,
+        tool_diameter: dia,
+        stock_to_leave: 0.0,
+        stepdown: 2.0,
+        through_allowance: 1.0,
+        clearance_z: 5.0,
+        retract_z: None,
+        feed: 800.0,
+        plunge_feed: 200.0,
+        climb: true,
+        tolerance: 0.01,
+        entry: crate::entry::Entry3D::Plunge,
+        helix_radius: 0.0,
+    }
+}
+
+#[test]
+fn bore_rides_the_wall_circle() {
+    // A 6 mm mill boring a 20 mm hole keeps its CENTER 7 mm from the
+    // axis - the wall circle minus one tool radius, at every cut move.
+    let path = bore(&bore_params(vec![bore_hole([0.0, 0.0], 10.0, false)], 6.0))
+        .expect("a 6 mm mill fits a 20 mm bore");
+    let cuts: Vec<_> = path.moves.iter().filter(|m| m.kind != MoveKind::Rapid).collect();
+    assert!(!cuts.is_empty(), "a bored hole posts cut moves");
+    for m in &cuts {
+        // Radial sweeps pass through the center by law; ring chords
+        // and arcs stand on rc = 7 (lattice is 1 um).
+        let rad = (m.to.x * m.to.x + m.to.y * m.to.y).sqrt();
+        let from = (m.from.x * m.from.x + m.from.y * m.from.y).sqrt();
+        assert!(
+            (rad - 7.0).abs() < 1e-3 || rad < 7.0 + 1e-3,
+            "cut point left the bore circle: {:?}", m.to
+        );
+        let _ = from;
+    }
+    // Two levels (0, -2, -4 via cut_levels): the ladder reaches floor.
+    assert!(cuts.iter().any(|m| (m.to.z + 4.0).abs() < 1e-9), "floor cut");
+}
+
+#[test]
+fn bore_refuses_a_mill_it_cannot_turn() {
+    // 24 mm tool in a 20 mm hole: rc would stand negative - named,
+    // never an empty path.
+    let err = bore(&bore_params(vec![bore_hole([0.0, 0.0], 10.0, false)], 24.0))
+        .expect_err("no circle left inside");
+    assert!(format!("{err:?}").contains("no circle left inside"), "{err:?}");
+}
+
+#[test]
+fn bore_declines_the_counterbore_fold() {
+    let err = bore(&bore_params(vec![bore_hole([3.0, 4.0], 6.0, true)], 4.0))
+        .expect_err("a stepped hole is declined by name");
+    assert!(format!("{err:?}").contains("counterbore fold"), "{err:?}");
+}
+
+fn thread_params(pitch: f64, dia: f64, holes: Vec<ThreadHole>) -> ThreadParams {
+    ThreadParams {
+        holes,
+        pitch,
+        tool_diameter: dia,
+        infeed: 0.4,
+        clearance_z: 5.0,
+        retract_z: None,
+        feed: 400.0,
+        plunge_feed: 120.0,
+        climb: true,
+    }
+}
+
+fn thread_hole(xy: [f64; 2], radius: f64) -> ThreadHole {
+    ThreadHole {
+        xy: Point2::new(xy[0], xy[1]),
+        radius,
+        top_z: 0.0,
+        floor_z: -6.0,
+        stepped: false,
+    }
+}
+
+#[test]
+fn thread_helix_leads_by_the_pitch() {
+    // Pitch 2 mm: each half-arc drops exactly 1 mm until the floor.
+    let path = thread_mill(&thread_params(2.0, 4.0, vec![thread_hole([0.0, 0.0], 5.0)]))
+        .expect("a 4 mm mill threads an M9-ish bore");
+    let arcs: Vec<_> = path
+        .moves
+        .iter()
+        .filter(|m| m.arc.is_some() && m.kind == MoveKind::Feed && m.to.z < 0.0 - 1e-12)
+        .collect();
+    assert!(arcs.len() >= 4, "a helix posts its half-turns: {}", arcs.len());
+    // Consecutive arc ends sit pitch/2 apart (descending, rising on
+    // the retract) or level (floor spirals, retract mirror joints).
+    for w in arcs.windows(2) {
+        let dz = (w[0].to.z - w[1].to.z).abs();
+        assert!(dz == 0.0 || (dz - 1.0).abs() < 1e-9, "lead drift: {dz}");
+    }
+    // The retract closes the ride: some feed move ends back on the
+    // tangent start point (rho_0, top_z) = (3, 0).
+    assert!(
+        path.moves.iter().any(|m| m.kind == MoveKind::Feed
+            && (m.to.x - 3.0).abs() < 1e-3 && m.to.y.abs() < 1e-3 && m.to.z.abs() < 1e-9),
+        "the reversed ride must land where it started"
+    );
+}
+
+#[test]
+fn thread_refuses_a_mill_wider_than_the_drill() {
+    let err = thread_mill(&thread_params(2.0, 12.0, vec![thread_hole([0.0, 0.0], 5.0)]))
+        .expect_err("no air to enter");
+    assert!(format!("{err:?}").contains("no air to enter"), "{err:?}");
+}
+
+#[test]
+fn thread_refuses_a_pitch_it_cannot_state() {
+    let err = thread_mill(&thread_params(0.0, 4.0, vec![thread_hole([0.0, 0.0], 5.0)]))
+        .expect_err("the tap law's twin");
+    assert!(format!("{err:?}").contains("positive pitch"), "{err:?}");
+}
+
+#[test]
+fn thread_infeed_travel_is_the_standards_depth() {
+    // H = 0.5413 * pitch: with infeed = H/ceil the last arc lands on
+    // rho_end = R + H - r; here 5 + 1.0826 - 2 = 4.0826 (+ lattice).
+    let pitch = 2.0;
+    let h = THREAD_DEPTH_PER_PITCH * pitch;
+    let path = thread_mill(&thread_params(pitch, 4.0, vec![thread_hole([0.0, 0.0], 5.0)]))
+        .expect("valid");
+    let far = path
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Feed)
+        .map(|m| (m.to.x * m.to.x + m.to.y * m.to.y).sqrt())
+        .fold(0.0_f64, f64::max);
+    assert!((far - (5.0 + h - 2.0)).abs() < 1e-3, "reached {far}, wanted {}", 5.0 + h - 2.0);
+}

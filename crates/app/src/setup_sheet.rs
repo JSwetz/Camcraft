@@ -795,6 +795,23 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             top_z,
             bottom_z,
             ..
+        }
+        // The boring ride and the thread mill fill the drill's four
+        // columns column for column - the R plane and the optional
+        // floor are their law too (M2.4 C).
+        | OpParams::Bore {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
+        }
+        | OpParams::Thread {
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            ..
         } => [
             ("CLR", "Clearance Z", Some(*clearance_z)),
             ("RET", "Retract Z", *retract_z),

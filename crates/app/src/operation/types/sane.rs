@@ -944,6 +944,56 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
             }
+            // The two hole-list rides (M2.4 C): the drill's door -
+            // an empty list is SANE, so creation gets the panel on
+            // screen, and generation refuses it by name. The wall
+            // fit (does the cutter have a circle inside each hole?)
+            // is the pair's question and stays the generator's to
+            // ask, because only there do holes and tool meet.
+            OpParams::Bore {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stock_to_leave,
+                stepdown,
+                feed,
+                plunge_feed,
+                tolerance,
+                holes,
+                ..
+            } => {
+                clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_none_or(|b| b.is_sane())
+                    && nneg(*stock_to_leave)
+                    && pos(*stepdown)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && pos(*tolerance)
+                    && holes.iter().all(|h| h.is_usable())
+            }
+            OpParams::Thread {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                infeed,
+                feed,
+                plunge_feed,
+                holes,
+                ..
+            } => {
+                clearance_z.is_sane()
+                    && retract_z.is_none_or(|r| r.is_sane())
+                    && top_z.is_sane()
+                    && bottom_z.is_none_or(|b| b.is_sane())
+                    && pos(*infeed)
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+                    && holes.iter().all(|h| h.is_usable())
+            }
         }
     }
 }

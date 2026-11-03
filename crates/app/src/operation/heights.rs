@@ -134,7 +134,10 @@ pub fn region_z(
         // so does the bore's (M5.2 F).
         | OpParams::MultiPassTurning { top_z, .. }
         | OpParams::FormTurning { top_z, .. }
-        | OpParams::BoringTurning { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::BoringTurning { top_z, .. }
+        // The holes' entry plane names the same station (M2.4 C).
+        | OpParams::Bore { top_z, .. }
+        | OpParams::Thread { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -313,7 +316,12 @@ pub fn resolve_params(
         // The drill bottom is an override of the whole pattern, not a
         // requirement: each hole's own floor is the default depth, so an
         // unresolved (None) bottom is the normal shape, not a failure.
-        OpParams::Drill { clearance_z, retract_z, top_z, bottom_z, .. } => (
+        OpParams::Drill { clearance_z, retract_z, top_z, bottom_z, .. }
+        // The boring ride and the thread mill carry the drill's four
+        // heights verbatim (M2.4 C) - the floors ride the holes, the
+        // override rides the bag.
+        | OpParams::Bore { clearance_z, retract_z, top_z, bottom_z, .. }
+        | OpParams::Thread { clearance_z, retract_z, top_z, bottom_z, .. } => (
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             opt("Bottom Z", *bottom_z)?,

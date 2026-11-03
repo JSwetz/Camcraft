@@ -1416,6 +1416,109 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             };
             (region, path)
         }
+        // M2.4 C: standalone boring - circular interpolation, the
+        // ride M1.6's Bore cycle declines to be. The per-hole entry
+        // and floor are the model's (the drill's law); `bottom_z`
+        // overrides every floor at once when authored. A hole no
+        // wider than the cutter, and a counterbore fold, are the
+        // kernel's refusals - named at its doors, not guessed past.
+        OpParams::Bore {
+            stock_to_leave,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            tolerance,
+            holes,
+            ..
+        } => {
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            let path = machining2d::bore(&machining2d::BoreParams {
+                holes: holes
+                    .iter()
+                    .map(|h| machining2d::BoreHole {
+                        xy: h.xy,
+                        radius: h.radius,
+                        top_z: h.entry_z,
+                        floor_z: hl.bottom.unwrap_or(h.floor_z),
+                        through: h.through,
+                        stepped: h.stepped,
+                    })
+                    .collect(),
+                tool_diameter: d,
+                stock_to_leave: *stock_to_leave,
+                stepdown: *stepdown,
+                // The cycles' exit gift, the drilling crate's own
+                // number - one law, not a second spelling.
+                through_allowance: drilling::THROUGH_CLEAR,
+                clearance_z: hl.clearance,
+                retract_z: hl.retract,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                tolerance: *tolerance,
+                entry: Entry3D::Plunge,
+                helix_radius: 1.0,
+            })?;
+            (region, path)
+        }
+        // M2.4 C: helical thread milling. The pitch is the TOOL's,
+        // read the way the tap cycle reads it; a thread mill that
+        // cannot state one is refused here, by name. Every move
+        // posted is plain 3-axis interpolation - the spindle-sync
+        // word stays M3.3's machine-definition question, and this
+        // kind asks nothing of it.
+        OpParams::Thread {
+            infeed,
+            feed,
+            plunge_feed,
+            climb,
+            holes,
+            ..
+        } => {
+            if !(tool.pitch.is_finite() && tool.pitch > 0.0) {
+                return Err(GenError::Invalid(
+                    "a thread mill needs a positive pitch on the tool - the tap cycle's law, \
+                     read the same way".into(),
+                ));
+            }
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            let path = machining2d::thread_mill(&machining2d::ThreadParams {
+                holes: holes
+                    .iter()
+                    .map(|h| machining2d::ThreadHole {
+                        xy: h.xy,
+                        radius: h.radius,
+                        top_z: h.entry_z,
+                        floor_z: hl.bottom.unwrap_or(h.floor_z),
+                        stepped: h.stepped,
+                    })
+                    .collect(),
+                pitch: tool.pitch,
+                tool_diameter: d,
+                infeed: *infeed,
+                clearance_z: hl.clearance,
+                retract_z: hl.retract,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+            })?;
+            (region, path)
+        }
         // M5.2 stage A: the first turning kind. Which documents may
         // HOLD a Facing is the family door in CreateOperation; the
         // door in this arm is the TOOL - the kernel's no-gouge
@@ -1981,7 +2084,11 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         // the skin it offsets, and a leave would only move the
         // envelope's pass band (M5.2 F).
         | OpParams::FormTurning { .. }
-        | OpParams::BoringTurning { .. } => 0.0,
+        | OpParams::BoringTurning { .. }
+        // The thread mill owns the wave outright: the helix ends ON
+        // the major circle, and the infeed rungs before it only
+        // widen it (M2.4 C) - the threading answer on a mill.
+        | OpParams::Thread { .. } => 0.0,
         OpParams::Contour { stock_to_leave, .. }
         | OpParams::Pocket { stock_to_leave, .. }
         // The twins leave the pocket's shelf, same law (M2.4 A).
@@ -1991,6 +2098,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         // The circular ladder leaves the pocket's shelf, ring 0 eroded
         // off the wall by it (M2.4 B).
         | OpParams::Circular { stock_to_leave, .. }
+        // The boring ride leaves the wall's own shelf: the rim
+        // stands this far short of the model's circle (M2.4 C).
+        | OpParams::Bore { stock_to_leave, .. }
         | OpParams::Pocket3D { stock_to_leave, .. }
         // The ladder is the one rotary that LEAVES a shelf on purpose:
         // the finishing kinds own the ledge under a column's last cut,

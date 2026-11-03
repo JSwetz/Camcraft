@@ -101,6 +101,15 @@ pub fn current_stamp(
         crate::tools::ToolKind::Taper => w(&mut h, tool.tip_angle),
         _ => {}
     }
+    // A Thread OP times its helix against the TOOL's pitch (M2.4 C, the
+    // tap cycle's reading), whatever kind carries it - so the clause
+    // belongs to the operation, not the tool kind: the turning thread
+    // insert's pitch stays inert there (that ride reads pitch from
+    // params), and no pre-M2.4-C digest changes, because only the new
+    // operation kinds reach past this line.
+    if matches!(params, OpParams::Thread { .. }) {
+        w(&mut h, tool.pitch);
+    }
     params.stamp_with(world, setup, &mut h);
     match src {
         SrcRef::Stock => {

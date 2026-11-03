@@ -1181,6 +1181,70 @@ impl OpParams {
                     w(h, v);
                 }
             }
+            // The two hole-list rides (M2.4 C): the drill's digest
+            // law verbatim - the holes are params data, so they
+            // digest, and the Thread's pitch needs no word here
+            // because it is the TOOL's: the tool row carries it.
+            OpParams::Bore {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                stock_to_leave,
+                stepdown,
+                feed,
+                plunge_feed,
+                climb,
+                tolerance,
+                holes,
+            } => {
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh_opt(h, *bottom_z);
+                wh_opt(h, *retract_z);
+                for v in [*stock_to_leave, *stepdown, *feed, *plunge_feed, *tolerance] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u32(holes.len() as u32);
+                for hole in holes {
+                    wp2(h, hole.xy);
+                    w(h, hole.radius);
+                    w(h, hole.entry_z);
+                    w(h, hole.floor_z);
+                    h.write_u8(u8::from(hole.through));
+                    h.write_u8(u8::from(hole.stepped));
+                }
+            }
+            OpParams::Thread {
+                clearance_z,
+                retract_z,
+                top_z,
+                bottom_z,
+                infeed,
+                feed,
+                plunge_feed,
+                climb,
+                holes,
+            } => {
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh_opt(h, *bottom_z);
+                wh_opt(h, *retract_z);
+                for v in [*infeed, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+                h.write_u8(u8::from(*climb));
+                h.write_u32(holes.len() as u32);
+                for hole in holes {
+                    wp2(h, hole.xy);
+                    w(h, hole.radius);
+                    w(h, hole.entry_z);
+                    w(h, hole.floor_z);
+                    h.write_u8(u8::from(hole.through));
+                    h.write_u8(u8::from(hole.stepped));
+                }
+            }
         }
     }
 }

@@ -14,7 +14,13 @@ use super::*;
 /// `taper` word, and the three rows join the 2D mill's run after
 /// Trace, so the ladder shifts every pin index from the old Drill row
 /// up by three.
-pub const PROJECT_VERSION: u32 = 44;
+/// v45: the shape once more WITH the shift (M2.4 C) — the ParamsDto
+/// grows the Bore/Thread arms and the two rows seat IN their sections'
+/// runs (Thread closes Mill2D at 10, Bore joins Drilling at 12): the
+/// partition law wants contiguous runs and the family law wants the
+/// turning rows to stay the tail, so the rung steps the old Drill
+/// index by +1 and everything from the old Pocket3D row up by +2.
+pub const PROJECT_VERSION: u32 = 45;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {

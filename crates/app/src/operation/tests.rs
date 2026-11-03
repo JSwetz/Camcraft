@@ -185,8 +185,10 @@ fn stamp_follows_every_input() {
     // three blade rows to 24 - stage D's wave row to its true 25 -
     // stage E's three contour rides to 28 - stage E2's crown row to
     // 29 - stage F's boring row to 30 - M2.4 A's roughing twins to 32 -
-    // M2.4 B's engrave-chamfer-circular trio to its true 35.)
-    assert_eq!(KindInfo::ALL.len(), 35);
+    // M2.4 B's engrave-chamfer-circular trio to its true 35 -
+    // M2.4 C's pair, seated mid-run (the thread closes the 2D mill,
+    // the bore joins drilling), to its true 37.)
+    assert_eq!(KindInfo::ALL.len(), 37);
     for (i, row) in KindInfo::ALL.iter().enumerate() {
         assert_eq!(row.ty.ordinal(), i, "row {i} out of step with ordinal");
         assert_eq!(row.tag as usize, i, "digest tag must equal table order");

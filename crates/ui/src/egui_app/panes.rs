@@ -565,6 +565,14 @@ fn op_icon(kind: OpType) -> Icon {
         // from the inside (M5.2 F), same glyph by the no-new-asset
         // law the whole family keeps.
         OpType::FormTurning | OpType::BoringTurning => Icon::Face,
+        // The standalone boring ride lives in the drilling section -
+        // the drill's pixels, same word about a hole (M2.4 C, the
+        // twins' reuse law). The thread mill lives in the 2D mill's
+        // run and is a contour that closes on itself one pitch at a
+        // time - the contour's pixels, a circle peeled to a thread
+        // (the Chamfer2D precedent).
+        OpType::Bore => Icon::Drill,
+        OpType::Thread => Icon::Contour,
     }
 }
 

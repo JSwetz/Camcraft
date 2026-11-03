@@ -818,6 +818,39 @@ pub enum ParamsDto {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Standalone boring (M2.4 C). The optional heights ride the
+    /// drill's absent-means-law shape; the hole list is the drill's
+    /// `HoleDto` verbatim - recognition data, editable, stamped.
+    Bore {
+        clearance_z: HeightDto,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bottom_z: Option<HeightDto>,
+        stock_to_leave: f64,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        tolerance: f64,
+        holes: Vec<HoleDto>,
+    },
+    /// Helical thread milling (M2.4 C). The pitch rides no DTO -
+    /// it lives on the tool, like every other tool number.
+    Thread {
+        clearance_z: HeightDto,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retract_z: Option<HeightDto>,
+        top_z: HeightDto,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bottom_z: Option<HeightDto>,
+        infeed: f64,
+        feed: f64,
+        plunge_feed: f64,
+        climb: bool,
+        holes: Vec<HoleDto>,
+    },
 }
 
 /// The angle an absent `ramp_angle` means: 45°, the ground the

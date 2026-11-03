@@ -961,6 +961,51 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
     },
+    /// Standalone boring (M2.4 C). The hole list is params data, the
+    /// drill's own law: recognized by an action, undoable, stamped -
+    /// a model edit turns the op Stale through the source digest, it
+    /// never re-runs recognition behind the user's back. `bottom_z`
+    /// overrides every floor at once; `None` machines each hole to
+    /// its own. The ride is circular interpolation, so the wall must
+    /// be a circle the cutter can stand inside: a hole no wider than
+    /// the tool is refused by name at generate.
+    Bore {
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        /// Where the feed move opens in each hole (the cycles' R
+        /// plane law).
+        top_z: Height,
+        bottom_z: Option<Height>,
+        /// The rim stands this far short of the model's wall; `0.0`
+        /// finishes to nominal.
+        stock_to_leave: f64,
+        stepdown: f64,
+        feed: f64,
+        plunge_feed: f64,
+        /// CCW on the wall (climb) when true.
+        climb: bool,
+        /// Sagitta budget for the wall circle's arc fit.
+        tolerance: f64,
+        holes: Vec<Hole>,
+    },
+    /// Helical thread milling (M2.4 C). Pitch is the TOOL's, read at
+    /// generate the way the tap cycle reads it - a thread mill that
+    /// cannot state a pitch is the M1.6 refusal, named. `infeed` is
+    /// the radial step per turn and must stay inside the standard's
+    /// depth `0.5413 x pitch`; the ride lands on the major circle
+    /// whatever it is.
+    Thread {
+        clearance_z: Height,
+        retract_z: Option<Height>,
+        top_z: Height,
+        bottom_z: Option<Height>,
+        infeed: f64,
+        feed: f64,
+        plunge_feed: f64,
+        /// CCW for a right-hand thread.
+        climb: bool,
+        holes: Vec<Hole>,
+    },
 }
 
 impl OpParams {
@@ -1002,6 +1047,8 @@ impl OpParams {
             OpParams::MultiPassTurning { .. } => OpType::MultiPassTurning,
             OpParams::FormTurning { .. } => OpType::FormTurning,
             OpParams::BoringTurning { .. } => OpType::BoringTurning,
+            OpParams::Bore { .. } => OpType::Bore,
+            OpParams::Thread { .. } => OpType::Thread,
         }
     }
 
@@ -1075,7 +1122,12 @@ impl OpParams {
             | OpParams::FormTurning { .. }
             // The boring bar is that kinematic inside a hole: the
             // work spins, the nose walks the wall (M5.2 F).
-            | OpParams::BoringTurning { .. } => None,
+            | OpParams::BoringTurning { .. }
+            // Standalone boring and thread milling ride the hole list
+            // in plain world XY - the drilling family's own answer
+            // (M2.4 C): a tilted plane has no round hole to find.
+            | OpParams::Bore { .. }
+            | OpParams::Thread { .. } => None,
         }
     }
 
@@ -1117,7 +1169,9 @@ impl OpParams {
             | OpParams::TaperTurning { clearance_z, .. }
             | OpParams::MultiPassTurning { clearance_z, .. }
             | OpParams::FormTurning { clearance_z, .. }
-            | OpParams::BoringTurning { clearance_z, .. } => *clearance_z,
+            | OpParams::BoringTurning { clearance_z, .. }
+            | OpParams::Bore { clearance_z, .. }
+            | OpParams::Thread { clearance_z, .. } => *clearance_z,
         }
     }
 
@@ -1174,7 +1228,11 @@ impl OpParams {
             | OpParams::FormTurning { top_z, .. }
             // The bore window's high station: the wall the ride
             // ends at stands at or below it (M5.2 F).
-            | OpParams::BoringTurning { top_z, .. } => *top_z,
+            | OpParams::BoringTurning { top_z, .. }
+            // The holes' entry plane: the region the ride dips under
+            // begins where the model's mouths stand (M2.4 C).
+            | OpParams::Bore { top_z, .. }
+            | OpParams::Thread { top_z, .. } => *top_z,
         }
     }
 
@@ -1246,7 +1304,12 @@ impl OpParams {
                 f(*top_z);
                 f(*bottom_z);
             }
-            OpParams::Drill { clearance_z, retract_z, top_z, bottom_z, .. } => {
+            // The boring ride and the thread mill carry the drill's
+            // four - the hole list's floors are params data, not
+            // section heights (M2.4 C).
+            OpParams::Drill { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::Bore { clearance_z, retract_z, top_z, bottom_z, .. }
+            | OpParams::Thread { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
                 f(*top_z);
