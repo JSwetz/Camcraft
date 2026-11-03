@@ -67,15 +67,15 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 | Engrave | ✅ | M2.4 |
 | 2D Chamfer | ✅ | M2.4 |
 | Circular (pocket / vault) | ✅ | M2.4 |
-| Thread (helical milling; tapping is M1.6) | 📋 | M2.4 |
-| Bore (standalone op; the cycle is M1.6) | ⚠️ cycle only | M2.4 |
+| Thread (helical milling; tapping is M1.6) | ✅ | M2.4 |
+| Bore (standalone op; the cycle is M1.6) | ✅ | M2.4 |
 
 ### Milling — 3D
 
 | Operation | Status | Home |
 |-----------|--------|------|
 | 3D Adaptive roughing | ✅ | M2.1 |
-| 3D Offset pocket roughing | ⚠️ level staircase today, not offsets | M2.4 |
+| 3D Offset pocket roughing | ⚠️ level staircase today, not offsets | M2.5 |
 | 3D Contour | ✅ | M2.2 |
 | Horizontal (waterline) | ✅ | M2.2 |
 | Parallel | ✅ | M2.2 |
@@ -1077,15 +1077,16 @@ before touching metal.
       holds by construction.
 
 ### M2.4 - 2D Completeness
-**Goal: every 2D name in the catalog exists.** — 📋
+**Goal: every 2D name in the catalog exists.** — ✅
 
 - **2D Adaptive roughing**: the M2.1 engagement discipline brought to the
       plane - trochoidal step-in and constant-load passes specced from
       published roughing literature, rest judged by the M2.3 dexel sim
 - **2D Offset pocket roughing** (style-A): concentric offsets from the
       boundary inward; islands and tool-radius clearance by the same
-      computation M2.1 uses for its staircase, and the 3D offset-pocket
-      ⚠️ in the catalog clears here too
+      computation M2.1 uses for its staircase. (The 3D offset-pocket ⚠️
+      once rode this bullet - it is not a 2D name, so the goal line
+      cannot carry it; its promise moved to M2.5, row 78 retagged.)
 - **Engrave**, **2D Chamfer** (chamfer mill along selected edges),
       **Circular** (circular pocket / vault), **Bore** as a standalone op
       beside M1.6's boring cycles
@@ -1107,6 +1108,11 @@ before touching metal.
 - **Blend / Morph / Corner / Project-generalization**, **Flow** (flowline
       on freeform; ruled-surface flow waits for M5.1's axis control),
       **Deburr** (edge-break toolpaths; pairs with M2.4's chamfer)
+- **3D Offset pocket roughing**: the catalog ⚠️ M2.4 retired to here -
+      roughing by OFFSET SHELLS of the model (the boundary eroded in
+      the surface's own normals, waterlined where the shell turns
+      steep), not the level ladder's XY rings; the M2.3 dexel sim
+      judges the rest, as ever
 
 ---
 

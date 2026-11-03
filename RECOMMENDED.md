@@ -7277,3 +7277,108 @@ layout-identical.
   clean-room, the vault is our own stated paraboloid, and the ring
   tiling is the pocket waterline law restricted to a disk. No
   HSMWorks posts, params tables or text consulted.
+
+## M2.4 C - the pair seated in its runs: a circle bored, a helix timed (2026-11-03, stage C)
+
+- The two rows seat MID-RUN (Thread at 10 closing the Mill2D run,
+  Bore at 12 behind Drill), tail-append died on the ribbon's own
+  tests: `sections_partition_the_registry` demands each section be a
+  CONTIGUOUS run in the table and `family_is_derived_not_forked`
+  demands Turning stay the trailing run - the first draft tacked
+  Bore/Thread at 35/36 and both laws failed on the spot. The lesson
+  the ledger keeps: `Section::kinds()` being a filter made a
+  tail-append READ fine in the UI, which is not the same as being
+  LEGAL - the partition and family laws are the taxonomy, the
+  ribbon only draws it. The v44 -> v45 rung therefore takes a
+  two-boundary step (the shift the first three rungs never needed):
+  old index 10 (Drill) gains +1 for the Thread's seat, old 11 up
+  (Pocket3D) gains +2 for the Bore's - ribbon.rs's v44 rung test
+  says it in pins, mill2d_c.rs in G-code.
+- PROJECT_VERSION 44 -> 45: beyond the pin shift, the two ParamsDto
+  arms are NEW VARIANTS, so a v44 build meeting one must refuse with
+  the version word, not an unknown-variant serde word - the M2.4
+  A/B reading, unchanged. Every OTHER v45 byte is a v44 byte: the
+  pair ride `type` and `params`, no old field moved.
+- The thread's PITCH is the TOOL's number, not a params field - the
+  tap cycle's law read the same way (M1.6's threading already gets
+  its pitch from the tool row). A thread mill that cannot state one
+  is refused at the app door BY NAME before the kernel's own door
+  (which guards its own numbers) sees the job. Chosen over a pitch
+  param: two sources of truth for one thread means the pane, the
+  digest, and the ride can each believe a different thread.
+- The stamp law: current_stamp digests tool.pitch for Thread OPS via
+  an operation-scoped clause after the tool-kind match, so a Tap
+  tool's pitch change marks the op Stale instead of silently re-
+  posting the old helix. Chosen over a guarded arm inside
+  `match tool.kind` - the ToolKind::Thread/Form/Taper arms match
+  before a later guard could fire, a shadowing the compiler cannot
+  show you. Zero churn to every pre-M2.4-C digest (the turning
+  insert's pitch stays inert - that ride reads pitch from params
+  already): only the two new kinds reach past the clause. The Prime
+  Directive's stale-tracking, extended to the pair on day one.
+- Bore is the drilling law on a circle, not a second cycle: the
+  per-hole entry and floor are the MODEL's (h.top_z = the hole's
+  entry_z, hl.bottom overrides every floor at once when authored),
+  through holes drop the drill cycle's own exit gift (the kernel
+  takes through_allowance = drilling::THROUGH_CLEAR - one law, not
+  a second spelling), rings are closed 256-chord circles swept
+  stock_to_leave deep with tolerance as the chord sag. A stepped
+  hole (the counterbore fold) and a hole no wider than the cutter
+  (no circle left inside) are the kernel's named refusals at its
+  doors. Entry is hardcoded Entry3D::Plunge with helix_radius
+  inert: helical boring into a finished wall is M8.x's entry-family
+  question, and this stage does not invent an answer to it - the
+  debt is stated here, not hidden in a bool.
+- Thread geometry: tangent start rho_0 = R - r (rim stands on the
+  wall, cutting from zero), radial depth h = 0.5413 * pitch - the
+  ISO 724 internal-thread depth, the one constant the kernel
+  borrows from a published standard - turns = max(n_z, n_r) + 1 so
+  the ride ends when BOTH jobs (depth and profile) are done, and
+  the retract walks the same helix REVERSED at feed. Chosen over a
+  rapid out of a fresh flank: pulling a spinning mill straight up
+  through a thread it just cut is the gouge the Prime Directive
+  names. The axis plunge at rho = 0 is inside the hole's own air -
+  legitimate, and the envelope test skips it BY VALUE (rho < 1e-6),
+  not with a widened fudge.
+- Seeds and panes: the drill's four heights ride both; Bore seeds
+  leave 0.0 / tolerance 0.01 (finishing numbers - the kind is the
+  final word on the hole), Thread seeds infeed 0.1 (a light pass;
+  the validator caps it at the standard's depth for whatever pitch
+  the mounted tool states) and opens climb CCW - the standard read
+  for a right-hand thread. Neither kind loses its Passes group (the
+  trio's exemption law): boring says leave + tolerance, threading
+  says radial infeed per pass. The mid-run seats DO need drift-table
+  rows (ui tests: the field-labels guard is positional over the milled
+  kinds' prefix, and Thread/Drill/Bore now live inside it) - the two
+  rows ride beside the drill's, their Geometry a hole list, their
+  Heights the drill's promise plus the stepdown's, their Passes the
+  one number each kind exists to speak.
+- detect_holes answers for the whole hole-list family (Drill/Bore/
+  Thread share the z-holes commit) but the radial cross-hole list
+  stays the drill's alone - the only ride that stores one. Chosen
+  over a third copy of the recognition path, and the non-drill
+  refusal says so in its own words now.
+- Icons ride reuse, the no-new-asset law: Bore => Icon::Drill (the
+  drilling section's glyph should say so), Thread => Icon::Contour
+  (a circle peeled to a thread, the Chamfer2D precedent).
+- The spindle-sync word stays M3.3's machine-definition question:
+  every move this kind posts is plain linear/arc interpolation
+  (G1/G2/G3 with Z timed against the angle by the helix itself), so
+  a machine that cannot sync C asks nothing extra of it - unlike
+  rigid tapping, this path never claims the spindle turns the
+  thread. When M3.3 grows machine capabilities, the refusal (if any
+  kind ever needs one) gets its door there, on purpose.
+
+- Close-out of M2.4 as a milestone: the goal line reads ✅ with C, and
+  the catalog's 3D-offset-pocket ⚠️ (row 78) is RETAGGED to M2.5 by
+  decision, not drift. Chosen because the ⚠️ names a 3-D kind and the
+  M2.4 goal line speaks only of 2D names - keeping the row under a
+  milestone whose goal cannot cover it is the kind of silent status
+  debt the Prime Directive's honesty clause forbids. Considered and
+  dropped: closing row 78 as "done" because Pocket3D already offsets
+  per level - the row's own words say the ladder is "not offsets", and
+  that verdict stands. Considered and dropped: a new M2.4 D stage -
+  one ⚠️ row does not earn a milestone, and M2.5 is precisely "3-axis
+  strategy completeness", the honest home for an offset-shell
+  rougher. The prose keeps a pointer at the old seat so the move is
+  traceable from either end.
