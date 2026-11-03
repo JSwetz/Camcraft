@@ -51,7 +51,12 @@
 //! - **Ladder law.** Each run: rapid over its start, vertical plunge
 //!   down the tangent column, feeds along the locus, hop to
 //!   clearance. Corner runs are different features, not levels of
-//!   one ladder, so between runs the hop is to clearance z.
+//!   one ladder, so between runs the hop is to clearance z. Moves
+//!   speak TIPS, as everywhere else in finishing3d: the locus is a
+//!   center line, so every emitted point is its center lowered by
+//!   `r` - a path that posted centers would run the ball a radius
+//!   clear of the crease it was made for, and the envelope scan's
+//!   `+r` lift would read that silence as a clean bill.
 
 use std::collections::HashMap;
 
@@ -267,9 +272,10 @@ fn loci(
             Point3::new(first.x, first.y, p.clearance_z),
             None,
         );
-        b.push(MoveKind::Plunge, first, Some(p.plunge_feed));
+        let tip = |q: Point3| Point3::new(q.x, q.y, q.z - r);
+        b.push(MoveKind::Plunge, tip(first), Some(p.plunge_feed));
         for &pt in &run[1..] {
-            b.push(MoveKind::Feed, pt, Some(p.feed));
+            b.push(MoveKind::Feed, tip(pt), Some(p.feed));
         }
     }
     let cur = b.at();

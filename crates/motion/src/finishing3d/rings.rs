@@ -7,7 +7,7 @@ use crate::machining2d::{fit_arcs, GenError};
 
 use super::params::{Finish3DParams, FinishPattern, SPLIT_MZ, TOUCH_EPS, dirs, levels, validate};
 use super::scan::{level_region, push_walk};
-use super::support::{Sup, build_sups, closest_pt_tri, dist2_pt_tri};
+use super::support::{Sup, build_sups, closest_pt_tri, column_clear, dist2_pt_tri};
 
 /// The contact normal at a tangent center: the unit vector from the
 /// nearest facet point toward the center. `None` when the nearest
@@ -191,9 +191,15 @@ pub(super) fn emit_rings(
     // pattern - and every file that predates this field - gets
     // `None` here and walks its loops exactly as the waterline
     // always did, byte for byte.
-    let part: Option<Vec<Sup>> = matches!(p.pattern, FinishPattern::SteepShallow)
-        .then(|| build_sups(facets, r));
+    // The supports are built for every pattern now: the partition
+    // still consults them only when its flag is up, but the entry
+    // column below is a certifier's question, not a partition's
+    // (M2.5 A verdict lane: a plunge that digs through a canopy on
+    // its way to a ring cuts nothing - it lies).
+    let sups = build_sups(facets, r);
+    let steep = matches!(p.pattern, FinishPattern::SteepShallow);
     let mut any = false;
+    let mut refused = 0usize;
     for &z_tip in zs {
         let region = level_region(facets, r, z_tip + r, ds)?;
         if region.is_empty() {
@@ -226,9 +232,10 @@ pub(super) fn emit_rings(
             // The partition (M2.5 A) breaks the loop at the border
             // into runs the ladder owns; every other pattern rides
             // the whole loop, as it always did.
-            let runs: Vec<(Vec<Point2>, bool)> = match &part {
-                None => vec![(order, true)],
-                Some(sups) => ring_runs(&order, sups, z_tip + r, r, p.tolerance),
+            let runs: Vec<(Vec<Point2>, bool)> = if steep {
+                ring_runs(&order, &sups, z_tip + r, r, p.tolerance)
+            } else {
+                vec![(order, true)]
             };
             for (mut poly, closed) in runs {
                 if closed {
@@ -252,7 +259,15 @@ pub(super) fn emit_rings(
                 None => cur.z,
                 Some(lz) if lz != z_tip => p.clearance_z,
                 Some(_) => hop,
-            };
+            }
+            // A ring programmed above the approach plane is still
+            // reached by descending, never by an UPWARD plunge:
+            // the traverse plane lifts to meet the cut - the
+            // march's law (march.rs), now the rings' too. A
+            // "plunge" that rises through the flank is the exact
+            // gouge the cone verdict measured (2.4963 mm at the
+            // spire's first ring, tip 30 under a clearance of 25).
+            .max(z_tip);
                 // M8.2 B: the ramped first contact. The plunge is the
                 // law's own entry; `entry_ramp` is the opt-in that
                 // engages a steep wall along its contact normal instead -
@@ -307,14 +322,14 @@ pub(super) fn emit_rings(
                 if let Some(cs) = ramped {
                     // Air to the start column at the approach plane...
                     match *last {
-                        None => b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, cur.z), None),
+                        None => b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, approach_z), None),
                         Some(lz) => {
                             if lz != z_tip {
-                                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
-                                b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, p.clearance_z), None);
+                                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, approach_z), None);
+                                b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, approach_z), None);
                             } else {
-                                b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
-                                b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, hop), None);
+                                b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, approach_z), Some(p.feed));
+                                b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, approach_z), None);
                             }
                         }
                     }
@@ -335,21 +350,38 @@ pub(super) fn emit_rings(
                         Some(p.plunge_feed),
                     );
                 } else {
+                    // The column law (M2.5 A verdict lane): the tangent
+                    // stop is clear by construction - the DESCENT must
+                    // answer for itself. Under a canopy no vertical
+                    // entry reaches a ring; a run that cannot be begun
+                    // legally is refused by note, and the material it
+                    // would have ridden stands as rest, reported.
+                    if !column_clear(
+                        entry.x,
+                        entry.y,
+                        z_tip + r,
+                        approach_z + r,
+                        r - p.tolerance,
+                        &sups,
+                    ) {
+                        refused += 1;
+                        continue;
+                    }
                     match *last {
                         None => {
-                            b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
+                            b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, approach_z), None);
                         }
                         Some(lz) => {
                             if lz != z_tip {
                                 // Level to level: the new level engages
                                 // material the previous one never touched -
                                 // climb to the one plane safe over all of it.
-                                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
-                                b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, p.clearance_z), None);
+                                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, approach_z), None);
+                                b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, approach_z), None);
                             } else {
                                 // Ring to ring within one level: the hop.
-                                b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
-                                b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, hop), None);
+                                b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, approach_z), Some(p.feed));
+                                b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, approach_z), None);
                             }
                         }
                     }
@@ -364,6 +396,11 @@ pub(super) fn emit_rings(
                 any = true;
             }
         }
+    }
+    if refused > 0 {
+        b.note(format!(
+            "rings: {refused} ring entries refused - their plunge column from the approach plane crosses the solid; what hides there stands as rest, reported not cut"
+        ));
     }
     Ok(any)
 }

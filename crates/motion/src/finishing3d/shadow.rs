@@ -6,7 +6,7 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
 use super::params::{Finish3DParams, refinement_floor, scallop_stepdown, scallop_stepover, validate};
-use super::support::{Sup, build_sups, support_at};
+use super::support::{Sup, build_sups, plunge_support};
 use super::march::{emit_runs, march_curve};
 use super::raster::{placement_guard, rings_and_tail};
 /// The center-shadow of the shallow terrain: the union of every
@@ -166,7 +166,14 @@ pub(super) fn shadow_pass(
     }
     const MAX_RINGS_CAP: usize = 8192;
     let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
-    let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, sups);
+    let trimmed = std::cell::Cell::new(0usize);
+    let sup = |q: Point2| {
+        let (c, cut) = plunge_support(q.x, q.y, r, p.bottom_z, p.clearance_z + r, sups);
+        if cut {
+            trimmed.set(trimmed.get() + 1);
+        }
+        c
+    };
     let mut runs: Vec<Vec<(Point2, f64)>> = Vec::new();
     let mut reg = shadow.clone();
     let mut k = 0usize;
@@ -206,6 +213,12 @@ pub(super) fn shadow_pass(
             break;
         }
         reg = reg.offset(-step)?;
+    }
+    if trimmed.get() > 0 {
+        b.note(format!(
+            "{family}: {} ground samples refused - their plunge column from clearance crosses the solid; what hides there stands as rest, reported not cut",
+            trimmed.get()
+        ));
     }
     if runs.is_empty() {
         return Ok(false);

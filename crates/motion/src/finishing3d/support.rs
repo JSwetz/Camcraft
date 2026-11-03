@@ -116,6 +116,66 @@ pub(super) fn ball_clear(c: Point3, sups: &[Sup], r: f64) -> bool {
     true
 }
 
+/// May the ball be lowered along the vertical column at XY `(x, y)`
+/// from the center plane `top_cz` down to center height `cz` without
+/// cutting on the way? `ball_clear` proves the STOP, not the DESCENT:
+/// ground that hides beneath a canopy - the cone's base disc under
+/// its own flank - keeps a tangent-clear center and is still
+/// unreachable, because the ball crosses the canopy mid-column. The
+/// exact certifier is the segment-triangle distance (the sweep of a
+/// ball along a segment IS that segment inflated by `r` - the same
+/// question the envelope scan asks, asked before posting rather than
+/// after); the padded footprint filters facets exactly as
+/// `ball_clear`'s does, since a column plus a radius only meets
+/// triangles whose padded footprint it enters.
+///
+/// `limit` is the currency of the answer: an analytic tangent center
+/// measures exactly `r` and belongs to `r - TOUCH_EPS`; a start point
+/// read off a tessellated ring boundary sits a chord-sag inside the
+/// true locus and belongs to `r - tol`, the same debt `leg_clears`
+/// states.
+pub(super) fn column_clear(x: f64, y: f64, cz: f64, top_cz: f64, limit: f64, sups: &[Sup]) -> bool {
+    use crate::stock_sim::dist_seg_tri;
+    let (hi, lo) = (top_cz.max(cz), top_cz.min(cz));
+    let (a, b) = (Point3::new(x, y, hi), Point3::new(x, y, lo));
+    for s in sups {
+        if x < s.xmin || x > s.xmax || y < s.ymin || y > s.ymax {
+            continue; // outside the padded footprint: the swept ball cannot reach it
+        }
+        let t = Triangle::new(s.tri[0], s.tri[1], s.tri[2]);
+        if dist_seg_tri(a, b, &t) < limit {
+            return false;
+        }
+    }
+    true
+}
+
+/// The march ground for families that enter by vertical plunge: the
+/// support's answer, but only where the descent is possible. Returns
+/// the center height and whether the column law TRIMMED an answer
+/// `support_at` had given - a trimmed ground is loud (a pass note),
+/// never a silently vanished floor; the rest scan answers for what
+/// stays under the canopy.
+pub(super) fn plunge_support(
+    x: f64,
+    y: f64,
+    r: f64,
+    floor_tip: f64,
+    top_cz: f64,
+    sups: &[Sup],
+) -> (Option<f64>, bool) {
+    match support_at(x, y, r, floor_tip, sups) {
+        None => (None, false),
+        Some(cz) => {
+            if column_clear(x, y, cz, top_cz, r - TOUCH_EPS, sups) {
+                (Some(cz), false)
+            } else {
+                (None, true)
+            }
+        }
+    }
+}
+
 /// The tangent-center height of a ball resting on one shallow facet
 /// above center XY `(x, y)`: the contact `q = (x, y) − r·m_xy` must
 /// fall inside the facet's XY projection (a shallow facet's

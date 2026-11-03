@@ -6,7 +6,7 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
 use super::params::{Finish3DParams, refinement_floor, scallop_stepdown, scallop_stepover, validate};
-use super::support::{build_sups, support_at};
+use super::support::{build_sups, plunge_support};
 use super::march::{emit_runs, march_curve};
 use super::raster::{placement_guard, rings_and_tail, shallow_footprint};
 /// Radial finishing (M2.2d): `N = ceil(PI·R/s)` CHORDS through the
@@ -34,7 +34,14 @@ pub fn radial(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
         let n = (std::f64::consts::FRAC_PI_2 * 2.0 * rad / step).ceil().max(1.0);
         placement_guard(step, n, "radial", MAX_CHORDS)?;
         let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
-        let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, &sups);
+        let trimmed = std::cell::Cell::new(0usize);
+        let sup = |q: Point2| {
+            let (c, cut) = plunge_support(q.x, q.y, r, p.bottom_z, p.clearance_z + r, &sups);
+            if cut {
+                trimmed.set(trimmed.get() + 1);
+            }
+            c
+        };
         let mut runs: Vec<Vec<(Point2, f64)>> = Vec::new();
         for k in 0..n as i64 {
             let th = std::f64::consts::PI * k as f64 / n;
@@ -62,6 +69,12 @@ pub fn radial(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
         if !runs.is_empty() {
             emit_runs(&mut b, p, r, &sups, &runs, false);
             emitted = true;
+        }
+        if trimmed.get() > 0 {
+            b.note(format!(
+                "radial: {} ground samples refused - their plunge column from clearance crosses the solid; what hides there stands as rest, reported not cut",
+                trimmed.get()
+            ));
         }
     }
     rings_and_tail(b, p, r, facets, emitted)
@@ -95,7 +108,14 @@ pub fn spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
         let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
         let th_end = std::f64::consts::TAU * (rad - step * 0.5) / step;
         let r_of = |th: f64| rad - step * th / std::f64::consts::TAU;
-        let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, &sups);
+        let trimmed = std::cell::Cell::new(0usize);
+        let sup = |q: Point2| {
+            let (c, cut) = plunge_support(q.x, q.y, r, p.bottom_z, p.clearance_z + r, &sups);
+            if cut {
+                trimmed.set(trimmed.get() + 1);
+            }
+            c
+        };
         let pos = |th: f64| {
             let rr = r_of(th).max(0.0);
             let (cs, sn) = th.sin_cos();
@@ -121,6 +141,12 @@ pub fn spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
         if !pieces.is_empty() {
             emit_runs(&mut b, p, r, &sups, &pieces, false);
             emitted = true;
+        }
+        if trimmed.get() > 0 {
+            b.note(format!(
+                "spiral: {} ground samples refused - their plunge column from clearance crosses the solid; what hides there stands as rest, reported not cut",
+                trimmed.get()
+            ));
         }
     }
     rings_and_tail(b, p, r, facets, emitted)

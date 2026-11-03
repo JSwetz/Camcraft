@@ -6,7 +6,7 @@ use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
 use super::params::{Finish3DParams, FinishPattern, dirs, levels, refinement_floor, scallop_stepdown, scallop_stepover, validate};
-use super::support::{Sup, build_sups, support_at};
+use super::support::{Sup, build_sups, plunge_support};
 use super::march::{emit_runs, march_curve};
 use super::rings::emit_rings;
 /// One Z-following raster pass: lines perpendicular to `(ux, uy)`
@@ -63,7 +63,18 @@ pub(super) fn raster_pass(
     let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
     let eps_chord = p.tolerance * 0.25;
     let at = |t: f64, v: f64| Point2::new(ux * t + vx * v, uy * t + vy * v);
-    let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, sups);
+    // Ground a vertical plunge can actually REACH: a tangent center
+    // under a canopy is not a floor the tool may promise (support's
+    // column law), and a refusal this pass makes is a note, never a
+    // quiet vanishing.
+    let trimmed = std::cell::Cell::new(0usize);
+    let sup = |q: Point2| {
+        let (c, cut) = plunge_support(q.x, q.y, r, p.bottom_z, p.clearance_z + r, sups);
+        if cut {
+            trimmed.set(trimmed.get() + 1);
+        }
+        c
+    };
 
     let n_lines = ((vmax - vmin) / step).floor() as i64 + 1;
     let mut runs: Vec<Vec<(Point2, f64)>> = Vec::new();
@@ -88,6 +99,12 @@ pub(super) fn raster_pass(
             }
         }
         runs.extend(pieces);
+    }
+    if trimmed.get() > 0 {
+        b.note(format!(
+            "raster: {} ground samples refused - their plunge column from clearance crosses the solid; what hides there stands as rest, reported not cut",
+            trimmed.get()
+        ));
     }
     if runs.is_empty() {
         return Ok(false);

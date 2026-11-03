@@ -6607,9 +6607,11 @@ fn the_crease_pair_generates_through_the_operation_layer() {
         history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
         assert_eq!(status(&world, name), OpStatus::Ok, "{name} must seat and cut");
         let moves = cache(&world, name).expect("cached").path.moves;
+        // Moves speak tips: the ring's locus stands at floor + r
+        // (z 8.0), its TOOLPATH points at floor level (z 5.0).
         let ring = moves.iter().any(|m| {
             matches!(m.kind, camcraft_app::cl::MoveKind::Feed)
-                && (m.to.z - 8.0).abs() < 1e-9
+                && (m.to.z - 5.0).abs() < 1e-9
                 && (m.to.x.abs() - 3.0).abs() < 1e-9
                 && (m.to.y.abs() - 3.0).abs() < 1e-9
         });

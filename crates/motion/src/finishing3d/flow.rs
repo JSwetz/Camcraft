@@ -33,7 +33,7 @@ use crate::machining2d::GenError;
 use super::march::{emit_runs, march_curve};
 use super::params::{Finish3DParams, refinement_floor, scallop_stepdown, scallop_stepover, validate};
 use super::raster::rings_and_tail;
-use super::support::{build_sups, support_at};
+use super::support::{build_sups, plunge_support};
 
 /// The seed lattice and the traced-line exclusion, both as a
 /// fraction of the commanded stepover. The law they keep together
@@ -108,7 +108,14 @@ pub fn flow(
         // kept under the same eps_chord budget the straight march
         // gives its chords.
         let turn_max = ((8.0 * p.tolerance * 4.0) / step).min(0.35);
-        let sup = |q: Point2| support_at(q.x, q.y, r, p.bottom_z, &sups);
+        let trimmed = std::cell::Cell::new(0usize);
+        let sup = |q: Point2| {
+            let (c, cut) = plunge_support(q.x, q.y, r, p.bottom_z, p.clearance_z + r, &sups);
+            if cut {
+                trimmed.set(trimmed.get() + 1);
+            }
+            c
+        };
         let delta0 = scallop_stepdown(r, p.tolerance).max(1e-6);
         let eps_chord = p.tolerance * 0.25;
         // Traced territory, bucketed one cell per seed spacing: a
@@ -196,6 +203,12 @@ pub fn flow(
                 }
                 row_odd = !row_odd;
             }
+        }
+        if trimmed.get() > 0 {
+            b.note(format!(
+                "flow: {} ground samples refused - their plunge column from clearance crosses the solid; what hides there stands as rest, reported not cut",
+                trimmed.get()
+            ));
         }
     }
     rings_and_tail(b, p, r, facets, emitted)

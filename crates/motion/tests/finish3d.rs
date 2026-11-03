@@ -372,17 +372,30 @@ fn box_walls_are_pure_structure() {
 #[test]
 #[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn overhang_is_caught_by_the_measurement() {
-    // The module's entry law: a vertical plunge over an overhang
-    // violates the tangent promise. A sphere run past its equator has
-    // exactly that - and the envelope must REFUSE LOUD, because silent
-    // gouge is the worst failure mode without exception.
+    // The module's entry law, stated twice by its own history. This
+    // fixture used to DOCUMENT the violation: a vertical plunge over
+    // an overhang breaks the tangent promise, a sphere run past its
+    // equator is exactly that, and the assert demanded the envelope
+    // CAUGHT the gouge the generator committed (silent gouge being
+    // the worst failure mode without exception). M2.5 A's verdict
+    // lane fixed the generator - the rings' entry plunge is now
+    // column-certified - so the violation never reaches the measure.
+    // The law the same assert now protects is stronger: the refused
+    // entries speak (a counted note), the cut moves stay inside
+    // budget, and the ground under the equator stands as REPORTED
+    // rest, never quietly skipped.
     let f = sphere_cap(20.0, 0.9 * PI, 10, 96);
     let t = waterline(&f, &params(16.0, -16.0)).expect("sphere waterline");
     let rep = envelope(&f, &t);
     assert!(
-        rep.gouge_mm > gate(rep.cell),
-        "the overhang gouge went unmeasured: {:?}",
+        rep.gouge_mm <= gate(rep.cell),
+        "an entry the column law could refuse still gouged: {:?}",
         rep
+    );
+    assert!(
+        t.notes.iter().any(|n| n.contains("plunge column")),
+        "the refused entries went quiet: {:?}",
+        t.notes
     );
     let warns = verify_finish(&f, &t, 20.0);
     assert!(
@@ -2289,11 +2302,22 @@ fn the_split_leaves_nothing_uncut_on_either_side_of_the_border() {
     };
     let t = f(&cone, FinishPattern::SteepShallow, 30.0, 0.0);
     let rep = envelope(&cone, &t);
+    // The cone's base disc lies UNDER its own flank - a roof. From
+    // clearance 25 no vertical entry reaches it: the ball crosses the
+    // flank mid-column (the old path's plunges gouged exactly there,
+    // root-caused at cz 9 on rho 14.8). So the march now refuses that
+    // ground by note, the rings stand off the flank clean, and the
+    // floor stands as the rest no plunge at this clearance can
+    // promise - reported honestly, never cut by a lie.
     assert!(
-        rep.gouge_mm <= gate(rep.cell) && rep.rest_mm <= gate(rep.cell),
-        "cone split {} {}",
-        rep.gouge_mm,
-        rep.rest_mm
+        rep.gouge_mm <= gate(rep.cell),
+        "cone split gouges {} mm",
+        rep.gouge_mm
+    );
+    assert!(
+        t.notes.iter().any(|n| n.contains("plunge column")),
+        "the trimmed floor went quiet: {:?}",
+        t.notes
     );
     let wedge = tilted(std::f64::consts::PI / 6.0, 6.0);
     let t = f(&wedge, FinishPattern::SteepShallow, 13.4, 4.0);
@@ -2350,11 +2374,14 @@ fn v_groove(alpha_deg: f64) -> Vec<Triangle> {
 }
 
 /// Every ball-center below the clearance, plunge heads included.
+/// Moves speak tips (the convention of the whole module), so this
+/// lifts what it reads by `r` - the crease kernels hold their law
+/// in centers and emit them lowered.
 fn centers(t: &Toolpath) -> Vec<Point3> {
     t.moves
         .iter()
         .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge) && m.to.z < 25.0 - 1e-6)
-        .map(|m| m.to)
+        .map(|m| p3(m.to.x, m.to.y, m.to.z + R))
         .collect()
 }
 

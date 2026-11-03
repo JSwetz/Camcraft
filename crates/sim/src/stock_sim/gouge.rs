@@ -155,7 +155,10 @@ pub(super) fn facet_gouge(
 /// distance 0, the one configuration no endpoint or edge can witness
 /// (Ericson, "Real-Time Collision Detection" 5.1: the reduction is
 /// complete with all four enumerated - the face test is that fourth).
-fn dist_seg_tri(a: Point3, b: Point3, t: &Triangle) -> f64 {
+/// Made public for M2.5 A's verdict-lane fix: finishing3d's plunge
+/// law asks the same sweep question the envelope scan asks - does the
+/// ball, run along this segment, ever come nearer than r to a facet.
+pub fn dist_seg_tri(a: Point3, b: Point3, t: &Triangle) -> f64 {
     let (v0, v1, v2) = (t.a, t.b, t.c);
     let (e0, e1) = (sub(v1, v0), sub(v2, v0));
     let n = cross(e0, e1);
