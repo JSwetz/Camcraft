@@ -398,6 +398,13 @@ pub enum ParamsDto {
         /// like `ramp`.
         #[serde(default)]
         entry_ramp: bool,
+        /// Absent means the scallop law `2√(r·tol)` spaces the ring
+        /// ladder - what every v45 file and every pattern but Steep-
+        /// and-shallow runs (M2.5 A). Absent spells None exactly like
+        /// `stepover`: the derived ladder is authored by the two
+        /// numbers already in the file, not stored a third time.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        steep_stepover: Option<f64>,
     },
     /// Declared at v24 with the simultaneous-axis kinds (M5.1 stage
     /// C). The renames state the tags for the familiar reason - the
@@ -881,6 +888,11 @@ pub enum FinishPatternDto {
     Contour,
     /// M2.2e, same law: the silhouette lifted onto the surface.
     Project,
+    /// M2.5 A, same law: the auto-split as a border, each side of
+    /// the 45° line with its own spacing number.
+    SteepShallow,
+    /// M2.5 A, same law: the floors only, one pass per shrink.
+    Flat,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -894,6 +906,8 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::Spiral => crate::finishing3d::FinishPattern::Spiral,
             FinishPatternDto::Contour => crate::finishing3d::FinishPattern::Contour,
             FinishPatternDto::Project => crate::finishing3d::FinishPattern::Project,
+            FinishPatternDto::SteepShallow => crate::finishing3d::FinishPattern::SteepShallow,
+            FinishPatternDto::Flat => crate::finishing3d::FinishPattern::Flat,
         }
     }
 }
@@ -909,6 +923,8 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::Spiral => FinishPatternDto::Spiral,
             crate::finishing3d::FinishPattern::Contour => FinishPatternDto::Contour,
             crate::finishing3d::FinishPattern::Project => FinishPatternDto::Project,
+            crate::finishing3d::FinishPattern::SteepShallow => FinishPatternDto::SteepShallow,
+            crate::finishing3d::FinishPattern::Flat => FinishPatternDto::Flat,
         }
     }
 }

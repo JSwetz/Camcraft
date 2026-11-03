@@ -427,6 +427,18 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         }
         file.version = 45;
     }
+    if file.version == 45 {
+        // v45 -> v46: the ring ladder's own spacing number arrives
+        // (M2.5 A) inside the Finish3D arm - one optional key, whose
+        // absence decodes to the scallop law `2sqrt(r*tol)`, exactly
+        // what every v45 file ran - and the pattern grammar grows
+        // two words a v45 file cannot contain (the arrival law). No
+        // row seats or moves, so the pins stand: pure step-up, the
+        // v17 -> v18 law. The stamp of every finish op refreshes
+        // once, as it did then - one-time staleness is the price of
+        // the grammar, not a wrong answer.
+        file.version = 46;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

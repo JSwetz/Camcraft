@@ -297,6 +297,7 @@ impl OpParams {
                 plunge_feed,
                 min_step,
                 ramp_angle,
+                steep_stepover,
                 ..
             } => {
                 // No stepdown to check: the scallop law derives it from
@@ -305,6 +306,9 @@ impl OpParams {
                 // rings than the machine of record may hold.
                 pos(*tolerance)
                     && stepover.is_none_or(pos)
+                    // M2.5 A: the flank's own number is a spacing
+                    // like the raster's - finite and positive, or absent.
+                    && steep_stepover.is_none_or(pos)
                     && clearance_z.is_sane()
                     && retract_z.is_none_or(|r| r.is_sane())
                     && top_z.is_sane()

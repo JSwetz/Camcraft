@@ -463,6 +463,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             min_step,
             ramp_angle,
             entry_ramp,
+            steep_stepover,
             ..
         } => {
             // Ball jurisdiction: the rings are the tangent locus of a
@@ -500,22 +501,29 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 min_step: *min_step,
                 ramp_angle: *ramp_angle,
                 entry_ramp: *entry_ramp,
+                steep_stepover: *steep_stepover,
             };
             // The pattern picks the generator; Waterline never
-            // reaches the raster code at all.
+            // reaches the raster code at all. SteepShallow is the
+            // parallel kernel's twin (M2.5 A): the same raster, the
+            // same ladder, and the border law inside `emit_rings`
+            // that keeps the rings off shallow tangency - which is
+            // the whole difference, and it lives in the pattern.
             let path = match pattern {
                 finishing3d::FinishPattern::Waterline => {
                     finishing3d::waterline(&material.facets, &fp)?
                 }
                 finishing3d::FinishPattern::Parallel
                 | finishing3d::FinishPattern::ParallelMulti
-                | finishing3d::FinishPattern::Scallop => {
+                | finishing3d::FinishPattern::Scallop
+                | finishing3d::FinishPattern::SteepShallow => {
                     finishing3d::parallel(&material.facets, &fp)?
                 }
                 finishing3d::FinishPattern::Radial => finishing3d::radial(&material.facets, &fp)?,
                 finishing3d::FinishPattern::Spiral => finishing3d::spiral(&material.facets, &fp)?,
                 finishing3d::FinishPattern::Contour => finishing3d::contour(&material.facets, &fp)?,
                 finishing3d::FinishPattern::Project => finishing3d::project(&material.facets, &fp)?,
+                finishing3d::FinishPattern::Flat => finishing3d::flat(&material.facets, &fp)?,
             };
             (region, path)
         }
@@ -597,6 +605,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 min_step: None,
                 ramp_angle: 45.0,
                 entry_ramp: false,
+                steep_stepover: None,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -682,6 +691,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 min_step: None,
                 ramp_angle: 45.0,
                 entry_ramp: false,
+                steep_stepover: None,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -766,6 +776,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 min_step: None,
                 ramp_angle: 45.0,
                 entry_ramp: false,
+                steep_stepover: None,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -993,6 +1004,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 min_step: None,
                 ramp_angle: 45.0,
                 entry_ramp: false,
+                steep_stepover: None,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,

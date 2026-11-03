@@ -521,6 +521,7 @@ fn finish3d_waterline_cone() {
             min_step: None,
             ramp_angle: 45.0,
             entry_ramp: false,
+            steep_stepover: None,
         },
     )
     .unwrap();
@@ -574,6 +575,7 @@ fn finish3d_scallop_plateau() {
             min_step: None,
             ramp_angle: 45.0,
             entry_ramp: false,
+            steep_stepover: None,
         },
     )
     .unwrap();
@@ -625,6 +627,7 @@ fn finish3d_ramp_parallel_plateau() {
             min_step: None,
             ramp_angle: 45.0,
             entry_ramp: false,
+            steep_stepover: None,
         },
     )
     .unwrap();
@@ -694,6 +697,7 @@ fn finish3d_radial_dome() {
             min_step: None,
             ramp_angle: 45.0,
             entry_ramp: false,
+            steep_stepover: None,
         },
     )
     .unwrap();
@@ -739,6 +743,7 @@ fn finish3d_spiral_plateau() {
             min_step: None,
             ramp_angle: 45.0,
             entry_ramp: false,
+            steep_stepover: None,
         },
     )
     .unwrap();
@@ -784,6 +789,7 @@ fn finish3d_contour_plateau() {
             min_step: None,
             ramp_angle: 45.0,
             entry_ramp: false,
+            steep_stepover: None,
         },
     )
     .unwrap();
@@ -847,6 +853,7 @@ fn finish3d_project_dome() {
             min_step: None,
             ramp_angle: 45.0,
             entry_ramp: false,
+            steep_stepover: None,
         },
     )
     .unwrap();

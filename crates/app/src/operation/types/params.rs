@@ -449,6 +449,14 @@ pub enum OpParams {
         /// where the tangent is steep (M8.2 B). `false` is every
         /// pre-0.5 file: the vertical plunge, byte for byte.
         entry_ramp: bool,
+        /// The ring ladder's spacing, mm (M2.5 A): the flank's own
+        /// number where the Steep-and-shallow partition draws its
+        /// border. `None` - and every pattern but SteepShallow, and
+        /// every pre-v46 file - rides the scallop law `2√(r·tol)`,
+        /// byte for byte, as if this field had never arrived; the
+        /// same "a stated number outranks a derived one, the verdict
+        /// keeps the promise" grammar `stepover` keeps for the raster.
+        steep_stepover: Option<f64>,
     },
     /// Simultaneous 5-axis level finishing (M5.1 stage C): the waterline
     /// ring ladder a [`Self::Finish3D`] Waterline cuts, with a tool-axis

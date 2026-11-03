@@ -3900,6 +3900,7 @@ fn finish_params(top_z: f64, bottom_z: f64, tolerance: f64) -> OpParams {
         min_step: None,
         ramp_angle: 45.0,
         entry_ramp: false,
+        steep_stepover: None,
     }
 }
 
@@ -4009,6 +4010,181 @@ fn the_ramp_flag_stamps_the_digest_and_clears_on_undo() {
     history.undo(&world);
     assert_eq!(status(&world, "Ramp1"), OpStatus::Ok);
     assert_eq!(cache(&world, "Ramp1").expect("cached").path.moves, base.moves);
+}
+
+#[test]
+fn the_ladder_number_stamps_the_digest_even_where_it_is_inert() {
+    // M2.5 A, same grammar as the ramp flag above: `steep_stepover`
+    // feeds the stamp for every pattern, but `levels()` reads it only
+    // under SteepShallow - so under Waterline the word is inert, not
+    // silent. One Stale, one regen, and the dome's path does not move
+    // by a lattice point.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "L1",
+            "BN-0600",
+            SrcRef::Entity("dome".into()),
+            finish_params(18.0, DOME_RIM_Z, 0.1),
+        )
+        .expect("create"),
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "L1").expect("generate"),
+    );
+    assert_eq!(status(&world, "L1"), OpStatus::Ok);
+    let base = cache(&world, "L1").expect("cached").path;
+
+    let mut ask = finish_params(18.0, DOME_RIM_Z, 0.1);
+    let OpParams::Finish3D { steep_stepover, .. } = &mut ask else {
+        panic!("finish3d params expected");
+    };
+    *steep_stepover = Some(2.5);
+    history.execute(
+        &world,
+        EditOperationParams::new(&world, "L1", ask).expect("edit"),
+    );
+    assert_eq!(
+        status(&world, "L1"),
+        OpStatus::Stale,
+        "the ladder byte rides the digest"
+    );
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "L1").expect("regen"),
+    );
+    let t = cache(&world, "L1").expect("cached").path;
+    assert!(t.notes.is_empty(), "an inert word says nothing: {:?}", t.notes);
+    assert_eq!(t.moves, base.moves, "inert means the same path");
+
+    // Two steps back lands on the unstamped digest again.
+    history.undo(&world);
+    assert_eq!(status(&world, "L1"), OpStatus::Stale);
+    history.undo(&world);
+    assert_eq!(status(&world, "L1"), OpStatus::Ok);
+    assert_eq!(cache(&world, "L1").expect("cached").path.moves, base.moves);
+}
+
+#[test]
+fn the_split_and_the_floors_generate_through_the_operation_layer() {
+    // The dispatch doors, not the kernels. The plateau is the
+    // partition's smallest honest witness - five faces, a floor the
+    // march owns, walls steep enough for the rings - and the app's
+    // envelope verdict reads it in seconds instead of minutes. The
+    // dome's physics (the split's border verdicts, Flat's refusal of
+    // the unreachable rim disc) are pinned at the kernel door by the
+    // motion twin in finish3d.rs; here only the doors ride.
+    use camcraft_app::geometry::Triangle;
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let (a, b, c, d) = (
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(10.0, 0.0, 0.0),
+        Point3::new(10.0, 10.0, 0.0),
+        Point3::new(0.0, 10.0, 0.0),
+    );
+    let (e, f, g, h) = (
+        Point3::new(0.0, 0.0, 5.0),
+        Point3::new(10.0, 0.0, 5.0),
+        Point3::new(10.0, 10.0, 5.0),
+        Point3::new(0.0, 10.0, 5.0),
+    );
+    let walls = vec![
+        quad([a, b, f, e]),
+        quad([b, c, g, f]),
+        quad([c, d, h, g]),
+        quad([d, a, e, h]),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let plateau = {
+        let mut facets = walls.clone();
+        facets.extend(quad([e, f, g, h])); // top
+        Mesh::from_facets(facets)
+    };
+    let tube = Mesh::from_facets(walls);
+    history.execute(&world, ImportModel::from_mesh("plateau", plateau));
+    history.execute(&world, ImportModel::from_mesh("tube", tube));
+    let pat = |q: camcraft_app::finishing3d::FinishPattern| {
+        let mut ask = finish_params(5.0, 0.0, 0.1);
+        let OpParams::Finish3D { pattern, .. } = &mut ask else {
+            panic!("finish3d params expected");
+        };
+        *pattern = q;
+        ask
+    };
+    for (name, src, q) in [
+        ("FP", "plateau", camcraft_app::finishing3d::FinishPattern::Parallel),
+        ("FS", "plateau", camcraft_app::finishing3d::FinishPattern::SteepShallow),
+        ("FF", "plateau", camcraft_app::finishing3d::FinishPattern::Flat),
+    ] {
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity(src.into()), pat(q))
+                .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        assert_eq!(status(&world, name), OpStatus::Ok, "{name} must seat and cut");
+    }
+    let moves = |n: &str| cache(&world, n).expect("cached").path.moves;
+    let (fp, fs) = (moves("FP"), moves("FS"));
+    // The border law speaks only where a ring would ride shallow
+    // tangency; on prismatic ground the march already owns every
+    // floor and the wall rings stand all-steep, so the split rides
+    // the parallel BYTE FOR BYTE here - it may drop nothing. (Where
+    // the rings do speak - the dome's cap - the motion twin pins
+    // the difference.)
+    assert!(!fs.is_empty(), "the split went silent on the plateau");
+    assert_eq!(fs, fp, "the partition dropped a cut it did not own");
+    // The floors ride the programmed depth: every cutting row below
+    // clearance sits on z 5 - Flat never descends the walls it cannot
+    // hold a ball against.
+    assert!(
+        moves("FF")
+            .iter()
+            .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge)
+                && m.to.z < 25.0 - 1e-6)
+            .all(|m| (m.to.z - 5.0).abs() <= 1e-6),
+        "a floor row sank off the floor"
+    );
+    // A wall with no floor anywhere: Flat's Empty answer must reach
+    // the user as a command refusal, not a silent nothing - and the
+    // op must stay where nothing wrong can post.
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "FT",
+            "BN-0600",
+            SrcRef::Entity("tube".into()),
+            pat(camcraft_app::finishing3d::FinishPattern::Flat),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "FT")
+        .err()
+        .expect("a floorless tube must refuse the floors")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("no floor"), "{msg}");
+    assert_eq!(status(&world, "FT"), OpStatus::Never, "a refusal cuts nothing");
 }
 
 #[test]

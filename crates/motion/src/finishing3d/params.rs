@@ -24,6 +24,16 @@ use crate::machining2d::{cut_levels, GenError};
 /// loops, each lifted sample sitting tangent wherever a tangent
 /// exists - and Project runs only its boundary: the model's own
 /// silhouette, XY kept, Z lifted. Rings close both families.
+/// SteepShallow (M2.5 A) is the auto-split spoken as a partition:
+/// the raster rides the shallow ground exactly as Parallel does,
+/// and the ring ladder keeps its hands OFF shallow tangency - the
+/// 45° line stops being a meeting place and becomes a border, so
+/// no slope is ridden twice and the flanks answer to their OWN
+/// spacing number (`steep_stepover`, the ring ladder's author when
+/// stated). Flat (M2.5 A) finishes the floors only: the near-level
+/// facets' footprints, shrunk one stepover per pass at constant
+/// tip-Z - the shadow family's choreography on the ground the
+/// waterline's rest verdict always refused to claim.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FinishPattern {
     Waterline,
@@ -34,6 +44,10 @@ pub enum FinishPattern {
     Spiral,
     Contour,
     Project,
+    /// The two-truth split as a border, each side with its number.
+    SteepShallow,
+    /// Floors only, planar, one pass per floor.
+    Flat,
 }
 
 /// Everything the 3D finishers need that the tool and geometry don't
@@ -114,6 +128,19 @@ pub struct Finish3DParams {
     /// that barely traverse (`d_xy` below the tolerance) are the
     /// vertical case the ramp law already settled, gate untouched.
     pub ramp_angle: f64,
+    /// The ring ladder's spacing, mm (M2.5 A): the flank's own
+    /// number, stated at the slope the partition draws. Waterline's
+    /// ladder has never had one - the scallop stepdown authored it -
+    /// and that is the surface-finish tail M2.2 left for this
+    /// stage: a `stepover` for the lines, a `steep_stepover` for
+    /// the rings. `Some(s)` spaces the levels by `s` exactly (the
+    /// same authored-over-law grammar `stepover` keeps for the
+    /// raster - the envelope verdict, not the number, is what holds
+    /// the promise); `None` - every pre-M2.5 file, and every
+    /// pattern other than SteepShallow - rides the scallop law
+    /// `2√(r·tol)`, byte for byte, as if this field had never
+    /// arrived.
+    pub steep_stepover: Option<f64>,
 }
 
 /// The stepdown the scallop law prescribes: cusp height
@@ -181,12 +208,19 @@ pub(super) fn levels(p: &Finish3DParams, r: f64) -> Result<Vec<f64>, GenError> {
     if span < 0.0 {
         return Err(GenError::Invalid("waterline bottom is above its top".into()));
     }
-    let dz = scallop_stepdown(r, p.tolerance);
+    // The ladder's author: the scallop law, unless the partition's
+    // own operation states a flank spacing (M2.5 A) - the same
+    // "a stated number outranks a derived one, the verdict keeps
+    // the promise" grammar the raster's stepover speaks.
+    let dz = match p.pattern {
+        FinishPattern::SteepShallow => p.steep_stepover.unwrap_or_else(|| scallop_stepdown(r, p.tolerance)),
+        _ => scallop_stepdown(r, p.tolerance),
+    };
     const MAX_LEVELS: f64 = 8192.0;
     if span > 0.0 && dz <= span / MAX_LEVELS {
         return Err(GenError::Invalid(format!(
-            "tolerance {:.6} with this tool needs {} levels (cap {}): refine the model or widen the tolerance",
-            p.tolerance,
+            "stepdown {:.6} with this span needs {} levels (cap {}): refine the spacing or the tolerance",
+            dz,
             (span / dz.max(1e-12)).min(i64::MAX as f64) as i64,
             MAX_LEVELS as i64,
         )));
@@ -225,6 +259,7 @@ pub(super) fn validate(p: &Finish3DParams, facets: &[Triangle]) -> Result<(), Ge
         && p.top_z.is_finite()
         && p.bottom_z.is_finite()
         && p.stepover.is_none_or(|s| s.is_finite() && s > 0.0)
+        && p.steep_stepover.is_none_or(|s| s.is_finite() && s > 0.0)
         && p.retract_z.is_none_or(|rz| rz.is_finite())
         && p.min_step.is_none_or(|s| s.is_finite() && s > 0.0)
         // The ramp angle is refused OUTSIDE (0, 90) even while

@@ -101,7 +101,7 @@ const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
 const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
 /// The 3-D finish kinematics, in the order the combo maps them.
-const FINISH_PATTERNS: [&str; 8] = [
+const FINISH_PATTERNS: [&str; 10] = [
     "Waterline",
     "Parallel",
     "Parallel - multi",
@@ -110,6 +110,8 @@ const FINISH_PATTERNS: [&str; 8] = [
     "Spiral",
     "Contour",
     "Project",
+    "Steep and shallow",
+    "Flat",
 ];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
@@ -2019,6 +2021,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             min_step,
             ramp_angle,
             entry_ramp,
+            steep_stepover,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -2073,6 +2076,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::finishing3d::FinishPattern::Spiral => 5,
                     camcraft_app::finishing3d::FinishPattern::Contour => 6,
                     camcraft_app::finishing3d::FinishPattern::Project => 7,
+                    camcraft_app::finishing3d::FinishPattern::SteepShallow => 8,
+                    camcraft_app::finishing3d::FinishPattern::Flat => 9,
                 };
                 let before = pat_idx;
                 combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
@@ -2085,11 +2090,13 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         5 => camcraft_app::finishing3d::FinishPattern::Spiral,
                         6 => camcraft_app::finishing3d::FinishPattern::Contour,
                         7 => camcraft_app::finishing3d::FinishPattern::Project,
+                        8 => camcraft_app::finishing3d::FinishPattern::SteepShallow,
+                        9 => camcraft_app::finishing3d::FinishPattern::Flat,
                         _ => camcraft_app::finishing3d::FinishPattern::Waterline,
                     };
                 }
                 ui.label(
-                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette - then the rings take the flanks.",
+                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette - then the rings take the flanks. Steep and shallow draws that split as a border: the rings keep their hands off shallow ground, and the flanks answer to their own spacing. Flat rides the floors only, one pass per shrink.",
                 );
                 if !matches!(pattern, camcraft_app::finishing3d::FinishPattern::Waterline) {
                     field(ui, "Stepover");
@@ -2147,6 +2154,31 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     ui.label(
                         "on flanks steeper than the split, a ring's first contact slides in along its contact normal instead of dropping; where the normal cannot certify the way in, the plunge stands and the path says why",
                     );
+                    if matches!(
+                        pattern,
+                        camcraft_app::finishing3d::FinishPattern::SteepShallow
+                    ) {
+                        field(ui, "Steep stepover");
+                        let mut authored = steep_stepover.is_some();
+                        if ui.checkbox(&mut authored, "Space the rings").changed() {
+                            // The scallop law's own figure on the
+                            // reference R3 ball - 2 x sqrt(r tol) -
+                            // as a starting value; the field is then
+                            // free. The envelope verdict, not the
+                            // number, is what keeps the promise.
+                            *steep_stepover = if authored {
+                                Some((12.0 * tolerance.max(1e-9)).sqrt())
+                            } else {
+                                None
+                            };
+                        }
+                        if let Some(s) = steep_stepover {
+                            num(ui, u, s);
+                            ui.label("the flank's own level spacing - state it and the ladder obeys; the cusp it leaves is still measured, never assumed");
+                        } else {
+                            ui.label("from tolerance and tool by the scallop law, 2 x sqrt(r x tolerance)");
+                        }
+                    }
                 }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);

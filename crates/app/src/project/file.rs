@@ -20,7 +20,12 @@ use super::*;
 /// partition law wants contiguous runs and the family law wants the
 /// turning rows to stay the tail, so the rung steps the old Drill
 /// index by +1 and everything from the old Pocket3D row up by +2.
-pub const PROJECT_VERSION: u32 = 45;
+/// v46: the pure step-up again (M2.5 A) — the Finish3D arm grows one
+/// optional key (`steep_stepover`) and the pattern grammar grows two
+/// words (steep_and_shallow, flat); no row moves, so no pin shifts —
+/// an absent key decodes to the scallop law, exactly what every v45
+/// file ran, and the new words cannot exist in one (the arrival law).
+pub const PROJECT_VERSION: u32 = 46;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {

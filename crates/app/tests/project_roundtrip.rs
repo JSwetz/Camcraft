@@ -4728,3 +4728,92 @@ fn v40_part_rows_step_up_silent_and_the_feeder_flags_round_trip() {
     assert_eq!(read(&world3), (true, 25.0, true, true, 0.05), "the signals are the file's, verbatim");
     let _ = std::fs::remove_file(&p);
 }
+
+#[test]
+fn v45_file_steps_to_v46_and_the_ladder_grammar_round_trips() {
+    // M2.5 A's pure step-up: the v45 finish3d row grows one optional
+    // key - `steep_stepover` - whose absence decodes to the scallop
+    // law, exactly the ladder every v45 file ran. No entity moved, so
+    // a v45 file reads with the same answer it wrote, and the only
+    // change is the stamp. The two new pattern words are the arrival
+    // law's: a v45 file cannot contain them.
+    let finish = |keys: &str| {
+        let mut t = String::from(
+            r#"{
+        "version": 45,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "F1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"finish3d": {
+                 "tolerance": 0.1,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true"#,
+        );
+        t.push_str(keys);
+        t.push_str("}}}}\n        ]\n    }");
+        t
+    };
+    let read = |world: &flecs_ecs::prelude::World| {
+        let e = model::find_by_name(world, "F1").expect("op");
+        let o = model::operation_of(world, &e).expect("operation");
+        let OpParams::Finish3D { pattern, steep_stepover, .. } = &o.params else {
+            panic!("finish3d params expected, got {:?}", o.params);
+        };
+        (*pattern, *steep_stepover)
+    };
+
+    let world = new_world();
+    project::open(&world, &finish("")).expect("a ladder-less v45 file must migrate");
+    let p = tmp_path("v46a");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(
+        saved.contains(&format!("\"version\": {}", project::PROJECT_VERSION)),
+        "the migration writes the v46 stamp: {saved}"
+    );
+    assert_eq!(
+        read(&world),
+        (camcraft_app::finishing3d::FinishPattern::Waterline, None),
+        "absence is the waterline at the scallop's own spacing"
+    );
+    assert!(!saved.contains("steep_stepover"), "None is absent, not null: {saved}");
+
+    // Stated, the pair round-trips: the word and its number, through
+    // save, reload, resave - a fixed point like every grammar before it.
+    let stated = finish(", \"pattern\": \"steep_shallow\", \"steep_stepover\": 2.5");
+    let world2 = new_world();
+    project::open(&world2, &stated).expect("the v46 ladder grammar must read");
+    assert_eq!(
+        read(&world2),
+        (camcraft_app::finishing3d::FinishPattern::SteepShallow, Some(2.5)),
+        "the authored ladder is the file's, verbatim"
+    );
+    project::save(&world2, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    assert!(first.contains("\"steep_shallow\""), "the tag is the word: {first}");
+    assert!(first.contains("\"steep_stepover\": 2.5"), "{first}");
+    let world3 = new_world();
+    project::load(&world3, &p).expect("reload");
+    project::save(&world3, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    assert_eq!(first, second, "the ladder shape round-trips byte-identically");
+
+    // The other new word, and the nonsense the loader refuses.
+    let world4 = new_world();
+    project::open(&world4, &finish(", \"pattern\": \"flat\""))
+        .expect("the floors-only word must read");
+    assert_eq!(read(&world4).0, camcraft_app::finishing3d::FinishPattern::Flat);
+    let _ = std::fs::remove_file(&p);
+    let bad = finish(", \"pattern\": \"steep_shallow\", \"steep_stepover\": 0.0");
+    let world5 = new_world();
+    assert!(
+        matches!(project::open(&world5, &bad), Err(ProjectError::Corrupt(_))),
+        "a ladder that does not advance is refused, not defaulted"
+    );
+}

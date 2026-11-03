@@ -5,9 +5,9 @@ use crate::geo2d::{Loop, Point2};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{fit_arcs, GenError};
 
-use super::params::{Finish3DParams, SPLIT_MZ, dirs, levels, validate};
+use super::params::{Finish3DParams, FinishPattern, SPLIT_MZ, TOUCH_EPS, dirs, levels, validate};
 use super::scan::{level_region, push_walk};
-use super::support::closest_pt_tri;
+use super::support::{Sup, build_sups, closest_pt_tri, dist2_pt_tri};
 
 /// The contact normal at a tangent center: the unit vector from the
 /// nearest facet point toward the center. `None` when the nearest
@@ -83,6 +83,93 @@ fn leg_clears(facets: &[Triangle], a: Point3, b: Point3, r: f64, tol: f64) -> bo
     }
     true
 }
+
+/// The partition's tangency verdict (M2.5 A): of the facets a ball
+/// centered at `c` grazes at ring distance - within `r + tol +
+/// TOUCH_EPS`, the scan's own currency for "touching" - does a STEEP
+/// one answer? A pure shallow tangency (a cone's flank, an inclined
+/// plane) is ground the raster already rides, and the border law
+/// says the ladder keeps its hands off it; a mixed touch at a
+/// crease, or a pure wall, rides. A center that touches NOTHING
+/// (unclassifiable - ring samples are tangencies by construction)
+/// rides: a redundant cut costs a pass, a skipped one can leave
+/// raw material, and the Prime Directive ranks those differently.
+fn touches_steep(sups: &[Sup], c: Point3, r: f64, tol: f64) -> bool {
+    let lim = r + tol + TOUCH_EPS;
+    let mut touched = false;
+    let mut steep = false;
+    let mut nearest_shallow = false;
+    let mut best_d2 = f64::INFINITY;
+    for s in sups {
+        if c.x < s.xmin || c.x > s.xmax || c.y < s.ymin || c.y > s.ymax {
+            continue;
+        }
+        let d2 = dist2_pt_tri(c, &s.tri);
+        if d2 <= lim * lim {
+            touched = true;
+            steep |= !s.shallow;
+        }
+        if d2 < best_d2 {
+            best_d2 = d2;
+            nearest_shallow = s.shallow;
+        }
+    }
+    if touched {
+        steep
+    } else {
+        !nearest_shallow
+    }
+}
+
+/// One ring level's loop split into the ladder's OWN runs: maximal
+/// arcs of steep tangency, as `(points, closed)` pairs. An
+/// all-steep loop passes through whole and closed - the waterline's
+/// exact geometry, unchanged; an all-shallow loop yields nothing
+/// (the raster rides it); a mixed loop breaks at the border into
+/// open runs, each entered and exited by the same hop-and-plunge
+/// choreography a ring always used, because a run of one level is
+/// a ring of one level.
+fn ring_runs(
+    order: &[Point2],
+    sups: &[Sup],
+    cz: f64,
+    r: f64,
+    tol: f64,
+) -> Vec<(Vec<Point2>, bool)> {
+    let n = order.len();
+    let flags: Vec<bool> = order
+        .iter()
+        .map(|q| touches_steep(sups, Point3::new(q.x, q.y, cz), r, tol))
+        .collect();
+    if flags.iter().all(|f| *f) {
+        return vec![(order.to_vec(), true)];
+    }
+    if !flags.iter().any(|f| *f) {
+        return Vec::new();
+    }
+    // A circular split always has a transition; start the linear
+    // walk just after one so no run wraps around the seam.
+    let start = (0..n)
+        .find(|&i| flags[i] != flags[(i + n - 1) % n])
+        .unwrap_or(0);
+    let mut runs: Vec<(Vec<Point2>, bool)> = Vec::new();
+    let mut cur: Vec<Point2> = Vec::new();
+    for k in 0..n {
+        let i = (start + k) % n;
+        if flags[i] {
+            cur.push(order[i]);
+        } else if cur.len() >= 2 {
+            runs.push((std::mem::take(&mut cur), false));
+        } else {
+            cur.clear();
+        }
+    }
+    if cur.len() >= 2 {
+        runs.push((cur, false));
+    }
+    runs
+}
+
 /// The ring ladder proper: one pass of the levels loop, appended to
 /// `b`. `last` is the tip-Z of the path's last cut (or `None` when
 /// the builder has never cut) - the choreography reads it exactly
@@ -99,6 +186,13 @@ pub(super) fn emit_rings(
     last: &mut Option<f64>,
 ) -> Result<bool, GenError> {
     let hop = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
+    // The partition's eyes (M2.5 A): SteepShallow is the one pattern
+    // that reads tangency before it rides a ring. Every other
+    // pattern - and every file that predates this field - gets
+    // `None` here and walks its loops exactly as the waterline
+    // always did, byte for byte.
+    let part: Option<Vec<Sup>> = matches!(p.pattern, FinishPattern::SteepShallow)
+        .then(|| build_sups(facets, r));
     let mut any = false;
     for &z_tip in zs {
         let region = level_region(facets, r, z_tip + r, ds)?;
@@ -124,12 +218,22 @@ pub(super) fn emit_rings(
             if stored.len() < 2 {
                 continue;
             }
-            let mut poly: Vec<Point2> = if p.climb {
+            let order: Vec<Point2> = if p.climb {
                 stored.to_vec()
             } else {
                 stored.iter().rev().copied().collect()
             };
-            poly.push(poly[0]); // close the ring for the fitter
+            // The partition (M2.5 A) breaks the loop at the border
+            // into runs the ladder owns; every other pattern rides
+            // the whole loop, as it always did.
+            let runs: Vec<(Vec<Point2>, bool)> = match &part {
+                None => vec![(order, true)],
+                Some(sups) => ring_runs(&order, sups, z_tip + r, r, p.tolerance),
+            };
+            for (mut poly, closed) in runs {
+                if closed {
+                    poly.push(poly[0]); // close the ring for the fitter
+                }
             // The same chord law as the raster's: every XY shortcut of
             // the plan holds to tolerance/4, not the full tolerance.
             // The tessellated boundary already sits a chord-sag inside
@@ -149,115 +253,116 @@ pub(super) fn emit_rings(
                 Some(lz) if lz != z_tip => p.clearance_z,
                 Some(_) => hop,
             };
-            // M8.2 B: the ramped first contact. The plunge is the
-            // law's own entry; `entry_ramp` is the opt-in that
-            // engages a steep wall along its contact normal instead -
-            // from a center one radius out along that normal, down a
-            // certified column and in along a certified diagonal.
-            // `None` below is silent (a gentle tangent: the plunge IS
-            // the ramp there, no reason to talk); `Err` is a refusal
-            // the user asked about, and it says its reason.
-            let ramp = if p.entry_ramp {
-                let c = Point3::new(entry.x, entry.y, z_tip + r);
-                match contact_normal(facets, c) {
-                    None => Some(Err("no contact direction at the ring entry".to_string())),
-                    Some(n) => {
-                        let tilt = (n.x * n.x + n.y * n.y).sqrt();
-                        if n.z <= 0.25 {
-                            Some(Err(
-                                "the contact faces down, or too near-horizontal to lift a ramp off it; an entry along such a normal is a lateral in-feed at depth".into(),
-                            ))
-                        } else if tilt < SPLIT_MZ {
-                            None
-                        } else {
-                            let cs = Point3::new(c.x + r * n.x, c.y + r * n.y, c.z + r * n.z);
-                            if cs.z > approach_z + r {
-                                Some(Err("the ramp start sits above the approach plane".into()))
-                            } else if !leg_clears(
-                                facets,
-                                Point3::new(cs.x, cs.y, approach_z + r),
-                                cs,
-                                r,
-                                p.tolerance,
-                            ) {
-                                Some(Err("the vertical approach bites the wall".into()))
-                            } else if !leg_clears(facets, cs, c, r, p.tolerance) {
-                                Some(Err("the diagonal bites the wall".into()))
+                // M8.2 B: the ramped first contact. The plunge is the
+                // law's own entry; `entry_ramp` is the opt-in that
+                // engages a steep wall along its contact normal instead -
+                // from a center one radius out along that normal, down a
+                // certified column and in along a certified diagonal.
+                // `None` below is silent (a gentle tangent: the plunge IS
+                // the ramp there, no reason to talk); `Err` is a refusal
+                // the user asked about, and it says its reason.
+                let ramp = if p.entry_ramp {
+                    let c = Point3::new(entry.x, entry.y, z_tip + r);
+                    match contact_normal(facets, c) {
+                        None => Some(Err("no contact direction at the ring entry".to_string())),
+                        Some(n) => {
+                            let tilt = (n.x * n.x + n.y * n.y).sqrt();
+                            if n.z <= 0.25 {
+                                Some(Err(
+                                    "the contact faces down, or too near-horizontal to lift a ramp off it; an entry along such a normal is a lateral in-feed at depth".into(),
+                                ))
+                            } else if tilt < SPLIT_MZ {
+                                None
                             } else {
-                                Some(Ok(cs))
+                                let cs = Point3::new(c.x + r * n.x, c.y + r * n.y, c.z + r * n.z);
+                                if cs.z > approach_z + r {
+                                    Some(Err("the ramp start sits above the approach plane".into()))
+                                } else if !leg_clears(
+                                    facets,
+                                    Point3::new(cs.x, cs.y, approach_z + r),
+                                    cs,
+                                    r,
+                                    p.tolerance,
+                                ) {
+                                    Some(Err("the vertical approach bites the wall".into()))
+                                } else if !leg_clears(facets, cs, c, r, p.tolerance) {
+                                    Some(Err("the diagonal bites the wall".into()))
+                                } else {
+                                    Some(Ok(cs))
+                                }
                             }
                         }
                     }
-                }
-            } else {
-                None
-            };
-            let ramped = match ramp {
-                Some(Ok(cs)) => Some(cs),
-                Some(Err(why)) => {
-                    b.note(format!("ramp entry at z {z_tip:.4} refused: {why}"));
+                } else {
                     None
-                }
-                None => None,
-            };
-            if let Some(cs) = ramped {
-                // Air to the start column at the approach plane...
-                match *last {
-                    None => b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, cur.z), None),
-                    Some(lz) => {
-                        if lz != z_tip {
-                            b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
-                            b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, p.clearance_z), None);
-                        } else {
-                            b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
-                            b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, hop), None);
+                };
+                let ramped = match ramp {
+                    Some(Ok(cs)) => Some(cs),
+                    Some(Err(why)) => {
+                        b.note(format!("ramp entry at z {z_tip:.4} refused: {why}"));
+                        None
+                    }
+                    None => None,
+                };
+                if let Some(cs) = ramped {
+                    // Air to the start column at the approach plane...
+                    match *last {
+                        None => b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, cur.z), None),
+                        Some(lz) => {
+                            if lz != z_tip {
+                                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+                                b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, p.clearance_z), None);
+                            } else {
+                                b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
+                                b.push(MoveKind::Rapid, Point3::new(cs.x, cs.y, hop), None);
+                            }
                         }
                     }
-                }
-                // ...down the certified column (if there is air left
-                // to descend), then in along the certified diagonal
-                // to the tangent: the ring walk starts where it
-                // always did, already cutting.
-                if b.at().z > cs.z - r + 1e-9 {
+                    // ...down the certified column (if there is air left
+                    // to descend), then in along the certified diagonal
+                    // to the tangent: the ring walk starts where it
+                    // always did, already cutting.
+                    if b.at().z > cs.z - r + 1e-9 {
+                        b.push(
+                            MoveKind::Plunge,
+                            Point3::new(cs.x, cs.y, cs.z - r),
+                            Some(p.plunge_feed),
+                        );
+                    }
+                    b.push(
+                        MoveKind::Feed,
+                        Point3::new(entry.x, entry.y, z_tip),
+                        Some(p.plunge_feed),
+                    );
+                } else {
+                    match *last {
+                        None => {
+                            b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
+                        }
+                        Some(lz) => {
+                            if lz != z_tip {
+                                // Level to level: the new level engages
+                                // material the previous one never touched -
+                                // climb to the one plane safe over all of it.
+                                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+                                b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, p.clearance_z), None);
+                            } else {
+                                // Ring to ring within one level: the hop.
+                                b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
+                                b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, hop), None);
+                            }
+                        }
+                    }
                     b.push(
                         MoveKind::Plunge,
-                        Point3::new(cs.x, cs.y, cs.z - r),
+                        Point3::new(entry.x, entry.y, z_tip),
                         Some(p.plunge_feed),
                     );
                 }
-                b.push(
-                    MoveKind::Feed,
-                    Point3::new(entry.x, entry.y, z_tip),
-                    Some(p.plunge_feed),
-                );
-            } else {
-                match *last {
-                    None => {
-                        b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
-                    }
-                    Some(lz) => {
-                        if lz != z_tip {
-                            // Level to level: the new level engages
-                            // material the previous one never touched -
-                            // climb to the one plane safe over all of it.
-                            b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
-                            b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, p.clearance_z), None);
-                        } else {
-                            // Ring to ring within one level: the hop.
-                            b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop), Some(p.feed));
-                            b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, hop), None);
-                        }
-                    }
-                }
-                b.push(
-                    MoveKind::Plunge,
-                    Point3::new(entry.x, entry.y, z_tip),
-                    Some(p.plunge_feed),
-                );
+                push_walk(b, &walk, z_tip, p.feed);
+                *last = Some(z_tip);
+                any = true;
             }
-            push_walk(b, &walk, z_tip, p.feed);
-            *last = Some(z_tip);
-            any = true;
         }
     }
     Ok(any)

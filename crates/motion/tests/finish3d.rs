@@ -10,14 +10,14 @@
 //! strategy's jurisdiction, so the envelope must stay silent on them).
 //!
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::stock_sim, camcraft_motion::verify.
-//! Lane shape (M4.4): 13 law tests run here in seconds; 27 envelope-VERDICT and
+//! Lane shape (M4.4): 24 law tests run here in seconds; 28 envelope-VERDICT and
 //! dome-generation tests are #[ignore]d - run them with
 //! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
 
 use camcraft_motion::cl::{lattice, MoveKind, Toolpath};
 use camcraft_motion::finishing3d::{
-    contour, parallel, project, radial, scallop_stepdown, scallop_stepover, spiral, waterline,
-    Finish3DParams, FinishPattern,
+    contour, flat, parallel, project, radial, scallop_stepdown, scallop_stepover, spiral,
+    waterline, Finish3DParams, FinishPattern,
 };
 use camcraft_motion::geometry::{slice, Point3, Triangle};
 use camcraft_motion::geo2d::Region;
@@ -215,6 +215,7 @@ fn params(top_z: f64, bottom_z: f64) -> Finish3DParams {
         ramp_angle: 45.0,
         // M8.2 B: the ring entry keeps its plunge unless asked.
         entry_ramp: false,
+        steep_stepover: None,
     }
 }
 
@@ -2048,4 +2049,265 @@ fn minimum_step_floors_the_refinement_not_the_edges() {
     )
     .expect("w2");
     assert_eq!(w1.moves, w2.moves, "stage-E numbers spoke to the rings");
+}
+
+// ---- M2.5 A: the auto-split as a border, and the floors-only pass ----
+//
+// Two strategies, no new kinds: SteepShallow rides `parallel()`'s
+// raster unchanged and asks the ring ladder one question the Waterline
+// never had to - does THIS point of the loop touch a steep facet? A
+// 45-degree line stops being a meeting place and becomes a border:
+// pure-shallow tangency belongs to the march, walls to the rings, and
+// where a loop straddles the crease both sides get their own path.
+// Flat answers to nothing but the floors - facets shallow by the
+// family's own flag AND flat enough that their tangent-sheet rise
+// hides inside the tolerance - and refuses a part that has none.
+
+#[test]
+fn the_split_changes_nothing_where_there_is_no_shallow_to_drop() {
+    // The twin-kernel law in one assertion: on all-steep ground - the
+    // 60-degree cone's flank, every tangent steep by the flag - the
+    // partition filter admits every run, so SteepShallow's path is
+    // Parallel's byte for byte. The same kernel, the same numbers,
+    // one question answered "all of it".
+    let f = steep_cone(48);
+    let par =
+        parallel(&f, &ppattern(30.0, 0.0, FinishPattern::Parallel)).expect("cone parallel");
+    let ss = parallel(&f, &ppattern(30.0, 0.0, FinishPattern::SteepShallow)).expect("cone split");
+    assert_eq!(ss.moves, par.moves, "the split spoke on ground with no shallow to drop");
+    assert!(n_kind(&ss, MoveKind::Feed) > 0, "and went silent elsewhere");
+}
+
+#[test]
+fn the_border_gives_the_shallow_side_to_the_march() {
+    // The tilted wedge: a 30-degree sheet (shallow by the flag) with
+    // vertical walls (steep). Parallel lets the rings draw its loops
+    // straight ACROSS the sheet, duplicating what the march already
+    // rides; the split sends those chords home - strictly fewer feeds -
+    // while the wall side and the march itself stand untouched.
+    let f = tilted(std::f64::consts::PI / 6.0, 6.0);
+    let par = parallel(&f, &ppattern(13.4, 4.0, FinishPattern::Parallel)).expect("wedge parallel");
+    let ss =
+        parallel(&f, &ppattern(13.4, 4.0, FinishPattern::SteepShallow)).expect("wedge split");
+    assert!(
+        n_kind(&ss, MoveKind::Feed) < n_kind(&par, MoveKind::Feed),
+        "the rings still drew sheet chords under the split: {} vs {}",
+        n_kind(&ss, MoveKind::Feed),
+        n_kind(&par, MoveKind::Feed)
+    );
+    // The march took the other side of the border: sheet-height
+    // feeds ride on both paths. The row is the machine's own: center
+    // XY, tip Z - so a tangent center's tip sits R(1-cos)/cos above
+    // the plane read at the CENTER's y, the ball's tilt tax, neither
+    // the contact's z nor the axis'.
+    let a = std::f64::consts::PI / 6.0;
+    let on_sheet = |p: &Toolpath| {
+        p.moves.iter().any(|m| {
+            m.kind == MoveKind::Feed
+                && m.to.x.abs() < 5.9
+                && m.to.y.abs() < 5.9
+                && (m.to.z
+                    - (10.0 - m.to.y * a.tan() + R * (1.0 - a.cos()) / a.cos()))
+                    .abs()
+                    <= TOL + 1e-6
+        })
+    };
+    assert!(on_sheet(&par) && on_sheet(&ss), "the sheet lost its march");
+}
+
+#[test]
+fn the_authored_ladder_spaces_the_rings_and_says_nothing_elsewhere() {
+    // A stated flank spacing authors the ladder under SteepShallow -
+    // coarser by the number, strictly, rung by rung - and is inert
+    // under every other pattern, as if the field had never arrived.
+    let f = box_facets();
+    let at = |s: Option<f64>| {
+        parallel(
+            &f,
+            &Finish3DParams {
+                pattern: FinishPattern::SteepShallow,
+                steep_stepover: s,
+                ..params(10.0, 0.0)
+            },
+        )
+        .expect("box split")
+    };
+    let (n_none, n_two, n_eight) = (at(None), at(Some(2.0)), at(Some(8.0)));
+    let n_p = |t: &Toolpath| n_kind(t, MoveKind::Plunge);
+    assert!(n_p(&n_none) > n_p(&n_two), "Some(2.0) did not coarsen the ladder");
+    assert!(n_p(&n_two) > n_p(&n_eight), "Some(8.0) did not coarsen the ladder");
+    assert!(n_p(&n_eight) > 0, "the ladder vanished with a coarse authoring");
+    // None rides the scallop law - which is Parallel's ladder number:
+    // the twin of test one, counted.
+    let par = parallel(&f, &ppattern(10.0, 0.0, FinishPattern::Parallel)).expect("box parallel");
+    assert_eq!(n_p(&n_none), n_p(&par), "None drifted off the scallop law");
+    // And the word is mute outside its pattern: authored Parallel,
+    // byte for byte the unauthored path.
+    let authored = parallel(
+        &f,
+        &Finish3DParams {
+            steep_stepover: Some(2.0),
+            ..ppattern(10.0, 0.0, FinishPattern::Parallel)
+        },
+    )
+    .expect("authored parallel");
+    assert_eq!(authored.moves, par.moves, "a ladder number outside its pattern spoke");
+}
+
+#[test]
+fn flat_rides_only_the_floors_and_never_a_flank() {
+    // The step pocket: a z=10 shelf and a z=5 pocket floor, walls and
+    // slopes between. Flat answers to exactly two heights on the
+    // material; every Feed BELOW clearance sits on one of them, and
+    // both get ridden. (Hop retracts to clearance are Feeds by the
+    // family's own choreography - a vertical lift, not a flank.)
+    let f = step_pocket();
+    let clr = 25.0;
+    let t = flat(&f, &ppattern(10.0, 0.0, FinishPattern::Flat)).expect("floors");
+    let on_floor = |z: f64| {
+        t.moves
+            .iter()
+            .any(|m| m.kind == MoveKind::Feed && (m.to.z - z).abs() < 1e-6)
+    };
+    assert!(on_floor(10.0) && on_floor(5.0), "a floor went uncut: {:?}", &t.moves[..2]);
+    let stray = t
+        .moves
+        .iter()
+        .filter(|m| m.kind == MoveKind::Feed && m.to.z < clr - 1e-6)
+        .find(|m| (m.to.z - 10.0).abs() >= 1e-6 && (m.to.z - 5.0).abs() >= 1e-6);
+    assert!(stray.is_none(), "flat rode a flank at z {:?}", stray.map(|m| m.to.z));
+}
+
+#[test]
+fn flat_refuses_a_part_with_no_floor_and_ignores_the_ladder_number() {
+    // The 60-degree cone stripped to its flank: everything faces the
+    // sky steeply, nothing lies flat - and Flat names that refusal
+    // rather than cutting slopes it was never promised.
+    let walls: Vec<Triangle> = steep_cone(48)
+        .into_iter()
+        .filter(|t| !(t.a.z == 0.0 && t.b.z == 0.0 && t.c.z == 0.0))
+        .collect();
+    let e = flat(&walls, &ppattern(30.0, 0.0, FinishPattern::Flat)).expect_err("no floor here");
+    assert!(matches!(e, GenError::Empty(_)), "{e:?}");
+    assert!(e.to_string().contains("no floor"), "{e}");
+    // And the ladder's own number is mute here too, byte for byte.
+    let b = box_facets();
+    let p = |s: Option<f64>| {
+        flat(
+            &b,
+            &Finish3DParams {
+                pattern: FinishPattern::Flat,
+                steep_stepover: s,
+                ..params(10.0, 0.0)
+            },
+        )
+        .expect("box floors")
+    };
+    assert_eq!(p(Some(2.0)).moves, p(None).moves, "the ladder number spoke to the floors");
+}
+
+#[test]
+fn the_ladder_number_validates_like_the_others() {
+    // Nonsense authoring refuses at the gate on every door, whatever
+    // the pattern reads it - validate early, name the parameter, and
+    // a None is legal everywhere.
+    for s in [0.0, -2.0, f64::NAN, f64::INFINITY] {
+        let p = Finish3DParams {
+            pattern: FinishPattern::SteepShallow,
+            steep_stepover: Some(s),
+            ..params(10.0, 0.0)
+        };
+        assert!(
+            matches!(parallel(&box_facets(), &p), Err(GenError::Invalid(_))),
+            "steep_stepover {s} passed the gate"
+        );
+        // Even where the field is inert, a nonsense word still refuses.
+        assert!(
+            matches!(waterline(&box_facets(), &p), Err(GenError::Invalid(_))),
+            "steep_stepover {s} passed the waterline gate"
+        );
+        assert!(
+            matches!(flat(&box_facets(), &p), Err(GenError::Invalid(_))),
+            "steep_stepover {s} passed the flat gate"
+        );
+    }
+}
+
+#[test]
+fn the_closed_dome_rides_the_split_and_refuses_the_floors() {
+    // The dome the operation layer actually programs: the 12x96 cap
+    // closed with a flat disc at the rim plane. The split must
+    // answer - the march takes the bands, the rings stand off the
+    // shallow tangency. And the floors must REFUSE BY NAME: the
+    // disc is real floor but unreachable (a ball resting on it
+    // buries 0.14 mm into the cap - the cavity is 2.86 tall, the
+    // ball 6), and the pole's bands are convex - a tangent ring
+    // there is a point the march cannot ride. Flat's honest answer
+    // is the Empty refusal, not a path that lies.
+    let mut f = dome();
+    let rr = 20.0 * (PI / 4.0).sin();
+    let center = p3(0.0, 0.0, RIM_Z);
+    for j in 0..96usize {
+        let th = TAU * j as f64 / 96.0;
+        let th2 = TAU * (j + 1) as f64 / 96.0;
+        let a = p3(rr * th.cos(), rr * th.sin(), RIM_Z);
+        let b = p3(rr * th2.cos(), rr * th2.sin(), RIM_Z);
+        f.push(Triangle::new(center, a, b));
+    }
+    let ss = parallel(&f, &ppattern(18.0, RIM_Z, FinishPattern::SteepShallow))
+        .expect("closed-dome split");
+    assert!(!ss.moves.is_empty(), "the split said nothing on the dome");
+    let e = flat(&f, &ppattern(18.0, RIM_Z, FinishPattern::Flat))
+        .expect_err("the dome has no CUTTABLE floor");
+    assert!(matches!(e, GenError::Empty(_)), "{e:?}");
+    assert!(e.to_string().contains("no floor"), "{e}");
+    // The app's own heights, straight through both twins.
+    let fp = parallel(&f, &ppattern(20.0, RIM_Z, FinishPattern::Parallel))
+        .expect("closed-dome parallel");
+    let fs = parallel(&f, &ppattern(20.0, RIM_Z, FinishPattern::SteepShallow))
+        .expect("closed-dome split, app heights");
+    assert!(!fp.moves.is_empty() && !fs.moves.is_empty());
+    assert_ne!(fs.moves, fp.moves);
+}
+
+#[test]
+#[ignore = "verdict lane: full-precision envelope scans over the M2.5 A fixtures - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
+fn the_split_leaves_nothing_uncut_on_either_side_of_the_border() {
+    // The Prime Directive reading of the partition: a border, not a
+    // gap. Every path below stays inside the cusp budget on its own
+    // fixture - and the wedge, where the drop happens, keeps BOTH
+    // sides covered: rings on the walls, the march on the sheet.
+    let cone = steep_cone(48);
+    let f = |facets: &[Triangle], pattern, top: f64, bottom: f64| {
+        parallel(
+            facets,
+            &ppattern(top, bottom, pattern),
+        )
+        .expect("split path")
+    };
+    let t = f(&cone, FinishPattern::SteepShallow, 30.0, 0.0);
+    let rep = envelope(&cone, &t);
+    assert!(
+        rep.gouge_mm <= gate(rep.cell) && rep.rest_mm <= gate(rep.cell),
+        "cone split {} {}",
+        rep.gouge_mm,
+        rep.rest_mm
+    );
+    let wedge = tilted(std::f64::consts::PI / 6.0, 6.0);
+    let t = f(&wedge, FinishPattern::SteepShallow, 13.4, 4.0);
+    let rep = envelope(&wedge, &t);
+    assert!(
+        rep.gouge_mm <= gate(rep.cell) && rep.rest_mm <= gate(rep.cell),
+        "wedge split gouged {} left {}",
+        rep.gouge_mm,
+        rep.rest_mm
+    );
+    assert_eq!(verify_finish(&wedge, &t, 13.4), Vec::new(), "the verifier agrees");
+    // The pocket's floors: Flat gouges nothing on the flanks it
+    // declines - rest there is the strategy's own honesty, and the
+    // floors themselves come out inside the budget.
+    let pocket = step_pocket();
+    let t = flat(&pocket, &ppattern(10.0, 0.0, FinishPattern::Flat)).expect("floors");
+    let rep = envelope(&pocket, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "flat gouged {} mm", rep.gouge_mm);
 }

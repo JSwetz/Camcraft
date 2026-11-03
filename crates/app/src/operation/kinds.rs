@@ -941,6 +941,10 @@ fn seed_finish3d(c: &Carried) -> OpParams {
         min_step: None,
         ramp_angle: 45.0,
         entry_ramp: false,
+        // The ladder rides the scallop law until a machinist authors
+        // the flank's own spacing (M2.5 A) - and only the Steep-and-
+        // shallow pattern would ever read it.
+        steep_stepover: None,
     }
 }
 

@@ -346,6 +346,7 @@ impl OpParams {
                 min_step,
                 ramp_angle,
                 entry_ramp,
+                steep_stepover,
             } => {
                 // v16: the pattern chooses a different kinematic (and
                 // the raster fields only answer to Parallel), so they
@@ -389,6 +390,19 @@ impl OpParams {
                 // entry legs of every ring, so it stamps the digest
                 // like every other move-changing word.
                 h.write_u8(u8::from(*entry_ramp));
+                // v46 (M2.5 A): the ring ladder's own spacing authors
+                // a different level count under SteepShallow, so it
+                // digests - same Some/None split as `stepover` above,
+                // so a scallop-derived ladder never digests as the
+                // number 0. The two new patterns themselves ride the
+                // pattern byte untouched: append-only ordinals.
+                match steep_stepover {
+                    Some(s) => {
+                        h.write_u8(1);
+                        w(h, *s);
+                    }
+                    None => h.write_u8(0),
+                }
             }
             // The 5-axis twins and plain swarf (tags 8/9/10): the
             // finish's scalar law with the pattern byte dropped - the
