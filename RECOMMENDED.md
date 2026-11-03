@@ -7424,3 +7424,204 @@ layout-identical.
   patterns (an ask changed is an ask changed), and the v45 -> v46
   DTO rung is pure step-up - old projects keep their paths, the new
   word defaults to the scallop law.
+
+- M2.5 B stage decisions (pencil + corner, the crease pair):
+- "Pencil follows hidden rest material" (ROADMAP's hint at the old
+  remachining machinery) is read GEOMETRICALLY, not by boolean stock:
+  the leftover of a fatter pen against a crease is the band between
+  the two balls' tangent loci, and the band has a closed form -
+  (r_ref - r) / tan(theta/2) - from the dihedral's own normals.
+  Chosen over subtracting the reference ball's swept volume against
+  the model and walking the remainder: the boolean route is the
+  remachining stack's problem shape (minutes, voxel-bound, and it
+  cannot tell a corner from a scallop cusp). The geometric band is
+  exact at the seam, answers in microseconds, and refuses honestly
+  (band below tolerance = the pen already cleans it). Considered
+  and dropped: sampling the offset surface for "where two faces
+  touch the ball at once" - same answer, no closed form, and it
+  drifts off thin welds.
+- Corner is PROVED, not reimplemented: Corner == Pencil whose
+  reference ball is the op's own ball, so `corner()` calls the same
+  `loci()` with reference = r and the band r/tan(theta/2). The
+  idempotence test pins it byte-for-byte on the step pocket - two
+  doors, one weld - and `pencil_reference` is inert for Corner as
+  if it had never arrived (a Some(99.0) file cuts the identical
+  path). Chosen over a separate corner kernel: two code paths on
+  one geometry is two chances to disagree.
+- Pencil with NO named reference cleans every concave corner whose
+  locus rests. The alternative - refuse until a pen is named - was
+  dropped because absence already means something honest: with no
+  pen, nothing is already cleaned, so every corner hides rest.
+  Naming a pen is the user saying "a pen this fat ran before me";
+  only bands it could not reach are worth a run. A named pen that
+  is not fatter than the ball is Invalid by name ("does not
+  exceed") - not a silent no-op - because a reference that hides
+  under the tool is authoring nonsense, and nonsense that passes
+  quietly is the silent-wrong answer.
+- Validation of `pencil_reference` rides EVERY door's `validate`
+  before the pattern is read (Waterline refuses NaN the same way):
+  an ask that is nonsense is nonsense stamped anywhere - the
+  ladder law from v46, reused without a new word for it.
+- The seam walk skips, with a NOTE, what it cannot trust: a shared
+  edge that the two faces run the SAME way (inconsistent winding)
+  or that is not shared by exactly two faces (boundary or
+  non-manifold) never yields a guessed locus. Chosen over
+  auto-repairing winding by majority: flipping a facet the model
+  gave us would rewrite the user's geometry in the kernel's
+  opinion; the note keeps the diagnostic loud and the path clean
+  where the geometry IS trustworthy.
+- Weld joints stay BIT-EXACT through clipping (shrink): clipped
+  ends appear only mid-edge, at(i) march samples, while an
+  untouched endpoint keeps p0/p1 verbatim. This is what lets a
+  closed ring's last point sit back on its first exactly - the
+  ring assert in the pocket test (run[4] == run[0]) is a law, not
+  a tolerance; a float-drifted weld would post a staircase, not a
+  loop.
+- Mouth runs are clipped by the neighbouring wall's plane (the
+  ball may not cross into it) and by the tip window at the floor
+  end, but keep the EXACT corner line at the top: the pocket test
+  pins one mouth point at z == top because the corner line itself
+  is real geometry - a run that "improves" its own endpoint with
+  a clip sample would move the first cut off the seam it follows.
+- v47 is a pure step-up (optional `pencil_reference` key, two
+  pattern words a v46 file cannot contain, no row moves): the
+  rung stamps version only, absence decodes to the answer every
+  v46 file ran, and None serializes ABSENT - never null - so the
+  DTO stays a fixed point (save, reload, resave byte-identical is
+  asserted). A null-defaulting field was the considered
+  alternative; every grammar before it made absence the default
+  and the files should not grow a second way to say nothing.
+- The envelope verdicts for the crease pair measure PARTIAL
+  coverage, so they assert gouge against the scan gate
+  (TOL + cell^2/2R + eps) and stay silent about rest: rest belongs
+  to the full-pattern lanes, and a tangent pass that claims a
+  rest verdict it did not earn is the loud-wrong answer wearing a
+  clean badge. The 28 ignored verdict tests run at stage close-out
+  on the release ladder.
+- Process, logged so it is not repeated: a sed touch to a file an
+  Edit call was also about to change clobbered two destructuring
+  sites in params_impl.rs (E0027 aftermath, fixed same window).
+  Large test blocks now ride the temp-file append (Write to the
+  job's tmp dir, `cat >>`), never a heredoc or in-place sed where
+  quoting and read-state can fight the Edit tool.
+- M2.5 A verdict-lane miss, found by M2.5 B's heavy lane and fixed
+  here (the cone in the_split_leaves_nothing gouged 0.2 mm):
+  `support_at` proved the STOP, never the DESCENT - a tangent
+  center can be ball-clear while the plunge column down to it
+  crosses a flank. On the cone every vertical center at rho <= 20
+  crosses the wall (z_w = 34.641 - 1.732*rho), so the whole base
+  disc is plunge-unreachable from clearance, and the march happily
+  walked onto it. Chosen fix: a column law - `column_clear` runs
+  the same exact dist_seg_tri sweep the envelope scan runs, over
+  the r-padded facet boxes, from clearance to candidate center;
+  `plunge_support` pairs it with `support_at` and reports the
+  trim. Considered and dropped: lifting the whole family to the
+  highest reachable z (changes what the march means, and hides
+  real rest); sampling the column at fixed steps (a sub-tol miss
+  is still a gouge; the exact form costs a bbox reject per facet).
+  The trim is DIAGNOSED, not silent: each family counts refused
+  samples in a Cell and posts a note ("what hides there stands as
+  rest, reported not cut") before the empty-runs return, so a
+  model whose ground is all unreachable refuses with a count
+  rather than emitting a shorter lie. The march's ramp probe
+  (diagonal_ok) deliberately keeps raw support_at - it asks a
+  reachability question, not a plunge question, and its answer
+  only steers a diagonal that emits nothing.
+- Crease passes emit TIPS (pencil/corner lower the locus by r at
+  emission; rests, shrink and chain stay center-based internally):
+  the envelope convention says moves speak tips, and a kernel that
+  posted centers made the scan's +r lift read a silent pass as a
+  clean bill - vacuous verdicts in the lane that was made to
+  catch exactly that. The valley fixture proved it: its locus ends
+  rest 3.587 above the end-fan apex, r = 3.5, and after the fix
+  the crease scans measure a real 0.087 of slack instead of
+  measuring nothing.
+- The note-law was staged where plunges are CERTIFIED (the five
+  family sup-closures: raster, radial, spiral, flow, shadow). The
+  claim that rings needed no such law - "the tangent-circle law
+  provably clears its own column" - rode the first draft of this
+  entry and the release lane spent it: the cone verdict gouged
+  2.4963 mm, exactly r minus the distance from the FIRST RING's
+  plunge column to the flank. The ring's stop is tangent-clear by
+  construction, but its entry was choreographed as "plunge from
+  the clearance plane down", and the verdict fixture programs
+  top_z 30 under a clearance of 25 - that plunge RISES, crossing
+  the spire mid-column on every level above tip 18. Chosen fix,
+  two parts, both already law elsewhere: the rings' traverse
+  plane lifts to meet the cut (`approach_z.max(z_tip)`, the
+  march's `trav = clearance.max(z0)` convention, march.rs:300),
+  and the entry plunge is column-certified with the same exact
+  dist_seg_tri sweep, in the `r - tol` currency leg_clears
+  already pays (a loop start is read off the lattice-quantized
+  union boundary, a chord-sag inside the true tangent locus -
+  asking it for TOUCH_EPS exactness refuses every ring, which is
+  how the first cut of this fix failed the debug ladder). A run
+  that cannot be entered legally is refused with a counted note,
+  as the march refuses its canopy ground. Considered and
+  dropped: a blanket `top_z <= clearance_z` law in validate -
+  the march has always treated the raised-traverse program as
+  legal (the cone twin-kernel test rides it), and refusing it
+  mid-M2.5 would rewrite accepted behavior, not fix a gouge.
+
+
+## M2.5 A verdict-lane miss: the rings' entry was the gouge the partition law was meant to catch (2026-11-03)
+
+**What happened.** M2.5 A closed with the `the_split_twin_kernels_agree_on_the_cone`
+verdict left failing: I recorded it as "an entry-law artifact of steep-ring
+entries - the twin's agreement is solid; the entry law stays M2.5's open
+flag" and moved on to B. The release heavy lane says that call was wrong:
+at HEAD the verdict reports 2.4963 mm of gouge - six hundred times the gate
+- and the probe trace pins every part of it to `emit_rings`' entry moves.
+The flag was not "deferred"; it was live, and B's audit inherited a false
+premise from it ("rings never call support_at, the partition never asks")
+that the diagnosis below falsifies. Recorded here so the ledger tells the
+truth: this is an M2.5 A miss, fixed under M2.5 B's close-out.
+
+**Root cause, measured.** The fixture's first ring sits at tip Z 30, above
+`clearance_z` 25. The entry block wrote the approach at `cur.z`/`clearance_z`
+and the second move at `hop` (= tip + r = 33): for a ring above the
+clearance plane the "plunge" *rises* 25 → 33 with its whole column inside
+the flank. The ball at tip 30 touches the cone by construction (tangent
+center); every point above it along that column is *inside* the solid.
+`d(center→flank) = 0.5037`, `r − d = 2.4963` - the exact verdict number,
+then again at 21 (2.4954) and 12 (2.4952). The "diameter-crossing chords"
+I blamed were arc-sagitta artifacts of the debug printer: `centers()` skips
+`MoveKind::Rapid` but arcs ride under `MoveKind::Feed` with `arc=Some`, so
+the probe drew chord lines across circles the machine actually traveled
+as arcs. The clipper-union degeneracy theory from the previous session was
+also wrong (probe: the cone's forbidden-center polygon is a clean 224-point
+CCW circle at both 8 and 128 scan dirs).
+
+**The fix, by the module's own two laws.** (1) *Raised traverse*:
+`approach_z = max(z_tip, …)`, the convention `march.rs` already ships for
+waterline entries - a level above the clearance plane is reached at its own
+plane, never by an upward plunge. (2) *Entry certification*: the descent
+into a ring's start is now a support question - `column_clear` over the
+plunge column - because "the tangent stop is clear by construction" was
+exactly the claim that let the rise through. The certification thread
+`r − tol`, not `r − TOUCH_EPS`: a lattice-quantized ring-loop start sits
+a chord-sag inside the true locus (the same debt `leg_clears` states), so
+an analytic-center tolerance would refuse every ring (first cut proved it:
+3 debug tests flipped to `Empty`). Refused runs are *counted by note*
+("plunge column … stands as rest, reported not cut") - the march's
+canopy-refusal form, per "never silence". `column_clear` gained the
+`limit` parameter; `plunge_support` passes `r − TOUCH_EPS` (its centers
+are analytic).
+
+**Verification.** Debug ladder green (finish3d 33, motion lib 76, app/ui
+sim suites, 13 .nc goldens byte-identical, clippy clean on
+motion/sim/app/ui). Release `--ignored` lanes: finish3d 28/28 incl. the
+twice-"flaky" cone verdict, now passing honestly at 0.42 s (the flakiness
+claim was a misdiagnosis of this same gouge drifting past the assert).
+`overhang_is_caught_by_the_measurement` asserted the *violation* as law
+("the M2.2 entry law is exactly what produces it"); the entry law now
+refuses those plunges instead of performing them, so the test asserts the
+new contract: bound clean, refusal by note, verifier warning on the rest.
+
+**Considered and dropped.** (R1) blanket `validate()` refusal of
+`top_z > clearance_z` - contradicts march's accepted raised-traverse
+convention and would flip two non-ignored tests; the right law is
+per-entry certification, not a parameter veto. (R2) keeping the approach
+at `hop` alone - fixes the first plunge but leaves level-to-level moves
+climbing to `clearance_z` under a canopy; the certification is what makes
+any entry honest, so the raised approach is merely the cheap case of it.
