@@ -90,6 +90,15 @@ pub enum FinishPattern {
     /// a ring that touches nothing flatter than the band is the
     /// ladder's hands off the floor, as the border law always said.
     Blend,
+    /// The ladder's levels joined by ruled lofts (M2.5 D2): the
+    /// waterline rings ride as always, and between every consecutive
+    /// pair of levels whose loops pair (area rank + centroid within
+    /// one tool diameter) one interpolated guide runs, its XY the
+    /// loop-to-loop ruling's midpoint and its Z the column's own
+    /// answer - halving the spacing quarters the cusp, and where the
+    /// levels' geometry disagrees about being one feature, nothing
+    /// is paired and the rings alone carry the step, as before.
+    Morph,
 }
 
 /// Everything the 3D finishers need that the tool and geometry don't

@@ -10,15 +10,15 @@
 //! strategy's jurisdiction, so the envelope must stay silent on them).
 //!
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::stock_sim, camcraft_motion::verify.
-//! Lane shape (M4.4): 54 law tests run here in seconds (M2.5 B adds
-//! the crease pair, M2.5 D the band); 26 envelope-VERDICT and
+//! Lane shape (M4.4): 57 law tests run here in seconds (M2.5 B adds
+//! the crease pair, M2.5 D the band and the lofts); 33 envelope-VERDICT and
 //! dome-generation tests are #[ignore]d - run them with
 //! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
 
 use camcraft_motion::cl::{lattice, MoveKind, Toolpath};
 use camcraft_motion::finishing3d::{
-    blend, contour, corner, flat, geodesic, morphed_spiral, parallel, pencil, project, radial,
-    scallop_stepdown, scallop_stepover, spiral, waterline, Finish3DParams, FinishPattern,
+    blend, contour, corner, flat, geodesic, morph, morphed_spiral, parallel, pencil, project,
+    radial, scallop_stepdown, scallop_stepover, spiral, waterline, Finish3DParams, FinishPattern,
 };
 use camcraft_motion::geometry::{slice, Point3, Triangle};
 use camcraft_motion::geo2d::Region;
@@ -3438,6 +3438,95 @@ fn blend_band_sheet_is_envelope_clean() {
     // budget anywhere on the sheet, walls or floors.
     let f = tilted(38f64.to_radians(), 8.0);
     let t = blend(&f, &ppattern(14.7, 4.0, FinishPattern::Blend)).expect("band blend");
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+}
+
+// M2.5 D. Morph: the ladder's levels joined by ruled lofts. The rings
+// ride exactly as the waterline places them - Morph is neither steep
+// nor band in `emit_rings`, so the single-level ladder is the
+// waterline path byte for byte, the twin law again - and between each
+// pair of consecutive levels whose loops pair (same area rank, the
+// centroids no further apart than a tool diameter) one interpolated
+// guide is marched, its XY the loop-to-loop ruling's midpoint and its
+// Z the column's own answer, never the interpolation's. Halving the
+// wall's spacing quarters the cusp the ladder's promise bought.
+
+#[test]
+fn the_single_level_morph_is_the_waterline() {
+    // One level, no gap, nothing to loft: the morph IS the ladder,
+    // move for move, on a box and on a cone. The identity is exact
+    // because the ring part is the same `emit_rings` walk (Morph
+    // trips neither the steep nor the band flag) and the retract that
+    // closes it is the waterline's own.
+    // One level (top == bottom), inside each fixture's own reach: no
+    // gap, nothing to loft.
+    for (f, z) in [
+        (box_facets(), 5.0),
+        (steep_cone(48), 15.0),
+        (tilted(30f64.to_radians(), 6.0), 10.0),
+    ] {
+        let wl = waterline(&f, &ppattern(z, z, FinishPattern::Waterline)).expect("one-level waterline");
+        let mo = morph(&f, &ppattern(z, z, FinishPattern::Morph)).expect("one-level morph");
+        assert_eq!(
+            mo.moves, wl.moves,
+            "with no gap to loft the morph repainted the ladder"
+        );
+    }
+}
+
+#[test]
+fn the_morph_lays_a_loft_in_every_paired_gap() {
+    // A real ladder on the 30-degree sheet: many level pairs, each a
+    // wall strip the ruling can join (centroids drift by
+    // dz·cot(alpha) per level, well inside the 2r gate). The morph's
+    // feed count stands STRICTLY above the waterline's - the lofts
+    // are extra cut lines, never replacements.
+    let f = tilted(30f64.to_radians(), 6.0);
+    let wl = waterline(&f, &ppattern(14.0, 4.0, FinishPattern::Waterline)).expect("wl");
+    let mo = morph(&f, &ppattern(14.0, 4.0, FinishPattern::Morph)).expect("morph");
+    let n = |t: &Toolpath| n_kind(t, MoveKind::Feed);
+    assert!(
+        n(&mo) > n(&wl),
+        "the lofts cut nothing: morph {} feeds vs waterline {}",
+        n(&mo),
+        n(&wl)
+    );
+}
+
+#[test]
+fn the_morph_is_deterministic_and_refuses_nonsense_by_the_shared_door() {
+    // The pairing is a predicate on facts (area rank, centroid), not
+    // a scheduler: the same facets twice write the same path twice.
+    // And degeneracy answers at `validate`'s door like every pattern:
+    // a NaN facet refuses by name, dust answers Ok-or-Err (the
+    // tangent circle about a point is honest geometry), never a panic.
+    let f = tilted(30f64.to_radians(), 6.0);
+    assert_eq!(
+        morph(&f, &ppattern(14.0, 4.0, FinishPattern::Morph)).expect("a").moves,
+        morph(&f, &ppattern(14.0, 4.0, FinishPattern::Morph)).expect("b").moves,
+        "the loft pairing wavered between runs"
+    );
+    let dust = vec![Triangle::new(p3(1.0, 1.0, 1.0), p3(1.0, 1.0, 1.0), p3(1.0, 1.0, 1.0))];
+    let r = morph(&dust, &ppattern(1.0, -1.0, FinishPattern::Morph));
+    assert!(r.is_ok() || r.is_err(), "dust answered with a panic");
+    let nan = vec![Triangle::new(p3(f64::NAN, 0.0, 0.0), p3(1.0, 0.0, 0.0), p3(0.0, 1.0, 0.0))];
+    assert!(
+        morph(&nan, &ppattern(1.0, -1.0, FinishPattern::Morph)).is_err(),
+        "a NaN facet made geometry"
+    );
+}
+
+#[test]
+#[ignore = "verdict lane: envelope scan over the 30-degree loft sheet - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
+fn morph_loft_sheet_is_envelope_clean() {
+    // The loft's promise, measured: grounding every interpolated
+    // sample on the column (never the XY ruling's implied Z) means the
+    // extra guides bite nothing and the quartered cusp leaves nothing
+    // standing past the budget on the wall strips they join.
+    let f = tilted(30f64.to_radians(), 8.0);
+    let t = morph(&f, &ppattern(14.0, 4.0, FinishPattern::Morph)).expect("loft morph");
     let rep = envelope(&f, &t);
     assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
     assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);

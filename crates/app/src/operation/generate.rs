@@ -562,6 +562,14 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 finishing3d::FinishPattern::Blend => {
                     finishing3d::blend(&material.facets, &fp)?
                 }
+                // M2.5 D. Morph is the waterline ladder PLUS the
+                // ruled lofts between its levels: the ring part is
+                // emit_rings' ordinary walk (Morph is neither steep
+                // nor band there), and `morph` adds one column-
+                // grounded interpolated guide per paired level gap.
+                finishing3d::FinishPattern::Morph => {
+                    finishing3d::morph(&material.facets, &fp)?
+                }
             };
             (region, path)
         }

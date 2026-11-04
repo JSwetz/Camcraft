@@ -4444,6 +4444,99 @@ fn the_blend_pattern_generates_through_the_operation_layer() {
 }
 
 #[test]
+fn the_morph_pattern_generates_through_the_operation_layer() {
+    // M2.5 D's other door. The morph's rings ARE the waterline's
+    // ladder - the pattern's promise is the loft family riding
+    // between the levels - so through the operation layer the morph
+    // must cut strictly MORE than the ladder: same rings, extra
+    // guides. A door that routes "morph" to `waterline` leaves the
+    // feed count equal; this test is that failure's witness.
+    use camcraft_app::finishing3d::FinishPattern;
+    use camcraft_app::geometry::Triangle;
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let t = 38f64.to_radians().tan();
+    let surf = |y: f64| 10.0 - y * t;
+    let h = 6.0;
+    let mut facets = Vec::new();
+    facets.extend(quad([
+        Point3::new(-h, -h, surf(-h)),
+        Point3::new(h, -h, surf(-h)),
+        Point3::new(h, h, surf(h)),
+        Point3::new(-h, h, surf(h)),
+    ])); // tilted top
+    for (y0, y1) in [(-h, -h), (h, h)] {
+        facets.extend(quad([
+            Point3::new(-h, y0, 4.0),
+            Point3::new(h, y0, 4.0),
+            Point3::new(h, y1, surf(y1)),
+            Point3::new(-h, y1, surf(y0)),
+        ]));
+    }
+    for (x0, x1) in [(-h, -h), (h, h)] {
+        facets.extend(quad([
+            Point3::new(x0, -h, 4.0),
+            Point3::new(x1, h, 4.0),
+            Point3::new(x1, h, surf(h)),
+            Point3::new(x0, -h, surf(-h)),
+        ]));
+    }
+    facets.extend(quad([
+        Point3::new(-h, -h, 4.0),
+        Point3::new(h, -h, 4.0),
+        Point3::new(h, h, 4.0),
+        Point3::new(-h, h, 4.0),
+    ])); // base
+    history.execute(
+        &world,
+        ImportModel::from_mesh("sheet38m", Mesh::from_facets(facets)),
+    );
+    let ask = |q: FinishPattern| {
+        let mut a = finish_params(14.7, 4.0, 0.1);
+        let OpParams::Finish3D { pattern, .. } = &mut a else {
+            panic!("finish3d params expected");
+        };
+        *pattern = q;
+        a
+    };
+    let mut op = |name: &str, a: OpParams| {
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("sheet38m".into()), a)
+                .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        assert_eq!(status(&world, name), OpStatus::Ok, "{name} must seat and cut");
+    };
+    op("FF", ask(FinishPattern::Morph));
+    op("FH", ask(FinishPattern::Waterline));
+    let feeds = |n: &str| {
+        cache(&world, n)
+            .expect("cached")
+            .path
+            .moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Feed)
+            .count()
+    };
+    assert!(feeds("FF") > 0, "the morph went silent on the sheet");
+    assert!(
+        feeds("FF") > feeds("FH"),
+        "the morph cut no more than the ladder - the lofts never reached the kernel ({} vs {})",
+        feeds("FF"),
+        feeds("FH")
+    );
+}
+
+#[test]
 fn finish3d_refuses_a_flat_bottomed_tool() {
     // The forbidden-center scan is ball geometry; an end mill here must
     // refuse by name, never generate a ball path dressed as an end mill.

@@ -349,7 +349,24 @@ fn the_new_rows_round_trip_through_the_project_file() {
         project::save(&world, &path).expect("save");
         let text = std::fs::read_to_string(&path).expect("read");
         assert!(text.contains(key), "the params carry their tag {key}");
-        assert!(text.contains("\"version\":45") || text.contains("\"version\": 45"), "the file states v45");
+        // The rows this suite added entered the DTO grammar at v45;
+        // every later bump's file must still carry them, so the
+        // claim is "v45-era grammar or newer", never the exact head
+        // (a hard pin here rotted twice in M2.5 A/B, whose gates
+        // this suite never rode).
+        let stated = text
+            .split_once("\"version\"")
+            .and_then(|(_, s)| {
+                let digits: String =
+                    s.chars().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect();
+                digits.parse::<u32>().ok()
+            })
+            .expect("the file states a numeric version");
+        assert!(
+            (45..=project::PROJECT_VERSION).contains(&stated),
+            "the file must state v45-era grammar up to this build's head ({})",
+            project::PROJECT_VERSION
+        );
         let world2 = new_world();
         project::load(&world2, &path).expect("load");
         let e = model::find_by_name(&world2, "OP").expect("op");

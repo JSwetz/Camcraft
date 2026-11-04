@@ -913,6 +913,8 @@ pub enum FinishPatternDto {
     /// M2.5 D, same law: both families ride the 30-45° transition,
     /// so the border's staircase is cut from both directions.
     Blend,
+    /// M2.5 D, same law: the ladder's levels joined by ruled lofts.
+    Morph,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -934,6 +936,7 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::MorphSpiral => crate::finishing3d::FinishPattern::MorphSpiral,
             FinishPatternDto::Geodesic => crate::finishing3d::FinishPattern::Geodesic,
             FinishPatternDto::Blend => crate::finishing3d::FinishPattern::Blend,
+            FinishPatternDto::Morph => crate::finishing3d::FinishPattern::Morph,
         }
     }
 }
@@ -957,6 +960,7 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::MorphSpiral => FinishPatternDto::MorphSpiral,
             crate::finishing3d::FinishPattern::Geodesic => FinishPatternDto::Geodesic,
             crate::finishing3d::FinishPattern::Blend => FinishPatternDto::Blend,
+            crate::finishing3d::FinishPattern::Morph => FinishPatternDto::Morph,
         }
     }
 }

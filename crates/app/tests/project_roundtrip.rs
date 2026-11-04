@@ -4956,6 +4956,10 @@ fn the_stage_c_pattern_words_arrive_as_words_not_a_version() {
             "blend",
             camcraft_app::finishing3d::FinishPattern::Blend,
         ),
+        (
+            "morph",
+            camcraft_app::finishing3d::FinishPattern::Morph,
+        ),
     ] {
         let t = finish(&format!(", \"pattern\": \"{word}\""));
         let w = new_world();

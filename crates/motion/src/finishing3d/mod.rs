@@ -86,6 +86,7 @@
 mod crease;
 mod flat;
 mod geodesic;
+mod morph;
 mod pencil;
 mod flow;
 mod march;
@@ -110,4 +111,5 @@ pub(crate) use support::closest_pt_tri;
 pub use polar::{morphed_spiral, radial, spiral};
 pub use raster::{blend, parallel, swarf, swarf_multi};
 pub use rings::waterline;
+pub use morph::morph;
 pub use shadow::{contour, project};
