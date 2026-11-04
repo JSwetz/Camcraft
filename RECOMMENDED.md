@@ -7856,3 +7856,62 @@ those diffs touching it. The assert now PARSES the stated version and
 checks the range `45..=PROJECT_VERSION` (the grammar floor stays
 exact). The lesson for every future version assert: state the floor,
 bound by the head, never pin a literal that bumps carry past.
+
+## M2.5 D3 - Project generalization: drape the part's own edges, not just their shadow (2026-11-04)
+
+**What was chosen.** Project now walks TWO curve families: the
+center-shadow silhouette it always marched (M2.2e, untouched law,
+untouched bytes), and then every CLOSED boundary loop the mesh itself
+carries - a trim's rim, a hole's edge - XY kept exactly, Z answered
+by the column law (`plunge_support`), marched by the very
+`march_loop` the shadow families ride. The tilted plate's hole is cut
+where the plate's edge STANDS, not where its shadow falls. Provenance
+stays public-behavior-only ("projected finishing" is machine-handbook
+vocabulary); the construction - weld-scaled open-edge chaining onto
+crease.rs' chain walk - is ours, two truths one code.
+
+**One weld law for the whole family.** `vkey`/`vkey_scale` lived twice
+(pencil.rs, geodesic.rs); the drape needed the same third time, so
+the pair was LIFTED into crease.rs and both copies deleted - the
+drape's boundary chain, the loci's locus chain and the geodesic's
+contour chain now weld the same mesh the same way, by construction
+rather than by copy-paste discipline. Considered and dropped: a third
+private copy (what the drape draft was), and a weld trait (a
+one-function abstraction for two call sites' worth of code).
+
+**The crack branch found real garbage in the house.** Refusal by
+count - open runs are NAMED in a note and draped as NOTHING -
+resisted every synthetic fixture: with both orientations collected,
+welded keys and closing-beats-ties, every constructible planar mesh
+chains closed (nine contortions tried: bowties, slits, T-junctions,
+whiskers - all closed). The branch needed no contortion: the repo's
+OWN `box_facets` fixture hides a bowtie bottom - three valence-1
+edges chaining into one open diagonal run - and the drape is the
+first code here to report it. Chosen: keep the fixture (its envelope
+suites pass with it, and it is now a working crack corpus at zero
+cost), add `closed_box()` beside it to prove the silence half of the
+law. The `a_crack_is_named_and_never_draped_as_if_closed` test
+asserts both halves: the note names one run, and no feed stands on
+the diagonals.
+
+**Up-slope edges open; that is the law, not a bug.** A rim sample is
+supported where the ball's CONTACT (`center − r·m_xy`) rests on a
+real facet - on a tilted sheet that is the down-slope edges. The
+drape test asserts y = 10 and x = −3 exactly; the opposite edges
+break under the march's own break law, counted by geometry and never
+hidden (an envelope-verdict test on an OPEN sheet was considered and
+dropped: a phantom back side is what the height-field measure cannot
+see - tilted()'s own doc says so; the goldens carry the closed-solid
+identity instead).
+
+**Byte-identity is the safety law, and it is structural.** A closed
+manifold has no open edge, so `boundary_loops` returns empty before a
+sample, no note is written, and Project answers exactly as before
+this file existed - every solid-model golden rides byte-identical
+(the gate's porcelain check is the proof).
+
+**The app layer changed not one line.** Project's dispatch door
+(`generate.rs`), the operations word-table and the round-trip
+coverage all predate D3 - a generalization that needed new plumbing
+would have been the wrong generalization. Only the pages.rs tooltip
+grew the drape's sentence.

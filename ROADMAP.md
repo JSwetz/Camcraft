@@ -90,7 +90,7 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 | Morphed spiral | ✅ | M2.5 |
 | Geodesic | ✅ | M2.5 |
 | Blend | ✅ | M2.5 |
-| Morph | 📋 | M2.5 |
+| Morph | ✅ | M2.5 |
 | Corner | ✅ | M2.5 |
 | Flow (flowline; ruled-surface flow waits for M5.1) | 📋 | M2.5 |
 | Deburr | 📋 | M2.5 |
