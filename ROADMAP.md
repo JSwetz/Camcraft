@@ -1,6 +1,6 @@
 # ROADMAP.md
 
-> _Last updated: 2026-11-02_
+> _Last updated: 2026-11-04_
 
 ## North Star
 
@@ -86,9 +86,9 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 | Steep and shallow | ✅ | M2.5 |
 | Flat (flat-area finishing) | ✅ | M2.5 |
 | Pencil | ✅ | M2.5 |
-| Ramp | 📋 | M2.5 |
-| Morphed spiral | 📋 | M2.5 |
-| Geodesic | 📋 | M2.5 |
+| Ramp | ✅ | M2.5 |
+| Morphed spiral | ✅ | M2.5 |
+| Geodesic | ✅ | M2.5 |
 | Blend | 📋 | M2.5 |
 | Morph | 📋 | M2.5 |
 | Corner | ✅ | M2.5 |
@@ -1357,6 +1357,74 @@ NVIDIA sparse distance fields). Everything composed from these public
 sources; all Rust/wgpu/WGSL code here is ours; no HSMWorks or vendor
 material of any kind.
 
+## Phase 11 — Smooth transitions: the arc move at the turns
+
+Every turn in a path is a stop today: a facing row reverses on a sharp 180°
+corner, a between-pass link jogs at an angle, an entry drops straight down.
+Each is a direction discontinuity the machine must decelerate into, and the
+surface shows it. The moves to spend are arcs — RS-274 / ISO 6983 G2/G3
+circular interpolation, which the post has emitted since M1.7 — applied to
+the transitions themselves: tangential blends at turning points, and
+circular (arc) entries that curve the cutter down to the material instead
+of a straight plunge. Specced from the public G-code standard and general
+machining knowledge (path filleting, circular-ramp entry), clean-room.
+
+### M11.1 - Arc blends and arc entries
+**Goal: the tool changes direction and enters material continuously - turns ride G2/G3, not G1 stops.** — 📋
+
+- **Turning-point blends**: direction changes in feed motion - the facing
+  serpentine's end reversals (the named example), contour corners,
+  between-pass links - carry a fitted tangential arc (a fillet of the path
+  at the corner) emitted as one G2/G3 move, not a chord fan and not a G1
+  stop. The blend radius is bounded by tool radius, the op tolerance and
+  live geometry; whatever rest a rounding leaves, the sim reports (Prime
+  Directive: measured, never silent), and where no legal arc exists the
+  sharp corner stands, named. The generators emit the arc move; the post
+  needs no new word (M1.7's G2/G3 covers it).
+- **Arc entry**: the M2.1 entry family (plunge / ramp / helix) gains the
+  circular ramp - the cutter reaches the material along an arc in a
+  vertical plane, engaging tangentially instead of dropping a straight
+  line - dive-point legality proved by the same laws the ramp and helix
+  obey, with the same honest fallback when nothing can be proved.
+
+## Phase 12 — Geometry kernel: Solidcore
+
+The kernel decision open since M1.3 ("benchmark truck vs an OpenCascade
+binding") has a third answer: [tangency-labs/solidcore](https://github.com/tangency-labs/solidcore) -
+"A Rust port of NVIDIA's SMLib B-rep kernel (CAD subset): safe, deterministic,
+wasm-compatible" (Apache-2.0; the upstream it ports is NVIDIA's open
+usd-brep release, and the port is "not affiliated with or endorsed by
+NVIDIA"). A Rust-native kernel from an open source replaces the deferred
+modeling engine with no C++ toolchain risk and no proprietary internals kept
+at arm's length - the clean-room cuts toward reading SMLib, not away from it.
+
+### M12.1 - Solidcore replaces the B-rep engine
+**Goal: one Rust-native kernel behind the geometry - booleans, offsets and fillets stop being deferred kernel territory or mesh workarounds.** — 📋
+
+- **The swap**: `solidcore` enters the workspace as the modeling kernel
+      (topology, booleans, offset/shell work, fillet/chamfer, intersections,
+      healing), and the M1.3 ⏸ territory it unlocks - face/island
+      recognition from a real B-rep, boolean stock ops, B-rep editing -
+      becomes buildable. Truck does not exit wholesale: STEP→mesh import
+      (M1.2) stays on truck-stepio until a ported translator exists -
+      solidcore's scope is the kernel, upstream translators explicitly
+      outside it.
+- **The retirement gate**: the port is experimental (0.0.x, "partial units
+      and known mismatches; integration incomplete"), so it replaces truck
+      only after proving against the laws already in this codebase - a
+      dual-kernel agreement bench (truck vs solidcore verdicts on the
+      boolean/offset fixtures; a disagreement is a bug filed against the
+      port, never a rounding to accept - the M4.2b dome-golden law), the
+      corrupt-input corpus passing unchanged (the kernel's own "no panics
+      on bad input" goal restates the Prime Directive), and the heavy lane.
+- **Stays buildable everywhere**: the kernel builds for
+      `wasm32-unknown-unknown`, so M4.2's wasm-compile CI job extends to
+      it, and "no `unsafe` in the kernel" means no new FFI surface
+      anywhere.
+- **Provenance**: an Apache-2.0 port of a publicly released kernel -
+      license-clean to link; the notice rides `assets/ui/LICENSES.md`
+      (the clipper2-rust precedent).
+
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units (IGES deferred) | ⚠️ |
@@ -1396,6 +1464,8 @@ material of any kind.
 | **M8.3** | Canned/posed/revolved order | Done: drilling - R-plane law kept per cycle, the bore's fit door refuses an oversize tool and a stepped (counterbore-folded) hole by name, Spot dims off the mouth, FIT_TOL unified as one trust wearing three laws; helical bore entries declined as a verdict (a wide slide is contour's verb); multi-axis - a dive's lead now rides the cut it lands into (the stamp matches curve.rs's first station; ALONG→AT corrected in the archived prose), cone-dodge-at-entry, wrap radial dives and tilt-posed rapids recorded as verdicts with their backstop chains; turning - order law stated in the catalog rows, the verifier's stands-downs documented, no entry-defect analog (ridge, kerf-slide and rho_clear laws refuse or prevent by name); whole registry annotated, heavy lane green on every family | ✅ |
 | **M9.1** | The operation opens its own page | Done: the retype dropdown and its dialog retired - the ribbon creates or opens by kind, the tree selection opens the same pane in place (A); the six tabs folded into one stacked pane of collapsing sections per the Blender verdict, `op_tab` retired, the drift guard restated exact (B); the pane law walks all 30 registry kinds - one header per group, fields exactly once, catching the Passes header/field collision, renamed Pass count (C); toolpath goldens byte-identical, snapshots re-blessed; heavy lane green; ledger in RECOMMENDED.md | ✅ |
 | **M10.1** | A tool that can cut the operation | The tool law: `KindInfo.tool_kinds` one table (mill forms / cycle tools / lathe blades per family), `CreateOperation` + `ChangeTool` refuse the mismatch at command construction by name, the ribbon darkens with the reason (fix is a library click away - darken, not hide), tool edits leave ops visible-and-blocked not silently machined, old files load untouched; generator shape refusals stand as the backstop | 📋 |
+| **M11.1** | Smooth transitions | Arc blends at feed-path turning points (facing reversals, corners, links) as single G2/G3 moves instead of G1 stops; circular-ramp arc entry beside plunge/ramp/helix | 📋 |
+| **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
 
 ## Open questions & deferred
 
@@ -1410,13 +1480,13 @@ material of any kind.
   at those exact ties - so seven goldens were regenerated, coarser by
   8-24 moves, with the heavy envelope/verify lanes as the tolerance
   proof. See RECOMMENDED.md.
-- **Geometry kernel**: [ricosjp/truck](https://github.com/ricosjp/truck) (Apache-2.0,
-  Rust-native B-rep: truck-topology/geometry/meshalgo + truck-stepio STEP IO) is now
-  LINKED and ships STEP→mesh import (M1.2) - pure Rust, no C++ toolchain risk,
-  license-clean for the clean-room posture. Its boolean/offset quality for toolpath
-  operations is still unbuilt here: bench truck vs an OpenCascade binding before M1.3
-  commits to either for booleans; no proprietary kernel internals may be studied for
-  implementation hints either way (clean-room cuts both ways)
+- **Geometry kernel** (answered - replaced, not benched): [tangency-labs/solidcore](https://github.com/tangency-labs/solidcore)
+  (Apache-2.0), a Rust/wasm port of NVIDIA's SMLib B-rep kernel, replaces
+  truck as the modeling engine - the decision and gates are Phase 12 /
+  M12.1, not a truck-vs-OpenCascade bench any more. Until that swap lands,
+  truck (ricosjp, also Apache-2.0) still carries STEP→mesh import (M1.2),
+  and its boolean/offset behavior is the reference the dual-kernel
+  agreement bench measures against
 - **Post scripting runtime**: which embedded language (QuickJS / Lua / Rust-native DSL) -
   decide before M3.3; must be sandboxed like other scripts
 - **Simulation stock representation** (answered, revisited by design): decided dexel before M1.7 - right for the Z-plunge work of

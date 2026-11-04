@@ -7625,3 +7625,124 @@ per-entry certification, not a parameter veto. (R2) keeping the approach
 at `hop` alone - fixes the first plunge but leaves level-to-level moves
 climbing to `clearance_z` under a canopy; the certification is what makes
 any entry honest, so the raised approach is merely the cheap case of it.
+
+## M2.5 C - the ramp twin, the morph spiral's local law, the geodesic's boundary demand (2026-11-04)
+
+**Ramp: a flag's twin, not a fourth march.** The catalog's sloped-line
+pattern is app-forced onto the proven parallel law: `generate.rs` takes
+`FinishPattern::Ramp` and sets `q.pattern = Parallel; q.ramp = true;
+q.entry_ramp = true` before the march. Every link law M8.2 B certified
+(diagonal chain, `leg_clears` on each dive point) then applies verbatim,
+and the registry test proves the twin identity: moves("FR") ==
+moves("FQ") where FR carries the Ramp kind and FQ the identical explicit
+flags - and both differ from the plain parallel FP. Considered and
+dropped: a dedicated ramp generator - it would fork the link law that
+M8.2's whole verdict lane certified, and a second implementation of one
+law is exactly the drift M4's reuse phase exists to prevent.
+
+**Morphed spiral: one turn's spacing is that turn's own.** `polar.rs`
+marches the spiral family; the morph variant asks the surface where each
+stepover should land instead of a global pitch - local cos-law spacing
+from `support_grad` / the new `plunge_support_grad` (the gradient of
+plunge support, so the stepover shrinks where the wall steepens). The
+wedge fixture proves a spiral that tightens its rings against the slope
+and still clears the verifier.
+
+**Geodesic: it demands an open boundary, by name.** `geodesic.rs` welds
+the mesh by vertex key, solves the exact boundary-distance field
+(Dijkstra over face adjacency, weighted by the shared edge), and cuts
+the toolpath at iso-distance contours - rings that march inward from
+the part's own rim. A closed shell has no rim to march from and no
+honest seed exists, so it is refused at parameter-validation depth:
+GenError::Invalid "geodesic needs an open boundary to march from - this
+model is a closed shell", surfaced through the operation layer as a
+Machining error. Considered and dropped: marching from a face chosen as
+a pseudo-source - plausible-looking paths with no specced meaning is the
+silent-wrong-answer shape the Prime Directive forbids. The app witness
+(the stage-C test's FG row) needed the plateau's base quad added: the
+closed-shell refusal triggers only when *every* rim edge is paired, and
+the fixture was an open-bottom box. No metal moved in the twin rows -
+adding a floor the cutter never reaches changes no moves.
+
+**Support-kernel currency: what a candidate may propose, and what the
+clearance decides.** An earlier draft of this section claimed the
+tolerance now THREADS through `ball_clear`/`plunge_support`/`support_at`
+(`r − tol`). That threading was tried, measured against the corrugated
+belt, and REVERTED: the belt's one envelope deviation (0.0317 mm, in the
+ring-close's fitted arcs, endpoints exactly tangent, the same number the
+`tol/4` XY-sagitta budget predicts on a 22.5° face) appears identically
+under threaded and exact laws - the threading fixed nothing, and a
+center allowed to bury `tol` into a facet is a center the kernel
+promises NOT to bury. Every clearance question stays at HEAD's exact
+currency `r − TOUCH_EPS`.
+
+What stage C adds is a CANDIDATE law, and it lives in exactly one
+place: `tangent_z_folded`. The strict `tangent_z` (march ground, rings,
+shadow, flat - every family that CUTS) keeps HEAD's 1e-9 barycentric
+hair: where no facet's plane owns a tangent foot there is no rest, the
+run BREAKS, and the crease gap between adjacent breaks is the staircase
+the minimum-step law is specced against (`minimum_step_floors_the_
+refinement_not_the_edges`: 324/302/258/236/236 feeds across the rungs).
+The folded variant (inside exact; near-miss allowed with `wmin ≥ −0.15`
+and per-edge caps `max(0.05·r, 0.02·h_edge)` - slack proportional to the
+tessellation, never a global fudge) answers only `support_grad`, the
+morph table's slope lookup - a reading that RUNS NO CUT, so a wider
+answer can only widen a spacing, and the 45° jurisdiction clamp bounds
+what that can cost. It was tried on the whole kernel once, on the theory
+that candidates only propose and `ball_clear` decides: true about
+safety, and it still destroyed the belt's staircase - edge-resting
+centers that a straddling ball legitimately HAS answered the march
+where the module's promise says BREAK. A law's promise outranks a looser
+answer; the slack went where it cannot speak through a cut move.
+
+Two verdicts followed the narrowing, both restored to HEAD semantics:
+`flat` on the closed dome answers its Empty refusal again (the apex
+star was a fold-rest the plane law cannot own - M7.1's brick-SDF
+territory, the same jurisdiction the dome march's hole note names), and
+the morphed-spiral cap test reads its spacing PER FRAGMENT binned by
+radius instead of per stitched turn (fragmentation at tessellation
+crests IS the strict law's honest output; the within-band azimuthal
+quantization of the 16-node table is averaged out by construction).
+Considered and dropped: family-specific kernels for the polar march
+(spacing laws speak on contiguous ground - a family that quietly keeps
+a looser ground is two kernels, not one exception); folding the table's
+noise away by densifying the node grid (the table's currency is its own
+spacing promise, not the march's).
+
+## M2.5 C verdict-lane: a closed ring rotates to a clean start - and the test it had been hiding (2026-11-04)
+
+**What happened.** The rotary app test failed under stage C's kernel and
+bisected to *HEAD itself*: it has been failing since 6dbf94d (M2.5 A
+verdict-lane), and B's close-out missed it because the gate binary ran
+under a name filter that matched nothing - `--exact` plus a substring
+pattern silently executed 0 tests and exited 0 green. A filter that can
+run zero tests is not a gate. Recorded so the ledger carries both the
+fix and the process miss.
+
+**Root cause, measured.** On the laid stepped bar (r6 → cone 6→5 → r5,
+stations −16..16) the bottom rung's ring (the −3.8590/−4 pair on the
+r5 flank) is a clean ccw loop, but the scan's start vertex
+(−1.8556, −8.8844) sits at the r6→cone shoulder: the plunge column from
+`approach_z` passes 2.888 from the corner edge, under the currency
+r − tol = 2.9, so 6dbf94d's entry certification refused the *whole
+ring* for the crime of its starting vertex. The region exists; the
+entry point was poisoned.
+
+**The fix: a closed ring is a cycle, and its start is a choice.** When
+the head vertex's column is blocked, `rings.rs` rotates the loop to the
+first stride-sampled vertex whose column certifies clear - ≤ 256 tests
+at the same `r − tol` currency, then re-fits the arcs - before any
+refusal note is written. Nothing is softened: if no vertex clears, the
+refusal stands, counted by note as before. Open runs keep their head
+(their ends are the spec); the `entry_ramp` path is untouched (M8.2 B
+certifies each dive point already). Considered and dropped: refusing
+the rung as before (wrong - the metal is reachable); entering by
+retract-and-traverse from another rung's endpoint (rewrites the ring
+family's link law for one fixture's geometry); lowering the currency
+(the certification is the law this fix honors, not its obstacle).
+
+**Gate-filter law, learned.** Every gate report must show per-binary
+test counts; "0 passed; N filtered out" under a name filter is RED by
+definition. Both this stage's binaries and the close-out ladder now
+state expected counts, and a zero-test run is a failure to report, not
+a pass.
