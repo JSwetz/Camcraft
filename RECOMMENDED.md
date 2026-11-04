@@ -7794,3 +7794,65 @@ rings_and_tail's callers always have); steep_stepover stays
 SteepShallow-only because Blend's ring spacing is the ladder's own
 scallop law, not a stated flank number - the pane says what the
 kernel spends.
+
+## M2.5 D2 - Morph: the loft's Z is the column's, never the ruler's (2026-11-04)
+
+**What the pattern is.** Between consecutive waterline rings the tool
+rides ONE interpolated guide per paired gap - the `t = 1/2` ruling
+between the two tangent loops. Halving the level spacing quarters the
+cusp (`Δz²/(8r)` at the midpoint), so Morph shows the ladder's promise
+at a quarter of the Z budget. It attacks the same cusp the ramp and
+blend strategies ride, from the other side: they move where the rings
+sit; Morph adds a path between them.
+
+**The Z law, chosen against the obvious construction.** The guide's XY
+is the interpolation's, but its Z is grounded sample by sample by
+`plunge_support` - the march families' own currency. Considered and
+dropped: averaging the two rings' Z (a linear chord between levels
+lies under canopies and stands over cusps - it would promise support
+the surface doesn't give, the one thing the Prime Directive names);
+carrying the loft as a raw polyline without the march (no
+climb-gate, no trim-when-refused, no hop law). Grounded instead, a
+refused sample breaks the run at the hop and counts a note, and what
+hides there stands as rest, reported not cut.
+
+**Pairing: area-rank, gated by a tool diameter.** Components of
+consecutive levels match by |area| rank (the ring walker's own
+emission order - two truths, one code) and a centroid-proximity gate:
+centroids further apart than `2r` are a feature appearing or dying (a
+hole closing, an island dying), not a wall continuing - nothing pairs,
+no loft is written, and the rings alone carry that level change
+exactly as the ladder did before this file existed. Considered and
+dropped: index pairing (the region walker's order is not feature
+order across levels), Hausdorff matching (a full similarity search
+for a question one distance answers).
+
+**The seam makes the phase deterministic.** Both loops are resampled
+to a common count walked from each loop's furthest +X vertex from the
+signed centroid, so two levels of the same feature start their arc at
+the same phase (the scan direction set is shared, so seams land in
+the same quadrant). Considered and dropped: arbitrary-start resample
+(a seam half a loop away interpolates a figure-eight through the
+solid), arc-length-parameter-only (still rotates the phase wherever
+the loop's own vertex counts differ).
+
+**The identity law.** A single-level ladder (top = bottom) lofts
+nothing, and Morph is Waterline byte for byte - `emit_rings`' ordinary
+walk with the pattern check neither steep nor band. The door test
+holds both halves: on a 38° sheet Morph's feed count strictly exceeds
+Waterline's (the lofts arrived), and `last = Some(clearance)` makes
+the ring part identical to the ladder's own.
+
+**Row 93 stays 📋 until D3.** The Morph row is shared with the
+Project generalization (draping the model's own boundary loops, not
+just its silhouette shadow): the strategy the row names is shipped
+and green, and the row flips when the drape lands.
+
+**Finding the gate told us: a pin rots silently if nobody's ladder
+steps on it.** `mill2d_c` hard-pinned the literal `"version":45`;
+PROJECT_VERSION rode 45→46→47 through M2.5 A/B - whose narrow gates
+never included that suite - and the test went RED without any of
+those diffs touching it. The assert now PARSES the stated version and
+checks the range `45..=PROJECT_VERSION` (the grammar floor stays
+exact). The lesson for every future version assert: state the floor,
+bound by the head, never pin a literal that bumps carry past.
