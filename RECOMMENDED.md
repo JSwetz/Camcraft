@@ -7968,3 +7968,81 @@ answers ride the memo), applied at the island law.
 **The door's verdict cost: none.** verify answers 0 warns on the
 barrel in ~330 ms; law (f)'s envelope scan (241 ms) is now the floor -
 honest, it is the rest-material verdict itself.
+
+## M2.5 E B - the deburr seats in the Mill3D run, and the door the tool law already closed (2026-11-04)
+
+**The row seats inside the run, not at the tail.** Deburr takes index
+15, after Finish3D, because the contiguity law will not abide a
+tail-append for a Mill3D kind (same reason M2.4 C seated Bore and
+Thread IN their runs). The rung is one boundary: v47 -> v48 shifts
+`pinned` indices >= 15 by +1 - the same partition the registry's
+section rows read. Considered and dropped: seat at 37 (breaks the run
+into a lie) and reuse of a hole (no law says an index is free). The
+v42/v43/v44 pin tests recomposed for the fourth rung, their chain
+comments the file's proof that rungs compose, not overwrite.
+
+**The ride needs one authored number.** `drop = width /
+tan(half-angle)` puts the virtual tip under the edge and the cone's
+surface meets the edge's plane at exactly `width` - so the break's
+DEPTH is the TOOL's word, derived, never a second number to disagree
+(the chamfer grammar on a real dihedral, and the 45-deg congruence
+test says it in bytes: same XY circuit `chamfer.rs` posts, quantized
+to microns, which no real disagreement survives). No XY offset
+exists to get wrong: a vertical-axis cone over a convex edge lies
+over it, material under. The loci are pencil's mirror - the crease
+gate reads the other way (keep the pair that fails "both opposite
+vertices above"), rims welded in 3D because the drape's boundary walk
+flattens to XY to ground Z and this ride needs the loop's own Z. The
+window clips tips by the segment's own line; an edge nothing exposes
+answers `Empty` by name.
+
+**No retract key in the grammar.** The kernel hops to `clearance_z`
+between every edge run - a programmed retract would be a second
+truth about the same hop, and `ParamsDto::Deburr` carries six keys,
+not seven. Dropped: a retract field "for symmetry" with Contour.
+
+**The angle door is defense-in-depth, and the test proved it from
+both sides.** `AddTool`'s `is_sane` (Taper wants `0 < tip_angle <
+180`, the global bound under a flat) makes a 180-deg cone
+UNMOUNTABLE - the generate door's `!(0.0..180.0)` can never fire
+through the command layer. The test asserts both: AddTool refuses the
+mount by the sanity law, then writes the `ToolDef` straight onto the
+entity (the machine.rs:760 idiom) so the kernel's own door meets the
+shape the command law can no longer produce. Considered and dropped:
+deleting the generate door as "unreachable" - the direct-write path
+is exactly what a future step-up or a corrupt-mirror mount would
+take, and the door is the last layer, per the Prime Directive's
+validate-early-plus-late.
+
+**The flute door reads the slant, not the drop.** The cone reaches a
+`width` break at slant distance `width / sin(half-angle)` up its
+flank - shorter flute than that and the cylinder above the cone would
+ride the wall, so the door says it in millimetres ("the break reaches
+7.1 mm up the cone's flank"). Dropped: comparing `flute_len` to the
+drop alone (that's the Z reach; the cut lives on the flank).
+
+**The happy fixture breaks the top rim only.** A cone cannot deburr
+a bottom rim from above - its body would stand INSIDE the wall - so
+the window [6, 8] over a brick's rims admits exactly the top circuit
+and the honest program says so; the bottom rim's tips (z = -2, drop
+2) clip under `bottom_z + drop` by the window law itself. A fixture
+that "deburred" both rims would have been a gouge the verifier
+catches and the post refuses - designed out.
+
+**UI words: the pane borrows its icon from Contour** (the edge-ride
+glyph is the same circuit-follow; a deburr-only glyph invented a
+difference the operation doesn't have), **names the window fields
+"Window Top Z" / "Window Bottom Z"** (a bare "Top Z" would promise
+the Heights group's model-relative pair; these bound the EDGE
+window, a different thing), and **excludes Passes** from the pane
+(the drift-guard table carries the 16th row): one authored break, no
+stock-to-leave, no stepdown - a deburr is a single pass over exposed
+edges, a law the seed states as plainly as the kernel does.
+
+**Staleness debt: none.** New PARAMS variant means no old file can
+carry it, so no digest word rides into existing ops' stamps - the
+one-time-Stale the step-up law accepts (the M5.3 C/D precedent) is
+the price for appending words to EXISTING variants; `Deburr`'s fold
+(width, the window's planes, clearance, both feeds - the cone itself
+already rides the tool revision) only ever salts ops that were born
+with it.
