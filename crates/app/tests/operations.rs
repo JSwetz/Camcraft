@@ -4360,6 +4360,90 @@ fn the_stage_c_patterns_generate_through_the_operation_layer() {
 }
 
 #[test]
+fn the_blend_pattern_generates_through_the_operation_layer() {
+    // M2.5 D's door. A 38-degree sheet is shallow by the 45 flag and
+    // past the band line, so the split and the Blend cannot cut the
+    // same metal: the sheet-crossing ring runs ride under Blend and
+    // stay home under SteepShallow. Through the operation layer that
+    // difference must survive - the door routes the pattern word to
+    // `blend`, not to `parallel` wearing a new name.
+    use camcraft_app::finishing3d::FinishPattern;
+    use camcraft_app::geometry::Triangle;
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let t = 38f64.to_radians().tan();
+    let surf = |y: f64| 10.0 - y * t;
+    let h = 6.0;
+    let mut facets = Vec::new();
+    facets.extend(quad([
+        Point3::new(-h, -h, surf(-h)),
+        Point3::new(h, -h, surf(-h)),
+        Point3::new(h, h, surf(h)),
+        Point3::new(-h, h, surf(h)),
+    ])); // tilted top
+    for (y0, y1) in [(-h, -h), (h, h)] {
+        facets.extend(quad([
+            Point3::new(-h, y0, 4.0),
+            Point3::new(h, y0, 4.0),
+            Point3::new(h, y1, surf(y1)),
+            Point3::new(-h, y1, surf(y0)),
+        ]));
+    }
+    for (x0, x1) in [(-h, -h), (h, h)] {
+        facets.extend(quad([
+            Point3::new(x0, -h, 4.0),
+            Point3::new(x1, h, 4.0),
+            Point3::new(x1, h, surf(h)),
+            Point3::new(x0, -h, surf(-h)),
+        ]));
+    }
+    facets.extend(quad([
+        Point3::new(-h, -h, 4.0),
+        Point3::new(h, -h, 4.0),
+        Point3::new(h, h, 4.0),
+        Point3::new(-h, h, 4.0),
+    ])); // base
+    history.execute(
+        &world,
+        ImportModel::from_mesh("sheet38", Mesh::from_facets(facets)),
+    );
+    let ask = |q: FinishPattern| {
+        let mut a = finish_params(14.7, 4.0, 0.1);
+        let OpParams::Finish3D { pattern, .. } = &mut a else {
+            panic!("finish3d params expected");
+        };
+        *pattern = q;
+        a
+    };
+    let mut op = |name: &str, a: OpParams| {
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("sheet38".into()), a)
+                .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        assert_eq!(status(&world, name), OpStatus::Ok, "{name} must seat and cut");
+    };
+    op("FD", ask(FinishPattern::Blend));
+    op("FE", ask(FinishPattern::SteepShallow));
+    let moves = |n: &str| cache(&world, n).expect("cached").path.moves;
+    assert!(!moves("FD").is_empty(), "the blend went silent on the sheet");
+    assert_ne!(
+        moves("FD"),
+        moves("FE"),
+        "the blend's door cut the split's metal - the band never reached the kernel"
+    );
+}
+
+#[test]
 fn finish3d_refuses_a_flat_bottomed_tool() {
     // The forbidden-center scan is ball geometry; an end mill here must
     // refuse by name, never generate a ball path dressed as an end mill.

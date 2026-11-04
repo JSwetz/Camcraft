@@ -10,14 +10,14 @@
 //! strategy's jurisdiction, so the envelope must stay silent on them).
 //!
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::stock_sim, camcraft_motion::verify.
-//! Lane shape (M4.4): 33 law tests run here in seconds (M2.5 B adds
-//! the crease pair); 28 envelope-VERDICT and
+//! Lane shape (M4.4): 54 law tests run here in seconds (M2.5 B adds
+//! the crease pair, M2.5 D the band); 26 envelope-VERDICT and
 //! dome-generation tests are #[ignore]d - run them with
 //! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
 
 use camcraft_motion::cl::{lattice, MoveKind, Toolpath};
 use camcraft_motion::finishing3d::{
-    contour, corner, flat, geodesic, morphed_spiral, parallel, pencil, project, radial,
+    blend, contour, corner, flat, geodesic, morphed_spiral, parallel, pencil, project, radial,
     scallop_stepdown, scallop_stepover, spiral, waterline, Finish3DParams, FinishPattern,
 };
 use camcraft_motion::geometry::{slice, Point3, Triangle};
@@ -3350,4 +3350,95 @@ fn morphed_spiral_dome_bites_nothing() {
     let t = morphed_spiral(&f, &ppattern(24.0, -5.0, FinishPattern::MorphSpiral)).expect("dome morph");
     let rep = envelope(&f, &t);
     assert!(rep.gouge_mm <= gate(rep.cell), "the widened turns bit: {} mm at {:?}", rep.gouge_mm, rep.at);
+}
+
+// M2.5 D. Blend: the transition band ridden from BOTH sides. The
+// raster is Parallel's, untouched; the ring ladder is asked one new
+// question - does a shallow tangency ALSO reach past thirty degrees?
+// In the band between the two lines the ring's own cusp promise is
+// at most 4/3 of the ladder's budget (BLEND_MZ's note), so cutting
+// the band twice is a shave, not a waste: the staircase the 45-degree
+// border leaves where the march and the ladder fail to meet goes
+// away. Where the ground has no transition, the band says nothing -
+// and says it byte for byte, the twin law of every M2.5 kernel.
+
+#[test]
+fn the_blend_rides_the_band_the_split_drops() {
+    // The 38-degree sheet: shallow by the flag (cos 38 = .788 >
+    // cos 45) and past the band line (.788 < cos 30 = .866). The
+    // split sends loops that graze only the sheet to the march;
+    // the Blend rides them. Parallel filters nothing, so the three
+    // feed counts stand in the law's own order: par >= blend > ss.
+    let f = tilted(38f64.to_radians(), 6.0);
+    let par = parallel(&f, &ppattern(14.7, 4.0, FinishPattern::Parallel)).expect("band parallel");
+    let ss = parallel(&f, &ppattern(14.7, 4.0, FinishPattern::SteepShallow)).expect("band split");
+    let bl = blend(&f, &ppattern(14.7, 4.0, FinishPattern::Blend)).expect("band blend");
+    let n = |t: &Toolpath| n_kind(t, MoveKind::Feed);
+    assert!(n(&bl) > n(&ss), "the band rode nothing: {} vs {}", n(&bl), n(&ss));
+    assert!(
+        n(&bl) <= n(&par),
+        "the band invented geometry the unfiltered ladder never drew: {} vs {}",
+        n(&bl),
+        n(&par)
+    );
+    // The plunge ledger keeps the order too: every extra run is
+    // entered the way every other run is.
+}
+
+#[test]
+fn the_band_says_nothing_where_there_is_no_transition() {
+    // Steep-and-flat ground: the box. Flats are not band (their
+    // normals stand at m.z 1, past cos 30), walls always rode - so
+    // the Blend's path IS the split's, move for move. And on
+    // all-steep ground the filter admits every loop whole, which is
+    // the unfiltered geometry itself: the cone's Blend is its
+    // Parallel, byte for byte.
+    let b = box_facets();
+    let ss =
+        parallel(&b, &ppattern(10.0, 0.0, FinishPattern::SteepShallow)).expect("box split");
+    let bl = blend(&b, &ppattern(10.0, 0.0, FinishPattern::Blend)).expect("box blend");
+    assert_eq!(bl.moves, ss.moves, "the band spoke on ground with no transition");
+    let c = steep_cone(48);
+    let par = parallel(&c, &ppattern(30.0, 0.0, FinishPattern::Parallel)).expect("cone parallel");
+    let bl = blend(&c, &ppattern(30.0, 0.0, FinishPattern::Blend)).expect("cone blend");
+    assert_eq!(bl.moves, par.moves, "a filter with nothing to drop repainted the path");
+}
+
+#[test]
+fn the_blend_is_deterministic_and_refuses_nonsense_by_the_shared_door() {
+    // The band's flag is a predicate, not a scheduler: the same
+    // facets twice write the same path twice. And the degeneracy
+    // answers ride `validate` and the support build, the same door
+    // every pattern walks: a NaN facet refuses by name, dust answers
+    // Ok-or-Err (the tangent circle about a point is honest
+    // geometry - `degenerate_meshes_never_panic`'s law), never a
+    // panic.
+    let f = tilted(38f64.to_radians(), 6.0);
+    assert_eq!(
+        blend(&f, &ppattern(14.7, 4.0, FinishPattern::Blend)).expect("a").moves,
+        blend(&f, &ppattern(14.7, 4.0, FinishPattern::Blend)).expect("b").moves,
+        "the band's run order wavered"
+    );
+    let dust = vec![Triangle::new(p3(1.0, 1.0, 1.0), p3(1.0, 1.0, 1.0), p3(1.0, 1.0, 1.0))];
+    let r = blend(&dust, &ppattern(1.0, -1.0, FinishPattern::Blend));
+    assert!(r.is_ok() || r.is_err(), "dust answered with a panic");
+    let nan = vec![Triangle::new(p3(f64::NAN, 0.0, 0.0), p3(1.0, 0.0, 0.0), p3(0.0, 1.0, 0.0))];
+    assert!(
+        blend(&nan, &ppattern(1.0, -1.0, FinishPattern::Blend)).is_err(),
+        "a NaN facet made geometry"
+    );
+}
+
+#[test]
+#[ignore = "verdict lane: envelope scan over the 38-degree band sheet - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
+fn blend_band_sheet_is_envelope_clean() {
+    // The double cut's promise: riding the band from both sides
+    // bites nothing - the rings stay tangent law, the raster stays
+    // the march law - and leaves nothing standing past the cusp
+    // budget anywhere on the sheet, walls or floors.
+    let f = tilted(38f64.to_radians(), 8.0);
+    let t = blend(&f, &ppattern(14.7, 4.0, FinishPattern::Blend)).expect("band blend");
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
 }

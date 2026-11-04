@@ -5,7 +5,7 @@ use crate::geo2d::{Loop, Point2};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{fit_arcs, GenError};
 
-use super::params::{Finish3DParams, FinishPattern, SPLIT_MZ, TOUCH_EPS, dirs, levels, validate};
+use super::params::{BLEND_MZ, Finish3DParams, FinishPattern, SPLIT_MZ, TOUCH_EPS, dirs, levels, validate};
 use super::scan::{level_region, push_walk};
 use super::support::{Sup, build_sups, closest_pt_tri, column_clear, dist2_pt_tri};
 
@@ -94,7 +94,7 @@ pub(super) fn leg_clears(facets: &[Triangle], a: Point3, b: Point3, r: f64, tol:
 /// (unclassifiable - ring samples are tangencies by construction)
 /// rides: a redundant cut costs a pass, a skipped one can leave
 /// raw material, and the Prime Directive ranks those differently.
-fn touches_steep(sups: &[Sup], c: Point3, r: f64, tol: f64) -> bool {
+fn touches_steep(sups: &[Sup], c: Point3, r: f64, tol: f64, band: bool) -> bool {
     let lim = r + tol + TOUCH_EPS;
     let mut touched = false;
     let mut steep = false;
@@ -107,7 +107,10 @@ fn touches_steep(sups: &[Sup], c: Point3, r: f64, tol: f64) -> bool {
         let d2 = dist2_pt_tri(c, &s.tri);
         if d2 <= lim * lim {
             touched = true;
-            steep |= !s.shallow;
+            // The Blend's one difference: a shallow facet past the
+            // band line counts too - the ladder rides the band it
+            // can promise on, shaving the border's staircase.
+            steep |= !s.shallow || (band && s.m.z < BLEND_MZ);
         }
         if d2 < best_d2 {
             best_d2 = d2;
@@ -135,11 +138,12 @@ fn ring_runs(
     cz: f64,
     r: f64,
     tol: f64,
+    band: bool,
 ) -> Vec<(Vec<Point2>, bool)> {
     let n = order.len();
     let flags: Vec<bool> = order
         .iter()
-        .map(|q| touches_steep(sups, Point3::new(q.x, q.y, cz), r, tol))
+        .map(|q| touches_steep(sups, Point3::new(q.x, q.y, cz), r, tol, band))
         .collect();
     if flags.iter().all(|f| *f) {
         return vec![(order.to_vec(), true)];
@@ -198,6 +202,11 @@ pub(super) fn emit_rings(
     // its way to a ring cuts nothing - it lies).
     let sups = build_sups(facets, r);
     let steep = matches!(p.pattern, FinishPattern::SteepShallow);
+    // Blend is the same walk with the border moved down the tilt to
+    // the band line (M2.5 D): a run of the ladder survives when it
+    // reaches past 30 degrees, so the 30-45° transition is ridden
+    // twice by design and the seam's staircase is cut away.
+    let band = matches!(p.pattern, FinishPattern::Blend);
     let mut any = false;
     let mut refused = 0usize;
     for &z_tip in zs {
@@ -232,8 +241,8 @@ pub(super) fn emit_rings(
             // The partition (M2.5 A) breaks the loop at the border
             // into runs the ladder owns; every other pattern rides
             // the whole loop, as it always did.
-            let runs: Vec<(Vec<Point2>, bool)> = if steep {
-                ring_runs(&order, &sups, z_tip + r, r, p.tolerance)
+            let runs: Vec<(Vec<Point2>, bool)> = if steep || band {
+                ring_runs(&order, &sups, z_tip + r, r, p.tolerance, band)
             } else {
                 vec![(order, true)]
             };

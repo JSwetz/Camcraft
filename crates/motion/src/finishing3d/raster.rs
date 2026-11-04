@@ -146,6 +146,27 @@ pub fn parallel(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, Gen
     rings_and_tail(b, p, r, facets, emitted)
 }
 
+/// The blend strategy (M2.5 D): Parallel's raster, then the ring
+/// ladder with the border moved DOWN to the band line - every level
+/// walks its loops, but a run survives when the tangency reaches
+/// past 30 degrees instead of past 45. The 30-45° transition is
+/// therefore ridden twice, once from each direction: the cusp
+/// promises of the two families differ by less than the tolerance
+/// itself there (`4/3` of the ring's own law at the band's flat
+/// edge, per `BLEND_MZ`'s note), so the double cut is a shave, not
+/// a waste - it removes the staircase the hard 45° border leaves
+/// where the raster's last line and the ladder's first ring fail to
+/// meet. Flat ground answers with lines only; the ladder never
+/// rides a loop that touches nothing past the band.
+pub fn blend(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
+    validate(p, facets)?;
+    let r = p.tool_diameter * 0.5;
+    let sups = build_sups(facets, r);
+    let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    let emitted = raster_pass(&mut b, p, r, &sups, 1.0, 0.0, false)?;
+    rings_and_tail(b, p, r, facets, emitted)
+}
+
 /// The shared close of every raster-family strategy: the steep
 /// flanks ride the waterline rings from wherever the shallow pass
 /// left the tool, then the clearance exit, the emptiness refusal

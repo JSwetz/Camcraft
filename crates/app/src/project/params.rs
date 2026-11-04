@@ -910,6 +910,9 @@ pub enum FinishPatternDto {
     /// M2.5 C, same law: rings of equal geodesic distance from the
     /// model's open boundary.
     Geodesic,
+    /// M2.5 D, same law: both families ride the 30-45° transition,
+    /// so the border's staircase is cut from both directions.
+    Blend,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -930,6 +933,7 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::Ramp => crate::finishing3d::FinishPattern::Ramp,
             FinishPatternDto::MorphSpiral => crate::finishing3d::FinishPattern::MorphSpiral,
             FinishPatternDto::Geodesic => crate::finishing3d::FinishPattern::Geodesic,
+            FinishPatternDto::Blend => crate::finishing3d::FinishPattern::Blend,
         }
     }
 }
@@ -952,6 +956,7 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::Ramp => FinishPatternDto::Ramp,
             crate::finishing3d::FinishPattern::MorphSpiral => FinishPatternDto::MorphSpiral,
             crate::finishing3d::FinishPattern::Geodesic => FinishPatternDto::Geodesic,
+            crate::finishing3d::FinishPattern::Blend => FinishPatternDto::Blend,
         }
     }
 }

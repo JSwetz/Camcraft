@@ -554,6 +554,14 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 finishing3d::FinishPattern::Geodesic => {
                     finishing3d::geodesic(&material.facets, &fp)?
                 }
+                // M2.5 D. Blend is Parallel's raster plus the ring
+                // ladder reading the border at the BAND line: the
+                // 30-45° transition gets both families' lines and
+                // the seam's staircase is shaved, per `blend`'s own
+                // note - the difference lives in `emit_rings`.
+                finishing3d::FinishPattern::Blend => {
+                    finishing3d::blend(&material.facets, &fp)?
+                }
             };
             (region, path)
         }

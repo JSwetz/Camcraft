@@ -4952,6 +4952,10 @@ fn the_stage_c_pattern_words_arrive_as_words_not_a_version() {
             "geodesic",
             camcraft_app::finishing3d::FinishPattern::Geodesic,
         ),
+        (
+            "blend",
+            camcraft_app::finishing3d::FinishPattern::Blend,
+        ),
     ] {
         let t = finish(&format!(", \"pattern\": \"{word}\""));
         let w = new_world();

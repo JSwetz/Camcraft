@@ -80,6 +80,16 @@ pub enum FinishPattern {
     /// placed by arc-length along the mesh, not by Z. Needs an open
     /// boundary to march from; a closed shell is refused by name.
     Geodesic,
+    /// The two families BOTH ride the transition (M2.5 D): the
+    /// raster's lines over the shallow ground exactly as Parallel
+    /// places them, and the ring ladder kept wherever a loop's
+    /// tangency reaches past 30 degrees - so the band between the
+    /// floor's law and the wall's law is cut twice, from both
+    /// directions, instead of leaving the 45° border's staircase as
+    /// the price of one clean split. Flat interiors stay raster-only:
+    /// a ring that touches nothing flatter than the band is the
+    /// ladder's hands off the floor, as the border law always said.
+    Blend,
 }
 
 /// Everything the 3D finishers need that the tool and geometry don't
@@ -236,6 +246,16 @@ pub(super) fn refinement_floor(delta0: f64, min_step: Option<f64>) -> f64 {
 /// so the two strategies meet exactly at each one's limit - no
 /// territory claimed twice, none dropped.
 pub(super) const SPLIT_MZ: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+/// The Blend's band line, as a cosine: 30° off vertical. Why there:
+/// the ring cusp on a facet tilted `α` is `Δz² / (8·r·cos²α)` - at
+/// 30° it is `4/3` of the vertical promise, at 45° twice it - so
+/// between 30° and the split the two families' numbers are within
+/// a factor of the SAME tolerance of each other, and cutting that
+/// band twice shaves the border's staircase instead of trading
+/// promises. Flatter ground is worth only the raster's line; the
+/// rings let it alone, exactly as the border law says.
+pub(super) const BLEND_MZ: f64 = 0.866_025_403_784_438_7;
 
 /// The numeric skin of the laws: a center that touches a facet sits
 /// at distance exactly `r` from it, and float says `r ± 1e-9·r`.
