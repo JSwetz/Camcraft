@@ -99,6 +99,15 @@ pub enum FinishPattern {
     /// levels' geometry disagrees about being one feature, nothing
     /// is paired and the rings alone carry the step, as before.
     Morph,
+    /// The flowline pass (M2.5 E): lines that CURVE with the part,
+    /// seeded on the lattice and traced along the surface's own
+    /// least-curving grain - the curvature field of `multiaxis`'
+    /// 5-axis sibling, run with NO axes stamped: a plain XYZ
+    /// finish, the tool's axis vertical, the lines the only thing
+    /// that bends. Flat ground makes no claim; there the fallback
+    /// walks straight, and flow over plain ground IS the parallel
+    /// raster - cutting, never stalling.
+    Flow,
 }
 
 /// Everything the 3D finishers need that the tool and geometry don't

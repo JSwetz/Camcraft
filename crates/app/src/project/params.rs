@@ -915,6 +915,9 @@ pub enum FinishPatternDto {
     Blend,
     /// M2.5 D, same law: the ladder's levels joined by ruled lofts.
     Morph,
+    /// M2.5 E, same law: flowlines along the surface's grain, the
+    /// 5-axis field without the axes.
+    Flow,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -937,6 +940,7 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::Geodesic => crate::finishing3d::FinishPattern::Geodesic,
             FinishPatternDto::Blend => crate::finishing3d::FinishPattern::Blend,
             FinishPatternDto::Morph => crate::finishing3d::FinishPattern::Morph,
+            FinishPatternDto::Flow => crate::finishing3d::FinishPattern::Flow,
         }
     }
 }
@@ -961,6 +965,7 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::Geodesic => FinishPatternDto::Geodesic,
             crate::finishing3d::FinishPattern::Blend => FinishPatternDto::Blend,
             crate::finishing3d::FinishPattern::Morph => FinishPatternDto::Morph,
+            crate::finishing3d::FinishPattern::Flow => FinishPatternDto::Flow,
         }
     }
 }

@@ -101,7 +101,7 @@ const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
 const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
 /// The 3-D finish kinematics, in the order the combo maps them.
-const FINISH_PATTERNS: [&str; 17] = [
+const FINISH_PATTERNS: [&str; 18] = [
     "Waterline",
     "Parallel",
     "Parallel - multi",
@@ -119,6 +119,7 @@ const FINISH_PATTERNS: [&str; 17] = [
     "Geodesic",
     "Blend",
     "Morph",
+    "Flow",
 ];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
@@ -2093,6 +2094,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::finishing3d::FinishPattern::Geodesic => 14,
                     camcraft_app::finishing3d::FinishPattern::Blend => 15,
                     camcraft_app::finishing3d::FinishPattern::Morph => 16,
+                    camcraft_app::finishing3d::FinishPattern::Flow => 17,
                 };
                 let before = pat_idx;
                 combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
@@ -2114,11 +2116,12 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         14 => camcraft_app::finishing3d::FinishPattern::Geodesic,
                         15 => camcraft_app::finishing3d::FinishPattern::Blend,
                         16 => camcraft_app::finishing3d::FinishPattern::Morph,
+                        17 => camcraft_app::finishing3d::FinishPattern::Flow,
                         _ => camcraft_app::finishing3d::FinishPattern::Waterline,
                     };
                 }
                 ui.label(
-                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette, and every closed edge the part itself carries - a trim's rim, a hole's edge - XY kept and Z grounded, cut exactly where the model's facets end rather than where their shadow falls (a closed solid has no open edge, so its path is what it always was). Then the rings take the flanks. Steep and shallow draws that split as a border: the rings keep their hands off shallow ground, and the flanks answer to their own spacing. Flat rides the floors only, one pass per shrink. Pencil and Corner read the bends instead of the slope: each rides the line of centres tangent to both faces of every concave corner, Corner with the op's own ball and Pencil with a fatter reference ball, cleaning only what that pen leaves standing. Ramp is Parallel with the sloped entries always on. The morphed spiral keeps one in-winding curve but spaces its turns by the ground's own cosine under them. Geodesic rings start at the model's open edge and march outward by distance ALONG the surface, so one loop can run floor, wall and rim together; a closed shell with no open edge is refused by name. Blend rides the slope from both directions: the parallel lines keep the flat ground, and the rings keep every run touching ground past thirty degrees, so the transition band is cut twice and the border's staircase is shaved away. Morph joins the ladder's levels: the rings ride as Waterline places them, and between each two successive rings that pair as one feature a middle guide is laid halfway between the loops and grounded on the surface - half the spacing along the wall, a quarter of the cusp.",
+                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette, and every closed edge the part itself carries - a trim's rim, a hole's edge - XY kept and Z grounded, cut exactly where the model's facets end rather than where their shadow falls (a closed solid has no open edge, so its path is what it always was). Then the rings take the flanks. Steep and shallow draws that split as a border: the rings keep their hands off shallow ground, and the flanks answer to their own spacing. Flat rides the floors only, one pass per shrink. Pencil and Corner read the bends instead of the slope: each rides the line of centres tangent to both faces of every concave corner, Corner with the op's own ball and Pencil with a fatter reference ball, cleaning only what that pen leaves standing. Ramp is Parallel with the sloped entries always on. The morphed spiral keeps one in-winding curve but spaces its turns by the ground's own cosine under them. Geodesic rings start at the model's open edge and march outward by distance ALONG the surface, so one loop can run floor, wall and rim together; a closed shell with no open edge is refused by name. Blend rides the slope from both directions: the parallel lines keep the flat ground, and the rings keep every run touching ground past thirty degrees, so the transition band is cut twice and the border's staircase is shaved away. Morph joins the ladder's levels: the rings ride as Waterline places them, and between each two successive rings that pair as one feature a middle guide is laid halfway between the loops and grounded on the surface - half the spacing along the wall, a quarter of the cusp. Flow traces the surface's own grain: each line starts where the ground is widest and runs along the direction that curves least under it, the field the Flow5D operation reads - so on a blade the passes lie WITH it; on ground that claims no direction the lines degrade to the straight raster and still cover, and the rings take the flanks as always.",
                 );
                 if !matches!(pattern, camcraft_app::finishing3d::FinishPattern::Waterline) {
                     field(ui, "Stepover");

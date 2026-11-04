@@ -4,6 +4,9 @@
 //! what the 5-axis field glue composes (an axis on every cut move,
 //! the min-curvature directions steering the lines WITH a blade,
 //! plain ground degrading to the fallback's straight passes).
+//! M2.5 E adds the OTHER door on the same field: `flow3d` - the
+//! flowline finish asked of a 3-axis machine, tested here as the
+//! law that its posed twin is the same ground cut upright.
 //!
 //! The envelope VERDICTS - the measured gouge/rest of a flow path
 //! over the dome - ride the ignored lane, as every envelope test in
@@ -21,7 +24,7 @@ use camcraft_motion::finishing3d::{flow, scallop_stepover, Finish3DParams, Finis
 use camcraft_motion::geo2d::Point2;
 use camcraft_motion::geometry::{Point3, Triangle};
 use camcraft_motion::machining2d::GenError;
-use camcraft_motion::multiaxis::{flow5d, AxisControl};
+use camcraft_motion::multiaxis::{flow3d, flow5d, AxisControl};
 
 const TAU: f64 = std::f64::consts::TAU;
 const R: f64 = 3.0;
@@ -382,4 +385,116 @@ fn sphere_cap(radius: f64, polar_max: f64, n_lat: usize, n_lon: usize) -> Vec<Tr
         facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
     }
     facets
+}
+
+// ---------- M2.5 E: the flow pattern's 3-axis door ----------
+//
+// `flow3d` is `flow5d`'s field law minus the pose, and it is what
+// `FinishPattern::Flow` runs. The laws below are the door's own:
+// the ground is the twin's ground, the lines curve with the grain
+// the field reads, and an unclaimed flat still cuts straight.
+
+/// The catalog's own ball: R6 with the standard budget.
+fn ball(p: &mut Finish3DParams, q: FinishPattern) -> Finish3DParams {
+    p.pattern = q;
+    *p
+}
+
+#[test]
+fn the_flow_pattern_walks_the_same_ground_as_the_five_axis_kind() {
+    // Two truths, one code: same field, same kernel - the stamp is
+    // the only difference, so the cut positions are the same lattice
+    // points and the 3-axis path states no axis anywhere.
+    let blade = tube_about(16, 6, 12.0, 30.0);
+    let p = ball(&mut finish(11.0, -11.0), FinishPattern::Flow);
+    let three = flow3d(&blade, &p).expect("a tube flows in XYZ");
+    let five = flow5d(&blade, &p, &AxisControl::default(), None).expect("and posed");
+    let cut = |t: &camcraft_motion::cl::Toolpath| -> Vec<(i64, i64, i64)> {
+        t.moves
+            .iter()
+            .filter(|m| m.kind != MoveKind::Rapid)
+            .map(|m| {
+                (
+                    lattice_bits(m.to.x),
+                    lattice_bits(m.to.y),
+                    lattice_bits(m.to.z),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(cut(&three), cut(&five), "the two doors walked different metal");
+    assert!(
+        three.moves.iter().all(|m| m.axis.is_none()),
+        "flow3d posed an axis on a 3-axis path"
+    );
+}
+
+#[test]
+fn flow3d_lines_turn_with_the_grain_they_read() {
+    // The tube's least-curving direction is x-hat wherever the
+    // ground is shallow: the body's chords lie along it, curved
+    // into the circular rows by the march's grounding, never run
+    // straight ACROSS the blade as a fixed-direction raster would.
+    let blade = tube_about(32, 8, 12.0, 30.0);
+    let p = ball(&mut finish(11.0, -11.0), FinishPattern::Flow);
+    let t = flow3d(&blade, &p).expect("a tube flows");
+    assert!(t.all_finite());
+    let cs = chords(&t);
+    let (mut along, mut total) = (0, 0);
+    for (a, b) in &cs {
+        if a.x.abs() > 26.0 || b.x.abs() > 26.0 {
+            continue; // rim rows and their links
+        }
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let l = (dx * dx + dy * dy).sqrt();
+        if l < 1e-6 {
+            continue;
+        }
+        total += 1;
+        if dy.abs() / l < 0.1 {
+            along += 1;
+        }
+    }
+    assert!(total > 40, "only {total} body chords over a whole tube");
+    assert!(along * 10 > total * 9, "{along}/{total} body chords left the blade's direction");
+}
+
+#[test]
+fn flow3d_over_plain_ground_cuts_and_never_stalls() {
+    // Flat ground claims nothing; the fallback walks +x, so the
+    // pass exists everywhere - the same degradation the 5-axis
+    // kind promises, now without any pose to hide it in.
+    let plate = graph_grid(12, 40.0, |_, _| 0.0);
+    let p = ball(&mut finish(2.0, -0.5), FinishPattern::Flow);
+    let t = flow3d(&plate, &p).expect("plain ground flows");
+    assert!(chords(&t).len() > 20, "flow over plain ground stalled");
+}
+
+#[test]
+fn two_runs_of_the_flow_pattern_speak_the_same_path() {
+    // The field's HashMap walk must never reach the geometry.
+    let blade = tube_about(16, 6, 12.0, 30.0);
+    let p = ball(&mut finish(11.0, -11.0), FinishPattern::Flow);
+    let a = flow3d(&blade, &p).unwrap();
+    let b = flow3d(&blade, &p).unwrap();
+    assert_eq!(a.moves.len(), b.moves.len());
+    for (x, y) in a.moves.iter().zip(&b.moves) {
+        assert_eq!(
+            (x.from.x, x.from.y, x.from.z, x.to.x, x.to.y, x.to.z),
+            (y.from.x, y.from.y, y.from.z, y.to.x, y.to.y, y.to.z)
+        );
+    }
+}
+
+#[test]
+#[ignore = "verdict lane: envelope scan over the 3-axis flow path on the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
+fn dome_flow3d_is_envelope_clean() {
+    use camcraft_motion::stock_sim::envelope_scan;
+    let facets = sphere_cap(20.0, std::f64::consts::FRAC_PI_4, 12, 96);
+    let p = ball(&mut finish(18.0, 20.0 * std::f64::consts::FRAC_1_SQRT_2 - 0.5), FinishPattern::Flow);
+    let t = flow3d(&facets, &p).expect("dome flow, upright");
+    let rep = envelope_scan(&facets, &t.moves, R, 0.05).expect("fixture-sized grid");
+    let gate = 0.05 + rep.cell * rep.cell / (2.0 * R) + 1e-9;
+    assert!(rep.gouge_mm <= gate, "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate, "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
 }

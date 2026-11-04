@@ -154,6 +154,21 @@ pub fn flow5d(
     stamp_axes(&base, facets, p.tool_diameter * 0.5, c, shank)
 }
 
+/// The SAME field law cut by a 3-axis machine (M2.5 E): seeds,
+/// traced lines, grounded march, rings on the flanks - everything
+/// `flow5d` runs, minus the pose. No `stamp_axes`, no `AxisControl`,
+/// no shank: every move carries the vertical axis as the XYZ
+/// families always have. The field is not re-derived here - two
+/// truths, one code: this is `flow5d`'s `build_field` and the
+/// catalog's `FinishPattern::Flow` door.
+pub fn flow3d(
+    facets: &[Triangle],
+    p: &Finish3DParams,
+) -> Result<Toolpath, GenError> {
+    let field = build_field(facets);
+    finishing3d::flow(facets, p, &|q| dir_at(&field, q))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4537,6 +4537,94 @@ fn the_morph_pattern_generates_through_the_operation_layer() {
 }
 
 #[test]
+fn the_flow_pattern_generates_through_the_operation_layer() {
+    // M2.5 E's door, on a COARSE barrel (the lane law: no minutes-
+    // long generation rides a quick test - the dome-sized fixtures
+    // belong to the ignored verdicts). The barrel's crown is
+    // shallow, its flanks steep: the flow door must generate,
+    // cut, and stand prismatic - an axis on any move would mean
+    // the 5-axis stamp leaked into a 3-axis program. The witness
+    // against an alias to the ladder is the same barrel under
+    // Waterline: the field's lines over the crown cut metal the
+    // rings alone never reach, and a door routed wrong leaves the
+    // two paths equal.
+    use camcraft_app::cl::MoveKind;
+    use camcraft_app::finishing3d::FinishPattern;
+    use camcraft_app::geometry::Triangle;
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    // A FULL capped cylinder: the ring close demands a closed
+    // mesh, and the field's blade direction is the axis. Crown at
+    // z = 24, floor at z = 0, axis along x.
+    let (rad, x_len, n_th, n_x) = (12.0f64, 20.0, 12usize, 4usize);
+    let v = |j: usize, i: usize| {
+        let th = std::f64::consts::TAU * j as f64 / n_th as f64;
+        Point3::new(
+            -x_len + 2.0 * x_len * i as f64 / n_x as f64,
+            rad * th.cos(),
+            rad + rad * th.sin(),
+        )
+    };
+    let mut facets = Vec::new();
+    for j in 0..n_th {
+        for i in 0..n_x {
+            let (a, b, c, d) = (
+                v(j, i),
+                v((j + 1) % n_th, i),
+                v((j + 1) % n_th, i + 1),
+                v(j, i + 1),
+            );
+            facets.push(Triangle::new(a, b, c));
+            facets.push(Triangle::new(a, c, d));
+        }
+    }
+    for i in [0, n_x] {
+        let x = -x_len + 2.0 * x_len * i as f64 / n_x as f64;
+        let c = Point3::new(x, 0.0, rad);
+        for j in 0..n_th {
+            let (a, b) = (v(j, i), v((j + 1) % n_th, i));
+            // Outward normals: the +x cap winds a-b, the -x b-a.
+            let (a, b) = if i == 0 { (b, a) } else { (a, b) };
+            facets.push(Triangle::new(c, a, b));
+        }
+    }
+    history.execute(&world, ImportModel::from_mesh("barrel5e", Mesh::from_facets(facets)));
+    let ask = |q: FinishPattern| {
+        let mut a = finish_params(20.0, 12.0, 0.1);
+        let OpParams::Finish3D { pattern, .. } = &mut a else {
+            panic!("finish3d params expected");
+        };
+        *pattern = q;
+        a
+    };
+    let mut op = |name: &str, a: OpParams| {
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity("barrel5e".into()), a)
+                .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        assert_eq!(status(&world, name), OpStatus::Ok, "{name} must seat and cut");
+    };
+    op("FG", ask(FinishPattern::Flow));
+    op("F5", ask(FinishPattern::Waterline));
+    let path = |n: &str| cache(&world, n).expect("cached").path;
+    let feeds = |n: &str| path(n).moves.iter().filter(|m| m.kind == MoveKind::Feed).count();
+    assert!(feeds("FG") > 0, "the flow door went silent on the barrel");
+    assert!(
+        path("FG").is_prismatic(),
+        "flow3d leaked a posed axis into a 3-axis program"
+    );
+    assert_ne!(
+        path("FG").moves,
+        path("F5").moves,
+        "the flow door cut the ladder's metal - the field never reached the kernel"
+    );
+}
+
+#[test]
 fn finish3d_refuses_a_flat_bottomed_tool() {
     // The forbidden-center scan is ball geometry; an end mill here must
     // refuse by name, never generate a ball path dressed as an end mill.

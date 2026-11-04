@@ -570,6 +570,15 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 finishing3d::FinishPattern::Morph => {
                     finishing3d::morph(&material.facets, &fp)?
                 }
+                // M2.5 E. Flow is the 5-axis kind's field law asked
+                // of a 3-axis machine: the host lives in
+                // `multiaxis::flow3d` - the SAME `build_field` the
+                // Flow5D operation runs, no `stamp_axes` - so the
+                // grain lives once and the two entries can never
+                // drift.
+                finishing3d::FinishPattern::Flow => {
+                    crate::multiaxis::flow3d(&material.facets, &fp)?
+                }
             };
             (region, path)
         }

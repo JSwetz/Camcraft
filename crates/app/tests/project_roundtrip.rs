@@ -4960,6 +4960,10 @@ fn the_stage_c_pattern_words_arrive_as_words_not_a_version() {
             "morph",
             camcraft_app::finishing3d::FinishPattern::Morph,
         ),
+        (
+            "flow",
+            camcraft_app::finishing3d::FinishPattern::Flow,
+        ),
     ] {
         let t = finish(&format!(", \"pattern\": \"{word}\""));
         let w = new_world();

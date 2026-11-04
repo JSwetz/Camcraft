@@ -48,7 +48,7 @@ pub mod tilt;
 pub use avoid::Shank;
 pub use contour5d::contour5d;
 pub use curve::{contour_curve, CurveParams};
-pub use flow::flow5d;
+pub use flow::{flow3d, flow5d};
 pub use parallel5d::parallel5d;
 pub use rough::{multiaxis_rough, multiaxis_rough_prev};
 pub use rotary::{rotary_contour, rotary_parallel};

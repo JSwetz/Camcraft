@@ -107,6 +107,24 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
             .or_insert_with(|| fresh.clone());
         fresh
     };
+    // The same membership asked as a question about one point, without
+    // cloning the plane's region to ask it (M2.5 E): `surface`'s binary
+    // search and `part_at` probe thousands of cached slices per program,
+    // and a Region clone per probe turned a continuous-Z path (a flow
+    // line rides a new plane with every chord) into a minutes-long walk.
+    let island_holds = |facets: &[crate::geometry::Triangle], z: f64, q: Point2| -> bool {
+        let key = z.to_bits();
+        if let Some(hit) = island_cache.borrow().get(&key) {
+            return hit.as_ref().is_some_and(|s| s.contains(q));
+        }
+        let fresh = crate::geometry::slice::material_above(facets, z).ok();
+        let holds = fresh.as_ref().is_some_and(|s| s.contains(q));
+        island_cache
+            .borrow_mut()
+            .entry(key)
+            .or_insert_with(|| fresh.clone());
+        holds
+    };
     // Deepest plane the path cuts at (drives the island law of the
     // reach samples and the part label below).
     let z_deepest = path
@@ -213,12 +231,37 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // cached slice, run only for chords that are already within reach.
     let surface = |q: Point2| -> f64 {
         let r2 = (r + 1e-9) * (r + 1e-9);
-        let cleared = cut
+        // The island clause is a monotone threshold in z, not a scan
+        // (M2.5 E): `q` sits inside the plane-z island exactly while
+        // z < h(q) - the slice IS the part above z - so below the
+        // threshold every chord fails the island test whatever its
+        // reach, and above it every chord clears iff it reaches. The
+        // first success is therefore the first in-reach chord at or
+        // above the threshold: binary-search the threshold (log probed
+        // planes, no clones - `island_holds`), then walk upward. The
+        // old deepest-first `find` returns the same chord, move for
+        // move; it just walked every deep chord's island to learn it.
+        let mut lo = 0usize;
+        let mut hi = cut.len();
+        if let Some(f) = cx.model {
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if island_holds(f, cut[mid].2, q) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+        }
+        // The upward test keeps the island clause: above the threshold
+        // it never fires (that is the threshold's meaning), so this is
+        // the old predicate restated, not an approximation of it.
+        let cleared = cut[lo..]
             .iter()
             .find(|(a, b, z)| {
                 dist2_seg(q, *a, *b) <= r2
                     && cx.model
-                        .is_none_or(|f| !islands_at(f, *z).is_some_and(|s| s.contains(q)))
+                        .is_none_or(|f| !island_holds(f, *z, q))
             })
             .map_or(f64::INFINITY, |(_, _, z)| *z);
         cleared.min(cx.stock_top_z)
@@ -269,11 +312,14 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                 }
             }
         }
+        let deepest_island: Option<Option<Region>> =
+            cx.model.map(|f| islands_at(f, z_deepest));
         let part_at = |q: Point2| -> bool {
             !cx.region.contains(q)
-                || cx.model.is_some_and(|f| {
-                    islands_at(f, z_deepest).is_some_and(|s| s.contains(q))
-                })
+                || deepest_island
+                    .as_ref()
+                    .and_then(|o| o.as_ref())
+                    .is_some_and(|s| s.contains(q))
         };
         // Pose (M5.1 stage A): a leaning band is enclosed, exactly as
         // in [`super::bands_vs_fixtures`], in a vertical column that is
@@ -309,6 +355,21 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                         (mid * a[0], mid * a[1], band_r + spread, za.min(zb) - band_r)
                     }
                 };
+                // Z-window skip (M2.5 E): the law convicts only where
+                // `h0 < surface(q)`, and no column's surface stands
+                // above the stock top (`surface` ends in that `min`,
+                // and a cleared column cannot exceed the stock it was
+                // cut from). A band whose bottom stands at or above
+                // the ceiling has nothing to meet in any column -
+                // this is the same predicate read one step earlier,
+                // not an approximation: the old loop asked every
+                // sample's annulus to learn the answer it could see
+                // in the band's own numbers. A continuous-Z path (a
+                // flow line) multiplies that blind ask by its plane
+                // count; on a level ladder the test rarely fires.
+                if h0 >= cx.stock_top_z {
+                    continue;
+                }
                 let r2 = (r_band + 1e-9) * (r_band + 1e-9);
                 let mut hit = None;
                 'worst: {
