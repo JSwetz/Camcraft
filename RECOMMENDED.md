@@ -7915,3 +7915,56 @@ this file existed - every solid-model golden rides byte-identical
 coverage all predate D3 - a generalization that needed new plumbing
 would have been the wrong generalization. Only the pages.rs tooltip
 grew the drape's sentence.
+
+## M2.5 E A - the flowline's 3-axis door, and the reach law that had to learn to skip (2026-11-04)
+
+**Flow lives once.** `FinishPattern::Flow` runs `multiaxis::flow3d` -
+`flow5d`'s own `build_field`, traced with NO `stamp_axes`, no
+`AxisControl`, no shank: the field's least-curving grain steers the
+lines, the tool axis stays vertical because there was never a second
+law to drift from. Considered and dropped: a finishing3d-local copy of
+the field (two truths, the rot the catalog's twin kinds were built to
+avoid). The congruence proof is the kernel test itself: same tube,
+lattice-equal cut positions, `axis: None` everywhere.
+
+**The pattern word is additive.** `FinishPattern::Flow` enters the DTO
+as a word in the pattern enum (like blend/morph), so no OpParams
+version bump - the round-trip test speaks "flow" as a word.
+
+**The door rides a COARSE barrel.** 12x4 capped cylinder, crown z=24,
+tol 0.1 - quick-ladder law (no minutes-long generation in a `#[test]`);
+the dome-scale verdicts are the ignored lane's. The F5 twin (Waterline
+over the same barrel) is the alias witness: if Flow were a disguised
+ladder the paths would match; they must not, and the 3-axis path must
+stay `is_prismatic`.
+
+**The stall was the verify engine, not the kernel - and its fixes are
+laws, not flags.** The app door ran minutes while the kernel took
+193 ms. Three permanent corrections, each an exact restatement of the
+predicate it replaced (gate: 90 porcelain goldens byte-clean + the
+full verdict lane):
+
+- `surface()` searched the cut list deepest-first, learning the answer
+  one clone at a time. The island clause is a MONOTONE threshold in z
+  (q is inside the slice above z exactly while z < h(q) - the slice IS
+  the part above z), so the first clearing chord is the first in-reach
+  chord at or above a binary-searchable threshold; the upward walk
+  keeps the full island test as the belt - a mesh that lied about
+  monotonicity would still convict exactly.
+- `island_holds` asks the island cache the membership question without
+  cloning the plane's Region; a continuous-Z path probes thousands of
+  cached planes per program and the clone-per-probe was minutes of
+  allocator for zero verdict.
+- The (c) reach band now skips whole bands whose floor stands at or
+  above the stock top: `surface` ends in `.min(stock_top_z)`, so such
+  a band cannot convict in any column - the same predicate read one
+  step earlier. On a level ladder the test rarely fires; a flowline's
+  1977 distinct planes made the blind ask the story.
+
+`part_at`'s per-call `islands_at` was hoisted out of the closure for
+the same reason. Doctrine cited: `sweep.rs`'s column memo (pure column
+answers ride the memo), applied at the island law.
+
+**The door's verdict cost: none.** verify answers 0 warns on the
+barrel in ~330 ms; law (f)'s envelope scan (241 ms) is now the floor -
+honest, it is the rest-material verdict itself.
