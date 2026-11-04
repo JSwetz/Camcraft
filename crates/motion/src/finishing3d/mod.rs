@@ -84,6 +84,7 @@
 //! structure only - behaviour is byte-identical to the flat file it replaces.
 
 mod crease;
+mod drape;
 mod flat;
 mod geodesic;
 mod morph;

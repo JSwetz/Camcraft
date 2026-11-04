@@ -5,10 +5,33 @@
 //! this file is their arithmetic. Provenance as there: published
 //! ball-end corner kinematics, our own construction.
 
-use crate::geometry::Point3;
+use crate::geometry::{Point3, Triangle};
 
 use super::params::Finish3DParams;
 use super::support::{Sup, dist2_pt_tri};
+
+/// The model's float skin: welded vertices agree to this. The weld
+/// scale every chain in this module family keys on - lifted from the
+/// crease pair's two private copies (M2.5 D3) so the drape's boundary
+/// chain and the loci's locus chain weld the SAME mesh the same way.
+pub(super) fn vkey_scale(facets: &[Triangle]) -> f64 {
+    let mut m = 1.0f64;
+    for f in facets {
+        for q in [f.a, f.b, f.c] {
+            m = m.max(q.x.abs()).max(q.y.abs()).max(q.z.abs());
+        }
+    }
+    (m * 1e-9).max(1e-9)
+}
+
+/// The weld key: a vertex's lattice cell at the float-skin scale.
+pub(super) fn vkey(p: Point3, s: f64) -> (i64, i64, i64) {
+    (
+        (p.x / s).round() as i64,
+        (p.y / s).round() as i64,
+        (p.z / s).round() as i64,
+    )
+}
 
 /// One concave-edge candidate: the kept locus endpoints (ball
 /// centers), their weld keys, and the two unit face normals.

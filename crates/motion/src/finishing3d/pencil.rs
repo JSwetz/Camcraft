@@ -64,28 +64,9 @@ use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
-use super::crease::{add3, chain, cmp_pt, scale3, shrink, sub3, Seg};
+use super::crease::{add3, chain, cmp_pt, scale3, shrink, sub3, vkey, vkey_scale, Seg};
 use super::params::{validate, Finish3DParams};
 use super::support::build_sups;
-
-/// The model's float skin: welded vertices agree to this.
-fn vkey_scale(facets: &[Triangle]) -> f64 {
-    let mut m = 1.0f64;
-    for f in facets {
-        for q in [f.a, f.b, f.c] {
-            m = m.max(q.x.abs()).max(q.y.abs()).max(q.z.abs());
-        }
-    }
-    (m * 1e-9).max(1e-9)
-}
-
-fn vkey(p: Point3, s: f64) -> (i64, i64, i64) {
-    (
-        (p.x / s).round() as i64,
-        (p.y / s).round() as i64,
-        (p.z / s).round() as i64,
-    )
-}
 
 fn vid(pt: Point3, s: f64, verts: &mut Vec<Point3>, ids: &mut HashMap<(i64, i64, i64), usize>) -> usize {
     let k = vkey(pt, s);

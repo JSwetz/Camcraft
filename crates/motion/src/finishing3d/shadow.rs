@@ -5,6 +5,7 @@ use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
+use super::drape;
 use super::params::{Finish3DParams, refinement_floor, scallop_stepdown, scallop_stepover, validate};
 use super::support::{Sup, build_sups, plunge_support};
 use super::march::{emit_runs, march_curve};
@@ -250,13 +251,18 @@ pub fn contour(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenE
 /// where the tool grazes the part's edge wherever that edge climbs.
 /// It is the contour family with `max_rings = 0`: same shadow, same
 /// march laws, one loop set. The rings below it finish the flanks
-/// the lifted rim only touches at a point.
+/// the lifted rim only touches at a point. M2.5 D3 generalizes the
+/// name: after the silhouette, the part's OWN closed boundary loops -
+/// a trim's rim, a hole's edge - are draped onto the surface too
+/// ([`super::drape`]); a closed solid has none, and for one this
+/// answers exactly as it did before the drape existed.
 pub fn project(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
     let shadow = shadow_region(&sups, r)?;
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
-    let emitted = shadow_pass(&mut b, p, r, &sups, &shadow, Some(0), "project")?;
+    let mut emitted = shadow_pass(&mut b, p, r, &sups, &shadow, Some(0), "project")?;
+    emitted |= drape::drape_pass(&mut b, p, r, &sups, facets, emitted);
     rings_and_tail(b, p, r, facets, emitted)
 }

@@ -10,8 +10,8 @@
 //! strategy's jurisdiction, so the envelope must stay silent on them).
 //!
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d, camcraft_motion::geo2d, camcraft_motion::geometry, camcraft_motion::machining2d, camcraft_motion::stock_sim, camcraft_motion::verify.
-//! Lane shape (M4.4): 57 law tests run here in seconds (M2.5 B adds
-//! the crease pair, M2.5 D the band and the lofts); 33 envelope-VERDICT and
+//! Lane shape (M4.4): 54 law tests run here in seconds (M2.5 B adds
+//! the crease pair, M2.5 D the band, the lofts and the drape); 33 envelope-VERDICT and
 //! dome-generation tests are #[ignore]d - run them with
 //! `cargo test --release -p camcraft-app -- --ignored` at milestone close.
 
@@ -3530,4 +3530,174 @@ fn morph_loft_sheet_is_envelope_clean() {
     let rep = envelope(&f, &t);
     assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
     assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+}
+
+// ---------- M2.5 D3: the drape - Project walks the part's OWN edges ----------
+
+/// A tilted open sheet with a square through-hole: the plane
+/// z = 10 − (x + y)·tan20°/√2 over [−10,10]² with [−3,3]² cut out, as
+/// eight coplanar quads (24 triangles, welded at exact shared
+/// corners). The tilt runs along the DIAGONAL, so the shadow's shift
+/// r·m_xy is nonzero in both components: the silhouette rim and the
+/// part's own rim fall on different ground, and which line the path
+/// keeps is the drape's signature. The sheet's open edges - twelve
+/// outer runs, four about the hole - chain into exactly two CLOSED
+/// loops; nothing here stands open.
+fn holed_sheet() -> Vec<Triangle> {
+    let k = 20f64.to_radians().tan() * std::f64::consts::FRAC_1_SQRT_2;
+    let surf = |x: f64, y: f64| 10.0 - (x + y) * k;
+    let g = [-10.0, -3.0, 3.0, 10.0];
+    let mut facets = Vec::new();
+    for (ix, iy) in [
+        (0, 0), (1, 0), (2, 0), (0, 1), (2, 1), (0, 2), (1, 2), (2, 2),
+    ] {
+        let (x0, x1) = (g[ix], g[ix + 1]);
+        let (y0, y1) = (g[iy], g[iy + 1]);
+        let q = |x: f64, y: f64| p3(x, y, surf(x, y));
+        facets.push(Triangle::new(q(x0, y0), q(x1, y0), q(x1, y1)));
+        facets.push(Triangle::new(q(x0, y0), q(x1, y1), q(x0, y1)));
+    }
+    facets
+}
+
+#[test]
+fn the_drape_walks_the_parts_own_rims_not_their_shadows() {
+    // D3's whole claim, in two counts and one exact z: feeds stand on
+    // the model's own edge LINES - the outer rim's down-slope edges
+    // and the hole's x = -3 edge - where a chord between two rim
+    // vertices is exact (the march refines along the line, never off
+    // it). The silhouette's counterparts sit at y = 10 + r·m_y,
+    // strictly aside. Up-slope edges are the law's honest refusals: a
+    // ball resting there would stand its CONTACT in air, so the march
+    // opens the loop there - a break, counted by geometry, never a
+    // chord dragged through air. And the rim sample's height is the
+    // COLUMN'S answer: the tangent center over the shifted contact
+    // q = rim − r·m, minus the radius - not a shadow value, not an
+    // average, just where a ball resting on the sheet has its tip.
+    let f = holed_sheet();
+    let t = project(&f, &ppattern(14.0, 4.0, FinishPattern::Project)).expect("project the holed sheet");
+    let feeds = t.moves.iter().filter(|m| m.kind == MoveKind::Feed);
+    let on_outer = feeds.clone().filter(|m| (m.to.y - 10.0).abs() < 1e-9).count();
+    assert!(on_outer >= 4, "the outer rim was never draped: {on_outer} samples on its own line");
+    let on_hole = feeds
+        .clone()
+        .filter(|m| (m.to.x + 3.0).abs() < 1e-9 && m.to.y.abs() < 3.0)
+        .count();
+    assert!(on_hole >= 2, "the hole's rim was never draped: {on_hole} samples on its own line");
+    // The grounded z of a rim sample: tip = plane(q) + r·m_z − r.
+    let k = 20f64.to_radians().tan() * std::f64::consts::FRAC_1_SQRT_2;
+    let inv = 1.0 / (1.0 + 2.0 * k * k).sqrt();
+    let s = R * k * inv;
+    let sample = t
+        .moves
+        .iter()
+        .find(|m| m.kind == MoveKind::Feed && (m.to.y - 10.0).abs() < 1e-9)
+        .expect("an outer-rim drape sample");
+    let grounded = 10.0 - (sample.to.x - s + (10.0 - s)) * k + R * inv - R;
+    assert!(
+        (sample.to.z - grounded).abs() < 1e-6,
+        "the rim stood on the shadow's height, not its own column: {} vs {grounded}",
+        sample.to.z
+    );
+    assert!(
+        t.notes.iter().all(|n| !n.contains("stand open")),
+        "a cleanly closed chain reported a crack: {:?}",
+        t.notes
+    );
+    let again = project(&f, &ppattern(14.0, 4.0, FinishPattern::Project)).expect("again");
+    assert_eq!(
+        t.moves, again.moves,
+        "two drape passes, two paths - a stamp would churn forever"
+    );
+}
+
+/// box_facets' six quads with the bottom split along its true
+/// diagonal - a manifold with no open edge at all, which is what the
+/// drape must fall silent on. (The fixture box below this family
+/// names is NOT one: its bottom is a bowtie quad, and the drape is
+/// the first code in this repo to say so.)
+fn closed_box() -> Vec<Triangle> {
+    let q = |sx: f64, sy: f64, z: f64| p3(sx * 10.0, sy * 10.0, z);
+    let (a, b, c, d) = (q(-1.0, -1.0, 0.0), q(1.0, -1.0, 0.0), q(1.0, 1.0, 0.0), q(-1.0, 1.0, 0.0));
+    let (e, f, g, h) = (q(-1.0, -1.0, 10.0), q(1.0, -1.0, 10.0), q(1.0, 1.0, 10.0), q(-1.0, 1.0, 10.0));
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let mut facets = Vec::new();
+    facets.extend(quad([e, f, g, h])); // top
+    facets.extend(quad([a, d, c, b])); // bottom, wound opposite the top, split true
+    facets.extend(quad([a, b, f, e])); // sides
+    facets.extend(quad([b, c, g, f]));
+    facets.extend(quad([c, d, h, g]));
+    facets.extend(quad([d, a, e, h]));
+    facets
+}
+
+#[test]
+fn a_closed_solid_hears_nothing_from_the_drape() {
+    // The generalization's safety law: a closed manifold has no open
+    // edge, so the boundary chain finds no loop, the drape answers
+    // before a single sample, and Project's notes stay silent on both
+    // drape branches - which is why every golden of a solid model
+    // rides this change byte for byte (the gate's porcelain check is
+    // the proof; this is the promise).
+    let fixtures: Vec<(&str, Vec<Triangle>)> = vec![
+        ("closed box", closed_box()),
+        ("wedge", tilted(PI / 6.0, 8.0)),
+        ("domed cap", sphere_cap(12.0, PI / 4.0, 12, 24)), // closed with its disc
+    ];
+    for (name, f) in fixtures {
+        let t = project(&f, &ppattern(14.0, -2.0, FinishPattern::Project));
+        let Ok(t) = t else { continue }; // a refusal is an answer too
+        assert!(
+            t.notes.iter().all(|n| !n.contains("stand open") && !n.contains("drape")),
+            "{name} heard something from the drape: {:?}",
+            t.notes
+        );
+    }
+}
+
+#[test]
+fn a_crack_is_named_and_never_draped_as_if_closed() {
+    // The refusal-by-count branch runs on REAL garbage: this repo's
+    // own box fixture hides a bowtie bottom - three facet edges stand
+    // open, and their chain dangles a run no ball can follow to a
+    // closing sample. The drape says so once, drapes nothing of it,
+    // and the silhouette and rings carry on untouched - a crack
+    // reported, never cut as if it were a rim.
+    let f = box_facets();
+    let t = project(&f, &ppattern(14.0, -2.0, FinishPattern::Project)).expect("project the cracked-bottom box");
+    assert!(
+        t.notes
+            .iter()
+            .any(|n| n.contains("stand open") && n.contains("1 boundary run")),
+        "the bowtie bottom's open chain went unreported: {:?}",
+        t.notes
+    );
+    // And nothing stands on the open diagonals: had the run been
+    // draped, its samples would answer through the flat top's tangent
+    // - tip z = 10 at points strictly inside the footprint, on the
+    // lines x = y and x = -y. A silhouette rim or ring point always
+    // sits on |x| = 10, |y| = 10 or a |x + y| level line, never here.
+    assert!(
+        t.moves.iter().all(|m| {
+            m.kind != MoveKind::Feed
+                || (m.to.x - m.to.y).abs() > 1e-9
+                || m.to.x.abs() >= 9.9
+                || (m.to.z - 10.0).abs() > 1e-6
+        }),
+        "an open run was draped as if closed: {:?}",
+        t.moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Feed
+                && (m.to.x - m.to.y).abs() < 1e-9
+                && m.to.x.abs() < 9.9
+                && (m.to.z - 10.0).abs() < 1e-6)
+            .map(|m| (m.to.x, m.to.y, m.to.z))
+            .take(4)
+            .collect::<Vec<_>>()
+    );
 }

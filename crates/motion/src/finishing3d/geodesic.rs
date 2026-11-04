@@ -57,30 +57,11 @@ use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
-use super::crease::{add3, chain, cmp_pt, scale3, sub3, Seg};
+use super::crease::{add3, chain, cmp_pt, scale3, sub3, vkey, vkey_scale, Seg};
 use super::params::{scallop_stepover, validate, Finish3DParams};
 use super::raster::placement_guard;
 use super::rings::leg_clears;
 use super::support::{build_sups, column_clear, dist2_pt_tri, Sup};
-
-/// The model's float skin, same scale law as the crease pair.
-fn vkey_scale(facets: &[Triangle]) -> f64 {
-    let mut m = 1.0f64;
-    for f in facets {
-        for q in [f.a, f.b, f.c] {
-            m = m.max(q.x.abs()).max(q.y.abs()).max(q.z.abs());
-        }
-    }
-    (m * 1e-9).max(1e-9)
-}
-
-fn vkey(p: Point3, s: f64) -> (i64, i64, i64) {
-    (
-        (p.x / s).round() as i64,
-        (p.y / s).round() as i64,
-        (p.z / s).round() as i64,
-    )
-}
 
 /// The boundary-seeded geodesic distance field over the welded
 /// vertices: zero on open-edge vertices, Dijkstra everywhere else.
