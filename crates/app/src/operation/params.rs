@@ -418,6 +418,27 @@ impl OpParams {
                     None => h.write_u8(0),
                 }
             }
+            // The deburr ride digests the one authored number, the
+            // window's two planes, the clearance plane it hops to,
+            // and the two feeds - the cone itself is the TOOL's
+            // word, already riding the tool revision, and the depth
+            // is derived, chamfer's grammar on a real dihedral
+            // (M2.5 E B).
+            OpParams::Deburr {
+                width,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                wh(h, *clearance_z);
+                wh(h, *top_z);
+                wh(h, *bottom_z);
+                for v in [*width, *feed, *plunge_feed] {
+                    w(h, v);
+                }
+            }
             // The 5-axis twins and plain swarf (tags 8/9/10): the
             // finish's scalar law with the pattern byte dropped - the
             // tag already names the kinematic - and the axis trio

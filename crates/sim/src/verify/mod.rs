@@ -27,7 +27,10 @@
 //!   it because tangency IS their geometry (rings tangent to the model,
 //!   lathes tracing the meridian); `Mode::Radial` skips it because a
 //!   plunge chord crosses the silhouette wall head-on - d = 0 is the
-//!   hole's mouth, not a gouge (M5.2 F2).
+//!   hole's mouth, not a gouge (M5.2 F2); `Mode::Cone` skips it because
+//!   the generatrix ride puts the axis ON the edge and the virtual tip
+//!   inside the corner the chamfer makes - both are the promise, and
+//!   unlike Engrave the shank law keeps speaking (M2.5 E B).
 //! - [`Warning::ShankHit`] - uncut material inside the shank or holder
 //!   annulus above the current cut. Rest material: at a boundary sample
 //!   q (region and stock loop vertices and edge midpoints, nudged a hair

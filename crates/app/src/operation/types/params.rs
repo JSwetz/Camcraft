@@ -465,6 +465,32 @@ pub enum OpParams {
         /// every other pattern ignores it as if it never arrived.
         pencil_reference: Option<f64>,
     },
+    /// Deburr (M2.5 E B): the cone-ruled edge break in 3D. The ONE
+    /// authored number is `width` - the break's width in the edge's
+    /// own plane - and the tip's depth follows from the tool's cone:
+    /// `drop = width / tan(half-angle)`, stated once in
+    /// [`crate::finishing3d::DeburrParams::drop`] so the door, the
+    /// pane and the path cannot disagree (chamfer's derived-floor
+    /// grammar, read on a real dihedral). No `bottom_z` to author
+    /// the ride stops at: the loci are the model's own exposed edges,
+    /// and `top_z`/`bottom_z` bound the WINDOW those edges must lie
+    /// in - a rim running off the programmed floor is clipped by the
+    /// edge's own line, never dropped whole. The hop between runs is
+    /// the kernel's own: every run starts and ends at `clearance_z`
+    /// (no retract field exists to author, and none is needed).
+    Deburr {
+        /// Break width at the edge plane, mm; > 0 at the door, and
+        /// small enough for the tool's flute is the OTHER door.
+        width: f64,
+        clearance_z: Height,
+        /// Tip ceiling of the ride: edges whose TIP stands above it
+        /// are clipped - the window's top, as every finishing op's.
+        top_z: Height,
+        /// Tip floor of the ride: edges running below it are clipped.
+        bottom_z: Height,
+        feed: f64,
+        plunge_feed: f64,
+    },
     /// Simultaneous 5-axis level finishing (M5.1 stage C): the waterline
     /// ring ladder a [`Self::Finish3D`] Waterline cuts, with a tool-axis
     /// pose stamped on every cutting move. The positions are the
@@ -1040,6 +1066,7 @@ impl OpParams {
             OpParams::Drill { .. } => OpType::Drill,
             OpParams::Pocket3D { .. } => OpType::Pocket3D,
             OpParams::Finish3D { .. } => OpType::Finish3D,
+            OpParams::Deburr { .. } => OpType::Deburr,
             OpParams::Contour5D { .. } => OpType::Contour5D,
             OpParams::Parallel5D { .. } => OpType::Parallel5D,
             OpParams::Swarf { .. } => OpType::Swarf,
@@ -1093,6 +1120,11 @@ impl OpParams {
             OpParams::Drill { .. }
             | OpParams::Pocket3D { .. }
             | OpParams::Finish3D { .. }
+            // The deburr ride poses the cone by the EDGE's own lean,
+            // not by a machine index: the axis stands vertical over
+            // the edge point and the generatrix does the breaking -
+            // a 3+2 index would fight the one fact the ride is (M2.5 E B).
+            | OpParams::Deburr { .. }
             | OpParams::Contour5D { .. }
             | OpParams::Parallel5D { .. }
             | OpParams::Swarf { .. }
@@ -1163,6 +1195,7 @@ impl OpParams {
             | OpParams::Drill { clearance_z, .. }
             | OpParams::Pocket3D { clearance_z, .. }
             | OpParams::Finish3D { clearance_z, .. }
+            | OpParams::Deburr { clearance_z, .. }
             | OpParams::Contour5D { clearance_z, .. }
             | OpParams::Parallel5D { clearance_z, .. }
             | OpParams::Swarf { clearance_z, .. }
@@ -1210,6 +1243,8 @@ impl OpParams {
             | OpParams::Drill { top_z, .. }
             | OpParams::Pocket3D { top_z, .. }
             | OpParams::Finish3D { top_z, .. }
+            // The window's top: the highest TIP the ride may stand at.
+            | OpParams::Deburr { top_z, .. }
             | OpParams::Contour5D { top_z, .. }
             | OpParams::Parallel5D { top_z, .. }
             | OpParams::Swarf { top_z, .. }
@@ -1353,6 +1388,14 @@ impl OpParams {
             | OpParams::MultiAxisContour { clearance_z, retract_z, top_z, bottom_z, .. } => {
                 f(*clearance_z);
                 opt(retract_z, &mut f);
+                f(*top_z);
+                f(*bottom_z);
+            }
+            // The deburr ride visits the trio (M2.5 E B): the kernel
+            // hops every run to `clearance_z` itself, so no retract
+            // exists to visit - the facing law's shape, on a mill.
+            OpParams::Deburr { clearance_z, top_z, bottom_z, .. } => {
+                f(*clearance_z);
                 f(*top_z);
                 f(*bottom_z);
             }

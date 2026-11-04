@@ -1207,7 +1207,11 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // rapids in and out are the lead-off and lead-back, and the
         // travel home rides the clearance height (M5.2 F).
         | operation::OpParams::FormTurning { .. }
-        | operation::OpParams::BoringTurning { .. } => None,
+        | operation::OpParams::BoringTurning { .. }
+        // The deburr ride says it too: every run starts and ends at
+        // the clearance plane by the kernel's own word - no hop
+        // height exists to author or draw (M2.5 E B).
+        | operation::OpParams::Deburr { .. } => None,
     };
     if let Some(hop) = hop
         && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
@@ -1328,8 +1332,11 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::MultiPassTurning { top_z, bottom_z, .. }
         | operation::OpParams::FormTurning { top_z, bottom_z, .. }
         // The bore window is the same pair of planes: the length of
-        // wall the ride walks (M5.2 F).
-        | operation::OpParams::BoringTurning { top_z, bottom_z, .. } => {
+        // wall the ride walks (M5.2 F). The deburr window is the two
+        // planes the tip rides between - the ceiling and floor its
+        // loci are clipped by (M2.5 E B).
+        | operation::OpParams::BoringTurning { top_z, bottom_z, .. }
+        | operation::OpParams::Deburr { top_z, bottom_z, .. } => {
             if let Some(z) = top_z.z(world) {
                 out.push(HeightPlane {
                     z,

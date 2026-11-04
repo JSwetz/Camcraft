@@ -989,6 +989,24 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
+        (
+            // The deburr ride (M2.5 E B): one authored number, the
+            // break width, in Geometry with the derived tip-depth
+            // note; the window's two planes stand in Heights (their
+            // labels name the TIP's law, not a cut floor), and the
+            // feeds are the ride's - no climb row, the cone follows
+            // the edge wherever the weld puts it. There is NO Passes
+            // group: one edge, one pass - the loci are what the weld
+            // exposes, and a stepover could only disagree with the
+            // taxonomy (has_section's exclusion, Chamfer2D's answer
+            // once more).
+            "Deburr",
+            vec![
+                ("Geometry", vec!["Break width"]),
+                ("Heights", vec!["Clearance Z", "Window Top Z", "Window Bottom Z"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)"]),
+            ],
+        ),
     ];
     // One pane per kind (M9.1 B): the stack draws at once, no tab to
     // open - so the law reads off a single frame. Every field of the

@@ -309,13 +309,26 @@ fn the_chamfer_rides_the_corner_the_door_let_through() {
     // The positive case, over the real command path: the 6-wide 90
     // cone on a 2 land at 45 degrees posts z = 20 - 2*tan(45) = 18
     // for every feed move of the stock's boundary circuit.
-    let (_w, _h, path) = job_tool("CHM", catalog_tool("CM-0600-90"), "CM-0600-90", chamfer(2.0));
+    let (w, _h, path) = job_tool("CHM", catalog_tool("CM-0600-90"), "CM-0600-90", chamfer(2.0));
     assert!(path.is_chained() && path.all_finite());
     let feeds: Vec<_> = path.moves.iter().filter(|m| m.kind == MoveKind::Feed).collect();
     assert!(!feeds.is_empty());
     for m in &feeds {
         assert!((m.to.z - 18.0).abs() < 1e-9, "the corner ride stays at 18: {m:?}");
     }
+    // The verdict, not just the ride: the envelope scan must find
+    // this cone clean on this stock - no gouge claim, no rest
+    // complaint (M2.5 E B law restated for the chamfer's congruent
+    // kernel: a warned ride reads Ok to the pane and posts anyway,
+    // so the warning list is the only surface this regression
+    // class shows on).
+    let e = model::find_by_name(&w, "CHM").expect("op");
+    let cached = model::toolpath_of(&w, &e).expect("cached");
+    assert!(
+        cached.warnings.is_empty(),
+        "the chamfer ride drew a verdict: {:?}",
+        cached.warnings
+    );
 }
 
 #[test]

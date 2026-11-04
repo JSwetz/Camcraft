@@ -137,7 +137,10 @@ pub fn region_z(
         | OpParams::BoringTurning { top_z, .. }
         // The holes' entry plane names the same station (M2.4 C).
         | OpParams::Bore { top_z, .. }
-        | OpParams::Thread { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::Thread { top_z, .. }
+        // The deburr window's ceiling names the same high station:
+        // the ride's tips stand at or below it (M2.5 E B).
+        | OpParams::Deburr { top_z, .. } => resolve_height(world, setup, *top_z),
     }
 }
 
@@ -296,6 +299,18 @@ pub fn resolve_params(
             req("Clearance Z", *clearance_z)?,
             Some(req("Top of Part Z", *top_z)?),
             Some(req("Bottom of Part Z", *bottom_z)?),
+            None,
+            None,
+        ),
+        // The deburr ride states the trio too - but its two window
+        // heights are named for what they bound: the TIP's ceiling
+        // and floor, since the kernel stands the tip `drop` below
+        // each edge it breaks (M2.5 E B). The rapids plane hops every
+        // run itself; no hop height exists to resolve.
+        OpParams::Deburr { clearance_z, top_z, bottom_z, .. } => (
+            req("Clearance Z", *clearance_z)?,
+            Some(req("Window Top Z", *top_z)?),
+            Some(req("Window Bottom Z", *bottom_z)?),
             None,
             None,
         ),

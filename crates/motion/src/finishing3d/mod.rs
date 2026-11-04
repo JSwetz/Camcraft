@@ -84,6 +84,7 @@
 //! structure only - behaviour is byte-identical to the flat file it replaces.
 
 mod crease;
+mod deburr;
 mod drape;
 mod flat;
 mod geodesic;
@@ -102,6 +103,7 @@ mod support;
 pub use params::{
     scallop_stepdown, scallop_stepover, Finish3DParams, FinishPattern,
 };
+pub use deburr::{deburr, DeburrParams};
 pub use flat::flat;
 pub use geodesic::geodesic;
 pub use pencil::{corner, pencil};

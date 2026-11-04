@@ -156,8 +156,15 @@ pub(crate) fn has_section(kind: OpType, s: usize) -> bool {
         // peck depth and bottom dwell, the numbers that shape its hops.
         // The engrave twin is Trace's shape verbatim, and the chamfer
         // ride's floor is DERIVED from width and angle - neither has a
-        // stepover or a leave to show (M2.4 B).
-        SEC_PASSES => !matches!(kind, OpType::Trace | OpType::Engrave | OpType::Chamfer2D),
+        // stepover or a leave to show (M2.4 B). The deburr ride is
+        // that answer once more: one edge, one pass - its width is
+        // geometry, not a ladder (M2.5 E B).
+        SEC_PASSES => {
+            !matches!(
+                kind,
+                OpType::Trace | OpType::Engrave | OpType::Chamfer2D | OpType::Deburr
+            )
+        }
         SEC_LEADS => matches!(kind, OpType::Contour),
         SEC_MACHINE => matches!(kind, OpType::Part),
         _ => false,
@@ -1430,6 +1437,53 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
                 num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
+            }
+        }
+        // The deburr ride (M2.5 E B): the chamfer's word read on the
+        // model's own edges - one authored number, the break width,
+        // with the cone and its depth the TOOL's word (the door
+        // refuses anything not a chamfer mill); heights are the
+        // window the tip rides in, feeds the ride's. No pattern, no
+        // stepover, no hop: the loci are what the weld exposes.
+        OpParams::Deburr {
+            width,
+            clearance_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+        } => {
+            if tab == SEC_GEO {
+                field(ui, "Break width");
+                num(ui, u, width);
+                ui.label("measured in the edge's own plane; the tip stands width / tan(half-angle) below it - the cone is the tool's, so its angle authors the depth, never a field here");
+            }
+            if tab == SEC_HEIGHTS {
+                field(ui, "Clearance Z");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "deburr.clearance",
+                );
+                field(ui, "Window Top Z");
+                height_editor(ui, &state.world, op_ctx.as_deref(), top_z, "deburr.top");
+                field(ui, "Window Bottom Z");
+                height_editor(
+                    ui,
+                    &state.world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "deburr.bottom",
+                );
+                ui.label("the two planes the TIP rides between: an edge running outside the window is clipped along its own line, never dropped whole");
+            }
+            if tab == SEC_FEEDS {
+                field(ui, &format!("Feed ({})", u.feed_suffix()));
+                num_feed(ui, u, feed);
+                field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
+                num_feed(ui, u, plunge_feed);
             }
         }
         // The circular ladder (M2.4 B): the pocket family about an

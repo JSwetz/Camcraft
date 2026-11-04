@@ -4997,3 +4997,96 @@ fn the_stage_c_pattern_words_arrive_as_words_not_a_version() {
     };
     assert_eq!(*pattern, camcraft_app::finishing3d::FinishPattern::Waterline);
 }
+
+#[test]
+fn the_deburr_params_grammar_round_trips() {
+    // M2.5 E B's arrival word: `deburr` is the variant's automatic
+    // snake_case tag, and the six keys are the kind's whole content -
+    // the one authored number is `width` (the tip's depth follows from
+    // it and the TOOL's cone, the tool-free rule), and there is no
+    // retract key to be absent because the kernel hops every run to
+    // the clearance itself. A v47 file cannot contain this tag (the
+    // arrival law), so the body is stamped at the build's own version.
+    let body = |width: &str| {
+        format!(
+            r#"{{
+        "version": {},
+        "entities": [
+            {{"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {{"kind": "taper", "diameter": 6.0, "corner_r": 0.0, "tip_angle": 90.0,
+                      "flute_len": 10.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 10000.0, "feed": 2000.0}}}},
+            {{"name": "D1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {{"tool": "T1", "src": "stock", "params": {{"deburr": {{
+                 "width": {width},
+                 "clearance_z": {{"reference": "fixed", "offset": 25.0}},
+                 "top_z": {{"reference": "top_of_model", "offset": 0.0}},
+                 "bottom_z": {{"reference": "bottom_of_model", "offset": 0.0}},
+                 "feed": 500.0, "plunge_feed": 100.0
+             }}}}}}}}
+        ]
+    }}"#,
+            project::PROJECT_VERSION
+        )
+    };
+    let read = |world: &flecs_ecs::prelude::World| {
+        let e = model::find_by_name(world, "D1").expect("op");
+        let o = model::operation_of(world, &e).expect("operation");
+        let OpParams::Deburr {
+            width,
+            clearance_z,
+            top_z,
+            bottom_z,
+            feed,
+            plunge_feed,
+        } = &o.params
+        else {
+            panic!("deburr params expected, got {:?}", o.params);
+        };
+        (*width, *clearance_z, *top_z, *bottom_z, *feed, *plunge_feed)
+    };
+
+    let world = new_world();
+    project::open(&world, &body("0.5")).expect("the deburr word must read");
+    assert_eq!(
+        read(&world),
+        (
+            0.5,
+            Height::fixed(25.0),
+            Height::of(
+                camcraft_app::operation::HeightReference::TopOfModel,
+                0.0
+            ),
+            Height::of(
+                camcraft_app::operation::HeightReference::BottomOfModel,
+                0.0
+            ),
+            500.0,
+            100.0
+        ),
+        "the six keys land as authored"
+    );
+    let p = tmp_path("deburr");
+    project::save(&world, &p).expect("save");
+    let first = std::fs::read_to_string(&p).expect("read");
+    assert!(first.contains("\"deburr\""), "the tag is the word: {first}");
+    assert!(first.contains("\"width\": 0.5"), "{first}");
+    let world2 = new_world();
+    project::load(&world2, &p).expect("reload");
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(first, second, "the deburr shape round-trips byte-identically");
+
+    // A width that breaks nothing is no deburr: the door's law reads
+    // the file too, and the loader refuses rather than defaulting.
+    let world3 = new_world();
+    assert!(
+        matches!(
+            project::open(&world3, &body("-1.0")),
+            Err(ProjectError::Corrupt(_))
+        ),
+        "a negative break width is refused, not defaulted"
+    );
+}

@@ -64,7 +64,7 @@ use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
-use super::crease::{add3, chain, cmp_pt, scale3, shrink, sub3, vkey, vkey_scale, Seg};
+use super::crease::{add3, chain, cmp_pt, scale3, shrink, sub3, third, vkey, vkey_scale, Seg};
 use super::params::{validate, Finish3DParams};
 use super::support::build_sups;
 
@@ -274,18 +274,3 @@ fn loci(
     Ok(path)
 }
 
-/// The third vertex of a face, given the two forming an edge (by
-/// coordinate - the welded ids and the floats agree).
-fn third(tri: Triangle, e0: Point3, e1: Point3) -> Point3 {
-    for &q in &[tri.a, tri.b, tri.c] {
-        if !near(q, e0) && !near(q, e1) {
-            return q;
-        }
-    }
-    tri.c
-}
-
-fn near(p: Point3, q: Point3) -> bool {
-    let s = (p.x.abs() + p.y.abs() + p.z.abs() + 1.0) * 1e-12;
-    (p.x - q.x).abs() <= s && (p.y - q.y).abs() <= s && (p.z - q.z).abs() <= s
-}

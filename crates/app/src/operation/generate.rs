@@ -582,6 +582,67 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             };
             (region, path)
         }
+        // Deburr (M2.5 E B): the cone stands OVER each exposed edge -
+        // rim or convex crease - and breaks it. Tool jurisdiction is
+        // the chamfer mill's own cone, and the angle is the TOOL's
+        // word, never a second promise on the operation: the op
+        // authors only the break width, and `drop` (the kernel's
+        // single formula) follows. The congruence test with the 2D
+        // chamfer needs no shared number because there is none to
+        // disagree with.
+        OpParams::Deburr {
+            width,
+            feed,
+            plunge_feed,
+            ..
+        } => {
+            if tool.kind != crate::tools::ToolKind::Taper {
+                return Err(GenError::Invalid(format!(
+                    "Deburr rides its cone over the edge - it needs a chamfer mill, '{}' is a {}",
+                    tool_name, tool.kind
+                )));
+            }
+            if !(0.0..180.0).contains(&tool.tip_angle) || !tool.tip_angle.is_finite() {
+                return Err(GenError::Invalid(format!(
+                    "Deburr needs a cone tool: '{}' has an included angle of {}, which rules no chamfer",
+                    tool_name, tool.tip_angle
+                )));
+            }
+            // The cone's flank must physically reach the contact
+            // circle: at the tip's drop the flank stands `width` out
+            // from the axis, that far along the flank from the apex -
+            // a short-fluted V stands on its shank there, and the
+            // ride would dress a cylinder as a cone (the derived
+            // float quotes to a tenth, chamfer's reading law).
+            let slant = width / (0.5 * tool.tip_angle.to_radians()).sin();
+            if tool.flute_len < slant - 1e-9 {
+                return Err(GenError::Invalid(format!(
+                    "the break reaches {:.1} mm up the cone's flank; '{}' has {} mm of flute",
+                    slant, tool_name, tool.flute_len
+                )));
+            }
+            let region = region_for_job(
+                    &mut picked_region,
+                    &mut section_z,
+                    &src,
+                    &params,
+                m_gen,
+                frame.as_ref(),
+            )?;
+            let path = finishing3d::deburr(
+                &material.facets,
+                &DeburrParams {
+                    width: *width,
+                    tip_angle_deg: tool.tip_angle,
+                    clearance_z: hl.clearance,
+                    top_z: req_z(hl.top, "Window Top Z")?,
+                    bottom_z: req_z(hl.bottom, "Window Bottom Z")?,
+                    feed: *feed,
+                    plunge_feed: *plunge_feed,
+                },
+            )?;
+            (region, path)
+        }
         // The simultaneous-axis kinds (M5.1 stage C). The ball-center
         // path is the finish's own - a sphere's envelope is rotation-
         // invariant, so leaning the spindle changes what the SHANK
@@ -2103,6 +2164,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         // verdict (the contour-rides' answer, spoken on a mill).
         | OpParams::Engrave { .. }
         | OpParams::Chamfer2D { .. }
+        // The deburr cone owns its break outright, same grammar as
+        // its 2D twin one row up: the ride IS the finished edge, and
+        // a leave number could only move the rest verdict (M2.5 E B).
+        | OpParams::Deburr { .. }
         | OpParams::Drill { .. }
         | OpParams::Finish3D { .. }
         // The 5-axis kinds leave no stock - the ball path is the
@@ -2202,6 +2267,11 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                         &params,
                         OpParams::Pocket3D { .. }
                             | OpParams::Finish3D { .. }
+                            // The deburr loci ARE the model's welded
+                            // edges: its boundary law reads the mesh
+                            // at the tip's plane, never the flat
+                            // footprint's silhouette wall (M2.5 E B).
+                            | OpParams::Deburr { .. }
                             | OpParams::Contour5D { .. }
                             | OpParams::Parallel5D { .. }
                             | OpParams::Swarf { .. }

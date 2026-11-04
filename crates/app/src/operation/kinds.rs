@@ -85,6 +85,9 @@ fn feed_of(p: &OpParams) -> f64 {
         | OpParams::Trace { feed, .. }
         | OpParams::Drill { feed, .. }
         | OpParams::Finish3D { feed, .. }
+        // The deburr ride feeds along the edge at the cone's flank -
+        // the same distance-per-minute the chamfer rides state (M2.5 E B).
+        | OpParams::Deburr { feed, .. }
         | OpParams::Contour5D { feed, .. }
         | OpParams::Parallel5D { feed, .. }
         | OpParams::Swarf { feed, .. }
@@ -151,6 +154,9 @@ fn plunge_of(p: &OpParams) -> f64 {
         | OpParams::Trace { plunge_feed, .. }
         | OpParams::Drill { plunge_feed, .. }
         | OpParams::Finish3D { plunge_feed, .. }
+        // Deburr's plunge stands the tip on the edge from the
+        // clearance plane - the chamfer's number, one dihedral over (M2.5 E B).
+        | OpParams::Deburr { plunge_feed, .. }
         | OpParams::Contour5D { plunge_feed, .. }
         | OpParams::Parallel5D { plunge_feed, .. }
         | OpParams::Swarf { plunge_feed, .. }
@@ -255,7 +261,12 @@ fn climb_of(p: &OpParams) -> bool {
         // work turns - which flank of the ball carries the chip is
         // the spindle's whole story, inward as outward (M5.2 F).
         | OpParams::BoringTurning { .. }
-        | OpParams::FormTurning { .. } => true,
+        | OpParams::FormTurning { .. }
+        // Nor the deburr ride: the cone stands OVER the edge and the
+        // chain's welded direction says which way the run goes -
+        // which flank breaks the burr is the edge's own geometry,
+        // not a number an author could flip (M2.5 E B).
+        | OpParams::Deburr { .. } => true,
         // The wall ride and the helix choose their flank: the climb
         // number says which way the circle runs (M2.4 C).
         OpParams::Bore { climb, .. } | OpParams::Thread { climb, .. } => *climb,
@@ -335,7 +346,10 @@ fn stepover_of(p: &OpParams) -> Option<f64> {
         // One ring per hole is the boring answer, one helix per hole
         // the thread's: the wall is the pattern, nothing tiles (M2.4 C).
         | OpParams::Bore { .. }
-        | OpParams::Thread { .. } => None,
+        | OpParams::Thread { .. }
+        // One ride per exposed edge is the deburr answer: the model's
+        // own edges are the pattern, nothing tiles (M2.5 E B).
+        | OpParams::Deburr { .. } => None,
     }
 }
 
@@ -406,6 +420,11 @@ fn stepdown_of(p: &OpParams) -> Option<f64> {
         // the threading law restated on a mill (M2.4 C).
         | OpParams::Chamfer2D { .. }
         | OpParams::Thread { .. } => None,
+        // One ride of the edge is the deburr answer too: the tip's
+        // depth is derived from width and the tool's cone, and
+        // between the clearance plane and the edge there is no
+        // infeed ladder to step (M2.5 E B).
+        OpParams::Deburr { .. } => None,
     }
 }
 
@@ -464,7 +483,10 @@ pub fn top_of(p: &OpParams) -> Option<Height> {
         | OpParams::BoringTurning { top_z, .. }
         // The holes' entry plane: where the feed move opens (M2.4 C).
         | OpParams::Bore { top_z, .. }
-        | OpParams::Thread { top_z, .. } => Some(*top_z),
+        | OpParams::Thread { top_z, .. }
+        // The window's tip ceiling: rides whose TIP stands above it
+        // are clipped there (M2.5 E B).
+        | OpParams::Deburr { top_z, .. } => Some(*top_z),
         OpParams::Face { .. } => None,
     }
 }
@@ -522,7 +544,10 @@ pub fn bottom_of(p: &OpParams) -> Option<Height> {
         // below it (M5.2 F).
         | OpParams::MultiPassTurning { bottom_z, .. }
         | OpParams::FormTurning { bottom_z, .. }
-        | OpParams::BoringTurning { bottom_z, .. } => Some(*bottom_z),
+        | OpParams::BoringTurning { bottom_z, .. }
+        // The window's tip floor: an edge running below it is clipped
+        // by the edge's own line, and the ride stops there (M2.5 E B).
+        | OpParams::Deburr { bottom_z, .. } => Some(*bottom_z),
         // A drill's floor is normally the hole's own, from the model;
         // only an explicit Depth override is a plane to carry over.
         // Bore and Thread keep the drill's law: the floors come from
@@ -606,7 +631,10 @@ fn retract_of(p: &OpParams) -> Option<Height> {
         // (M5.2 F).
         | OpParams::MultiPassTurning { .. }
         | OpParams::FormTurning { .. }
-        | OpParams::BoringTurning { .. } => None,
+        | OpParams::BoringTurning { .. }
+        // The deburr ride hops every run to the clearance plane -
+        // the kernel's own word, no between-run plane authored (M2.5 E B).
+        | OpParams::Deburr { .. } => None,
     }
 }
 
@@ -946,6 +974,23 @@ fn seed_finish3d(c: &Carried) -> OpParams {
         // shallow pattern would ever read it.
         steep_stepover: None,
         pencil_reference: None,
+    }
+}
+
+fn seed_deburr(c: &Carried) -> OpParams {
+    OpParams::Deburr {
+        // A shop hand-break knows this one: half a millimetre of
+        // shine off a sharp edge is the deburr, not a chamfer. The
+        // tip's depth follows from the tool's cone - derived, never
+        // a second number to disagree (variant docs, M2.5 E B).
+        width: 0.5,
+        clearance_z: c.clearance,
+        // The window is the model's own height: every exposed edge
+        // stands inside it until a machinist narrows the ride.
+        top_z: c.top,
+        bottom_z: c.bottom,
+        feed: c.feed,
+        plunge_feed: c.plunge,
     }
 }
 
@@ -1619,10 +1664,14 @@ impl KindInfo {
             label: "2D Chamfer",
             caption: "Chamfer",
             tag: 8,
-            // One ride with the cone lying ON the wall: boundary laws
-            // rule, and the wall itself is the authored promise the
-            // tool's cone must be able to keep (M2.4 B).
-            mode: Mode::Boundary,
+            // One ride with the cone lying ON the wall: the axis runs
+            // on the wall loop and the tool's congruence doors keep
+            // the promise (M2.4 B). Mode::Cone (M2.5 E B): law (b)
+            // once read that ride as five gouges per square - a
+            // tangency law cannot convict a generatrix that lies ON
+            // the face by construction - while the shank band still
+            // answers for the wall beside the edge.
+            mode: Mode::Cone,
             section: Section::Mill2D,
             seed: seed_chamfer2d,
         },
@@ -1708,10 +1757,24 @@ impl KindInfo {
             seed: seed_finish3d,
         },
         KindInfo {
+            ty: OpType::Deburr,
+            label: "Deburr",
+            caption: "Deburr",
+            tag: 15,
+            // The cone lies ON the break the edge makes: the axis
+            // runs on the edge's own XY and the virtual tip stands
+            // inside the corner by construction - the 2-D chamfer's
+            // doctrine read on a real dihedral (M2.5 E B). Law (b)
+            // stands down; the shank band keeps its voice.
+            mode: Mode::Cone,
+            section: Section::Mill3D,
+            seed: seed_deburr,
+        },
+        KindInfo {
             ty: OpType::Contour5D,
             label: "5-Axis Contour",
             caption: "5-Axis Contour",
-            tag: 15,
+            tag: 16,
             // Same measured envelope law (M5.1 stage C): the ball is
             // the cutter and a sphere's envelope is rotation-invariant,
             // so the pose changes what the SHANK sees, not what the
@@ -1725,7 +1788,7 @@ impl KindInfo {
             ty: OpType::Parallel5D,
             label: "5-Axis Parallel",
             caption: "5-Axis Parallel",
-            tag: 16,
+            tag: 17,
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_parallel5d,
@@ -1734,7 +1797,7 @@ impl KindInfo {
             ty: OpType::Swarf,
             label: "Swarf",
             caption: "Swarf",
-            tag: 17,
+            tag: 18,
             // The same measured envelope, read along the ruling (M5.1
             // stage D): the ball's path is the raster's, so the verdict
             // law is the finish's - the pose question (the blade lies
@@ -1747,7 +1810,7 @@ impl KindInfo {
             ty: OpType::AdvancedSwarf,
             label: "Advanced Swarf",
             caption: "Adv. Swarf",
-            tag: 18,
+            tag: 19,
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_advanced_swarf,
@@ -1756,7 +1819,7 @@ impl KindInfo {
             ty: OpType::RotaryContour,
             label: "Rotary Contour",
             caption: "Rotary Contour",
-            tag: 19,
+            tag: 20,
             // The rings are the finish's, posed radially (M5.1 stage
             // E): the ball's path decides the verdict, the fitted
             // axis and the lean answer only where the spindle points.
@@ -1768,7 +1831,7 @@ impl KindInfo {
             ty: OpType::RotaryParallel,
             label: "Rotary Parallel",
             caption: "Rotary Parallel",
-            tag: 20,
+            tag: 21,
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_rotary_parallel,
@@ -1777,7 +1840,7 @@ impl KindInfo {
             ty: OpType::RotaryOffset,
             label: "Rotary Offset",
             caption: "Rotary Offset",
-            tag: 21,
+            tag: 22,
             // The rough ladder's verdict is the measured envelope too
             // (M5.1 stage E2): law (f) sweeps a sphere, so the pose
             // cannot lie to it on a bar lying or standing, and the
@@ -1790,7 +1853,7 @@ impl KindInfo {
             ty: OpType::MultiAxisRough,
             label: "Multi-Axis Rough",
             caption: "Multi-Axis Rough",
-            tag: 22,
+            tag: 23,
             // The positions are the pocket ladder's, bit for bit, and
             // a sphere's envelope is rotation-invariant about its own
             // center: law (f) measures what the vertical rough would
@@ -1806,7 +1869,7 @@ impl KindInfo {
             ty: OpType::Flow5D,
             label: "5-Axis Flow",
             caption: "5-Axis Flow",
-            tag: 23,
+            tag: 24,
             // The parallel's verdict law on lines that turn (M5.1 I):
             // a sphere's envelope is rotation-invariant, so the field
             // decides where the lines GO and the lean law where the
@@ -1819,7 +1882,7 @@ impl KindInfo {
             ty: OpType::MultiAxisContour,
             label: "Multi-Axis Contour",
             caption: "Multi-Axis Contour",
-            tag: 24,
+            tag: 25,
             // The ball rides the picked chains wherever they stand
             // (M5.1 J): there is no authored pattern for a law to
             // distrust, and the verdict is the same sphere-envelope
@@ -1833,7 +1896,7 @@ impl KindInfo {
             ty: OpType::Facing,
             label: "Facing",
             caption: "Facing",
-            tag: 25,
+            tag: 26,
             // The facing verdict is measured like the finish's (law
             // f): the ball is the insert nose circle swept true - and
             // a meridian circle revolved IS a sphere about the axis,
@@ -1849,7 +1912,7 @@ impl KindInfo {
             ty: OpType::ProfileRough,
             label: "Profile Rough",
             caption: "Profile Rough",
-            tag: 26,
+            tag: 27,
             // The rungs' verdict is the same sphere-envelope law
             // (M5.2 B): a nose circle revolved IS a sphere about the
             // axis, so the scan measures each rung's shell exactly -
@@ -1863,7 +1926,7 @@ impl KindInfo {
             ty: OpType::ProfileFinish,
             label: "Profile Finish",
             caption: "Profile Finish",
-            tag: 27,
+            tag: 28,
             // The ride is the pattern: no authored spacing for a law
             // to distrust, and the tolerance is exactly the
             // envelope's budget - the chord law the kernel settled
@@ -1876,7 +1939,7 @@ impl KindInfo {
             ty: OpType::GrooveRough,
             label: "Groove Rough",
             caption: "Groove Rough",
-            tag: 28,
+            tag: 29,
             // No sphere can judge a band: a grooved part is undercut
             // BY DESIGN, and material standing beside the groove is
             // out of every ball's reach along Z. The verdict is the
@@ -1891,7 +1954,7 @@ impl KindInfo {
             ty: OpType::GrooveFinish,
             label: "Groove Finish",
             caption: "Groove Finish",
-            tag: 29,
+            tag: 30,
             // The same meridian law, leave-free: one plunge per
             // center to the band's floor, and the floor no band
             // reached rests by the window shell - silence is what a
@@ -1904,7 +1967,7 @@ impl KindInfo {
             ty: OpType::Part,
             label: "Parting",
             caption: "Part",
-            tag: 30,
+            tag: 31,
             // Separation as a band cut: the through-axis kerf is
             // judged silent inside its own kerf and right of it
             // (the workpiece left with the scrap), and the verdict
@@ -1917,7 +1980,7 @@ impl KindInfo {
             ty: OpType::Threading,
             label: "Threading",
             caption: "Threading",
-            tag: 31,
+            tag: 32,
             // The blade verdict with the wave clause (M5.2 D): the
             // tool's V, not a boxcar, is the footprint - at every
             // center's station the floor stands deeper by the flank
@@ -1933,7 +1996,7 @@ impl KindInfo {
             ty: OpType::Chamfering,
             label: "Chamfering",
             caption: "Chamfer",
-            tag: 32,
+            tag: 33,
             // The promised-face rides (M5.2 E) judge like the
             // profile finish, and for the profile finish's reason:
             // the nose-ball sweeps the MODEL's own offset, so the
@@ -1950,7 +2013,7 @@ impl KindInfo {
             ty: OpType::TaperTurning,
             label: "Taper Turning",
             caption: "Taper",
-            tag: 33,
+            tag: 34,
             // The same envelope law across the cone: the authored
             // diameters spent themselves at the door, and what the
             // ball rolls over is the modeled skin within the
@@ -1963,7 +2026,7 @@ impl KindInfo {
             ty: OpType::MultiPassTurning,
             label: "Multi-Pass Turning",
             caption: "Multi-Pass",
-            tag: 34,
+            tag: 35,
             // Rough and finish in one program: the rungs' shells
             // and the spring rides' midpoints all stand at a
             // nose's distance-or-more from the skin, so the same
@@ -1978,7 +2041,7 @@ impl KindInfo {
             ty: OpType::FormTurning,
             label: "Form Turning",
             caption: "Form",
-            tag: 35,
+            tag: 36,
             // The crown floor of the meridian scan: the gauge's
             // arc, not the nose circle, says what stands between
             // the band's edges, and the crest law keeps the shell
@@ -1991,7 +2054,7 @@ impl KindInfo {
             ty: OpType::BoringTurning,
             label: "Boring",
             caption: "Bore",
-            tag: 36,
+            tag: 37,
             // The profile finish's inside twin (M5.2 F): the nose
             // stands ON the wall and the bar rides it, so the
             // envelope scan - rolled about the centers with the
@@ -2059,6 +2122,7 @@ pub const ALL_LABELS: [&str; KIND_COUNT] = [
     KindInfo::ALL[34].label,
     KindInfo::ALL[35].label,
     KindInfo::ALL[36].label,
+    KindInfo::ALL[37].label,
 ];
 
 impl OpType {
@@ -2086,28 +2150,32 @@ impl OpType {
             OpType::Bore => 12,
             OpType::Pocket3D => 13,
             OpType::Finish3D => 14,
-            OpType::Contour5D => 15,
-            OpType::Parallel5D => 16,
-            OpType::Swarf => 17,
-            OpType::AdvancedSwarf => 18,
-            OpType::RotaryContour => 19,
-            OpType::RotaryParallel => 20,
-            OpType::RotaryOffset => 21,
-            OpType::MultiAxisRough => 22,
-            OpType::Flow5D => 23,
-            OpType::MultiAxisContour => 24,
-            OpType::Facing => 25,
-            OpType::ProfileRough => 26,
-            OpType::ProfileFinish => 27,
-            OpType::GrooveRough => 28,
-            OpType::GrooveFinish => 29,
-            OpType::Part => 30,
-            OpType::Threading => 31,
-            OpType::Chamfering => 32,
-            OpType::TaperTurning => 33,
-            OpType::MultiPassTurning => 34,
-            OpType::FormTurning => 35,
-            OpType::BoringTurning => 36,
+            // M2.5 E B: the deburr joins the Mill3D run where the
+            // partition's contiguity law puts it - behind the finish,
+            // before the multi-axis run opens.
+            OpType::Deburr => 15,
+            OpType::Contour5D => 16,
+            OpType::Parallel5D => 17,
+            OpType::Swarf => 18,
+            OpType::AdvancedSwarf => 19,
+            OpType::RotaryContour => 20,
+            OpType::RotaryParallel => 21,
+            OpType::RotaryOffset => 22,
+            OpType::MultiAxisRough => 23,
+            OpType::Flow5D => 24,
+            OpType::MultiAxisContour => 25,
+            OpType::Facing => 26,
+            OpType::ProfileRough => 27,
+            OpType::ProfileFinish => 28,
+            OpType::GrooveRough => 29,
+            OpType::GrooveFinish => 30,
+            OpType::Part => 31,
+            OpType::Threading => 32,
+            OpType::Chamfering => 33,
+            OpType::TaperTurning => 34,
+            OpType::MultiPassTurning => 35,
+            OpType::FormTurning => 36,
+            OpType::BoringTurning => 37,
         }
     }
 

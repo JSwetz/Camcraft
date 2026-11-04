@@ -60,6 +60,24 @@ pub(super) fn cmp_pt(a: Point3, b: Point3) -> std::cmp::Ordering {
         .then(a.z.total_cmp(&b.z))
 }
 
+/// The third vertex of a face, given the two forming an edge (by
+/// coordinate - the welded ids and the floats agree). Lifted from
+/// pencil's private copy (M2.5 E B): the deburr walk reads the same
+/// opposite vertices to ask the mirrored question.
+pub(super) fn third(tri: Triangle, e0: Point3, e1: Point3) -> Point3 {
+    for &q in &[tri.a, tri.b, tri.c] {
+        if !near(q, e0) && !near(q, e1) {
+            return q;
+        }
+    }
+    tri.c
+}
+
+pub(super) fn near(p: Point3, q: Point3) -> bool {
+    let s = (p.x.abs() + p.y.abs() + p.z.abs() + 1.0) * 1e-12;
+    (p.x - q.x).abs() <= s && (p.y - q.y).abs() <= s && (p.z - q.z).abs() <= s
+}
+
 /// Is this center a READING of the corner, inside the programmed
 /// window? Clear of every facet, resting on the solid at exactly r,
 /// and both contact feet standing on real facets.

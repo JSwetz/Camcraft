@@ -16,7 +16,7 @@ use camcraft_app::geometry::{IDENTITY_Q, Mesh, Point3, cube};
 use camcraft_app::machining2d::{Lead, Side};
 use camcraft_app::model;
 use camcraft_app::operation::{self, Height, OpParams, OpStatus, SrcRef};
-use camcraft_app::schema::{Location, Operation, STOCK_NAME, Toolpath};
+use camcraft_app::schema::{Location, Operation, ToolDef, STOCK_NAME, Toolpath};
 use camcraft_app::stock::StockShape;
 use camcraft_app::tools::{Tool, catalog};
 use camcraft_app::world::new_world;
@@ -7089,4 +7089,251 @@ fn the_crease_pair_generates_through_the_operation_layer() {
     };
     assert!(msg.contains("no concave corner"), "{msg}");
     assert_eq!(status(&world, "KB"), OpStatus::Never);
+}
+
+// ---------------------------------------------------------------------------
+// M2.5 E B: the deburr ride through the operation layer. The kernel law
+// (`finishing3d::deburr` and its edge taxonomy) is gate-tested in the
+// motion crate's deburr.rs; at this level the checks are the THREE tool
+// doors the app adds on top of the kernel's own validate (the kind, the
+// cone's angle, and the flank's reach - a plain end mill dressed as a
+// break is a gouge waiting for a spindle), one through-the-layer ride
+// that must seat, cut, and stay prismatic, and the seed's numbers.
+// ---------------------------------------------------------------------------
+
+/// The deburr ride's params: the window is stated in the TIP's units
+/// (the kernel's clipping law), so a `top_z` at the model's own top
+/// minus the drop names exactly the rim that stands there.
+fn deburr_params(width: f64, top_z: f64, bottom_z: f64) -> OpParams {
+    OpParams::Deburr {
+        width,
+        clearance_z: Height::fixed(25.0),
+        top_z: Height::fixed(top_z),
+        bottom_z: Height::fixed(bottom_z),
+        feed: 500.0,
+        plunge_feed: 100.0,
+    }
+}
+
+#[test]
+fn the_deburr_rides_the_bricks_top_rim_through_the_operation_layer() {
+    // Width 2 on the 90-degree cone drops the tip 2 below each edge
+    // it rides; the window [6, 8] admits the top rim's tips (8) and
+    // the top ends of the verticals, and the bottom rim (tip -2)
+    // stays out - which is the honest program: a cone breaking the
+    // bottom rim from above would stand INSIDE the wall. The law
+    // under test is the trip, not the taxonomy: an Ok verdict, metal
+    // cut, no gouge claim, and nothing posed - an axis on a move
+    // would mean the 5-axis stamp leaked into the ride.
+    use camcraft_app::cl::MoveKind;
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "CM-0600-90");
+    history.execute(
+        &world,
+        ImportModel::from_mesh(
+            "brick",
+            cube(Point3::new(-20.0, -10.0, 0.0), Point3::new(20.0, 10.0, 10.0)),
+        ),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "BRK",
+            "CM-0600-90",
+            SrcRef::Entity("brick".into()),
+            deburr_params(2.0, 8.0, 6.0),
+        )
+        .expect("create"),
+    );
+    history.execute(&world, GenerateOperation::new(&world, "BRK").expect("generate"));
+    assert_eq!(status(&world, "BRK"), OpStatus::Ok, "the rim ride must seat and cut");
+    let t = cache(&world, "BRK").expect("cached");
+    let feeds = t.path.moves.iter().filter(|m| m.kind == MoveKind::Feed).count();
+    assert!(feeds > 0, "the deburr went silent on the brick");
+    assert!(t.path.is_prismatic(), "the deburr leaked a posed axis into a 3-axis program");
+    assert!(
+        !t.warnings.iter().any(|w| matches!(w, camcraft_app::verify::Warning::Gouge { .. })),
+        "the ride gouged: {:?}",
+        t.warnings
+    );
+    // The tips of a 90-degree cone at width 2 stand exactly 2 below
+    // the edges they break: no cut move may dip under the window's
+    // floor or breach the clearance - the clipping law's own bounds,
+    // read off the program.
+    for m in &t.path.moves {
+        assert!(m.to.z >= 6.0 - 1e-9, "a cut point under the window floor: {:?}", m.to);
+        assert!(m.to.z <= 25.0 + 1e-9, "a move over the clearance: {:?}", m.to);
+    }
+}
+
+#[test]
+fn deburr_refuses_a_plain_end_mill_by_name() {
+    // The ride IS a cone over the edge; an end mill would dress a
+    // cylinder as a chamfer flank, and the kernel would compute
+    // drops for a tool that has none. The door speaks, nothing cuts.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(
+        &world,
+        ImportModel::from_mesh("brick", deburr_brick()),
+    );
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "DB",
+            "EM-0600-4FL",
+            SrcRef::Entity("brick".into()),
+            deburr_params(2.0, 8.0, 6.0),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "DB")
+        .err()
+        .expect("the deburr must refuse a flat tool")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("needs a chamfer mill"), "{msg}");
+    assert_eq!(status(&world, "DB"), OpStatus::Never, "the refusal leaves no path behind");
+}
+
+#[test]
+fn deburr_refuses_a_cone_that_rules_no_chamfer() {
+    // 180 included is a flat, not a cone: no half-angle to take the
+    // tangent of, no drop to stand the tip at. The door names the
+    // angle it found. Two layers close on it: AddTool's is_sane gate
+    // (Taper wants tip_angle > 0, the global bound < 180) refuses the
+    // mount, and the generate door catches the shape directly - so
+    // the command layer is proven, then bypassed by writing the
+    // ToolDef straight onto the entity (the machine.rs idiom), which
+    // is the only way the kernel's own door can ever see a flat.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    let flat = Tool {
+        kind: camcraft_app::tools::ToolKind::Taper,
+        tip_angle: 180.0,
+        flute_len: 10.0,
+        ..stub_tool()
+    };
+    assert!(
+        matches!(
+            AddTool::new(&world, "FLAT-CONE", flat.clone()),
+            Err(CommandError::Invalid(_))
+        ),
+        "the command law refuses a cone that rules no chamfer"
+    );
+    model::spawn(&world, "FLAT-CONE")
+        .entity_view(&world)
+        .set(ToolDef { tool: flat });
+    history.execute(&world, ImportModel::from_mesh("brick", deburr_brick()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "DB",
+            "FLAT-CONE",
+            SrcRef::Entity("brick".into()),
+            deburr_params(2.0, 8.0, 6.0),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "DB")
+        .err()
+        .expect("a flat cone must refuse")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("rules no chamfer"), "{msg}");
+    assert_eq!(status(&world, "DB"), OpStatus::Never);
+}
+
+#[test]
+fn deburr_refuses_a_flank_too_short_for_the_break() {
+    // Width 5 on the 90-degree cone reaches 5 / sin 45 = 7.1 mm up
+    // the flank - the CM-0400's 6 mm of flute stops at its shank, and
+    // the ride would dress a cylinder as a cone. The catalog's own
+    // tool proves the door: no fixture invention needed.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "CM-0400-90");
+    history.execute(&world, ImportModel::from_mesh("brick", deburr_brick()));
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "DB",
+            "CM-0400-90",
+            SrcRef::Entity("brick".into()),
+            deburr_params(5.0, 8.0, -6.0),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "DB")
+        .err()
+        .expect("a short flank must refuse")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("up the cone's flank"), "{msg}");
+    assert!(msg.contains("7.1"), "{msg}");
+    assert_eq!(status(&world, "DB"), OpStatus::Never);
+}
+
+#[test]
+fn the_deburr_seed_carries_the_heights_and_a_hand_break_width() {
+    // The seed's promise (M2.5 E B): half a millimetre - the shop's
+    // deburr, not a chamfer - and the window IS the model's own
+    // height, so a fresh op rides every exposed edge until a
+    // machinist narrows it. Nothing else the seed may invent.
+    use camcraft_app::operation::{Carried, HeightReference, KindInfo, OpType};
+    let carried = Carried {
+        feed: 500.0,
+        plunge: 100.0,
+        climb: true,
+        clearance: Height::fixed(25.0),
+        stepover: 3.0,
+        stepdown: 5.0,
+        top: Height::of(HeightReference::TopOfModel, 0.0),
+        bottom: Height::of(HeightReference::BottomOfModel, 0.0),
+        retract: Height::fixed(20.0),
+        tilt: None,
+    };
+    let row = KindInfo::ALL
+        .iter()
+        .find(|k| k.ty == OpType::Deburr)
+        .expect("the deburr row seats in the registry");
+    let OpParams::Deburr {
+        width,
+        clearance_z,
+        top_z,
+        bottom_z,
+        feed,
+        plunge_feed,
+    } = (row.seed)(&carried)
+    else {
+        panic!("the deburr row must seed deburr params");
+    };
+    assert_eq!(width, 0.5, "a hand-break, not a chamfer");
+    assert_eq!(clearance_z, carried.clearance);
+    assert_eq!(top_z, carried.top, "the window is the model's own");
+    assert_eq!(bottom_z, carried.bottom);
+    assert_eq!(feed, 500.0);
+    assert_eq!(plunge_feed, 100.0);
+}
+
+/// The ride's model: a 40 x 20 x 10 brick standing on the stock floor,
+/// centered so no face runs off the 60 x 60 x 25 stock's edge.
+fn deburr_brick() -> camcraft_app::geometry::Mesh {
+    camcraft_app::geometry::cube(
+        Point3::new(-20.0, -10.0, 0.0),
+        Point3::new(20.0, 10.0, 10.0),
+    )
 }

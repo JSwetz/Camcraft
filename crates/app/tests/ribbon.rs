@@ -144,10 +144,12 @@ fn v42_pins_shift_for_the_twins_row_insert() {
     // the same kind, and from the Drill row up each gains the two
     // new rows' worth. The rungs CHAIN (M2.4 B proved it from the
     // other side): v42 -> v43 by the twins' rung, v43 -> v44 by the
-    // trio's, v44 -> v45 by the M2.4 C pair's two-boundary step, so
-    // the old Drill row lands three + two + one past its old home
-    // in the final table. The PostDto law seen from the other side -
-    // names survive growth, indices need a rung.
+    // trio's, v44 -> v45 by the M2.4 C pair's two-boundary step, and
+    // v47 -> v48 by the Deburr seat (a tail index is above the 15
+    // boundary, so it rides that +1 too) - the old Drill row lands
+    // three + two + one past its old home, the last turning row one
+    // rung more. The PostDto law seen from the other side - names
+    // survive growth, indices need a rung.
     let world = new_world();
     project::open(
         &world,
@@ -157,8 +159,8 @@ fn v42_pins_shift_for_the_twins_row_insert() {
     let pins = pinned_of(&world);
     assert_eq!(
         pins,
-        vec![4, 11, 36],
-        "Trace stays; the Drill row and the last turning row take all three rungs"
+        vec![4, 11, 37],
+        "Trace stays; the Drill row takes three rungs, the turning tail a fourth"
     );
     assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
     assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
@@ -171,7 +173,8 @@ fn v43_pins_shift_for_the_m24b_row_insert() {
     // their kinds and 7 up gains three. The Offset row (6) is the
     // run's last old name; the Drill row (7) is the run's first
     // shifted one. The v45 rung chains after: the landed 10 takes
-    // the Thread's +1, the landed 34 the pair's +2.
+    // the Thread's +1, the landed 34 the pair's +2 - and the v48
+    // Deburr seat adds its +1 to everything from 15 up.
     let world = new_world();
     project::open(
         &world,
@@ -179,7 +182,7 @@ fn v43_pins_shift_for_the_m24b_row_insert() {
     )
     .expect("a v43 pinned file steps up");
     let pins = pinned_of(&world);
-    assert_eq!(pins, vec![6, 11, 36], "below the insert stays, from Drill up shifts");
+    assert_eq!(pins, vec![6, 11, 37], "below the insert stays, from Drill up shifts");
     assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Offset2D);
     assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill);
     assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::BoringTurning);
@@ -194,7 +197,9 @@ fn v44_pins_take_the_two_boundary_step() {
     // at 12, so everything from the old Pocket3D row (11) up shifts
     // +2. The rung is two boundaries, not one - and this is the
     // proof: the old Drill lands at 11 (its +1), the old Threading
-    // (29) and the old last-turning (34) both land +2.
+    // (29) and the old last-turning (34) both land +2. The v48
+    // Deburr rung chains after (+1 from 15 up): Threading lands at
+    // 32, the turning tail at 37, the Drill below the seat at 11.
     let world = new_world();
     project::open(
         &world,
@@ -202,7 +207,11 @@ fn v44_pins_take_the_two_boundary_step() {
     )
     .expect("a v44 pinned file steps up");
     let pins = pinned_of(&world);
-    assert_eq!(pins, vec![4, 11, 31, 36], "below Thread stays, Drill +1, from Pocket3D up +2");
+    assert_eq!(
+        pins,
+        vec![4, 11, 32, 37],
+        "below Thread stays, Drill +1, from Pocket3D up +2, from the seat up +1 more"
+    );
     assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Trace);
     assert_eq!(KindInfo::ALL[pins[1]].ty, operation::OpType::Drill, "the drill took the +1");
     assert_eq!(KindInfo::ALL[pins[2]].ty, operation::OpType::Threading);
@@ -210,4 +219,43 @@ fn v44_pins_take_the_two_boundary_step() {
     // And the two new rows sit where the rungs' arithmetic says.
     assert_eq!(KindInfo::ALL[10].ty, operation::OpType::Thread, "Thread closes Mill2D");
     assert_eq!(KindInfo::ALL[12].ty, operation::OpType::Bore, "Bore joins Drilling");
+}
+
+#[test]
+fn v47_pins_take_the_deburr_seat_shift() {
+    // M2.5 E B seats Deburr at 15 IN the Mill3D run (the partition
+    // law's contiguity, not a tail-append): below the seat the names
+    // stand - Finish3D was 14 and stays 14 - and from the old 5-Axis
+    // Contour row up every index slides +1. One cut, one rung: the
+    // M2.4 choreography seen from the middle of the table.
+    let world = new_world();
+    project::open(
+        &world,
+        r#"{"version": 47, "pinned": [4, 14, 15, 36], "entities": []}"#,
+    )
+    .expect("a v47 pinned file steps up");
+    let pins = pinned_of(&world);
+    assert_eq!(pins, vec![4, 14, 16, 37], "below the seat stays, from Contour5D up slides");
+    assert_eq!(KindInfo::ALL[pins[0]].ty, operation::OpType::Trace);
+    assert_eq!(
+        KindInfo::ALL[pins[1]].ty,
+        operation::OpType::Finish3D,
+        "the row under the seat keeps its number"
+    );
+    assert_eq!(
+        KindInfo::ALL[pins[2]].ty,
+        operation::OpType::Contour5D,
+        "the old 15 lands at 16"
+    );
+    assert_eq!(
+        KindInfo::ALL[pins[3]].ty,
+        operation::OpType::BoringTurning,
+        "the table's tail slides too"
+    );
+    // And the new row sits where the rung's arithmetic says.
+    assert_eq!(
+        KindInfo::ALL[15].ty,
+        operation::OpType::Deburr,
+        "Deburr seats in the Mill3D run"
+    );
 }

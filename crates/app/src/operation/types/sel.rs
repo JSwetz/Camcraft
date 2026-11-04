@@ -118,6 +118,14 @@ pub enum OpType {
     /// Mesh-driven 3D finishing: ball-nose waterline rings at the scallop
     /// stepdown (see [`crate::finishing3d`]).
     Finish3D,
+    /// Deburring (M2.5 E B): the cone-ruled edge break in 3D — every
+    /// EXPOSED edge of the model (an open mesh's rim, a convex crease)
+    /// ridden once with the taper tool's axis standing OVER the edge,
+    /// the generatrix making the break (see [`crate::finishing3d`]'s
+    /// deburr). The break's width is the one authored number; the tip's
+    /// depth follows from the tool's own cone, so no second promise
+    /// exists to disagree. Edges nothing exposes answer Empty by name.
+    Deburr,
     /// Simultaneous 5-axis level finishing: the waterline ring ladder
     /// with the TOOL AXIS moving per move - lead/lag lean against a
     /// tilt clamp, for shank clearance on steep walls (M5.1 stage C,

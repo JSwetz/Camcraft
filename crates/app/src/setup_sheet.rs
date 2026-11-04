@@ -673,6 +673,21 @@ fn height_fields(params: &OpParams) -> [(&'static str, &'static str, Option<Heig
             ("TOP", "Top of Part Z", Some(*top_z)),
             ("BOT", "Bottom of Part Z", None),
         ],
+        // The deburr ride states four rows but names its top and
+        // bottom as a WINDOW: the tip may stand nowhere else, and
+        // there is no RET row - the kernel hops every run to the
+        // clearance plane itself (M2.5 E B).
+        OpParams::Deburr {
+            clearance_z,
+            top_z,
+            bottom_z,
+            ..
+        } => [
+            ("CLR", "Clearance Z", Some(*clearance_z)),
+            ("RET", "Retract Z", None),
+            ("TOP", "Window Top Z", Some(*top_z)),
+            ("BOT", "Window Bottom Z", Some(*bottom_z)),
+        ],
         // The rough ladder states the sheet with no RET row - the
         // kernel's hop plane is a law, not a height (M5.1 stage E2).
         OpParams::RotaryOffset {

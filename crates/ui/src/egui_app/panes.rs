@@ -530,6 +530,10 @@ fn op_icon(kind: OpType) -> Icon {
         // around a centre.
         OpType::Engrave => Icon::Trace,
         OpType::Chamfer2D => Icon::Contour,
+        // The deburr ride is the chamfer's word read on the model's
+        // own edges - same promise, a loop of peeled corner, so the
+        // contour's pixels again (M2.5 E B, the reuse law).
+        OpType::Deburr => Icon::Contour,
         OpType::Circular => Icon::Pocket,
         OpType::Drill => Icon::Drill,
         OpType::Pocket3D => Icon::Pocket,

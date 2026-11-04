@@ -200,6 +200,10 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
                 | OpParams::Thread { .. }
                 | OpParams::Pocket3D { .. }
                 | OpParams::Finish3D { .. }
+                // The deburr ride's edges ARE the model's own exposed
+                // boundary - a pick could only disagree with what the
+                // weld already found (M2.5 E B).
+                | OpParams::Deburr { .. }
                 // The drive-curve contour's picks are the PATH, not a
                 // boundary: the 2D selection walk below would try to
                 // bound an area with them (and refuse an open run),
@@ -288,6 +292,9 @@ pub(super) fn selection_drives_region(params: &OpParams) -> bool {
             | OpParams::Thread { .. }
             | OpParams::Pocket3D { .. }
             | OpParams::Finish3D { .. }
+            // The deburr loci are the model's own exposed edges - the
+            // weld finds them, and a pick could only disagree (E B).
+            | OpParams::Deburr { .. }
             // The 5-axis kinds are mesh-driven like the finish: the
             // rings and raster lines chase the model at every plane,
             // so a picked loop could only disagree with the path
@@ -431,6 +438,10 @@ pub(super) fn region_core(
         // The rotary twins chase the mesh around the fitted axis, so
         // the same shadow answers for them (stage E).
         OpParams::Finish3D { .. }
+        // The deburr ride's machine area is the model's own shadow:
+        // its loci are welded edges in the material, and the region
+        // only says where the model stands (M2.5 E B).
+        | OpParams::Deburr { .. }
         | OpParams::Contour5D { .. }
         | OpParams::Parallel5D { .. }
         | OpParams::Swarf { .. }

@@ -13,6 +13,20 @@ pub enum Mode {
     /// Trace: the cutter center runs on the boundary itself; laws that
     /// assume tangency do not apply.
     Engrave,
+    /// The cone rides (M2.5 E B): a chamfer mill whose GENERATRIX lies
+    /// on the wall - the axis runs exactly on the edge's own XY, and
+    /// on a convex crease the virtual tip stands deliberately INSIDE
+    /// the corner it is making (the material above the tip plane,
+    /// within one break width, is the burr: the cut's promise, not a
+    /// collision). Law (b)'s tangency reading convicts both facts, so
+    /// it stands down - Engrave's words, written from the cone side.
+    /// Unlike Engrave the shank law KEEPS its voice: a leaning-edge
+    /// ride straddles a wall with a cylinder wider than the cone ever
+    /// opens, and the column beside it is real steel the way an
+    /// engraver's air never is. The kernel's reach doors (the cone's
+    /// congruence, the flute's depth) are this mode's construction
+    /// law, measured at the dispatch.
+    Cone,
     /// Ball-rolling 3-D finish (waterline): the centers sit exactly r
     /// off the model at each tangent point and nearer than r to the
     /// section silhouettes elsewhere, so the tangency gouge law would

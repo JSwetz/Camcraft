@@ -729,6 +729,16 @@ impl HeightRefs for OpParams {
                 v.extend(retract_z.iter());
                 v
             }
+            // The deburr ride resolves three too, the finish's shape
+            // without the hop: the kernel returns to clearance
+            // between runs itself, and the window's two planes clip
+            // the loci (M2.5 E B).
+            OpParams::Deburr {
+                clearance_z,
+                top_z,
+                bottom_z,
+                ..
+            } => vec![clearance_z, top_z, bottom_z],
             // The wrap ladder's three - no hop plane exists to ask
             // about; the kernel's rapids ride the skin, not a height
             // (M5.1 stage E2).

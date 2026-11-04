@@ -30,7 +30,12 @@ use super::*;
 /// words (pencil, corner); no row moves, so no pin shifts — an absent
 /// key decodes to "no reference ball named", exactly what every v46
 /// file ran, and the new words cannot exist in one (the arrival law).
-pub const PROJECT_VERSION: u32 = 47;
+/// v48: the shape with the shift, one row (M2.5 E B) — the ParamsDto
+/// grows the Deburr arm and the row seats IN the Mill3D run at 15
+/// (the partition law wants contiguous sections, so the 5-Axis Contour
+/// and everything after it slide +1): a v47 file cannot contain the
+/// new variant (arrival law) and its pins name a table that moved.
+pub const PROJECT_VERSION: u32 = 48;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {

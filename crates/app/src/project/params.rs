@@ -412,6 +412,22 @@ pub enum ParamsDto {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pencil_reference: Option<f64>,
     },
+    /// Declared at v48 with the deburr ride (M2.5 E B). `Deburr`'s
+    /// automatic snake_case tag IS the clean word - no rename needed -
+    /// and the six keys are the kind's whole content: `width` is the
+    /// one authored number (the tip's depth follows from it and the
+    /// TOOL, never stored, per the tool-free rule), and the kernel
+    /// hops every run to `clearance_z` itself, so there is no
+    /// `retract_z` key to be absent. A v47 file cannot contain this
+    /// variant (the arrival law).
+    Deburr {
+        width: f64,
+        clearance_z: HeightDto,
+        top_z: HeightDto,
+        bottom_z: HeightDto,
+        feed: f64,
+        plunge_feed: f64,
+    },
     /// Declared at v24 with the simultaneous-axis kinds (M5.1 stage
     /// C). The renames state the tags for the familiar reason - the
     /// automatic snake_case of `Contour5D` would be `contour5_d`,

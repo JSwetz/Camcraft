@@ -50,7 +50,7 @@ use flecs_ecs::prelude::World;
 
 use crate::cl::Toolpath;
 use crate::drilling::{self, CycleChoice, Hole};
-use crate::finishing3d::{self, Finish3DParams};
+use crate::finishing3d::{self, DeburrParams, Finish3DParams};
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Triangle;
 use crate::geometry::feature::{self, LoopKind};

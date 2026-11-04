@@ -362,6 +362,25 @@ impl ParamsDto {
                 steep_stepover: *steep_stepover,
                 pencil_reference: *pencil_reference,
             },
+            // The deburr ride (M2.5 E B): the six keys are the kind's
+            // whole content - no pattern, no retract, nothing derived
+            // is stored (the tip's depth is width and TOOL, and the
+            // file's tool-free rule keeps the second out).
+            OpParams::Deburr {
+                width,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => ParamsDto::Deburr {
+                width: *width,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+            },
             // The 5-axis twins (M5.1 stage C): one shape, mirrored.
             // The contour arm has no stepover to name, so the pattern
             // reads it back (the or-pattern law again).
@@ -1461,6 +1480,24 @@ impl ParamsDto {
                 entry_ramp: *entry_ramp,
                 steep_stepover: *steep_stepover,
                 pencil_reference: *pencil_reference,
+            },
+            // Read back whole, the blade kinds' way - sane or
+            // nothing, `validate_kind`'s door first (M2.5 E B):
+            // every v47 file's own variants decode unchanged.
+            ParamsDto::Deburr {
+                width,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => OpParams::Deburr {
+                width: *width,
+                clearance_z: (*clearance_z).into(),
+                top_z: (*top_z).into(),
+                bottom_z: (*bottom_z).into(),
+                feed: *feed,
+                plunge_feed: *plunge_feed,
             },
             // The 5-axis twins (M5.1 stage C): the same shape read
             // back - the contour has no stepover key to lose, and the

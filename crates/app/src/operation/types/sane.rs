@@ -329,6 +329,27 @@ impl OpParams {
                     // happen at the gate, never at the emitter.
                     && (0.0..90.0).contains(ramp_angle)
             }
+            // The deburr ride (M2.5 E B): `width` is the one authored
+            // number and it must stand - a zero break removes nothing,
+            // and the tip's drop derived from it must be finite and
+            // positive, which is the kernel's own door restated at
+            // command creation (the tool's cone completes the product
+            // at generate; sanity asks only for the number).
+            OpParams::Deburr {
+                width,
+                clearance_z,
+                top_z,
+                bottom_z,
+                feed,
+                plunge_feed,
+            } => {
+                pos(*width)
+                    && clearance_z.is_sane()
+                    && top_z.is_sane()
+                    && bottom_z.is_sane()
+                    && pos(*feed)
+                    && pos(*plunge_feed)
+            }
             OpParams::Contour5D {
                 tolerance,
                 clearance_z,

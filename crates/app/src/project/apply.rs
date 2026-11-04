@@ -448,6 +448,23 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         // seats or moves, so the pins stand: pure step-up again.
         file.version = 47;
     }
+    if file.version == 47 {
+        // v47 -> v48: the deburr ride arrives (M2.5 E B) as one new
+        // variant a v47 file cannot contain (the arrival law), seated
+        // in the middle of the Mill3D run - the partition law says a
+        // section's rows are contiguous, so 15 is its seat and every
+        // old row from the 5-Axis Contour (15) up slides one. The
+        // pins are indices, and the table they named moved: one cut,
+        // one +1. The stamp digest writes the kind's tag, so every
+        // op behind the seat regenerates exactly once - one-time
+        // staleness is the price of the seat, not a wrong answer.
+        for idx in &mut file.pinned {
+            if *idx >= 15 {
+                *idx += 1;
+            }
+        }
+        file.version = 48;
+    }
     if file.version != PROJECT_VERSION {
         return Err(ProjectError::UnsupportedVersion(file.version));
     }

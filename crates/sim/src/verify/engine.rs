@@ -159,7 +159,17 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // on, d = 0, every feed point of the bore inside the finish
     // circle it came to make. Tangency is the mill's law; the door
     // the kernel measured on the mesh is the radial one.
-    if !matches!(cx.mode, Mode::Engrave | Mode::Envelope | Mode::Revolve | Mode::Radial) {
+    // Mode::Cone stands down on the same reading from the vertical
+    // mill's side (M2.5 E B): a chamfer ride's axis runs ON the wall
+    // loop it rules (d = 0 by construction) and a deburr's tip
+    // stands inside the corner material the ride exists to remove -
+    // both facts are the generatrix law, not near misses. The reach
+    // laws stay, unlike Engrave's: the cone's shank is wider than
+    // the cone and the wall beside the edge is steel.
+    if !matches!(
+        cx.mode,
+        Mode::Engrave | Mode::Envelope | Mode::Revolve | Mode::Radial | Mode::Cone
+    ) {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
                 continue;
