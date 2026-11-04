@@ -85,6 +85,7 @@
 
 mod crease;
 mod flat;
+mod geodesic;
 mod pencil;
 mod flow;
 mod march;
@@ -100,12 +101,13 @@ pub use params::{
     scallop_stepdown, scallop_stepover, Finish3DParams, FinishPattern,
 };
 pub use flat::flat;
+pub use geodesic::geodesic;
 pub use pencil::{corner, pencil};
 pub use flow::flow;
 // The 5-axis stamp's contact question (M5.1 C): the same Voronoi
 // closest-point law the raster clearance uses, crate-visible.
 pub(crate) use support::closest_pt_tri;
-pub use polar::{radial, spiral};
+pub use polar::{morphed_spiral, radial, spiral};
 pub use raster::{parallel, swarf, swarf_multi};
 pub use rings::waterline;
 pub use shadow::{contour, project};

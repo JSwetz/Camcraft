@@ -1,5 +1,6 @@
 //! Split from `finishing3d.rs` by M5.0.1; structure only.
 
+use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
 
 use super::params::{SPLIT_MZ, TOUCH_EPS};
@@ -104,6 +105,22 @@ pub(crate) fn closest_pt_tri(p: Point3, t: &[Point3; 3]) -> Point3 {
 /// The center is clear when every facet keeps at least `r` of ball
 /// around it - the same no-gouge law the ring enforces through the
 /// forbidden region, asked of one point at a time.
+///
+/// The currency is EXACT (`r - TOUCH_EPS`), and that is load-bearing:
+/// the distance is the triangle's, so a foot past a facet's edge
+/// reads as distance to the shared edge - at least `r` for a ball
+/// that truly rests on the crease. Any slack here would instead
+/// forgive a SUNK center, whose ball passes inside the far facet
+/// while the foot-clamped test still reads ≥ r: on a convex fold
+/// that is a bite off the roof, measured (the corrugated belt's
+/// envelope once ran a tol-threaded currency here: 0.0317 mm of
+/// ridge bitten, under the tolerance and therefore silent). The
+/// lattice-sag question is kept out of this test entirely: the only
+/// slack in the kernel is `tangent_z_folded`'s, which answers the
+/// GRADIENT TABLE's "where would a straddling ball rest" - a slope
+/// reading that runs no cut - while the march's ground stays the
+/// strict tangency, whose crease silences the minimum-step law is
+/// specced against.
 pub(super) fn ball_clear(c: Point3, sups: &[Sup], r: f64) -> bool {
     for s in sups {
         if c.x < s.xmin || c.x > s.xmax || c.y < s.ymin || c.y > s.ymax {
@@ -150,6 +167,51 @@ pub(super) fn column_clear(x: f64, y: f64, cz: f64, top_cz: f64, limit: f64, sup
     true
 }
 
+/// `support_at`'s answer plus the ground's slope: the gradient of the
+/// support FUNCTION along the unit ray `u` at the point `q`. Where the
+/// chosen tangent rests on one facet plane, that gradient is
+/// -(m_xy . u)/m_z of the facet the ball sits on - the same currency
+/// `shallow_footprint`'s `mz` spends globally, asked at one point.
+/// A chord across the support could miss where a tessellated ring
+/// crest answers None; the facet plane does not miss.
+pub(super) fn support_grad(q: Point2, u: Point2, r: f64, floor_tip: f64, sups: &[Sup]) -> Option<(f64, f64)> {
+    let (x, y) = (q.x, q.y);
+    let mut best: Option<(f64, f64)> = None;
+    for s in sups {
+        if !s.shallow || x < s.xmin || x > s.xmax || y < s.ymin || y > s.ymax {
+            continue;
+        }
+        let Some(cz) = tangent_z_folded(s, x, y, r) else { continue };
+        if cz - r < floor_tip - TOUCH_EPS {
+            continue;
+        }
+        if best.is_some_and(|b| b.0 >= cz) {
+            continue;
+        }
+        if ball_clear(Point3::new(x, y, cz), sups, r) {
+            best = Some((cz, -(s.m.x * u.x + s.m.y * u.y) / s.m.z));
+        }
+    }
+    best
+}
+
+/// Plunge-support's law spoken with `support_grad`'s answer: only
+/// where the column itself descends clean.
+pub(super) fn plunge_support_grad(
+    q: Point2,
+    u: Point2,
+    r: f64,
+    floor_tip: f64,
+    top_cz: f64,
+    sups: &[Sup],
+) -> Option<(f64, f64)> {
+    let (cc, cut) = plunge_support(q.x, q.y, r, floor_tip, top_cz, sups);
+    if cut || cc.is_none() {
+        return None;
+    }
+    support_grad(q, u, r, floor_tip, sups)
+}
+
 /// The march ground for families that enter by vertical plunge: the
 /// support's answer, but only where the descent is possible. Returns
 /// the center height and whether the column law TRIMMED an answer
@@ -181,7 +243,32 @@ pub(super) fn plunge_support(
 /// fall inside the facet's XY projection (a shallow facet's
 /// projection is never degenerate), and the center sits at
 /// `q_z + r·m_z`. None when this facet owns no tangent here.
+///
+/// The MARCH's law is the strict one: a foot a hair past a facet edge
+/// answers nothing, and that silence is load-bearing - on corrugated
+/// ground the crease's straddle annulus is a VALIDITY GAP the march
+/// breaks runs at, and the minimum-step floor is specced against that
+/// staircase (`minimum_step_floors_the_refinement_not_the_edges`).
 pub(super) fn tangent_z(s: &Sup, x: f64, y: f64, r: f64) -> Option<f64> {
+    tangent_z_at(s, x, y, r, false)
+}
+
+/// The same question for the GRADIENT lookup only (`support_grad`):
+/// the contact may ride onto the facet's neighbour across a fold the
+/// ball genuinely straddles. This slack is safe HERE because a
+/// gradient answer proposes nothing the march rides: the ground the
+/// curve actually walks is still `support_at`'s exact question, and
+/// the column safety is `plunge_support`'s. Used it for the whole
+/// kernel once, on the theory that candidates only propose and
+/// `ball_clear` decides; true, and the belt still lost its staircase
+/// - the edge-resting centers a straddling ball legitimately has
+///   then ANSWER the march where the module's promise says break, and
+///   a law's promise outranks a looser answer. Narrowed to the table.
+pub(super) fn tangent_z_folded(s: &Sup, x: f64, y: f64, r: f64) -> Option<f64> {
+    tangent_z_at(s, x, y, r, true)
+}
+
+fn tangent_z_at(s: &Sup, x: f64, y: f64, r: f64, fold: bool) -> Option<f64> {
     if !s.shallow {
         return None;
     }
@@ -196,9 +283,56 @@ pub(super) fn tangent_z(s: &Sup, x: f64, y: f64, r: f64) -> Option<f64> {
     let w0 = ((b.x - a.x) * (qy - a.y) - (b.y - a.y) * (qx - a.x)) / det;
     let w1 = ((c.x - a.x) * (a.y - qy) - (c.y - a.y) * (a.x - qx)) / det;
     let w2 = 1.0 - w0 - w1;
-    let tol = 1e-9; // barycentric slack: contact may sit on an edge or a vertex
-    if w0 < -tol || w1 < -tol || w2 < -tol {
-        return None;
+    // The folded ask (`fold`, the gradient table's) may ride the
+    // contact outside this facet, onto its neighbour, but only as
+    // far as a real neighbour could reach. A pure barycentric slack
+    // is the wrong currency: the legit overshoot is set by the FOLD
+    // a ball can straddle, not by the triangle's size, and a big
+    // triangle's 15 percent is millimetres of empty air (the plane's
+    // plane-extension would then answer a rung standing off the
+    // model's edge, cutting nothing and chaining links the angle law
+    // must refuse). Two caps say it together:
+    //  - an absolute one, a twentieth of the ball: past any facet
+    //    edge, tangency survives while the plane's float over the
+    //    fold (overshoot times the normal's turn, at most a radian
+    //    of tilt-change) stays under the pattern's teeth; 0.05*r is
+    //    the same budget the tessellation currency already spends,
+    //    and it is what lets a polar mesh's radial-knife band rest
+    //    - a quad facet's diagonal-split triangles carry normals a
+    //    half-wedge off the ray, so the true contact sits just
+    //    OUTSIDE both translated footprints, a gap of
+    //    r*sin(tilt)*sin(dtheta/2) that no facet-size law speaks.
+    //  - a relative one, a fiftieth of the height: on coarse facets
+    //    the fold straddled is the mesh's own sag, and that debt was
+    //    already paid by the old barycentric hair (0.02); keeping it
+    //    as a floor under the absolute cap means every tangency the
+    //    module answered before it still answers.
+    // The barycentric test below still runs at 0.15 as a shape
+    // guard: a sliver's absolute cap must not buy an overshoot of
+    // whole facets. Safety is ball_clear's, never the slack's.
+    if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
+        // inside: the exact tangency, no slack spent.
+    } else if !fold {
+        if w0.min(w1).min(w2) < -1e-9 {
+            return None;
+        }
+    } else {
+        let wmin = w0.min(w1).min(w2);
+        if wmin < -0.15 {
+            return None;
+        }
+        let area2 = det.abs();
+        let (e0, e1, e2) = (
+            (b.x - a.x).hypot(b.y - a.y),
+            (c.x - a.x).hypot(c.y - a.y),
+            (c.x - b.x).hypot(c.y - b.y),
+        );
+        let h = |edge: f64| area2 / edge.max(1e-300);
+        let cap = |hi: f64| (0.05 * r).max(0.02 * hi);
+        let over = |w: f64, hi: f64| w >= 0.0 || -w * hi <= cap(hi);
+        if !(over(w0, h(e0)) && over(w1, h(e1)) && over(w2, h(e2))) {
+            return None;
+        }
     }
     // The plane through the triangle, solved for z (m_z >= SPLIT_MZ).
     let qz = a.z - (s.m.x * (qx - a.x) + s.m.y * (qy - a.y)) / s.m.z;
@@ -210,7 +344,16 @@ pub(super) fn tangent_z(s: &Sup, x: f64, y: f64, r: f64) -> Option<f64> {
 /// clear of every facet - the topmost surface a descending tool
 /// meets first - and `None` over air, over unreached overhangs, and
 /// over anything whose tangent sits below the programmed floor: the
-/// floor outranks the surface, nothing cuts below `bottom_z`.
+/// floor outranks the surface, nothing cuts below `bottom_z`. The
+/// clearance is exact (`r - TOUCH_EPS` through `ball_clear`), and the
+/// candidate law is HEAD's strict tangency: where the contact circle
+/// straddles a fold of a tessellated skin the plane test answers
+/// nothing, the march BREAKS, and the band stands as reported rest -
+/// the staircase that floors the minimum-step law is specced against
+/// exactly this silence. The folded candidate belongs to
+/// `tangent_z_folded`, the gradient table's question, which runs no
+/// cut. Slack in the clearance itself would forgive a real bite;
+/// slack in a candidate would only admit a question.
 pub(super) fn support_at(x: f64, y: f64, r: f64, floor_tip: f64, sups: &[Sup]) -> Option<f64> {
     let mut best: Option<f64> = None;
     for s in sups {

@@ -903,6 +903,13 @@ pub enum FinishPatternDto {
     Pencil,
     /// M2.5 B, same law: the two-face tangent pass, own ball.
     Corner,
+    /// M2.5 C, same law: parallel with the sloped entries always on.
+    Ramp,
+    /// M2.5 C, same law: the spiral with the terrain's own spacing.
+    MorphSpiral,
+    /// M2.5 C, same law: rings of equal geodesic distance from the
+    /// model's open boundary.
+    Geodesic,
 }
 
 impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
@@ -920,6 +927,9 @@ impl From<FinishPatternDto> for crate::finishing3d::FinishPattern {
             FinishPatternDto::Flat => crate::finishing3d::FinishPattern::Flat,
             FinishPatternDto::Pencil => crate::finishing3d::FinishPattern::Pencil,
             FinishPatternDto::Corner => crate::finishing3d::FinishPattern::Corner,
+            FinishPatternDto::Ramp => crate::finishing3d::FinishPattern::Ramp,
+            FinishPatternDto::MorphSpiral => crate::finishing3d::FinishPattern::MorphSpiral,
+            FinishPatternDto::Geodesic => crate::finishing3d::FinishPattern::Geodesic,
         }
     }
 }
@@ -939,6 +949,9 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
             crate::finishing3d::FinishPattern::Flat => FinishPatternDto::Flat,
             crate::finishing3d::FinishPattern::Pencil => FinishPatternDto::Pencil,
             crate::finishing3d::FinishPattern::Corner => FinishPatternDto::Corner,
+            crate::finishing3d::FinishPattern::Ramp => FinishPatternDto::Ramp,
+            crate::finishing3d::FinishPattern::MorphSpiral => FinishPatternDto::MorphSpiral,
+            crate::finishing3d::FinishPattern::Geodesic => FinishPatternDto::Geodesic,
         }
     }
 }

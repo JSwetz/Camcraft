@@ -4911,3 +4911,77 @@ fn v46_file_steps_to_v47_and_the_crease_grammar_round_trips() {
         "a pen that cuts nothing is refused, not defaulted"
     );
 }
+
+#[test]
+fn the_stage_c_pattern_words_arrive_as_words_not_a_version() {
+    // M2.5 C: "ramp", "morph_spiral" and "geodesic" join the grammar
+    // as words, not as a version - no key moved and no entity
+    // changed, so a file that never spelled them reads exactly as it
+    // did (the scallop's own arrival law). The twins round-trip
+    // through the save/load/save fixed point, and an unknown spelling
+    // is still refused, never defaulted.
+    let finish = |keys: &str| {
+        let mut t = String::from(
+            r#"{
+        "version": 47,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "F1", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"finish3d": {
+                 "tolerance": 0.1,
+                 "clearance_z": {"reference": "fixed", "offset": 25.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "feed": 500.0, "plunge_feed": 100.0, "climb": true"#,
+        );
+        t.push_str(keys);
+        t.push_str("}}}}\n        ]\n    }");
+        t
+    };
+    for (word, want) in [
+        ("ramp", camcraft_app::finishing3d::FinishPattern::Ramp),
+        (
+            "morph_spiral",
+            camcraft_app::finishing3d::FinishPattern::MorphSpiral,
+        ),
+        (
+            "geodesic",
+            camcraft_app::finishing3d::FinishPattern::Geodesic,
+        ),
+    ] {
+        let t = finish(&format!(", \"pattern\": \"{word}\""));
+        let w = new_world();
+        project::open(&w, &t).expect("the stage C spellings must read");
+        let e = model::find_by_name(&w, "F1").expect("op");
+        let o = model::operation_of(&w, &e).expect("operation");
+        let OpParams::Finish3D { pattern, .. } = &o.params else {
+            panic!("finish3d params expected, got {:?}", o.params);
+        };
+        assert_eq!(*pattern, want, "the {word} word must decode to its variant");
+        let p = tmp_path("stagec");
+        project::save(&w, &p).expect("save");
+        let first = std::fs::read_to_string(&p).expect("read");
+        assert!(first.contains(&format!("\"pattern\": \"{word}\"")), "{word}: {first}");
+        let w2 = new_world();
+        project::load(&w2, &p).expect("reload");
+        project::save(&w2, &p).expect("resave");
+        let second = std::fs::read_to_string(&p).expect("reread");
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(first, second, "the {word} shape round-trips byte-identically");
+    }
+    // The arrival law's other half: a file that never spelled the new
+    // words reads untouched - the plain v47 body above with no
+    // pattern key at all is the waterline, exactly as it always was.
+    let w3 = new_world();
+    project::open(&w3, &finish("")).expect("a wordless v47 file must read as before");
+    let e = model::find_by_name(&w3, "F1").expect("op");
+    let o = model::operation_of(&w3, &e).expect("operation");
+    let OpParams::Finish3D { pattern, .. } = &o.params else {
+        panic!("finish3d params expected");
+    };
+    assert_eq!(*pattern, camcraft_app::finishing3d::FinishPattern::Waterline);
+}

@@ -42,7 +42,7 @@ fn contact_normal(facets: &[Triangle], c: Point3) -> Option<Point3> {
 /// `r - tol`, not `r`: a tessellated ring boundary sits a chord-sag
 /// inside the true tangent locus, so a center exactly on the tangent
 /// already measures a hair under `r` (the law probe's own currency).
-fn leg_clears(facets: &[Triangle], a: Point3, b: Point3, r: f64, tol: f64) -> bool {
+pub(super) fn leg_clears(facets: &[Triangle], a: Point3, b: Point3, r: f64, tol: f64) -> bool {
     let limit = r - tol;
     // Only facets whose box can reach the swept volume need distance
     // tests: the leg's own box grown by the radius. A 100k-facet model
@@ -250,8 +250,8 @@ pub(super) fn emit_rings(
             // Z-direction envelope sees more than the XY figure of
             // speech promised (the tilted wedge's low corner, 0.144 mm
             // at a full-tolerance fit).
-            let walk = fit_arcs(&poly, p.tolerance * 0.25);
-            let entry = poly[0];
+            let mut walk = fit_arcs(&poly, p.tolerance * 0.25);
+            let mut entry = poly[0];
             let cur = b.at();
             // The plane the air moves park above the ring entry:
             // the ramp's approach column certifies from its centers.
@@ -268,6 +268,35 @@ pub(super) fn emit_rings(
             // gouge the cone verdict measured (2.4963 mm at the
             // spire's first ring, tip 30 under a clearance of 25).
             .max(z_tip);
+            // A closed ring is a CYCLE: its start vertex is a choice,
+            // not a law. When the head's plunge column is blocked -
+            // the descent grazes a shoulder that the level loop itself
+            // only touches tangentially (the laid stepped bar's -4
+            // rung: its scan start stood over the r6-to-cone station,
+            // where the ball passing down clips the corner edge) -
+            // the same cut is reached from any vertex whose column
+            // stands clear. Rotate there before refusing; an OPEN run
+            // has ends, not a start of choice, and keeps the head the
+            // partition gave it. The question asked of the candidates
+            // is the refusal's own, spent identically: never a softer
+            // currency than the column law's r - tol.
+            if closed && !p.entry_ramp {
+                let (cz, top, lim) = (z_tip + r, approach_z + r, r - p.tolerance);
+                let blocked = |q: &Point2| !column_clear(q.x, q.y, cz, top, lim, &sups);
+                if blocked(&entry) {
+                    let n = poly.len() - 1; // poly[n] == poly[0]
+                    let stride = (n / 256).max(1);
+                    for i in (stride..n).step_by(stride) {
+                        if !blocked(&poly[i]) {
+                            poly[..n].rotate_left(i);
+                            poly[n] = poly[0];
+                            entry = poly[0];
+                            walk = fit_arcs(&poly, p.tolerance * 0.25);
+                            break;
+                        }
+                    }
+                }
+            }
                 // M8.2 B: the ramped first contact. The plunge is the
                 // law's own entry; `entry_ramp` is the opt-in that
                 // engages a steep wall along its contact normal instead -

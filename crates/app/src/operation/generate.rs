@@ -532,6 +532,28 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 // ball's band, Pencil the stated reference's.
                 finishing3d::FinishPattern::Pencil => finishing3d::pencil(&material.facets, &fp)?,
                 finishing3d::FinishPattern::Corner => finishing3d::corner(&material.facets, &fp)?,
+                // M2.5 C. Ramp is Parallel's twin with the sloped
+                // laws always on - the diagonal chains (M2.2e) and
+                // the ramped ring entries (M8.2 B) are the two
+                // certified ways a cut engages without a vertical
+                // plunge; the pattern only forces what the pane
+                // otherwise asks. MorphSpiral rides the spiral's
+                // march with the terrain's LOCAL scallop spacing;
+                // Geodesic marches the iso contours of the open
+                // boundary's distance field.
+                finishing3d::FinishPattern::Ramp => {
+                    let mut q = fp;
+                    q.pattern = finishing3d::FinishPattern::Parallel;
+                    q.ramp = true;
+                    q.entry_ramp = true;
+                    finishing3d::parallel(&material.facets, &q)?
+                }
+                finishing3d::FinishPattern::MorphSpiral => {
+                    finishing3d::morphed_spiral(&material.facets, &fp)?
+                }
+                finishing3d::FinishPattern::Geodesic => {
+                    finishing3d::geodesic(&material.facets, &fp)?
+                }
             };
             (region, path)
         }

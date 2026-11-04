@@ -101,7 +101,7 @@ const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
 const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
 /// The 3-D finish kinematics, in the order the combo maps them.
-const FINISH_PATTERNS: [&str; 12] = [
+const FINISH_PATTERNS: [&str; 15] = [
     "Waterline",
     "Parallel",
     "Parallel - multi",
@@ -114,6 +114,9 @@ const FINISH_PATTERNS: [&str; 12] = [
     "Flat",
     "Pencil",
     "Corner",
+    "Ramp",
+    "Morphed spiral",
+    "Geodesic",
 ];
 
 /// The pane's amber for a chip whose feature id no longer resolves.
@@ -2083,6 +2086,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::finishing3d::FinishPattern::Flat => 9,
                     camcraft_app::finishing3d::FinishPattern::Pencil => 10,
                     camcraft_app::finishing3d::FinishPattern::Corner => 11,
+                    camcraft_app::finishing3d::FinishPattern::Ramp => 12,
+                    camcraft_app::finishing3d::FinishPattern::MorphSpiral => 13,
+                    camcraft_app::finishing3d::FinishPattern::Geodesic => 14,
                 };
                 let before = pat_idx;
                 combo(ui, "f3_pattern", &mut pat_idx, &FINISH_PATTERNS);
@@ -2099,11 +2105,14 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                         9 => camcraft_app::finishing3d::FinishPattern::Flat,
                         10 => camcraft_app::finishing3d::FinishPattern::Pencil,
                         11 => camcraft_app::finishing3d::FinishPattern::Corner,
+                        12 => camcraft_app::finishing3d::FinishPattern::Ramp,
+                        13 => camcraft_app::finishing3d::FinishPattern::MorphSpiral,
+                        14 => camcraft_app::finishing3d::FinishPattern::Geodesic,
                         _ => camcraft_app::finishing3d::FinishPattern::Waterline,
                     };
                 }
                 ui.label(
-                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette - then the rings take the flanks. Steep and shallow draws that split as a border: the rings keep their hands off shallow ground, and the flanks answer to their own spacing. Flat rides the floors only, one pass per shrink. Pencil and Corner read the bends instead of the slope: each rides the line of centres tangent to both faces of every concave corner, Corner with the op's own ball and Pencil with a fatter reference ball, cleaning only what that pen leaves standing.",
+                    "Waterline: tangent rings only. The others march the flat ground first - Parallel along the axes (Multi both, Scallop the diagonals), Radial as chords through the centre, Spiral as one in-winding curve, Contour as concentric loops of the model's shadow, Project as its lifted silhouette - then the rings take the flanks. Steep and shallow draws that split as a border: the rings keep their hands off shallow ground, and the flanks answer to their own spacing. Flat rides the floors only, one pass per shrink. Pencil and Corner read the bends instead of the slope: each rides the line of centres tangent to both faces of every concave corner, Corner with the op's own ball and Pencil with a fatter reference ball, cleaning only what that pen leaves standing. Ramp is Parallel with the sloped entries always on. The morphed spiral keeps one in-winding curve but spaces its turns by the ground's own cosine under them. Geodesic rings start at the model's open edge and march outward by distance ALONG the surface, so one loop can run floor, wall and rim together; a closed shell with no open edge is refused by name.",
                 );
                 if !matches!(pattern, camcraft_app::finishing3d::FinishPattern::Waterline) {
                     field(ui, "Stepover");
@@ -2126,6 +2135,20 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                             "from tolerance and tool by the scallop law, times the slope's cosine",
                         );
                     }
+                    // M2.5 C honesty: Geodesic carries no chord march
+                    // to floor, and rides neither chain-ramp nor
+                    // entry-ramp law - every loop enters by its own
+                    // certified plunge. Ramp IS the sloped laws,
+                    // always on, so the checkboxes would only lie.
+                    let geodesic_pat = matches!(
+                        pattern,
+                        camcraft_app::finishing3d::FinishPattern::Geodesic
+                    );
+                    let ramp_pat = matches!(
+                        pattern,
+                        camcraft_app::finishing3d::FinishPattern::Ramp
+                    );
+                    if !geodesic_pat {
                     field(ui, "Minimum step");
                     let mut floored = min_step.is_some();
                     if ui
@@ -2148,19 +2171,30 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     } else {
                         ui.label("the march's own resolution floor");
                     }
-                    ui.checkbox(ramp, "Ramp between lines");
-                    ui.label(
-                        "one diagonal feed chains each line's end to the next where the ground allows; where it doesn't, the hop stands",
-                    );
-                    if *ramp {
-                        field(ui, "Ramp angle");
-                        num_plain(ui, ramp_angle);
-                        ui.label("the steepest descent a chain may carry; past it a link is a plunge in a diagonal coat, and the hop holds the line");
                     }
-                    ui.checkbox(entry_ramp, "Ramp ring entries");
-                    ui.label(
-                        "on flanks steeper than the split, a ring's first contact slides in along its contact normal instead of dropping; where the normal cannot certify the way in, the plunge stands and the path says why",
-                    );
+                    if ramp_pat {
+                        ui.label(
+                            "the diagonal chains between lines and the ramped ring entries are this pattern's whole story - always on, whatever the boxes below would say",
+                        );
+                    } else if !geodesic_pat {
+                        ui.checkbox(ramp, "Ramp between lines");
+                        ui.label(
+                            "one diagonal feed chains each line's end to the next where the ground allows; where it doesn't, the hop stands",
+                        );
+                        if *ramp {
+                            field(ui, "Ramp angle");
+                            num_plain(ui, ramp_angle);
+                            ui.label("the steepest descent a chain may carry; past it a link is a plunge in a diagonal coat, and the hop holds the line");
+                        }
+                        ui.checkbox(entry_ramp, "Ramp ring entries");
+                        ui.label(
+                            "on flanks steeper than the split, a ring's first contact slides in along its contact normal instead of dropping; where the normal cannot certify the way in, the plunge stands and the path says why",
+                        );
+                    } else {
+                        ui.label(
+                            "geodesic rings ride the surface, not the ladder: each run enters by its own certified plunge, and the sloped-entry laws keep their hands off",
+                        );
+                    }
                     if matches!(
                         pattern,
                         camcraft_app::finishing3d::FinishPattern::SteepShallow

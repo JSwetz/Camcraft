@@ -62,6 +62,24 @@ pub enum FinishPattern {
     /// own ball - where the tool's own band beats the tolerance
     /// (M2.5 B). `pencil_reference` is inert here.
     Corner,
+    /// Parallel's twin with the sloped laws always on (M2.5 C): the
+    /// diagonal chain between the raster's lines (`ramp`) and the
+    /// ramped first contacts on steep tangents (`entry_ramp`) are
+    /// forced on whatever the pane says - the catalog's "sloped
+    /// paths" name, assembled from laws this module already owns.
+    Ramp,
+    /// The spiral with the terrain's own spacing (M2.5 C): one
+    /// in-winding curve whose radius advances by the LOCAL scallop
+    /// law - wide where the ground tilts, narrow where it's flat -
+    /// so the cusp budget is spent evenly instead of at the
+    /// footprint's worst tilt.
+    MorphSpiral,
+    /// Rings of equal GEODESIC distance from the model's open
+    /// boundary (M2.5 C): contours that run WITH the surface - down
+    /// the wall and across the floor on one continuous loop -
+    /// placed by arc-length along the mesh, not by Z. Needs an open
+    /// boundary to march from; a closed shell is refused by name.
+    Geodesic,
 }
 
 /// Everything the 3D finishers need that the tool and geometry don't

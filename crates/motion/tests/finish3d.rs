@@ -17,8 +17,8 @@
 
 use camcraft_motion::cl::{lattice, MoveKind, Toolpath};
 use camcraft_motion::finishing3d::{
-    contour, corner, flat, parallel, pencil, project, radial, scallop_stepdown, scallop_stepover, spiral,
-    waterline, Finish3DParams, FinishPattern,
+    contour, corner, flat, geodesic, morphed_spiral, parallel, pencil, project, radial,
+    scallop_stepdown, scallop_stepover, spiral, waterline, Finish3DParams, FinishPattern,
 };
 use camcraft_motion::geometry::{slice, Point3, Triangle};
 use camcraft_motion::geo2d::Region;
@@ -1957,7 +1957,7 @@ fn folds() -> Vec<Triangle> {
 }
 
 #[test]
-#[ignore = "verdict lane: envelope scan over the 12x96 dome - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
+#[ignore = "verdict lane: envelope scans over the corrugated belt on four ladders - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
 fn minimum_step_floors_the_refinement_not_the_edges() {
     // The corrugated belt: five 22.5-degree facets across the raster.
     // Its fold PEAKS are validity gaps - a ball center within
@@ -2248,6 +2248,7 @@ fn the_ladder_number_validates_like_the_others() {
     }
 }
 
+
 #[test]
 fn the_closed_dome_rides_the_split_and_refuses_the_floors() {
     // The dome the operation layer actually programs: the 12x96 cap
@@ -2272,6 +2273,15 @@ fn the_closed_dome_rides_the_split_and_refuses_the_floors() {
     let ss = parallel(&f, &ppattern(18.0, RIM_Z, FinishPattern::SteepShallow))
         .expect("closed-dome split");
     assert!(!ss.moves.is_empty(), "the split said nothing on the dome");
+    // The disc floor REFUSES - unreachable, every rim center buries
+    // 0.14 mm into the cap. The pole's answer is the march's OWN
+    // kernel law: the plane-tangent ground is strict (the crease gap
+    // that floors the minimum-step staircase is specced against it,
+    // and no family gets a different kernel to be green), so the
+    // apex's star is a fold-rest - real for a ball, invisible to a
+    // per-facet plane law - and it belongs to M7.1's brick-SDF, the
+    // same jurisdiction the dome march's hole note names. Flat's
+    // honest answer today is the Empty refusal, not a path that lies.
     let e = flat(&f, &ppattern(18.0, RIM_Z, FinishPattern::Flat))
         .expect_err("the dome has no CUTTABLE floor");
     assert!(matches!(e, GenError::Empty(_)), "{e:?}");
@@ -2583,4 +2593,761 @@ fn the_reference_number_validates_like_the_others() {
             assert!(matches!(r, Err(GenError::Invalid(_))), "{door:?} took pencil_reference {s}");
         }
     }
+}
+
+// ------------------------------------------------------------------ M2.5 C
+// The sloped twin, the locally-spaced spiral, and the boundary-distance
+// rings. Fixtures first: two OPEN shells, because the geodesic's whole
+// datum is an open edge a closed model does not have.
+
+/// Open dome: the sphere_cap's band and apex fan with the closing disc
+/// left off. The equatorial rim is a real open edge - the geodesic
+/// field's zero - and the normals tilt the whole 0..90 degrees, so the
+/// field's own levels run from rim to crown.
+fn open_dome() -> Vec<Triangle> {
+    let (radius, n_lat, n_lon) = (20.0, 12, 48);
+    let polar = PI / 2.0;
+    let mut facets = Vec::new();
+    let ring = |k: usize| -> Vec<Point3> {
+        let ph = polar * k as f64 / n_lat as f64;
+        let (z, rr) = (radius * ph.cos(), radius * ph.sin());
+        (0..n_lon)
+            .map(|j| {
+                let th = TAU * j as f64 / n_lon as f64;
+                p3(rr * th.cos(), rr * th.sin(), z)
+            })
+            .collect()
+    };
+    let apex = p3(0.0, 0.0, radius);
+    let first = ring(1);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, first[j], first[(j + 1) % n_lon]));
+    }
+    for k in 1..n_lat {
+        let (ra, rb) = (ring(k), ring(k + 1));
+        for j in 0..n_lon {
+            let j2 = (j + 1) % n_lon;
+            facets.push(Triangle::new(ra[j], rb[j], rb[j2]));
+            facets.push(Triangle::new(ra[j], rb[j2], ra[j2]));
+        }
+    }
+    facets
+}
+
+/// One subdivided quad face of an axis-aligned grid, wound so its
+/// normal points at `want`. The pocket's faces read as grids, not as
+/// two huge triangles: a geodesic contour is only as honest as the
+/// edges it can cross.
+fn face_grid(
+    o: (f64, f64, f64),
+    e1: (f64, f64, f64),
+    e2: (f64, f64, f64),
+    want: (f64, f64, f64),
+    n1: usize,
+    n2: usize,
+) -> Vec<Triangle> {
+    let pt = |i: usize, j: usize| {
+        p3(
+            o.0 + e1.0 * i as f64 / n1 as f64 + e2.0 * j as f64 / n2 as f64,
+            o.1 + e1.1 * i as f64 / n1 as f64 + e2.1 * j as f64 / n2 as f64,
+            o.2 + e1.2 * i as f64 / n1 as f64 + e2.2 * j as f64 / n2 as f64,
+        )
+    };
+    let w = p3(want.0, want.1, want.2);
+    let mut f = Vec::new();
+    for i in 0..n1 {
+        for j in 0..n2 {
+            let (q0, q1, q2, q3) = (pt(i, j), pt(i + 1, j), pt(i + 1, j + 1), pt(i, j + 1));
+            if (q1 - q0).cross(q3 - q0).dot(w) >= 0.0 {
+                f.push(Triangle::new(q0, q1, q2));
+                f.push(Triangle::new(q0, q2, q3));
+            } else {
+                f.push(Triangle::new(q0, q2, q1));
+                f.push(Triangle::new(q0, q3, q2));
+            }
+        }
+    }
+    f
+}
+
+/// A 20 x 20 pocket, z 0..10, with the top left off: floor at z = 0,
+/// four walls, normals into the cavity. Every rim edge is open (the
+/// datum runs the whole way around); the wall/wall and wall/floor
+/// creases are the 90-degree corners the lifted tangent cannot carry
+/// a ball around - the geodesic's honest-opening fixture.
+fn pocket_open() -> Vec<Triangle> {
+    let mut facets = face_grid((-10.0, -10.0, 0.0), (20.0, 0.0, 0.0), (0.0, 20.0, 0.0), (0.0, 0.0, 1.0), 10, 10);
+    facets.extend(face_grid((10.0, -10.0, 0.0), (0.0, 20.0, 0.0), (0.0, 0.0, 10.0), (-1.0, 0.0, 0.0), 10, 4));
+    facets.extend(face_grid((-10.0, -10.0, 0.0), (0.0, 20.0, 0.0), (0.0, 0.0, 10.0), (1.0, 0.0, 0.0), 10, 4));
+    facets.extend(face_grid((-10.0, 10.0, 0.0), (20.0, 0.0, 0.0), (0.0, 0.0, 10.0), (0.0, -1.0, 0.0), 10, 4));
+    facets.extend(face_grid((-10.0, -10.0, 0.0), (20.0, 0.0, 0.0), (0.0, 0.0, 10.0), (0.0, 1.0, 0.0), 10, 4));
+    facets
+}
+
+/// A bottomless box, z 0..10, walls as grids (the plateau's coarse
+/// triangles answer every contour endpoint at a corner, where the
+/// bisector-lift bites - an honest refusal that loses the whole ring
+/// on that mesh). Grid walls give the rings somewhere to stand, and
+/// only the corner bands open.
+fn box_open() -> Vec<Triangle> {
+    let mut facets = face_grid((-10.0, -10.0, 10.0), (20.0, 0.0, 0.0), (0.0, 20.0, 0.0), (0.0, 0.0, 1.0), 8, 8);
+    facets.extend(face_grid((10.0, -10.0, 0.0), (0.0, 20.0, 0.0), (0.0, 0.0, 10.0), (1.0, 0.0, 0.0), 8, 4));
+    facets.extend(face_grid((-10.0, -10.0, 0.0), (0.0, 20.0, 0.0), (0.0, 0.0, 10.0), (-1.0, 0.0, 0.0), 8, 4));
+    facets.extend(face_grid((-10.0, 10.0, 0.0), (20.0, 0.0, 0.0), (0.0, 0.0, 10.0), (0.0, 1.0, 0.0), 8, 4));
+    facets.extend(face_grid((-10.0, -10.0, 0.0), (20.0, 0.0, 0.0), (0.0, 0.0, 10.0), (0.0, -1.0, 0.0), 8, 4));
+    facets
+}
+
+/// A flat square sheet hung from its rim corners by a spoke fan: four
+/// open rim edges, one interior vertex. With an unreachable closed
+/// island parked beside it, this is the stranded-vertices fixture.
+fn hung_sheet() -> Vec<Triangle> {
+    let c = p3(0.0, 0.0, 0.0);
+    let v = [p3(-6.0, -6.0, 0.0), p3(6.0, -6.0, 0.0), p3(6.0, 6.0, 0.0), p3(-6.0, 6.0, 0.0)];
+    let mut f = Vec::new();
+    for j in 0..4 {
+        f.push(Triangle::new(c, v[j], v[(j + 1) % 4]));
+    }
+    f
+}
+
+/// A closed tetrahedron, far from everything: the island the boundary
+/// cannot reach.
+fn island() -> Vec<Triangle> {
+    let (a, b, c, d) = (p3(90.0, 0.0, 0.0), p3(91.0, 0.0, 0.0), p3(90.5, 1.0, 0.0), p3(90.5, 0.5, 2.0));
+    vec![
+        Triangle::new(a, b, c),
+        Triangle::new(a, b, d),
+        Triangle::new(b, c, d),
+        Triangle::new(c, a, d),
+    ]
+}
+
+/// The path's runs as the machine sees them: a Plunge opens a run,
+/// following Feeds extend it, anything else closes it.
+fn runs_of(t: &Toolpath) -> Vec<Vec<Point3>> {
+    let mut out = Vec::new();
+    let mut cur: Vec<Point3> = Vec::new();
+    for m in &t.moves {
+        match m.kind {
+            MoveKind::Plunge => {
+                if cur.len() > 1 {
+                    out.push(std::mem::take(&mut cur));
+                }
+                cur = vec![m.to];
+            }
+            MoveKind::Feed => cur.push(m.to),
+            MoveKind::Rapid => {
+                if cur.len() > 1 {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+        }
+    }
+    if cur.len() > 1 {
+        out.push(cur);
+    }
+    out
+}
+
+/// The march, whole: the curve's own pieces, in travel order. The
+/// radial advance per full turn is read off this stitch: unwrap
+/// theta along the march (dense thousands of chord-budgeted
+/// samples), then take r(t_k) - r(t_{k+1}) between turn boundaries
+/// PHASED to the ray that matters - on ground with a fall direction,
+/// the steepest ray is where the cusp law binds. This is the morphed
+/// spiral's whole promise, measured where the curve says it. A
+/// fragment of the spiral is a run whose radius ADVANCES with its
+/// angle - the curve law itself, read backwards as an admission
+/// test; a level ring (circle, arc, or corner-split piece) keeps
+/// its radius while it winds and is refused. Tessellated domes and
+/// wall-pierced sheets cut the march into pieces at every ring
+/// crossing and shelf edge - the discontinuity law doing its job -
+/// so per-turn laws are measured on the stitch, not on one piece.
+fn march_stitched(t: &Toolpath, step: f64) -> Vec<Point3> {
+    let (lo, hi) = (0.3 * step / TAU, 1.8 * step / TAU);
+    let mut out = Vec::new();
+    for run in runs_of(t) {
+        let mut acc = 0.0f64;
+        let mut prev: Option<f64> = None;
+        for q in &run {
+            let th = q.y.atan2(q.x);
+            if let Some(pv) = prev {
+                let mut d = th - pv;
+                while d <= -PI {
+                    d += TAU;
+                }
+                while d > PI {
+                    d -= TAU;
+                }
+                acc += d;
+            }
+            prev = Some(th);
+        }
+        if acc.abs() < 0.08 {
+            continue; // no opinion from a stub
+        }
+        let (r0, r1) = (
+            run[0].x.hypot(run[0].y),
+            run[run.len() - 1].x.hypot(run[run.len() - 1].y),
+        );
+        let rate = (r0 - r1).abs() / acc.abs();
+        if rate > lo && rate < hi {
+            out.extend(run);
+        }
+    }
+    out
+}
+
+/// The pitch read PER FRAGMENT, for skins the march breaks at every
+/// fold (the strict ground's own law - the dome test below is its
+/// statement). A stitched full turn never exists there; the fragments
+/// do, and they sit ON the curve: their XY positions are the spiral's
+/// own `r(theta)` sampled, so a fragment's radius advance over its
+/// angle advance is the spacing law that built it, read wherever it
+/// still speaks. The same admission law as `march_stitched` (a rate
+/// inside 0.3..1.8 of the spiral's, and enough angle to have an
+/// opinion) filters rings and stubs; results keep travel order, each
+/// paired with its own mid-radius (bands group by it; the morph's
+/// within-band azimuthal wobble averages out across them).
+fn fragment_pitch(t: &Toolpath, step: f64) -> Vec<(f64, f64)> {
+    let (lo, hi) = (0.3 * step / TAU, 1.8 * step / TAU);
+    let mut out = Vec::new();
+    for run in runs_of(t) {
+        let mut acc = 0.0f64;
+        let mut prev: Option<f64> = None;
+        for q in &run {
+            let th = q.y.atan2(q.x);
+            if let Some(pv) = prev {
+                let mut d = th - pv;
+                while d <= -PI {
+                    d += TAU;
+                }
+                while d > PI {
+                    d -= TAU;
+                }
+                acc += d;
+            }
+            prev = Some(th);
+        }
+        if acc.abs() < 0.08 {
+            continue; // no opinion from a stub
+        }
+        let (r0, r1) = (
+            run[0].x.hypot(run[0].y),
+            run[run.len() - 1].x.hypot(run[run.len() - 1].y),
+        );
+        let rate = (r0 - r1).abs() / acc.abs();
+        if rate > lo && rate < hi {
+            out.push(((r0 + r1) * 0.5, rate * TAU));
+        }
+    }
+    out
+}
+
+fn turn_pitch(piece: &[Point3], phase: f64) -> Vec<f64> {
+    // Unwrap the turn angle along the march; a stitch interval
+    // whose XY chord is a skip-phase air stretch (more than 2.5
+    // samples' worth) carries no curve law, so a turn boundary
+    // falling inside it reads nothing - the pitch there is dropped,
+    // not interpolated.
+    let mut pts: Vec<(f64, f64, bool)> = Vec::new();
+    let mut prev: Option<Point3> = None;
+    let mut acc = 0.0f64;
+    for q in piece {
+        let th0 = q.y.atan2(q.x);
+        if let Some(pv) = prev {
+            let mut dth = th0 - pv.y.atan2(pv.x);
+            while dth <= -PI {
+                dth += TAU;
+            }
+            while dth > PI {
+                dth -= TAU;
+            }
+            acc += dth;
+        }
+        let gap = prev.is_some_and(|pv| {
+            (q.x - pv.x).hypot(q.y - pv.y) > 2.5 * scallop_stepdown(R, TOL)
+        });
+        pts.push((acc, q.x.hypot(q.y), gap));
+        prev = Some(*q);
+    }
+    // The curve winds whichever way its parameterization says (the
+    // polar family's sin_cos swap makes it clockwise); the turn
+    // boundaries must ascend in the unwrapped angle either way.
+    if pts.len() >= 2 && pts[pts.len() - 1].0 < pts[0].0 {
+        for q in pts.iter_mut() {
+            q.0 = -q.0;
+        }
+    }
+    let r_at = |t: f64| -> Option<f64> {
+        if pts.is_empty() || t < pts[0].0 || t > pts[pts.len() - 1].0 {
+            return None;
+        }
+        pts.windows(2).find_map(|w| {
+            if w[0].0 <= t && t <= w[1].0 && w[1].0 > w[0].0 {
+                if t > w[0].0 && w[1].2 {
+                    return None; // strictly inside an air stretch
+                }
+                let f = (t - w[0].0) / (w[1].0 - w[0].0);
+                Some(w[0].1 + (w[1].1 - w[0].1) * f)
+            } else {
+                None
+            }
+        })
+    };
+    // A turn boundary whose interval contains an inter-run jump
+    // chord (a hole the march refused: ground that answered nothing
+    // anywhere on it) straddles territory the path never cut - its
+    // radius delta belongs to the skipped annulus, not to the
+    // spacing law. The reading is dropped, not interpolated.
+    let hole = |ta: f64, tb: f64| {
+        pts.windows(2).any(|w| {
+            w[1].2 && w[0].0 < tb && w[1].0 > ta && w[0].0 < w[1].0
+        })
+    };
+    let mut out = Vec::new();
+    if pts.is_empty() {
+        return out;
+    }
+    let start = pts[0].0 + (phase - pts[0].0).rem_euclid(TAU);
+    let mut k = 0.0f64;
+    while start + (k + 1.0) * TAU <= pts[pts.len() - 1].0 {
+        if let (Some(a), Some(b)) = (r_at(start + k * TAU), r_at(start + (k + 1.0) * TAU))
+            && !hole(start + k * TAU, start + (k + 1.0) * TAU)
+        {
+            out.push(a - b);
+        }
+        k += 1.0;
+    }
+    out
+}
+
+/// A lone vertical wall: no facet anywhere under it rests shallower
+/// than 45 degrees, so the polar family has no footprint to spiral -
+/// the all-steep fall-through's home fixture.
+fn steep_wall() -> Vec<Triangle> {
+    face_grid((5.0, -10.0, -6.0), (0.0, 20.0, 0.0), (0.0, 0.0, 12.0), (-1.0, 0.0, 0.0), 8, 8)
+}
+
+#[test]
+fn the_geodesic_datum_is_a_real_boundary() {
+    // A CLOSED shell has nowhere for the rings to start, and the
+    // refusal says so by name. A bottomless box is the same law read
+    // the other way: its open rims ARE a boundary, so its walls
+    // march, and the corner meridian that bites says so by note.
+    {
+        let f = cone(32);
+        let e = geodesic(&f, &ppattern(18.0, 0.0, FinishPattern::Geodesic));
+        assert!(
+            matches!(&e, Err(GenError::Invalid(m)) if m.contains("closed shell")),
+            "a closed shell slipped through: {e:?}"
+        );
+    }
+    let t = geodesic(&box_open(), &ppattern(18.0, -1.0, FinishPattern::Geodesic))
+        .expect("a bottomless box has a real rim");
+    assert!(n_kind(&t, MoveKind::Feed) > 0, "the rims seeded nothing");
+    assert!(
+        t.notes.iter().any(|n| n.contains("refused")),
+        "the wall-corner meridian went unannounced: {:?}",
+        t.notes
+    );
+}
+
+#[test]
+fn geodesic_ring_rides_the_open_dome_rim_to_crown() {
+    // The continuity law on a dome: every level of the boundary field
+    // closes into ONE loop, the loops climb to the crown (a waterline
+    // ladder would stop at its own Z levels), and no feed breaks Z
+    // along a run.
+    let f = open_dome();
+    let t = geodesic(&f, &ppattern(24.0, -5.0, FinishPattern::Geodesic)).expect("open dome marches");
+    let runs = runs_of(&t);
+    assert!(runs.len() >= 15, "the field marched {} rings", runs.len());
+    // A level of the dome's field is a latitude loop: the chain
+    // welds it closed by running the whole azimuth around. That is
+    // the honest closure test - the chain stops AT the start weld,
+    // it does not repeat the point.
+    let around = runs
+        .iter()
+        .filter(|r| {
+            let mut prev: Option<f64> = None;
+            let mut acc = 0.0f64;
+            for q in r.iter() {
+                let th0 = q.y.atan2(q.x);
+                if let Some(pv) = prev {
+                    let mut d = th0 - pv;
+                    while d <= -PI {
+                        d += TAU;
+                    }
+                    while d > PI {
+                        d -= TAU;
+                    }
+                    acc += d;
+                }
+                prev = Some(th0);
+            }
+            acc.abs() >= TAU * 0.9
+        })
+        .count();
+    assert!(
+        around >= 15,
+        "{around} of {} runs made it round the dome - the crease chain dropped seams",
+        runs.len()
+    );
+    assert!(
+        t.moves.iter().filter(|m| m.kind == MoveKind::Feed).all(|m| (m.to.z - m.from.z).abs() <= 0.05),
+        "a geodesic ring broke Z - the loop opened without saying so"
+    );
+    assert!(
+        t.moves.iter().any(|m| m.kind == MoveKind::Feed && m.to.z > 19.5),
+        "the field never climbed the crown"
+    );
+    assert!(n_kind(&t, MoveKind::Plunge) == runs.len(), "a run entered without its own certified plunge");
+}
+
+#[test]
+fn geodesic_opens_its_loops_at_the_pocket_corner_and_reports() {
+    // The pocket: wall levels that a ball can hold stand as four runs
+    // each (the vertical corner opens every loop - the lifted tangent
+    // bites the bisector there), floor levels far enough out close
+    // again, and the corner band is REFUSED POINTS counted in a note,
+    // not a smooth-looking lie.
+    let f = pocket_open();
+    let t = geodesic(&f, &ppattern(10.5, -1.0, FinishPattern::Geodesic)).expect("open pocket marches");
+    let runs = runs_of(&t);
+    assert!(runs.len() >= 16, "the pocket ran only {} pieces", runs.len());
+    let wall = t.moves.iter().filter(|m| {
+        m.kind == MoveKind::Feed && (m.to.x.abs() - 7.0).abs() < 0.11 && m.to.z > 0.5 && m.to.z < 7.0
+    }).count();
+    assert!(wall > 20, "the walls drew no runs: {wall}");
+    let floor = t.moves.iter().filter(|m| {
+        m.kind == MoveKind::Feed && m.to.z.abs() <= 3.0 * TOL && m.to.x.abs() < 7.0 && m.to.y.abs() < 7.0
+    }).count();
+    assert!(floor > 40, "the floor never got its rings: {floor}");
+    assert!(
+        t.notes.iter().any(|n| n.contains("refused")),
+        "the corner band went unannounced: {:?}",
+        t.notes
+    );
+}
+
+#[test]
+fn geodesic_counts_the_island_it_cannot_reach() {
+    // A closed component riding along with the open mesh is refused
+    // its contours and REPORTED - never invented a seam for.
+    let mut f = hung_sheet();
+    f.extend(island());
+    let t = geodesic(&f, &ppattern(1.0, -2.0, FinishPattern::Geodesic)).expect("the sheet still marches");
+    assert!(n_kind(&t, MoveKind::Feed) > 0, "the reachable rings vanished");
+    assert!(
+        t.notes.iter().any(|n| n.contains("cannot reach")),
+        "the island rode uncounted: {:?}",
+        t.notes
+    );
+}
+
+#[test]
+fn geodesic_refuses_nonsense_and_degeneracy_without_losing_its_head() {
+    // No open edge, no window, no size: every answer is a named
+    // refusal, never a panic and never a silent nothing.
+    let sheet = vec![Triangle::new(p3(0.0, 0.0, 0.0), p3(5.0, 0.0, 0.0), p3(0.0, 5.0, 0.0))];
+    let e = geodesic(&sheet, &ppattern(1.0, -1.0, FinishPattern::Geodesic));
+    assert!(matches!(e, Err(GenError::Empty(_))), "a zero-extent field answered {e:?}");
+    let dust = vec![Triangle::new(p3(1.0, 1.0, 1.0), p3(1.0, 1.0, 1.0), p3(1.0, 1.0, 1.0))];
+    assert!(geodesic(&dust, &ppattern(1.0, -1.0, FinishPattern::Geodesic)).is_err(), "dust cut a path");
+    let nan = vec![Triangle::new(p3(f64::NAN, 0.0, 0.0), p3(1.0, 0.0, 0.0), p3(0.0, 1.0, 0.0))];
+    assert!(geodesic(&nan, &ppattern(1.0, -1.0, FinishPattern::Geodesic)).is_err(), "a NaN facet made geometry");
+    for s in [0.0, -2.0, f64::NAN, f64::INFINITY] {
+        let q = Finish3DParams {
+            stepover: Some(s),
+            ..ppattern(1.0, -1.0, FinishPattern::Geodesic)
+        };
+        assert!(
+            matches!(geodesic(&pocket_open(), &q), Err(GenError::Invalid(_))),
+            "a door took stepover {s}"
+        );
+    }
+}
+
+#[test]
+fn the_ramp_variant_rides_parallels_raster_and_the_flags_are_the_story() {
+    // At the kernel, Ramp is Parallel - the variant carries no new
+    // geometry. The pattern's whole story is the two sloped laws, and
+    // those are the twin the app FORCES (operations.rs pins that).
+    let f = plateau();
+    let plain = parallel(&f, &ppattern(10.0, 0.0, FinishPattern::Parallel)).expect("parallel");
+    let variant = parallel(&f, &ppattern(10.0, 0.0, FinishPattern::Ramp)).expect("ramp variant");
+    assert_eq!(variant.moves, plain.moves, "the Ramp variant invented geometry of its own");
+    let forced = parallel(
+        &f,
+        &Finish3DParams {
+            ramp: true,
+            entry_ramp: true,
+            ..ppattern(10.0, 0.0, FinishPattern::Parallel)
+        },
+    )
+    .expect("forced twin");
+    assert_ne!(forced.moves, plain.moves, "the sloped laws are inert - the twin says nothing");
+}
+
+#[test]
+fn the_morphed_spiral_is_the_spiral_over_flat_ground() {
+    // g = 0 everywhere: the local cos-law collapses to the authored
+    // number, and the morph spaces its turns exactly where the
+    // spiral does. Both march, both measure the scallop step.
+    let f = tilted(0.0, 8.0);
+    let step = scallop_stepover(R, TOL);
+    let m = morphed_spiral(&f, &ppattern(10.0, 4.0, FinishPattern::MorphSpiral)).expect("flat morph");
+    let s = spiral(&f, &ppattern(10.0, 4.0, FinishPattern::Spiral)).expect("flat spiral");
+    for (t, who) in [(&m, "morph"), (&s, "spiral")] {
+        let pitch = turn_pitch(&march_stitched(t, step), 0.0);
+        assert!(pitch.len() >= 3, "{who} turned too few times to measure: {pitch:?}");
+        assert!(
+            pitch.iter().all(|d| (d - step).abs() <= 0.05),
+            "{who}'s flat-ground turn pitch left the scallop step: {pitch:?}"
+        );
+    }
+}
+
+#[test]
+fn the_morphed_spiral_spaces_turns_by_the_local_ground() {
+    // Two readings of one slope. The turn-to-turn gap of a spiral is
+    // CONSERVED across rays - it is the local law integrated around
+    // a turn - so on a uniform 30-degree sheet the morph advances by
+    // the MEAN of 1/cos over the turn, while the spiral takes the
+    // WORST-tilt discount once up front. Locality is gentler than
+    // the global law on the fall side and never tighter; both pay.
+    // Author a stepover and they split again: the spiral obeys the
+    // number verbatim, the morph still pays the slope.
+    let f = tilted(PI / 6.0, 8.0);
+    let step = scallop_stepover(R, TOL);
+    let t30 = (PI / 6.0).tan();
+    let mean_loc = (0..4096)
+        .map(|i| {
+            let th = TAU * i as f64 / 4096.0;
+            let g = t30 * th.sin();
+            1.0 / (1.0 + g * g).sqrt()
+        })
+        .sum::<f64>()
+        / 4096.0;
+    let m = morphed_spiral(&f, &ppattern(10.0, 4.0, FinishPattern::MorphSpiral)).expect("sheet morph");
+    let s = spiral(&f, &ppattern(10.0, 4.0, FinishPattern::Spiral)).expect("sheet spiral");
+    let (mp, sp) = (turn_pitch(&march_stitched(&m, step), 0.0), turn_pitch(&march_stitched(&s, step), 0.0));
+    assert!(mp.len() >= 2 && sp.len() >= 2, "the sheet turned too little to read: {mp:?} / {sp:?}");
+    // The morph's first turn crosses the sheet's rim (the march pays
+    // nothing for air - the trim law, not the spacing law), so its
+    // pitch is read from the second boundary in. The spiral starts
+    // INSIDE the rim and needs no such trimming.
+    let mp: Vec<f64> = mp.into_iter().skip(1).collect();
+    let want_m = step * mean_loc;
+    let want_s = step * (PI / 6.0).cos();
+    assert!(
+        mp.iter().all(|d| (d - want_m).abs() <= 0.06),
+        "morph turn advance left the mean of its local law: {mp:?} (want {want_m:.4})"
+    );
+    assert!(
+        sp.iter().all(|d| (d - want_s).abs() <= 0.06),
+        "spiral turn advance left the worst-tilt law: {sp:?} (want {want_s:.4})"
+    );
+    assert!(want_m > want_s + 0.02, "law setup lost: mean {want_m} vs worst {want_s}");
+    let mut qm = ppattern(10.0, 4.0, FinishPattern::MorphSpiral);
+    qm.stepover = Some(2.4);
+    let mut qs = qm;
+    qs.pattern = FinishPattern::Spiral;
+    let m2 = morphed_spiral(&f, &qm).expect("authored morph");
+    let s2 = spiral(&f, &qs).expect("authored spiral");
+    let mp2: Vec<f64> = turn_pitch(&march_stitched(&m2, 2.4), 0.0).into_iter().skip(1).collect();
+    let sp2 = turn_pitch(&march_stitched(&s2, 2.4), 0.0);
+    assert!(
+        mp2.iter().all(|d| (d - 2.4 * mean_loc).abs() <= 0.07),
+        "an authored stepover stopped paying the slope locally: {mp2:?}"
+    );
+    assert!(
+        sp2.iter().all(|d| (d - 2.4).abs() <= 0.07),
+        "the authored number stopped being the authored number: {sp2:?}"
+    );
+}
+
+
+#[test]
+fn the_morphed_spiral_widens_turns_where_the_cap_relaxes() {
+    // The local law measured on a gentle cap: tilt runs 0 at the
+    // apex to 30 degrees at the rim, and every facet stays inside
+    // the raster's jurisdiction. The march breaks at the tessellation's
+    // crests like anywhere else a plane law meets a fold (the dome
+    // test states that law; chord sag here is ~0.02, a fifth of the
+    // pattern's tol) - what survives between the breaks is the curve,
+    // and the curve carries the spacing law verbatim.
+    // The spiral pays the footprint's WORST tilt once (constant
+    // step*cos(30)); the morph pays it WHERE IT STANDS - so its
+    // turns run at the spiral's number at the rim, widen turn by
+    // turn as the cap relaxes, and reach the flat-ground step by
+    // the apex. And no turn ever narrows past the 45-degree line's
+    // spacing - the clamp's floor, which the plane-tangent law
+    // honors by construction (g <= 1 wherever it answers).
+    let f = sphere_cap(20.0, PI / 6.0, 12, 96);
+    let step = scallop_stepover(R, TOL);
+    let m = morphed_spiral(&f, &ppattern(24.0, -5.0, FinishPattern::MorphSpiral)).expect("cap morph");
+    let s = spiral(&f, &ppattern(24.0, -5.0, FinishPattern::Spiral)).expect("cap spiral");
+    // Read PER FRAGMENT, not per stitched turn: the cap's ring crests
+    // break the march at every fold (the strict ground's own law - the
+    // dome test below is its statement), so no single piece winds a
+    // whole turn. The fragments sit ON the curve, and that is exactly
+    // where the spacing law lives: each piece's radius advance over
+    // its angle advance IS the `r(theta)` that built it.
+    let mut mf: Vec<(f64, f64)> = fragment_pitch(&m, step).into_iter().skip(1).collect();
+    let sp: Vec<f64> = fragment_pitch(&s, step).into_iter().map(|(_, d)| d).collect();
+    assert!(mf.len() >= 24 && sp.len() >= 24, "too few fragments read: {} / {}", mf.len(), sp.len());
+    let want_s = step * (PI / 6.0).cos();
+    assert!(
+        sp.windows(2).all(|w| (w[1] - w[0]).abs() <= 0.05),
+        "the spiral's global worst-tilt step drifted turn to turn: {sp:?}"
+    );
+    // The morph pays the tilt WHERE IT STANDS - and where it stands
+    // is read from the radius a piece was cut at, not its place in the
+    // file: the table's sixteen nodes per turn quantize the skin at
+    // the band lines, and a piece straddling one carries whichever
+    // facet owns its ground. The promise is per band: the mean of a
+    // band's pitches is the flat step narrowed by that band's own
+    // tilt, and no band's mean sits under the band outside it.
+    mf.sort_by(|a, b| b.0.total_cmp(&a.0)); // rim first
+    let mut means: Vec<f64> = Vec::new();
+    let (mut band, mut sum, mut n) = (-1i64, 0.0f64, 0usize);
+    for (r, d) in &mf {
+        let b = (r / 20.0).min(1.0).asin() * (72.0 / PI);
+        let b = b.floor().clamp(0.0, 11.0) as i64;
+        if b != band {
+            if n > 0 {
+                means.push(sum / n as f64);
+            }
+            band = b;
+            sum = 0.0;
+            n = 0;
+        }
+        sum += d;
+        n += 1;
+    }
+    if n > 0 {
+        means.push(sum / n as f64);
+    }
+    assert!(means.len() >= 8, "the cap's bands barely spoke: {mf:?}");
+    assert!(
+        means.windows(2).all(|w| w[1] >= w[0] - 0.01),
+        "the morph tightened where the cap relaxes: {means:?}"
+    );
+    assert!(
+        (means[0] - want_s).abs() <= 0.05,
+        "at the shared 30-degree rim the local law left the global one: morph {means:?} spiral {want_s:.4}"
+    );
+    assert!(
+        (*means.last().unwrap() - step).abs() <= 0.06 * step,
+        "near the apex the morph still paid a slope it outgrew: {means:?} (flat {step:.4})"
+    );
+    assert!(
+        mf.iter().all(|(_, d)| *d >= step / std::f64::consts::SQRT_2 - 0.03),
+        "a fragment narrowed past the 45-degree jurisdiction floor: {mf:?}"
+    );
+}
+
+#[test]
+fn the_morphed_spiral_marches_a_dome_and_reports_where_it_cannot_rest() {
+    // A tessellated dome's ring crests straddle the tangent law:
+    // where the contact circle crosses a fold, no facet plane
+    // owns a rest and the march breaks. The path that stands is
+    // honest (every leg certified) and the uncut bands are
+    // REPORTED - a note counts them, never silence. (The spacing
+    // law itself speaks on contiguous ground; the cone test above
+    // is its jurisdiction proof. Full offset-surface support - a
+    // rest on the fold itself - is M7.1's brick-SDF territory.)
+    let f = dome();
+    let step = scallop_stepover(R, TOL);
+    let m = morphed_spiral(&f, &ppattern(24.0, -5.0, FinishPattern::MorphSpiral)).expect("dome morph");
+    assert!(m.all_finite(), "the dome morph left the finite horizon");
+    let feed = m.moves.iter().filter(|mv| matches!(mv.kind, MoveKind::Feed)).count();
+    assert!(feed > 500, "the dome morph barely marched: {feed} feed moves");
+    let hole = m.notes.iter().any(|n| n.contains("no facet plane rests a ball"));
+    assert!(hole, "a dome march with holes went unreported: {:?}", m.notes);
+    // What the march DID read still narrows: turn pitches inside
+    // the contiguous arcs sit between the clamp and the flat law.
+    let mp = turn_pitch(&march_stitched(&m, step), 0.0);
+    assert!(
+        mp.iter().all(|d| (step / std::f64::consts::SQRT_2 - 0.05..=step + 0.05).contains(d)),
+        "a readable dome turn left the band the clamp and flat ground allow: {mp:?}"
+    );
+}
+
+#[test]
+fn the_morphed_spiral_falls_through_to_the_rings_on_all_steep_ground() {
+    // No facet shallower than the 45-degree line, no footprint, no
+    // spiral: the morph's answer is the rings' answer, byte for byte
+    // - the same fall-through the spiral already made, shared
+    // through rings_and_tail. (A 60-degree cone wall does NOT
+    // qualify - its normal stands only 30 from vertical, inside the
+    // equality line. Only a true wall has no footprint at all.)
+    let f = steep_wall();
+    let m = morphed_spiral(&f, &ppattern(30.0, 0.0, FinishPattern::MorphSpiral)).expect("cone morph");
+    let s = spiral(&f, &ppattern(30.0, 0.0, FinishPattern::Spiral)).expect("cone spiral");
+    assert_eq!(m.moves, s.moves, "the fall-through grew a geometry of its own");
+    assert!(n_kind(&m, MoveKind::Feed) > 0, "and the rings went silent");
+}
+
+#[test]
+fn the_stage_c_trio_is_deterministic() {
+    // The heap, the buckets and the welded chain all fix their order
+    // by keys, not by HashMap iteration: the same facets twice write
+    // the same path twice.
+    let dome = open_dome();
+    let pocket = pocket_open();
+    let sheet = tilted(PI / 6.0, 8.0);
+    assert_eq!(
+        geodesic(&dome, &ppattern(24.0, -5.0, FinishPattern::Geodesic)).expect("a").moves,
+        geodesic(&dome, &ppattern(24.0, -5.0, FinishPattern::Geodesic)).expect("b").moves,
+        "the dome field churned"
+    );
+    assert_eq!(
+        geodesic(&pocket, &ppattern(10.5, -1.0, FinishPattern::Geodesic)).expect("a").moves,
+        geodesic(&pocket, &ppattern(10.5, -1.0, FinishPattern::Geodesic)).expect("b").moves,
+        "the pocket field churned"
+    );
+    assert_eq!(
+        morphed_spiral(&sheet, &ppattern(10.0, 4.0, FinishPattern::MorphSpiral)).expect("a").moves,
+        morphed_spiral(&sheet, &ppattern(10.0, 4.0, FinishPattern::MorphSpiral)).expect("b").moves,
+        "the morph table re-rolled"
+    );
+}
+
+#[test]
+#[ignore = "verdict lane: envelope scans over the M2.5 C fixtures - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
+fn geodesic_dome_is_envelope_clean() {
+    // The continuity story's price tag: a field-marched ring set keeps
+    // BOTH promises over the whole skin - nothing bitten, nothing
+    // left standing beyond the cusp budget.
+    let f = open_dome();
+    let t = geodesic(&f, &ppattern(24.0, -5.0, FinishPattern::Geodesic)).expect("dome rings");
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+}
+
+#[test]
+#[ignore = "verdict lane: envelope scan over the open pocket - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
+fn geodesic_pocket_bites_nothing_and_owns_the_corner() {
+    // The corner band is the crease pair's jurisdiction: the geodesic
+    // may leave it standing (rest is REPORTED, the note counts it) -
+    // what it may never do is bite the corner from the inside.
+    let f = pocket_open();
+    let t = geodesic(&f, &ppattern(10.5, -1.0, FinishPattern::Geodesic)).expect("pocket rings");
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "bit the corner: {} mm at {:?}", rep.gouge_mm, rep.at);
+    assert!(rep.rest_mm > 0.0, "and the note lied - there was nothing to report");
+}
+
+#[test]
+#[ignore = "verdict lane: envelope scan over the dome morph - minutes in debug, seconds in release; run at milestone close with -- --ignored"]
+fn morphed_spiral_dome_bites_nothing() {
+    let f = open_dome();
+    let t = morphed_spiral(&f, &ppattern(24.0, -5.0, FinishPattern::MorphSpiral)).expect("dome morph");
+    let rep = envelope(&f, &t);
+    assert!(rep.gouge_mm <= gate(rep.cell), "the widened turns bit: {} mm at {:?}", rep.gouge_mm, rep.at);
 }

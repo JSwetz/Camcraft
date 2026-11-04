@@ -4189,6 +4189,177 @@ fn the_split_and_the_floors_generate_through_the_operation_layer() {
 }
 
 #[test]
+fn the_stage_c_patterns_generate_through_the_operation_layer() {
+    // M2.5 C doors. At the kernel Ramp IS Parallel and the twin FORCES
+    // the two sloped words (generate.rs), so an operation asked as Ramp
+    // and one asked as Parallel-with-the-words set cut byte-identical
+    // metal - and on the box's vertical walls both differ from a plain
+    // Parallel, where the same flags stand false (the kernel twin in
+    // finish3d.rs pins WHY the sloped laws speak there). MorphSpiral
+    // rides the march over tilted terrain and the envelope verdict
+    // comes back clean; Geodesic must first name a closed shell
+    // refused, before any field is walked.
+    use camcraft_app::finishing3d::FinishPattern;
+    use camcraft_app::geometry::Triangle;
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
+    add_tool(&world, &mut history, "BN-0600");
+    let quad = |p: [Point3; 4]| {
+        vec![
+            Triangle::new(p[0], p[1], p[2]),
+            Triangle::new(p[0], p[2], p[3]),
+        ]
+    };
+    let (a, b, c, d) = (
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(10.0, 0.0, 0.0),
+        Point3::new(10.0, 10.0, 0.0),
+        Point3::new(0.0, 10.0, 0.0),
+    );
+    let (e, f, g, h) = (
+        Point3::new(0.0, 0.0, 5.0),
+        Point3::new(10.0, 0.0, 5.0),
+        Point3::new(10.0, 10.0, 5.0),
+        Point3::new(0.0, 10.0, 5.0),
+    );
+    let walls = vec![
+        quad([a, b, f, e]),
+        quad([b, c, g, f]),
+        quad([c, d, h, g]),
+        quad([d, a, e, h]),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let mut plateau_facets = walls;
+    plateau_facets.extend(quad([e, f, g, h])); // top
+    plateau_facets.extend(quad([a, d, c, b])); // base - a CLOSED box
+    // (the doors test's plateau rides an open-bottom box; this one is
+    // the geodesic refusal's witness, and a refusal needs a shell
+    // with every rim edge paired. The base hides under the floor
+    // plane's own law - no tangent there can rest clear of the top
+    // - so the twin rows' metal does not move.)
+    history.execute(
+        &world,
+        ImportModel::from_mesh("plateau", Mesh::from_facets(plateau_facets)),
+    );
+    // The wedge: a square top tilted 30 degrees over a flat base at
+    // z 4 - the morph's local cos-law home witness, the same numbers
+    // the kernel twin turns on.
+    let t30 = 30f64.to_radians().tan();
+    let surf = |y: f64| 10.0 - y * t30;
+    let wedge = {
+        let mut facets = Vec::new();
+        facets.extend(quad([
+            Point3::new(-8.0, -8.0, surf(-8.0)),
+            Point3::new(8.0, -8.0, surf(-8.0)),
+            Point3::new(8.0, 8.0, surf(8.0)),
+            Point3::new(-8.0, 8.0, surf(8.0)),
+        ])); // tilted top
+        facets.extend(quad([
+            Point3::new(-8.0, -8.0, 4.0),
+            Point3::new(8.0, -8.0, 4.0),
+            Point3::new(8.0, -8.0, surf(-8.0)),
+            Point3::new(-8.0, -8.0, surf(-8.0)),
+        ])); // walls
+        facets.extend(quad([
+            Point3::new(-8.0, 8.0, 4.0),
+            Point3::new(8.0, 8.0, 4.0),
+            Point3::new(8.0, 8.0, surf(8.0)),
+            Point3::new(-8.0, 8.0, surf(8.0)),
+        ]));
+        facets.extend(quad([
+            Point3::new(-8.0, -8.0, 4.0),
+            Point3::new(-8.0, 8.0, 4.0),
+            Point3::new(-8.0, 8.0, surf(8.0)),
+            Point3::new(-8.0, -8.0, surf(-8.0)),
+        ]));
+        facets.extend(quad([
+            Point3::new(8.0, -8.0, 4.0),
+            Point3::new(8.0, 8.0, 4.0),
+            Point3::new(8.0, 8.0, surf(8.0)),
+            Point3::new(8.0, -8.0, surf(-8.0)),
+        ]));
+        facets.extend(quad([
+            Point3::new(-8.0, -8.0, 4.0),
+            Point3::new(8.0, -8.0, 4.0),
+            Point3::new(8.0, 8.0, 4.0),
+            Point3::new(-8.0, 8.0, 4.0),
+        ])); // base
+        Mesh::from_facets(facets)
+    };
+    history.execute(&world, ImportModel::from_mesh("wedge", wedge));
+    let ask = |q: FinishPattern, rp: bool, er: bool, top: f64, bottom: f64| {
+        let mut a = finish_params(top, bottom, 0.1);
+        let OpParams::Finish3D {
+            pattern,
+            ramp,
+            entry_ramp,
+            ..
+        } = &mut a
+        else {
+            panic!("finish3d params expected");
+        };
+        *pattern = q;
+        *ramp = rp;
+        *entry_ramp = er;
+        a
+    };
+    let mut op = |name: &str, src: &str, a: OpParams| {
+        history.execute(
+            &world,
+            CreateOperation::new(&world, name, "BN-0600", SrcRef::Entity(src.into()), a)
+                .expect("create"),
+        );
+        history.execute(&world, GenerateOperation::new(&world, name).expect("generate"));
+        assert_eq!(status(&world, name), OpStatus::Ok, "{name} must seat and cut");
+    };
+    op("FR", "plateau", ask(FinishPattern::Ramp, false, false, 5.0, 0.0));
+    op("FQ", "plateau", ask(FinishPattern::Parallel, true, true, 5.0, 0.0));
+    op("FP", "plateau", ask(FinishPattern::Parallel, false, false, 5.0, 0.0));
+    op(
+        "FM",
+        "wedge",
+        ask(FinishPattern::MorphSpiral, false, false, 10.0, 4.0),
+    );
+    let moves = |n: &str| cache(&world, n).expect("cached").path.moves;
+    assert_eq!(
+        moves("FQ"),
+        moves("FR"),
+        "the twin's forcing is the same metal, not a new one"
+    );
+    assert_ne!(
+        moves("FP"),
+        moves("FR"),
+        "the sloped laws are inert through the app's doors"
+    );
+    assert!(!moves("FM").is_empty(), "the morph went silent on the wedge");
+    // A closed box has no open edge to march rings inward from: the
+    // refusal must reach the user named, and the op must sit where
+    // nothing wrong can post.
+    history.execute(
+        &world,
+        CreateOperation::new(
+            &world,
+            "FG",
+            "BN-0600",
+            SrcRef::Entity("plateau".into()),
+            ask(FinishPattern::Geodesic, false, false, 5.0, 0.0),
+        )
+        .expect("create"),
+    );
+    let CommandError::Machining(msg) = GenerateOperation::new(&world, "FG")
+        .err()
+        .expect("a closed shell must refuse the geodesic")
+    else {
+        panic!("expected a machining refusal");
+    };
+    assert!(msg.contains("closed shell"), "{msg}");
+    assert_eq!(status(&world, "FG"), OpStatus::Never, "a refusal cuts nothing");
+}
+
+#[test]
 fn finish3d_refuses_a_flat_bottomed_tool() {
     // The forbidden-center scan is ball geometry; an end mill here must
     // refuse by name, never generate a ball path dressed as an end mill.
