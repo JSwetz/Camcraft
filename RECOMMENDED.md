@@ -7746,3 +7746,51 @@ test counts; "0 passed; N filtered out" under a name filter is RED by
 definition. Both this stage's binaries and the close-out ladder now
 state expected counts, and a zero-test run is a failure to report, not
 a pass.
+
+## M2.5 D1 - Blend: where the border moves, and what it costs (2026-11-04)
+
+**Chosen: the band line at 30°, ride BOTH families there.** The
+transition between the floor's law (raster) and the wall's law (the
+ring ladder) had one border at 45°, and the border's staircase was the
+price of the clean split. Blend moves the RINGS' claim down to any
+loop whose tangency reaches past 30° - `BLEND_MZ = cos 30°` on the
+sky-pointed normal, the same reading the SteepShallow split already
+uses - and leaves the raster exactly where Parallel puts it. The
+transition band is then cut twice, from both directions. Considered
+and dropped: a dedicated band kernel (a third placement for a spacing
+question two placements already answer - the seam would itself need a
+border); moving the border instead of doubling it (that is
+SteepShallow, already shipped, and its verdict is the staircase).
+
+**The cost, computed before it was paid.** A ring cusp on a tilt α is
+`Δz²/(8r·cos²α)`: at 30° that is 4/3 of the ladder's promise, at 45°
+2x. So the band's second cut is a SHAVE of metal the raster already
+nearly reached, never a re-cut at full scallop - double-cutting the
+band spends time, not surface. This is why 30 and not 20 (where the
+ring's cos² inflation starts eating its own promise) and not 40
+(where the band shrinks back toward the staircase).
+
+**Two law-tests carry the design.** On a 38° sheet Blend's feed count
+sits strictly between Waterline-and-SteepShallow (the band arrived)
+and Parallel (`band ⊆ steep`: the blend rides a superset of the
+partition's ring claims). And on ground with no transition the twin
+law: Blend == SteepShallow byte-for-byte on the box and == Parallel
+byte-for-byte on the all-steep cone - `ring_runs`' all-true fast path
+is what makes the identity exact, so the pattern cannot leak a
+different choreography onto terrain that has no band to ride.
+
+**Findings the tests told us.** The plunge-count assertion was wrong
+and is gone: the band's extra runs do not each buy their own Plunge -
+runs joining one ring's walk ride its existing entry. And the
+dust-mote mesh is Ok-or-Err, not Err, for the raster/ring families:
+the ball-radius tangent circle about a point is honest geometry; the
+`degenerate_meshes_never_panic` law demands an answer, and the Blend
+door test asserts it answers. The NaN facet still refuses by name
+(validate's finiteness door, the shared one).
+
+**UI fields: no gating change.** Blend shows stepover (its raster
+obys), min_step/ramp/entry_ramp (the rings honor them, as
+rings_and_tail's callers always have); steep_stepover stays
+SteepShallow-only because Blend's ring spacing is the ladder's own
+scallop law, not a stated flank number - the pane says what the
+kernel spends.
