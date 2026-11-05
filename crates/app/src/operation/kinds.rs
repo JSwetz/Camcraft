@@ -20,8 +20,10 @@ use crate::finishing3d::FinishPattern;
 use crate::geo2d::Point2;
 use crate::machining2d::{Lead, PocketStrategy, Side};
 use crate::machining3d::Entry3D;
+use crate::tools::ToolKind;
 use crate::verify::Mode;
 
+use super::tool_law as tk;
 use super::types::{Height, HeightReference, OpParams, OpType, Tilt};
 
 /// The numbers that ride a retype: every kind stores them under the same
@@ -1469,6 +1471,10 @@ pub struct KindInfo {
     /// it, so no second taxonomy can drift from the first.
     pub section: Section,
     pub seed: fn(&Carried) -> OpParams,
+    /// The tool kinds that can machine this kind (M10.1 A) - one of the
+    /// named sets in [`super::tool_law`]; never empty, and every
+    /// `ToolKind` is claimed by some row (the law tests hold both).
+    pub tool_kinds: &'static [ToolKind],
 }
 
 /// The catalog's taxonomy, as registry data (M6.2): the five sections
@@ -1587,6 +1593,7 @@ impl KindInfo {
             mode: Mode::Boundary,
             section: Section::Mill2D,
             seed: seed_face,
+            tool_kinds: tk::FLAT_MILLS,
         },
         KindInfo {
             ty: OpType::Contour,
@@ -1596,6 +1603,7 @@ impl KindInfo {
             mode: Mode::Boundary,
             section: Section::Mill2D,
             seed: seed_contour,
+            tool_kinds: tk::FLAT_MILLS,
         },
         KindInfo {
             ty: OpType::Pocket,
@@ -1606,6 +1614,7 @@ impl KindInfo {
             mode: Mode::Area,
             section: Section::Mill2D,
             seed: seed_pocket,
+            tool_kinds: tk::FLAT_MILLS,
         },
         KindInfo {
             ty: OpType::Slot,
@@ -1615,6 +1624,7 @@ impl KindInfo {
             mode: Mode::Area,
             section: Section::Mill2D,
             seed: seed_slot,
+            tool_kinds: tk::FLAT_MILLS,
         },
         KindInfo {
             ty: OpType::Trace,
@@ -1625,6 +1635,7 @@ impl KindInfo {
             mode: Mode::Engrave,
             section: Section::Mill2D,
             seed: seed_trace,
+            tool_kinds: tk::CENTERLINE,
         },
         KindInfo {
             ty: OpType::Adaptive2D,
@@ -1637,6 +1648,7 @@ impl KindInfo {
             mode: Mode::Area,
             section: Section::Mill2D,
             seed: seed_adaptive2d,
+            tool_kinds: tk::FLAT_MILLS,
         },
         KindInfo {
             ty: OpType::Offset2D,
@@ -1649,6 +1661,7 @@ impl KindInfo {
             mode: Mode::Area,
             section: Section::Mill2D,
             seed: seed_offset2d,
+            tool_kinds: tk::FLAT_MILLS,
         },
         KindInfo {
             ty: OpType::Engrave,
@@ -1661,6 +1674,7 @@ impl KindInfo {
             mode: Mode::Engrave,
             section: Section::Mill2D,
             seed: seed_engrave,
+            tool_kinds: tk::CENTERLINE,
         },
         KindInfo {
             ty: OpType::Chamfer2D,
@@ -1677,6 +1691,7 @@ impl KindInfo {
             mode: Mode::Cone,
             section: Section::Mill2D,
             seed: seed_chamfer2d,
+            tool_kinds: tk::CONE,
         },
         KindInfo {
             ty: OpType::Circular,
@@ -1689,6 +1704,7 @@ impl KindInfo {
             mode: Mode::Area,
             section: Section::Mill2D,
             seed: seed_circular,
+            tool_kinds: tk::FLAT_MILLS,
         },
         KindInfo {
             ty: OpType::Thread,
@@ -1703,6 +1719,7 @@ impl KindInfo {
             mode: Mode::Boundary,
             section: Section::Mill2D,
             seed: seed_thread_mill,
+            tool_kinds: tk::THREAD_MILL,
         },
         KindInfo {
             ty: OpType::Drill,
@@ -1719,6 +1736,7 @@ impl KindInfo {
             mode: Mode::Boundary,
             section: Section::Drilling,
             seed: seed_drill,
+            tool_kinds: tk::HOLE_CYCLES,
         },
         KindInfo {
             ty: OpType::Bore,
@@ -1733,6 +1751,7 @@ impl KindInfo {
             mode: Mode::Boundary,
             section: Section::Drilling,
             seed: seed_standalone_bore,
+            tool_kinds: tk::FLAT_MILLS,
         },
         KindInfo {
             ty: OpType::Pocket3D,
@@ -1746,6 +1765,7 @@ impl KindInfo {
             mode: Mode::Area,
             section: Section::Mill3D,
             seed: seed_pocket3d,
+            tool_kinds: tk::ROUGH_MILLS,
         },
         KindInfo {
             ty: OpType::Finish3D,
@@ -1758,6 +1778,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::Mill3D,
             seed: seed_finish3d,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::Deburr,
@@ -1772,6 +1793,7 @@ impl KindInfo {
             mode: Mode::Cone,
             section: Section::Mill3D,
             seed: seed_deburr,
+            tool_kinds: tk::CONE,
         },
         KindInfo {
             ty: OpType::Contour5D,
@@ -1786,6 +1808,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_contour5d,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::Parallel5D,
@@ -1795,6 +1818,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_parallel5d,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::Swarf,
@@ -1808,6 +1832,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_swarf,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::AdvancedSwarf,
@@ -1817,6 +1842,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_advanced_swarf,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::RotaryContour,
@@ -1829,6 +1855,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_rotary_contour,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::RotaryParallel,
@@ -1838,6 +1865,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_rotary_parallel,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::RotaryOffset,
@@ -1851,6 +1879,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_rotary_offset,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::MultiAxisRough,
@@ -1867,6 +1896,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_multiaxis_rough,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::Flow5D,
@@ -1880,6 +1910,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_flow5d,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::MultiAxisContour,
@@ -1894,6 +1925,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::MultiAxis,
             seed: seed_multi_axis_contour,
+            tool_kinds: tk::BALL,
         },
         KindInfo {
             ty: OpType::Facing,
@@ -1910,6 +1942,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::Turning,
             seed: seed_facing,
+            tool_kinds: tk::INSERT,
         },
         KindInfo {
             ty: OpType::ProfileRough,
@@ -1924,6 +1957,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::Turning,
             seed: seed_profile_rough,
+            tool_kinds: tk::INSERT,
         },
         KindInfo {
             ty: OpType::ProfileFinish,
@@ -1937,6 +1971,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::Turning,
             seed: seed_profile_finish,
+            tool_kinds: tk::INSERT,
         },
         KindInfo {
             ty: OpType::GrooveRough,
@@ -1952,6 +1987,7 @@ impl KindInfo {
             mode: Mode::Revolve,
             section: Section::Turning,
             seed: seed_groove_rough,
+            tool_kinds: tk::BLADE,
         },
         KindInfo {
             ty: OpType::GrooveFinish,
@@ -1965,6 +2001,7 @@ impl KindInfo {
             mode: Mode::Revolve,
             section: Section::Turning,
             seed: seed_groove_finish,
+            tool_kinds: tk::BLADE,
         },
         KindInfo {
             ty: OpType::Part,
@@ -1978,6 +2015,7 @@ impl KindInfo {
             mode: Mode::Revolve,
             section: Section::Turning,
             seed: seed_part,
+            tool_kinds: tk::BLADE,
         },
         KindInfo {
             ty: OpType::Threading,
@@ -1994,6 +2032,7 @@ impl KindInfo {
             mode: Mode::Revolve,
             section: Section::Turning,
             seed: seed_threading,
+            tool_kinds: tk::THREAD_INSERT,
         },
         KindInfo {
             ty: OpType::Chamfering,
@@ -2011,6 +2050,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::Turning,
             seed: seed_chamfer,
+            tool_kinds: tk::INSERT,
         },
         KindInfo {
             ty: OpType::TaperTurning,
@@ -2024,6 +2064,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::Turning,
             seed: seed_taper,
+            tool_kinds: tk::INSERT,
         },
         KindInfo {
             ty: OpType::MultiPassTurning,
@@ -2039,6 +2080,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::Turning,
             seed: seed_multi_pass,
+            tool_kinds: tk::INSERT,
         },
         KindInfo {
             ty: OpType::FormTurning,
@@ -2052,6 +2094,7 @@ impl KindInfo {
             mode: Mode::Revolve,
             section: Section::Turning,
             seed: seed_form,
+            tool_kinds: tk::FORM,
         },
         KindInfo {
             ty: OpType::BoringTurning,
@@ -2069,6 +2112,7 @@ impl KindInfo {
             mode: Mode::Envelope,
             section: Section::Turning,
             seed: seed_bore,
+            tool_kinds: tk::BAR,
         },
     ];
 

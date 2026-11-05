@@ -71,6 +71,7 @@ mod heights;
 pub use heights::*;
 mod kinds;
 pub use kinds::*;
+pub mod tool_law;
 mod params;
 mod stamp;
 pub use stamp::*;
