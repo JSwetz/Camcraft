@@ -8046,3 +8046,151 @@ the price for appending words to EXISTING variants; `Deburr`'s fold
 (width, the window's planes, clearance, both feeds - the cone itself
 already rides the tool revision) only ever salts ops that were born
 with it.
+
+## M2.5 F A - the shell rides the roof, and the dome's helix exposed the bore's half-certified tube (2026-11-05, stage A)
+
+**The lift's shape: per-vertex tips, not per-level planes.** Every XY cut
+leg is subdivided to chords of at most the tool radius, and every
+vertex's Z is `min(plane, roof(q, r + cap) + leave).max(plane - stepdown,
+bottom_z)` with `roof` the highest facet-zmax whose AABB reaches the
+decision disc. Considered and dropped: one tip per level (the rings
+would ride a sampled surface but the LEGS between samples would cut
+straight through relief the endpoints' discs never saw - the stepped
+fixture's vertical-dive-beside-a-step is the concrete counterexample:
+the previous leg is long while the vertex's own disc is short, and at
+the crossing the interpolated Z rides below the step's surface - a
+gouge the sim names). The cap costs vertices, not depth: within one
+planar facet the tips along a leg are equal anyway, so subdivision adds
+only collinear co-planar points - the prismatic-equivalence test measures
+that move for move. A coarse mesh may name a high vertex no point of the
+tube reaches, and the tip rides UP toward the plane: that is the plain
+ladder's own cut, never deeper, never a gouge - conservative on the safe
+side by construction.
+
+**Links and ramps stay straight, with one discipline.** The hop's
+airline and the dive's link ride the tips of their endpoints - a tilted
+chord over relief is what the tip law means. The ramp is the exception
+the Crossing law forces: a tilted ring pair sharing XY space with the
+plain ladder's flat rows can overlap them in Z over a POSITIVE interval
+(verify's law tolerates only zero-touch grazes, which is what plain
+entries make by the superset law), so the shell's ramp rides strictly
+above the plane until one chord short of its destination and only then
+descends to the destination's tip. Considered and dropped: subdividing
+the ramp diagonal too (its chords would re-cross the ring's own plane-
+rows at mid-Z - the cap helps legs under relief, not diagonals ACROSS
+tilted rows).
+
+**The dome's helix found a plain-ladder law bug, not a shell bug.** The
+fixture's Helix entry gouged (sim: move ~193; A/B: the PLAIN
+`pocket3d` on the same model flags Gouge at its own move 59). Root
+cause: `helix_down` orbits the circle whose NEAR SIDE is the dive point
+(`center = xy + (rh, 0)`), but all three helix arms asked the dive-room
+margin OF THE ANCHOR. A margin that certifies the tube needs
+dist(ORBIT CENTER) >= rh in the tool-eroded space; one radius asked from
+the anchor certified half the tube: the far side bit rh deep into
+curved relief (dome: tube reached 3.779 from the axis, island r = 5).
+Stage A's shipped fix (0c99db5) widened the ask to `2*rh` from the
+anchor - sufficient, but SUFFICIENT IS NOT EXACT, and the app's
+operations suite proved it at this stage's gate: M8.2's slot orbit
+(channel 12, tool 6, rh 2 - max center-room 3.0, asked 4.001) lost its
+arcs to the substitution law. The final law is the CENTER CONVENTION:
+keep the ask at `rh + 1e-3` but take the FOUND point as the orbit's
+center, and start the dive at the anchor `found - (rh, 0)`. Exactness
+is one line: the certified disc IS the tube's projection, and the
+anchor lies inside the certified disc by the triangle inequality - so
+every arc point is a proven tool center, straight walls AND curved
+relief, with no radius of over-ask to refuse legitimate channels. Fixed
+at the same three call sites + `entry::dive_room`'s doc, which now
+states the convention. Considered and dropped: (a) keeping stage A's
+2-rh ask - over-refusal is also a wrong answer, the sim's slot suite
+names it; (b) orbiting about the anchor as found (ask rh, center =
+anchor) - that's the ORIGINAL bug restated; (c) leaving the plain
+ladders' law and fixing only the shell's copy - the bug is the plain
+ladder's, the shell merely met it. Gate lesson recorded: stage A's
+ladder ran MOTION binaries only; the regression lived in an APP-lane
+test.
+
+**A landed bore is not yet a clean one: the lifted-leg guard, level
+-10.** Under stage A's `2*rh`-from-anchor ask the dome's deepest level
+refused every landing point (the ring-with-hole center is a 2.5-wide
+channel: island eroded to 9, walls to 14, nothing clears 4.001) and the
+arm substituted by the no-room law. The center convention CHANGES that
+verdict: at (-8.46, 9.29) the widened disc has certified room and the
+bore LANDS - and landing is not the end of the law. The shell's -5.0
+rows stand LIFTED, their tips riding the dome's roof between -10 and
+-5, so a descending arc crossing one of those rows overlaps it in Z
+over a POSITIVE interval - the verifier names it Crossing, exactly the
+pair-of-moves law that tolerates only the measure-zero graze a FLAT
+ladder's rows make (a flat row at pz and a bore ending at pz share a
+plane, not an interval; that is why the plain pocket's helix never
+needed this guard, and why the slot channel - 3.0 of center-room
+against a 2.0 ask, LANDS with its arcs - stays green by the same
+construction). So the helix arm asks one more question before it
+dives: does any planned leg's XY reach the orbit circle while its
+PREVIOUS-plane tips' Z interval overlaps the bore's band? Sampled at
+the cap's chords, conservative by the same AABB overshoot the tip law
+itself carries; nonsense geometry answers YES (refuse loudly, never
+bite). If it does, the arm substitutes the noted axial dive - the one
+motion the Crossing law cannot name, sharing no XY ground with
+anything - and the level walks on. Completeness: a leg's XY is
+level-invariant (one tiling at every plane), and legs two planes above
+the floor stand at >= pz - they cannot reach a band the bore ends
+above - so only the previous plane's legs are asked. Considered and
+dropped: (a) letting it land and letting verify refuse the whole path -
+generation can fix this locally and say so; a refusal at the wrong door
+loses the cut; (b) re-routing the bore's XY plan around lifted rows -
+the shell's seam is that Z answers the model, XY answers the plan, and
+moving XY to dodge a Z fact is that seam inverted; (c) skipping the
+sampling near crossings silently - the Prime Directive's
+fallback-is-said law: the note names the lifted legs by name, every
+time ("entry: the shell lifts legs the bore would cross - axial dive on
+the floor instead").
+
+## M2.5 F B - the seam: a switch, not a second parameter world (2026-11-05, stage B)
+
+**Chosen: the app dispatches among the eight `pocket3d*` verbs on a
+new `OpParams::Pocket3D.shell` bool - motion's `Pocket3DParams` gains
+nothing.** The ROADMAP sketch said "a shell flag on the params"; the
+plan's wording rode that. Deviation, reasoned: `Pocket3DParams` is the
+engine's numeric input - its fields feed `validate()` and the tip law -
+and the choice of WHICH engine runs is the caller's seam, already
+expressed by which of the plain/offset x mask/rest functions
+`generate.rs` names. A field there would either be ignored by four of
+the eight entry points (a lie in the struct) or force motion to fork
+inside itself (the split this crate's API exists to avoid). The four-
+arm match `(*shell, *rest_rough)` reuses the exact mask/rest plumbing
+the ladder proved: shell rides the same prior grid, the same rest note
+discards. Considered and dropped: a `strategy` variant "OffsetShells"
+(the kind's combo would gain a word that silently retires the other
+four - the wire-grammar law's exact taboo).
+
+**The wire rides the slot's M8.2 C pattern: one appended
+`#[serde(default)]` key, NO PROJECT_VERSION bump.** Absent decodes to
+false, which is exactly what every pre-shell file generated - a pure
+step-up; the bump M2.5 A/B made carried NEW ENUM WORDS an old file can
+never hold, which a bool key is not. The digest bytes match: shell is
+`write_u8` APPENDED after `feed_opt`, so every pre-shell operation's
+stamp stays byte-identical - nothing false-Stales, and the new
+`shell_splitsthe_stamp`-style assert (operation/tests.rs) proves the
+flag is heard at all. The round-trip test states the version through
+`project::PROJECT_VERSION` - the pin-rot lesson from the `mill2d_c`
+finding, not a literal. The absent-means-off strip is JSON surgery
+through `get_mut` chains, never an index chain: serde_json's mutable
+indexing UPGRADES a missing key through Null into an object, which
+grafted a phantom `operation: {params: {pocket3d: null}}` onto the
+tool row - and the loader refusing that shape by name is the wire
+contract working, not a bug to route around (the test was the bug).
+
+**The fresh op seeds OFF; the checkbox says "Offset shells" on Passes,
+between Strategy and Entry.** Off is the ladder exactly as it always
+generated - the shell is the user's ask, never a new default that
+silently rewrites everyone's toolpaths (the same law that made
+`rest_rough` seed false). The pane-law table
+(`every_field_lives_on_exactly_one_section`) carries the new row; the
+description line is bare label text, which the law counts nowhere. The
+seam test (`the_shell_switch_sends_the_pocket_to_the_offset_engine`)
+runs the cube's vertical walls through BOTH flags and asserts the paths
+differ while both verify clean: on vertical walls the shell's tips fall
+exactly on the planes, so what moves is the XY plan - rings where
+zigzag was - and that is the whole claim a switch can make without a
+dome fixture (the dome's geometry law is stage A's own suite).
