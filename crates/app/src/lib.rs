@@ -33,6 +33,7 @@ pub use camcraft_sim::solid_rest;
 pub use camcraft_sim::sim;
 pub use camcraft_geometry::geometry::stock;
 pub mod stock_sim;
+pub mod stock_view;
 pub mod tool_list;
 pub use camcraft_tools::tools;
 pub mod units;

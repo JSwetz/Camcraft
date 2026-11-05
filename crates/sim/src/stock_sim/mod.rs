@@ -57,6 +57,7 @@ mod backend;
 mod cut;
 mod dexel;
 mod deviate;
+mod display;
 mod field;
 mod field_cut;
 mod field_gen;

@@ -99,8 +99,62 @@ pub fn stock_grid(
 pub fn simulate_document(
     world: &flecs_ecs::prelude::World,
 ) -> Result<ProgramSim, String> {
-    use crate::cl::Move;
-    use crate::geometry::transform_point;
+    let planned = plan_program(world)?;
+
+    let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
+    // The block the program starts on is the FIRST setup's stock - the
+    // implicit-setup law makes that the legacy `Stock` entity exactly,
+    // so a single-setup document walks this identical to before.
+    let mut dex = stock_grid(
+        world,
+        planned.first().and_then(|p| p.setup.as_deref()),
+        min_r,
+    )?;
+
+    // M3.2 A, multi-setup: the flip transform between setups is M3.3's
+    // engine, so until then a new setup's stock can only ADD material
+    // where its own block stands - never move what the previous setup
+    // already cut. That reads as a CLIP: inside the new block every
+    // column drops to at most the new stock's top, outside it material
+    // stands as left. The verdict then over-estimates leftover (a
+    // re-clamped face reads as uncut) - visible as rest, never as a
+    // gouge, the mask law's conservative direction. A later stock that
+    // is rotated or from-model cannot be judged in this frame at all:
+    // refusal, not a guess.
+    let mut prev_setup = crate::setup::effective(
+        world,
+        planned.first().and_then(|p| p.setup.as_deref()),
+    );
+    for p in &planned {
+        let eff = crate::setup::effective(world, p.setup.as_deref());
+        if eff != prev_setup {
+            clip_to_setup_stock(&mut dex, world, eff.as_deref(), min_r)?;
+            prev_setup = eff;
+        }
+        let sim_ops = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone }];
+        simulate(&mut dex, &sim_ops).map_err(|e| e.to_string())?;
+    }
+
+    let model_facets = part_facets(world);
+    let dev = deviate(&dex, &model_facets, DEV_TOL).map_err(|e| e.to_string())?;
+    let classes = color_classes(&dev);
+    let surface = dex.surface(&classes);
+    Ok(ProgramSim { dev, surface })
+}
+
+/// One operation of the program, resolved for the sim: its cached
+/// moves and the atom its tool sweeps.
+pub(crate) struct Planned {
+    pub moves: Vec<crate::cl::Move>,
+    pub radius: f64,
+    pub ball: bool,
+    pub cone: Option<f64>,
+    pub setup: Option<String>,
+}
+
+/// The program in posting order, each op resolved to its tool's atom
+/// - the one plan both the column verdict and the field eye walk.
+pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Planned>, String> {
     use crate::{model, posting};
 
     let ops = posting::program_ops(world)?;
@@ -112,13 +166,6 @@ pub fn simulate_document(
     // full radius at the corner depth); everything whose cut IS its
     // cylinder - end mills, drills, taps, bores - and the bull nose
     // with its stated corner bias sweep the disc.
-    struct Planned {
-        moves: Vec<Move>,
-        radius: f64,
-        ball: bool,
-        cone: Option<f64>,
-        setup: Option<String>,
-    }
     let mut planned: Vec<Planned> = Vec::with_capacity(ops.len());
     for (name, e) in &ops {
         let op = model::operation_of(world, e)
@@ -164,49 +211,21 @@ pub fn simulate_document(
             setup: op.setup,
         });
     }
+    Ok(planned)
+}
 
-    let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
-    // The block the program starts on is the FIRST setup's stock - the
-    // implicit-setup law makes that the legacy `Stock` entity exactly,
-    // so a single-setup document walks this identical to before.
-    let mut dex = stock_grid(
-        world,
-        planned.first().and_then(|p| p.setup.as_deref()),
-        min_r,
-    )?;
+/// The part as the machine must leave it: every model's facets in
+/// world, minus the stock (setup furniture, not design intent) - and
+/// minus the workholding, which M3.2 B made models too. A vise is
+/// steel the program must dodge, never a promise it must leave
+/// standing at height: its facets belong to the collision gate, not
+/// to the gouge verdict (counting them here would read a clamped job
+/// as a part with a vise-shaped hole in it). Visibility is a display
+/// choice; the verdict judges all the rest.
+pub(crate) fn part_facets(world: &flecs_ecs::prelude::World) -> Vec<Triangle> {
+    use crate::geometry::transform_point;
+    use crate::model;
 
-    // M3.2 A, multi-setup: the flip transform between setups is M3.3's
-    // engine, so until then a new setup's stock can only ADD material
-    // where its own block stands - never move what the previous setup
-    // already cut. That reads as a CLIP: inside the new block every
-    // column drops to at most the new stock's top, outside it material
-    // stands as left. The verdict then over-estimates leftover (a
-    // re-clamped face reads as uncut) - visible as rest, never as a
-    // gouge, the mask law's conservative direction. A later stock that
-    // is rotated or from-model cannot be judged in this frame at all:
-    // refusal, not a guess.
-    let mut prev_setup = crate::setup::effective(
-        world,
-        planned.first().and_then(|p| p.setup.as_deref()),
-    );
-    for p in &planned {
-        let eff = crate::setup::effective(world, p.setup.as_deref());
-        if eff != prev_setup {
-            clip_to_setup_stock(&mut dex, world, eff.as_deref(), min_r)?;
-            prev_setup = eff;
-        }
-        let sim_ops = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone }];
-        simulate(&mut dex, &sim_ops).map_err(|e| e.to_string())?;
-    }
-
-    // The part as the machine must leave it: every model's facets in
-    // world, minus the stock (setup furniture, not design intent) -
-    // and minus the workholding, which M3.2 B made models too. A vise
-    // is steel the program must dodge, never a promise it must leave
-    // standing at height: its facets belong to the collision gate,
-    // not to the gouge verdict (counting them here would read a
-    // clamped job as a part with a vise-shaped hole in it).
-    // Visibility is a display choice; the verdict judges all the rest.
     let mut model_facets: Vec<Triangle> = Vec::new();
     for (_, e) in model::model_entities(world) {
         if model::is_fixture(world, &e) {
@@ -220,11 +239,7 @@ pub fn simulate_document(
             transform_point(t.c, l.pos, l.rot),
         )));
     }
-
-    let dev = deviate(&dex, &model_facets, DEV_TOL).map_err(|e| e.to_string())?;
-    let classes = color_classes(&dev);
-    let surface = dex.surface(&classes);
-    Ok(ProgramSim { dev, surface })
+    model_facets
 }
 
 /// Fold a newly-entered setup's stock into the standing grid: inside

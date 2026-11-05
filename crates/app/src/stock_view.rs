@@ -1,0 +1,174 @@
+//! The document's stock as the eye sees it (M7.2 B3): the program
+//! walked through the FIELD arm, for the sphere-traced viewport.
+//! Provenance: the M7.1 field engine fed the same plan the column
+//! verdict walks (`stock_sim::plan_program`); the subdivision is plain
+//! midpoint refinement. Nothing from vendor binaries.
+//!
+//! ## The laws here
+//!
+//! - **A display field, not a verdict.** The deviation status line and
+//!   the post gate still read the column engine (`simulate_document`)
+//!   until M7.3 proves the two verdict-identical; this field exists so
+//!   the viewport can draw the machined volume. Its cell is chosen for
+//!   the frame's texel budget, never finer than the column's own.
+//! - **The true stock, not a bottomless one.** The verdict field's
+//!   block reaches ten spans down to mimic a semi-infinite column; the
+//!   eye builds the stock entity's own mesh, so the picture shows the
+//!   block the machine holds.
+//! - **Refusals by name, and a target that may be absent.** A rotated
+//!   stock, a multi-setup program (the flip transform is not the eye's
+//!   to guess), a program that will not plan: `Err`, and the viewport
+//!   keeps its sheet. A model the field cannot sign (an open shell)
+//!   leaves `target` empty with its reason - pixels then paint class 3,
+//!   unjudged, never clean.
+
+use crate::geometry::{transform_point, IDENTITY_Q, Point3, Triangle};
+use crate::model;
+use crate::stock_sim::preview::pack::MAX_TEXELS;
+use crate::stock_sim::{auto_cell, part_facets, plan_program, Backend, SimOp, Stock, FIELD_BAND};
+
+/// The texels the stock's display cell is sized for by default: a
+/// thirty-second of the dense pack budget. Finer cells cost the field
+/// subtraction cubically (the flat tool's spanning flank sweeps the
+/// whole stock height per move), and the first fixture run showed a
+/// quarter of the budget taking minutes per program - the per-brick
+/// cost law that would buy it back is M7.3's.
+pub const DEFAULT_TEXELS: f64 = (MAX_TEXELS / 32) as f64;
+
+/// A facet's longest edge after subdivision, in cells: well inside the
+/// field builder's per-facet candidate limit with the band dilated in.
+const EDGE_CELLS: f64 = 32.0;
+
+/// Subdivision rounds are capped: 6 rounds is 4096 children a facet.
+const MAX_ROUNDS: u32 = 6;
+
+/// What the viewport traces: the stock after the program, and the
+/// model it is judged against when the model can be signed.
+#[derive(Debug)]
+pub struct FieldView {
+    pub stock: Stock,
+    pub target: Option<Stock>,
+    /// Why `target` is empty, said so the status line can repeat it.
+    pub target_note: Option<String>,
+    pub cell: f64,
+}
+
+/// Walk the document's program through the field arm, at the default
+/// display budget.
+pub fn field_view(world: &flecs_ecs::prelude::World) -> Result<FieldView, String> {
+    field_view_with(world, DEFAULT_TEXELS)
+}
+
+/// The same walk with the stock's display cell sized for `texels`
+/// cells of volume (a coarser picture is cheaper to cut, never less
+/// honest: classes still come from the same gate).
+pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result<FieldView, String> {
+    if !(texels.is_finite() && texels >= 1.0) {
+        return Err(format!("the field view needs a positive texel budget, not {texels}"));
+    }
+    let planned = plan_program(world)?;
+    let first = planned.first().and_then(|p| p.setup.clone());
+    let eff = crate::setup::effective(world, first.as_deref());
+    if planned.iter().any(|p| crate::setup::effective(world, p.setup.as_deref()) != eff) {
+        return Err("the field view draws one setup's stock; a multi-setup program keeps the sheet (the flip transform is M7.3's)".into());
+    }
+    let stock_facets = stock_facets(world, first.as_deref())?;
+    let (lo, hi) = bounds(&stock_facets).ok_or("the stock meshed empty - nothing to draw")?;
+    let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
+    let (sx, sy, sz) = (hi.x - lo.x, hi.y - lo.y, hi.z - lo.z);
+    let budget = ((sx * sy * sz).max(0.0) / texels).cbrt();
+    let cell = auto_cell(if min_r.is_finite() { min_r } else { 1.0 }, sx, sy).max(budget);
+    if !(cell.is_finite() && cell > 0.0) {
+        return Err(format!("the stock's extent gives no sane display cell ({cell})"));
+    }
+    let backend = Backend::Field { band: FIELD_BAND };
+    let mut stock = Stock::from_facets(backend, &subdivide(&stock_facets, cell), cell)
+        .map_err(|e| format!("the field view could not build the stock: {e}"))?;
+    for p in &planned {
+        let op = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone }];
+        stock
+            .simulate_display(&op)
+            .map_err(|e| format!("the field view could not cut the program: {e}"))?;
+    }
+    let part = part_facets(world);
+    let (target, target_note) = if part.is_empty() {
+        (None, Some("no model to judge against".to_string()))
+    } else {
+        match Stock::from_facets(backend, &subdivide(&part, cell), cell) {
+            Ok(t) => (Some(t), None),
+            Err(e) => (None, Some(format!("the model cannot be signed as a field: {e}"))),
+        }
+    };
+    Ok(FieldView { stock, target, target_note, cell })
+}
+
+/// The setup's stock entity as world triangles (the mesh the viewport
+/// already draws), refusing a rotation the axis-aligned field
+/// lattice would silently ignore.
+fn stock_facets(world: &flecs_ecs::prelude::World, setup: Option<&str>) -> Result<Vec<Triangle>, String> {
+    let name = crate::setup::stock_entity_name(world, setup);
+    let e = model::find_by_name(world, &name)
+        .ok_or_else(|| format!("no stock '{name}' - the eye draws material, not air"))?;
+    let loc = model::transform_of(world, &e).unwrap_or_default();
+    if loc.rot != IDENTITY_Q {
+        return Err("the field view models an axis-aligned stock; this stock carries a rotation".into());
+    }
+    let tris = model::facets_of(world, &e).ok_or("the stock entity carries no mesh")?;
+    Ok(tris
+        .iter()
+        .map(|t| {
+            Triangle::new(
+                transform_point(t.a, loc.pos, loc.rot),
+                transform_point(t.b, loc.pos, loc.rot),
+                transform_point(t.c, loc.pos, loc.rot),
+            )
+        })
+        .collect())
+}
+
+fn bounds(f: &[Triangle]) -> Option<(Point3, Point3)> {
+    let mut lo = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut hi = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for t in f {
+        for v in [t.a, t.b, t.c] {
+            lo = Point3::new(lo.x.min(v.x), lo.y.min(v.y), lo.z.min(v.z));
+            hi = Point3::new(hi.x.max(v.x), hi.y.max(v.y), hi.z.max(v.z));
+        }
+    }
+    (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+}
+
+/// Uniform 4-way midpoint subdivision until the longest edge spans
+/// at most `EDGE_CELLS` cells. Every shared edge splits at the same
+/// midpoint on both sides, so a watertight shell stays watertight -
+/// the field's parity law needs exactly that.
+pub fn subdivide(facets: &[Triangle], cell: f64) -> Vec<Triangle> {
+    let longest = facets
+        .iter()
+        .flat_map(|t| [(t.a, t.b), (t.b, t.c), (t.c, t.a)])
+        .map(|(p, q)| dist(p, q))
+        .fold(0.0f64, f64::max);
+    let ratio = longest / (EDGE_CELLS * cell);
+    let rounds = if ratio.is_finite() && ratio > 1.0 { ratio.log2().ceil() as u32 } else { 0 };
+    let mut out = facets.to_vec();
+    for _ in 0..rounds.min(MAX_ROUNDS) {
+        let mut next = Vec::with_capacity(out.len() * 4);
+        for t in &out {
+            let (ab, bc, ca) = (mid(t.a, t.b), mid(t.b, t.c), mid(t.c, t.a));
+            next.push(Triangle::new(t.a, ab, ca));
+            next.push(Triangle::new(ab, t.b, bc));
+            next.push(Triangle::new(ca, bc, t.c));
+            next.push(Triangle::new(ab, bc, ca));
+        }
+        out = next;
+    }
+    out
+}
+
+fn mid(p: Point3, q: Point3) -> Point3 {
+    Point3::new((p.x + q.x) * 0.5, (p.y + q.y) * 0.5, (p.z + q.z) * 0.5)
+}
+
+fn dist(p: Point3, q: Point3) -> f64 {
+    ((p.x - q.x).powi(2) + (p.y - q.y).powi(2) + (p.z - q.z).powi(2)).sqrt()
+}

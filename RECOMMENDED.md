@@ -8588,3 +8588,136 @@ name and the viewport falls back to the CPU march (stage B3). The
 first gate caught the one way this law can bite: `target` is a
 reserved WGSL word, and the kernel never compiled - which the Err
 path reported by name instead of crashing.
+
+## M10.1 A+D - the tool law's table: seven decisions (2026-11-05)
+
+Built by a parallel worktree agent, reviewed and committed by the main
+session.
+
+(1) **The sets live in their own module** (`operation/tool_law.rs`),
+named constants each row points at, with each set's reasoning beside
+it. `kinds.rs` was already far past the 400-line law (~2.2k) and grows
+only by one line a row. Dropped: a per-OpType match function (a second
+truth beside the registry), and splitting `kinds.rs` now (its own
+refactor, not this stage's).
+
+(2) **3D Finish and every multi-axis kind take BallNose only.** The
+ROADMAP's "waterline-class tangent laws still preferring round noses"
+could read as admitting BullNose; the narrower set matches what those
+generators accept at their doors today, so the ribbon will never light
+for a tool that cannot pass. Dropped: all three mill forms with the
+generator filtering - an offer that always refuses is the silent lie
+in UI form.
+
+(3) **The flat-floor 2D kinds take EndMill + BullNose, not BallNose.**
+The bull nose is the everyday flat-floor roughing form; a ball
+contradicts the flat floor the kind promises. Dropped: EndMill alone
+(too narrow for shop practice).
+
+(4) **Trace and Engrave take all four mill forms, the cone included**
+- centerline cuts with the tangency laws stood down; the V-bit is the
+engraver.
+
+(5) **The milled Thread takes Tap only** - the thread-mill cylinder is
+modeled as a Tap because only Tap carries the pitch the ride is timed
+by. Dropped: EndMill (no pitch: it would fail the generator's door
+every time).
+
+(6) **The milled Bore takes the flat mills, not the boring bar** - it
+is an interpolated ride, not a G86-class cycle; the bar belongs to the
+Drill row's bore cycle and to turned boring.
+
+(7) **Drill is one row taking Drill, Tap and Bore** - the registry is
+per operation kind, not per cycle; matching the chosen cycle to the
+tool stays the drilling crate's door. Spot is never automatic (M1.6),
+and no spot-specific ToolKind exists to claim. Stage B's heads-up: any
+existing fixture pairing a kind with a tool outside this table (a ball
+on a 2D Contour or Face) will start refusing once `CreateOperation`
+gates - sweep the fixtures first.
+
+## M7.2 B3a - the field program sim the eye draws: three decisions (2026-11-05)
+
+(1) **One plan, two engines.** `simulate_document`'s op planning is
+extracted verbatim into `stock_sim::plan_program` + `part_facets`; the
+column verdict and `stock_view::field_view` walk the same plan, so the
+eye can never draw a different program than the verdict judged.
+`stock_sim_document` and `posting` guard the refactor.
+
+(2) **A display field, sized for the frame, with the true stock.** The
+verdict field's `block_field` reaches ten spans down to mimic a
+semi-infinite column; the eye builds the stock ENTITY's own mesh at its
+placement (the block the machine holds), at a cell of
+`max(auto_cell, cbrt(volume / (MAX_TEXELS/4)))` so the dense pack fits
+its budget. The mesh is uniformly 4-way subdivided until no edge spans
+more than 32 cells - shared edges split at the same midpoint, so a
+watertight shell stays watertight, and every facet stays inside the
+field builder's per-facet candidate limit. The verdict (status line,
+post gate) stays on the column engine until M7.3; this field is the
+picture.
+
+(3) **Refusals by name; the target may be absent.** A rotated stock
+and a multi-setup program (the flip transform is not the eye's to
+guess) refuse, and the viewport keeps its sheet. A model the field
+cannot sign (an open shell) leaves `target` empty with its reason, and
+those pixels paint class 3 - unjudged, never clean.
+
+## M11.1 A - facing turn blends: six decisions (2026-11-05)
+
+Built by a parallel worktree agent, reviewed and committed by the main
+session.
+
+(1) **The arc keeps the step's endpoints and bulges OUTWARD into the
+overrun.** A U-turn of radius stride/2, centered on the step line, one
+G2/G3 block per reversal - the rows are untouched, so the footprint is
+cut exactly as by the sharp path. Dropped: the inward arc (rows stopped
+short so the arc stays inside the straight sweep) - the facing
+verifier's boundary law demands every move endpoint stand a tool
+radius off the footprint, read the shortened rows as gouges on every
+move and would have blocked the post. The outward reach is bounded by
+the blend radius, which is capped at the tool radius, lies outside the
+part's footprint by construction, and is judged by the existing verify
+and machine gates (fixtures, travel) like any other overrun move.
+
+(2) **Opt-in, off by default** (`blend_turns`): the precedent that a
+new choice cannot disturb a path that never asks for it, and the golden
+discipline - every existing .cl/.nc golden re-ran byte-identical. One
+new byte witness (`face_square_40x40_blended.cl`, same 11 moves, four
+steps become arcs). Flipping the draft default to on is a user decision
+left open.
+
+(3) **Radius = stride/2, legal only within [0.01 mm, tool radius]**: a
+semicircle is the only single arc joining two parallel rows; the floor
+keeps micron-snapped centers clear of controller endpoint checks.
+Dropped: quarter arcs with a straight middle (more than one move per
+turn).
+
+(4) **A refused turn stays sharp and says so** - counted per reason
+once per path in the toolpath notes the status line shows, never
+repeated per level.
+
+(5) **No PROJECT_VERSION bump**: the key is absent when off (the
+`tilt` precedent); the cache stamp grows one byte only when on, so old
+caches stay fresh.
+
+(6) **Follow-ups named, not done**: contour-corner blends (there the op
+tolerance bounds the radius and an inside corner leaves rest the sim
+must report), between-pass link blends (pocket/slot/raster
+connectors), arc entry (stage B), and adding the blended fixture to the
+five-post conformance set.
+
+(4) **The display cut: the flat tool's flank sized to the stock, not
+the verdict world** (`Stock::simulate_display`, sim
+`stock_sim/display.rs`). The first gate run measured the cost of
+`spanning_flank` on the eye's field: the cut window grows by the
+tool's bounding radius on every axis, so a ~105 mm flank made a 60 mm
+facing program take minutes in debug (one fixture ran 14 min before it
+was stopped). A flank from the lowest tip to the stock's ceiling plus
+the band removes exactly the same material inside the stock's box -
+every cell within the radius above a tip lies below the ceiling - and a
+unit test holds the two cuts to the same sign everywhere in the box and
+the same value wherever a surface is resolved. Posed (multi-axis)
+moves keep the spanning law. The verdict path keeps `simulate`
+untouched; the general per-brick cost law is still M7.3's. Display
+budget default lowered to MAX_TEXELS/32; the fixtures use a coarse
+`field_view_with` budget because they test wiring and classes, not
+resolution.
