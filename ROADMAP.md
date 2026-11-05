@@ -1376,6 +1376,38 @@ machining knowledge (path filleting, circular-ramp entry), clean-room.
   line - dive-point legality proved by the same laws the ramp and helix
   obey, with the same honest fallback when nothing can be proved.
 
+### M11.2 - Plane-aware transitions: arcs off the work plane, keep-down links
+**Goal: moving from one cutting plane to the next is planned motion the user
+chooses - true G18/G19 arcs where engagement eases in, helix/ramp/plunge/arc
+between levels on every multi-level operation, and keep-down links as a
+definable strategy, never an unasked trip to the safe plane.** — 📋
+
+(User review, 2026-11-05: "the path generation doesn't seem to understand that
+arcs when entering material can be in the G19/G18 planes rather than the G17 ...
+when linking between the layers, why would we need to go to safe distance unless
+we choose to? keepdown is a common strategy we should honor and make definable.")
+
+- **A - the plane in the CL and the posts**: the CL arc carries its plane
+      (XY / XZ / YZ - RS-274's G17/G18/G19, ISO 6983), the five built-in posts
+      state the plane word modally and emit the arc in it (each control's own
+      dialect), conformance goldens per post; every existing CL and NC golden
+      stays byte-identical (an XY arc states nothing new).
+- **B - arcs off the work plane where they belong**: the vertical-plane arc
+      entry (M11.1 B) and vertical lead-in/out arcs emit as single G18/G19
+      arcs instead of chord fans; a lead may engage in the vertical plane
+      (the arc rolls the tool onto the material) as well as in XY.
+- **C - level transitions, one family, every multi-level op**: the descent
+      between levels - plunge / ramp (angle) / helix (radius, pitch) / arc
+      (vertical-plane, radius) - is a user parameter on every level-ladder
+      operation (contour, pocket, slot, adaptive, offset, circular, bore,
+      3D roughing), legality proved by the existing ramp/helix/lead-room laws,
+      fallback named in the notes.
+- **D - keep-down links, definable**: between levels and between passes in a
+      level, the link is the user's: retract to clearance / retract to the
+      retract plane / keep down (with a maximum stay-down distance and the
+      link proved clear of the part, else it lifts - named). Contour's
+      `level_link` (2026-11-05) is the first instance; D generalises it.
+
 ## Phase 12 — Geometry kernel: Solidcore
 
 The kernel decision open since M1.3 ("benchmark truck vs an OpenCascade
@@ -1454,6 +1486,7 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
 | **M9.1** | The operation opens its own page | Done: the retype dropdown and its dialog retired - the ribbon creates or opens by kind, the tree selection opens the same pane in place (A); the six tabs folded into one stacked pane of collapsing sections per the Blender verdict, `op_tab` retired, the drift guard restated exact (B); the pane law walks all 30 registry kinds - one header per group, fields exactly once, catching the Passes header/field collision, renamed Pass count (C); toolpath goldens byte-identical, snapshots re-blessed; heavy lane green; ledger in RECOMMENDED.md | ✅ |
 | **M10.1** | A tool that can cut the operation | Done: the tool law - `KindInfo.tool_kinds` one table (A), `CreateOperation` / tool reassignment / op retype / tool retype refuse the mismatch at command construction by name and the ribbon darkens with the reason (B), an op whose tool is gone or wrong reads BLOCKED - generation and the post refuse, nothing stored, old files load untouched (C), the law tests (D); generator shape refusals stand as the backstop | ✅ |
 | **M11.1** | Smooth transitions | Arc blends at feed-path turning points (facing reversals, corners, links) as single G2/G3 moves instead of G1 stops; circular-ramp arc entry beside plunge/ramp/helix | 📋 |
+| **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen | 📋 |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
 
 ## Open questions & deferred
