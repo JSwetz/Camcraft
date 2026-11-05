@@ -95,6 +95,15 @@ pub enum ParamsDto {
         /// is the sharp walk every earlier file held - no version step.
         #[serde(default, skip_serializing_if = "is_false")]
         blend_turns: bool,
+        /// Level to level: absent is `retract_reenter`, the transition
+        /// every earlier file posted - written only when the user picks
+        /// the stay-down ramp, so no version step.
+        #[serde(default, skip_serializing_if = "LevelLinkDto::is_default")]
+        level_link: LevelLinkDto,
+        /// The stay-down ramp's maximum angle, degrees; absent is the
+        /// 3 deg default, written only when it differs.
+        #[serde(default = "default_level_ramp_angle", skip_serializing_if = "is_default_level_ramp")]
+        ramp_angle: f64,
         /// 3+2 index; see the Face arm.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,
@@ -1020,6 +1029,33 @@ fn default_helix_radius() -> f64 {
 /// `false` is absent from the file, so legacy saves stay byte-identical.
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// The file mirror of `machining2d::LevelLink`; `default` is the
+/// retract-and-re-enter transition every earlier contour posted.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LevelLinkDto {
+    #[default]
+    RetractReenter,
+    StayDownRamp,
+}
+
+impl LevelLinkDto {
+    fn is_default(&self) -> bool {
+        *self == LevelLinkDto::RetractReenter
+    }
+}
+
+/// An absent stay-down ramp angle: the generator's default.
+fn default_level_ramp_angle() -> f64 {
+    crate::machining2d::DEFAULT_LEVEL_RAMP_ANGLE
+}
+
+/// Serde's skip test for the ramp angle: the default stays out of the
+/// file, so a contour that never touched it saves byte-identically.
+fn is_default_level_ramp(a: &f64) -> bool {
+    a.to_bits() == crate::machining2d::DEFAULT_LEVEL_RAMP_ANGLE.to_bits()
 }
 
 /// The file mirror of `machining3d::Entry3D`; `default` is Plunge, the

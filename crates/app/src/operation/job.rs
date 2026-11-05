@@ -45,6 +45,11 @@ pub struct GenJob {
     pub(super) is_mill: bool,
     pub(super) spindle: Option<(f64, f64)>,
     pub(super) fixtures: Vec<crate::fixture::FixtureBox>,
+    /// Whether `material` is a finished PART (a named model, or picks
+    /// made only on models) rather than the setup's stock: the depth-
+    /// aware verify judges the 2D kinds against its solid only then -
+    /// cutting into stock is the job, cutting into the part never is.
+    pub(super) part_solid: bool,
 }
 
 /// The tripwire phrase for a stored precompute whose arm never collected
@@ -70,6 +75,15 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     };
     let setup = op.setup.as_deref();
     let material = material_of(world, setup, &op.src)?;
+    let stock_name = crate::setup::stock_entity_name(world, setup);
+    let part_solid = !material.facets.is_empty()
+        && match &op.src {
+            SrcRef::Stock => false,
+            SrcRef::Entity(n) => *n != stock_name,
+            SrcRef::Selection(items) => {
+                !items.is_empty() && items.iter().all(|g| g.entity != stock_name)
+            }
+        };
     // Setup stock, when it is not the source itself: the swarf column
     // around a smaller model (the head read at `generate` - same call).
     let stock_facets = match &op.src {
@@ -177,6 +191,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         is_mill,
         spindle,
         fixtures,
+        part_solid,
     })
 }
 

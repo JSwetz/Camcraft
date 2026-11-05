@@ -5,10 +5,12 @@
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::Entry3D;
 use crate::geo2d::{Loop, Point2, Region};
-use crate::geometry::Point3;
+use crate::geometry::{Point3, Triangle};
 
 use super::arcs::{fit_arcs, lead_in, lead_out, push_segs, walk_tangent};
+use super::contour_depth::{Ladder, ladder};
 use super::contour_entry::{Engage, bore_entry, say, seam_leads, wall_arc, wall_arc_top};
+use super::contour_link::{LevelLink, plan_links, push_ramp};
 use super::levels::{Cert, Motion, cut_levels};
 use super::ring::Ring;
 use super::face::GenError;
@@ -124,6 +126,13 @@ pub struct ContourParams {
     /// stay sharp and are named in the notes with the worst corner
     /// rest. `false` - every pre-M11.1 file - is unchanged to the byte.
     pub blend_turns: bool,
+    /// Level to level: retract and re-enter (the default, every file
+    /// before the option), or stay down and ramp along the ring
+    /// (`contour_link`). The user's choice - nothing here is premade.
+    pub level_link: LevelLink,
+    /// Maximum descent angle of the stay-down ramp, degrees; read only
+    /// under [`LevelLink::StayDownRamp`].
+    pub ramp_angle: f64,
 }
 
 impl ContourParams {
@@ -182,6 +191,13 @@ impl ContourParams {
         if self.tab_count > 0 && (self.tab_width <= 0.0 || self.tab_height < 0.0) {
             return Err(GenError::Invalid("tabs need positive width".into()));
         }
+        if self.level_link == LevelLink::StayDownRamp
+            && !(self.ramp_angle.is_finite() && self.ramp_angle > 0.0 && self.ramp_angle < 90.0)
+        {
+            return Err(GenError::Invalid(
+                "the stay-down ramp angle must be between 0 and 90 degrees".into(),
+            ));
+        }
         if self.entry == Entry3D::Helix && self.helix_radius <= 0.0 {
             // Only positivity: the roughing ladders cap the radius at
             // the tool's so successive turns overlap, but a contour
@@ -227,6 +243,28 @@ impl ContourParams {
 /// safe plane are the verifier's business (step 7), flagged, never
 /// hidden.
 pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError> {
+    contour_impl(region, p, None)
+}
+
+/// [`contour`] of a region sectioned off a finished part: each ring is
+/// walked only at the levels where the part's wall it trims still
+/// exists (`contour_depth`) - a blind feature's ring ends at its floor
+/// plus the stock to leave, and the dropped levels are named in the
+/// notes. Through features and outer walls keep every level, so a part
+/// whose rings all run the full depth posts exactly [`contour`]'s path.
+pub fn contour_on_part(
+    region: &Region,
+    part: &[Triangle],
+    p: &ContourParams,
+) -> Result<Toolpath, GenError> {
+    contour_impl(region, p, Some(part))
+}
+
+fn contour_impl(
+    region: &Region,
+    p: &ContourParams,
+    part: Option<&[Triangle]>,
+) -> Result<Toolpath, GenError> {
     p.validate()?;
     if region.is_empty() {
         return Err(GenError::Empty("empty footprint".into()));
@@ -243,7 +281,7 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
             "offset boundary collapsed".into()
         }));
     }
-    let zs = p.levels();
+    let flat = p.levels();
     let mut loops: Vec<&Loop> = center.loops().iter().collect();
     loops.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
 
@@ -285,14 +323,34 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     let mut tally = FilletTally::default();
     // Lead shrinks, refusals and reseated starts, each said once.
     let mut lead_notes: Vec<String> = Vec::new();
+    // Which ring is cut at which level: all of them at every level for
+    // a flat region; against a part, each ring down to its own floor.
+    let lad = match part {
+        None => Ladder::uniform(&flat, loops.len()),
+        Some(f) => ladder(&plan, f, &flat, r, p.stock_to_leave, &mut lead_notes),
+    };
+    if lad.zs.is_empty() {
+        // Every ring stands in the part at its first level: nothing is
+        // legal to cut, and an empty path would read as a clean one.
+        return Err(GenError::Invalid(format!(
+            "every contour ring cuts into the part at its first level - nothing to machine \
+             without a gouge ({})",
+            lead_notes.join("; ")
+        )));
+    }
+    let lad = &lad;
 
     let eng = Engage { p, center: &center, cert: &cert, plan: &plan, m: &m, legal: &legal };
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let hop = p.retract_z.min(p.clearance_z);
     let mut first_entry = true;
-    for (zi, &z) in zs.iter().enumerate() {
-        let tabbed = p.tab_count > 0 && z < p.bottom_z + p.tab_height;
+    let is_tabbed = |z: f64| p.tab_count > 0 && z < p.bottom_z + p.tab_height;
+    // The cut order, and where the stay-down ramp links it (contour_link).
+    let (sched, ramp) = plan_links(p, lad, &plan, &mut lead_notes);
+    for (si, &(z, li)) in sched.iter().enumerate() {
+        let l = loops[li];
+        let tabbed = is_tabbed(z);
         // A tab-hop template traverses at `hop` between windows, and a
         // standing tab is material AT the window down to the level -
         // below `bottom_z + tab_height` the hop plane itself runs
@@ -307,7 +365,17 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
         } else {
             hop
         };
-        for (li, l) in loops.iter().enumerate() {
+        // Another ring was the last cut, at this same level: hop ring
+        // to ring; anything else crosses in from above.
+        let same_level = si > 0 && sched[si - 1].0.to_bits() == z.to_bits();
+        // This item is reached by the ramp / the next one leaves by it.
+        let ramp_in = ramp[si];
+        let ramp_out = ramp.get(si + 1).copied().flatten().is_some();
+        {
+            // This ring's own ladder: the level above it is the one IT
+            // was last cut at, whatever another ring's floor added.
+            let rz = lad.ring(li);
+            let rzi = rz.iter().position(|q| q.to_bits() == z.to_bits()).unwrap_or(0);
             // Canonical orientation is material-on-the-left travel;
             // conventional climbing reverses it. Air is the other side.
             // An Inside region was eroded, not grown, so its stored
@@ -362,13 +430,24 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 // the wall (contour_entry::wall_arc); a tabbed level, or
                 // a ring with no room for one, takes the graze below
                 // and says why.
-                let wall_arc_on = !inside && p.entry == Entry3D::Arc && k == 0;
+                let wall_arc_on = !inside && p.entry == Entry3D::Arc && k == 0 && ramp_in.is_none();
                 let mut arced = false;
+                if let (Some(laps), Some(&zp)) = (ramp_in, rzi.checked_sub(1).and_then(|i| rz.get(i))) {
+                    // Stayed down: the tool stands on the seam at the
+                    // level above (its lead-out skipped); ramp down
+                    // along the ring itself onto this level's seam.
+                    push_ramp(&mut b, &poly, laps, zp, z, p.feed);
+                    first_entry = false;
+                    push_segs(&mut b, &walk, z, p.feed);
+                    if !ramp_out {
+                        push_segs(&mut b, &lead_off, z, p.feed);
+                    }
+                    continue;
+                }
                 if wall_arc_on && !tabbed {
-                    let z_top = wall_arc_top(p, &zs, zi, hop_z);
-                    let stay = loops.len() == 1 && zi > 0 && !first_entry;
+                    let z_top = wall_arc_top(p, rz, rzi, hop_z);
                     let first = lead.first().or(walk.first());
-                    match wall_arc(&mut b, &eng, e2, z, z_top, hop_z, first, stay) {
+                    match wall_arc(&mut b, &eng, e2, z, z_top, hop_z, first) {
                         Ok(()) => arced = true,
                         Err(why) => say(
                             &mut lead_notes,
@@ -390,7 +469,7 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 }
                 if arced {
                     // Engaged: the arc ends standing at (e2, z).
-                } else if k == 0 && li > 0 && !first_entry {
+                } else if k == 0 && same_level && !first_entry {
                     // Loop to loop within one level: the tab-hop
                     // template - up to the hop plane, across, plunge.
                     let cur = b.at();
@@ -410,7 +489,7 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                     if !first_entry {
                         b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
                     }
-                    let prev_z = if zi == 0 { p.clearance_z } else { zs[zi - 1] };
+                    let prev_z = if rzi == 0 { p.clearance_z } else { rz[rzi - 1] };
                     if inside && tabbed {
                         // M8.2 C: the arm stands down where a tab is
                         // material. dive_room and chord_clears certify
@@ -486,7 +565,9 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 first_entry = false;
                 push_segs(&mut b, &lead, z, p.feed);
                 push_segs(&mut b, &walk, z, p.feed);
-                push_segs(&mut b, &lead_off, z, p.feed);
+                if !ramp_out {
+                    push_segs(&mut b, &lead_off, z, p.feed);
+                }
             }
         }
     }

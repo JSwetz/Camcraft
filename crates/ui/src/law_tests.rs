@@ -425,6 +425,8 @@ mod path_tests {
                     entry: camcraft_app::machining3d::Entry3D::Plunge,
                     helix_radius: 1.0,
                     blend_turns: false,
+                    level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+                    ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
                 },
             )
             .expect("operation"),
@@ -1153,6 +1155,8 @@ mod height_plane_tests {
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             blend_turns: false,
+            level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+            ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
         }
     }
 
@@ -1481,6 +1485,8 @@ mod height_plane_tests {
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             blend_turns: false,
+            level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+            ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
         };
         let mut state = state_with("C1", params);
         // G54 at z 3.0: stock top (20) + 5 = 25, G54 - 1 = 2.
@@ -1547,6 +1553,8 @@ mod height_plane_tests {
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             blend_turns: false,
+            level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+            ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
         };
         let state = state_with("C1", params);
         assert!(

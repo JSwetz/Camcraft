@@ -187,12 +187,10 @@ pub(super) fn wall_arc_top(p: &ContourParams, zs: &[f64], zi: usize, hop_z: f64)
 /// part's tool-radius offset; uncut stock outside the part is fair to
 /// cut.
 ///
-/// The approach is one of two standard sequences: `stay` (the tool
-/// stands on this same ring's lead-out on the plane above) feeds the
-/// link to the arc start on that plane when the link holds the same
-/// room law; otherwise the tool lifts to the hop (retract) plane,
-/// traverses, drops at rapid only to the top of the cut, and feeds the
-/// rest of the way at the plunge feed. Nothing is pushed on `Err`: the
+/// The approach is the retract-and-re-enter sequence: the tool lifts to
+/// the hop (retract) plane, traverses, drops at rapid only to the top of
+/// the cut, and feeds the rest of the way at the plunge feed (staying
+/// down is the user's `LevelLink` choice, ramped in `contour_link`). Nothing is pushed on `Err`: the
 /// caller substitutes and says why.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn wall_arc(
@@ -203,7 +201,6 @@ pub(super) fn wall_arc(
     z_top: f64,
     hop_z: f64,
     first: Option<&Seg>,
-    stay: bool,
 ) -> Result<(), &'static str> {
     let p = eng.p;
     let tol = slack(p);
@@ -214,18 +211,13 @@ pub(super) fn wall_arc(
     let arc = arc_lead(e2, dir, z_top, z, p.tool_diameter, p.tolerance, holds)?;
     let s = arc.start;
     let cur = b.at();
-    let here = Point2::new(cur.x, cur.y);
-    if stay && (cur.z - z_top).abs() <= 1e-9 && holds(here, s) {
-        b.push(MoveKind::Feed, Point3::new(s.x, s.y, z_top), Some(p.feed));
-    } else {
-        let lift = cur.z.max(hop_z);
-        b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, lift), None);
-        b.push(MoveKind::Rapid, Point3::new(s.x, s.y, lift), None);
-        let air = z_top.max(p.top_z).min(lift);
-        b.push(MoveKind::Rapid, Point3::new(s.x, s.y, air), None);
-        if z_top < air {
-            b.push(MoveKind::Plunge, Point3::new(s.x, s.y, z_top), Some(p.plunge_feed));
-        }
+    let lift = cur.z.max(hop_z);
+    b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, lift), None);
+    b.push(MoveKind::Rapid, Point3::new(s.x, s.y, lift), None);
+    let air = z_top.max(p.top_z).min(lift);
+    b.push(MoveKind::Rapid, Point3::new(s.x, s.y, air), None);
+    if z_top < air {
+        b.push(MoveKind::Plunge, Point3::new(s.x, s.y, z_top), Some(p.plunge_feed));
     }
     for q in &arc.fan {
         b.push(MoveKind::Feed, *q, Some(p.feed));

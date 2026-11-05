@@ -89,6 +89,8 @@ fn cp(blend: bool) -> ContourParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: blend,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 
@@ -180,6 +182,8 @@ fn contour_op(blend: bool) -> OpParams {
         helix_radius: 1.0,
         blend_turns: blend,
         tilt: None,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 

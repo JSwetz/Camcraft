@@ -57,6 +57,8 @@ impl OpParams {
                 tab_width,
                 tab_height,
                 helix_radius,
+                level_link,
+                ramp_angle,
                 ..
             } => {
                 // Structural only, the pocket doors' word (M8.2 A): a
@@ -77,6 +79,10 @@ impl OpParams {
                     && nneg(*tab_height)
                     && pos(*helix_radius)
                     && lead_sane(lead)
+                    // The stay-down ramp reads its angle; a retract
+                    // link never does, so any stored number is inert.
+                    && (*level_link == crate::machining2d::LevelLink::RetractReenter
+                        || (ramp_angle.is_finite() && *ramp_angle > 0.0 && *ramp_angle < 90.0))
             }
             OpParams::Pocket {
                 stepover,

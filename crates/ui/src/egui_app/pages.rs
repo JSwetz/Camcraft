@@ -55,7 +55,7 @@ use egui::{
 
 use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
 use camcraft_app::machine;
-use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
+use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, LevelLink, PocketStrategy, Side};
 use camcraft_app::model;
 use camcraft_app::operation::{
     self, GeoSel, Height, HeightReference, OpParams, SrcRef, Tilt,
@@ -101,6 +101,8 @@ const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// Descent combo items - the whole `Entry3D` vocabulary, index order
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
 const ENTRY_KINDS: [&str; 4] = ["Plunge", "Ramp", "Helix", "Arc"];
+/// Contour level-to-level links, index order matching the combo arm.
+const LEVEL_LINKS: [&str; 2] = ["Retract and re-enter", "Stay down and ramp"];
 /// The 3-D finish kinematics, in the order the combo maps them.
 const FINISH_PATTERNS: [&str; 18] = [
     "Waterline",
@@ -822,6 +824,8 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             entry,
             helix_radius,
             blend_turns,
+            level_link,
+            ramp_angle,
             tilt,
         } => {
             if tab == SEC_GEO {
@@ -948,6 +952,25 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 }
                 if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
                     ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
+                }
+                // The level-to-level transition is the user's pick:
+                // lift and re-enter by the Entry above, or stay at
+                // depth and ramp down along the ring just cut.
+                field(ui, "Level to level");
+                let mut k_idx = match level_link {
+                    LevelLink::RetractReenter => 0,
+                    LevelLink::StayDownRamp => 1,
+                };
+                combo(ui, "c_level_link", &mut k_idx, &LEVEL_LINKS);
+                *level_link = if k_idx == 1 {
+                    LevelLink::StayDownRamp
+                } else {
+                    LevelLink::RetractReenter
+                };
+                if *level_link == LevelLink::StayDownRamp {
+                    field(ui, "Ramp angle (deg)");
+                    num_plain(ui, ramp_angle);
+                    ui.label("each ring is cut all the way down, ramping along itself; a level that cannot ramp (tabs, a short ring) retracts and re-enters, named in the status line");
                 }
                 field(ui, "Tab count");
                 let mut tabs = f64::from(*tab_count);

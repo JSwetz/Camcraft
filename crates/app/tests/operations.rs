@@ -74,6 +74,8 @@ fn contour_params() -> OpParams {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 
@@ -2405,6 +2407,8 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     };
     history.execute(
         &world,
@@ -3215,6 +3219,8 @@ fn selection_notes_report_stitching_and_extension() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     };
     let notes = operation::selection_notes(&world, None, &items, &contour);
     assert!(
@@ -3261,6 +3267,8 @@ fn contour_at(side: Side, z: f64) -> OpParams {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 
@@ -3441,20 +3449,15 @@ fn contour_outside_forces_outside_on_bore() {
         )
         .expect("create"),
     );
-    history.execute(
-        &world,
-        GenerateOperation::new(&world, "BoreO").expect("generate"),
-    );
-    let radii = feed_radii(&world, "BoreO");
-    assert!(
-        radii.iter().all(|d| (14.0..=16.0).contains(d)),
-        "explicit Outside must stand, bore or no bore: {radii:?}"
-    );
-    let dives = dive_radii(&world, "BoreO");
-    assert!(
-        dives.iter().all(|d| (14.0..=16.0).contains(d)),
-        "and a wall dive still grazes at the lead-in: {dives:?}"
-    );
+    // The explicit Outside stands as asked - and on a bore it puts the
+    // Ø6 cutter on the ring at r 15, IN the plate around the Ø24 bore:
+    // the old path cut that groove silently. The part-solid depth law
+    // refuses it by name instead (the silent-gouge fix).
+    let err = GenerateOperation::new(&world, "BoreO")
+        .err()
+        .expect("an Outside ring around a bore stands in the plate - refused");
+    assert!(err.to_string().contains("cuts into the part"), "{err}");
+    assert!(err.to_string().contains("not walked at any level"), "{err}");
 }
 
 #[test]

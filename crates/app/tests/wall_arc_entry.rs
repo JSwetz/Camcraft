@@ -3,10 +3,14 @@
 //! own part (`testdata/models/Milling-test.step`, a D-shaped plate with
 //! a blind bore) contoured by its whole section with a tangential lead
 //! and Entry = Arc, regenerated through the commands; and a single-ring
-//! wall to pin the stay-down transition. Every path must verify silent.
+//! wall to pin the level-to-level link - retract and re-enter by
+//! default, stay down and ramp when the user picks it (`LevelLink`).
+//! Every path must verify silent - against the part SOLID, which is how
+//! the blind bore's ring below its floor stopped passing (the depth law).
 //!
 //! Gate map (M11.1): covers app::commands, app::machining2d (contour
-//! wall arc, seam leads), app::operation, app::verify, app::cl.
+//! wall arc, seam leads, level link, depth ladder), app::operation,
+//! app::verify, app::cl.
 
 use camcraft_app::cl::{Move, MoveKind, Toolpath};
 use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock};
@@ -48,12 +52,18 @@ fn user_op() -> OpParams {
         helix_radius: 1.0,
         blend_turns: true,
         tilt: None,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 
 /// Import the part, a 70 x 70 block from Z -7 to the part's top (Z 20),
 /// the tool, the op - and generate it, all through commands.
 fn user_job() -> (Toolpath, usize) {
+    user_job_with(user_op())
+}
+
+fn user_job_with(params: OpParams) -> (Toolpath, usize) {
     let world = new_world();
     let mut h = History::default();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/models/Milling-test.step");
@@ -65,7 +75,7 @@ fn user_job() -> (Toolpath, usize) {
     h.execute(&world, stock.expect("block stock"));
     let tool = catalog().into_iter().find(|(n, _)| *n == "EM-1000-4FL").map(|(_, t)| t).expect("catalog");
     h.execute(&world, AddTool::new(&world, "EM-1000-4FL", tool).expect("tool"));
-    let op = CreateOperation::new(&world, "C1", "EM-1000-4FL", SrcRef::Entity(name), user_op());
+    let op = CreateOperation::new(&world, "C1", "EM-1000-4FL", SrcRef::Entity(name), params);
     h.execute(&world, op.expect("create"));
     h.execute(&world, GenerateOperation::new(&world, "C1").expect("generate"));
     let e = model::find_by_name(&world, "C1").expect("op");
@@ -166,11 +176,29 @@ fn the_reported_outside_contour_enters_every_level_on_one_arc() {
     let all = fans(&t);
     let f: Vec<_> = all.iter().copied().filter(|&(s, _)| outer(&t.moves[s])).collect();
     assert_eq!(f.len(), levels.len(), "one arc entry per level on the outer ring");
-    // The bore ring: only the last, 2 mm drop leaves its arc room in
-    // the bore's air; the other six levels graze by name (noted).
+    // The bore ring is BLIND (floor Z 0): it is walked at 20..0 and
+    // never below - the old ladder walked it at -5 and -7 too, an
+    // annulus cut into the solid under the floor that the flat-region
+    // verifier could not see. Its five 5 mm drops leave no arc room in
+    // the bore's air: they graze by name (noted).
     let bore: Vec<_> = all.iter().filter(|&&(s, _)| !outer(&t.moves[s])).collect();
-    assert_eq!(bore.len(), 1, "{bore:?}");
-    assert_eq!(t.moves[bore[0].1 - 1].to.z, -7.0);
+    assert!(bore.is_empty(), "{bore:?}");
+    let ring_levels = |keep: &dyn Fn(f64) -> bool| -> Vec<f64> {
+        let mut v: Vec<f64> = t
+            .moves
+            .iter()
+            .filter(|m| m.kind == MoveKind::Feed && m.from.z == m.to.z && keep(m.to.x.hypot(m.to.y)))
+            .map(|m| m.to.z)
+            .collect();
+        v.dedup();
+        v
+    };
+    assert_eq!(ring_levels(&|d| d < 13.0), [20.0, 15.0, 10.0, 5.0, 0.0], "the bore ring ends at its floor");
+    assert_eq!(ring_levels(&|d| d > 30.0), levels, "the outer wall goes to the bottom");
+    assert!(
+        notes.contains("ends at its floor Z 0.000") && notes.contains("levels below skipped (-5.000, -7.000)"),
+        "{notes}"
+    );
     for (k, &(s, e)) in f.iter().enumerate() {
         let last = &t.moves[e - 1];
         assert_eq!(last.to.z, levels[k], "entry {k} lands on its level");
@@ -197,9 +225,9 @@ fn the_reported_outside_contour_enters_every_level_on_one_arc() {
         assert_eq!(seq, want, "entry {k}'s approach");
     }
     // Plunges left: the outer ring's deeper approaches to the arc top
-    // (5), the bore ring's six named grazes and its one arc approach.
+    // (5) and the bore ring's five named grazes.
     let plunges = t.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count();
-    assert_eq!(plunges, 5 + 6 + 1);
+    assert_eq!(plunges, 5 + 5);
 }
 
 fn disc() -> Region {
@@ -235,6 +263,8 @@ fn wall_params(entry: Entry3D, tabs: u32) -> ContourParams {
         entry,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 
@@ -266,33 +296,117 @@ fn verify_wall(t: &Toolpath, region: &Region) -> Vec<camcraft_app::verify::Warni
     verify(t, &cx)
 }
 
+/// Level transitions in path order: for each change of planar-feed
+/// level, (level above, level below, the moves strictly between the
+/// last planar feed above and the first planar feed below).
+fn transitions(t: &Toolpath) -> Vec<(f64, f64, Vec<Move>)> {
+    let planar = |m: &Move| m.kind == MoveKind::Feed && m.from.z == m.to.z;
+    let mut out = Vec::new();
+    let mut last: Option<usize> = None;
+    for (i, m) in t.moves.iter().enumerate() {
+        if !planar(m) {
+            continue;
+        }
+        if let Some(j) = last
+            && t.moves[j].to.z != m.to.z
+        {
+            out.push((t.moves[j].to.z, m.to.z, t.moves[j + 1..i].to_vec()));
+        }
+        last = Some(i);
+    }
+    out
+}
+
 #[test]
-fn a_single_wall_ring_stays_down_between_levels() {
+fn a_single_wall_ring_retracts_and_reenters_by_default() {
+    // The default link is the documented one: lead out, lift to the
+    // retract plane, move over, enter the next level by the Entry (here
+    // the wall arc) - nothing stays down unless the user asks.
     let r = disc();
     let t = contour(&r, &wall_params(Entry3D::Arc, 0)).expect("contour");
     assert_eq!(verify_wall(&t, &r), Vec::new(), "{:?}", t.notes);
-    assert!(!t.moves.iter().any(|m| m.kind == MoveKind::Plunge), "no plunge anywhere: {:?}", t.notes);
     let f = fans(&t);
     assert_eq!(f.len(), 4, "levels 20, 15, 10, 5 each enter on one arc");
-    // Level 0 comes down from clearance onto the arc top; every level
-    // after links at feed along the plane above, off its own lead-out,
-    // and arcs down - no lift, no rapid, no loop.
     assert_eq!(approach(&t, f[0].0), ["rapid-across", "rapid-down"]);
-    for &(s, _) in &f[1..] {
-        assert_eq!(approach(&t, s), Vec::<&str>::new(), "the stay-down link is a planar feed");
-        let link = &t.moves[s - 1];
-        assert_eq!(link.kind, MoveKind::Feed);
-        assert!(link.arc.is_none() && link.from.z == link.to.z);
+    let tr = transitions(&t);
+    assert_eq!(tr.len(), 3);
+    for (above, below, between) in &tr {
+        let top = between.iter().map(|m| m.to.z).fold(f64::NEG_INFINITY, f64::max);
+        assert!(top >= 30.0, "{above} -> {below}: lifts to the retract plane, got {top}");
     }
-    // Every cutter center of the whole path stays out of the part's
-    // tool-radius offset (the verifier's Boundary law above), and the
-    // descents stand off the wall: the fan never comes nearer the axis
-    // than the walked ring.
+    // Every fan stands off the wall: never nearer the axis than the ring.
     for &(s, e) in &f {
         for m in &t.moves[s..e] {
             assert!(m.to.x.hypot(m.to.y) >= 35.0 - 0.01, "fan point inside the offset: {m:?}");
         }
     }
+}
+
+#[test]
+fn a_single_wall_ring_stays_down_and_ramps_when_asked() {
+    use camcraft_app::machining2d::LevelLink;
+    let r = disc();
+    for angle in [3.0_f64, 1.0] {
+        let p = ContourParams { level_link: LevelLink::StayDownRamp, ramp_angle: angle, ..wall_params(Entry3D::Arc, 0) };
+        let t = contour(&r, &p).expect("contour");
+        assert_eq!(verify_wall(&t, &r), Vec::new(), "{:?}", t.notes);
+        // One entry from clearance; after it the tool never plunges,
+        // never rapids, and never rises above the level it just cut.
+        // (`fans` also counts the ramps - descending feeds that move in
+        // XY - so the arc entries are the descents that leave the ring.)
+        let off_ring = fans(&t)
+            .into_iter()
+            .filter(|&(s, e)| t.moves[s..e].iter().any(|m| (m.to.x.hypot(m.to.y) - 35.0).abs() > 0.05))
+            .count();
+        assert_eq!(off_ring, 1, "only the first level enters on the arc");
+        let tr = transitions(&t);
+        assert_eq!(tr.len(), 3);
+        let tan = angle.to_radians().tan();
+        for (above, below, between) in &tr {
+            assert!(!between.is_empty(), "the ramp is between the levels");
+            for m in between {
+                assert_eq!(m.kind, MoveKind::Feed, "{above} -> {below}: stays at feed: {m:?}");
+                assert!(m.from.z <= *above + 1e-9 && m.to.z <= *above + 1e-9, "never above the level cut: {m:?}");
+                assert!(m.to.z >= *below - 1e-9, "never below the next level: {m:?}");
+                let run = (m.to.x - m.from.x).hypot(m.to.y - m.from.y);
+                let drop = m.from.z - m.to.z;
+                assert!(drop <= run * tan + 1e-9, "{above} -> {below}: descends at <= {angle} deg: {m:?}");
+                // On the ring itself: the center never leaves the path.
+                assert!((m.to.x.hypot(m.to.y) - 35.0).abs() < 0.05, "the ramp rides the ring: {m:?}");
+            }
+            assert_eq!(between.last().map(|m| m.to.z), Some(*below), "the ramp lands on the level");
+        }
+        assert!(!t.moves.iter().any(|m| m.kind == MoveKind::Plunge), "{:?}", t.notes);
+    }
+}
+
+#[test]
+fn the_stay_down_ramp_falls_back_to_retract_by_name() {
+    use camcraft_app::machining2d::LevelLink;
+    let r = disc();
+    // Tabbed bottom level: the ramp would ride through a standing tab.
+    let p = ContourParams { level_link: LevelLink::StayDownRamp, ..wall_params(Entry3D::Arc, 3) };
+    let t = contour(&r, &p).expect("contour");
+    assert_eq!(verify_wall(&t, &r), Vec::new(), "{:?}", t.notes);
+    assert!(
+        t.notes.iter().any(|n| n.contains("no stay-down ramp onto Z 5.000") && n.contains("standing tab")),
+        "{:?}",
+        t.notes
+    );
+    // An angle the ring cannot hold: 0.01 deg over 5 mm wants ~130 laps.
+    let p = ContourParams { level_link: LevelLink::StayDownRamp, ramp_angle: 0.01, ..wall_params(Entry3D::Arc, 0) };
+    let t = contour(&r, &p).expect("contour");
+    assert_eq!(verify_wall(&t, &r), Vec::new(), "{:?}", t.notes);
+    assert!(t.notes.iter().any(|n| n.contains("too short for a 0.0 deg ramp")), "{:?}", t.notes);
+    let tr = transitions(&t);
+    assert_eq!(tr.len(), 3);
+    for (above, below, between) in &tr {
+        let top = between.iter().map(|m| m.to.z).fold(f64::NEG_INFINITY, f64::max);
+        assert!(top >= 30.0, "{above} -> {below}: the fallback retracts, got {top}");
+    }
+    // A nonsense angle is refused, never guessed.
+    let p = ContourParams { level_link: LevelLink::StayDownRamp, ramp_angle: 90.0, ..wall_params(Entry3D::Arc, 0) };
+    assert!(contour(&r, &p).is_err());
 }
 
 #[test]
@@ -317,4 +431,50 @@ fn plunge_entry_on_the_wall_is_unchanged_by_the_arc_law() {
     };
     let arc = contour(&r, &wall_params(Entry3D::Arc, 0)).expect("contour");
     assert_eq!(planar(&plunge), planar(&arc), "the walked rings and leads are the same");
+}
+
+#[test]
+fn the_users_part_links_levels_as_the_user_picks() {
+    use camcraft_app::machining2d::LevelLink;
+    let outer = |m: &Move| m.to.x.hypot(m.to.y) > 30.0;
+    // Default: every level change of either ring lifts to the retract
+    // plane (stock top + 13.5 = Z 33.5) before the next entry.
+    let (t, w) = user_job();
+    assert_eq!(w, 0, "{:?}", t.notes);
+    for (above, below, between) in transitions(&t) {
+        let top = between.iter().map(|m| m.to.z).fold(f64::NEG_INFINITY, f64::max);
+        assert!(top >= 33.5, "{above} -> {below}: retracts, got {top}");
+    }
+    // Stay down and ramp: each ring all the way down, ramping along
+    // itself at <= 3 deg; only the ring-to-ring move retracts.
+    let mut op = user_op();
+    if let OpParams::Contour { level_link, ramp_angle, .. } = &mut op {
+        *level_link = LevelLink::StayDownRamp;
+        *ramp_angle = 3.0;
+    }
+    let (t, w) = user_job_with(op);
+    assert_eq!(w, 0, "{:?}", t.notes);
+    let tr = transitions(&t);
+    let levels: Vec<f64> = std::iter::once(tr[0].0).chain(tr.iter().map(|x| x.1)).collect();
+    assert_eq!(
+        levels,
+        [20.0, 15.0, 10.0, 5.0, 0.0, -5.0, -7.0, 20.0, 15.0, 10.0, 5.0, 0.0],
+        "ring by ring: the outer wall to the bottom, then the bore to its floor"
+    );
+    let tan = 3.0_f64.to_radians().tan();
+    for (k, (above, below, between)) in tr.iter().enumerate() {
+        if k == 6 {
+            // Outer ring's bottom -> the bore ring's top: a new ring.
+            let top = between.iter().map(|m| m.to.z).fold(f64::NEG_INFINITY, f64::max);
+            assert!(top >= 33.5, "ring to ring retracts, got {top}");
+            continue;
+        }
+        for m in between {
+            assert_eq!(m.kind, MoveKind::Feed, "{above} -> {below}: {m:?}");
+            assert!(m.to.z <= *above + 1e-9 && m.to.z >= *below - 1e-9, "{above} -> {below}: {m:?}");
+            let run = (m.to.x - m.from.x).hypot(m.to.y - m.from.y);
+            assert!(m.from.z - m.to.z <= run * tan + 1e-9, "{above} -> {below}: steeper than 3 deg: {m:?}");
+            assert_eq!(outer(m), k < 6, "the ramp rides its own ring: {m:?}");
+        }
+    }
 }

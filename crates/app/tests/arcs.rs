@@ -57,6 +57,8 @@ fn contour_params(lead: Lead) -> ContourParams {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 

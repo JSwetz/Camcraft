@@ -120,9 +120,11 @@ pub use crate::tools::ToolGeom;
 
 mod engine;
 mod laws;
+mod solid;
 mod sweep;
 mod types;
 
 pub use types::{FixturePart, Mode, VerifyContext, Warning};
 pub use engine::verify;
 pub use laws::{bands_vs_fixtures, rapids_vs_fixtures};
+pub use solid::solid_hits;

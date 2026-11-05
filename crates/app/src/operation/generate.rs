@@ -42,6 +42,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         is_mill,
         spindle,
         fixtures,
+        part_solid,
     } = job;
     // Tool: the diameter drives the path, the body drives the reach law.
     let d = tool.diameter;
@@ -151,6 +152,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             entry,
             helix_radius,
             blend_turns,
+            level_link,
+            ramp_angle,
             ..
         } => {
             // Backstop for a committed file that carries Inside on a
@@ -179,6 +182,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 entry: *entry,
                 helix_radius: *helix_radius,
                 blend_turns: *blend_turns,
+                level_link: *level_link,
+                ramp_angle: *ramp_angle,
             };
             let (region, path) = match &src {
                 SrcRef::Selection(_) => {
@@ -209,6 +214,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     };
                     let mut path = if region.is_empty() {
                         Toolpath::new(Vec::new())
+                    } else if part_solid {
+                        // Picked rings of a part: each walked only down
+                        // to the floor of the wall it trims.
+                        machining2d::contour_on_part(&region, &m_gen.facets, &cp)?
                     } else {
                         machining2d::contour(&region, &cp)?
                     };
@@ -226,7 +235,15 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                         m_gen,
                         frame.as_ref(),
                     )?;
-                    let path = machining2d::contour(&region, &cp)?;
+                    // A whole part's section is ONE plane's rings: each
+                    // is walked only where the part's wall it trims
+                    // still exists (a blind bore's ring ends at its
+                    // floor) - never the top plane's ring at every level.
+                    let path = if part_solid {
+                        machining2d::contour_on_part(&region, &m_gen.facets, &cp)?
+                    } else {
+                        machining2d::contour(&region, &cp)?
+                    };
                     (region, path)
                 }
             };
@@ -2284,6 +2301,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         | OpParams::ProfileRough { stock_to_leave, .. }
         | OpParams::GrooveRough { stock_to_leave, .. } => *stock_to_leave,
     };
+    // The 2D kinds' depth-aware verify (the silent-gouge fix): a flat
+    // region says where the walls stand at ONE plane, and a path walked
+    // at every level of the ladder must also answer to the part solid
+    // at each level it cuts - a blind bore's ring below its floor is in
+    // steel the flat region never shows.
+    let depth_law = depth_law_of(&params, &src, part_solid);
     match &frame {
         None => {
             let mut warns = verify::verify(
@@ -2354,7 +2377,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                             | OpParams::FormTurning { .. }
                             | OpParams::BoringTurning { .. }
                     )
-                    .then_some(&material.facets[..]),
+                    .then_some(&material.facets[..])
+                    .or((depth_law == DepthLaw::Section).then_some(&material.facets[..])),
                     tool: &geom,
                     mode,
                     stock_top_z,
@@ -2486,6 +2510,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     *tolerance,
                 ));
             }
+            // Containment rides every depth law: the model law samples a
+            // straight move at its end only, and a facing row or a
+            // stay-down link can cross solid between two clear ends.
+            if depth_law != DepthLaw::None {
+                contain_into(&mut warns, &path, &material.facets);
+            }
             Ok((path, warns))
         }
         Some(f) => {
@@ -2545,7 +2575,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 &VerifyContext {
                     region: &region,
                     stock: stock_region_local.as_ref(),
-                    model: None,
+                    // The local facets: the path is local here, and
+                    // the depth law reads the part in the same frame.
+                    model: (depth_law == DepthLaw::Section).then_some(&m_gen.facets[..]),
                     tool: &geom,
                     mode,
                     stock_top_z: st_local,
@@ -2559,6 +2591,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     spindle: None,
                 },
             );
+            // Containment rides every depth law: the model law samples a
+            // straight move at its end only, and a facing row or a
+            // stay-down link can cross solid between two clear ends.
+            if depth_law != DepthLaw::None {
+                contain_into(&mut warns, &path, &m_gen.facets);
+            }
             if !fixture_boxes.is_empty() {
                 warns.extend(verify::bands_vs_fixtures(
                     &path_world,
@@ -2574,6 +2612,70 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 ));
             }
             Ok((path_world, warns))
+        }
+    }
+}
+
+/// Which depth-aware law a 2D kind's path answers to beyond its flat
+/// region (the silent-gouge fix, Prime Directive).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DepthLaw {
+    /// Nothing beyond the kind's own laws: the 3D kinds (they pass the
+    /// model already), stock sources, and the kinds whose source IS the
+    /// material they remove or whose cut enters the part by design.
+    None,
+    /// The full model law: the gouge tangency and containment checked
+    /// against the part's section at every move's deepest plane, and
+    /// the reach laws reading those sections as islands - plus the
+    /// containment law sampled ALONG each move.
+    Section,
+    /// Containment only (drill, bore, thread mill): their regions carry
+    /// exact rims for the mesh's tessellated hole walls, so tangency to
+    /// the facets would convict a matched tool - but a center inside
+    /// the part's section (a plunge past a blind floor) is a gouge.
+    Contain,
+}
+
+/// The depth law per kind and source. Only a finished-part source (see
+/// `GenJob::part_solid`) can be gouged:
+/// - Contour and Face trim/skim the part itself: `Section`.
+/// - The pocket family cuts picked part features (`Section`); a whole-
+///   model source there is the volume to REMOVE (the region is the
+///   material, its interior is cut by contract), so no part law applies.
+/// - Slot and Circular cut authored geometry into their source - the
+///   source is the material to remove, not a part to keep.
+/// - Trace, Engrave and 2D Chamfer enter the part by design (the
+///   engraving, the broken edge); their own modes stand the gouge law
+///   down for exactly that reason.
+/// - Drill (Z holes), Bore, Thread: `Contain`.
+pub(super) fn depth_law_of(params: &OpParams, src: &SrcRef, part_solid: bool) -> DepthLaw {
+    if !part_solid {
+        return DepthLaw::None;
+    }
+    match params {
+        OpParams::Contour { .. } | OpParams::Face { .. } => DepthLaw::Section,
+        OpParams::Pocket { .. } | OpParams::Adaptive2D { .. } | OpParams::Offset2D { .. }
+            if matches!(src, SrcRef::Selection(_)) =>
+        {
+            DepthLaw::Section
+        }
+        OpParams::Drill { cross, .. } if cross.is_empty() => DepthLaw::Contain,
+        OpParams::Bore { .. } | OpParams::Thread { .. } => DepthLaw::Contain,
+        _ => DepthLaw::None,
+    }
+}
+
+/// Sample spacing of the containment law along a straight move, mm:
+/// finer than any drill the catalog carries, coarse enough to stay
+/// linear on a long traverse.
+const CONTAIN_STEP: f64 = 0.25;
+
+/// Append the containment law's gouges that the region laws did not
+/// already report, keeping the list's move order.
+fn contain_into(warns: &mut Vec<Warning>, path: &Toolpath, facets: &[Triangle]) {
+    for w in verify::solid_hits(path, facets, GOUGE_TOL, CONTAIN_STEP) {
+        if !warns.contains(&w) {
+            warns.push(w);
         }
     }
 }

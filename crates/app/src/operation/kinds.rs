@@ -688,6 +688,10 @@ fn seed_contour(c: &Carried) -> OpParams {
         helix_radius: 1.0,
         // Turning-point blends are opt-in (M11.1 B), as on Face.
         blend_turns: false,
+        // Retract and re-enter: the transition every earlier contour
+        // posted; staying down is the user's pick on Leads & Links.
+        level_link: crate::machining2d::LevelLink::RetractReenter,
+        ramp_angle: crate::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
         tilt: c.tilt,
     }
 }

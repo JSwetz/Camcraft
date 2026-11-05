@@ -9210,3 +9210,50 @@ the bore floor (Z 0 down to -7), and verify checks Contour against
 the same flat region, so the post lets it through. Fix in flight:
 depth-aware verify for 2D ops with a model source, and per-ring level
 ranges ending at each feature's floor.
+
+## The silent blind-floor gouge, and the level link as a user choice: six decisions (2026-11-05)
+
+(1) **2D ops on a part source are verified against the part solid.**
+Contour, Face and part-picked pockets get the section law plus a new
+along-the-move check (`sim::verify::solid`, the cutter centre sampled
+inside the part along each move; a straight move was only checked at
+its ends). Drill (Z holes), Bore and Thread get the along-the-move
+check alone, because their exact hole rims would be convicted against
+the faceted mesh wall. Gated on `GenJob.part_solid` (a model or picks
+on models, never the stock). Left out on purpose: pocket-family ops on
+a whole model (the region IS the material), Slot and Circular
+(authored geometry), and Trace/Engrave/Chamfer (they cut the part by
+design). Those can still pass a below-floor cut silently; owed.
+
+(2) **A contour ring walks only down to its wall's floor.** Each ring's
+levels are tested against the part section at that height and every
+mesh vertex height up to the level above. A ring stops at its first
+illegal level, and the floor gets its own level (vertex height plus
+stock to leave), each drop named in the notes. Dropped: re-sectioning
+at every level, which would follow drafts and flanges and is no longer
+a 2D contour.
+
+(3) **When every ring cuts into the part at its first level,
+generation refuses.** This reverses two old fixtures: an explicit
+Outside on a picked bore, and Inside on a top-face edge, which each
+put the cutter in the part. Dropped: an empty path that reads as
+clean.
+
+(4) **`level_link` is the user's choice** (the user: "the whole idea of
+a CAM package is for the user to be able to control and generate
+G-code"). RetractReenter (default, every golden byte-identical) or
+StayDownRamp at `ramp_angle` (default 3 degrees), which cuts ring by
+ring and ramps down along the ring itself, so it never leaves proven
+ground. It falls back to retract by name on tabbed levels or rings too
+short for the angle. Shown on the Leads & Links tab as "Level to
+level" and "Ramp angle (deg)". The project key is written only when not
+the default, so there is no version bump; the stamp byte 0xC1 is
+appended only under StayDownRamp.
+
+(5) **The demo snapshots changed for a true reason.** The demo
+Contour's status now names a shank/holder collision with the part
+instead of "the uncut stock": the depth-aware law sees the shank really
+rubbing the finished wall.
+
+(6) **Owed.** contour.rs is ~690 lines (split due); depth-aware verify
+for the left-out kinds; no UI-level test drives the new combo.

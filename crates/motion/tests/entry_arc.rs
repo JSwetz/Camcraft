@@ -207,6 +207,8 @@ fn cp() -> ContourParams {
         entry: Entry3D::Arc,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_motion::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_motion::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 

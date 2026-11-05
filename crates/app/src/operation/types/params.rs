@@ -3,7 +3,7 @@
 use crate::drilling::{CycleChoice, Hole};
 use crate::finishing3d;
 use crate::geo2d::Point2;
-use crate::machining2d::{Lead, PocketStrategy, Side};
+use crate::machining2d::{Lead, LevelLink, PocketStrategy, Side};
 use crate::machining3d::Entry3D;
 
 use super::height::Height;
@@ -119,6 +119,13 @@ pub enum OpParams {
         /// it (`machining2d::fillet_corners`); `false` is the sharp
         /// walk every pre-M11.1 file holds.
         blend_turns: bool,
+        /// Level to level (the Leads & Links choice): retract and
+        /// re-enter - every file before the option - or stay down and
+        /// ramp along the ring (`machining2d::LevelLink`).
+        level_link: LevelLink,
+        /// Maximum stay-down ramp angle, degrees; read only under
+        /// `LevelLink::StayDownRamp`.
+        ramp_angle: f64,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },

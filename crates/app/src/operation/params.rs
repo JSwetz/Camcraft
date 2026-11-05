@@ -126,6 +126,8 @@ impl OpParams {
                 entry,
                 helix_radius,
                 blend_turns,
+                level_link,
+                ramp_angle,
                 tilt,
             } => {
                 w(h, *stock_to_leave);
@@ -180,6 +182,13 @@ impl OpParams {
                 // legacy sharp contour keeps its cached digest.
                 if *blend_turns {
                     h.write_u8(0xB1);
+                }
+                // The stay-down link changes the moves (and reads its
+                // angle); written only when chosen, so every retract-
+                // and-re-enter contour keeps its cached digest.
+                if *level_link == crate::machining2d::LevelLink::StayDownRamp {
+                    h.write_u8(0xC1);
+                    w(h, *ramp_angle);
                 }
             }
             OpParams::Pocket {

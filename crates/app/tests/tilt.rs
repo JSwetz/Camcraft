@@ -380,6 +380,8 @@ fn tilt_on_a_picked_selection_refuses_by_name() {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     };
     // The prismatic control: the same pick on the same part is legal.
     history.execute(

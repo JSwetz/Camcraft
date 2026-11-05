@@ -133,6 +133,8 @@ fn contour_side(side: Side) -> ContourParams {
         entry: crate::entry::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: crate::machining2d::LevelLink::RetractReenter,
+        ramp_angle: crate::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     }
 }
 

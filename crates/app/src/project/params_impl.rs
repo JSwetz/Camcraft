@@ -1,4 +1,5 @@
 use super::*;
+use crate::machining2d::LevelLink;
 
 impl ParamsDto {
     pub(super) fn from_params(p: &OpParams) -> Self {
@@ -45,6 +46,8 @@ impl ParamsDto {
                 entry,
                 helix_radius,
                 blend_turns,
+                level_link,
+                ramp_angle,
                 tilt,
             } => ParamsDto::Contour {
                 stock_to_leave: *stock_to_leave,
@@ -79,6 +82,11 @@ impl ParamsDto {
                 },
                 helix_radius: *helix_radius,
                 blend_turns: *blend_turns,
+                level_link: match level_link {
+                    LevelLink::RetractReenter => LevelLinkDto::RetractReenter,
+                    LevelLink::StayDownRamp => LevelLinkDto::StayDownRamp,
+                },
+                ramp_angle: *ramp_angle,
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Pocket {
@@ -1184,6 +1192,8 @@ impl ParamsDto {
                 entry,
                 helix_radius,
                 blend_turns,
+                level_link,
+                ramp_angle,
                 tilt,
             } => OpParams::Contour {
                 stock_to_leave: *stock_to_leave,
@@ -1220,6 +1230,11 @@ impl ParamsDto {
                 },
                 helix_radius: *helix_radius,
                 blend_turns: *blend_turns,
+                level_link: match level_link {
+                    LevelLinkDto::RetractReenter => LevelLink::RetractReenter,
+                    LevelLinkDto::StayDownRamp => LevelLink::StayDownRamp,
+                },
+                ramp_angle: *ramp_angle,
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Pocket {

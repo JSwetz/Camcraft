@@ -491,6 +491,8 @@ fn arc_move_round_trips() {
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
                 blend_turns: false,
+                level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+                ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
             },
         )
         .expect("create"),
@@ -1164,6 +1166,8 @@ fn a_selection_round_trips_and_stays_ok() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
+        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
     };
     history.execute(
         &world,
@@ -2610,6 +2614,80 @@ fn tangential_lead_round_trips() {
 }
 
 #[test]
+fn level_link_choice_round_trips_and_the_default_writes_no_key() {
+    use camcraft_app::machining2d::LevelLink;
+    let job = |link: LevelLink, angle: f64| {
+        let world = new_world();
+        let mut history = History::default();
+        history.execute(
+            &world,
+            SetStock::new(&world, StockShape::Box { dx: 40.0, dy: 40.0, dz: 10.0 }, Location::default())
+                .expect("stock"),
+        );
+        history.execute(
+            &world,
+            AddTool::new(&world, "EM-0600-4FL", catalog_tool("EM-0600-4FL")).expect("tool"),
+        );
+        history.execute(
+            &world,
+            ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(10.0, 10.0, 5.0))),
+        );
+        let params = OpParams::Contour {
+            tilt: None,
+            stock_to_leave: 0.0,
+            clearance_z: Height::fixed(10.0),
+            retract_z: Height::fixed(8.0),
+            top_z: Height::fixed(5.0),
+            bottom_z: Height::fixed(0.0),
+            stepdown: 2.0,
+            feed: 800.0,
+            plunge_feed: 200.0,
+            climb: true,
+            side: Side::Auto,
+            lead: Lead::None,
+            tolerance: 0.01,
+            tab_count: 0,
+            tab_width: 0.0,
+            tab_height: 0.0,
+            entry: camcraft_app::machining3d::Entry3D::Plunge,
+            helix_radius: 1.0,
+            blend_turns: false,
+            level_link: link,
+            ramp_angle: angle,
+        };
+        history.execute(
+            &world,
+            CreateOperation::new(&world, "C1", "EM-0600-4FL", SrcRef::Entity("part".into()), params)
+                .expect("create"),
+        );
+        world
+    };
+    // The default is absent from the file - every earlier save holds.
+    let path = tmp_path("link-default");
+    project::save(&job(LevelLink::RetractReenter, 3.0), &path).expect("save");
+    let text = std::fs::read_to_string(&path).expect("read");
+    assert!(!text.contains("level_link") && !text.contains("ramp_angle"), "{text}");
+    // The user's pick and angle write back, and round-trip byte-for-byte.
+    let path = tmp_path("link-stay");
+    project::save(&job(LevelLink::StayDownRamp, 5.0), &path).expect("save");
+    let first = std::fs::read_to_string(&path).expect("read");
+    assert!(first.contains("\"level_link\": \"stay_down_ramp\""), "{first}");
+    assert!(first.contains("\"ramp_angle\": 5.0"), "{first}");
+    let world2 = new_world();
+    project::load(&world2, &path).expect("load");
+    project::save(&world2, &path).expect("resave");
+    let second = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(first, second);
+    let e = model::find_by_name(&world2, "C1").expect("op");
+    let o = model::operation_of(&world2, &e).expect("operation");
+    let OpParams::Contour { level_link, ramp_angle, .. } = o.params else {
+        panic!("contour expected");
+    };
+    assert_eq!((level_link, ramp_angle), (LevelLink::StayDownRamp, 5.0));
+}
+
+#[test]
 fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
     // The stored value is the user's ask, never a resolution: Inside
     // survives save/load byte-for-byte...
@@ -2663,6 +2741,8 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
                 blend_turns: false,
+                level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+                ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
             },
         )
         .expect("create"),
@@ -2736,14 +2816,20 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
                 blend_turns: false,
+                level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
+                ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
             },
         )
         .expect("create C2"),
     );
-    history.execute(
-        &world2,
-        GenerateOperation::new(&world2, "C2").expect("generate C2"),
-    );
+    // The picked ring is the part's own top-face edge, and Inside puts
+    // the cutter 3 mm into the 5 mm-tall part from Z 4 down: a groove
+    // through the finished part. The depth law refuses it by name -
+    // the choice still round-trips below, the cut never generates.
+    let err = GenerateOperation::new(&world2, "C2")
+        .err()
+        .expect("an Inside ring inside the part solid must refuse");
+    assert!(err.to_string().contains("cuts into the part"), "{err}");
     project::save(&world2, &path).expect("save");
     let first = std::fs::read_to_string(&path).expect("read");
     assert!(
