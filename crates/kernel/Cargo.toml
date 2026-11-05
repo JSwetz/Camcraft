@@ -1,0 +1,29 @@
+[package]
+name = "camcraft-kernel"
+description = "The B-rep kernel seam (M12.1 stage 1): a thin trait over solidcore (the SMLib port) with a truck-backed reference impl, plus the dual-kernel agreement bench. No other crate depends on it yet. Clean-room implementation, public sources only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# The truck reference impl (boolean via truck-shapeops, measure via
+# truck-meshalgo tessellation). OFF by default: truck-shapeops 0.4.0 takes
+# truck-meshalgo with its default features, which on native targets pull
+# vtkio -> xz2 -> lzma-sys (C code) - the chain the workspace keeps off for
+# camcraft-app. The bench turns it on through the dev-dependency below, so
+# the C chain only builds for this crate's own tests.
+truck = ["dep:truck-shapeops", "dep:truck-modeling", "dep:truck-meshalgo"]
+
+[dependencies]
+thiserror = { workspace = true }
+# The SMLib port (tangency-labs, Apache-2.0, pure Rust, forbid(unsafe_code),
+# thiserror its only dependency). Hard-pinned: a 1.x minor adds opt-in
+# upstream fixes, and the bench numbers are only meaningful against one.
+solidcore = "=1.0.1"
+truck-shapeops = { version = "=0.4.0", default-features = false, optional = true }
+truck-modeling = { version = "=0.6.0", optional = true }
+truck-meshalgo = { workspace = true, optional = true }
+
+[dev-dependencies]
+camcraft-kernel = { path = ".", features = ["truck"] }

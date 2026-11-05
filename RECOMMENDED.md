@@ -8989,3 +8989,52 @@ that only holds within one build.
 BLOCKED line takes priority over it. The ui test went into the
 ~4,100-line `egui_app/tests.rs`, since it needs that file's private
 harness; splitting that suite is owed.
+
+## M12.1 stage 1 - solidcore evaluated behind a kernel seam: seven decisions (2026-11-05)
+
+(1) **solidcore is pinned at `=1.0.1`.** It is published as 1.0.1, not
+the 0.0.x the ROADMAP describes, matching the SMLib upstream release
+exactly. The bench numbers only mean something against one version;
+later minor versions add opt-in fixes. Dropped: a git dependency.
+
+(2) **The seam measures instead of tessellating.** solidcore 1.0.1 has
+not ported tessellation. `trait Kernel` offers `measure` (volume plus
+bounding box): solidcore integrates exactly, and truck measures its own
+mesh. A solidcore display path needs upstream tessellation first.
+
+(3) **The truck side sits behind an optional `truck` feature**, turned
+on only for this crate's own tests. truck-shapeops 0.4.0 forces
+truck-meshalgo's default features, which pull vtkio, xz2 and lzma-sys
+(C code), exactly the chain the workspace keeps out of camcraft-app.
+
+(4) **Offset runs with `merge_results: true` plus two guards.** It
+refuses insets of at least half the thinnest extent, and the volume
+must move in the direction of the offset's sign. Without them, the
+port's defaults return a 0-volume non-solid for a box inset by 1, and
+a box inset by 6 comes back as a valid-looking volume-8 solid: a wrong
+answer dressed as right. The guards only see the overall extent, so a
+thin wall in a big part could still collapse unseen; a per-feature
+check is stage-2 work.
+
+(5) **Port findings are pinned in a table, not failing tests.**
+`KNOWN_PORT_VERDICTS` records the port's behaviour on a NaN offset, a
+NaN origin, an empty-shape offset, and the inset-by-1 and inset-by-6
+cases. Each is wrapped into an `Err` by our side, and a version bump
+that changes any of them fails the test. They should be filed upstream
+at tangency-labs/solidcore. solidcore never panicked; truck's known
+panics are contained the way `geometry::import::step` already does it.
+
+(6) **Agreement verdict: the boolean and offset fixtures agree.**
+solidcore is within 1e-6 of the analytic volume, truck is within its
+mesh budget, and truck converges toward solidcore at finer tessellation.
+Bounding boxes match within 1e-14. Remaining before truck can retire:
+fillet fixtures, the corrupt-input corpus through a solidcore importer
+(none exists - STEP stays on truck-stepio per the ROADMAP), and adding
+the crate to M4.2's wasm CI job. `cargo check --target
+wasm32-unknown-unknown` already passes locally.
+
+(7) **Cost noted.** The crate is ~607k lines and takes 7-8 minutes per
+profile to compile; nothing outside `camcraft-kernel` depends on it
+yet, so the app's debug ladder doesn't pay that. Truck's own Apache-2.0
+notice is still missing from `assets/ui/LICENSES.md` and is owed in its
+own commit.
