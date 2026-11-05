@@ -1500,6 +1500,16 @@ problem with the operations, there is lack of control on area affected.")
 - **C - additional boundaries**: extra include / exclude regions (picked
       faces, sketches/loops, the stock outline, the silhouette of the part),
       combined by the same 2D boolean law (clipper2).
+- **E - open boundaries**: a boundary may be an open chain (picked edges /
+      a sketch curve that does not close). The machined area is the side of
+      it the user picks (machine inside / outside - i.e. which side of the
+      open curve), closed off by the stock outline: the path starts outside
+      the stock (in air, the facing-style approach) and works in up to the
+      open boundary. (User review, 2026-11-05: "We should also be able to
+      choose open boundaries. then the path should expand to outside of the
+      stock as a starting point and work up to the boundary. But there
+      should also be options to choose inside or outside of boundary to
+      machine.") Closed boundaries keep the same inside / outside choice.
 - **D - every op, one place**: the controls live in a "Geometry" /
       "Boundary" group on every kind with an area (2D and 3D families), with
       defaults that reproduce today's output; legality unchanged - an area
