@@ -37,6 +37,22 @@ pub const FFO_FLOOR: f64 = 0.25;
 /// zero-depth skin of the first level, air moves - reads exactly 0
 /// and is held at the programmed feed (there is no load to pay for).
 pub(super) fn engagement(dex: &Dexel, from: Point2, to: Point2, z: f64, r: f64) -> f64 {
+    sample_engagement(|q| dex.col(q).map(|i| dex.top_at(i)), from, to, z, r)
+}
+
+/// The same sampler read off either stock engine (M7.3): the seam's
+/// column reader answers `col`-then-`top_at` on the column arm and the
+/// verdict march on the field arm, so the heavy agreement lane asks
+/// both engines this law's question and demands one answer. Not on
+/// the feed pass's path yet - the column arm still owns `optimize_feed`.
+#[must_use]
+pub fn engagement_on(cols: &stock_sim::Columns<'_>, from: Point2, to: Point2, z: f64, r: f64) -> f64 {
+    sample_engagement(|q| cols.top_over(q), from, to, z, r)
+}
+
+/// The chord law of [`engagement`], over any column-top source:
+/// `top(q)` is the top standing in `q`'s column, None off the grid.
+fn sample_engagement(top: impl Fn(Point2) -> Option<f64>, from: Point2, to: Point2, z: f64, r: f64) -> f64 {
     const HALF: i32 = 8; // r/8 chord resolution, one lattice step per side
     let (dx, dy) = (to.x - from.x, to.y - from.y);
     let len = (dx * dx + dy * dy).sqrt();
@@ -60,8 +76,8 @@ pub(super) fn engagement(dex: &Dexel, from: Point2, to: Point2, z: f64, r: f64) 
                 s.y + ny * (k as f64) * r / HALF as f64,
             );
             total += 1;
-            if let Some(i) = dex.col(q)
-                && dex.top_at(i) > z + EPS
+            if let Some(t) = top(q)
+                && t > z + EPS
             {
                 hit += 1;
             }

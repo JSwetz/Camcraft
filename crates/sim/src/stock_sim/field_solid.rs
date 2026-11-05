@@ -149,6 +149,24 @@ pub(crate) fn pose_dist(ax: [f64; 3], t: Point3, q: Point3, kind: &RevKind) -> f
     }
 }
 
+/// An UPRIGHT flat pose's exact distance `v` (anchor `foot`, axis +Z)
+/// with its ties settled the column engine's way (M7.3): a point ON
+/// the flank (`rho == r`) strictly above the floor is removed - the
+/// column's reach law is inclusive of its disc - while a point ON the
+/// floor is not (the column's top IS the floor: steel to that plane).
+/// Elsewhere the old conservative hair stays: outside reads a
+/// rounding-scale more than exact, so no other tie ever claims.
+pub(crate) fn flat_tie(foot: Point3, q: Point3, kind: &RevKind, v: f64) -> f64 {
+    if let RevKind::Flat { r, flank } = kind {
+        let zl = q.z - foot.z;
+        let rho = (q.x - foot.x).hypot(q.y - foot.y);
+        if rho <= *r && zl > 0.0 && zl < *flank {
+            return v.min(-f64::MIN_POSITIVE);
+        }
+    }
+    v + 1e-12 + 1e-15 * v.abs()
+}
+
 /// Distance in the (rho, z) half-plane from a point to a segment.
 fn dist_pt_seg2(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
     let (dx, dy) = (bx - ax, by - ay);

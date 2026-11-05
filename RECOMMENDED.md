@@ -9355,3 +9355,30 @@ version bump; old Adaptive ops go Stale once and regenerate identical.
 (6) **Open, for the user.** A Pocket whose source is the whole model
 clears the part's own section silently - the documented "a whole-model
 source is the volume to remove" contract. Kept for now; flagged.
+
+## M7.3 B - consumer parity for the column retirement (blocked, not done): four decisions (2026-11-05)
+
+(1) **Retirement is blocked, honestly.** Every consumer the field can
+answer today is proven identical on the heavy lane: verdict, Deviate
+sheet and classes, rest masks (`above(z)`) and the feed-engagement
+sampler, across all 21 goldens. The deletion still waits on three
+things: the field building the op-frame stock `sim_of` uses (lattice
+on the footprint's own corner, plus the stock and part raise), the
+multi-setup clip, and `ladder.rs`/`entry.rs` taking `&Stock`.
+
+(2) **One shared column reader (`Stock::columns`) on both engines.**
+Dropped: a per-engine sampler, a second copy of the law that could
+drift.
+
+(3) **Masks are strict thresholds, so floors are exact.** Machined
+floors under an upright flat tool now read exactly their plane
+(`flat_floor_entry`); before, they read ~1.2e-12 high, and `above(z)`
+counted a whole floor (1461 mm^2 on the Pocket3D fixture) as standing.
+Dropped: an epsilon on the comparison, which accepts a rounding the
+law calls a bug.
+
+(4) **Edge ties follow the column engine** (`flat_tie`: side
+inclusive, bottom exclusive). This replaces part of M7.3 A (5)'s
+uniform nudge; worst deviation between engines fell to 4.5e-13. Owed:
+field `measure` proven on the goldens, exact floors for ball and
+taper, dexel.rs at 445 lines.

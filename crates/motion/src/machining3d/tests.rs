@@ -37,3 +37,44 @@ fn a_zero_length_planar_move_reads_as_a_full_bite() {
     let ae = engagement(&dex, Point2::new(2.0, 2.0), Point2::new(2.0, 2.0), 5.0, 1.0);
     assert!((ae - 1.0).abs() < 1e-12, "got {ae}");
 }
+
+#[test]
+fn the_sampler_reads_both_stock_engines_alike() {
+    // M7.3: `engagement_on` is the same chord law on the seam's
+    // column reader - on the column arm it IS `engagement`, and the
+    // field arm must answer every chord identically (the sampler is
+    // quantized, so equal means equal), with a fresh shelf beside the
+    // first pass: half, full, and air bites all asked.
+    use crate::cl::{Move, MoveKind};
+    use crate::geometry::Point3;
+    use crate::stock_sim::{Backend, SimOp, Stock, FIELD_BAND};
+    let block = |b| Stock::block(b, 0.0, 0.0, 12.0, 12.0, 0.0, 1.0).unwrap();
+    let (mut c, mut f) = (block(Backend::Column), block(Backend::Field { band: FIELD_BAND }));
+    let pass = [Move {
+        kind: MoveKind::Feed,
+        from: Point3::new(4.0, 2.0, -2.0),
+        to: Point3::new(4.0, 10.0, -2.0),
+        feed: Some(500.0),
+        arc: None,
+        axis: None,
+    }];
+    let ops = [SimOp { moves: &pass, radius: 2.0, ball: false, cone: None }];
+    c.simulate(&ops).unwrap();
+    f.simulate(&ops).unwrap();
+    let (cc, cf) = (c.columns().unwrap(), f.columns().unwrap());
+    let dex = c.column().unwrap();
+    let mut seen = Vec::new();
+    for (a, b) in [((6.0, 2.0), (6.0, 10.0)), ((4.0, 3.0), (4.0, 9.0)), ((9.0, 2.0), (9.0, 10.0)), ((2.0, 6.0), (10.0, 6.0))] {
+        let (a, b) = (Point2::new(a.0, a.1), Point2::new(b.0, b.1));
+        let ec = engagement_on(&cc, a, b, -2.0, 2.0);
+        assert_eq!(ec, engagement(dex, a, b, -2.0, 2.0), "the column arm is the shipped sampler");
+        assert_eq!(ec, engagement_on(&cf, a, b, -2.0, 2.0), "field disagrees on {a:?} -> {b:?}");
+        seen.push(ec);
+    }
+    // Not a vacuous agreement: the slot's own track (only its rim
+    // samples stand), a half bite on its wall, a full bite in the
+    // fresh shelf were all read.
+    assert!(seen[1] < 0.1, "the cut's track is (nearly) air: {seen:?}");
+    assert!(seen[0] > 0.3 && seen[0] < 0.7, "the wall pass is a half bite: {seen:?}");
+    assert_eq!(seen[2], 1.0, "the fresh shelf is a full bite: {seen:?}");
+}

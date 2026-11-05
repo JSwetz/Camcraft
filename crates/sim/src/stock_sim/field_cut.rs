@@ -58,7 +58,7 @@
 //!   refuses by name before a single brick is written.
 
 use super::field::{cell_of, SdfField};
-use super::field_solid::{add, dist_pt_para, dot, pose_dist, scale, sub, tool_kind, RevKind, ToolKind};
+use super::field_solid::{add, dist_pt_para, dot, flat_tie, pose_dist, scale, sub, tool_kind, RevKind, ToolKind};
 use super::kernel::StockError;
 use super::scan::dist_pt_seg3;
 
@@ -193,11 +193,11 @@ impl Sweep {
                     return pose_dist(ax, *a, q, kind); // a station: one pose
                 }
                 if let Some(t) = upright_flat_foot(ax, *a, d, q, kind) {
-                    // Exact, then nudged a rounding-scale hair UP: the
-                    // golden section's conservative direction kept, so
-                    // a tie on the solid's face never claims removal.
-                    let v = pose_dist(ax, add(*a, scale(d, t)), q, kind);
-                    return v + 1e-12 + 1e-15 * v.abs();
+                    // Exact, then ties settled by the column's law
+                    // (M7.3, `flat_tie`): the flank is inclusive, the
+                    // floor is not.
+                    let foot = add(*a, scale(d, t));
+                    return flat_tie(foot, q, kind, pose_dist(ax, foot, q, kind));
                 }
                 // Golden section on the convex map t -> phi(q - (a + t*d)).
                 let (mut lo, mut hi) = (0.0f64, 1.0f64);

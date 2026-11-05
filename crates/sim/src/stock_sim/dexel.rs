@@ -406,26 +406,9 @@ impl Dexel {
     /// clothing: cell-quantized by construction, and its consumer's
     /// tolerance laws - not this shape's corners - decide what is cut.
     pub fn above(&self, z: f64) -> Result<Region, StockError> {
-        let mut acc: Option<Region> = None;
-        for iy in 0..self.ny {
-            let mut run: Option<usize> = None;
-            for ix in 0..=self.nx {
-                let over = ix < self.nx && self.top_at(ix + iy * self.nx) > z;
-                match (run, over) {
-                    (None, true) => run = Some(ix),
-                    (Some(a), false) => {
-                        let r = strip(self.x0, self.y0, self.cell, a, ix, iy)?;
-                        acc = Some(match acc {
-                            None => r,
-                            Some(g) => g.union(&r).map_err(StockError::Geo)?,
-                        });
-                        run = None;
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Ok(acc.unwrap_or_else(Region::empty))
+        // The strip law lives with the seam's reader (M7.3), so both
+        // arms merge their masks by one body of code.
+        super::columns::above_strips(self.x0, self.y0, self.cell, self.nx, self.ny, |k| self.top_at(k), z)
     }
 }
 

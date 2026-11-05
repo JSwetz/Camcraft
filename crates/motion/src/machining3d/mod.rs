@@ -100,6 +100,6 @@ pub use entry::{
     pocket3d_offset_with_rest_prev, pocket3d_prev, pocket3d_with_rest,
     pocket3d_with_rest_prev,
 };
-pub use feed::{optimize_feed, FFO_FLOOR};
+pub use feed::{engagement_on, optimize_feed, FFO_FLOOR};
 pub use params::{engagement_step, Entry3D, Pocket3DParams};
 pub use rest::material_above;

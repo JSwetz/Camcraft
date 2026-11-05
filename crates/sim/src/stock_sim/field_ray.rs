@@ -35,6 +35,7 @@
 
 use super::field::SdfField;
 use super::field_cut::Sweep;
+use super::field_solid::RevKind;
 
 use crate::geometry::Point3;
 
@@ -76,6 +77,9 @@ pub(crate) fn vertical_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> 
     if g(0.0) < 0.0 {
         return 0.0; // the solid already covers the center
     }
+    if let Some(u) = flat_floor_entry(ax, sw, q, cell) {
+        return u;
+    }
     // Convex minimum of g on [0, cell]: golden section, same floor
     // as `field_cut`'s sweep search.
     const PHI: f64 = 0.6180339887498949;
@@ -114,4 +118,60 @@ pub(crate) fn vertical_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> 
         }
     }
     inside
+}
+
+/// The upright flat tool's floor, in closed form (M7.3): a level move
+/// or a plunge of a vertical-axis cylinder sweeps a solid whose bottom
+/// is the PLANE of its lowest tip, so a vertical ray strictly inside
+/// the swept footprint enters at exactly that plane - the column
+/// engine's own `min(top, tip z)`, with no search residue. The search
+/// above answers the same entry only to its bisection floor (and the
+/// cut's conservative 1e-12 hair), which left every machined floor
+/// reading a hair ABOVE its own plane: harmless to a verdict within
+/// `FIELD_VERDICT_EPS`, fatal to the strict `above(z)` mask the rest
+/// ladder asks at exactly that plane. None for every other solid, a
+/// ray outside the footprint, or a floor outside this cell's ray.
+fn flat_floor_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> Option<f64> {
+    let Sweep::Revolve { a, b, kind: RevKind::Flat { r, .. } } = sw else {
+        return None;
+    };
+    if ax != [0.0, 0.0, 1.0] {
+        return None;
+    }
+    let rho = if a.z == b.z {
+        // XY distance to the level segment.
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let l2 = dx * dx + dy * dy;
+        let t = if l2 > 0.0 { (((q.x - a.x) * dx + (q.y - a.y) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+        (q.x - a.x - t * dx).hypot(q.y - a.y - t * dy)
+    } else if a.x == b.x && a.y == b.y {
+        (q.x - a.x).hypot(q.y - a.y) // a plunge: one disc, every depth
+    } else {
+        return None; // an oblique move: the search's business
+    };
+    let tip = a.z.min(b.z);
+    // Inside the footprint - the flank inclusive, `field_solid::
+    // flat_tie`'s law - floor strictly above the center and inside
+    // this cell's ray (the search's own domain).
+    if !(rho.is_finite() && rho <= *r && tip > q.z && tip - q.z <= cell) {
+        return None;
+    }
+    // The read is `center + u` (`march::refine`): pick the `u` whose
+    // sum lands ON the plane, never below it (an ulp low would claim
+    // steel the tool never removed).
+    let mut u = tip - q.z;
+    for _ in 0..4 {
+        let s = q.z + u;
+        if s == tip {
+            break;
+        }
+        u = if s < tip { u.next_up() } else { u.next_down() };
+    }
+    for _ in 0..4 {
+        if q.z + u >= tip {
+            break;
+        }
+        u = u.next_up();
+    }
+    (u.is_finite() && u >= 0.0 && q.z + u >= tip).then_some(u)
 }
