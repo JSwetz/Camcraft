@@ -1444,6 +1444,39 @@ handle engagement.")
       "Lead in / Lead out" tab on every kind that has them (moved out of
       Passes); defaults reproduce every existing golden byte for byte.
 
+### M11.4 - One region whatever was picked; adaptive by HSM principles
+**Goal: the operation's region is what the selection encloses - a picked face
+and its picked boundary edges give the same region and the same toolpath - and
+adaptive clearing is planned by high-speed-machining principles, specified the
+way machinists specify it.** — 📋
+
+(User review, 2026-11-05: "there is a misconception that there should be
+different path generations depending on if it's a pocket's edge chosen or a
+face.. Pocket should most def. be inside the selection, but just because it's a
+round hole doesn't mean it needs to be circular paths when choosing adaptive ...
+there is no path optimization in accordance to the high speed machining
+principles. Adaptive has engagement based on percentage of the cutter - not a
+degree.")
+
+- **A - selection-agnostic regions**: face picks, edge/loop picks and model
+      sources resolve through one region law to "the area the selection
+      encloses" (pocket family: inside it); the strategy the user chose runs on
+      that region - never a different generator because of the pick type or the
+      region's shape (a round region under Adaptive is cleared adaptively, not
+      as forced concentric circles). Tests: face vs edge-loop picks of the same
+      pocket give byte-identical paths.
+- **B - adaptive engagement as machinists set it**: optimal load as a
+      percentage of the tool diameter (and/or a distance), the engagement angle
+      derived from it internally; old files' degree value converted on load in
+      memory (no data loss, the saved word kept readable).
+- **C - HSM path quality**: constant radial engagement held along the path
+      (the M2.1 engagement-step law), curvature-continuous motion - no sharp
+      direction changes in cut (arc blends / smoothing at every corner of the
+      adaptive path), trochoidal motion where a slot-width channel would
+      overload the tool, links that stay down and smooth (M11.2 D), minimum
+      air-cutting; measured, not asserted: max engagement, max curvature and
+      air-time reported per path and gated by tests.
+
 ## Phase 12 — Geometry kernel: Solidcore
 
 The kernel decision open since M1.3 ("benchmark truck vs an OpenCascade
@@ -1524,6 +1557,7 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
 | **M11.1** | Smooth transitions | Arc blends at feed-path turning points (facing reversals, corners, links) as single G2/G3 moves instead of G1 stops; circular-ramp arc entry beside plunge/ramp/helix | 📋 |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen | 📋 |
 | **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab | 📋 |
+| **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path | 📋 |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
 
 ## Open questions & deferred
