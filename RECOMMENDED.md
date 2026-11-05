@@ -9038,3 +9038,63 @@ profile to compile; nothing outside `camcraft-kernel` depends on it
 yet, so the app's debug ladder doesn't pay that. Truck's own Apache-2.0
 notice is still missing from `assets/ui/LICENSES.md` and is owed in its
 own commit.
+
+## M11.1 B - the arc entry (circular ramp): seven decisions (2026-11-05)
+
+(1) **Emitted as a chord fan, not a G18/G19 arc.** The CL `ArcMove` is
+XY-only (a Z change along it is a helix) and no post states a plane
+word, so a vertical-plane arc posts as G1 chords. Their sagitta stays
+within the op's tolerance, or `ARC_FIT_TOL` (0.01 mm) where the op has
+none, capped at 4096 chords and refused by name past that. Dropped:
+adding a plane field to `ArcMove` plus G17/G18/G19 to every post (it
+touches every CL reader and every post golden - its own decision); a
+single straight chord (that is just the ramp).
+
+(2) **No new radius parameter.** The arc asks for the tool diameter
+first and halves toward the drop h, never below it (R >= h keeps the
+sweep at most 90 degrees with no vertical leg). The lead room is what
+bounds the radius. Dropped: reusing `helix_radius` (wrong meaning,
+validated <= tool radius) and a new `arc_radius` on 9 parameter
+variants (wire, stamp and UI churn for a number the room decides).
+
+(3) **Legality is the ramp's chord law, unchanged.** The arc's XY
+footprint is the lead chord and its Z stays between the two planes, so
+the ramp's one-chord test certifies it. The start height is the ramp's
+start (the previous cut plane, or clearance on the first level). The
+fallback is the ramp's `substituted_dive`, with the reason named.
+
+(4) **The 3-D shell substitutes, named.** No proof follows the fan
+onto lifted shell tips; the rest ladder keeps the vertical dive, as
+Ramp and Helix do.
+
+(5) **No PROJECT_VERSION bump.** `EntryDto::Arc` is appended; an older
+build reading an `"arc"` file refuses it as Corrupt (unknown variant),
+never misreads it. Tension noted: M2.5 A/B did bump for new grammar
+words; this follows the opt-in/append law instead. Stamp byte 3 is
+appended, so no existing op goes Stale.
+
+(6) **Zigzag pockets always fall back, by geometry.** Each row starts
+on the region boundary, so there is no lead room behind the first cut,
+and the note says so. Circular rings after the first have no drop.
+Dropped: re-seating the pass start, which changes the plan and the
+existing goldens.
+
+(7) **Found while building it: a suspected lead-in gouge.** An inside
+contour with an arc LEAD-IN at a corner start places the lead start
+outside the tool-radius inset. The arc entry refuses to start from
+there. The lead-in itself is a separate Prime Directive investigation,
+logged in its own entry.
+
+## User review 2026-11-05 - two calls overturned by hand-test
+
+- **M9.1 B's stacked pane is reversed: the operation page gets its tabs
+  back.** The user, hand-testing: "the tabs in the operations menu are
+  gone so everything is just a lot to scroll thru - no organization,
+  hard to read and hard to understand." The M9.1 B rationale (no dead
+  tabs, the whole truth in one scroll) loses to readability. The
+  restoration keeps M9.1 A's retype-on-row and the no-dead-tabs law.
+- **M11.1 B's "bores first" arc entry is not enough.** On an outside
+  contour the entry refused ("the arc needs bounded air only a bore
+  has") and plunged, and the level-to-level transitions looked broken
+  in the viewport. Rework in flight: an arc entry in the air beside an
+  outside wall, and a clean lead-out/link/entry sequence per level.
