@@ -8768,3 +8768,58 @@ sheet wire, since a sphere-traced surface has no wire to offer.
 it to the status line; the same state is not retried every frame.
 `StockEye::cpu_only` exists so the fallback is tested on purpose
 (`tests/trace_composite.rs` holds GPU and CPU to the same pixel).
+
+## M7.2 test diet - the B3a eye and pack tests made smaller, not ignored (2026-11-05)
+
+Made the fixtures smaller instead of moving the tests to the heavy lane,
+because both laws hold on smaller input. (1)
+`pack::the_gate_refuses_a_huge_region_by_size_not_by_crash` now uses two
+1 mm cubes 220 mm apart rather than a 1200x90x90 bar. The pack already
+refused by size before allocating; the whole 48-80 s was the sparse
+builder covering the bar's surface. Debug time went from ~60 s to
+0.04 s, and the test now also checks the target pack (same gate). (2)
+`stock_view`'s M2.3 fixture went from a 60x60 to a 20x20 footprint,
+with `COARSE` scaled to the volume so the 1.53 mm cell, the heights and
+the clean/gouge/rest classes are unchanged. The time was the display cut
+of the Face program, which grows with area; the suite went from ~64 s
+to ~16 s. Considered and dropped: `#[ignore]` on the heavy lane (neither
+test measures geometry at full precision) and a coarser cell (it would
+put the class gate at risk). Follow-up for M7.3: the display cut's
+per-move cost is what keeps `the_eye_lands...` near 10 s even at 20x20.
+
+## M7.2 C - progressive playback: five decisions (2026-11-05)
+
+(1) **Playback is a prefix cut, checkpointed by whole snapshots**
+(`app::stock_play::FieldPlay`). The field's subtraction is a running
+max, so the stock after k moves is exactly the uncut stock minus those
+k moves, cut in any grouping; the last frame of playback is
+byte-for-byte the Deviate field view (the suite holds it). Backward
+seek clones the nearest snapshot at or before the target, so memory is
+bounded at 33 field copies (stride = max(64, moves/32)). The ROADMAP's
+dirty-brick journal is the cheaper form of the same law and belongs
+with M7.3's per-brick cost law. Dropped: re-cutting from move 0 on
+every backward seek (too slow for a scrub), and unbounded snapshots.
+
+(2) **Only completed moves cut.** The segment under the playhead has
+not finished removing its material yet; showing it partly done would
+need sub-move sweeps, which we don't do for now.
+
+(3) **Timeline and plan meet by op name, and a connector rapid is not
+a move.** The sim script is walked in tree order and the plan in
+posting order. An op the plan doesn't hold is refused by name, never
+silently skipped, which would leave material shown standing that the
+machine removes. An op's segment span one longer than its moves
+carries the connector between programs, and that connector is
+discounted.
+
+(4) **The transport arms the traced stock by itself.** With Deviate
+down, playback shows unjudged material (class 3 gray): mid-program
+everything would read as rest, which is true but useless. With Deviate
+up it is judged. The mode key is (transport, Deviate, doc_version while
+playing), so an edit during playback rebuilds the plan; Deviate alone
+keeps its frozen-evidence law and does not track edits.
+
+(5) **Each changed frame clones the stock and re-uploads its lattice.**
+That is simple and correct, and costly on big programs. A per-frame
+move budget and dirty-brick uploads are M7.3's cost law, recorded there
+rather than half-built here.

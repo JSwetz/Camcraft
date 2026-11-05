@@ -63,6 +63,23 @@ pub fn field_view(world: &flecs_ecs::prelude::World) -> Result<FieldView, String
 /// cells of volume (a coarser picture is cheaper to cut, never less
 /// honest: classes still come from the same gate).
 pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result<FieldView, String> {
+    let (mut stock, planned, cell) = display_parts(world, texels)?;
+    for p in &planned {
+        let op = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone }];
+        stock
+            .simulate_display(&op)
+            .map_err(|e| format!("the field view could not cut the program: {e}"))?;
+    }
+    let (target, target_note) = display_target(world, cell);
+    Ok(FieldView { stock, target, target_note, cell })
+}
+
+/// The uncut display stock, the plan it will be cut by, and its cell:
+/// the walk `field_view_with` and the playback (`stock_play`) share.
+pub(crate) fn display_parts(
+    world: &flecs_ecs::prelude::World,
+    texels: f64,
+) -> Result<(Stock, Vec<crate::stock_sim::Planned>, f64), String> {
     if !(texels.is_finite() && texels >= 1.0) {
         return Err(format!("the field view needs a positive texel budget, not {texels}"));
     }
@@ -82,24 +99,21 @@ pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result
         return Err(format!("the stock's extent gives no sane display cell ({cell})"));
     }
     let backend = Backend::Field { band: FIELD_BAND };
-    let mut stock = Stock::from_facets(backend, &subdivide(&stock_facets, cell), cell)
+    let stock = Stock::from_facets(backend, &subdivide(&stock_facets, cell), cell)
         .map_err(|e| format!("the field view could not build the stock: {e}"))?;
-    for p in &planned {
-        let op = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone }];
-        stock
-            .simulate_display(&op)
-            .map_err(|e| format!("the field view could not cut the program: {e}"))?;
-    }
+    Ok((stock, planned, cell))
+}
+
+/// The model as a field at `cell`, or why it cannot be one.
+pub(crate) fn display_target(world: &flecs_ecs::prelude::World, cell: f64) -> (Option<Stock>, Option<String>) {
     let part = part_facets(world);
-    let (target, target_note) = if part.is_empty() {
-        (None, Some("no model to judge against".to_string()))
-    } else {
-        match Stock::from_facets(backend, &subdivide(&part, cell), cell) {
-            Ok(t) => (Some(t), None),
-            Err(e) => (None, Some(format!("the model cannot be signed as a field: {e}"))),
-        }
-    };
-    Ok(FieldView { stock, target, target_note, cell })
+    if part.is_empty() {
+        return (None, Some("no model to judge against".to_string()));
+    }
+    match Stock::from_facets(Backend::Field { band: FIELD_BAND }, &subdivide(&part, cell), cell) {
+        Ok(t) => (Some(t), None),
+        Err(e) => (None, Some(format!("the model cannot be signed as a field: {e}"))),
+    }
 }
 
 /// The setup's stock entity as world triangles (the mesh the viewport

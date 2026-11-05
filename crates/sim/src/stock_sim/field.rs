@@ -77,7 +77,7 @@ pub(crate) const HOP: f64 = 0.5773502691896258; // 1 / sqrt(3), cells
 
 /// One narrow-band signed-distance grid: a watertight mesh sampled
 /// once into sparse bricks. Construct with `SdfField::from_mesh`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SdfField {
     pub(crate) cell: f64,
     /// Magnitudes beyond the band answer `sign * cap`.

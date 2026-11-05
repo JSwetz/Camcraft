@@ -145,6 +145,8 @@ pub fn simulate_document(
 /// One operation of the program, resolved for the sim: its cached
 /// moves and the atom its tool sweeps.
 pub(crate) struct Planned {
+    /// The operation's name - the sim timeline's key for it.
+    pub name: String,
     pub moves: Vec<crate::cl::Move>,
     pub radius: f64,
     pub ball: bool,
@@ -204,6 +206,7 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
             None
         };
         planned.push(Planned {
+            name: name.clone(),
             moves: cache.path.moves,
             radius: tool.diameter / 2.0,
             ball: tool.kind == crate::tools::ToolKind::BallNose,

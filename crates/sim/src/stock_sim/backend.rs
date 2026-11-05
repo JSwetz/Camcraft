@@ -63,7 +63,7 @@ pub enum Backend {
 pub const FIELD_BAND: u32 = 4;
 
 /// One stock, one verdict API, two engines behind it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Stock {
     Column(Dexel),
     Field(SdfField),

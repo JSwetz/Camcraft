@@ -866,6 +866,13 @@ pub struct State {
     /// it (`actions::ensure_field_view`), then the view or its refusal -
     /// computed once per arming, retired with `program_sim`.
     pub field_view: Option<Result<std::sync::Arc<camcraft_app::stock_view::FieldView>, String>>,
+    /// M7.2 C: the playback field while the transport is up - the stock
+    /// cut to the playhead, feeding `field_view` frame by frame.
+    pub field_play: Option<camcraft_app::stock_play::FieldPlay>,
+    /// What `field_view` was walked for: (transport up, Deviate armed,
+    /// the document version a playback plan was frozen at). A change
+    /// retires the view and the playback - never a stale picture.
+    pub field_mode: Option<(bool, bool, u64)>,
     /// The open ribbon section dropdown (M6.2): while `Some`, that
     /// section's overflow button stands pressed and its folded kinds
     /// draw as a popup column. View state like the sim's playhead -
@@ -1056,6 +1063,8 @@ impl State {
             post_view: None,
             program_sim: None,
             field_view: None,
+            field_play: None,
+            field_mode: None,
             ribbon_more: None,
             ribbon_mode_open: false,
             tree_menu: None,
@@ -1757,6 +1766,7 @@ impl State {
                 self.post_view = None;
                 self.program_sim = None;
                 self.field_view = None;
+                self.field_play = None;
                 self.machine_editor = None;
                 self.doc_version += 1;
                 self.status = String::from("new document");
@@ -2756,6 +2766,7 @@ impl State {
         self.post_view = None; // the old document's program is not this one's
         self.program_sim = None; // and neither is its stock verdict
         self.field_view = None; // nor its traced stock
+        self.field_play = None; // nor its playback
         self.machine_editor = None; // nor a draft over its machine's numbers
         match project::load(&self.world, &path) {
             Ok(()) => {

@@ -139,15 +139,39 @@ pub(crate) fn toggle_deviate(state: &mut State) {
     }
 }
 
-/// M7.2 B3b: walk the armed program through the field arm for the
-/// traced viewport stock, once per arming. Asked by the GPU-backed
-/// shell only (a headless run never pays for a picture it cannot
-/// show); a refusal is kept and said on the status line - the sheet
-/// stands, named.
+/// M7.2 B3b + C: the traced viewport stock's field. With Deviate armed
+/// and the transport down it is the whole program, walked once per
+/// arming; with the transport up it is the playback field cut to the
+/// playhead (judged when Deviate is armed too), rebuilt on any document
+/// edit. Asked by the GPU-backed shell only (a headless run never pays
+/// for a picture it cannot show); a refusal is kept and said on the
+/// status line - the sheet stands, named.
 pub(crate) fn ensure_field_view(state: &mut State) {
-    if state.program_sim.is_none() || state.field_view.is_some() {
+    let playing = state.sim.is_some();
+    let judged = state.program_sim.is_some();
+    let mode = (playing || judged).then_some((playing, judged, if playing { state.doc_version } else { 0 }));
+    if mode != state.field_mode {
+        state.field_mode = mode;
+        state.field_view = None;
+        state.field_play = None;
+    }
+    if mode.is_none() || matches!(state.field_view, Some(Err(_))) {
         return;
     }
+    if !playing {
+        if state.field_view.is_none() {
+            walk_whole_program(state);
+        }
+        return;
+    }
+    if let Err(err) = follow_playhead(state, judged) {
+        state.status += &format!(" | traced playback refused: {err} - the sheet stands");
+        state.field_play = None;
+        state.field_view = Some(Err(err));
+    }
+}
+
+fn walk_whole_program(state: &mut State) {
     match camcraft_app::stock_view::field_view(&state.world) {
         Ok(fv) => {
             if let Some(note) = &fv.target_note {
@@ -160,6 +184,29 @@ pub(crate) fn ensure_field_view(state: &mut State) {
             state.field_view = Some(Err(err));
         }
     }
+}
+
+/// Cut the playback field to the transport's playhead; a new picture
+/// only when the cut changed.
+fn follow_playhead(state: &mut State, judged: bool) -> Result<(), String> {
+    use camcraft_app::stock_play::{progress, FieldPlay};
+    if state.field_play.is_none() {
+        state.field_play = Some(FieldPlay::new(&state.world, judged)?);
+    }
+    let sc = crate::egui_app::shell::sim_script(state);
+    let t = state.sim.as_ref().map_or(0.0, |s| s.t);
+    let play = state.field_play.as_mut().ok_or("playback was not built")?;
+    let k = match progress(&sc, t) {
+        None => 0,
+        Some(p) => play
+            .index_at(&p)
+            .ok_or_else(|| format!("{} is on the timeline but not in the posting plan", p.op))?,
+    };
+    let changed = play.seek(k)?;
+    if changed || state.field_view.is_none() {
+        state.field_view = Some(Ok(std::sync::Arc::new(play.view())));
+    }
+    Ok(())
 }
 
 /// The machine's vote as a status clause (M2.3 C): `None` when no
