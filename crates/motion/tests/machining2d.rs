@@ -687,18 +687,23 @@ fn tangential_lead_enters_parallel_and_lands_g1() {
         land.arc.unwrap().ccw,
         "conventional reverses the traversal, so the lead mirrors too"
     );
-    // The exit arc mirrors the entry: antipodal endpoints, same radius.
+    // The exit arc: tangent to the walk's end at the seam, and - this
+    // rim's seam sits on a corner's round join, where the walk's end
+    // and start tangents differ - closing on the entry's plunge point,
+    // so the two half arcs never cross out in the air (the seam law of
+    // `contour_entry::seam_leads`). Where the tangents agree it is the
+    // entry's exact mirror; here its radius stays within a hair of 5.
     let last = led
         .moves
         .iter()
         .rev()
         .find(|m| m.arc.is_some())
         .expect("a leave arc exists");
-    assert!(
-        ((last.to.x - (2.0 * last.arc.unwrap().center.x - last.from.x)).abs() < 1e-6)
-            && ((last.to.y - (2.0 * last.arc.unwrap().center.y - last.from.y)).abs() < 1e-6),
-        "exit arc's endpoints are antipodal about its center"
-    );
+    assert!((last.to.x - e.0).abs() < 1e-6 && (last.to.y - e.1).abs() < 1e-6, "exit closes on the plunge point");
+    let c = last.arc.unwrap().center;
+    let rho = (last.from.x - c.x).hypot(last.from.y - c.y);
+    assert!((rho - 5.0).abs() < 0.05, "exit radius {rho}");
+    assert!(led.notes.iter().any(|n| n.contains("closes on the lead-in's start")), "{:?}", led.notes);
     assert!(led.is_chained() && led.all_finite() && down.is_chained());
 }
 

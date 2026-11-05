@@ -34,7 +34,7 @@ const RESEAT_CANDIDATES: usize = 24;
 /// tolerance tighter than this tightens it further.
 const LEAD_SLACK: f64 = 0.005;
 
-fn slack(p: &ContourParams) -> f64 {
+pub(super) fn slack(p: &ContourParams) -> f64 {
     p.tolerance.min(LEAD_SLACK)
 }
 
@@ -79,7 +79,7 @@ fn arc_holds(legal: &Legal, from: Point2, c: Point2, ccw: bool, to: Point2, tol:
 }
 
 /// Every cutter center of `segs`, walked from `from`, on the legal side.
-fn segs_hold(legal: &Legal, from: Point2, segs: &[Seg], tol: f64) -> bool {
+pub(super) fn segs_hold(legal: &Legal, from: Point2, segs: &[Seg], tol: f64) -> bool {
     let mut at = from;
     for seg in segs {
         match seg {

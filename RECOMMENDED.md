@@ -9170,3 +9170,43 @@ release, which now dominates both heavy suites; field_cut.rs and
 backend.rs sit at ~405 lines, field.rs at 447; switching the display
 cut to the shanked ball is a follow-up. Bullet 3 of M7.3 (retiring the
 column engine) is next.
+
+## Contour leads/links rework from the user's hand-test: five decisions (2026-11-05)
+
+(1) **Outside-wall Arc entry is proved with `lead_fit`'s room check.**
+The arc is tangent to the lead-in's first move, and its footprint is
+sampled against the part's cutter-centre offset; uncut stock outside
+the part may be cut. Where no arc fits: "no arc fits beside the wall
+at the lead-in (x, y) ... grazing dive there instead". Tabbed levels
+stand down by name, since a standing tab is invisible to the room
+check. Dropped: one full-depth arc from Top (long air arcs), and
+rapiding down to the level above (could hit uncut stock).
+
+(2) **The stacked loops were seam crossings.** The tangential lead-in
+and lead-out closed into a full loop at a seam vertex where the start
+and end tangents differ. The lead-out is re-solved to close on the
+lead-in's plunge point, which keeps G1 at both wall joints. Dropped: a
+shared mean tangent, which breaks the G1 landing law. The
+contour_tangential_lead golden encoded the crossing and is
+regenerated.
+
+(3) **The status-line level count uses flat feed moves only.** Lifts
+and arc-entry chords no longer inflate it (the user's "8 levels" was
+7).
+
+(4) **Superseded by the user (2026-11-05): the stay-down link must be a
+choice.** The rework hard-wired "stay down where one ring per level and
+the link is legal, else retract". The user: "The stay down and ramp
+should be an option for the user to pick not to be 'premade'.. the
+whole idea of a CAM package is for the user to be able to control and
+generate G-code in the end." A `level_link` parameter (default
+Retract & re-enter; Stay down & ramp at a user ramp angle, named
+fallback) is in flight with the gouge fix below.
+
+(5) **Found: a SILENT gouge, top priority.** A 2D Contour whose source
+is a whole model sections it once at Top and walks every ring at every
+level. On the user's part the blind bore's ring cuts an annulus under
+the bore floor (Z 0 down to -7), and verify checks Contour against
+the same flat region, so the post lets it through. Fix in flight:
+depth-aware verify for 2D ops with a model source, and per-ring level
+ranges ending at each feature's floor.

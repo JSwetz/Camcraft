@@ -130,7 +130,20 @@ fn tangential_leads_post_as_half_sweeps() {
                 && (m.from.y + m.to.y - 2.0 * c.center.y).abs() < 1e-6
         })
     }).count();
-    assert_eq!(halves, 4, "the joins are the only antipodal arcs");
+    // The lead-ins are the half circles; this rim's seam sits on a
+    // corner round, where the walk's end and start tangents differ, so
+    // each lead-out is re-solved to close on its lead-in's plunge point
+    // (the seam law - two half arcs tangent to two tangents otherwise
+    // cross out in the air): tangent at the wall, ending where the
+    // level entered, a hair off a half sweep.
+    assert_eq!(halves, 2, "the lead-ins are the only antipodal arcs");
+    let plunges: Vec<_> = led.moves.iter().filter(|m| m.kind == MoveKind::Plunge).map(|m| (m.to.x, m.to.y)).collect();
+    let closing = led
+        .moves
+        .iter()
+        .filter(|m| m.arc.is_some() && plunges.iter().any(|&(x, y)| m.to.x == x && m.to.y == y))
+        .count();
+    assert_eq!(closing, 2, "each lead-out ends on the plunge point it entered at");
     assert!(led.is_chained() && led.all_finite());
 }
 

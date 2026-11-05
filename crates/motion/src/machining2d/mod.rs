@@ -27,6 +27,7 @@ mod chamfer;
 mod circular;
 mod thread_mill;
 mod contour;
+mod contour_entry;
 mod face;
 mod fillet;
 mod fillet_tally;

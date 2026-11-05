@@ -99,10 +99,23 @@ impl Toolpath {
         let n = self.moves.len();
         let p = self.moves.iter().filter(|m| m.kind == MoveKind::Plunge).count();
         let a = self.arc_count();
+        // A level is a plane the path CUTS along: planar feeds. A feed
+        // that only changes Z - a lift, a ramp or arc entry's chords -
+        // is travel between levels, not one more of them (an arc entry
+        // posts a dozen chord heights per level). A path with no planar
+        // feed at all (a drill's pecks) keeps the old count of every
+        // feed height, so those lines read as before.
         let mut levels: Vec<f64> = Vec::new();
         for m in &self.moves {
-            if m.kind == MoveKind::Feed && !levels.contains(&m.to.z) {
+            if m.kind == MoveKind::Feed && m.from.z == m.to.z && !levels.contains(&m.to.z) {
                 levels.push(m.to.z);
+            }
+        }
+        if levels.is_empty() {
+            for m in &self.moves {
+                if m.kind == MoveKind::Feed && !levels.contains(&m.to.z) {
+                    levels.push(m.to.z);
+                }
             }
         }
         let feed = self

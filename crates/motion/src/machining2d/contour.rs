@@ -3,19 +3,18 @@
 //! (tangent circle to two lines, RS-274 / ISO 6983 G2/G3).
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
-use crate::entry::{Entry3D, dive_room, helix_down};
-use crate::entry_arc::{arc_lead, push_arc_lead, seg_dir};
+use crate::entry::Entry3D;
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
 
 use super::arcs::{fit_arcs, lead_in, lead_out, push_segs, walk_tangent};
-use super::levels::{Cert, Motion, cut_levels, dive_link, substituted_dive};
+use super::contour_entry::{Engage, bore_entry, say, seam_leads, wall_arc, wall_arc_top};
+use super::levels::{Cert, Motion, cut_levels};
 use super::ring::Ring;
 use super::face::GenError;
 use super::fillet::{Legal, fillet_corners};
 use super::fillet_tally::{FilletTally, fillet_floor};
-use super::lead_fit::{plan_leads, reseat};
-use super::slots::chord_clears;
+use super::lead_fit::reseat;
 /// Entry/exit motion appended to each contour subpath. Every lead that
 /// is not [`Lead::None`] keeps the tool from dwelling (and gouging) at a
 /// plunge point directly on the finished wall: it starts the cut already
@@ -287,6 +286,8 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     // Lead shrinks, refusals and reseated starts, each said once.
     let mut lead_notes: Vec<String> = Vec::new();
 
+    let eng = Engage { p, center: &center, cert: &cert, plan: &plan, m: &m, legal: &legal };
+
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let hop = p.retract_z.min(p.clearance_z);
     let mut first_entry = true;
@@ -351,10 +352,45 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 // Both leads keep the cutter center in the legal room
                 // (lead_fit.rs): full size where they fit, else shrunk,
                 // else refused - by name, never through a wall.
+                // A whole ring's two leads also stay off each other at
+                // the seam (contour_entry::seam_leads).
                 let (entry, lead, lead_off) =
-                    plan_leads(&walk, &poly, p, &legal, &mut lead_notes);
+                    seam_leads(&walk, &poly, p, &legal, &mut lead_notes);
                 let e2 = Point2::new(entry.x, entry.y);
-                if k == 0 && li > 0 && !first_entry {
+                // The wall side's arc entry: every engagement of an
+                // untabbed outside ring descends a proved arc beside
+                // the wall (contour_entry::wall_arc); a tabbed level, or
+                // a ring with no room for one, takes the graze below
+                // and says why.
+                let wall_arc_on = !inside && p.entry == Entry3D::Arc && k == 0;
+                let mut arced = false;
+                if wall_arc_on && !tabbed {
+                    let z_top = wall_arc_top(p, &zs, zi, hop_z);
+                    let stay = loops.len() == 1 && zi > 0 && !first_entry;
+                    let first = lead.first().or(walk.first());
+                    match wall_arc(&mut b, &eng, e2, z, z_top, hop_z, first, stay) {
+                        Ok(()) => arced = true,
+                        Err(why) => say(
+                            &mut lead_notes,
+                            format!(
+                                "entry: no arc fits beside the wall at the lead-in ({:.3}, {:.3}) - {why}; \
+                                 grazing dive there instead",
+                                e2.x, e2.y
+                            ),
+                        ),
+                    }
+                } else if wall_arc_on {
+                    say(
+                        &mut lead_notes,
+                        "entry: the arc stands down on tabbed levels - a standing tab is \
+                         material beside the wall the room law cannot see; grazing dive at \
+                         the lead-in there"
+                            .into(),
+                    );
+                }
+                if arced {
+                    // Engaged: the arc ends standing at (e2, z).
+                } else if k == 0 && li > 0 && !first_entry {
                     // Loop to loop within one level: the tab-hop
                     // template - up to the hop plane, across, plunge.
                     let cur = b.at();
@@ -412,117 +448,7 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                         // against it with the pocket ladders' own
                         // machinery - the dive stands in the floor's
                         // room, never dwells on the finished wall.
-                        match p.entry {
-                            Entry3D::Plunge => match dive_room(&center, 0.0) {
-                                Some(d) => {
-                                    let cur = b.at();
-                                    if cur.x != d.x || cur.y != d.y {
-                                        b.push(
-                                            MoveKind::Rapid,
-                                            Point3::new(d.x, d.y, p.clearance_z),
-                                            None,
-                                        );
-                                    }
-                                    b.push(
-                                        MoveKind::Plunge,
-                                        Point3::new(d.x, d.y, z),
-                                        Some(p.plunge_feed),
-                                    );
-                                    dive_link(&mut b, &cert, &plan, d, e2, z, &m);
-                                }
-                                None => substituted_dive(
-                                    &mut b,
-                                    &cert,
-                                    &plan,
-                                    e2,
-                                    z,
-                                    &m,
-                                    "the disc fits nowhere here",
-                                ),
-                            },
-                            Entry3D::Ramp => {
-                                // One chord test covers the whole
-                                // interpolated descent: the region is
-                                // one at every plane, and the
-                                // destination's room bounds every
-                                // plane above it (M8.1's superset law,
-                                // here at its simplest - a planar
-                                // contour's single center).
-                                let cur = b.at();
-                                let leg = Point2::new(cur.x, cur.y);
-                                if chord_clears(&center, leg, e2) {
-                                    b.push(
-                                        MoveKind::Rapid,
-                                        Point3::new(leg.x, leg.y, prev_z),
-                                        None,
-                                    );
-                                    b.push(MoveKind::Feed, Point3::new(e2.x, e2.y, z), Some(p.feed));
-                                } else {
-                                    substituted_dive(
-                                        &mut b,
-                                        &cert,
-                                        &plan,
-                                        e2,
-                                        z,
-                                        &m,
-                                        "the ramp's chord is blocked",
-                                    );
-                                }
-                            }
-                            Entry3D::Arc => {
-                                // The circular ramp onto the lead-in's
-                                // own first move, certified by the
-                                // ramp's chord law (see `entry_arc`).
-                                let first = lead.first().or(walk.first());
-                                let lead_arc = first
-                                    .and_then(|s| seg_dir(e2, s))
-                                    .ok_or("the first cut has no direction to be tangent to")
-                                    .and_then(|d| {
-                                        let ok = |s, q| chord_clears(&center, s, q);
-                                        arc_lead(e2, d, prev_z, z, p.tool_diameter, p.tolerance, ok)
-                                    });
-                                match lead_arc {
-                                    Ok(l) => push_arc_lead(&mut b, &l, p.clearance_z, prev_z, p.feed),
-                                    Err(why) => substituted_dive(&mut b, &cert, &plan, e2, z, &m, why),
-                                }
-                            }
-                            Entry3D::Helix => {
-                                let cur = b.at();
-                                let leg = Point2::new(cur.x, cur.y);
-                                // The found point is the orbit's
-                                // CENTER; the dive starts at its near
-                                // side, `rh` west - one radius of
-                                // center-room certifies the whole
-                                // swept tube exactly (see
-                                // `entry::dive_room`, M2.5 F's dome;
-                                // the 2-radius ask over-refused the
-                                // channel, M8.2's slot).
-                                match dive_room(&center, p.helix_radius + 1e-3) {
-                                    Some(c) => {
-                                        let d = Point2::new(c.x - p.helix_radius, c.y);
-                                        if leg.x != d.x || leg.y != d.y {
-                                            b.push(
-                                                MoveKind::Rapid,
-                                                Point3::new(d.x, d.y, p.clearance_z),
-                                                None,
-                                            );
-                                        }
-                                        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
-                                        helix_down(&mut b, d, prev_z, z, p.helix_radius, p.feed);
-                                        dive_link(&mut b, &cert, &plan, d, e2, z, &m);
-                                    }
-                                    None => substituted_dive(
-                                        &mut b,
-                                        &cert,
-                                        &plan,
-                                        e2,
-                                        z,
-                                        &m,
-                                        "the widened disc fits nowhere at this level",
-                                    ),
-                                }
-                            }
-                        }
+                        bore_entry(&mut b, &eng, e2, z, prev_z, &lead, &walk);
                     } else {
                         // The wall side (explicit Outside, and every
                         // direct Auto): the graze this generator has
@@ -534,7 +460,7 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                         // dive on). The other two arms are refused by
                         // name - once, because the reason is
                         // structural, not level-dependent.
-                        if p.entry != Entry3D::Plunge && !refused_said {
+                        if !matches!(p.entry, Entry3D::Plunge | Entry3D::Arc) && !refused_said {
                             let arm = match p.entry {
                                 Entry3D::Ramp => "ramp",
                                 Entry3D::Helix => "helix",

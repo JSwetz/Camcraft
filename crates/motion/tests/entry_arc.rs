@@ -300,16 +300,38 @@ fn a_bore_too_small_for_the_lead_substitutes_and_says_it() {
 }
 
 #[test]
-fn the_wall_side_refuses_the_arc_by_name_grazing_unchanged() {
+fn the_wall_side_enters_on_a_tangent_arc_in_the_air_beside_the_wall() {
+    // The wall side (hand-test report): the arc is no longer refused.
+    // Each level descends one tangent arc whose every vertex stands
+    // outside the part's tool-radius offset - the air beside the wall -
+    // and the walked cut is the plunge entry's, move for move.
+    let part = rect(0.0, 0.0, 30.0, 30.0);
     let mut base = cp();
     base.side = Side::Outside;
     base.entry = Entry3D::Plunge;
-    let want = contour(&rect(0.0, 0.0, 30.0, 30.0), &base).expect("graze");
+    let plain = contour(&part, &base).expect("graze");
     let mut p = base;
     p.entry = Entry3D::Arc;
-    let t = contour(&rect(0.0, 0.0, 30.0, 30.0), &p).expect("wall arc valid");
-    assert_eq!(t.moves, want.moves, "the arc must not move the wall-side path");
-    assert!(t.notes.iter().any(|n| n.contains("the arc needs bounded air")), "{:?}", t.notes);
+    let t = contour(&part, &p).expect("wall arc valid");
+    assert!(t.is_chained() && t.all_finite());
+    assert!(!t.notes.iter().any(|n| n.contains("bounded air")), "{:?}", t.notes);
+    let f = descents(&t);
+    assert_eq!(f.len(), 3, "levels 0, -1, -2 each enter on one arc");
+    for fan in &f {
+        assert_fan_is_a_tangent_arc(fan);
+        for q in fan {
+            // Distance from the cutter center to the 30 x 30 part: at
+            // least the tool radius (the grown region's round joins
+            // flatten by a few microns).
+            let dx = (-q.x).max(q.x - 30.0).max(0.0);
+            let dy = (-q.y).max(q.y - 30.0).max(0.0);
+            assert!(dx.hypot(dy) >= 5.0 - 0.01, "fan vertex inside the part offset: {q:?}");
+        }
+    }
+    let planar = |t: &Toolpath| -> Vec<_> {
+        t.moves.iter().filter(|m| m.kind == MoveKind::Feed && m.from.z == m.to.z && m.arc.is_some()).map(|m| (m.from, m.to)).collect()
+    };
+    assert_eq!(planar(&t), planar(&plain), "the walked cut is unchanged");
 }
 
 fn pp() -> PocketParams {
