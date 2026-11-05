@@ -56,7 +56,7 @@ fn face_world() -> (flecs_ecs::prelude::World, History) {
             "Face1",
             "EM-0400-2FL",
             SrcRef::Stock,
-            OpParams::Face { tilt: None,
+            OpParams::Face { tilt: None, blend_turns: false,
                 stepover: 3.0,
                 clearance_z: Height::fixed(25.0),
                 cut_z: Height::fixed(19.5),

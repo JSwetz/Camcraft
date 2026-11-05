@@ -227,7 +227,7 @@ fn an_unborn_toolpath_refuses_to_post() {
 }
 
 fn face_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { blend_turns: false,
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
@@ -547,7 +547,7 @@ fn a_non_g54_slot_is_what_the_script_writes() {
         &world,
         SetWcsOrigin::new(&world, "G55", Location::default()).expect("place G55"),
     );
-    let params = OpParams::Face {
+    let params = OpParams::Face { blend_turns: false,
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::of(HeightReference::WorkOffset(1), 25.0),

@@ -12,6 +12,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                blend_turns,
                 tilt,
             } => ParamsDto::Face {
                 stepover: *stepover,
@@ -22,6 +23,7 @@ impl ParamsDto {
                 climb: *climb,
                 top_z: (*top_z).map(Into::into),
                 stepdown: *stepdown,
+                blend_turns: *blend_turns,
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Contour {
@@ -1136,6 +1138,7 @@ impl ParamsDto {
                 feed,
                 plunge_feed,
                 climb,
+                blend_turns,
                 tilt,
             } => OpParams::Face {
                 stepover: *stepover,
@@ -1146,6 +1149,7 @@ impl ParamsDto {
                 feed: *feed,
                 plunge_feed: *plunge_feed,
                 climb: *climb,
+                blend_turns: *blend_turns,
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Contour {

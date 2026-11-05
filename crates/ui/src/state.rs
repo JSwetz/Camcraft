@@ -400,6 +400,8 @@ impl Default for OpUi {
                 feed: 1200.0,
                 plunge_feed: 300.0,
                 climb: true,
+                // Opt-in, like `seed_face` (M11.1 A).
+                blend_turns: false,
             },
         }
     }

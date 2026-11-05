@@ -438,7 +438,7 @@ fn an_insane_tilt_refuses_at_the_command_door() {
         .expect("box stock"),
     );
     add_tool(&world, &mut history, "EM-0400-2FL");
-    let face = |tilt: Option<Tilt>| OpParams::Face {
+    let face = |tilt: Option<Tilt>| OpParams::Face { blend_turns: false,
         tilt,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
@@ -538,7 +538,7 @@ fn a_tilt_edit_marks_the_operation_stale_and_undo_restores() {
     add_tool(&world, &mut history, "EM-0400-2FL");
     history.execute(
         &world,
-        CreateOperation::new(&world, "F", "EM-0400-2FL", SrcRef::Stock, OpParams::Face {
+        CreateOperation::new(&world, "F", "EM-0400-2FL", SrcRef::Stock, OpParams::Face { blend_turns: false,
             tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
@@ -558,7 +558,7 @@ fn a_tilt_edit_marks_the_operation_stale_and_undo_restores() {
         EditOperationParams::new(
             &world,
             "F",
-            OpParams::Face {
+            OpParams::Face { blend_turns: false,
                 tilt: Some(Tilt {
                     a_deg: 0.0,
                     b_deg: 20.0,

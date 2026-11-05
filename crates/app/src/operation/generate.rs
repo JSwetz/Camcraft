@@ -108,6 +108,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             feed,
             plunge_feed,
             climb,
+            blend_turns,
             ..
         } => {
             let region = region_for_job(
@@ -130,6 +131,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     feed: *feed,
                     plunge_feed: *plunge_feed,
                     climb: *climb,
+                    blend_turns: *blend_turns,
                 },
             )?;
             (region, path)

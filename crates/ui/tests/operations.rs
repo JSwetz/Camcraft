@@ -23,7 +23,7 @@ fn catalog_tool(name: &str) -> Tool {
 }
 
 fn face_params() -> OpParams {
-    OpParams::Face {
+    OpParams::Face { blend_turns: false,
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
@@ -182,7 +182,7 @@ fn create_generate_undo_redo_replays_the_same_path() {
     assert_eq!(status(&state, "Face1"), OpStatus::Ok);
 
     // A parameter edit marks it stale but keeps the old path on screen.
-    let moved = OpParams::Face {
+    let moved = OpParams::Face { blend_turns: false,
         tilt: None,
         stepover: 4.0,
         clearance_z: Height::fixed(25.0),
@@ -290,7 +290,7 @@ fn a_work_offset_reference_survives_apply_undo_and_the_draft() {
     stock_and_tool(&mut state);
     create_face(&mut state);
 
-    let referenced = OpParams::Face {
+    let referenced = OpParams::Face { blend_turns: false,
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
@@ -373,7 +373,7 @@ fn retargeting_a_tool_and_bad_params() {
 
     // Degenerate parameters are refused at construction: status explains,
     // and the operation keeps its exact previous values and stamp.
-    let junk = OpParams::Face {
+    let junk = OpParams::Face { blend_turns: false,
         tilt: None,
         stepover: 0.0,
         clearance_z: Height::fixed(25.0),
@@ -717,7 +717,7 @@ fn apply_reports_queued_then_updated_on_drain() {
     create_face(&mut state);
     part_and_target(&mut state);
     // Spinbox typing is what this mirrors: the draft differs from live.
-    state.op_ui.params = OpParams::Face {
+    state.op_ui.params = OpParams::Face { blend_turns: false,
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),
@@ -979,7 +979,7 @@ fn generate_flushes_a_dirty_draft_before_generating() {
     // Spinbox typing the frame has not Applied: the panel shows a new cut
     // height while the operation still holds the old one. Generating under
     // that draft used to cut the old numbers silently.
-    state.op_ui.params = OpParams::Face {
+    state.op_ui.params = OpParams::Face { blend_turns: false,
         tilt: None,
         stepover: 3.0,
         clearance_z: Height::fixed(25.0),

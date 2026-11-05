@@ -75,6 +75,11 @@ pub enum OpParams {
         feed: f64,
         plunge_feed: f64,
         climb: bool,
+        /// Turning-point blends (M11.1 A): row-end reversals ride one
+        /// tangent G2/G3 semicircle where the law proves it legal
+        /// (`machining2d::face`); `false` is the sharp serpentine every
+        /// pre-M11.1 file holds.
+        blend_turns: bool,
         /// 3+2 index (M5.1 stage B): the plane this face cuts, tilted;
         /// `None` is the world XY the kind has always meant.
         tilt: Option<Tilt>,

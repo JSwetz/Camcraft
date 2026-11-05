@@ -174,7 +174,7 @@ fn the_machine_vote_joins_the_deviate_clause() {
         name: "Face1".into(),
         tool: "EM-0400-2FL".into(),
         src: SrcRef::Stock,
-        params: OpParams::Face {
+        params: OpParams::Face { blend_turns: false,
             tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),
@@ -236,7 +236,7 @@ fn the_machine_gate_refuses_the_post_by_name() {
         name: "Face1".into(),
         tool: "EM-0400-2FL".into(),
         src: SrcRef::Stock,
-        params: OpParams::Face {
+        params: OpParams::Face { blend_turns: false,
             tilt: None,
             stepover: 3.0,
             clearance_z: Height::fixed(25.0),

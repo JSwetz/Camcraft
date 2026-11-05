@@ -51,6 +51,11 @@ pub enum ParamsDto {
         top_z: Option<HeightDto>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stepdown: Option<f64>,
+        /// M11.1 A turning-point blends: absent (and written only when
+        /// ON) is the sharp serpentine every earlier file held - no
+        /// version step, the same pure default as `tilt`.
+        #[serde(default, skip_serializing_if = "is_false")]
+        blend_turns: bool,
         /// Declared at v22-era M5.1 B: absent is no index - the
         /// prismatic op every earlier file held.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1001,6 +1006,12 @@ pub(super) fn default_engagement_deg() -> f64 {
 /// pocket an `entry` field; its files predate the number).
 fn default_helix_radius() -> f64 {
     1.0
+}
+
+/// Serde's skip test for an opt-in flag (M11.1 A `blend_turns`): a
+/// `false` is absent from the file, so legacy saves stay byte-identical.
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// The file mirror of `machining3d::Entry3D`; `default` is Plunge, the

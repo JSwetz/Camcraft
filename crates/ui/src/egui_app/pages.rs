@@ -781,6 +781,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             feed,
             plunge_feed,
             climb,
+            blend_turns,
             tilt,
         } => {
             if tab == SEC_HEIGHTS {
@@ -824,6 +825,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             if tab == SEC_PASSES {
                 field(ui, "Stepover (Y spacing)");
                 num(ui, u, stepover);
+                // M11.1 A: row ends turn on one arc where it is legal;
+                // the status line names every turn left sharp.
+                ui.checkbox(blend_turns, "Arc turns at row ends");
             }
             if tab == SEC_FEEDS {
                 field(ui, &format!("Feed ({})", u.feed_suffix()));

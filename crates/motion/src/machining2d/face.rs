@@ -1,10 +1,13 @@
-//! Split from `machining2d.rs` by M5.0.1; structure only.
+//! Serpentine facing (split from `machining2d.rs` by M5.0.1); M11.1 A
+//! adds the optional G2/G3 row-end reversal blends - provenance in
+//! `blend.rs` (RS-274 / ISO 6983 circular interpolation, path filleting).
 
 use thiserror::Error;
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
-use crate::geo2d::{GeoError, Region};
+use crate::geo2d::{GeoError, Point2, Region};
 use crate::geometry::Point3;
 
+use super::blend::plan_reversals;
 use super::levels::cut_levels;
 #[derive(Error, Debug, PartialEq)]
 pub enum GenError {
@@ -46,6 +49,12 @@ pub struct FaceParams {
     /// Climb milling: the first pass runs -X to +X. Conventional starts
     /// the other way.
     pub climb: bool,
+    /// Turning-point blends (M11.1 A): each row-end reversal rides one
+    /// tangent semicircle (a single G2/G3 move) where the legality law
+    /// in `blend.rs` proves it; refused turns stay sharp and are named
+    /// in the path's notes. `false` - every pre-M11.1 file - is the
+    /// sharp serpentine, unchanged to the byte.
+    pub blend_turns: bool,
 }
 
 impl FaceParams {
@@ -99,7 +108,10 @@ impl FaceParams {
 /// entered from the clearance plane the same way the single level was.
 /// A stepover wider than the tool leaves an uncut band between rows -
 /// visible in the path, never silently smoothed over, and never a crash:
-/// facing simply cuts where it passes.
+/// facing simply cuts where it passes. With `p.blend_turns` each row-end
+/// step becomes a tangent semicircle with the same endpoints, bulging into
+/// the overrun, where `blend.rs`'s law proves it; every refusal keeps its
+/// sharp corner and rides the path's notes. Rows never change.
 pub fn face(region: &Region, p: &FaceParams) -> Result<Toolpath, GenError> {
     p.validate()?;
     let (lo, hi) = match region.bounds() {
@@ -114,8 +126,15 @@ pub fn face(region: &Region, p: &FaceParams) -> Result<Toolpath, GenError> {
         _ => vec![p.cut_z],
     };
 
+    // Rows are the same at every level, so the reversal plan is too:
+    // decided once, its refusals stated once.
+    let (turns, blend_notes) = plan_reversals(&ys, r, p.blend_turns);
+
     let start_x = if p.climb { x_in } else { x_out };
     let mut b = PathBuilder::new(Point3::new(start_x, ys[0], p.clearance_z));
+    for n in blend_notes {
+        b.note(n);
+    }
     for (k, &z) in zs.iter().enumerate() {
         if k > 0 {
             // New material is engaged from the air, never from under:
@@ -128,14 +147,20 @@ pub fn face(region: &Region, p: &FaceParams) -> Result<Toolpath, GenError> {
         for (i, y) in ys.iter().enumerate() {
             // Serpentine: even rows run the climb direction, odd rows return.
             let forward = p.climb == (i % 2 == 0);
-            b.push(
-                MoveKind::Feed,
-                Point3::new(if forward { x_out } else { x_in }, *y, z),
-                Some(p.feed),
-            );
-            if i + 1 < ys.len() {
-                let at = b.at();
-                b.push(MoveKind::Feed, Point3::new(at.x, ys[i + 1], z), Some(p.feed));
+            let end_x = if forward { x_out } else { x_in };
+            b.push(MoveKind::Feed, Point3::new(end_x, *y, z), Some(p.feed));
+            if let Some(&y1) = ys.get(i + 1) {
+                let to = Point3::new(end_x, y1, z);
+                if turns.get(i).copied().unwrap_or(false) {
+                    // Blended reversal: the step's own endpoints, one
+                    // semicircle bulging away from the footprint - a
+                    // left (ccw) turn off a +X row, a right (cw) one
+                    // off -X.
+                    let center = Point2::new(end_x, (*y + y1) * 0.5);
+                    b.push_arc(MoveKind::Feed, to, Some(p.feed), center, forward);
+                } else {
+                    b.push(MoveKind::Feed, to, Some(p.feed));
+                }
             }
         }
     }

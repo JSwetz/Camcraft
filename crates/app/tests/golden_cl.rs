@@ -161,9 +161,36 @@ fn face_square_40x40_matches_golden() {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        blend_turns: false,
     };
     let t = face(&rect(0.0, 0.0, 40.0, 40.0), &p).unwrap();
     write_golden("face_square_40x40.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn face_square_40x40_blended_matches_golden() {
+    // M11.1 A's byte witness: the same job with turning-point blends on.
+    // Line-for-line the sharp file, except that each of the four row
+    // reversals' step feed becomes one `Arc ... S±1` semicircle on the
+    // same endpoints (stride/2 radius, bulging into the overrun) and the
+    // header steps to v2. The sharp golden above stays byte-identical:
+    // blends are opt-in.
+    let p = FaceParams {
+        tool_diameter: 10.0,
+        stepover: 8.0,
+        clearance_z: 5.0,
+        cut_z: -2.0,
+        top_z: None,
+        stepdown: None,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        blend_turns: true,
+    };
+    let t = face(&rect(0.0, 0.0, 40.0, 40.0), &p).unwrap();
+    assert_eq!(t.arc_count(), 4);
+    assert!(t.notes.is_empty(), "{:?}", t.notes);
+    write_golden("face_square_40x40_blended.cl", &gen_to_cltext(&t));
 }
 
 #[test]
@@ -181,6 +208,7 @@ fn face_square_40x40_stepped_matches_golden() {
         feed: 500.0,
         plunge_feed: 100.0,
         climb: true,
+        blend_turns: false,
     };
     let t = face(&rect(0.0, 0.0, 40.0, 40.0), &p).unwrap();
     assert_eq!(

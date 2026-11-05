@@ -5,7 +5,8 @@
 //! CAM strategies as described in machine-tool handbooks and published CAM
 //! literature; the arc fitter is the classic three-point circle with a
 //! two-sided sagitta bound (geometry handbooks, e.g. Farin's curves and
-//! surfaces primer). Every number (parameter model, entry/exit overruns,
+//! surfaces primer); turning-point blends are RS-274 / ISO 6983 G2/G3
+//! path filleting (general machining knowledge). Every number (parameter model, entry/exit overruns,
 //! snap rules) is ours. Pure module: no flecs, no
 //! world access - the command layer resolves geometry into regions, this
 //! module only cuts them.
@@ -19,6 +20,7 @@
 
 
 mod arcs;
+mod blend;
 mod bore;
 mod chamfer;
 mod circular;
@@ -41,6 +43,7 @@ use {
 mod tests;
 
 pub use arcs::{fit_arcs, Seg, ARC_FIT_TOL};
+pub use blend::MIN_BLEND_RADIUS;
 pub use bore::{bore, BoreHole, BoreParams};
 pub use chamfer::{chamfer, ChamferParams};
 pub use circular::{circular, CircularParams};

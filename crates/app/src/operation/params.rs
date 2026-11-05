@@ -79,6 +79,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 climb,
+                blend_turns,
                 tilt,
             } => {
                 w(h, *stepover);
@@ -99,6 +100,12 @@ impl OpParams {
                     None => h.write_u8(0),
                 }
                 wt(h, *tilt);
+                // M11.1 A: the blends change the moves, so they change
+                // the digest - written only when ON, so every legacy
+                // (sharp) face keeps the digest it was cached under.
+                if *blend_turns {
+                    h.write_u8(0xB1);
+                }
             }
             OpParams::Contour {
                 stock_to_leave,
