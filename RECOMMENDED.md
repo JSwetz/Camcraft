@@ -8272,3 +8272,73 @@ Gate note: the R=200 sparsity parameter caught a cell-of-two bug -
 `seed_exact` divided its scan bounds by `cell` twice, which is invisible
 at cell 1.0 and empty everywhere else. The lattice tests now carry a
 non-unit cell each; that is the class the bug belonged to.
+
+## M7.1 B - swept-tool subtraction on the field: six decisions the max layer rests on (2026-11-05)
+
+**Chosen: a second per-cell layer (`cuts`) storing the running max of
+the negated swept-tool distances, clamped at cap; the query takes
+`max(mesh_term, cut)`.** Considered and dropped, decision by decision.
+(1) Re-graphing the field per move, or recomputing the whole sweep's
+distance at query time - the first makes every verdict pay every
+prior move, the second has no verdict that does not time out; the
+stored max is the layer the ROADMAP's "one max() per sample" names,
+and it is exactly associative: max commutes, so a replay in any
+order answers bit-identically (`the_order_of_moves_changes_nothing`
+proves it on 12^3 centers). The dexel only LOOKS order-dependent
+because a column stores one Z; its removal is a min over bottoms,
+the same commuting law in column clothing.
+(2) The swept solid's distance: voxelizing the sweep (marching the
+swept volume into the lattice) was dropped for the ROADMAP's
+inverted-trajectory law read exactly - the solid is convex and the
+sweep is a Minkowski sum along a segment, so `t -> phi(q - p(t))` is
+CONVEX and golden section (32 iterations, interval 4.6e-9) finds the
+min to far below a cell. The evaluated min is an UPPER bound of the
+true distance, so removal is never over-claimed: ghost rest, the
+blessed direction, never a false clean. The ball closes further into
+the capsule's closed form (the ROADMAP's "exact" entry, literal).
+Pose sampling was considered and refused for the same reason the
+ROADMAP refuses it: not conservative, never a verdict source.
+(3) Sign layering: a query on the shell (magnitude 0) lifts only by
+a removal claim (`cut.max(0.0)`), and `max` of a non-positive mesh
+term with a negative cut claim is the mesh term - so wherever
+parity says material and the tool demonstrably did not reach, the
+field says material, whatever the cell size or band width. The
+`phi >= cap` store-skip leans on the same inequality: its claim
+could never beat the mesh's `-cap`, so skipping is not an opinion.
+(4) The flat endmill's flank is FINITE and explicit (`SdfTool::Flat
+{ r, flank }`), where the dexel's column is infinite: above the
+flank's ceiling the field shows rest where the column shows air
+(`the_flat_sweep_says_cylinder_not_column` probes the divergence on
+purpose). Chosen because the field's law only speaks through the
+solid, and a solid with an infinite flank is not a tool; the
+reconciliation at declared tolerance rides stage C (pass a flank
+that spans the stock and the two agree to a cell). Bull-nose is
+deliberately absent: it is the rounded-rect profile the ROADMAP
+lists next to the torus and the frustum, and it belongs with the
+lathe sweeps, not smuggled in as a half-ball.
+(5) Non-finite moves REFUSE by name, where `Dexel::subtract` skips
+them silently - the dexel can afford to ignore a NaN column because
+a NaN column top is inert in its report; a field is a total function
+and its totality is the promise. The finiteness gate runs BEFORE the
+rapid skip (found at test design: a garbage rapid was sailing
+through "touch nothing" - refusing malformed input at the door is
+the Prime Directive's wording, and the door is now earlier). The
+window refusal is atomic the same way: every chord's cell budget is
+proved payable before ANY write, so a refusal never leaves half a
+move subtracted (`an_unpayable_window_refuses_and_writes_nothing`
+checks the field answers identically after the no).
+(6) Cost: golden section per cell per chord is stage B's honesty
+price - 12^3-cell law tests run in seconds, real programs will not.
+The ROADMAP's economy (marching the envelope's dirty bricks once,
+eikonal re-normalization, GPU scan conversion) is stage C's, and
+this stage keeps the seam so small that C can trade the walk for a
+sweep without a single verdict call site moving.
+
+Test-shape note: the law suites probe CELL CENTERS and assert
+`after == max(before, (-phi).min(cap))` with `phi` from formulas the
+tests write independently (capsule closed form; dense parameter
+scans against the field's golden section; the cone as a half-plane
+triangle - its nearest surface point provably rides the query's own
+half-plane). The arc test measures the sagitta contract instead:
+chord sweep vs true arc sweep, within the tolerance the chords were
+built under.

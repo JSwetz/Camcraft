@@ -34,7 +34,10 @@
 //! - **Sparse by brick, not octree.** 8x8x8-cell bricks of f64 under
 //!   a flat hash map; only near-surface bricks exist. An allocated
 //!   brick's out-of-band cell is NaN, and NaN answers the same law as
-//!   an absent brick: `cap`.
+//!   an absent brick: `cap`. A second layer (M7.1 B's cuts) rides the
+//!   same lattice: `subtract` folds `max` of the swept tool's negated
+//!   distance into it, and a query takes the max of the two layers,
+//!   so subtraction commutes and can never hide material.
 //! - **Total input.** A non-finite vertex, a zero-area facet, a
 //!   non-watertight shell, or a nonsense cell size refuses with the
 //!   defect named, before any cell is written. The query contract
@@ -77,6 +80,10 @@ pub struct SdfField {
     pub(crate) cap: f64,
     pub(crate) mesh: Arc<Vec<Triangle>>,
     pub(crate) bricks: HashMap<[i32; 3], Box<[f64; BRICK3]>>,
+    /// M7.1 B's subtraction layer: per cell, the running max of the
+    /// negated swept-tool distances; NaN cells and absent bricks say
+    /// "no tool has claimed this cell".
+    pub(crate) cuts: HashMap<[i32; 3], Box<[f64; BRICK3]>>,
 }
 
 /// World cell of a point on the origin-locked lattice.
@@ -108,17 +115,20 @@ impl SdfField {
         self.bricks.len()
     }
 
-    /// The signed distance at `p`: negative in material, positive in
-    /// air, zero at the shell. The sign is exact (parity on p's own
-    /// ray); the magnitude is the band value near the surface and
-    /// `cap` beyond it, in the conservative direction the header
-    /// names.
+    /// The signed distance at `p` in the STOCK AFTER CUTS: negative
+    /// in material, positive in air. The mesh term keeps the exact
+    /// sign (parity on p's own ray) and the band magnitude; the cut
+    /// term (`field_cut`'s max law) can only lift it, so a cell the
+    /// tool reached reads removed and material is never hidden.
+    /// Before any `subtract` the answer is the mesh term alone: zero
+    /// at the shell, band value near it, `cap` beyond.
     #[must_use]
     pub fn distance(&self, p: Point3) -> f64 {
         if !p.is_finite() {
             return f64::NAN;
         }
         let key = [cell_of(p.x, self.cell), cell_of(p.y, self.cell), cell_of(p.z, self.cell)];
+        let cut = self.cut_at(key);
         let mag = match self.bricks.get(&brick_of(key)) {
             Some(b) => {
                 let v = b[in_brick(key)];
@@ -131,10 +141,32 @@ impl SdfField {
             None => self.cap,
         };
         if mag == 0.0 {
-            return 0.0; // on the shell: either sign would be a lie
+            return cut.max(0.0); // on the shell: only a removal claim moves it
         }
         let sign = if self.inside(p) { -1.0 } else { 1.0 };
-        sign * mag
+        (sign * mag).max(cut)
+    }
+
+    /// The cut layer's value at a cell: NEGATIVE INFINITY where no
+    /// tool has claimed the cell, so `max` leaves the mesh term alone.
+    pub(crate) fn cut_at(&self, key: [i32; 3]) -> f64 {
+        match self.cuts.get(&brick_of(key)) {
+            Some(b) => {
+                let v = b[in_brick(key)];
+                if v.is_nan() {
+                    f64::NEG_INFINITY
+                } else {
+                    v
+                }
+            }
+            None => f64::NEG_INFINITY,
+        }
+    }
+
+    /// Allocated cut bricks: the swept-volume footprint is measurable.
+    #[must_use]
+    pub fn cut_brick_count(&self) -> usize {
+        self.cuts.len()
     }
 
     /// Ray-parity membership of `p` on p's own ray, the `solid_rest`
@@ -167,6 +199,14 @@ impl SdfField {
         self.bricks
             .entry(brick_of(key))
             .or_insert_with(|| Box::new([f64::NAN; BRICK3]))
+    }
+
+    /// The cut layer's slot for a cell, allocating its brick.
+    pub(crate) fn cut_mut(&mut self, key: [i32; 3]) -> &mut f64 {
+        &mut self
+            .cuts
+            .entry(brick_of(key))
+            .or_insert_with(|| Box::new([f64::NAN; BRICK3]))[in_brick(key)]
     }
 }
 

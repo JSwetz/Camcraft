@@ -146,6 +146,7 @@ impl SdfField {
             cap,
             mesh: Arc::new(facets.to_vec()),
             bricks: HashMap::new(),
+            cuts: HashMap::new(),
         };
         for (&key, &v) in &done {
             // Clamped: a stored value past the band is `cap`, exactly
