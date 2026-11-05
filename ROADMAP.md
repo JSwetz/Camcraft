@@ -47,7 +47,7 @@ keeps the open work, the registry table, and a pointer.
 ## Operation Catalog — the source of truth
 
 The complete list of operations the product must offer, grouped the way the
-ribbon shows them (M1.4.3). Status is what shipped by 0.2.0; Home is the
+ribbon shows them (M1.4.3). Status is current (kept in step with the registry); Home is the
 milestone that owns each name. A new operation is added here first — if it
 isn't on this list it isn't on the roadmap, and if it is, it has a ribbon
 home - and, from M10.1, a declared set of tool kinds that can cut it
@@ -62,7 +62,7 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 | Slot | ✅ | M1.3 |
 | Trace | ✅ | M1.3 |
 | 2D Pocket (zig / winding) | ✅ | M1.3 |
-| 2D Adaptive roughing | ✅ | M2.4 |
+| 2D Adaptive roughing | ⚠️ | M2.4 -> M11.4 C (shipped as engagement-stepped rings; trochoidal/constant-load owed) |
 | 2D Offset pocket roughing | ✅ | M2.4 |
 | Engrave | ✅ | M2.4 |
 | 2D Chamfer | ✅ | M2.4 |
@@ -74,7 +74,7 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 
 | Operation | Status | Home |
 |-----------|--------|------|
-| 3D Adaptive roughing | ✅ | M2.1 |
+| 3D Adaptive roughing | ⚠️ | M2.1 -> M11.4 C (trochoidal slot paths and fallbacks owed) |
 | 3D Offset pocket roughing | ✅ | M2.5 |
 | 3D Contour | ✅ | M2.2 |
 | Horizontal (waterline) | ✅ | M2.2 |
@@ -92,7 +92,7 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 | Blend | ✅ | M2.5 |
 | Morph | ✅ | M2.5 |
 | Corner | ✅ | M2.5 |
-| Flow (flowline; ruled-surface flow waits for M5.1) | ✅ | M2.5 |
+| Flow (flowline; ruled-surface flow waits for M5.1 - done since: M5.1 D swarf off the ruling fit) | ✅ | M2.5 |
 | Deburr | ✅ | M2.5 |
 | 3+2 roughing (tilted plane, indexed) | ✅ | M5.1 |
 
@@ -493,8 +493,8 @@ Latin-first fine; no built-in animation easing; egui-minor churn is
 bounded by the kittest snapshots.
 
 ### M1.4.3 - Structured Ribbon - a home for every operation
-**Goal: the whole catalog is reachable without drowning the ribbon.** — ⏸ (deferred;
-lands as M6.2 in Phase 6 - the home law below was overtaken by events, see there)
+**Goal: the whole catalog is reachable without drowning the ribbon.** — ✅ (landed as
+M6.2 in Phase 6 - the home law below was overtaken by events, see there)
 
 - **Sections by family**: the ribbon divides into labeled sections - Milling
       2D, Milling 3D, Drilling, Multi-axis, Turning - mirroring the
@@ -737,6 +737,7 @@ degrades by rule, none guesses silently:
       and retract as Feeds at rpm × pitch (the Tool's `pitch` field),
       the spindle-sync shape the post will emit as G84. **Thread
       milling stays open** - no helical-interp post exists yet (M1.7+)
+      (done since: M2.4 `machining2d/thread_mill.rs`)
 - ✅ **Boring and back-boring**: basic cycles - Bore feeds down and
       rapids out, BackBore feeds down and feeds up; the tool's `kind`
       (with `tip_angle` for drills, `pitch` for taps) drives the
@@ -937,7 +938,7 @@ before touching metal.
       is a serde-default no-op).
 
 ### M2.2 - 3D Finishing
-**Goal: mold-quality surfaces at a stated tolerance.**
+**Goal: mold-quality surfaces at a stated tolerance.** — ✅
 
 - ✅ **Parallel** (M2.2b): XY raster with Z-follow and the 45-deg
       auto-split - shallow terrain (|m_z| ≥ 1/√2, the scallop law's own
@@ -1065,7 +1066,8 @@ before touching metal.
       the viewport and one click (Frame rest / Frame gouge) flies the
       camera there. The per-op verifier's holder/collar bands stand
       beside this program-level truth; fixture-aware checking waits for
-      fixture modeling (M3.2).
+      fixture modeling (M3.2). (done since: M3.2 B - fixture solids,
+      live-gate collision law)
 - ✅ **Stock comparison** (M2.3 A-B): color map of over/under-cut against
       the final geometry - the deviation field IS the program's contract
       (sim top minus model surface per column), aggregated into the one
@@ -1129,7 +1131,8 @@ before touching metal.
 - **Ramp**, **Morphed spiral**, **Geodesic**: sloped paths and two new
       placements on M2.2's polar law
 - **Blend / Morph / Corner / Project-generalization**, **Flow** (flowline
-      on freeform; ruled-surface flow waits for M5.1's axis control),
+      on freeform; ruled-surface flow waits for M5.1's axis control -
+      done since: M5.1 D swarf off the ruling fit),
       **Deburr** (edge-break toolpaths; pairs with M2.4's chamfer)
 - **3D Offset pocket roughing**: the catalog ⚠️ M2.4 retired to here -
       roughing by OFFSET SHELLS of the model (the boundary eroded in
@@ -1169,11 +1172,11 @@ The phases below passed every gate; their prose lives in `DONE.md`
 (AGENTS.md "Done ledger" law), their status rows stay in the registry
 table at the foot of this file, and their decisions in `RECOMMENDED.md`.
 
-- **Phase 3 — Associative CAM & Production Workflow** (M3.1-M3.3, Release 0.3.0) — ✅
+- **Phase 3 — Associative CAM & Production Workflow** (M3.1-M3.3, Release 0.3.0) — ✅ (M3.3 owed item reopened 2026-11-05 -> M13.2)
 - **Phase 4 - Refactoring and reuseability.** (M4.1-M4.4, M4.2b) — ✅
-- **Phase 5 — Power: Multi-Axis, Turning, Scale** (M5.0-M5.3, Release 0.4.0) — ✅
+- **Phase 5 — Power: Multi-Axis, Turning, Scale** (M5.0-M5.3, Release 0.4.0) — ✅ (M5.2 owed items reopened 2026-11-05 -> M13.5)
 - **Phase 6 — UI refactoring.** (M6.1-M6.2) — ✅
-- **Phase 8 - Cutting order: the generator review & refactor.** (M8.1-M8.3, Release 0.5.0) — ✅
+- **Phase 8 - Cutting order: the generator review & refactor.** (M8.1-M8.3, Release 0.5.0) — ✅ (M8.1 "Adaptive earns its name" reopened 2026-11-05 -> M11.4 C)
 - **Phase 9 - The workpane: every operation opens its own page.** (M9.1, Release 0.6.0) - ✅
 - **Phase 10 — The tool law: an operation opens only where a tool can cut it** (M10.1) — ✅
 
@@ -1554,6 +1557,107 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
       license-clean to link; the notice rides `assets/ui/LICENSES.md`
       (the clipper2-rust precedent).
 
+## Phase 13 — Owed from done milestones
+
+The 2026-11-05 roadmap audit found promises made inside milestones whose
+rows read ✅ that no open milestone owned - written into a done
+milestone's prose, then left there when the row closed. This phase is
+their tracked home: nothing here is new scope, it is the debt. Each
+bullet quotes the original promise and names where it was made; the
+source prose stays where it is, and the source rows now read ⚠️ with a
+pointer here (or to M7.3 / M11.4 C, where an open milestone already owns
+the gap).
+
+### M13.1 - Stock engine completeness
+**Goal: the stock field cuts every tool the library holds and serves
+every consumer Phase 7 promised it to.** — 📋
+
+- **Bull-nose and lathe/rotary swept solids** (M7.1, "bull-nose = swept
+      rounded-rect profile; taper = frustum; a lathe or rotary cut =
+      torus/annular-sector sweeps"): today any tool that is not ball or
+      cone cuts the field as Flat (`crates/sim/src/stock_sim/field_solid.rs`,
+      `backend.rs:259-266`, `display.rs:52-57`) - a bull-nose's corner
+      radius is removed in the field where the real tool leaves it
+- **The eikonal band re-normalization** (M7.1, "re-normalize the band
+      with one eikonal sweep before the render pass (fast, local)"):
+      handed to M7.2 for the render, not built there
+- **The extracted mesh for the viewer and picking** (M7.2, "regenerates
+      triangles for the G-code viewer's stock display, picking, and STL
+      export"): the `MeshCache` serves STL export only
+- **Dual contouring** (M7.2, "dual contouring where sharp interior
+      corners must survive"): only the marching-tetrahedra extraction
+      shipped
+- **The solid hidden-rest scan past its budget** (M2.2, "Over the 1.2
+      M-cell / 40 M-claim budgets the solid scan answers with the stated
+      zero - the field's debt stays on the books"): the scan still
+      returns the stated zero over budget
+      (`crates/sim/src/stock_sim/scan.rs:261-264`); the field is to
+      answer there instead
+
+### M13.2 - Machine limits and cutting data
+**Goal: a program is judged against the machine's spindle and the
+material, not only its travel and feed.** — 📋
+
+- **Spindle speed and power checks** (M3.3 C, "spindle speed and power
+      limits (the ceilings the tool library's per-material speeds and
+      feeds are checked against)"): the machine definition stores
+      `spindle_power` but checks nothing
+      (`crates/post/src/machine/def.rs:107-112` - "checking it would
+      compare against nothing")
+- **The homegrown materials database** (Open question "Cutting data":
+      "grow a homegrown materials/tools database under an open license,
+      seeded from public vendor catalogs"): the per-material speeds &
+      feeds library the checks above read
+
+### M13.3 - Builds and distribution
+**Goal: every target builds and ships the way M1.7 and M4.2 said it
+would.** — 📋
+
+- **Code signing and the installer-vs-zip decision** (M1.7, "Unsigned -
+      no code-signing certificate is owned yet; the installer (vs the
+      zip) is a post-0.1.0 discussion")
+- **Docker builds for every target** (M4.2, "Docker: Using docker builds
+      for every target" - left open in the row as tooling death)
+- **The app/UI on wasm** (M4.2, "The app/UI-on-wasm story is the
+      web-sys-mvp rung"): only geometry/cl/post compile for wasm32 today
+- **A headless binary per crate** (Phase 4 intro, "Each crate should
+      produce a standalone executable that can be headless tested"):
+      today only app (`camcraft-cli`), post and ui carry binaries
+
+### M13.4 - Small owed polish
+**Goal: the named cheap follow-ons stop being named and get done.** — 📋
+
+- **ColorVision remaps** (M6.1, "Their `ColorVision` layer
+      (protan/deutan/tritan remaps applied on top of any theme) is a
+      cheap follow-on once the token table exists"): the token table
+      exists; the remaps do not
+- **The tool-law refusal suggests a starter-catalog entry** (M10.1,
+      "Stretch, deferred: the refusal naming a starter-catalog entry")
+- **Vertex picking and WCS face/vertex snapping** (M1.5, "vertex picking
+      deferred: ... it lands with the features that ask for it (hole
+      centers, M1.6; WCS snap, below)"; M1.2, "True face/vertex snapping
+      waits on M1.5's vertex pick mode"): only M1.5's ⏸ held it, and
+      M1.5 schedules nothing
+
+### M13.5 - Mill-turn completeness
+**Goal: mill-turn machines with the C axis, not only indexed beside it.** — 📋
+
+- **Continuous C-axis live-tooling operations** (M5.2, "Mill-turn: live
+      tooling operations indexed and continuous (C-axis)"): only the
+      indexed half shipped
+- **Axial drilling** (M5.2, "Turning holes: radial and axial drilling
+      through live tooling"): only indexed radial drilling shipped (F2)
+
+### M13.6 - Feature recognition beyond holes
+**Goal: pockets and slots are recognized, not only holes.** — 📋
+
+- **Pocket/slot recognition** (Open question "Feature recognition":
+      "automatic hole/pocket/slot recognition beyond M1.5 selection and
+      M1.6 basics"; M12.1, "face/island recognition from a real B-rep ...
+      becomes buildable"): M12.1 makes it buildable but schedules
+      nothing; this milestone is where it is built, on the Solidcore
+      B-rep once M12.1 lands
+
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
 | **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units (IGES deferred) | ⚠️ |
@@ -1564,16 +1668,16 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.4.3** | A home for every operation | Family-sectioned ribbon per the Operation Catalog, overflow dropdowns, user pinning (a document setting); the home law was overtaken by M5.1's ten ribbon-less kinds - the promise moved to M6.2, which landed it | ✅ |
 | **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
-| **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
+| **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open (done since: thread milling M2.4 thread_mill.rs, the post M1.7) | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) - REOPENED 2026-11-05 (user review): trochoidal slot paths and the corner-contact/trochoidal fallbacks were left "open" in the prose while the row read done; owed under M11.4 C | ⚠️ |
 | **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop, the polar placements (radial, spiral), the solid-truth hidden rest and the center-shadow families (contour, project) done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair, ray-parity material intervals, closed-loop march, the certified diagonal chain between raster lines); the four surface-finish params (tolerance, stepover, min_step, ramp_angle) went live and MEASURED at M2.5 A, which closes this row's last open clause | ✅ |
 | **M2.3** | Trust before cutting | Done: program material sim (chained cached ops), deviation color map with located verdicts, machine-definition checker (.mch travel/feed/spindle), verification made the post gate, 0.2.0 | ✅ |
-| **M2.4** | 2D, complete | Done: 2D adaptive + offset pocket roughing, engrave, 2D chamfer, circular, standalone bore, helical thread milling (row 78's offset-shell roughing rides on to M2.5 F) - REOPENED 2026-11-05 (user review + M11.4 measurement): 2D Adaptive was specced as trochoidal step-in at constant load but shipped as concentric offset rings stepped by the engagement law (a round pocket gets circles); the real constant-engagement/trochoidal adaptive is owed under M11.4 C | ⚠️ |
+| **M2.4** | 2D, complete | Done: 2D adaptive + offset pocket roughing, engrave, 2D chamfer, circular, standalone bore, helical thread milling (row 78's offset-shell roughing rides on to M2.5 F - done since: M2.5, 3D Offset pocket roughing) - REOPENED 2026-11-05 (user review + M11.4 measurement): 2D Adaptive was specced as trochoidal step-in at constant load but shipped as concentric offset rings stepped by the engagement law (a round pocket gets circles); the real constant-engagement/trochoidal adaptive is owed under M11.4 C | ⚠️ |
 | **M2.5** | 3-axis, complete | Done: steep-and-shallow, flat-area, pencil, ramp, morphed spiral, geodesic, blend/morph/corner, flow (freeform), deburr, and 3D Offset pocket roughing (the shell); M2.2's surface-finish params; reference revisit vs. the `pdf-sources` papers (PFD field, double spiral) on the M2.1d/M2.2 placements closed - both placements stand re-confirmed on the literature | ✅ |
 | **M3.1** | Model changes, toolpaths update | Done: stable feature identity + `UpdateModel` revision (A), stamp inputs - tool/WCS/FromModel stock propagate, staleness rides the copy (B), live-question `stale_reason` + one-undo-unit `RegenerateAll` (C), re-MACHining - rest masks from predecessors' recorded paths, converges in two rounds (D) | ✅ |
 | **M3.2** | Production setups | Done: multi-setup with implicit-setup law + datum transfer (A); fixtures - user STEP solids wearing a marker, spindle/table bands from the `.mch`, live-gate collision law (B); per-setup tool list in change order (C); setup sheets, one form-fed page per setup, no timestamps (D); workspaces by machine kind, axis-inventory inference (E) | ✅ |
-| **M3.3** | Every control covered | Done: post template engine - mounted `.mch` shapes output, `SelectPost` rides the undo history, user `.cps` refuse by name (A); five built-in posts - Fanuc, Haas, 840D, Heidenhain, Mazak - by-name registry, conformance goldens (B); machine definitions - declared kind gates the op families, full numbers mirrored, coolant M-codes, changer capacity, draft-law editor (C); RTCP - G43.4 delegates pivots to the controller, rotaries mirror as geometry, angle words modal both ways; block-by-block post trace with derived selection (D); 0.3.0 | ✅ |
+| **M3.3** | Every control covered | Done: post template engine - mounted `.mch` shapes output, `SelectPost` rides the undo history, user `.cps` refuse by name (A); five built-in posts - Fanuc, Haas, 840D, Heidenhain, Mazak - by-name registry, conformance goldens (B); machine definitions - declared kind gates the op families, full numbers mirrored, coolant M-codes, changer capacity, draft-law editor (C); RTCP - G43.4 delegates pivots to the controller, rotaries mirror as geometry, angle words modal both ways; block-by-block post trace with derived selection (D); 0.3.0; owed: spindle speed/power checked against nothing (-> M13.2) | ⚠️ |
 | **M4.1** | Code refactor | Done: six subcrates on the seam map (geometry R1, cl+tools R2, post R3, sim+motion R4 with the stock_sim/fixture knot dissolved); app's operation and project monoliths split along section seams (R5); tests moved crate-by-crate, coverage law held 785==785 at every rung; CI + release lanes run per crate (M4.1) | ✅ |
 | **M4.2** | Multibuilds | Done: GPU backend pick - `--gpu-backend`/env, refuse-by-name, preferred→auto→all honest chain, adapter log line; Linux native check + suites (18/20 goldens; 2 dome goldens drift on Linux libm - named skip, M4.2b fix owed, RECOMMENDED); macOS + wasm-compile CI jobs (geometry/cl/post green on wasm32); Docker-for-every-target left open (tooling death, RECOMMENDED) | ✅ |
 | **M4.3** | Defer Code | Done: hsmworks→camcraft everywhere user-facing or self-referential - crates/packages, `camcraft-ui.exe`, `.camproj` (+filter+untitled name), window title, cps vendor line, dist zip, thread name, doc titles; hash salts moved (one-time Stale, by design), wire magics kept (format = compatibility contract), Autodesk-trademark true-sentences kept; full suite green on the new names (595 pass / 792 `#[test]` law held / clippy -D warnings), goldens byte-stable, post `--version` intact | ✅ |
@@ -1581,14 +1685,14 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
 | **M4.2b** | Dome-golden fix | Done: the drift was never the sampler's rates - it was float-bit ties in the facet scan's argmax at mathematically-exact tangencies, resolved differently by each platform's libm. Fix: scan points born on the micron lattice, support compared on the lattice, convex hull in exact i64/i128 integers, arc splits `(lattice(q)+1e-12).ceil()`. Windows goldens regenerated once (7 files, coarser by 8-24 moves; envelope + verify lanes prove no tolerance broke); both named CI `--skip`s retired; Linux parity 20/20 (RECOMMENDED: law override) | ✅ |
 | **M5.0** | Structure prelude | Done: the kind-fan-out collapse (M5.0.2 `KindInfo::ALL` registry - labels, captions, digest tags, verify modes, retype seeds in one table; three silent UI catch-alls removed) + seven oversized-file splits (operation/types, machining2d, finishing3d, verify, stock_sim, drilling, machining3d) + M4.2b paid; lets M5.1/M5.2 add ~25 op kinds at one-table-row cost. Goldens byte-identical (structure, not behavior). Coverage 793==793, 29 ignores kept. See docs/M5-PHASE5-PLAN.md. | ✅ |
 | **M5.1** | Five axes | Done: the pose seam - `Move.axis` rides every move, prismatic byte-for-byte (A); 3+2 tilted-plane indexing on the five plane kinds (B); lead/lag/max-tilt over the waterline and raster ladders (C); swarf and advanced swarf off the ruling fit (D); rotary contour/parallel on the fitted axis (E), rotary offset roughing in developed wrap (E2), multi-axis roughing (E3); collision-aware shank dodge (F); kinematic machine sim with the pose-grid sweep law (G); flowline finish that curves with the part (I); drive-curve multi-axis contour (J); the envelope yardstick measures arcs at the generator's own tol/4 chord law, every family verdict green (close-out) | ✅ |
-| **M5.2** | Lathes too | Done: the lathe branch substrate - X/Z axis model, stock as revolved solid, blade tool profiles (A); facing, profile rough/finish (B); grooving, parting, the revolved blade verdict (C); threading on the wave verdict (D); chamfer, taper, multi-pass ladders (E), form turning (E2); boring on the inside-out revolve (F), radial drilling + hole recognition on turned solids (F2); part orientation and the bar feeder's load/unload intents (G/G.2); mill-turn offers both families through the machine-kind gate; tagged `m5.2-done` (RECOMMENDED: the tag and the vehicle) | ✅ |
+| **M5.2** | Lathes too | Done: the lathe branch substrate - X/Z axis model, stock as revolved solid, blade tool profiles (A); facing, profile rough/finish (B); grooving, parting, the revolved blade verdict (C); threading on the wave verdict (D); chamfer, taper, multi-pass ladders (E), form turning (E2); boring on the inside-out revolve (F), radial drilling + hole recognition on turned solids (F2); part orientation and the bar feeder's load/unload intents (G/G.2); mill-turn offers both families through the machine-kind gate; tagged `m5.2-done` (RECOMMENDED: the tag and the vehicle); owed: continuous C-axis live tooling and axial drilling (-> M13.5) | ⚠️ |
 | **M5.3** | Shop scale | Done: the entity-scoped digest memo - recompute only what moved (A); rayon batch generation, threaded-equals-serial bit-for-bit (B); part transfer intents + spindle inventory (C); in-process probe asks + composed deviation verdict (D); 72-byte shared mesh, streaming STL import at 30M facets, tiled-sparse stock grid (E/E1/E2); the boa job-script host - `cam.*` verbs, TS bindings generated from the verb table (F); `camcraft-cli` + the golden-model numerical regression suite in CI (G); released as 0.4.0 | ✅ |
 | **M6.1** | Token architecture | Adopt the solidcraft `Tokens`/`theme_files` design: one named table drives widgets + painted chrome, radii/spacing/sizes themeable, command-law switcher. Stages A+B+C landed: the table, derived visuals, the exhaustiveness guard, geometry clamps; the `camcraft-theme/1` reader - caps, named refusals, discovery, parse cache; the switcher as a command (`ThemeRef`/`SetTheme`, `Tokens::LIGHT`, setup-page picker, frame-edge sync, v41 persistence) - and the NewDocument singleton-leak fix it found; D - the contrast module (WCAG ratios, the follow law for unspelled accent states, on-fill ink that caught the hand-typed white's 3.83:1 active-state bug, the readability gate that refuses an unreadable file by name) and LIGHT's golden through the switcher's own door, the three snapshot tests under one lock. All seven bullets landed; the ColorVision remaps remain the named cheap follow-on, deferred | ✅ |
 | **M6.2** | A home for every operation, kept | M1.4.3's debt, paid: the registry's Section column (Family derived, one truth), `shown_for` the single machine filter - hiding not darkening; the fold, then re-folded: first width-driven (40px floor, fattest group's tail behind a "{Section}..." door, the dropdown reaches every kind, global-rect law the first click-through proved), then structural at the user's verdict - a crowd that only folds when squeezed is still a crowd: every family behind one labeled door at any width, at most 4 pins on the bar, a pinned kind leaves its door (one home per kind); the machine door (Setup group) switches Milling/Turning/Mill-turning by mounting that kind's reference machine - a LoadBuiltinMachine command, so the switch rides undo; pins as a document setting outside the history (RibbonPins, v42, absent = unpinned; undo replays cuts, not layout); the combo grouped by the same taxonomy | ✅ |
-| **M7.1** | Stock becomes a field | Narrow-band brick SDF from the mesh; closed-form swept-tool subtraction (`max` with the tool-frame distance, inverted-trajectory law); same stock_sim API, real distances at every verdict call site | ✅ |
-| **M7.2** | The machined volume in the 3D view | Done: sphere-traced viewport render on the egui-wgpu stack - compute march + composite with sorted depth (A/B), progressive per-move playback with checkpointed backward seek (C), continuous deviation classes from the target's field per pixel, marching-tetrahedra mesh as a cache keyed on the field view + STL export of what the program leaves (D), CPU fallback at thumbnail resolution; the status-line verdict stays on the column engine until M7.3 | ✅ |
+| **M7.1** | Stock becomes a field | Narrow-band brick SDF from the mesh; closed-form swept-tool subtraction (`max` with the tool-frame distance, inverted-trajectory law); same stock_sim API, real distances at every verdict call site; owed: rest material still reads the column engine (-> M7.3), bull-nose and lathe/rotary sweeps cut as Flat (-> M13.1) | ⚠️ |
+| **M7.2** | The machined volume in the 3D view | Done: sphere-traced viewport render on the egui-wgpu stack - compute march + composite with sorted depth (A/B), progressive per-move playback with checkpointed backward seek (C), continuous deviation classes from the target's field per pixel, marching-tetrahedra mesh as a cache keyed on the field view + STL export of what the program leaves (D), CPU fallback at thumbnail resolution; the status-line verdict stays on the column engine until M7.3; owed: the mesh never reached the viewer's stock display or picking, no dual contouring, no eikonal re-normalization (-> M13.1) | ⚠️ |
 | **M7.3** | Dexel retirement | Both engines verdict-identical on the heavy lane (rest/gouge/deviation within declared epsilon), per-brick update cost law, column engine retires | 📋 |
-| **M8.1** | Roughing entry & order | Level-0 obeys the entry family (true helix/ramp into metal, no silent plunge fallback), roughing pass order reaches the middle off the wall, `Adaptive` trochoid-or-renamed, substitutions diagnosed | ✅ |
+| **M8.1** | Roughing entry & order | Level-0 obeys the entry family (true helix/ramp into metal, no silent plunge fallback), roughing pass order reaches the middle off the wall, `Adaptive` trochoid-or-renamed, substitutions diagnosed; owed: "Adaptive earns its name" was not taken - still rings, neither trochoid nor renamed (-> M11.4 C) | ⚠️ |
 | **M8.2** | Finishing & planar order | Done: contour Z-entry on the entry family, certified against the destination bore air, wall-side opt-in refused by note (A); waterline tangent-ring entry re-proved on steep parts, ramped first contact opt-in, normals measured not assumed (B); slot ramp/helix certified on the convex cutter-center stadium (`Cert`), full-width substitution says its name, tabbed levels stand the arms down on the pre-A byte, tall-tab hop raise, trace plunge theorem (C); M1.3's spiral/helical debt swept; heavy lane green | ✅ |
 | **M8.3** | Canned/posed/revolved order | Done: drilling - R-plane law kept per cycle, the bore's fit door refuses an oversize tool and a stepped (counterbore-folded) hole by name, Spot dims off the mouth, FIT_TOL unified as one trust wearing three laws; helical bore entries declined as a verdict (a wide slide is contour's verb); multi-axis - a dive's lead now rides the cut it lands into (the stamp matches curve.rs's first station; ALONG→AT corrected in the archived prose), cone-dodge-at-entry, wrap radial dives and tilt-posed rapids recorded as verdicts with their backstop chains; turning - order law stated in the catalog rows, the verifier's stands-downs documented, no entry-defect analog (ridge, kerf-slide and rho_clear laws refuse or prevent by name); whole registry annotated, heavy lane green on every family | ✅ |
 | **M9.1** | The operation opens its own page | Done: the retype dropdown and its dialog retired - the ribbon creates or opens by kind, the tree selection opens the same pane in place (A); the six tabs folded into one stacked pane of collapsing sections per the Blender verdict, `op_tab` retired, the drift guard restated exact (B); the pane law walks all 30 registry kinds - one header per group, fields exactly once, catching the Passes header/field collision, renamed Pass count (C); toolpath goldens byte-identical, snapshots re-blessed; heavy lane green; ledger in RECOMMENDED.md | ✅ |
@@ -1599,6 +1703,12 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path | 📋 |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area | 📋 |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
+| **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2) | 📋 |
+| **M13.2** | Machine limits and cutting data | Spindle speed/power checks against a per-material speeds & feeds library (M3.3 C); the homegrown materials database (Open question "Cutting data") | 📋 |
+| **M13.3** | Builds and distribution | Code signing + installer-vs-zip (M1.7); Docker builds for every target, app/UI on wasm (M4.2); a headless binary per crate (Phase 4 intro) | 📋 |
+| **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5) | 📋 |
+| **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
+| **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 
 ## Open questions & deferred
 
@@ -1620,28 +1730,31 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
   truck (ricosjp, also Apache-2.0) still carries STEP→mesh import (M1.2),
   and its boolean/offset behavior is the reference the dual-kernel
   agreement bench measures against
-- **Post scripting runtime**: which embedded language (QuickJS / Lua / Rust-native DSL) -
-  decide before M3.3; must be sandboxed like other scripts
+- **Post scripting runtime** (answered - boa): which embedded language (QuickJS / Lua / Rust-native DSL) -
+  decide before M3.3; must be sandboxed like other scripts. Answered: the boa JS engine hosts
+  `.cps` posts (M3.3) and job scripts (M5.3 F)
 - **Simulation stock representation** (answered, revisited by design): decided dexel before M1.7 - right for the Z-plunge work of
   Phases 1-2 - and the multi-axis phases broke the column model's premise. Phase 7 answers the question the way the parenthetical
   always suspected: an implicit SDF engine replaces the voxel/dexel preview, keeps the exact remaining-material queries gouge
   checks need, and renders the machined volume directly. The grid models the *machined block for simulation only* - operation
   geometry and tolerance checks still evaluate against B-rep/mesh; that law is Phase 7's load-bearing premise, not its casualty
-- **Cutting data**: no licensed handbook is affordable long-term - grow a homegrown
+- **Cutting data** (claimed by M13.2): no licensed handbook is affordable long-term - grow a homegrown
   materials/tools database under an open license, seeded from public vendor catalogs
-- **Patent check (FTO)**: high-efficiency milling and some 5-axis orientation techniques
+- **Patent check (FTO)** (answered - waived): high-efficiency milling and some 5-axis orientation techniques
   were patented in the 2000s-2010s; run a freedom-to-operate review before M2.1 and M5.1
-  to confirm the literature we're implementing from is unencumbered
-- **Probing / workpiece verification**: deferred until post Phase 2 (which probing protocol
-  sets first - RS238 or Renishaw-style macros?)
-- **Feature recognition**: automatic hole/pocket/slot recognition beyond M1.5 selection
+  to confirm the literature we're implementing from is unencumbered. Answered: waived by
+  the user 2026-10-19 (RECOMMENDED.md, 'Freedom-to-operate review WAIVED', line ~1410)
+- **Probing / workpiece verification** (answered): deferred until post Phase 2 (which probing protocol
+  sets first - RS238 or Renishaw-style macros?). Answered by M5.3 D: the PROBE request on the
+  stream, emitted per post through its own `onProbe`
+- **Feature recognition** (claimed by M13.6): automatic hole/pocket/slot recognition beyond M1.5 selection
   and M1.6 basics - deferred; M3.1 associativity will need some of it anyway
 - **Machine simulation kinematics fidelity**: full controller emulation is out of scope;
   we simulate geometry and limits, not the control loop
 - **SolidWorks link**: HSMWorks was a SolidWorks add-in; this implementation is a
   standalone application - add-in/host integration deferred indefinitely (and any
   file-format interop done from published formats only)
-- **Naming**: the project currently uses the HSMWorks name descriptively; pick our own
+- **Naming** (answered - camcraft, M4.3): the project currently uses the HSMWorks name descriptively; pick our own
   product name before 0.1.0 to stay clear of trademark confusion (clean-room clears
   copyright, not brands)
 

@@ -440,7 +440,9 @@ Phase-5 shape law.
       world; picked selections refuse a tilt by name; the program posts
       only to a machine with the letters. Position commands between
       cuts ride A; 3+2 ROUGHING strategies (the helical/adaptive
-      families on the plane) continue below
+      families on the plane) continue below (done since: M5.1 B -
+      Adaptive2D and Offset2D carry a `Tilt` like the other plane kinds;
+      the catalog's 3+2 roughing row)
 - ✅ **Collision-aware orientation** (stage F, this commit): auto-tilt
       to avoid shank contact, with shortest-travel smoothing - the
       spindle dodges the wall WITHOUT moving the path: the three
@@ -1196,7 +1198,7 @@ heavy lane green at 6d2c424; ledger in RECOMMENDED.md)
 
 ### M8.3 - Drilling, multi-axis, turning
 **Goal: the canned, posed and revolved families answer the same
-questions; cycle order and approach order get stated, not assumed.** — 📋
+questions; cycle order and approach order get stated, not assumed.** — ✅
 
 - drilling cycles: spot → peck → bottom → retract orders audited
   against the G73/G83 semantics already posted (`drilling/cycle.rs`;
@@ -1240,7 +1242,7 @@ dropdown. Low coupling, high cohesion, applied to the UI.
 ### M9.1 - Operation-specific panes ✅
 **Goal: the ribbon's operation button starts that operation and opens its
 own pane; the generic create-everything form and its kind dropdown are
-gone, and existing operations edit in place.** — 📋
+gone, and existing operations edit in place.** — ✅
 
 - Click-through first (the reported bug): a ribbon cell for a kind creates
   AND focuses that operation in one action - `Cmd::Create(kind)` lands the
