@@ -20,8 +20,9 @@ use egui_wgpu::wgpu;
 
 const SHADER: &str = include_str!("composite.wgsl");
 
-/// `struct C` in composite.wgsl: a mat4 and five vec4s.
-const UNIFORM_SIZE: u64 = 64 + 5 * 16;
+/// `struct C` in composite.wgsl: a mat4 and nine vec4s (five of frame
+/// geometry, four of verdict palette - M13.4).
+const UNIFORM_SIZE: u64 = 64 + 9 * 16;
 
 /// The viewport depth format - `viewport::DEPTH_FORMAT`'s twin.
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -41,6 +42,9 @@ pub struct FrameGeom {
     pub k: u32,
     /// Trace frame extent in pixels.
     pub trace: (u32, u32),
+    /// The verdict palette (M13.4's colour-vision remap): clean, rest,
+    /// gouge, unjudged - `fs_stock`'s, so sheet and trace agree.
+    pub verdict: [[f32; 3]; 4],
 }
 
 /// The composite pipeline plus its uniform.
@@ -180,6 +184,9 @@ pub fn uniform_bytes(mvp: &[[f32; 4]; 4], g: &FrameGeom) -> Vec<u8> {
     v4(g.right, g.view.1 as f32);
     v4(g.up, g.k as f32);
     v4([g.trace.0 as f32, g.trace.1 as f32, 0.0], 0.0);
+    for c in g.verdict {
+        v4(c, 1.0);
+    }
     b
 }
 
@@ -198,6 +205,7 @@ mod tests {
             view: (640, 480),
             k: 2,
             trace: (320, 240),
+            verdict: [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9], [1.0, 0.0, 0.5]],
         };
         let b = uniform_bytes(&[[0.0; 4]; 4], &g);
         assert_eq!(b.len() as u64, UNIFORM_SIZE);
@@ -206,5 +214,7 @@ mod tests {
         assert_eq!(f(80 + 12), 640.0); // fwd.w = view width
         assert_eq!(f(112 + 12), 2.0); // up.w = k
         assert_eq!(f(128), 320.0); // frame.x
+        assert_eq!(f(144 + 16 * 2 + 4), 0.8); // gouge.g
+        assert_eq!(f(144 + 16 * 3 + 12), 1.0); // unjudged.w
     }
 }

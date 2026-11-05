@@ -338,6 +338,27 @@ mod path_tests {
         assert!(green && blue && red, "feed, rapid and plunge each show: {green} {blue} {red}");
     }
 
+    /// M13.4: the move kinds wear the colour-vision palette, switched
+    /// through the command door and put back by undo; Off is the three
+    /// house consts exactly.
+    #[test]
+    fn the_path_wears_the_colour_vision_palette_and_undo_restores_it() {
+        use crate::egui_app::colorvision::Semantic;
+        use camcraft_app::schema::ColorVision;
+        let mut state = state_with_generated_path();
+        select(&mut state, Some("Face1"));
+        let has = |state: &State, c: [f32; 3]| toolpath_lines(state).iter().any(|v| v[3..6] == c);
+        assert!(has(&state, FEED_RGB) && has(&state, PLUNGE_RGB), "Off: the house colours");
+        state.pending.push_back(CommandKind::SelectColorVision(ColorVision::Deutan));
+        state.drain_actions();
+        let rg = Semantic::RED_GREEN;
+        assert!(has(&state, rg.feed) && has(&state, rg.plunge) && has(&state, rg.rapid), "deutan palette");
+        assert!(!has(&state, FEED_RGB), "the green feed is gone under deutan");
+        state.pending.push_back(CommandKind::Undo);
+        state.drain_actions();
+        assert!(has(&state, FEED_RGB) && has(&state, PLUNGE_RGB) && has(&state, RAPID_RGB), "undo: Off again");
+    }
+
     #[test]
     fn deselecting_hides_the_path_again() {
         let mut state = state_with_generated_path();

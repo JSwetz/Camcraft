@@ -173,6 +173,13 @@ pub(super) fn validate_kind(dto: &EntityDto, kind: EntityKind) -> Result<(), Pro
                     dto.name
                 )));
             }
+            if !op.area.to_controls().is_sane_for(&params) {
+                return Err(corrupt(format!(
+                    "the Boundary settings of '{}' are not usable for a {} operation",
+                    dto.name,
+                    params.kind()
+                )));
+            }
             if let Some(cache) = &op.cache {
                 let path = cl_path(&cache.moves, &cache.cycles);
                 if path.is_empty() {

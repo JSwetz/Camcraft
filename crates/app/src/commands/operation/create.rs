@@ -67,6 +67,7 @@ impl CreateOperation {
                 params,
                 stamp: None,
                 setup,
+                area: Default::default(),
             },
         })
     }

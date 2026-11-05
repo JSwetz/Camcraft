@@ -23,6 +23,26 @@ pub struct EditOperationParams {
 
 impl EditOperationParams {
     pub fn new(world: &World, name: &str, params: OpParams) -> Result<Self, CommandError> {
+        Self::edit(world, name, params, None)
+    }
+
+    /// The same edit carrying the area controls too (M11.5): one undo
+    /// unit for the page's Apply, whichever half the user touched.
+    pub fn with_area(
+        world: &World,
+        name: &str,
+        params: OpParams,
+        area: operation::AreaControls,
+    ) -> Result<Self, CommandError> {
+        Self::edit(world, name, params, Some(area))
+    }
+
+    fn edit(
+        world: &World,
+        name: &str,
+        params: OpParams,
+        area: Option<operation::AreaControls>,
+    ) -> Result<Self, CommandError> {
         let Some(entity) = model::find_by_name(world, name) else {
             return Err(CommandError::NotFound(name.to_string()));
         };
@@ -50,9 +70,22 @@ impl EditOperationParams {
         if let Some(msg) = crate::operation::side_sane(&params, &prev.src) {
             return Err(CommandError::Invalid(msg));
         }
+        let area = area.unwrap_or_else(|| prev.area.clone());
+        if !area.is_sane_for(&params) {
+            return Err(CommandError::Invalid(if operation::area_applies(params.kind()) {
+                "the Boundary settings are not usable - distances must be finite, within 10 m, the extension not negative, and every boundary must name its picks".to_string()
+            } else {
+                format!("a {} operation has no machining area - its Boundary settings stay at their defaults", params.kind())
+            }));
+        }
+        let picks: Vec<_> = area.picks().cloned().collect();
+        if !picks.is_empty() {
+            valid_src(world, prev.setup.as_deref(), &SrcRef::Selection(picks))?;
+        }
         let next = Operation {
             params,
             stamp: None,
+            area,
             ..prev.clone()
         };
         Ok(EditOperationParams { name: name.to_string(), prev, next })
@@ -116,7 +149,15 @@ impl ChangeOperationKind {
         // The retype is a creation of the new kind against the op's
         // current tool: the same tool-law door (M10.1 B).
         tool_gate(world, &params, &prev.tool)?;
-        let next = Operation { params, stamp: None, ..prev.clone() };
+        // The area controls ride the retype when the new kind has an
+        // area (M11.5); a kind without one keeps the identity, never
+        // controls it cannot honor.
+        let area = if operation::area_applies(params.kind()) {
+            prev.area.clone()
+        } else {
+            operation::AreaControls::default()
+        };
+        let next = Operation { params, stamp: None, area, ..prev.clone() };
         Ok(ChangeOperationKind { name: name.to_string(), prev, next })
     }
 }

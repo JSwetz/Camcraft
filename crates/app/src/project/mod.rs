@@ -105,6 +105,8 @@ use crate::tools::{Tool, ToolKind};
 use crate::units::{self, Unit};
 use crate::verify::Warning;
 
+mod area;
+pub use area::*;
 mod file;
 pub use file::*;
 mod params;

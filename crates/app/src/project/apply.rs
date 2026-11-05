@@ -624,6 +624,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                     params: odto.params.to_params(),
                     stamp: odto.stamp.map(GenStamp),
                     setup: odto.setup,
+                    area: odto.area.to_controls(),
                 });
                 if let Some(cache) = &odto.cache {
                     entity.entity_view(world).set(cache.to_cache());

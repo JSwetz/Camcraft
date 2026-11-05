@@ -189,6 +189,25 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
     if frame.is_some() && matches!(&op.src, SrcRef::Selection(_)) {
         return None;
     }
+    // The area controls (M11.5), resolved as generation resolves them; a
+    // refusal draws nothing - generation names it.
+    let ctx = match area_ctx_of(world, op) {
+        None => None,
+        Some(Ok(mut c)) => {
+            if let OpParams::Contour { side, .. } = &op.params {
+                let inside = match side {
+                    Side::Inside => true,
+                    Side::Outside => false,
+                    Side::Auto => contour_auto_side(world, op.setup.as_deref(), &op.src, &op.params)
+                        .unwrap_or(false),
+                };
+                c.contour_side(inside);
+            }
+            Some(c)
+        }
+        Some(Err(_)) => return None,
+    };
+    let controlled = |r: Option<Region>| r.and_then(|r| apply_area_controls(r, ctx.as_ref()).ok());
     if let SrcRef::Selection(items) = &op.src
         && !matches!(
             op.params,
@@ -213,11 +232,13 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
                 | OpParams::MultiAxisContour { .. }
         )
     {
-        return selection_region(world, op.setup.as_deref(), items, &op.params).ok();
+        return controlled(selection_region(world, op.setup.as_deref(), items, &op.params).ok());
     }
     let material = material_of(world, op.setup.as_deref(), &op.src).ok()?;
     match &frame {
-        None => region_for(world, op.setup.as_deref(), Some(&op.src), &material, &op.params, None).ok(),
+        None => controlled(
+            region_for(world, op.setup.as_deref(), Some(&op.src), &material, &op.params, None).ok(),
+        ),
         Some(f) => {
             let local = Material {
                 facets: f.local_facets(&material.facets),
@@ -427,9 +448,10 @@ pub(super) fn region_core(
     z: Result<f64, GenError>,
 ) -> Result<Region, GenError> {
     // Every source-built region (Face's silhouette included) crosses the
-    // one area-controls seam the selection-built ones cross (M11.4 A;
-    // M11.5's controls attach there, identity today).
-    apply_area_controls(source_region(material, params, frame, z)?, &AreaControls::default())
+    // one area-controls seam the selection-built ones cross (M11.4 A /
+    // M11.5) at the caller - `run_job`'s precompute and `region_of` -
+    // where the tool and the stock the controls read are in hand.
+    source_region(material, params, frame, z)
 }
 
 /// The source-built region per kind, before the area controls.

@@ -482,7 +482,8 @@ pub(super) fn selection_geometry_impl(
 /// [`pocket_region_on_part`] (M11.4 A): the area the picks enclose, the
 /// part's own material at the ladder's planes as the islands - so a
 /// face, its edge loop and its wall resolve to the same region. Every
-/// kind's answer then crosses the area-controls seam (M11.5's home).
+/// kind's answer then crosses the area-controls seam (`apply_area_controls`,
+/// M11.5) at its caller.
 pub(super) fn selection_region(
     world: &World,
     setup: Option<&str>,
@@ -499,5 +500,7 @@ pub(super) fn selection_region(
         Some((part, planes)) => pocket_region_on_part(loops, &part, &planes)?,
         None => Region::new(loops)?,
     };
-    apply_area_controls(region, &AreaControls::default())
+    // The area controls run after this, at the seam's call sites (the
+    // job collector, the preview) - they need the tool and the stock.
+    Ok(region)
 }

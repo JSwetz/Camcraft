@@ -189,3 +189,58 @@ fn change_tool_refuses_a_retype_that_strands_an_op() {
     h.execute(&world, AddTool::new(&world, "Spare", catalog_tool("EM-0600-4FL")).expect("add"));
     ChangeTool::new(&world, "Spare", blade).expect("nothing rides Spare");
 }
+
+/// M13.4: with an empty rack, every kind's refusal names a real
+/// starter-catalog entry its family can cut with, and each family's
+/// pick is the everyday-size one (nearest 6 mm, the blade/insert
+/// families by ground width).
+#[test]
+fn the_refusal_names_a_fitting_catalog_entry() {
+    let (world, _h) = world_with(None, &[]);
+    let cat = catalog();
+    for info in camcraft_app::operation::KindInfo::ALL {
+        let why = tool_gate::create_refusal(&world, info).expect("an empty rack refuses every kind");
+        assert!(why.starts_with("No "), "{why}");
+        let named = why
+            .split_once(" - add '")
+            .and_then(|(_, rest)| rest.split_once('\''))
+            .map(|(name, _)| name)
+            .unwrap_or_else(|| panic!("{}: no catalog hint in {why}", info.label));
+        let (_, tool) = cat
+            .iter()
+            .find(|(n, _)| *n == named)
+            .unwrap_or_else(|| panic!("{named} is not a catalog entry"));
+        assert!(info.accepts(tool.kind), "{}: {named} cannot cut it", info.label);
+        assert!(why.ends_with("from the catalog?"), "{why}");
+    }
+    for (ty, want) in [
+        (OpType::Drill, "'DR-0600' (6 mm drill)"),
+        (OpType::Thread, "'TAP-M6' (6 mm tap)"),
+        (OpType::BoringTurning, "'BR-1000' (10 mm boring bar)"),
+        (OpType::GrooveFinish, "'GT-0300' (3 mm grooving blade)"),
+        (OpType::Threading, "'TD-1732-60' (1.732 mm threading insert)"),
+        (OpType::Facing, "'TN-1600-0R8' (16 mm turning insert)"),
+        (OpType::Pocket, "'EM-0600-4FL' (6 mm flat end mill)"),
+        (OpType::Finish3D, "'BN-0600' (6 mm ball-nose)"),
+        (OpType::FormTurning, "'FG-0600-04' (4 mm form gauge)"),
+    ] {
+        let why = tool_gate::create_refusal(&world, ty.info()).expect("empty rack");
+        assert!(why.contains(&format!("add {want} from the catalog?")), "{why}");
+    }
+}
+
+/// M13.4: a catalog that stocks no tool of the family's kinds suggests
+/// nothing - the refusal never names a tool that cannot cut the op.
+#[test]
+fn no_catalog_entry_of_the_kind_means_no_hint() {
+    let no_blades: Vec<(&str, Tool)> =
+        catalog().into_iter().filter(|(_, t)| t.kind != ToolKind::Groove).collect();
+    let blade = OpType::GrooveFinish.info().tool_kinds;
+    assert_eq!(tool_gate::catalog_suggestion(&no_blades, blade), None);
+    assert_eq!(tool_gate::catalog_suggestion(&[], OpType::Drill.info().tool_kinds), None);
+    // A family's later kind still answers when its first is missing.
+    let no_drills: Vec<(&str, Tool)> =
+        catalog().into_iter().filter(|(_, t)| t.kind != ToolKind::Drill).collect();
+    let hint = tool_gate::catalog_suggestion(&no_drills, OpType::Drill.info().tool_kinds);
+    assert_eq!(hint.as_deref(), Some("add 'TAP-M6' (6 mm tap) from the catalog?"));
+}

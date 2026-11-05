@@ -97,6 +97,7 @@ fn generate(world: &World, name: &str, picks: &[FeatureSel], params: &OpParams) 
         params: params.clone(),
         stamp: None,
         setup: None,
+        area: Default::default(),
     };
     operation::generate(world, &op, "").map(|(t, w)| (t, w.len())).map_err(|e| e.to_string())
 }

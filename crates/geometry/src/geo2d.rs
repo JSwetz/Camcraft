@@ -33,7 +33,9 @@ pub(crate) const COORD_LIMIT: f64 = 1e12;
 /// tool radius stays in the dozens of segments.
 const ARC_TOL_UNITS: f64 = 5e3;
 
-/// Miter limit, unused while joins are round; Clipper's default.
+/// Miter limit of [`Region::offset_sharp`] (Clipper's default): a corner
+/// sharper than ~60 degrees is squared off at twice the offset instead of
+/// running a spike out to infinity.
 const MITER_LIMIT: f64 = 2.0;
 
 #[derive(Error, Debug, PartialEq)]
@@ -377,6 +379,25 @@ impl Region {
             &self.to_paths()?,
             d * SCALE,
             JoinType::Round,
+            EndType::Polygon,
+            MITER_LIMIT,
+            ARC_TOL_UNITS,
+        )))
+    }
+
+    /// [`offset`](Self::offset) with mitred joins: a grown rectangle stays a
+    /// rectangle (M11.5's sharp corner style). Same refusals, same lattice.
+    pub fn offset_sharp(&self, d: f64) -> Result<Region, GeoError> {
+        if !d.is_finite() {
+            return Err(GeoError::Invalid("non-finite offset distance".into()));
+        }
+        if d.abs() >= COORD_LIMIT {
+            return Err(GeoError::OutOfRange);
+        }
+        Ok(Self::from_paths(inflate_paths_64(
+            &self.to_paths()?,
+            d * SCALE,
+            JoinType::Miter,
             EndType::Polygon,
             MITER_LIMIT,
             ARC_TOL_UNITS,

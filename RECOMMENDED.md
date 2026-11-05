@@ -9430,3 +9430,68 @@ owed: a 3D Pocket with Helix entry run to the stock bottom on the
 user's part makes a sliver level under the bore's solid floor (caught
 by verify, post blocked - not silent; the generator fix is tracked).
 contour.rs dropped 689 -> 338 lines and ladder.rs 596 -> 295.
+
+## M11.5 - area control and open boundaries: seven decisions (2026-11-06)
+
+(1) **The settings live on the operation** (`area: AreaControls` beside
+tool/src/setup), not in `OpParams`, so no kind's field list churns. The
+defaults are exactly today's behaviour: no stamp bytes, no file key,
+no version bump, goldens unchanged. Valid on Face, Contour, Pocket,
+Adaptive2D, Offset2D and Pocket3D; other kinds refuse non-defaults.
+
+(2) **One order, through the M11.4 seam:** open boundary, offset
+(round/sharp - `geo2d::offset_sharp` added), extension (grown except
+where part material stands), includes, containment, excludes. All
+world reads are resolved once in `collect_job`; `run_job` stays pure.
+
+(3) **Containment is relative to what each kind already does**
+(default "as the kind cuts"; On adds a tool radius, Outside a tool
+diameter), so containment never pushes a pocket into the part: the
+part's own material is always taken back out.
+
+(4) **Excludes are a hard keep-out for the whole tool on clearing
+kinds**, and reshape the ring for Contour.
+
+(5) **Open boundaries (the user's E).** The chain runs on straight past
+its ends and splits the stock outline in two. "Inside" is the side
+holding more of the op's own area (an exact tie takes the left,
+walking from the chain's lower end). Face lays its rows parallel to the
+chain, far side first, starting in air outside the stock and finishing
+with the tool edge on the chain; pocket kinds reach a tool diameter past
+the stock so their outer passes start in air. Contour, and any boundary
+on a 3+2-indexed op, refuse by name for now.
+
+(6) **Face clears a bounding rectangle**, so a shaped area that would
+cross an exclude, the far side of an open boundary, or part material
+above Cut Z refuses by name with a pointer to Pocket. An empty area
+names the step that emptied it.
+
+(7) **UI:** a collapsed "Boundary" group on the Geometry tab (same
+question as the selection; a new tab would change every kind's bar).
+Apply sends one combined `EditOperationParams::with_area` undo step;
+include/exclude/open pick buttons route viewport clicks into the
+page's draft until Apply. Dropped: a non-identity Face default (the
+ROADMAP floated "past the stock outline by default"; it stays opt-in
+so the facing goldens hold).
+
+## M13.4 - polish: catalog hint and colour-vision palettes: four decisions (2026-11-06)
+
+(1) **The catalog hint names the entry nearest 6 mm** from the family's
+first stocked kind (blades by ground width, since they share one 16 mm
+body). Dropped: the smallest size (a 2 mm drill is the fragile one) and
+the op's hole size (`create_refusal` has no params to read it from).
+
+(2) **Colour vision is a view preference, not a document setting.** It
+is a command-law world singleton (`SetColorVision`, undoable), not
+saved, and survives New/Open: a protan user's file opened by a
+colleague shouldn't wear the protan palette.
+
+(3) **Hand-tuned remaps, gated by simulation.** Machado, Oliveira &
+Fernandes 2009 at full severity; every must-distinguish pair (13)
+keeps CIEDE2000 >= 20 through that eye (weakest: protan 25.5, deutan
+27.5, tritan 24.3), and the theme must stay WCAG-readable through it.
+Off is pixel-identical (house palette's weakest pair is 11.2, which Off
+doesn't promise). Dropped: algorithmic daltonisation.
+
+(4) **Owed:** the warning/error text colours in pages.rs are not
+remapped yet.

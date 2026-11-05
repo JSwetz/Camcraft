@@ -483,6 +483,12 @@ impl Shell {
                 }
             }
         }
+        // M13.4: both verdict painters wear the viewer's palette.
+        let pal = super::colorvision::palette_of(&state.world);
+        view.set_palette(pal);
+        if let Some(se) = stock_eye.as_mut() {
+            se.set_palette(pal);
+        }
         match stock_eye.as_ref().filter(|_| traced) {
             Some(se) => {
                 let draw = |pass: &mut wgpu::RenderPass<'_>| se.draw(pass);
@@ -1127,14 +1133,16 @@ fn viewport_panel(
         // that project behind the camera.
         if let Some(ps) = &state.program_sim {
             let mvp = state.cam.mvp(aspect);
-            for (q, rgb) in [
-                (ps.dev.max_rest_at, (250u8, 184, 51)),
-                (ps.dev.max_gouge_at, (230, 46, 36)),
+            // M13.4: the rings wear the colour-vision palette (Off's
+            // rest/gouge round to the 250,184,51 / 230,46,36 they were).
+            let pal = super::colorvision::palette_of(&state.world);
+            for (q, col) in [
+                (ps.dev.max_rest_at, super::colorvision::ink(pal.rest)),
+                (ps.dev.max_gouge_at, super::colorvision::ink(pal.gouge)),
             ] {
                 let Some(q) = q else { continue };
                 if let Some(u) = interact::project_uv(&mvp, [q.x, q.y, q.z]) {
                     let c = egui::pos2(rx0 + u[0] * rw, ry0 + u[1] * rh);
-                    let col = egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2);
                     ui.painter().circle_stroke(c, 6.0, egui::Stroke::new(2.0, col));
                     ui.painter().circle_filled(c, 1.5, col);
                 }

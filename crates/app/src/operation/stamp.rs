@@ -252,17 +252,7 @@ pub fn status_of(world: &World, entity: &flecs_ecs::prelude::Entity) -> OpStatus
         return OpStatus::Never; // a cache with no moves is no cache
     }
     let name = model::name_of(world, entity).unwrap_or_default();
-    match (
-        op.stamp,
-        current_stamp(
-            world,
-            &op.tool,
-            &op.src,
-            &op.params,
-            &name,
-            op.setup.as_deref(),
-        ),
-    ) {
+    match (op.stamp, op_stamp(world, &op, &name)) {
         (Some(stored), Some(now)) if stored == now => OpStatus::Ok,
         _ => OpStatus::Stale,
     }
@@ -343,6 +333,9 @@ pub fn stale_reason(
         {
             return Some(format!("a height is measured from {missing}"));
         }
+    }
+    if let Some(why) = area_stale_reason(world, &op) {
+        return Some(why);
     }
     // M3.1 D: the program ahead is the LAST question, and reaching it
     // forces the answer: every own-input question above came back

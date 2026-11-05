@@ -13,6 +13,11 @@ struct C {
     right: vec4<f32>,  // xyz right, w viewport height (px)
     up: vec4<f32>,     // xyz up, w viewport px per trace px
     frame: vec4<f32>,  // trace width, trace height
+    // fs_stock's verdict palette (M13.4 colour-vision remap)
+    clean: vec4<f32>,
+    rest: vec4<f32>,
+    gouge: vec4<f32>,
+    unjudged: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> c: C;
 @group(0) @binding(1) var<storage, read> px: array<vec4<f32>>;
@@ -59,11 +64,11 @@ fn fs_composite(@builtin(position) pos: vec4<f32>) -> FOut {
     }
     // fs_stock's verdict palette, opaque: steel clean, amber rest, red
     // gouge, flat gray where no verdict was rendered (never green).
-    var tint = vec3<f32>(0.42, 0.50, 0.62);
+    var tint = c.clean.xyz;
     switch (i32(s.y + 0.5)) {
-        case 1: { tint = vec3<f32>(0.98, 0.72, 0.20); }
-        case 2: { tint = vec3<f32>(0.90, 0.18, 0.14); }
-        case 3: { tint = vec3<f32>(0.45, 0.46, 0.48); }
+        case 1: { tint = c.rest.xyz; }
+        case 2: { tint = c.gouge.xyz; }
+        case 3: { tint = c.unjudged.xyz; }
         default: {}
     }
     let light = 0.2 + 0.8 * clamp(s.z, 0.0, 1.0);

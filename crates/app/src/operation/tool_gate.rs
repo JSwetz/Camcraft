@@ -22,7 +22,7 @@ use flecs_ecs::prelude::{Entity, World};
 
 use crate::model;
 use crate::schema::Operation;
-use crate::tools::ToolKind;
+use crate::tools::{Tool, ToolKind};
 
 use super::KindInfo;
 
@@ -73,11 +73,58 @@ pub fn create_refusal(world: &World, info: &KindInfo) -> Option<String> {
     if library(world).iter().any(|(_, k)| info.accepts(*k)) {
         return None;
     }
+    let hint = catalog_suggestion(&crate::tools::catalog(), info.tool_kinds)
+        .map(|s| format!(" - {s}"))
+        .unwrap_or_default();
     Some(format!(
-        "No {} in {} tools - a {} operation cuts with one; add it to the tool library",
+        "No {} in {} tools - a {} operation cuts with one; add it to the tool library{hint}",
         kinds_phrase(info.tool_kinds),
         setup_words(world),
         info.label
+    ))
+}
+
+/// The everyday size a suggestion aims at when the refusal knows no
+/// hole or region size (M13.4): 6 mm, the middle of the starter
+/// catalog's drill and end-mill ladders - a common shop size, not the
+/// smallest (a 2 mm drill is the breakable one, a poor default).
+const SUGGEST_SIZE_MM: f64 = 6.0;
+
+/// The size a tool is bought by: a blade's or insert's ground width
+/// (every catalog blade shares one 16 mm toolholder body, so the body
+/// says nothing), everything else its cutting diameter.
+fn bought_size(t: &Tool) -> f64 {
+    match t.kind {
+        ToolKind::Groove | ToolKind::Thread | ToolKind::Form if t.width > 0.0 => t.width,
+        _ => t.diameter,
+    }
+}
+
+/// M13.4, the tool law's catalog hint: the starter-catalog entry the
+/// refusal suggests - of the family's first kind the catalog stocks
+/// (the family lists its primary kind first), the one nearest the
+/// everyday size, a tie to the smaller. `None` when the catalog holds
+/// no tool of any fitting kind: then the refusal says nothing extra
+/// rather than suggest a tool that cannot cut the op. Non-finite sizes
+/// never win (total ordering on the distance, NaN last).
+#[must_use]
+pub fn catalog_suggestion(catalog: &[(&str, Tool)], kinds: &[ToolKind]) -> Option<String> {
+    let (name, tool) = kinds.iter().find_map(|kind| {
+        catalog
+            .iter()
+            .filter(|(_, t)| t.kind == *kind && bought_size(t).is_finite())
+            .min_by(|(_, a), (_, b)| {
+                let (sa, sb) = (bought_size(a), bought_size(b));
+                (sa - SUGGEST_SIZE_MM)
+                    .abs()
+                    .total_cmp(&(sb - SUGGEST_SIZE_MM).abs())
+                    .then(sa.total_cmp(&sb))
+            })
+    })?;
+    Some(format!(
+        "add '{name}' ({} mm {}) from the catalog?",
+        bought_size(tool),
+        tool.kind
     ))
 }
 

@@ -19,16 +19,16 @@ use camcraft_app::commands::{
     CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
     MoveFixture, MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry,
-    SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin, TagFixture, UntagFixture,
+    SetColorVision, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
 };
 use camcraft_app::geometry::{
     Point3, feature, quat_from_euler, quat_from_yaw, quat_to_euler, transform_point,
 };
 use camcraft_app::operation::{
-    self, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef,
+    self, AreaControls, FeatureSel, GeoSel, Height, HeightReference, OpParams, SrcRef,
 };
-use camcraft_app::schema::{Location, Operation as OperationDef, PostRef, ThemeRef, WCS_SLOTS};
+use camcraft_app::schema::{ColorVision, Location, Operation as OperationDef, PostRef, ThemeRef, WCS_SLOTS};
 use camcraft_app::stock::{self, StockShape};
 use camcraft_app::tools::{Tool, ToolKind, catalog};
 use camcraft_app::units::{self, Unit};
@@ -116,6 +116,11 @@ pub enum CommandKind {
     /// theme refuses at the pick, never enters the history.
     SelectTheme(ThemeRef),
     SelectThemeDialog,
+    /// The viewer's colour-vision remap (M13.4), `SelectTheme`'s twin:
+    /// gated (separation + readability through the simulated eye)
+    /// before the command is built, so a failing mode never enters
+    /// the history.
+    SelectColorVision(ColorVision),
     /// Work offset: slot origin plus full orientation as yaw-pitch-roll
     /// degrees (R = Rz ⊗ Ry ⊗ Rx). The world stores a unit quaternion;
     /// pure-yaw setups use roll = pitch = 0.
@@ -150,6 +155,12 @@ pub enum CommandKind {
     EditOperationParams {
         name: String,
         params: OpParams,
+    },
+    /// The same draft with its Boundary group (M11.5): one undo unit.
+    EditOperationBoundary {
+        name: String,
+        params: OpParams,
+        area: AreaControls,
     },
     /// The op's context-menu retype (M9.1): change the operation's kind
     /// in place, numbers carried by the one retype law, one undo unit.
@@ -380,6 +391,9 @@ pub struct OpUi {
     pub geo: Vec<GeoSel>,
     /// The parameter set; the kind the fields show is `params.kind()`.
     pub params: OpParams,
+    /// The Boundary group's draft (M11.5): rides the same Apply as the
+    /// parameters, one undo unit.
+    pub area: AreaControls,
 }
 
 impl Default for OpUi {
@@ -390,6 +404,7 @@ impl Default for OpUi {
             src_kind: 0,
             src_name: String::new(),
             geo: Vec::new(),
+            area: AreaControls::default(),
             // A facing pass over a small billet, in references: 25 above
             // the stock top, skimming the stock top itself. `retype`
             // carries this clearance into every kind, so the draft
@@ -432,6 +447,7 @@ impl OpUi {
             src_name,
             geo,
             params: op.params.clone(),
+            area: op.area.clone(),
         }
     }
 
@@ -676,6 +692,18 @@ pub fn quat_yaw_deg(q: [f64; 4]) -> f64 {
 pub enum DragMode {
     Orbit,
     Pan,
+}
+
+/// Where a Face/Edge viewport pick lands while the Boundary group is
+/// collecting (M11.5): an include or exclude boundary, or the open
+/// boundary - into the page's draft, committed by Apply like every
+/// other draft field. `None` on [`State::boundary_pick`] is the plain
+/// selection pick. Ephemeral view state, never a command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoundaryPick {
+    Include,
+    Exclude,
+    Open,
 }
 
 /// What a viewport click selects. Transient view state - the mode
@@ -978,6 +1006,9 @@ pub struct State {
     /// chains. Ephemeral view state like the drafts above - the mode is
     /// set from the Operations page radio row, never saved or undone.
     pub geo_pick: GeoPick,
+    /// The Boundary group's pick target (M11.5); `None` routes picks to
+    /// the selection as always.
+    pub boundary_pick: Option<BoundaryPick>,
     /// The Geometry list row under the pointer this frame, if any: the
     /// pane answers "which one is that?" by lighting the feature in the
     /// viewport, like pointer hover does. Ephemeral view state (the
@@ -1114,6 +1145,7 @@ impl State {
             hover: None,
             viewport_hot: false,
             geo_pick: GeoPick::Model,
+            boundary_pick: None,
             geo_hover: None,
             op_tab: 0,
             hidden_models: Vec::new(),
@@ -1344,17 +1376,26 @@ impl State {
     /// button; this is the same ephemeral-ack pattern the feature picks
     /// use, not a command.
     pub fn apply_operation_params(&mut self, name: &str) {
-        let unchanged = model::find_by_name(&self.world, name)
-            .and_then(|e| model::operation_of(&self.world, &e))
-            .is_some_and(|op| op.params == self.op_ui.params);
+        let live = model::find_by_name(&self.world, name).and_then(|e| model::operation_of(&self.world, &e));
+        let unchanged = live
+            .as_ref()
+            .is_some_and(|op| op.params == self.op_ui.params && op.area == self.op_ui.area);
         if unchanged {
             self.status = String::from("parameters already applied - nothing changed");
         } else {
-            self.pending.push_back(CommandKind::EditOperationParams {
-                name: name.to_string(),
-                params: self.op_ui.params.clone(),
-            });
+            self.push_param_edit(name, live.is_some_and(|op| op.area != self.op_ui.area));
         }
+    }
+
+    /// Queue the page draft as one edit: the plain parameter edit, or -
+    /// when the Boundary group moved too - the edit that carries both.
+    fn push_param_edit(&mut self, name: &str, area_dirty: bool) {
+        let (name, params) = (name.to_string(), self.op_ui.params.clone());
+        self.pending.push_back(if area_dirty {
+            CommandKind::EditOperationBoundary { name, params, area: self.op_ui.area.clone() }
+        } else {
+            CommandKind::EditOperationParams { name, params }
+        });
     }
 
     /// Arm the Generate click (the pane's button and the menu's item for
@@ -1368,12 +1409,13 @@ impl State {
         let dirty = name == self.op_ui.name
             && model::find_by_name(&self.world, name)
                 .and_then(|e| model::operation_of(&self.world, &e))
-                .is_some_and(|op| op.params != self.op_ui.params);
+                .is_some_and(|op| op.params != self.op_ui.params || op.area != self.op_ui.area);
+        let area_dirty = dirty
+            && model::find_by_name(&self.world, name)
+                .and_then(|e| model::operation_of(&self.world, &e))
+                .is_some_and(|op| op.area != self.op_ui.area);
         if dirty {
-            self.pending.push_back(CommandKind::EditOperationParams {
-                name: name.to_string(),
-                params: self.op_ui.params.clone(),
-            });
+            self.push_param_edit(name, area_dirty);
         }
         self.pending
             .push_back(CommandKind::GenerateOperation(name.to_string()));
@@ -2009,6 +2051,7 @@ impl State {
             }
             CommandKind::SelectPostNamed(name) => self.select_post(PostRef::Named(name)),
             CommandKind::SelectTheme(next) => self.select_theme(next),
+            CommandKind::SelectColorVision(next) => self.select_color_vision(next),
             CommandKind::SelectThemeDialog => {
                 if let Some(path) = pick_theme_file() {
                     self.select_theme(ThemeRef::File(path.display().to_string()));
@@ -2159,6 +2202,18 @@ impl State {
                             ErrorScope::Operation,
                             format!("parameters not updated: {err}"),
                         );
+                    }
+                }
+            }
+            CommandKind::EditOperationBoundary { name, params, area } => {
+                match EditOperationParams::with_area(&self.world, &name, params, area) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = format!("parameters and boundary updated for {name}");
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Operation, format!("parameters not updated: {err}"));
                     }
                 }
             }
@@ -2746,6 +2801,27 @@ impl State {
                 self.status = format!("theme: {}", theme_label(&self.world));
             }
             Err(err) => self.refuse(ErrorScope::Setup, format!("theme not selected: {err}")),
+        }
+    }
+
+    /// Choose the colour-vision remap (M13.4), `select_theme`'s twin:
+    /// the surface owns the palette and the gate (layering - app holds
+    /// only the reference), so the gate runs HERE against the live
+    /// table and a failing mode is a visible refusal at the pick. The
+    /// look follows from the world on the next frame - the overlay
+    /// lines, the verdict shaders and the rings all read the singleton.
+    fn select_color_vision(&mut self, next: ColorVision) {
+        if let Some(why) = crate::egui_app::colorvision::gate(next, &crate::egui_app::theme::current()) {
+            self.refuse(ErrorScope::Setup, format!("colour vision not selected: {why}"));
+            return;
+        }
+        match SetColorVision::new(&self.world, next) {
+            Ok(command) => {
+                self.history.execute(&self.world, command);
+                self.doc_version += 1;
+                self.status = format!("colour vision: {}", next.label());
+            }
+            Err(err) => self.refuse(ErrorScope::Setup, format!("colour vision not selected: {err}")),
         }
     }
 

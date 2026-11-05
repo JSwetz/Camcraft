@@ -68,6 +68,8 @@ pub struct StockEye {
     frame: Option<Frame>,
     /// The state a refusal was last said for (not re-said, not retried).
     refused: Option<Key>,
+    /// The verdict palette the composite paints with (M13.4).
+    verdict: [[f32; 3]; 4],
 }
 
 impl StockEye {
@@ -83,7 +85,18 @@ impl StockEye {
                 None
             }
         };
-        Ok(StockEye { trace, composite, source: None, gpu_scene: false, frame: None, refused: None })
+        let verdict = Self::verdict_of(&crate::egui_app::colorvision::Semantic::OFF);
+        Ok(StockEye { trace, composite, source: None, gpu_scene: false, frame: None, refused: None, verdict })
+    }
+
+    fn verdict_of(p: &crate::egui_app::colorvision::Semantic) -> [[f32; 3]; 4] {
+        [p.clean, p.rest, p.gouge, p.unjudged]
+    }
+
+    /// The verdict palette the next `prepare` stages (M13.4's colour-
+    /// vision remap): clean, rest, gouge, unjudged.
+    pub fn set_palette(&mut self, p: &crate::egui_app::colorvision::Semantic) {
+        self.verdict = Self::verdict_of(p);
     }
 
     /// The same eye with its GPU march dropped: the CPU fallback a
@@ -156,6 +169,7 @@ impl StockEye {
             view,
             k: f.k,
             trace: f.trace,
+            verdict: self.verdict,
         };
         self.composite.write(queue, mvp, &geom);
         Ok(true)

@@ -366,6 +366,7 @@ fn op(params: OpParams) -> Operation {
         params,
         stamp: None,
         setup: None,
+        area: Default::default(),
     }
 }
 

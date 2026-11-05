@@ -173,6 +173,7 @@ fn refuse(world: &World, tool_name: &str, params: OpParams) -> String {
         params,
         stamp: None,
         setup: None,
+        area: Default::default(),
     };
     match operation::generate(world, &op, "") {
         Ok((path, _)) => panic!("a door was meant to refuse, got {} moves", path.moves.len()),
@@ -388,6 +389,7 @@ fn the_open_run_refusal_names_the_engrave_too() {
         params: engrave(),
         stamp: None,
         setup: None,
+        area: Default::default(),
     };
     let err = match operation::generate(&world, &op, "") {
         Ok((path, _)) => panic!("engrave generated from an open run: {} moves", path.moves.len()),

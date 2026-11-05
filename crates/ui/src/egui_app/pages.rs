@@ -462,6 +462,11 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
         }
     }
     params_fields(ui, state, tab);
+    if tab == SEC_GEO {
+        // The Boundary group (M11.5): how far the area reaches, under
+        // the picks that say where it is.
+        super::boundary::boundary_group(ui, state);
+    }
     // The whole-panel unresolved line is operations.rs's law, same as the
     // retired imgui page's.
     if let Some(note) =
@@ -476,7 +481,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
     // edits the operation it was opened on.
     let unchanged = live
         .as_ref()
-        .is_some_and(|o| o.params == state.op_ui.params);
+        .is_some_and(|o| o.params == state.op_ui.params && o.area == state.op_ui.area);
     ui.horizontal(|ui| {
         let apply = ui.add_enabled(!unchanged, egui::Button::new("Apply Parameters"));
         if apply.clicked() {
@@ -4187,6 +4192,8 @@ fn theme_section(ui: &mut Ui, state: &mut State) {
                 .push_back(CommandKind::SelectTheme(ThemeRef::Dark));
         }
     });
+    // M13.4: the viewer's colour-vision remap rides beside the theme.
+    super::colorvision::picker(ui, state);
 }
 
 /// The document's post script (M3.3 A/B): setup furniture, read live

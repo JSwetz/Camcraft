@@ -292,6 +292,11 @@ pub fn queue_feature_pick(state: &mut State, pick: GeoSel, append: bool) {
         state.status = String::from("open an operation first - geometry picks fill the open one");
         return;
     }
+    // The Boundary group is collecting (M11.5): the pick fills its draft.
+    if let Some(target) = state.boundary_pick {
+        crate::egui_app::boundary_take_pick(state, target, pick, append);
+        return;
+    }
     let base: Vec<GeoSel> = if append {
         model::find_by_name(&state.world, &name)
             .and_then(|e| model::operation_of(&state.world, &e))
@@ -845,6 +850,9 @@ pub(crate) fn ftoz(v: f64) -> f32 {
 pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
     let mut out = Vec::new();
     let arm = chevron_arm(state);
+    // M13.4: the move kinds wear the viewer's colour-vision palette
+    // (Off = the three consts above, unchanged).
+    let pal = crate::egui_app::colorvision::palette_of(&state.world);
     for (name, entity) in model::named_entities(&state.world) {
         // Browser-eye hidden: the cache still exists and still posts, it
         // just does not draw (display state, never a geometry change).
@@ -861,9 +869,9 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
         let dim = if selected { 1.0 } else { OTHERS_DIM };
         for m in &cache.path.moves {
             let base = match m.kind {
-                MoveKind::Rapid => RAPID_RGB,
-                MoveKind::Feed => FEED_RGB,
-                MoveKind::Plunge => PLUNGE_RGB,
+                MoveKind::Rapid => pal.rapid,
+                MoveKind::Feed => pal.feed,
+                MoveKind::Plunge => pal.plunge,
             };
             let c = [base[0] * dim, base[1] * dim, base[2] * dim];
             if m.arc.is_some() {

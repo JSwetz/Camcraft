@@ -43,6 +43,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         spindle,
         fixtures,
         part_solid,
+        area,
     } = job;
     // Tool: the diameter drives the path, the body drives the reach law.
     let d = tool.diameter;
@@ -101,9 +102,24 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     });
     let m_gen = material_local.as_ref().unwrap_or(&material);
 
+    // The area controls (M11.5): the region every arm takes is the
+    // controlled one, resolved here once into the slot `region_for_job`
+    // reads first. The Contour selection arm resolves its own (its side
+    // is only known there). Face keeps the band constraints and turn.
+    let contour_sel_arm = matches!((&params, &src), (OpParams::Contour { .. }, SrcRef::Selection(_)));
+    let mut area = area.transpose()?;
+    let mut face_band: Option<(Vec<(&'static str, Region)>, f64)> = None;
+    if !contour_sel_arm && let Some(ctx) = area.take() {
+        let base = region_for_job(&mut picked_region, &mut section_z, &src, &params, m_gen, frame.as_ref())?;
+        let applied = apply_area_full(base, Some(&ctx))?;
+        face_band = Some((applied.forbidden, applied.turn));
+        picked_region = Some(Ok(applied.region));
+    }
+
+
     // Region + path per kind. The level transitions and links (M11.2)
     // are read once: every ladder kind hands them to its generator.
-    let lk =params.links().copied().unwrap_or_else(|| params.default_links());
+    let lk = params.links().copied().unwrap_or_else(|| params.default_links());
     let (region, path) = match &params {
         OpParams::Face {
             stepover,
@@ -122,8 +138,16 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 m_gen,
                 frame.as_ref(),
             )?;
+            let (turn, band) = match face_band.take() {
+                Some((forbidden, turn)) => (turn, Some(forbidden)),
+                None => (0.0, None),
+            };
+            let laid = boundary_turn::turn_region(&region, turn)?;
+            if let Some(forbidden) = &band {
+                boundary_turn::face_band_sane(&laid, forbidden, turn, d, *stepover)?;
+            }
             let path = machining2d::face(
-                &region,
+                &laid,
                 &FaceParams {
                     tool_diameter: d,
                     stepover: *stepover,
@@ -137,6 +161,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     blend_turns: *blend_turns,
                 },
             )?;
+            let path = boundary_turn::turn_path(path, -turn)?;
             (region, path)
         }
         OpParams::Contour {
@@ -206,11 +231,21 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                         Side::Auto => Side::Outside,
                         s => *s,
                     };
+                    if loops.is_empty() && area.is_some() {
+                        return Err(GenError::Invalid(
+                            "the Boundary settings shape an area, and these picks are open runs the cutter rides - reset them, or pick closed rings".into(),
+                        ));
+                    }
                     let region = if loops.is_empty() {
                         Region::empty()
                     } else {
-                        // The one area-controls seam (M11.4 A / M11.5).
-                        apply_area_controls(Region::new(loops)?, &AreaControls::default())?
+                        // The one area-controls seam (M11.4 A / M11.5),
+                        // with the side this arm just resolved.
+                        let mut ctx = area.take();
+                        if let Some(c) = &mut ctx {
+                            c.contour_side(cp.side == Side::Inside);
+                        }
+                        apply_area_controls(Region::new(loops)?, ctx.as_ref())?
                     };
                     let mut path = if region.is_empty() {
                         Toolpath::new(Vec::new())

@@ -11,7 +11,7 @@ use flecs_ecs::prelude::*;
 
 use crate::cl::Toolpath as ClPath;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};
-use crate::operation::types::{GenStamp, OpParams, SrcRef};
+use crate::operation::types::{AreaControls, GenStamp, OpParams, SrcRef};
 use crate::stock::StockShape;
 use crate::tools::Tool;
 use crate::verify::Warning;
@@ -163,6 +163,9 @@ pub struct Operation {
     /// a document with no setups at all is exactly the old global
     /// behavior (the implicit-setup law).
     pub setup: Option<String>,
+    /// The area controls (M11.5): how far past - or short of - the
+    /// selection the tool may go. Default is the identity.
+    pub area: AreaControls,
 }
 
 /// The cached result of generating an operation: the path plus the
@@ -230,6 +233,43 @@ pub enum ThemeRef {
     File(String),
 }
 
+/// The colour-vision remap the viewer wears (M13.4), a flecs singleton
+/// switched by `SetColorVision` under the theme's command law. `Off`
+/// is the default and changes nothing on screen. Unlike `ThemeRef` it
+/// is a VIEW preference, not a document setting: a deficiency belongs
+/// to the person at the screen, not to the part - a protan's document
+/// opened by a colleague must not wear the protan palette - so the
+/// project file never carries it and opening a document leaves it as
+/// it was (the world outlives the documents it shows).
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ColorVision {
+    #[default]
+    Off,
+    /// Protanopia: the long-wavelength (L) cones absent.
+    Protan,
+    /// Deuteranopia: the medium-wavelength (M) cones absent.
+    Deutan,
+    /// Tritanopia: the short-wavelength (S) cones absent.
+    Tritan,
+}
+
+impl ColorVision {
+    /// Every mode, Off first - the picker's row order.
+    pub const ALL: [ColorVision; 4] =
+        [ColorVision::Off, ColorVision::Protan, ColorVision::Deutan, ColorVision::Tritan];
+
+    /// The picker's label.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            ColorVision::Off => "Off",
+            ColorVision::Protan => "Protanopia",
+            ColorVision::Deutan => "Deuteranopia",
+            ColorVision::Tritan => "Tritanopia",
+        }
+    }
+}
+
 /// Ribbon pins (M6.2): the kind indices the user pinned, in pin order -
 /// the ribbon's own Pinned section reads this singleton. A document
 /// SETTING like the theme reference (saved with the project), but NOT
@@ -267,6 +307,7 @@ pub fn register_schema(world: &World) {
     world.component::<MachineDef>();
     world.component::<PostRef>();
     world.component::<ThemeRef>();
+    world.component::<ColorVision>();
     world.component::<RibbonPins>();
     world.component::<SetupDef>();
     world.component::<ActiveSetup>();

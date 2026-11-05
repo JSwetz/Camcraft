@@ -99,6 +99,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 params: ParamsDto::from_params(&op.params),
                 stamp: op.stamp.map(|g| g.0),
                 cache: model::toolpath_of(world, &entity).map(|c| PathDto::from_cache(&c)),
+                area: AreaDto::from_controls(&op.area),
                 setup: op.setup,
             });
             // Parametric stock regenerates its facets on load; offsets, tools,

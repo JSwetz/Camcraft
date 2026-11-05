@@ -44,8 +44,15 @@ const VERTEX_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayou
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+/// `struct U`: mvp + eye + wire (80 bytes), then six palette vec4s.
+const UNIFORM_SIZE: u64 = 80 + 6 * 16;
+
 const SHADER: &str = "
-struct U { mvp: mat4x4<f32>, eye: vec3<f32>, wire: f32 };
+// The verdict / selection palette rides the uniform (M13.4's
+// colour-vision remap; Off = the literals these fields replaced).
+struct U { mvp: mat4x4<f32>, eye: vec3<f32>, wire: f32,
+           clean: vec4<f32>, rest: vec4<f32>, gouge: vec4<f32>,
+           unjudged: vec4<f32>, hot: vec4<f32>, warm: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: U;
 
 struct VSOut {
@@ -97,9 +104,7 @@ fn fs_edge(in: VSOut) -> @location(0) vec4<f32> {
     let dark = vec3<f32>(0.06, 0.07, 0.09);
     let gray = vec3<f32>(0.62, 0.66, 0.72);
     let unlit = mix(dark, gray, u.wire);
-    let warm = vec3<f32>(0.55, 0.35, 0.05);
-    let hot = vec3<f32>(0.98, 0.72, 0.20);
-    let sel = mix(warm, hot, u.wire);
+    let sel = mix(u.warm.xyz, u.hot.xyz, u.wire);
     return vec4<f32>(mix(unlit, sel, in.sel), 1.0);
 }
 
@@ -121,18 +126,16 @@ fn fs_stock(in: VSOut) -> @location(0) vec4<f32> {
     let key_dir = normalize(vec3<f32>(0.45, 0.60, 0.66));
     let key = abs(dot(n, key_dir));
     let light = 0.55 + 0.45 * key;
-    var tint = vec3<f32>(0.42, 0.50, 0.62);
+    var tint = u.clean.xyz;
     var alpha = mix(0.30, 0.55, in.sel);
     switch (i32(in.cls + 0.5)) {
-        case 1: { tint = vec3<f32>(0.98, 0.72, 0.20); alpha = 0.75; }  // rest
-        case 2: { tint = vec3<f32>(0.90, 0.18, 0.14); alpha = 0.85; }  // gouge
-        case 3: { tint = vec3<f32>(0.45, 0.46, 0.48); alpha = 0.25; }  // no verdict
+        case 1: { tint = u.rest.xyz; alpha = 0.75; }  // rest
+        case 2: { tint = u.gouge.xyz; alpha = 0.85; }  // gouge
+        case 3: { tint = u.unjudged.xyz; alpha = 0.25; }  // no verdict
         default: {}
     }
     let judged = step(0.5, in.cls);
-    let steel = vec3<f32>(0.42, 0.50, 0.62);
-    let hot = vec3<f32>(0.98, 0.72, 0.20);
-    let base = mix(steel, hot, in.sel * (1.0 - judged));
+    let base = mix(u.clean.xyz, u.hot.xyz, in.sel * (1.0 - judged));
     return vec4<f32>(mix(base, tint, judged) * light, alpha);
 }
 
@@ -197,6 +200,9 @@ pub struct View3D {
     overlay_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
+    /// The verdict/selection palette the next render uploads (M13.4;
+    /// the shell sets it from the world's colour-vision mode).
+    palette: crate::egui_app::colorvision::Semantic,
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     /// Total indices; `[0, model_index_count)` are models,
@@ -252,11 +258,11 @@ impl View3D {
             immediate_size: 0,
         });
 
-        // mat4x4 (64) + eye vec3 (aligned to 64, padded to the 80-byte
-        // uniform stride).
+        // mat4x4 (64) + eye vec3 + wire (80), then the six palette
+        // vec4s (M13.4): UNIFORM_SIZE.
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport3d-uniform"),
-            size: 80,
+            size: UNIFORM_SIZE,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -567,6 +573,7 @@ impl View3D {
             overlay_pipeline,
             bind_group,
             uniform,
+            palette: crate::egui_app::colorvision::Semantic::OFF,
             vertex_buf,
             index_buf,
             index_count: 0,
@@ -723,6 +730,13 @@ impl View3D {
         self.overlay_count = lines.len() as u32;
     }
 
+    /// The verdict/selection palette the next `render` uploads (M13.4's
+    /// colour-vision remap). A uniform, not a vertex re-bake: a mode
+    /// switch re-colours without touching the geometry buffers.
+    pub fn set_palette(&mut self, p: &crate::egui_app::colorvision::Semantic) {
+        self.palette = *p;
+    }
+
     /// Encode the 3D pass into the offscreen target. `eye` is the camera
     /// position in world space, for the specular term; `display` selects
     /// shaded-with-wire or hidden-line wireframe (the buffers are identical
@@ -751,7 +765,7 @@ impl View3D {
         stock: Option<&dyn Fn(&mut wgpu::RenderPass<'_>)>,
     ) {
         let wireframe = display == crate::state::DisplayMode::Wireframe;
-        let mut data = [0u8; 80];
+        let mut data = [0u8; UNIFORM_SIZE as usize];
         let mut o = 0usize;
         for col in mvp {
             for v in col {
@@ -764,6 +778,14 @@ impl View3D {
             o += 4;
         }
         data[76..80].copy_from_slice(&(f32::from(u8::from(wireframe))).to_le_bytes());
+        let p = &self.palette;
+        o = 80;
+        for c in [p.clean, p.rest, p.gouge, p.unjudged, p.select_hot, p.select_warm] {
+            for v in [c[0], c[1], c[2], 1.0] {
+                data[o..o + 4].copy_from_slice(&v.to_le_bytes());
+                o += 4;
+            }
+        }
         queue.write_buffer(&self.uniform, 0, &data);
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

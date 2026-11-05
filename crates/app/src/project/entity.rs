@@ -219,6 +219,11 @@ pub struct OperationDto {
     /// is byte-identical to its v20 save.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<String>,
+    /// The area controls (M11.5). Absent means the identity - what every
+    /// earlier file held - and an untouched operation writes nothing, so
+    /// no version bump (the v22 `axis` precedent).
+    #[serde(default, skip_serializing_if = "AreaDto::is_default")]
+    pub area: AreaDto,
 }
 
 impl MoveDto {

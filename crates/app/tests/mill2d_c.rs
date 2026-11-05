@@ -111,6 +111,7 @@ fn refuse(world: &World, tool_name: &str, params: OpParams) -> String {
         params,
         stamp: None,
         setup: None,
+        area: Default::default(),
     };
     match operation::generate(world, &op, "") {
         Ok((path, _)) => panic!("a door was meant to refuse, got {} moves", path.moves.len()),

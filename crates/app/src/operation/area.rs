@@ -17,17 +17,21 @@
 
 use super::*;
 
-/// The area controls of M11.5 (tool containment, boundary offset, edge
-/// extension, extra include/exclude boundaries) attach HERE, in one
-/// place, for every kind. Today the default is the identity, so every
-/// region and every golden is exactly what it was.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct AreaControls {}
+/// The seam itself (M11.4 A / M11.5): every region an operation cuts -
+/// selection-built or source-built, Face included, and the Contour
+/// selection arm's rings - passes through here last. `None` is the
+/// identity controls (nothing resolved, nothing changed: every golden
+/// stays what it was); `Some` runs the `boundary` law.
+pub(super) fn apply_area_controls(region: Region, ctx: Option<&AreaCtx>) -> Result<Region, GenError> {
+    Ok(apply_area_full(region, ctx)?.region)
+}
 
-/// The seam itself: every region an operation cuts (selection-built or
-/// source-built, Face included) passes through here last.
-pub(super) fn apply_area_controls(region: Region, _controls: &AreaControls) -> Result<Region, GenError> {
-    Ok(region)
+/// The seam's full answer: the region plus Face's band constraints.
+pub(super) fn apply_area_full(region: Region, ctx: Option<&AreaCtx>) -> Result<AreaApplied, GenError> {
+    match ctx {
+        None => Ok(AreaApplied { region, forbidden: Vec::new(), turn: 0.0 }),
+        Some(c) => boundary::resolve(region, c),
+    }
 }
 
 /// The part's facets and the ladder planes, top down.
@@ -154,7 +158,7 @@ mod law {
                 .expect("loop"),
         ])
         .expect("region");
-        let out = apply_area_controls(r.clone(), &AreaControls::default()).expect("identity");
+        let out = apply_area_controls(r.clone(), None).expect("identity");
         assert_eq!(out.loops(), r.loops());
     }
 

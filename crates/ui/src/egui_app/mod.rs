@@ -28,6 +28,12 @@ pub(crate) mod gpu;
 // columns, and `theme::visuals` + `theme_files::parse` + `painted`'s
 // glyph tint are the consumers (ratio, on-fill, the follow law, the gate).
 pub mod contrast;
+mod boundary;
+pub(crate) use boundary::take_pick as boundary_take_pick;
+// pub: M13.4's ColorVision layer - the viewport, the traced stock and
+// the overlay lines read the palette; `cvd` is its maths.
+pub mod colorvision;
+pub mod cvd;
 mod icons;
 mod layout;
 mod load_field;
@@ -58,6 +64,8 @@ pub(crate) mod world;
 mod tests;
 #[cfg(test)]
 mod heights_tests;
+#[cfg(test)]
+mod colorvision_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`
 /// selects the no-window proof (seeded document, fallback adapter, View3D

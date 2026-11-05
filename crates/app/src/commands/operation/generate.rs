@@ -52,14 +52,7 @@ fn stage_generation(world: &World, name: &str) -> Result<Staged, CommandError> {
     let prev_cache = model::toolpath_of(world, &entity);
     let job = operation::collect_job(world, &prev_operation, name)
         .map_err(|e| CommandError::Machining(format!("{name}: {e}")))?;
-    let stamp = operation::current_stamp(
-        world,
-        &prev_operation.tool,
-        &prev_operation.src,
-        &prev_operation.params,
-        name,
-        prev_operation.setup.as_deref(),
-    );
+    let stamp = operation::op_stamp(world, &prev_operation, name);
     Ok(Staged {
         name: name.to_string(),
         prev_operation,

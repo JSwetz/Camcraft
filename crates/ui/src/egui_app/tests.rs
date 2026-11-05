@@ -2890,7 +2890,7 @@ fn a_create_cell_darkens_with_the_tool_laws_reason() {
     harness.run();
     let label = camcraft_app::operation::KindInfo::ALL[kind].label;
     let reason = format!(
-        "No drill, tap or boring bar in the setup's tools - a {label} operation cuts with one; add it to the tool library"
+        "No drill, tap or boring bar in the setup's tools - a {label} operation cuts with one; add it to the tool library - add 'DR-0600' (6 mm drill) from the catalog?"
     );
     {
         let st = &harness.state().state;

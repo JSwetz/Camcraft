@@ -50,6 +50,9 @@ pub struct GenJob {
     /// aware verify judges the 2D kinds against its solid only then -
     /// cutting into stock is the job, cutting into the part never is.
     pub(super) part_solid: bool,
+    /// The area controls resolved against the world (M11.5); `None` for
+    /// the identity - an untouched operation carries nothing new.
+    pub(super) area: Option<Result<AreaCtx, GenError>>,
 }
 
 /// The tripwire phrase for a stored precompute whose arm never collected
@@ -75,15 +78,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     };
     let setup = op.setup.as_deref();
     let material = material_of(world, setup, &op.src)?;
-    let stock_name = crate::setup::stock_entity_name(world, setup);
-    let part_solid = !material.facets.is_empty()
-        && match &op.src {
-            SrcRef::Stock => false,
-            SrcRef::Entity(n) => *n != stock_name,
-            SrcRef::Selection(items) => {
-                !items.is_empty() && items.iter().all(|g| g.entity != stock_name)
-            }
-        };
+    let part_solid = part_solid_of(world, setup, &op.src, &material);
     // Setup stock, when it is not the source itself: the swarf column
     // around a smaller model (the head read at `generate` - same call).
     let stock_facets = match &op.src {
@@ -166,6 +161,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         }
         _ => None,
     };
+    let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
     let is_mill = crate::machine::kind_of(world) == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
     let spindle = crate::machine::of(world)
@@ -192,6 +188,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         spindle,
         fixtures,
         part_solid,
+        area,
     })
 }
 
@@ -207,14 +204,18 @@ pub(super) fn region_for_job(
     material: &Material,
     frame: Option<&crate::cl::TiltedFrame>,
 ) -> Result<Region, GenError> {
+    // A stored answer is THE answer: the picks' region, or the area
+    // controls' (M11.5) - `run_job` precomputes the controlled region
+    // into this same slot, so every arm takes it unchanged.
+    if let Some(r) = picked_region.take() {
+        return r;
+    }
     if matches!(src, SrcRef::Selection(_)) && selection_drives_region(params) {
         // The Contour arm never comes through here (its picks resolve
         // as geometry, not as a region) - so the guard that decided
         // collection decides the take.
         debug_assert!(!matches!(params, OpParams::Contour { .. }));
-        return picked_region
-            .take()
-            .ok_or_else(|| unreached("picked selection region"))?;
+        return Err(unreached("picked selection region"));
     }
     region_core(
         material,

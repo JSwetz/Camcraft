@@ -12,12 +12,17 @@
 //! heights semantics), no vendor internals.
 
 
+mod area;
 mod height;
 mod links;
 mod params;
 mod sane;
 mod sel;
 
+pub use area::{
+    AREA_DISTANCE_MAX, AreaControls, BoundaryMode, BoundaryShape, ChainSide, Containment, CornerStyle,
+    ExtraBoundary, OpenBoundary, area_applies,
+};
 pub use height::{Height, HeightReference};
 pub use params::{OpParams, Tilt};
 pub use sel::{FeatureSel, GenStamp, GeoSel, OpStatus, OpType, SrcRef, WCS_SLOTS};

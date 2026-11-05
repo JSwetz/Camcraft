@@ -1,0 +1,260 @@
+//! The world half of the area controls (M11.5): every read the law in
+//! `boundary` needs - stock outline, part material standing at the cut
+//! planes, the picked include / exclude / open boundaries - resolved on
+//! the caller's thread into an owned [`AreaCtx`] (the M5.3 B job law:
+//! nothing in the run phase names a `World`). `None` for the identity
+//! controls: an untouched operation reads nothing new, so its path and
+//! stamp are exactly what they were.
+//!
+//! Provenance: our own design notes; the pick resolution is the
+//! selection walk every region already runs. No vendor material consulted.
+
+use super::boundary::{AreaCtx, Family, Native, OpenGeom};
+use super::*;
+
+/// Whether `material` is a finished PART rather than the setup's stock -
+/// the depth-aware verify's own test, shared with the job collector.
+pub(super) fn part_solid_of(world: &World, setup: Option<&str>, src: &SrcRef, material: &Material) -> bool {
+    let stock_name = crate::setup::stock_entity_name(world, setup);
+    !material.facets.is_empty()
+        && match src {
+            SrcRef::Stock => false,
+            SrcRef::Entity(n) => *n != stock_name,
+            SrcRef::Selection(items) => !items.is_empty() && items.iter().all(|g| g.entity != stock_name),
+        }
+}
+
+/// [`area_ctx`] for a caller holding only the operation (the preview):
+/// tool and material read here, the same reads generation makes.
+pub(super) fn area_ctx_of(world: &World, op: &Operation) -> Option<Result<AreaCtx, GenError>> {
+    if op.area.is_default() {
+        return None;
+    }
+    let tool = model::find_by_name(world, &op.tool).and_then(|e| model::tool_of(world, &e));
+    let Some(tool) = tool else {
+        return Some(Err(GenError::Invalid(format!("no tool named '{}'", op.tool))));
+    };
+    let setup = op.setup.as_deref();
+    let material = match material_of(world, setup, &op.src) {
+        Ok(m) => m,
+        Err(e) => return Some(Err(e)),
+    };
+    let part_solid = part_solid_of(world, setup, &op.src, &material);
+    area_ctx(world, op, tool.diameter * 0.5, &material, part_solid)
+}
+
+/// Resolve the operation's area controls against the world, or `None`
+/// for the identity. Refusals are named here, at the door of the region.
+pub(super) fn area_ctx(
+    world: &World,
+    op: &Operation,
+    tool_r: f64,
+    material: &Material,
+    part_solid: bool,
+) -> Option<Result<AreaCtx, GenError>> {
+    if op.area.is_default() {
+        return None;
+    }
+    Some(build(world, op, tool_r, material, part_solid))
+}
+
+fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_solid: bool) -> Result<AreaCtx, GenError> {
+    let kind = op.params.kind();
+    if !area_applies(kind) {
+        return Err(GenError::Invalid(format!(
+            "a {kind} operation has no machining area - its Boundary settings must stay at their defaults"
+        )));
+    }
+    if op.params.tilt().is_some() {
+        return Err(GenError::Invalid(
+            "Boundary settings on a 3+2-indexed plane are not supported yet - reset them or remove the index".into(),
+        ));
+    }
+    if !(tool_r.is_finite() && tool_r > 0.0) {
+        return Err(GenError::Invalid("the tool has no usable diameter".into()));
+    }
+    let setup = op.setup.as_deref();
+    let (family, native) = match &op.params {
+        OpParams::Face { .. } => (Family::Face, Native::ToolInside),
+        OpParams::Contour { .. } => (Family::Contour, Native::ToolOutside),
+        _ => (Family::Clearing, Native::ToolInside),
+    };
+    let stock_name = crate::setup::stock_entity_name(world, setup);
+    let stock = model::find_by_name(world, &stock_name)
+        .and_then(|e| model::world_facets(world, &e))
+        .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
+        .filter(|r| !r.is_empty());
+    // Part material standing above the cut plane(s): the pocket island
+    // law's ladder for the pocket family on picked part features, the
+    // finished plane for Face and Contour on a part.
+    let mut islands = false;
+    let blocked = match &op.params {
+        OpParams::Pocket { .. } | OpParams::Adaptive2D { .. } | OpParams::Offset2D { .. } => {
+            match &op.src {
+                SrcRef::Selection(items) => match pocket_ladder(world, setup, items, &op.params)? {
+                    Some((part, planes)) => {
+                        islands = true;
+                        let mut b = Region::empty();
+                        for z in planes {
+                            b = b.union(&slice::material_above(&part, z).map_err(from_slice)?)?;
+                        }
+                        Some(b)
+                    }
+                    None => None,
+                },
+                _ => None,
+            }
+        }
+        OpParams::Face { .. } | OpParams::Contour { .. } if part_solid => {
+            let hs = resolve_params(world, setup, Some(&op.src), &op.params).map_err(GenError::Invalid)?;
+            let z = hs
+                .bottom
+                .ok_or_else(|| GenError::Invalid("the cut plane does not resolve".into()))?;
+            Some(slice::material_above(&material.facets, z).map_err(from_slice)?)
+        }
+        _ => None,
+    };
+    let mut extra = Vec::with_capacity(op.area.extra.len());
+    for b in &op.area.extra {
+        let region = match &b.shape {
+            BoundaryShape::Picks(picks) => match picks_geom(world, setup, picks, &op.params)? {
+                OpenGeom::Ring(r) => r,
+                OpenGeom::Chain(_) => {
+                    return Err(GenError::Invalid(
+                        "an include / exclude boundary must close - its picks spell an open chain; use it as the open boundary instead".into(),
+                    ));
+                }
+            },
+            BoundaryShape::Stock => stock.clone().ok_or_else(|| {
+                GenError::Invalid("a stock-outline boundary needs stock - this setup has none".into())
+            })?,
+            BoundaryShape::Silhouette => {
+                if !part_solid {
+                    return Err(GenError::Invalid(
+                        "a part-silhouette boundary needs a part source - pick the part or choose its model as the source".into(),
+                    ));
+                }
+                silhouette(&material.facets)
+                    .ok_or_else(|| GenError::Empty("the part casts no silhouette".into()))?
+            }
+        };
+        extra.push((b.mode, region));
+    }
+    let open = match &op.area.open {
+        None => None,
+        Some(o) => Some((picks_geom(world, setup, &o.picks, &op.params)?, o.side)),
+    };
+    Ok(AreaCtx {
+        controls: op.area.clone(),
+        family,
+        native,
+        tool_r,
+        stock,
+        blocked,
+        islands,
+        extra,
+        open,
+    })
+}
+
+/// The digest an operation's cached path answers to: [`current_stamp`],
+/// plus - only when the area controls are not the identity - the
+/// controls and every world input they read (picked entities' placement
+/// and geometry, the stock's box). An untouched operation stamps the
+/// exact bytes it always did.
+#[must_use]
+pub fn op_stamp(world: &World, op: &Operation, op_name: &str) -> Option<GenStamp> {
+    let base = current_stamp(world, &op.tool, &op.src, &op.params, op_name, op.setup.as_deref())?;
+    if op.area.is_default() {
+        return Some(base);
+    }
+    let a = &op.area;
+    let mut h = std::hash::DefaultHasher::new();
+    let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
+    h.write_u64(base.0);
+    h.write(b"camcraft-area-v1");
+    h.write_u8(match a.containment {
+        None => 0,
+        Some(Containment::Inside) => 1,
+        Some(Containment::On) => 2,
+        Some(Containment::Outside) => 3,
+    });
+    w(&mut h, a.offset);
+    h.write_u8(u8::from(a.corner == CornerStyle::Sharp));
+    w(&mut h, a.extension);
+    let picks = |h: &mut std::hash::DefaultHasher, items: &[GeoSel]| -> Option<()> {
+        h.write_usize(items.len());
+        for g in items {
+            let (tag, id) = match g.feature {
+                FeatureSel::Face(id) => (0u8, id),
+                FeatureSel::Chain(id) => (1, id),
+                FeatureSel::Patch(id) => (2, id),
+            };
+            h.write_u8(tag);
+            h.write_u64(id);
+            h.write_usize(g.entity.len());
+            h.write(g.entity.as_bytes());
+            let e = model::find_by_name(world, &g.entity)?;
+            let loc = model::transform_of(world, &e).unwrap_or_default();
+            for v in [loc.pos.x, loc.pos.y, loc.pos.z, loc.rot[0], loc.rot[1], loc.rot[2], loc.rot[3]] {
+                h.write(&v.to_bits().to_le_bytes());
+            }
+            h.write_u64(model::geometry_signature(world, &e)?);
+        }
+        Some(())
+    };
+    h.write_usize(a.extra.len());
+    for b in &a.extra {
+        h.write_u8(u8::from(b.mode == BoundaryMode::Exclude));
+        match &b.shape {
+            BoundaryShape::Picks(p) => {
+                h.write_u8(0);
+                picks(&mut h, p)?;
+            }
+            BoundaryShape::Stock => h.write_u8(1),
+            BoundaryShape::Silhouette => h.write_u8(2),
+        }
+    }
+    match &a.open {
+        None => h.write_u8(0),
+        Some(o) => {
+            h.write_u8(if o.side == ChainSide::Inside { 1 } else { 2 });
+            picks(&mut h, &o.picks)?;
+        }
+    }
+    // The stock outline closes open boundaries and bounds Face's run-out.
+    if let Some(b) = model::stock_world_aabb_for(world, op.setup.as_deref()) {
+        for v in [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z] {
+            w(&mut h, v);
+        }
+    }
+    Some(GenStamp(h.finish()))
+}
+
+/// The area controls' half of `stale_reason`: a boundary pick whose
+/// entity is gone. `None` when every referenced entity still stands.
+pub(super) fn area_stale_reason(world: &World, op: &Operation) -> Option<String> {
+    op.area
+        .picks()
+        .find(|g| model::find_by_name(world, &g.entity).is_none())
+        .map(|g| format!("a Boundary pick names '{}', which was deleted", g.entity))
+}
+
+/// Picked boundary features in XY, through the selection walk every
+/// region runs (stitching, rim dedupe and every named refusal included):
+/// one open run, or closed rings - never a mix, never several runs.
+fn picks_geom(world: &World, setup: Option<&str>, picks: &[GeoSel], params: &OpParams) -> Result<OpenGeom, GenError> {
+    // The contour walk is the one that hands open runs back instead of
+    // refusing or running them out - the reading a boundary wants.
+    let probe = retype_params(params, OpType::Contour as usize);
+    let (loops, mut runs, _) = selection_geometry_impl(world, setup, picks, &probe, None)?;
+    match (loops.is_empty(), runs.len()) {
+        (true, 1) => Ok(OpenGeom::Chain(runs.remove(0))),
+        (false, 0) => Ok(OpenGeom::Ring(Region::new(loops)?)),
+        (true, 0) => Err(GenError::Empty("the boundary picks resolve to nothing".into())),
+        (_, n) => Err(GenError::Invalid(format!(
+            "the boundary picks spell {} closed ring(s) and {n} open run(s) - a boundary is one open chain or closed rings; re-pick it",
+            loops.len()
+        ))),
+    }
+}
