@@ -21,7 +21,7 @@ pub fn pocket3d(
     footprint: &Region,
     p: &Pocket3DParams,
 ) -> Result<Toolpath, GenError> {
-    pocket3d_prev(facets, footprint, p, None)
+    run_plain(facets, footprint, p, false, None)
 }
 
 /// The re-machining sibling (M3.1 D): the same ladder, run against the
@@ -35,9 +35,58 @@ pub fn pocket3d_prev(
     p: &Pocket3DParams,
     mask: Option<&Dexel>,
 ) -> Result<Toolpath, GenError> {
+    run_plain(facets, footprint, p, false, mask)
+}
+
+/// The offset-shell twin (M2.5 F): roughing by OFFSET SHELLS of the
+/// model, not the level staircase's flat rings. The ladder stays
+/// whole - the same zs planes, the same per-level islands and their
+/// XY erosion, the same entry arms, links, superset laws and
+/// Empty-by-name refusals - and what changes is the Z every CUT
+/// vertex lands on: `min(plane, roof(q, r + ℓ) + leave)`, floored at
+/// `max(plane - stepdown, bottom_z)`, where `roof` is the model's
+/// highest nearby facet top (`machining3d::shell`). Every XY leg is
+/// subdivided to
+/// chords of at most ℓ - the tool radius - so each vertex's decision
+/// disc bounds both the leg it starts and the one it ends: the
+/// staircase's pyramid between plane and surface is cut away in the
+/// pass itself, while the steep flanks where the roof outgrows the
+/// plane stay exactly the waterline the plain ladder cut there. On a
+/// prismatic model every roof query answers at or above the plane
+/// and the shells collapse onto the planes themselves - the
+/// prismatic equivalence test measures that, move for move. The
+/// axial hop per pass never exceeds `stepdown`, the same bite a
+/// plain ladder's dive already takes, and the M2.3 simulation still
+/// holds the closing verdict.
+pub fn pocket3d_offset(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+) -> Result<Toolpath, GenError> {
+    run_plain(facets, footprint, p, true, None)
+}
+
+/// The re-machining sibling of [`pocket3d_offset`] (same M3.1 D law
+/// as [`pocket3d_prev`]).
+pub fn pocket3d_offset_prev(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    mask: Option<&Dexel>,
+) -> Result<Toolpath, GenError> {
+    run_plain(facets, footprint, p, true, mask)
+}
+
+fn run_plain(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    shell: bool,
+    mask: Option<&Dexel>,
+) -> Result<Toolpath, GenError> {
     guard_input(facets, footprint, p)?;
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
-    ladder(facets, footprint, p, &zs, None, mask, home(p))
+    ladder(facets, footprint, p, &zs, None, mask, home(p), shell)
 }
 
 /// The rest-material sibling (M2.1b): the same level ladder, then a
@@ -55,7 +104,30 @@ pub fn pocket3d_with_rest(
     footprint: &Region,
     p: &Pocket3DParams,
 ) -> Result<(Toolpath, StockReport), GenError> {
-    pocket3d_with_rest_prev(facets, footprint, p, None)
+    run_rest(facets, footprint, p, false, None)
+}
+
+/// The offset-shell twin of [`pocket3d_with_rest`]: shells on the
+/// coarse leg, shells on the rest leg, and the sim's verdict between
+/// them as always - the rest ladder's staircase closing half the
+/// stepdown is exactly what the shell's normal-eroded center costs
+/// less of (M2.5 F).
+pub fn pocket3d_offset_with_rest(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+) -> Result<(Toolpath, StockReport), GenError> {
+    run_rest(facets, footprint, p, true, None)
+}
+
+/// The re-machining sibling of [`pocket3d_offset_with_rest`].
+pub fn pocket3d_offset_with_rest_prev(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    mask: Option<&Dexel>,
+) -> Result<(Toolpath, StockReport), GenError> {
+    run_rest(facets, footprint, p, true, mask)
 }
 
 /// The re-machining sibling of [`pocket3d_with_rest`] (M3.1 D): the
@@ -69,10 +141,20 @@ pub fn pocket3d_with_rest_prev(
     p: &Pocket3DParams,
     mask: Option<&Dexel>,
 ) -> Result<(Toolpath, StockReport), GenError> {
+    run_rest(facets, footprint, p, false, mask)
+}
+
+fn run_rest(
+    facets: &[Triangle],
+    footprint: &Region,
+    p: &Pocket3DParams,
+    shell: bool,
+    mask: Option<&Dexel>,
+) -> Result<(Toolpath, StockReport), GenError> {
     guard_input(facets, footprint, p)?;
     let r = p.tool_diameter * 0.5;
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
-    let coarse = ladder(facets, footprint, p, &zs, None, mask, home(p))?;
+    let coarse = ladder(facets, footprint, p, &zs, None, mask, home(p), shell)?;
 
     // What the coarse ladder leaves standing, column by column: the
     // op-frame grid simulated from raw stock, or - when the program
@@ -103,7 +185,7 @@ pub fn pocket3d_with_rest_prev(
     // order (M8.1): the status line reads the substitutions as the
     // machine lived them.
     let mut notes = coarse.notes;
-    match ladder(facets, footprint, p, &zs_r, Some(&dex), None, start) {
+    match ladder(facets, footprint, p, &zs_r, Some(&dex), None, start, shell) {
         Ok(rp) => {
             moves.extend(rp.moves);
             notes.extend(rp.notes);

@@ -2,6 +2,7 @@
 
 use super::params::{Entry3D, Pocket3DParams};
 use super::rest::material_above;
+use super::shell::Field;
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::{chord_hits_plan, dive_room, helix_down};
@@ -28,6 +29,33 @@ use crate::stock_sim::Dexel;
 /// cutter whose bottom travels at or above a column's top touches
 /// nothing there. Air, never a wall: the island term is the only one
 /// with walls to prove against, and the island superset is untouched.
+///
+/// `shell` (M2.5 F) leaves the region law exactly as the plain ladder
+/// has it - the level's islands, XY-eroded at `r + leave`, the only
+/// XY set the entry arms and the dive superset law ever read - and
+/// lifts every CUT VERTEX off the level plane onto the model's offset
+/// shell: `min(plane, roof(q, r + ℓ) + leave)`, floored at the plane's
+/// own stepdown budget and the pocket's drawn floor, so no level
+/// bites deeper axially than a plain ladder's dive already does and
+/// none descends past `bottom_z`. ℓ, the chord cap `feed_leg` subdivides
+/// every XY leg to, is the tool radius: a vertex decides within one
+/// diameter, and because both of a capped leg's endpoints decide
+/// within `r + ℓ` of themselves, no interpolation between the two
+/// bounds can slip under a part point the leg's tube covers - the
+/// rising-leg gouge an uncapped leg is open to (see
+/// `machining3d::shell`). A ring XY inside the eroded center has no
+/// part above the plane within its disc at all, so a lifted vertex
+/// bites part material nowhere, exactly as the flat one never did.
+/// Where the surface is steep the roof outgrows the plane and the
+/// vertex stays AT it - the waterline the plain ladder always cut
+/// there; where the surface is shallow it follows the surface at the
+/// leave standoff, and the staircase's pyramid between plane and
+/// surface is gone from the single pass. Rapids and hops never lift:
+/// they cut nothing. See `machining3d::entry::pocket3d_offset`.
+// One slot per law the run threads: the model, the plan, the planes, the
+// rest mask, the program mask, the tip source (M2.5 F's `shell`), the
+// start - flat reads for one walk, like the march kernel's ten.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn ladder(
     facets: &[Triangle],
     footprint: &Region,
@@ -36,9 +64,17 @@ pub(super) fn ladder(
     rest: Option<&Dexel>,
     mask: Option<&Dexel>,
     start: Point3,
+    shell: bool,
 ) -> Result<Toolpath, GenError> {
     let r = p.tool_diameter * 0.5;
     let hop_z = p.retract_z.unwrap_or(p.clearance_z).min(p.clearance_z);
+    // The shell's roof query boxes the model once per call; the plain
+    // ladder never pays for it and never reads it (every leg then
+    // lands at its plane, exactly as always).
+    let field = match shell {
+        true => Some(Field::new(facets).map_err(GenError::Invalid)?),
+        false => None,
+    };
 
     let mut b = PathBuilder::new(start);
     let step = p.tiling_step();
@@ -75,6 +111,9 @@ pub(super) fn ladder(
             continue; // nothing above this plane: model material across
                       // the whole footprint, or nothing standing at all
         }
+        // The center's erosion: the XY law, both rungs of the ladder -
+        // the shell lifts the legs' tips, never this region (the dive
+        // superset law reads exactly this set at exactly this plane).
         let center = target.offset(-(r + p.stock_to_leave))?;
         if center.is_empty() {
             continue; // narrower than the tool at this level: the
@@ -115,6 +154,7 @@ pub(super) fn ladder(
             z,
             hop_z,
             p,
+            field: field.as_ref(),
         };
         match p.entry {
             // Ramp and helix are the coarse ladder's motions: a rest
@@ -137,7 +177,35 @@ pub(super) fn ladder(
                 let open = chord_clears(&center, leg, entry);
                 if open {
                     b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
-                    b.push(MoveKind::Feed, Point3::new(entry.x, entry.y, z), Some(p.feed));
+                    if lvl.field.is_none() {
+                        b.push(MoveKind::Feed, Point3::new(entry.x, entry.y, z), Some(p.feed));
+                    } else {
+                        // The shell's ramp keeps the plain ladder's
+                        // discipline: it rides strictly above the
+                        // plane until one chord short of its
+                        // destination, and only then descends to the
+                        // destination's tip. A diagonal that sank to
+                        // a floor tip early would meet this level's
+                        // own (tilted) rings at shared depth along
+                        // the way - the Crossing the verifier names -
+                        // and would interpolate under columns whose
+                        // surface only its START's disc saw. In the
+                        // last chord every tube point sits within
+                        // `r + ℓ` of the destination, whose tip the
+                        // decision disc has earned; above it the
+                        // move is at or above the plane, where the
+                        // chord's center membership is the whole
+                        // proof, exactly as the plain law states.
+                        let cap = p.tool_diameter * 0.5;
+                        let (dx, dy) = (entry.x - leg.x, entry.y - leg.y);
+                        let l = (dx * dx + dy * dy).sqrt();
+                        let t = if l > cap { 1.0 - cap / l } else { 0.0 };
+                        if t > 0.0 {
+                            let q1 = Point2::new(leg.x + dx * t, leg.y + dy * t);
+                            b.push(MoveKind::Feed, Point3::new(q1.x, q1.y, z), Some(p.feed));
+                        }
+                        feed_leg(&mut b, &lvl, entry, 0.0);
+                    }
                 } else {
                     substituted_dive(&mut b, &lvl, entry, "the ramp's chord is blocked");
                 }
@@ -154,13 +222,27 @@ pub(super) fn ladder(
                 // in the eroded leg, `dive` resolved None on every
                 // tessellated model this ladder meets, and the orbit
                 // died into a wall plunge without a word.
-                let dive = dive_room(&center, p.helix_radius + 1e-3);
+                // The margin is 2 radii, not 1: `helix_down` orbits
+                // about the point `rh` east of the anchor (the anchor
+                // is the circle's NEAR side, where the dive provably
+                // starts), so the orbit's own disc must clear `rh`
+                // from there - `2 rh` from the anchor. Asking 1 rh
+                // certified only half the tube: on curved relief the
+                // far side bit `rh` into the island (M2.5 F's dome
+                // walked into this plain-ladder gap; the sim said so).
+                let dive = dive_room(&center, 2.0 * p.helix_radius + 1e-3);
                 if let Some(d) = dive {
                     if leg.x != d.x || leg.y != d.y {
                         b.push(MoveKind::Rapid, Point3::new(d.x, d.y, p.clearance_z), None);
                     }
                     b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
-                    helix_down(&mut b, d, prev_z, z, p.helix_radius, p.feed);
+                    // The orbit's tube is the widened disc about `d`,
+                    // so the whole helix lands at the one tip that
+                    // decision disc earns (no chord reaches beyond it:
+                    // the corridor already carries `2 * helix_radius`,
+                    // the tube's full span about the center).
+                    let z_hel = lvl.tip(d, p.helix_radius * 2.0);
+                    helix_down(&mut b, d, prev_z, z_hel, p.helix_radius, p.feed);
                     dive_link(&mut b, &lvl, d, entry);
                 } else {
                     substituted_dive(
@@ -181,11 +263,10 @@ pub(super) fn ladder(
                         if leg.x != d.x || leg.y != d.y {
                             b.push(MoveKind::Rapid, Point3::new(d.x, d.y, p.clearance_z), None);
                         }
-                        b.push(
-                            MoveKind::Plunge,
-                            Point3::new(d.x, d.y, z),
-                            Some(p.plunge_feed),
-                        );
+                        // A vertical dive is exact at corridor r - no
+                        // chord to cap - so it lands on its own tip.
+                        let z_d = lvl.tip(d, 0.0);
+                        b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z_d), Some(p.plunge_feed));
                         dive_link(&mut b, &lvl, d, entry);
                     }
                     None => {
@@ -204,12 +285,12 @@ pub(super) fn ladder(
                 }
                 b.push(
                     MoveKind::Plunge,
-                    Point3::new(entry.x, entry.y, z),
+                    Point3::new(entry.x, entry.y, lvl.tip(entry, 0.0)),
                     Some(p.plunge_feed),
                 );
             }
         }
-        walk_pass(&mut b, first_pass, z, p.feed, /*skip_first=*/ true);
+        walk_pass(&mut b, first_pass, &lvl, /*skip_first=*/ true);
         // Remaining passes: connect as far as the floor allows - and no
         // further than the level's own planned paths allow (the boss
         // bug: a chord can clear the cutter-center area yet cross every
@@ -223,18 +304,18 @@ pub(super) fn ladder(
             let p2 = Point2::new(prev.x, prev.y);
             if chord_clears(&center, p2, next_entry) && !chord_hits_plan(p2, next_entry, &passes) {
                 // Feed straight on at this level (the join chord the
-                // test just proved).
-                b.push(MoveKind::Feed, Point3::new(next_entry.x, next_entry.y, z), Some(p.feed));
+                // test just proved) - on the shell, vertex by vertex.
+                feed_leg(&mut b, &lvl, next_entry, 0.0);
             } else {
                 b.push(MoveKind::Rapid, Point3::new(prev.x, prev.y, hop_z), None);
                 b.push(MoveKind::Rapid, Point3::new(next_entry.x, next_entry.y, hop_z), None);
                 b.push(
                     MoveKind::Plunge,
-                    Point3::new(next_entry.x, next_entry.y, z),
+                    Point3::new(next_entry.x, next_entry.y, lvl.tip(next_entry, 0.0)),
                     Some(p.plunge_feed),
                 );
             }
-            walk_pass(&mut b, pass, z, p.feed, /*skip_first=*/ true);
+            walk_pass(&mut b, pass, &lvl, /*skip_first=*/ true);
         }
         // Hand this level's plan to the next one's entry legality: it
         // is the deepest cut so far, so its center bounds every plane
@@ -266,6 +347,64 @@ struct LevelCtx<'a> {
     z: f64,
     hop_z: f64,
     p: &'a Pocket3DParams,
+    /// The offset shell's memory of the model; None on the plain
+    /// ladder, where every tip is the plane itself.
+    field: Option<&'a Field>,
+}
+
+impl LevelCtx<'_> {
+    /// The plane an XY cut vertex of this level lands on: the shell
+    /// tip at `q` over a decision disc of `r + ℓ` (ℓ = the tool
+    /// radius, the chord cap `feed_leg` subdivides to - the disc is
+    /// one tool diameter wide), floored at the level's own stepdown
+    /// budget and at the pocket's drawn floor - the shell's early
+    /// descent stops where the program stops, never deeper; or the
+    /// plane itself with no shell mounted, the plain ladder's value
+    /// byte for byte. `extra` widens the disc for a vertex whose
+    /// sweep is wider than the chords reaching it (a helix orbit, by
+    /// its radius).
+    fn tip(&self, q: Point2, extra: f64) -> f64 {
+        match self.field {
+            None => self.z,
+            Some(f) => {
+                let floor_z = (self.z - self.p.stepdown).max(self.p.bottom_z);
+                f.tip(q, self.z, self.p.tool_diameter + extra, self.p.stock_to_leave, floor_z)
+            }
+        }
+    }
+}
+
+/// Feed from the builder's current point to `to`: with no shell, the
+/// plain ladder's single move at the level plane; with the shell, the
+/// leg split into chords of at most ℓ with every vertex landing on
+/// its own tip - the cap is what makes the endpoint tips bound the
+/// interpolation between them (`machining3d::shell`'s rising-leg
+/// gouge). `extra` widens only the LAST vertex's decision disc.
+fn feed_leg(b: &mut PathBuilder, lvl: &LevelCtx, to: Point2, extra: f64) {
+    let feed = lvl.p.feed;
+    let z = lvl.z;
+    if lvl.field.is_none() {
+        b.push(MoveKind::Feed, Point3::new(to.x, to.y, z), Some(feed));
+        return;
+    }
+    let at = b.at();
+    let cap = lvl.p.tool_diameter * 0.5;
+    let n = ((to.x - at.x).hypot(to.y - at.y) / cap).ceil();
+    // A leg over a thousand tool diameters long is nonsense
+    // geometry, not a reason to hang: it rides the plane, exactly as
+    // the plain ladder's leg would - and the plane is safe by the
+    // level law. (The comparison also routes a NaN distance here.)
+    if n > 1024.0 || !n.is_finite() {
+        b.push(MoveKind::Feed, Point3::new(to.x, to.y, z), Some(feed));
+        return;
+    }
+    let n = (n as usize).max(1);
+    for i in 1..=n {
+        let t = i as f64 / n as f64;
+        let q = Point2::new(at.x + (to.x - at.x) * t, at.y + (to.y - at.y) * t);
+        let zq = lvl.tip(q, if i == n { extra } else { 0.0 });
+        b.push(MoveKind::Feed, Point3::new(q.x, q.y, zq), Some(feed));
+    }
 }
 
 /// The link from a dive that just finished at `d` up on plane `z` to
@@ -276,13 +415,13 @@ struct LevelCtx<'a> {
 /// ladder runs the same law in `machining2d::levels`).
 fn dive_link(b: &mut PathBuilder, lvl: &LevelCtx, d: Point2, e: Point2) {
     if chord_clears(lvl.cen, d, e) && !chord_hits_plan(d, e, lvl.passes) {
-        b.push(MoveKind::Feed, Point3::new(e.x, e.y, lvl.z), Some(lvl.p.feed));
+        feed_leg(b, lvl, e, 0.0);
     } else {
         b.push(MoveKind::Rapid, Point3::new(d.x, d.y, lvl.hop_z), None);
         b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lvl.hop_z), None);
         b.push(
             MoveKind::Plunge,
-            Point3::new(e.x, e.y, lvl.z),
+            Point3::new(e.x, e.y, lvl.tip(e, 0.0)),
             Some(lvl.p.plunge_feed),
         );
     }
@@ -304,7 +443,7 @@ fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, why: &str) {
             }
             b.push(
                 MoveKind::Plunge,
-                Point3::new(d.x, d.y, lvl.z),
+                Point3::new(d.x, d.y, lvl.tip(d, 0.0)),
                 Some(lvl.p.plunge_feed),
             );
             dive_link(b, lvl, d, e);
@@ -316,15 +455,16 @@ fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, why: &str) {
             b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lvl.p.clearance_z), None);
             b.push(
                 MoveKind::Plunge,
-                Point3::new(e.x, e.y, lvl.z),
+                Point3::new(e.x, e.y, lvl.tip(e, 0.0)),
                 Some(lvl.p.plunge_feed),
             );
         }
     }
 }
 
-/// Feed-walk a pass's points at plane `z` (the first point is the
-/// current position; `skip_first` avoids a zero move). Ring closure is
+/// Feed-walk a pass's points at the level (plane `z`, or the shell
+/// tip of every chord between them; the first point is the current
+/// position; `skip_first` avoids a zero move). Ring closure is
 /// a property of the point DATA, not a motion added here: a waterline
 /// loop arrives with its start point repeated at the end (each ring is
 /// emitted closed by `waterline_passes`, and a chain of rings carries a
@@ -335,8 +475,8 @@ fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, why: &str) {
 /// of the data's own closing, but for a chained multi-ring pass it
 /// dragged a diagonal across every intermediate ring - the boss crossing
 /// bug. The law is: walk the data, add nothing.
-pub(super) fn walk_pass(b: &mut PathBuilder, pass: &[Point2], z: f64, feed: f64, skip_first: bool) {
+fn walk_pass(b: &mut PathBuilder, pass: &[Point2], lvl: &LevelCtx, skip_first: bool) {
     for q in pass.iter().skip(if skip_first { 1 } else { 0 }) {
-        b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
+        feed_leg(b, lvl, *q, 0.0);
     }
 }

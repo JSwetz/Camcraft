@@ -435,7 +435,12 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                             Entry3D::Helix => {
                                 let cur = b.at();
                                 let leg = Point2::new(cur.x, cur.y);
-                                match dive_room(&center, p.helix_radius + 1e-3) {
+                                // The bore orbits about `d + (rh, 0)`
+                                // (the anchor is the circle's near
+                                // side), so the widened disc spans 2
+                                // radii from the anchor - see
+                                // `entry::dive_room` (M2.5 F law fix).
+                                match dive_room(&center, 2.0 * p.helix_radius + 1e-3) {
                                     Some(d) => {
                                         if leg.x != d.x || leg.y != d.y {
                                             b.push(

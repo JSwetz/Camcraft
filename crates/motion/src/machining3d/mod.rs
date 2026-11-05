@@ -28,6 +28,15 @@
 //! quantization noise, never a silent gouge: the reach law verifies the
 //! chords at their Z.
 //!
+//! The offset-shell twin (`pocket3d_offset`, M2.5 F) keeps this law's
+//! XY plan exactly - the same islands, the same erosion, the same
+//! entry proofs - and lifts each cut VERTEX onto the model's own
+//! relief between the planes, subdividing every leg to chords short
+//! enough for the vertex tips to bound the interpolation between
+//! them: the staircase above a shallow surface goes in the roughing
+//! pass itself, and steep flanks stay the waterline they always cut
+//! (see `machining3d::shell`).
+//!
 //! Entries at a level's first pass: `Plunge` mirrors the 2-D pocket
 //! precedent (an axial dive the flutes are built for); `Ramp` feeds the
 //! diagonal from the previous level's plane, earned only when that
@@ -78,6 +87,7 @@ mod feed;
 mod ladder;
 mod params;
 mod rest;
+mod shell;
 
 #[cfg(test)]
 #[allow(unused_imports)]
@@ -85,7 +95,11 @@ use {entry::*, feed::*, ladder::*, params::*, rest::*};
 #[cfg(test)]
 mod tests;
 
-pub use entry::{pocket3d, pocket3d_prev, pocket3d_with_rest, pocket3d_with_rest_prev};
+pub use entry::{
+    pocket3d, pocket3d_offset, pocket3d_offset_prev, pocket3d_offset_with_rest,
+    pocket3d_offset_with_rest_prev, pocket3d_prev, pocket3d_with_rest,
+    pocket3d_with_rest_prev,
+};
 pub use feed::{optimize_feed, FFO_FLOOR};
 pub use params::{engagement_step, Entry3D, Pocket3DParams};
 pub use rest::material_above;

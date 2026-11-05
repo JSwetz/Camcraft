@@ -108,9 +108,14 @@ pub(crate) fn chord_hits_plan(a: Point2, b: Point2, passes: &[Vec<Point2>]) -> b
 /// `center`'s own triangulation whose centre sits at least `margin`
 /// clear of the boundary - the widest open floor the region offers
 /// under a disc of that reach, not a search along the planned passes'
-/// chords. `margin` is a helix's `radius + a micron's insurance` (the
-/// swept disc must clear every wall through the whole orbit); an
-/// axial plunge passes 0.0 and needs only the center itself.
+/// chords. A helix asks `2 * radius + a micron's insurance`:
+/// `helix_down` orbits the circle whose NEAR side is the chosen point
+/// (the dive starts where room was proven), so the orbit's center
+/// sits one radius from the anchor and its swept disc must clear one
+/// radius from THERE - two from here. Asking one radius certified
+/// only half the tube, and the far side bit a radius into curved
+/// relief (M2.5 F's dome exposed this plain-ladder gap; the sim said
+/// so). An axial plunge passes 0.0 and needs only the center itself.
 ///
 /// M8.1 replaced `dive_point`'s chord-midpoint scan with this after
 /// the scan's defect came to light: on an all-arcs plan (every
