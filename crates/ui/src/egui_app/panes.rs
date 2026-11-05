@@ -31,6 +31,7 @@ use crate::actions;
 use crate::state::{CommandKind, DisplayMode, Sim, State, UiTarget};
 
 use super::icons::{Icon, IconSet};
+use super::layout;
 use super::painted;
 use super::theme::Tokens;
 
@@ -143,6 +144,9 @@ pub(super) enum Cmd {
     Paths,
     Simulate,
     Deviate,
+    /// The View door: one cell whose list toggles the dock's closable
+    /// panels and resets the layout (layout.rs). View state, no command.
+    View,
 }
 
 /// The four anchor groups: file work opens the row, setup follows, and
@@ -162,6 +166,7 @@ const MAX_PINS: usize = 4;
 const MODIFY: (&str, &[Cmd]) = ("Modify", &[Cmd::Undo, Cmd::Redo, Cmd::Run, Cmd::Delete]);
 const INSPECT: (&str, &[Cmd]) =
     ("Inspect", &[Cmd::Frame, Cmd::Paths, Cmd::Simulate, Cmd::Deviate]);
+const VIEW: (&str, &[Cmd]) = ("View", &[Cmd::View]);
 
 /// One ribbon group before layout: its caption and every cell it would
 /// show in a row that never ran out of width. `section` marks the
@@ -238,6 +243,7 @@ pub(super) fn ribbon_plan(
     }));
     plan.push(Group { title: MODIFY.0, cells: MODIFY.1.to_vec(), section: None });
     plan.push(Group { title: INSPECT.0, cells: INSPECT.1.to_vec(), section: None });
+    plan.push(Group { title: VIEW.0, cells: VIEW.1.to_vec(), section: None });
     plan
 }
 
@@ -270,6 +276,7 @@ fn label_of(c: Cmd) -> &'static str {
         Cmd::Paths => "Paths",
         Cmd::Simulate => "Simulate",
         Cmd::Deviate => "Deviate",
+        Cmd::View => "Panels",
         Cmd::More(s) => s.label(),
     }
 }
@@ -294,6 +301,7 @@ fn text_of(c: Cmd, state: &State) -> String {
         Cmd::Machine => {
             format!("{}…", mode_caption(camcraft_app::machine::kind_of(&state.world)))
         }
+        Cmd::View => format!("{}…", label_of(c)),
         // The ribbon caption is registry data (M5.0.2) - imgui's strings,
         // same order as the Create cells below. The list here is built
         // from the table, so an out-of-range index means a table bug:
@@ -378,6 +386,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
         Cmd::Deviate => {
             "Judge the program's stock against the model (deviation map)".into()
         }
+        Cmd::View => "Show or hide the browser and properties panes, or reset the layout".into(),
     }
 }
 
@@ -475,6 +484,7 @@ pub(super) fn toggled(c: Cmd, state: &State) -> bool {
         // opened".
         Cmd::More(s) => state.ribbon_more == Some(s),
         Cmd::Machine => state.ribbon_mode_open,
+        Cmd::View => state.ribbon_view_open,
         _ => false,
     }
 }
@@ -523,6 +533,9 @@ fn icon_of(c: Cmd) -> Option<Icon> {
         // The stock glyph, reused (RECOMMENDED.md's no-new-asset law):
         // what the cell shows IS the judged stock.
         Cmd::Deviate => Some(Icon::Stock),
+        // The machine door's no-new-asset law: the caption names the
+        // door, the ellipsis says a list opens.
+        Cmd::View => None,
     }
 }
 
@@ -641,11 +654,21 @@ fn run_cmd(c: Cmd, state: &mut State) {
         Cmd::More(s) => {
             state.ribbon_more = (state.ribbon_more != Some(s)).then_some(s);
             state.ribbon_mode_open = false;
+            state.ribbon_view_open = false;
         }
         Cmd::Machine => {
             state.ribbon_mode_open = !state.ribbon_mode_open;
             if state.ribbon_mode_open {
                 state.ribbon_more = None;
+                state.ribbon_view_open = false;
+            }
+        }
+        // Same door law; the dock itself is the shell's (layout.rs).
+        Cmd::View => {
+            state.ribbon_view_open = !state.ribbon_view_open;
+            if state.ribbon_view_open {
+                state.ribbon_more = None;
+                state.ribbon_mode_open = false;
             }
         }
     }
@@ -741,8 +764,8 @@ pub(super) fn machine_rows(
         })
         .collect()
 }
-const DROP_W: f32 = 200.0;
-const DROP_GAP: f32 = 2.0;
+pub(super) const DROP_W: f32 = 200.0;
+pub(super) const DROP_GAP: f32 = 2.0;
 
 /// The ribbon's layout math, pure: a plan (ribbon_plan's groups) and the
 /// strip give back cell rects, group captions (centre x, title), the
@@ -1147,7 +1170,32 @@ pub fn ribbon(
             }
         }
     }
+    // The View door's dropdown (layout.rs): the panel toggles and the
+    // layout reset, same popup law as the doors above.
+    if state.ribbon_view_open {
+        match cells.iter().find(|c| c.cmd == Cmd::View) {
+            None => {
+                debug_assert!(false, "ribbon: view door missing from the bar");
+                eprintln!("ribbon: closing a view list whose button is gone");
+                state.ribbon_view_open = false;
+            }
+            Some(cell) => {
+                let rows = view_rows_of(cell.rect, rect, pal);
+                layout::view_drop(ui, state, pal, base.with("view-drop"), cell.rect, &rows);
+            }
+        }
+    }
     ui.allocate_rect(rect, Sense::hover());
+}
+
+/// The View door's rows under `button` in `strip` - the one geometry the
+/// draw and the tests share.
+pub(super) fn view_rows_of(
+    button: Rect,
+    strip: Rect,
+    pal: &Tokens,
+) -> Vec<(layout::ViewRow, Rect)> {
+    layout::view_rows(button, strip, pal.row_height, DROP_W, DROP_GAP)
 }
 
 /// The status strip (bottom panel): the shell's one-line feedback, dimmer,

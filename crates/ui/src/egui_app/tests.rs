@@ -56,6 +56,8 @@ use super::shell::{Tab, build_dock, headless, shell_layout};
 use super::viewcube;
 use super::{theme, world};
 
+mod layout;
+
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields
 /// `shell_layout` touches, so the harness exercises the window's real body.
 struct ShellUi {
@@ -2424,6 +2426,10 @@ fn tips_match_the_imgui_table() {
         (Cmd::Paths, "Show every cached toolpath"),
         (Cmd::Simulate, "Simulate tool moves (transport bar)"),
         (Cmd::Deviate, "Judge the program's stock against the model (deviation map)"),
+        (
+            Cmd::View,
+            "Show or hide the browser and properties panes, or reset the layout",
+        ),
     ];
     for (c, want) in rows {
         assert_eq!(&panes::tip_of(*c, &with_tool), want, "tip drifted for {c:?}");

@@ -803,6 +803,46 @@ pub struct PostView {
     pub trace: bool,
 }
 
+/// A dock panel the ribbon's View door can close and reopen. The
+/// viewport is not one of them: it is permanent (the dock refuses to
+/// close it), so the type cannot even name it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel {
+    Browser,
+    Properties,
+}
+
+/// A dock-layout ask from the View door, applied by the shell on the
+/// same frame (the dock lives beside `State`, not in it). Layout is
+/// view state like the camera - immediate-mode, never a command, never
+/// saved - so this is a one-frame mailbox, not a history entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutRequest {
+    /// Close the panel if open, reopen it at its default side if not.
+    Toggle(Panel),
+    /// Rebuild the default three-pane dock.
+    Reset,
+}
+
+/// Which closable panels the dock holds this frame - mirrored from the
+/// dock by the shell before the ribbon draws, so the View door's
+/// checkmarks read the truth without the ribbon touching the dock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanelsOpen {
+    pub browser: bool,
+    pub properties: bool,
+}
+
+impl PanelsOpen {
+    #[must_use]
+    pub fn get(self, p: Panel) -> bool {
+        match p {
+            Panel::Browser => self.browser,
+            Panel::Properties => self.properties,
+        }
+    }
+}
+
 pub struct State {
     pub world: World,
     pub history: History,
@@ -891,6 +931,13 @@ pub struct State {
     /// any choice or outside press; at most one dropdown is open at a
     /// time, so the two toggles close each other.
     pub ribbon_mode_open: bool,
+    /// The View door's open flag: the same dropdown law as
+    /// `ribbon_mode_open` (one door open at a time, a frame fact).
+    pub ribbon_view_open: bool,
+    /// The dock's closable panels as of this frame (see [`PanelsOpen`]).
+    pub panels_open: PanelsOpen,
+    /// The View door's pending dock ask (see [`LayoutRequest`]).
+    pub layout_request: Option<LayoutRequest>,
     /// The browser row whose retype menu stands open (M9.1): the op's
     /// name, anchored to its row and recomputed per frame like the
     /// ribbon's dropdowns - a frame fact, not a document fact; the
@@ -1084,6 +1131,9 @@ impl State {
             stock_mesh: camcraft_app::stock_export::MeshCache::default(),
             ribbon_more: None,
             ribbon_mode_open: false,
+            ribbon_view_open: false,
+            panels_open: PanelsOpen { browser: true, properties: true },
+            layout_request: None,
             tree_menu: None,
             pending: VecDeque::new(),
             request_quit: false,

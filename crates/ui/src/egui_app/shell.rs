@@ -17,9 +17,7 @@
 
 use std::sync::Arc;
 
-use egui_dock::{
-    DockArea, DockState, Node, NodePath, Split, Style as DockStyle, SurfaceIndex, TabViewer,
-};
+use egui_dock::{DockArea, DockState, Style as DockStyle, TabViewer};
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -36,6 +34,7 @@ use crate::state::{DragMode, State};
 use crate::viewport::View3D;
 
 use super::icons;
+use super::layout;
 use super::machine_editor;
 use super::gpu;
 use super::pages;
@@ -139,24 +138,9 @@ impl Tab {
     }
 }
 
-/// The shell's fixed three-pane layout, as egui_dock splits: the browser
-/// takes 17% at the left and the properties pane 22% at the right of what
-/// remains - shell.rs's DockLayout ratios, restated as split fractions.
-/// A fraction governs the TOP/LEFT child (SplitNode docs), and a `Left`
-/// split puts the NEW node left, a `Right` split the OLD one - so the first
-/// fraction is the browser's share, the second the viewport's.
-pub(crate) fn build_dock() -> DockState<Tab> {
-    let mut dock = DockState::new(vec![Tab::Viewport]);
-    let [vp, _browser] =
-        dock.split(NodePath::MAIN_ROOT, Split::Left, 0.17, Node::leaf(Tab::Browser));
-    dock.split(
-        NodePath::new(SurfaceIndex::main(), vp),
-        Split::Right,
-        0.735,
-        Node::leaf(Tab::Properties),
-    );
-    dock
-}
+/// The default dock lives with the layout law (layout.rs); re-exported
+/// here because the shell and its frame tests build it by this name.
+pub(crate) use super::layout::build_dock;
 
 impl Shell {
     fn new(pick: gpu::GpuPick) -> Self {
@@ -581,12 +565,16 @@ pub(crate) fn shell_layout(
     // share one token table, so the widget path and the painted ink cannot
     // disagree on a retheme (M6.1 A). `ribbon_h` tracks the cell box.
     let pal = theme::current();
+    // The View door's checkmarks read the dock as it stands; a toggle the
+    // door files lands right after the ribbon, before the dock lays out.
+    layout::settle(state, dock);
     egui::Panel::top("ribbon")
         .frame(egui::Frame::NONE)
         .exact_size(theme::ribbon_h(&pal))
         .show(ui, |ui| {
             panes::ribbon(ui, &mut *state, &pal, icons);
         });
+    layout::settle(state, dock);
     egui::Panel::bottom("status")
         .frame(egui::Frame::NONE)
         .exact_size(STATUS_H)
@@ -596,6 +584,9 @@ pub(crate) fn shell_layout(
     egui::CentralPanel::default().show(ui, |ui| {
         DockArea::new(&mut *dock)
             .style(DockStyle::from_egui(ui.style().as_ref()))
+            // No per-area close-all: it is the X that took whole panes
+            // away by accident. Tabs keep their own X where closable.
+            .show_leaf_close_all_buttons(false)
             .show_inside(ui, &mut ShellTabs {
                 state: &mut *state,
                 tex,
@@ -709,6 +700,20 @@ impl TabViewer for ShellTabs<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         tab.title().into()
+    }
+
+    /// The viewport is permanent: no X, no middle-click close, no
+    /// context-menu close, and a float holding it cannot close either.
+    /// The browser and the properties pane may close - the ribbon's
+    /// View door reopens them (layout.rs).
+    fn is_closeable(&self, tab: &Self::Tab) -> bool {
+        layout::closeable(tab)
+    }
+
+    /// The viewport never floats: it stays in the main dock, so the
+    /// main surface always has a root to reopen panels against.
+    fn allowed_in_windows(&self, tab: &mut Self::Tab) -> bool {
+        layout::closeable(tab)
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
