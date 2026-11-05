@@ -937,6 +937,14 @@ pub struct State {
     /// hover itself is the precedent) - refreshed every frame, never a
     /// command, never an overlay rebuild.
     pub geo_hover: Option<GeoSel>,
+    /// Which named section of the operation page is open (the M1.4 tab
+    /// bar, restored after M9.1 B's stack on user feedback). An index into
+    /// `egui_app::op_tabs::SECTIONS`. Ephemeral pane state like the drafts
+    /// it reveals - never a command, never saved; a kind without the
+    /// section falls back to the first tab. Deliberately NOT inside
+    /// [`OpUi`]: the drafts rebuild on every sync, and a tab reset on
+    /// Apply or on reselecting the same op would read as a bug.
+    pub op_tab: usize,
     pub tool_ui: ToolUi,
     /// The tool editor window (M1.4): `None` closed, `Some(name)` editing
     /// that tool, `Some("")` the blank creation form. Ephemeral window
@@ -1060,6 +1068,7 @@ impl State {
             viewport_hot: false,
             geo_pick: GeoPick::Model,
             geo_hover: None,
+            op_tab: 0,
             hidden_models: Vec::new(),
             hidden_paths: Vec::new(),
             cam: Camera::default(),

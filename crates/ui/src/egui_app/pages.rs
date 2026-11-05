@@ -12,9 +12,10 @@
 //! Is a Command"). The M-c pages arrived as one scroll (parity first); the
 //! named post-M-g carry-over landed here: the operation page is now the
 //! specced named sections (SECTIONS - geometry, heights, passes, leads and
-//! links, feeds) stacked as one pane per kind (M9.1 B: the tab bar and its
-//! transient open-tab state retired; each field keeps its within-section
-//! order under its group header). Two
+//! links, feeds) as a tab bar (`op_tabs`), each field keeping its
+//! within-section order, the open tab transient pane state that queues
+//! nothing (M9.1 B stacked them into one pane; user feedback brought the
+//! tabs back). Two
 //! deliberate translations, both from the go/no-go
 //! report (S4):
 //!
@@ -57,7 +58,7 @@ use camcraft_app::machine;
 use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
 use camcraft_app::model;
 use camcraft_app::operation::{
-    self, GeoSel, Height, HeightReference, OpParams, OpType, SrcRef, Tilt,
+    self, GeoSel, Height, HeightReference, OpParams, SrcRef, Tilt,
 };
 use camcraft_app::posting;
 use camcraft_app::commands::theme_of;
@@ -129,59 +130,21 @@ const RED: Color32 = Color32::from_rgb(0xFF, 0x59, 0x59);
 /// The note gray imgui's geometry notes use ([0.62,0.66,0.72]).
 const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
 
-/// The specced named sections of the operation page (ROADMAP M1.4: "tabs
-/// and named sections (geometry, heights, passes, leads and links, feeds)
-/// instead of long stacks"), in tab-bar order. The guard indices in
-/// `params_fields` are these same numbers - one placement law, table and
-/// guards read each other.
-pub(crate) const SECTIONS: [&str; 6] = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds", "Machine"];
-const SEC_GEO: usize = 0;
-const SEC_HEIGHTS: usize = 1;
-const SEC_PASSES: usize = 2;
-const SEC_LEADS: usize = 3;
-const SEC_FEEDS: usize = 4;
-const SEC_MACHINE: usize = 5;
-
-/// Which sections an operation kind actually has fields (or the pick law)
-/// for: Geometry/Heights/Feeds always; Passes except Trace (Trace has no
-/// stepover or leave); Leads & Links only Contour - it is the kind with
-/// lead moves and tabs; Machine only Part - the bar feeder's signals
-/// are the one lifecycle group no cutting tab names (M5.2 G.2). The
-/// page stacks exactly these groups: no dead tabs, and none to click
-/// (M9.1 B).
-pub(crate) fn has_section(kind: OpType, s: usize) -> bool {
-    match s {
-        SEC_GEO | SEC_HEIGHTS | SEC_FEEDS => true,
-        // Trace cuts no passes; a drill's Passes are the cycle's own -
-        // peck depth and bottom dwell, the numbers that shape its hops.
-        // The engrave twin is Trace's shape verbatim, and the chamfer
-        // ride's floor is DERIVED from width and angle - neither has a
-        // stepover or a leave to show (M2.4 B). The deburr ride is
-        // that answer once more: one edge, one pass - its width is
-        // geometry, not a ladder (M2.5 E B).
-        SEC_PASSES => {
-            !matches!(
-                kind,
-                OpType::Trace | OpType::Engrave | OpType::Chamfer2D | OpType::Deburr
-            )
-        }
-        SEC_LEADS => matches!(kind, OpType::Contour),
-        SEC_MACHINE => matches!(kind, OpType::Part),
-        _ => false,
-    }
-}
+// The section table and the tab strip live in `op_tabs` (the M1.4 bar,
+// restored after M9.1 B): the guard indices below read its SEC_* numbers.
+use super::op_tabs::{SEC_FEEDS, SEC_GEO, SEC_HEIGHTS, SEC_LEADS, SEC_MACHINE, SEC_PASSES};
 
 // --------------------------------------------------------------- properties
 
 /// The dock's properties pane: dispatch on the shell's ui target, exactly
 /// like operations.rs's contents() dispatcher.
-pub fn properties(ui: &mut Ui, state: &mut State, _pal: &Tokens) {
+pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     let t = state.pane_target();
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| match t {
             UiTarget::None => no_operation_page(ui, state),
-            UiTarget::Operation(n) => operation_page(ui, state, n.as_str()),
+            UiTarget::Operation(n) => operation_page(ui, state, n.as_str(), pal),
             UiTarget::Tool(n) => tool_page(ui, state, &n),
             UiTarget::Stock => {
                 state.sync_setup_ui();
@@ -233,7 +196,7 @@ fn no_operation_page(ui: &mut Ui, _state: &mut State) {
     ui.label("Click one in the browser, or pick a kind from the ribbon's family doors - the new operation opens its own page straight away.");
 }
 
-fn operation_page(ui: &mut Ui, state: &mut State, name: &str) {
+fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
     state.sync_ops_ui();
     ui.heading(format!("Operation: {name}"));
     let target = name.to_owned();
@@ -358,9 +321,9 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str) {
         }
     }
 
-    // Status above the section stack (it sat below the Geometry block in
-    // the M-c scroll, and above the tab bar after M1.4): a STALE line and
-    // the warning fold ride the top of the pane, always in view.
+    // Status above the tab bar (it sat below the Geometry block in the
+    // M-c scroll): a STALE line and the warning fold must stay visible
+    // whichever section is open.
     if exists {
         let ent = model::find_by_name(&state.world, &target);
         let (moves, warnings): (usize, Vec<Warning>) = ent
@@ -397,120 +360,110 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str) {
     }
     ui.separator();
 
-    // One pane per kind (M9.1 B): the sections no longer fold into tabs -
-    // every group this kind has fields for stacks under its own header, in
-    // SECTIONS order, fields within a group in the order the tabs already
-    // showed them. A dead tab becomes impossible by construction (there is
-    // no tab), and the operation's whole field set is visible in one
-    // scroll. The open-tab field was view state (never a command, never
-    // saved); it retires with the bar. params_fields keeps its per-section
-    // guards and is simply asked once per visible group - the guards were
-    // written so no field renders outside its own section's call, which is
-    // what makes this loop exact.
+    // The named sections (M1.4's tabbing of M-c's single scroll, restored
+    // after M9.1 B's one-pane stack on user feedback): one tab per specced
+    // group, SECTIONS order; a kind shows only the sections it has fields
+    // for - no dead tabs. The open tab is transient pane state
+    // (`State::op_tab`), never a command, never saved: switching it queues
+    // nothing, and every edit rides its own tab (hidden guards write no
+    // params).
     let kind = state.op_ui.params.kind();
-    for (sec, name) in SECTIONS.iter().enumerate() {
-        if !has_section(kind, sec) {
-            continue;
-        }
-        if sec != SEC_GEO {
-            ui.add_space(6.0);
-        }
-        ui.strong(*name);
-        if sec == SEC_GEO {
-            // The Geometry group leads with the viewport pick block.
-            // Viewport pick mode - transient view state like the drafts
-            // this page edits: the mode itself is not undoable; what a
-            // Face/Edge click changes is (M-e: the radio row, because the
-            // egui viewport honors geo_pick exactly like the imgui one did).
-            ui.horizontal(|ui| {
-                ui.label("Click selects:");
-                let mut pick_mode = match state.geo_pick {
-                    GeoPick::Model => 0,
-                    GeoPick::Face => 1,
-                    GeoPick::Edge => 2,
-                };
-                ui.radio_value(&mut pick_mode, 0, "Models");
-                ui.radio_value(&mut pick_mode, 1, "Faces");
-                ui.radio_value(&mut pick_mode, 2, "Edges");
-                state.geo_pick = match pick_mode {
-                    1 => GeoPick::Face,
-                    2 => GeoPick::Edge,
-                    _ => GeoPick::Model,
-                };
-            });
-            ui.label("Click in the viewport - Ctrl adds; Alt in Edge mode takes one edge.");
-            if state.op_ui.src_kind == 2 {
-                // Hovering a row lights that feature in the viewport
-                // (screen-space amber, the shared interact law) - so the
-                // chip carries its GeoSel.
-                let chips: Vec<(String, bool, GeoSel)> = state
-                    .geo_chips()
-                    .into_iter()
-                    .map(|c| (c.label, c.missing, c.sel))
-                    .collect();
-                for (i, (label, missing, sel)) in chips.into_iter().enumerate() {
-                    let remove = ui
-                        .horizontal(|ui| {
-                            let resp = if missing {
-                                ui.colored_label(AMBER, &label)
-                            } else {
-                                ui.label(&label)
-                            };
-                            if resp.hovered() {
-                                state.geo_hover = Some(sel);
-                            }
-                            ui.small_button("×").clicked()
-                        })
-                        .inner;
-                    if remove {
-                        let mut rest: Vec<GeoSel> = state.op_ui.geo.clone();
-                        if i < rest.len() {
-                            rest.remove(i);
-                            if rest.is_empty() {
-                                state.op_ui.geo.clear();
-                                state.op_ui.src_kind = 0;
-                                state.pending.push_back(CommandKind::EditOperationLinks {
-                                    name: target.clone(),
-                                    tool: None,
-                                    src: Some(SrcRef::Stock),
-                                });
-                            } else {
-                                state.op_ui.geo = rest.clone();
-                                state.pending.push_back(CommandKind::SetOperationGeometry {
-                                    name: target.clone(),
-                                    items: rest,
-                                });
-                            }
+    let tab = super::op_tabs::tab_bar(ui, kind, &mut state.op_tab, pal);
+
+    // The Geometry section's pick block (params' geometry fields follow in
+    // params_fields).
+    if tab == SEC_GEO {
+        // Viewport pick mode - transient view state like the drafts
+        // this page edits: the mode itself is not undoable; what a
+        // Face/Edge click changes is (M-e: the radio row, because the
+        // egui viewport honors geo_pick exactly like the imgui one did).
+        ui.horizontal(|ui| {
+            ui.label("Click selects:");
+            let mut pick_mode = match state.geo_pick {
+                GeoPick::Model => 0,
+                GeoPick::Face => 1,
+                GeoPick::Edge => 2,
+            };
+            ui.radio_value(&mut pick_mode, 0, "Models");
+            ui.radio_value(&mut pick_mode, 1, "Faces");
+            ui.radio_value(&mut pick_mode, 2, "Edges");
+            state.geo_pick = match pick_mode {
+                1 => GeoPick::Face,
+                2 => GeoPick::Edge,
+                _ => GeoPick::Model,
+            };
+        });
+        ui.label("Click in the viewport - Ctrl adds; Alt in Edge mode takes one edge.");
+        if state.op_ui.src_kind == 2 {
+            // Hovering a row lights that feature in the viewport
+            // (screen-space amber, the shared interact law) - so the
+            // chip carries its GeoSel.
+            let chips: Vec<(String, bool, GeoSel)> = state
+                .geo_chips()
+                .into_iter()
+                .map(|c| (c.label, c.missing, c.sel))
+                .collect();
+            for (i, (label, missing, sel)) in chips.into_iter().enumerate() {
+                let remove = ui
+                    .horizontal(|ui| {
+                        let resp = if missing {
+                            ui.colored_label(AMBER, &label)
+                        } else {
+                            ui.label(&label)
+                        };
+                        if resp.hovered() {
+                            state.geo_hover = Some(sel);
+                        }
+                        ui.small_button("×").clicked()
+                    })
+                    .inner;
+                if remove {
+                    let mut rest: Vec<GeoSel> = state.op_ui.geo.clone();
+                    if i < rest.len() {
+                        rest.remove(i);
+                        if rest.is_empty() {
+                            state.op_ui.geo.clear();
+                            state.op_ui.src_kind = 0;
+                            state.pending.push_back(CommandKind::EditOperationLinks {
+                                name: target.clone(),
+                                tool: None,
+                                src: Some(SrcRef::Stock),
+                            });
+                        } else {
+                            state.op_ui.geo = rest.clone();
+                            state.pending.push_back(CommandKind::SetOperationGeometry {
+                                name: target.clone(),
+                                items: rest,
+                            });
                         }
                     }
                 }
-                if ui.small_button("Clear").clicked() {
-                    state.pending.push_back(CommandKind::EditOperationLinks {
-                        name: target.clone(),
-                        tool: None,
-                        src: Some(SrcRef::Stock),
-                    });
-                }
             }
-            let notes: Vec<String> = operation::selection_notes(
-                &state.world,
-                live_setup,
-                &state.op_ui.geo.clone(),
-                &state.op_ui.params.clone(),
-            );
-            for note in notes {
-                ui.colored_label(NOTE, note);
-            }
-            if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
-                let n = state.op_ui.src_name.clone();
-                ui.label(format!("Whole of '{n}' - the first pick replaces this."));
-            } else if state.op_ui.src_kind != 2 {
-                ui.label("Whole stock contour (default) - picks bound the operation.");
+            if ui.small_button("Clear").clicked() {
+                state.pending.push_back(CommandKind::EditOperationLinks {
+                    name: target.clone(),
+                    tool: None,
+                    src: Some(SrcRef::Stock),
+                });
             }
         }
-        params_fields(ui, state, sec);
-        ui.separator();
+        let notes: Vec<String> = operation::selection_notes(
+            &state.world,
+            live_setup,
+            &state.op_ui.geo.clone(),
+            &state.op_ui.params.clone(),
+        );
+        for note in notes {
+            ui.colored_label(NOTE, note);
+        }
+        if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
+            let n = state.op_ui.src_name.clone();
+            ui.label(format!("Whole of '{n}' - the first pick replaces this."));
+        } else if state.op_ui.src_kind != 2 {
+            ui.label("Whole stock contour (default) - picks bound the operation.");
+        }
     }
+    params_fields(ui, state, tab);
     // The whole-panel unresolved line is operations.rs's law, same as the
     // retired imgui page's.
     if let Some(note) = unresolved_note(&state.world, live_setup, &state.op_ui.params) {
@@ -552,9 +505,9 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str) {
 /// echoes, unchanged in content and in within-section order, placed by
 /// section: each field renders when, and only when, its own section is the
 /// one being asked (SECTIONS/has_section are the placement law; the guards
-/// below read them as indices). The page walks the sections a kind has and
-/// calls this once per group, so the guards' exclusivity is what makes a
-/// field appear exactly once per pane (M9.1 B). Numbers are DragValue
+/// below read them as indices). The page asks it for the open tab only, so
+/// the guards' exclusivity is what puts each field on exactly one tab - a
+/// new field under an existing guard lands on that tab by itself. Numbers are DragValue
 /// instead of InputDouble (divergence D5, S4 report): egui has no
 /// InputDouble; DragValue edits + commits with no custom state.
 /// The roughing twins' shared pane (M2.4 A): the pocket's fields minus
@@ -668,7 +621,7 @@ fn roughing2d_pane(
     }
 }
 
-fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
+pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let u = state.units();
     let mut side_note: Option<String> = None;
     let mut auto_note: Option<String> = None;
@@ -3898,9 +3851,9 @@ fn swarf_editor(
         }
         // The ladder's rung count, the rung-count law: a plain number
         // clamped into the generator's named range at the draft, so
-        // no panel edit ever holds a 0 or a 9. Named "Pass count" - in
-        // the stacked pane a field reading exactly "Passes" would echo
-        // its own group header (M9.1 B named this by pinning headers).
+        // no panel edit ever holds a 0 or a 9. Named "Pass count" - a
+        // field reading exactly "Passes" would echo its own tab's label
+        // (M9.1 B named this by pinning headers; the tab bar keeps it).
         if let Some(passes) = passes {
             field(ui, "Pass count");
             let mut n = f64::from(*passes);

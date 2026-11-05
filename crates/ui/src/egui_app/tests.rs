@@ -531,8 +531,10 @@ fn click_apply_edits_operation_through_commands() {
         _ => false,
     };
     assert!(staged_climb(&harness));
-    // The stacked pane (M9.1 B): the Feeds-group checkbox is in the tree
-    // from the first frame - nothing to navigate to, just the click law.
+    // M1.4 sectioning (restored after M9.1 B): the checkbox lives on the
+    // Feeds tab, and a tab cell is the way in - navigation first, then the
+    // click law itself.
+    harness.get_by_label("Feeds").click();
     harness.run();
     harness.get_by_label("Climb milling").scroll_to_me();
     harness.run();
@@ -602,9 +604,9 @@ fn status_bar_offers_regenerate_all_when_something_is_stale() {
     );
 }
 
-/// The Contour pane's "Stock to leave" DragValue. The stacked page (M9.1 B)
-/// shows every section at once, so "the pane's only number" no longer holds;
-/// the field-label row pins it instead: the number is the DragValue that
+/// The Contour pane's "Stock to leave" DragValue (on the Passes tab, which
+/// the caller opens). The field-label row pins it - robust to whatever
+/// other numbers the tab grows: the number is the DragValue that
 /// sits directly below its `field()` label (tree nodes are submission order
 /// and the page flows top-down; the role query is DragValues only - the
 /// painted strips carry no a11y marks).
@@ -628,10 +630,10 @@ fn stock_to_leave_center(h: &Harness<'static, ShellUi>) -> egui::Pos2 {
 #[test]
 fn drag_and_type_edit_the_same_staged_number() {
     let mut harness = shell_harness();
-    // "Stock to leave" is one DragValue among the stacked pane's numbers
-    // now (M9.1 B) - the helper pins it by its field label, no navigation;
-    // the one thing the old tab click bought was bringing the field on
-    // screen, and that is now a plain scroll_into_view before measuring.
+    // "Stock to leave" is on the Passes tab - navigate there first; the
+    // helper still pins the DragValue by its field label's row, and the
+    // scroll brings it on screen before measuring.
+    harness.get_by_label("Passes").click();
     harness.run();
     harness.get_by_label("Stock to leave").scroll_to_me();
     harness.run();
@@ -721,15 +723,18 @@ fn drag_and_type_edit_the_same_staged_number() {
     );
 }
 
-/// M1.4's sectioning law in its M9.1 B shape - one pane per kind: every
-/// named field of every kind renders EXACTLY ONCE in the single stacked
-/// frame, and a group header rides the pane iff the kind has fields for
-/// that section (the tab bar's no-dead-tabs law, unstabbed). If a field
-/// moves sections, a label changes, or a guard drops a field, this fails.
+/// M1.4's sectioning law, as a drift guard in the tips-match style (the
+/// tab bar restored after M9.1 B): every named field of every tabled kind
+/// renders on exactly ONE tab - exactly once while its tab is open, absent
+/// from the tree otherwise - and a kind's tab bar shows exactly the
+/// sections it has fields for (no dead tabs). If a field moves sections, a
+/// label changes, or a guard drops a field, this fails. The registry-wide
+/// half (every KindInfo kind, field labels discovered, not tabled) is
+/// `every_registry_kind_gets_its_tab_bar`.
 #[test]
 fn every_field_lives_on_exactly_one_section() {
     let mut harness = shell_harness();
-    let all = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds"];
+    let all = super::op_tabs::SECTIONS;
     // Kind order == KindInfo::ALL table order == the ribbon's TYPES;
     // `retype` is the law the quick-adds and the retype menu's command
     // run, so the draft takes the same shape the buttons drive it into.
@@ -1029,89 +1034,194 @@ fn every_field_lives_on_exactly_one_section() {
             ],
         ),
     ];
-    // One pane per kind (M9.1 B): the stack draws at once, no tab to
-    // open - so the law reads off a single frame. Every field of the
-    // kind's table renders EXACTLY ONCE (a field double-guarded under two
-    // headers shows as count 2, the drift this guard is for), and a group
-    // header rides the pane iff the kind has fields for its section - the
-    // tab bar's no-dead-tabs law, unstabbed: there is nothing to be dead.
+    // One tab at a time: open each section in turn (the view-state field
+    // the tab click writes) and read the tree. A field must be in the tree
+    // exactly once on its own tab (a field double-guarded twice on one tab
+    // shows as count 2) and absent on every other - an out-of-set tab
+    // falls back to Geometry, the page's resolution law.
     for (ki, (kind_name, sections)) in table.iter().enumerate() {
         let cur = harness.state().state.op_ui.params.clone();
         let retyped = crate::operations::retype(&cur, ki);
         harness.state_mut().state.op_ui.params = retyped;
-        harness.run();
-        for sname in all.iter() {
-            let has = sections.iter().any(|(n, _)| n == sname);
-            assert_eq!(
-                harness.query_by_label(sname).is_some(),
-                has,
-                "{kind_name}: the pane shows the '{sname}' group iff the kind has fields for it",
-            );
+        let mut placement: Vec<(&str, usize)> = Vec::new();
+        for (sname, labels) in sections {
+            let si = all
+                .iter()
+                .position(|s| s == sname)
+                .expect("the table names the SECTIONS");
+            for l in labels.iter() {
+                placement.push((*l, si));
+            }
         }
-        let mut seen: Vec<&str> = Vec::new();
-        for (_, labels) in sections {
-            for l in labels.iter().copied() {
-                if !seen.contains(&l) {
-                    seen.push(l);
-                    let n = harness.query_all_by_label(l).count();
-                    assert_eq!(
-                        n, 1,
-                        "{kind_name}: '{l}' renders {n} times - exactly one placement is the law",
-                    );
-                }
+        for (si, tab_name) in all.iter().enumerate() {
+            harness.state_mut().state.op_tab = si;
+            harness.run();
+            let has_tab = sections.iter().any(|(n, _)| n == tab_name);
+            assert_eq!(
+                harness.query_by_label(tab_name).is_some(),
+                has_tab,
+                "{kind_name}: the tab bar must show '{tab_name}' iff the kind has fields for it",
+            );
+            let effective = if has_tab { si } else { 0 };
+            for (label, want) in &placement {
+                let n = harness.query_all_by_label(label).count();
+                assert_eq!(
+                    n,
+                    usize::from(*want == effective),
+                    "{kind_name}: '{label}' renders {n} time(s) on tab {si}; it belongs to tab \
+                     {want} - exactly once there, nowhere else",
+                );
             }
         }
     }
 }
 
-/// The stacked pane needs no navigation (M9.1 B): what the old tab bar
-/// made two frames and a click show - a Geometry field and a Heights
-/// field side by side - the page now draws in one frame, and no click
-/// queues anything because there is nothing left to click.
+/// A tab click is navigation, nothing more: the pane's view-state field
+/// moves, no command is queued, and the section's fields replace the
+/// previous ones (the view-state law from M1.4's toggle decision). The
+/// open tab survives reselecting the same operation (the drafts resync,
+/// the tab does not reset) and a kind change keeps the same section when
+/// the new kind has it, else falls back to the first tab.
 #[test]
-fn the_stacked_pane_shows_every_section_unasked() {
+fn tab_click_navigates_and_queues_nothing() {
     let mut harness = shell_harness();
     harness.run();
-    assert!(harness.query_by_label("Side").is_some(), "Geometry fields stand unasked");
-    assert!(
-        harness.query_by_label("Clearance Z").is_some(),
-        "Heights fields stand in the same frame"
-    );
-    assert!(harness.query_by_label("Heights").is_some(), "under their own header");
-    let st = &harness.state().state;
-    assert!(st.pending.is_empty(), "a pane that renders must still queue nothing");
+    assert!(harness.query_by_label("Side").is_some(), "Geometry opens by default");
+    assert!(harness.query_by_label("Clearance Z").is_none(), "Heights waits behind its tab");
+    harness.get_by_label("Heights").click();
+    harness.run();
+    {
+        let st = &harness.state().state;
+        assert_eq!(st.op_tab, 1, "the Heights cell did not open the Heights section");
+        assert!(st.pending.is_empty(), "opening a section must not queue a command");
+    }
+    assert!(harness.query_by_label("Clearance Z").is_some());
+    assert!(harness.query_by_label("Side").is_none(), "the closed tab's fields leave the tree");
+
+    // Reselecting the same op: the drafts resync, the tab stays.
+    harness.state_mut().state.sync_ops_ui();
+    harness.run();
+    assert_eq!(harness.state().state.op_tab, 1, "a resync must not reset the open tab");
+    assert!(harness.query_by_label("Clearance Z").is_some());
+
+    // Leads & Links is Contour's alone: open it, then show a Pocket - the
+    // tab falls back to Geometry; Heights, which Pocket has, would stay.
+    harness.get_by_label("Leads & Links").click();
+    harness.run();
+    assert_eq!(harness.state().state.op_tab, 3);
+    let cur = harness.state().state.op_ui.params.clone();
+    harness.state_mut().state.op_ui.params = crate::operations::retype(&cur, 2);
+    harness.run();
+    assert_eq!(harness.state().state.op_tab, 0, "a missing section falls back to the first tab");
+    assert!(harness.query_by_label("Leads & Links").is_none(), "Pocket has no Leads tab");
+    harness.get_by_label("Heights").click();
+    harness.run();
+    let cur = harness.state().state.op_ui.params.clone();
+    harness.state_mut().state.op_ui.params = crate::operations::retype(&cur, 1);
+    harness.run();
+    assert_eq!(harness.state().state.op_tab, 1, "a section the new kind has stays open");
+    assert!(harness.state().state.pending.is_empty(), "tab navigation never queues");
 }
 
-/// The registry half of M9.1's one pane per kind: the drift guard above
-/// tables the eleven milling kinds' FIELD LABELS; this one walks the whole
-/// KindInfo registry and pins the GROUP law for every kind that can be
-/// created or retyped into - the pane opens for each (Tool and Source
-/// above the stack, the section groups below), and a header rides the
-/// pane exactly where `has_section` says (Geometry/Heights/Feeds always;
-/// Passes except Trace; Leads & Links only Contour; Machine only the
-/// Part op, which is created, never retyped, so it is out of this loop
-/// by construction). A new kind that forgets its pane, or a section law
-/// that drifts from the table's meaning, fails here.
+/// Every text the properties pane renders right now (labels and checkbox
+/// captions), from the operation heading's left edge rightward - the pane
+/// column, so the browser and ribbon text stay out.
+fn pane_texts(h: &Harness<'static, ShellUi>) -> Vec<String> {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    let left = h.get_by_label_contains("Operation: ").rect().left() - 1.0;
+    h.query_all_by(|n| matches!(n.role(), Role::Label | Role::CheckBox))
+        .filter(|n| n.rect().left() >= left)
+        .filter_map(|n| {
+            let a = n.accesskit_node();
+            if a.role() == Role::Label { a.value() } else { a.label() }
+        })
+        .collect()
+}
+
+/// Whether `params_fields` draws anything for `sec` with the harness's
+/// current draft - rendered off-screen in a throwaway context, so the
+/// probe can ask a section the tab bar would never open.
+fn section_draws(state: &mut State, sec: usize) -> bool {
+    let ctx = egui::Context::default();
+    let mut drew = false;
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let before = ui.cursor().min;
+        super::pages::params_fields(ui, state, sec);
+        drew = ui.cursor().min != before;
+    });
+    // Nothing paints this throwaway pass: the font atlas upload is dropped
+    // on purpose (epaint refuses a silently dropped delta).
+    out.textures_delta.clear();
+    drew
+}
+
+/// The registry half of the tab law: the drift guard above tables the
+/// milling kinds' field labels by hand; this one walks EVERY KindInfo kind
+/// and discovers them. Per kind: the tab bar shows exactly `has_section`'s
+/// tabs, and `has_section` matches what the per-section guards really draw
+/// (a tab with no fields is dead, a section with fields but no tab loses
+/// them - both fail; Geometry always carries the pick block); and every
+/// pane text that is not chrome (present on all tabs) appears on exactly
+/// one tab. A field added under an existing section guard - in any kind -
+/// is covered with no edit here.
 #[test]
-fn every_registry_kind_gets_its_stacked_pane() {
+fn every_registry_kind_gets_its_tab_bar() {
     let mut harness = shell_harness();
     harness.run();
+    let secs = super::op_tabs::SECTIONS;
     for (ki, k) in camcraft_app::operation::KindInfo::ALL.iter().enumerate() {
         let cur = harness.state().state.op_ui.params.clone();
         let retyped = crate::operations::retype(&cur, ki);
         let kind = retyped.kind();
         harness.state_mut().state.op_ui.params = retyped;
-        harness.run();
-        let st = &harness.state().state;
-        assert!(st.pending.is_empty(), "{}: opening the pane queues nothing", k.label);
-        assert!(harness.query_by_label("Tool").is_some(), "{}: the pane opens on the tool row", k.label);
-        for (si, sname) in super::pages::SECTIONS.iter().enumerate() {
+        // Geometry (0) is skipped: the page's pick block makes it never dead.
+        for (si, sname) in secs.iter().enumerate().skip(1) {
+            let drew = section_draws(&mut harness.state_mut().state, si);
+            let has = super::op_tabs::has_section(kind, si);
             assert_eq!(
-                harness.query_all_by_label(sname).next().is_some(),
-                super::pages::has_section(kind, si),
-                "{}: '{sname}' header must follow has_section({si}) - the pane shows groups the kind has fields for, and only those",
+                drew, has,
+                "{}: '{sname}' draws fields = {drew}, but has_section says {has} - the tab law \
+                 and the section guards disagree",
                 k.label,
             );
+        }
+        let mut per_tab: Vec<(usize, Vec<String>)> = Vec::new();
+        for (si, sname) in secs.iter().enumerate() {
+            harness.state_mut().state.op_tab = si;
+            harness.run();
+            let st = &harness.state().state;
+            assert!(st.pending.is_empty(), "{}: opening a tab queues nothing", k.label);
+            let has = super::op_tabs::has_section(kind, si);
+            assert_eq!(
+                harness.query_all_by_label(sname).next().is_some(),
+                has,
+                "{}: the '{sname}' tab must follow has_section({si})",
+                k.label,
+            );
+            if has {
+                assert!(harness.query_by_label("Tool").is_some(), "{}: the pane opens on the tool row", k.label);
+                per_tab.push((si, pane_texts(&harness)));
+            }
+        }
+        // Chrome: what every open tab shares (heading, tool/source rows,
+        // tab captions, footer). Everything else is a section's own.
+        let chrome: Vec<&String> = per_tab[0]
+            .1
+            .iter()
+            .filter(|t| per_tab.iter().all(|(_, ts)| ts.contains(t)))
+            .collect();
+        for (si, texts) in &per_tab {
+            let own: Vec<&String> = texts.iter().filter(|t| !chrome.contains(t)).collect();
+            assert!(!own.is_empty(), "{}: the '{}' tab is dead - nothing of its own", k.label, secs[*si]);
+            for t in own {
+                let on: Vec<&str> = per_tab
+                    .iter()
+                    .filter(|(_, ts)| ts.contains(t))
+                    .map(|(s, _)| secs[*s])
+                    .collect();
+                assert_eq!(on.len(), 1, "{}: '{t}' renders on tabs {on:?} - one tab per field", k.label);
+            }
         }
     }
 }
@@ -3140,6 +3250,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     assert_eq!(s0, None);
     {
         let sh = harness.state_mut();
+        sh.state.op_tab = 2; // Passes - the ramp checkbox below lives there
         sh.state.sync_ops_ui();
         if let OpParams::Finish3D { pattern, stepover, .. } = &mut sh.state.op_ui.params {
             *pattern = camcraft_app::finishing3d::FinishPattern::Waterline;
