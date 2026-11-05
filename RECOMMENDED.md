@@ -8870,3 +8870,37 @@ delete/re-add path. All 15 generator-refusal tests keep their asserts.
 Not done: `commands/operation.rs` is now ~750 lines, further over the
 400-line cap (split owed); the op page's tool dropdown still lists
 every tool, and a wrong pick is refused by `EditOperationLinks`.
+
+## M7.2 D - a mesh when asked: four decisions (2026-11-05)
+
+(1) **Marching cubes in its tetrahedral form** (`sim::stock_sim::iso`,
+six tetrahedra around one main diagonal, per Bloomenthal's implicit
+surface polygonizer). It needs no 256-case table, has no ambiguous
+faces, and is watertight by construction; the suite checks closure
+with an open-edge count. Dropped: the classic case table, which adds
+more code and the face-ambiguity fixes; dual contouring, whose sharp
+interior corners are the ROADMAP's "where they must survive" clause,
+and no consumer needs them yet.
+
+(2) **Samples stand on the field's cell centres.** `SdfField::distance`
+is exact at cell centres and constant across each cell. The first cut
+sampled on cell faces and came out a quarter cell fat (568 vs 480 on a
+10x8x6 box); on the centres it lands within 5%.
+
+(3) **A hole is a refusal.** `stock_export::machined_mesh` refuses an
+extraction with any open edge rather than write an STL that claims a
+solid it isn't. The mesh cache keys on the identity of the
+`Arc<FieldView>`, the same view the viewport traces, so a new cut or a
+re-arm is a new mesh, never a stale one. It is retired on document
+switch and open.
+
+(4) **Consumers: the STL export ships; picking and the G-code viewer
+keep what they have.** The Deviate bar gains "Export STL", which goes
+through the pending-command queue with a dialog arm and a headless path
+arm, like the setup sheet. Picking selects entities, not surface
+points, and the stock entity is still the thing picked. The G-code
+viewer's 3D view already shows the traced stock through the B3b eye. So
+no consumer needs the triangles there today; `MeshCache` is the seam
+when one does. This is a scope call for the close-out: the ROADMAP
+clause names those consumers, and here they are served by the eye,
+not by triangles.

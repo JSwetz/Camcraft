@@ -834,6 +834,7 @@ fn viewport_panel(
     // like every other camera move - no command.
     if let Some(ps) = &state.program_sim {
         let mut fly: Option<[f64; 3]> = None;
+        let mut export = false;
         ui.horizontal(|ui| {
             ui.label(crate::actions::deviate_readout(&ps.dev));
             if ps.dev.rest_cells > 0
@@ -848,9 +849,20 @@ fn viewport_panel(
             {
                 fly = Some([q.x, q.y, q.z]);
             }
+            // M7.2 D: what the program leaves, out as a mesh.
+            if ui
+                .button("Export STL")
+                .on_hover_text("Write the machined stock as an STL mesh (extracted from the traced field)")
+                .clicked()
+            {
+                export = true;
+            }
         });
         if let Some(p) = fly {
             crate::actions::frame_at(state, p);
+        }
+        if export {
+            state.pending.push_back(crate::state::CommandKind::ExportStockDialog);
         }
         ui.separator();
     }

@@ -67,6 +67,7 @@ mod gouge;
 mod kernel;
 mod march;
 mod march_verdicts;
+pub mod iso;
 pub mod preview;
 mod scan;
 mod tiles;

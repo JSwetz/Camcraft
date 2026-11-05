@@ -4,7 +4,7 @@
 //! a mode change retiring whatever was walked. Provenance: our own
 //! tests; nothing from vendor binaries.
 //!
-//! Gate map (M4.4): covers ui::actions::ensure_field_view.
+//! Gate map (M4.4): covers ui::actions::ensure_field_view, ui::state (ExportStock*).
 
 use crate::actions::ensure_field_view;
 use crate::state::{Sim, State};
@@ -29,4 +29,14 @@ fn a_refused_playback_is_said_once_and_retired_with_the_transport() {
     state.sim = None;
     ensure_field_view(&mut state);
     assert!(state.field_view.is_none() && state.field_mode.is_none(), "the transport down retires it");
+}
+
+#[test]
+fn the_stock_export_refuses_by_name_and_writes_nothing_without_stock() {
+    let mut state = State::new();
+    let path = std::env::temp_dir().join(format!("camcraft-no-stock-{}.stl", std::process::id()));
+    state.pending.push_back(crate::state::CommandKind::ExportStockFile(path.clone()));
+    state.drain_actions();
+    assert!(state.status.starts_with("stock export refused:"), "{}", state.status);
+    assert!(!path.exists(), "a refusal writes no file");
 }

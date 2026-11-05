@@ -234,6 +234,11 @@ pub enum CommandKind {
     /// the save-dialog law; the path arm is what headless tests run.
     SetupSheetDialog,
     SetupSheetFile(PathBuf),
+    /// M7.2 D: what the program leaves, as binary STL - the traced
+    /// stock's field iso-extracted. A view of the document like the
+    /// sheet: no command, no history; dialog arm and headless path arm.
+    ExportStockDialog,
+    ExportStockFile(PathBuf),
 }
 
 /// Editable fields of the Setup pane's stock group. Transient UI state,
@@ -873,6 +878,8 @@ pub struct State {
     /// the document version a playback plan was frozen at). A change
     /// retires the view and the playback - never a stale picture.
     pub field_mode: Option<(bool, bool, u64)>,
+    /// M7.2 D: the machined stock's mesh, one extraction per field view.
+    pub stock_mesh: camcraft_app::stock_export::MeshCache,
     /// The open ribbon section dropdown (M6.2): while `Some`, that
     /// section's overflow button stands pressed and its folded kinds
     /// draw as a popup column. View state like the sim's playhead -
@@ -1065,6 +1072,7 @@ impl State {
             field_view: None,
             field_play: None,
             field_mode: None,
+            stock_mesh: camcraft_app::stock_export::MeshCache::default(),
             ribbon_more: None,
             ribbon_mode_open: false,
             tree_menu: None,
@@ -1767,6 +1775,7 @@ impl State {
                 self.program_sim = None;
                 self.field_view = None;
                 self.field_play = None;
+                self.stock_mesh.clear();
                 self.machine_editor = None;
                 self.doc_version += 1;
                 self.status = String::from("new document");
@@ -2370,6 +2379,12 @@ impl State {
                 }
             }
             CommandKind::SetupSheetFile(path) => self.setup_sheet_path(path),
+            CommandKind::ExportStockDialog => {
+                if let Some(path) = save_stl_dialog() {
+                    self.export_stock_path(path);
+                }
+            }
+            CommandKind::ExportStockFile(path) => self.export_stock_path(path),
         }
     }
 
@@ -2767,6 +2782,7 @@ impl State {
         self.program_sim = None; // and neither is its stock verdict
         self.field_view = None; // nor its traced stock
         self.field_play = None; // nor its playback
+        self.stock_mesh.clear(); // nor the mesh extracted from it
         self.machine_editor = None; // nor a draft over its machine's numbers
         match project::load(&self.world, &path) {
             Ok(()) => {
@@ -2807,6 +2823,35 @@ impl State {
             // A refused post leaves any previous program (file and viewer)
             // exactly as it was - the gate writes nothing on refusal.
             Err(err) => self.status = format!("post refused: {err}"),
+        }
+    }
+
+    /// M7.2 D: extract the machined stock and write it as STL. The view
+    /// the viewport traces is reused when it is the whole program (the
+    /// mesh cache keys on it); otherwise - transport up, or no GPU eye
+    /// asked yet - the whole program is walked here. A refusal (no
+    /// stock, an open extraction, a write error) is the status line.
+    fn export_stock_path(&mut self, path: PathBuf) {
+        let fv = match &self.field_view {
+            Some(Ok(fv)) if self.sim.is_none() => std::sync::Arc::clone(fv),
+            _ => match camcraft_app::stock_view::field_view(&self.world) {
+                Ok(fv) => std::sync::Arc::new(fv),
+                Err(err) => {
+                    self.status = format!("stock export refused: {err}");
+                    return;
+                }
+            },
+        };
+        let mesh = match self.stock_mesh.get(&fv) {
+            Ok(m) => m,
+            Err(err) => {
+                self.status = format!("stock export refused: {err}");
+                return;
+            }
+        };
+        match std::fs::write(&path, camcraft_app::stock_export::stl_bytes(&mesh)) {
+            Ok(()) => self.status = format!("machined stock: {} facets written to {}", mesh.len(), path.display()),
+            Err(err) => self.status = format!("stock export write failed: {err}"),
         }
     }
 
@@ -2932,6 +2977,13 @@ fn post_program_dialog() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("NC Program", &["nc"])
         .set_file_name("program.nc")
+        .save_file()
+}
+
+fn save_stl_dialog() -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter("STL", &["stl"])
+        .set_file_name("machined-stock.stl")
         .save_file()
 }
 
