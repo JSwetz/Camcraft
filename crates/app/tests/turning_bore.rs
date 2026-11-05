@@ -202,7 +202,7 @@ fn a_bore_kind_refuses_the_wrong_tool_by_name() {
     // refusal names the op's tool and what that tool is.
     let (world, mut history) = bore_world();
     common::create_past_the_tool_law(&world, &mut history, "BT1", "TN-1600-0R8", SrcRef::Entity("bar".into()), bore_params());
-    let Err(err) = GenerateOperation::new(&world, "BT1") else {
+    let Err(err) = common::generate_past_the_tool_law(&world, "BT1") else {
         panic!("an outside insert cannot ride an inside wall");
     };
     let msg = err.to_string();

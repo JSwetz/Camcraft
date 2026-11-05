@@ -4692,9 +4692,8 @@ fn finish3d_refuses_a_flat_bottomed_tool() {
         SrcRef::Entity("dome".into()),
         finish_params(18.0, DOME_RIM_Z, 0.1),
     );
-    let CommandError::Machining(msg) = GenerateOperation::new(&world, "FinishE")
-        .err()
-        .expect("the waterline must refuse a flat tool")
+    let CommandError::Machining(msg) = common::generate_past_the_tool_law(&world, "FinishE")
+        .expect_err("the waterline must refuse a flat tool")
     else {
         panic!("expected a machining refusal");
     };
@@ -5012,9 +5011,8 @@ fn axis_twins_refuse_a_flat_bottomed_tool_by_name() {
             SrcRef::Entity("dome".into()),
             params,
         );
-        let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
-            .err()
-            .expect("the twins must refuse a flat tool")
+        let CommandError::Machining(msg) = common::generate_past_the_tool_law(&world, name)
+            .expect_err("the twins must refuse a flat tool")
         else {
             panic!("expected a machining refusal");
         };
@@ -5298,9 +5296,8 @@ fn swarf_family_refuses_a_flat_tool_by_name() {
             SrcRef::Entity("blade".into()),
             params,
         );
-        let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
-            .err()
-            .expect("the swarf kinds must refuse a flat tool")
+        let CommandError::Machining(msg) = common::generate_past_the_tool_law(&world, name)
+            .expect_err("the swarf kinds must refuse a flat tool")
         else {
             panic!("expected a machining refusal");
         };
@@ -5765,9 +5762,8 @@ fn rotary_twins_refuse_a_flat_bottomed_tool_by_name() {
             SrcRef::Entity("lathe".into()),
             params,
         );
-        let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
-            .err()
-            .expect("the rotary twins must refuse a flat tool")
+        let CommandError::Machining(msg) = common::generate_past_the_tool_law(&world, name)
+            .expect_err("the rotary twins must refuse a flat tool")
         else {
             panic!("expected a machining refusal");
         };
@@ -5946,9 +5942,8 @@ fn rotary_offset_refuses_a_flat_tool_by_name() {
         SrcRef::Entity("lathe".into()),
         rotary_offset_params(14.0, -14.0),
     );
-    let CommandError::Machining(msg) = GenerateOperation::new(&world, "ROf")
-        .err()
-        .expect("a flat tool must refuse the wrap")
+    let CommandError::Machining(msg) = common::generate_past_the_tool_law(&world, "ROf")
+        .expect_err("a flat tool must refuse the wrap")
     else {
         panic!("expected a machining refusal");
     };
@@ -6244,9 +6239,8 @@ fn multiaxis_rough_refuses_a_flat_tool_by_name() {
         SrcRef::Entity("slabboss".into()),
         multiaxis_rough_params(),
     );
-    let CommandError::Machining(msg) = GenerateOperation::new(&world, "MAF")
-        .err()
-        .expect("a flat tool must refuse the stamp")
+    let CommandError::Machining(msg) = common::generate_past_the_tool_law(&world, "MAF")
+        .expect_err("a flat tool must refuse the stamp")
     else {
         panic!("expected a machining refusal");
     };
@@ -6946,9 +6940,8 @@ fn multiaxis_contour_refuses_a_flat_tool_and_nonsense_pose_by_name() {
         src.clone(),
         multiaxis_contour_params(6.0, 4.0),
     );
-    let CommandError::Machining(msg) = GenerateOperation::new(&world, "MT1")
-        .err()
-        .expect("a flat tool cannot ride a chain")
+    let CommandError::Machining(msg) = common::generate_past_the_tool_law(&world, "MT1")
+        .expect_err("a flat tool cannot ride a chain")
     else {
         panic!("expected a machining refusal");
     };
@@ -7221,9 +7214,8 @@ fn deburr_refuses_a_plain_end_mill_by_name() {
         SrcRef::Entity("brick".into()),
         deburr_params(2.0, 8.0, 6.0),
     );
-    let CommandError::Machining(msg) = GenerateOperation::new(&world, "DB")
-        .err()
-        .expect("the deburr must refuse a flat tool")
+    let CommandError::Machining(msg) = common::generate_past_the_tool_law(&world, "DB")
+        .expect_err("the deburr must refuse a flat tool")
     else {
         panic!("expected a machining refusal");
     };

@@ -13,12 +13,15 @@
 //! ribbon's darkening all speak one sentence for one fact. Tools are a
 //! document-wide library; "the active setup's tools" is that library as
 //! seen from the setup new work joins, and the refusal names the setup.
-//! Opening, viewing or generating an existing operation is never asked
-//! here - viewing is not cutting (the after-state is M10.1 C's).
+//! Opening or viewing an existing operation is never refused - viewing
+//! is not cutting. What an existing op's tool has become since it was
+//! made is M10.1 C's after-state: [`tool_problem`] names it, generation
+//! and the post refuse on it, the tree and the page show it.
 
-use flecs_ecs::prelude::World;
+use flecs_ecs::prelude::{Entity, World};
 
 use crate::model;
+use crate::schema::Operation;
 use crate::tools::ToolKind;
 
 use super::KindInfo;
@@ -126,4 +129,42 @@ pub fn retype_refusal(world: &World, tool: &str, prev: ToolKind, next: ToolKind)
         info.label,
         kinds_phrase(info.tool_kinds)
     ))
+}
+
+/// M10.1 C, the honest after-state: why an existing operation cannot be
+/// cut with the tool it names - the tool was deleted (or its name now
+/// belongs to something that is not a tool), or it is a kind the op's
+/// family cannot cut with (an old file, written before the law). `None`
+/// when the tool fits. A pure read of the live world, so the warning
+/// surfaces the moment the op is read and clears the moment the world
+/// is mended (an undo of the delete, a reassignment, a retype back) -
+/// nothing is stored, nothing in the project file changes.
+#[must_use]
+pub fn tool_problem(world: &World, op_name: &str, op: &Operation) -> Option<String> {
+    let info = op.params.kind().info();
+    let wants = format!(
+        "a {} operation cuts with a {}",
+        info.label,
+        kinds_phrase(info.tool_kinds)
+    );
+    let tool = &op.tool;
+    let Some(entity) = model::find_by_name(world, tool) else {
+        return Some(format!("{op_name}'s tool '{tool}' is gone; {wants}"));
+    };
+    let Some(def) = model::tool_of(world, &entity) else {
+        return Some(format!("{op_name}'s tool '{tool}' is no longer a tool; {wants}"));
+    };
+    if info.accepts(def.kind) {
+        return None;
+    }
+    Some(format!("{op_name}'s tool '{tool}' is a {}; {wants}", def.kind))
+}
+
+/// [`tool_problem`] for an operation entity, as the tree, the page and
+/// the post read it. `None` for an entity that is not an operation.
+#[must_use]
+pub fn tool_problem_of(world: &World, entity: &Entity) -> Option<String> {
+    let op = model::operation_of(world, entity)?;
+    let name = model::name_of(world, entity).unwrap_or_default();
+    tool_problem(world, &name, &op)
 }

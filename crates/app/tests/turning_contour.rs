@@ -350,7 +350,7 @@ fn contour_kinds_refuse_the_wrong_tool_by_name() {
     // circle - a blade edge or a fluted mill cannot trace it.
     let (world, mut history) = contour_world();
     common::create_past_the_tool_law(&world, &mut history, "CT1", "GT-0300", SrcRef::Entity("bar".into()), ch_params(45.0));
-    let Err(err) = GenerateOperation::new(&world, "CT1") else {
+    let Err(err) = common::generate_past_the_tool_law(&world, "CT1") else {
         panic!("a blade edge cannot ride a cone face");
     };
     let msg = err.to_string();
@@ -359,7 +359,7 @@ fn contour_kinds_refuse_the_wrong_tool_by_name() {
         "{msg}"
     );
     common::create_past_the_tool_law(&world, &mut history, "CT2", "EM-0400-2FL", SrcRef::Entity("taper".into()), tp_params(20.0, 16.0));
-    let Err(err) = GenerateOperation::new(&world, "CT2") else {
+    let Err(err) = common::generate_past_the_tool_law(&world, "CT2") else {
         panic!("an end mill cannot turn a taper");
     };
     assert!(err.to_string().contains("Taper Turning needs a turning insert"), "{err}");

@@ -8952,3 +8952,40 @@ byte-identical; two new blended `.cl` goldens are added. They are not
 posted to NC goldens, matching A's facing precedent. Open: contour.rs
 (~650 lines) and commands/operation.rs (~750) are past the 400-line
 cap, and a seam split is owed.
+
+## M10.1 C - the honest after-state: five decisions (2026-11-05)
+
+(1) **BLOCKED is computed, not stored.** There is no new status value.
+Generation, `posting::program_ops`, the tree and the page each ask
+`tool_gate::tool_problem` against the live world, so undo or a fitting
+reassignment clears it without any command writing a flag. The project
+file never changes (no version bump, no migration). Dropped: a fourth
+`OpStatus::Blocked`, which would have touched every match on the
+status and the script API's `"ok"|"stale"|"never"` type for no gain.
+
+(2) **The post refuses rather than skipping a blocked op.**
+`program_ops` returns the sentence plus " - fix the tool before
+posting", checked before never/stale, so the stock sim, the machine
+check and the post all agree. Dropped: leaving the op out silently,
+which would post a program missing an op the user can see. An old
+file whose cached path still matches its inputs reads OK but is still
+refused at the post - the tool, not the cache, is what is wrong.
+
+(3) **Generator wrong-tool tests call the generator directly.**
+`common::generate_past_the_tool_law` first asserts that
+`GenerateOperation` blocks, then calls `operation::generate` (what the
+command wraps), so both the gate and the generators' shape checks stay
+tested. Dropped: rewriting those 16 tests to expect the gate's
+sentence, which would leave the generators' refusals untested.
+
+(4) **The "old file" fixture is built inside the test.** A pre-law file
+can't be made with commands any more. The test swaps the tool for a
+grooving blade under the op and re-stamps the saved JSON with what that
+world produces, which is exactly what an older build wrote. Dropped: a
+committed fixture file, because the stamp is a `DefaultHasher` digest
+that only holds within one build.
+
+(5) **The deleted-tool stale reason keeps its old wording**; the page's
+BLOCKED line takes priority over it. The ui test went into the
+~4,100-line `egui_app/tests.rs`, since it needs that file's private
+harness; splitting that suite is owed.

@@ -298,7 +298,7 @@ fn the_profile_kinds_refuse_a_mill_tool_by_name() {
         add_tool(&world, &mut history, "EM-0400-2FL");
         let name = format!("X{tag}");
         common::create_past_the_tool_law(&world, &mut history, &name, "EM-0400-2FL", SrcRef::Entity("bar".into()), params);
-        let Err(err) = GenerateOperation::new(&world, &name) else {
+        let Err(err) = common::generate_past_the_tool_law(&world, &name) else {
             panic!("a flat nose cannot ride a profile");
         };
         let msg = err.to_string();

@@ -309,7 +309,7 @@ fn facing_refuses_a_mill_tool_by_name() {
     mount(&world, &mut history, "lathe");
     add_tool(&world, &mut history, "EM-0400-2FL");
     common::create_past_the_tool_law(&world, &mut history, "F1", "EM-0400-2FL", SrcRef::Entity("bar".into()), facing_params(14.0));
-    let Err(err) = GenerateOperation::new(&world, "F1") else {
+    let Err(err) = common::generate_past_the_tool_law(&world, "F1") else {
         panic!("a flat nose cannot face a lathe");
     };
     let msg = err.to_string();

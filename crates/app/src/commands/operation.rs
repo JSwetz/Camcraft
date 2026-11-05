@@ -577,6 +577,12 @@ fn stage_generation(world: &World, name: &str) -> Result<Staged, CommandError> {
     };
     let prev_operation = model::operation_of(world, &entity)
         .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))?;
+    // M10.1 C: a tool gone or of the wrong family blocks generation by
+    // name, before the generator runs - the generators' shape doors stay
+    // the backstop behind this one, never the first word.
+    if let Some(why) = operation::tool_gate::tool_problem(world, name, &prev_operation) {
+        return Err(CommandError::Machining(why));
+    }
     let prev_cache = model::toolpath_of(world, &entity);
     let job = operation::collect_job(world, &prev_operation, name)
         .map_err(|e| CommandError::Machining(format!("{name}: {e}")))?;

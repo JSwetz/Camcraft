@@ -213,7 +213,7 @@ fn a_form_kind_refuses_the_wrong_tool_by_name() {
     // the op's tool and what that tool is.
     let (world, mut history) = form_world();
     common::create_past_the_tool_law(&world, &mut history, "FT1", "GT-0300", SrcRef::Entity("bar".into()), form_params());
-    let Err(err) = GenerateOperation::new(&world, "FT1") else {
+    let Err(err) = common::generate_past_the_tool_law(&world, "FT1") else {
         panic!("a straight edge cannot stamp a crown");
     };
     let msg = err.to_string();

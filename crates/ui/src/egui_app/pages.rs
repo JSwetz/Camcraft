@@ -368,10 +368,18 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str) {
             .and_then(|e| model::toolpath_of(&state.world, e))
             .map(|tp| (tp.path.len(), tp.warnings))
             .unwrap_or((0, Vec::new()));
-        let status_line = match ent.as_ref().map(|e| operation::status_of(&state.world, e)) {
-            Some(operation::OpStatus::Never) | None => "Status: never generated".to_owned(),
-            Some(operation::OpStatus::Ok) => format!("Status: OK - {moves} move(s) cached"),
-            Some(operation::OpStatus::Stale) => {
+        // M10.1 C: the tool law's after-state outranks the stamp - a
+        // blocked op says so and names why (the app's sentence, verbatim);
+        // the cached count stays visible, it is just not cuttable.
+        let blocked = ent
+            .as_ref()
+            .and_then(|e| operation::tool_gate::tool_problem_of(&state.world, e));
+        let status = ent.as_ref().map(|e| operation::status_of(&state.world, e));
+        let status_line = match (blocked, status) {
+            (Some(why), _) => format!("Status: BLOCKED - {why} ({moves} move(s) cached)"),
+            (None, Some(operation::OpStatus::Never) | None) => "Status: never generated".to_owned(),
+            (None, Some(operation::OpStatus::Ok)) => format!("Status: OK - {moves} move(s) cached"),
+            (None, Some(operation::OpStatus::Stale)) => {
                 // M3.1 C: say which input moved, not just that one did -
                 // the reason is a live question against the world.
                 let reason = ent

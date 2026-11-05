@@ -268,6 +268,13 @@ pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
     // before a single record is built (a half-posted program is the
     // silent wrong answer this file exists to prevent).
     for (name, e) in &ops {
+        // M10.1 C first: an op whose tool is gone or cannot cut its kind
+        // is blocked by name - "regenerate" would be the wrong advice,
+        // since generation refuses it too - and a cache generated before
+        // the tool went wrong never posts behind the warning.
+        if let Some(why) = operation::tool_gate::tool_problem_of(world, e) {
+            return Err(format!("{why} - fix the tool before posting"));
+        }
         match operation::status_of(world, e) {
             OpStatus::Never => {
                 return Err(format!("{name}: no toolpath yet - generate it first"))

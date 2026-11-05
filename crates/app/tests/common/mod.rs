@@ -14,7 +14,9 @@ use std::path::PathBuf;
 use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::{MoveKind, Toolpath};
-use camcraft_app::commands::{AddTool, CreateOperation, DeleteTool, History};
+use camcraft_app::commands::{
+    AddTool, CommandError, CreateOperation, DeleteTool, GenerateOperation, History,
+};
 use camcraft_app::model;
 use camcraft_app::operation::{OpParams, SrcRef};
 
@@ -48,6 +50,31 @@ pub fn create_past_the_tool_law(
     history.execute(world, CreateOperation::new(world, name, tool, src, params).expect("create"));
     history.execute(world, DeleteTool::new(world, tool).expect("delete stand-in"));
     history.execute(world, AddTool::new(world, tool, own).expect("restore"));
+}
+
+/// M10.1 C: generate an op [`create_past_the_tool_law`] landed. The
+/// command refuses first - `GenerateOperation` now blocks a mismatched
+/// tool by the op's name before any generator runs, asserted here so
+/// every caller pins that gate too - and the generator itself is then
+/// asked directly through `operation::generate` (the pure read the
+/// command wraps), so the GENERATORS' shape doors, the backstop the
+/// law keeps, stay under test. The error is the command's own shape
+/// (`Machining("<op>: <generator words>")`), so callers read the same
+/// sentence the command used to carry.
+pub fn generate_past_the_tool_law(world: &World, name: &str) -> Result<(), CommandError> {
+    let Err(gate) = GenerateOperation::new(world, name) else {
+        panic!("the tool law must block generating {name} before its generator runs");
+    };
+    let gate = gate.to_string();
+    assert!(
+        gate.contains(&format!("{name}'s tool")) && gate.contains("cuts with"),
+        "the block names the op and the kind it cuts with: {gate}"
+    );
+    let entity = model::find_by_name(world, name).expect("the op exists");
+    let op = model::operation_of(world, &entity).expect("an operation");
+    camcraft_app::operation::generate(world, &op, name)
+        .map(|_| ())
+        .map_err(|e| CommandError::Machining(format!("{name}: {e}")))
 }
 
 /// Golden coordinate resolution in mm: 0.001 = 1 um.

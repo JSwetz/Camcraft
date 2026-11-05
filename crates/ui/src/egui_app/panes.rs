@@ -1199,7 +1199,7 @@ pub fn status(ui: &mut Ui, state: &mut State, pal: &Tokens) {
 
 /// What a browser row's click means. Parallel to the painted Row list.
 #[derive(Clone)]
-enum Leaf {
+pub(crate) enum Leaf {
     Section,
     /// The Setups page row (M3.2 A): one row over the document's whole
     /// setups list, like Tool rows - target-only, never arms Del.
@@ -1273,7 +1273,7 @@ pub(crate) fn kind_name(k: ToolKind) -> &'static str {
 /// column model lays out). Sections show a faint placeholder row when
 /// empty, in place of imgui's help paragraph (the tree paints rows, not
 /// wrapped text).
-fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
+pub(crate) fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
     let mut rows = Vec::new();
     let mut leaves = Vec::new();
     let t = state.pane_target();
@@ -1407,12 +1407,20 @@ fn browser_rows(state: &State) -> (Vec<painted::Row>, Vec<Leaf>) {
             1 => "  1 warning".to_owned(),
             n => format!("  {n} warnings"),
         };
+        // M10.1 C: a tool gone or of the wrong family outranks the
+        // stamp's word - the row reads BLOCKED and names why, in the
+        // suffix column (the row's one status channel). The app asks
+        // the question; the tree only says it.
+        let suffix = match operation::tool_gate::tool_problem_of(&state.world, &entity) {
+            Some(why) => format!("{kind}  BLOCKED{warn_text}  {why}"),
+            None => format!("{kind}  {tag}{warn_text}"),
+        };
         let hidden = state.hidden_paths.contains(&name);
         push_row(
             &mut rows,
             &mut leaves,
             name.clone(),
-            format!("{kind}  {tag}{warn_text}"),
+            suffix,
             painted::Kind::Op,
             Some(icon),
             matches!(&t, UiTarget::Operation(n) if *n == name),

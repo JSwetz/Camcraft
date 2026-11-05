@@ -223,7 +223,7 @@ fn a_threading_kind_refuses_the_wrong_tool_by_name() {
     // what that tool is.
     let (world, mut history) = thread_world();
     common::create_past_the_tool_law(&world, &mut history, "TT1", "GT-0300", SrcRef::Entity("bar".into()), thread_params());
-    let Err(err) = GenerateOperation::new(&world, "TT1") else {
+    let Err(err) = common::generate_past_the_tool_law(&world, "TT1") else {
         panic!("a rectangular kerf cannot cut a V");
     };
     let msg = err.to_string();

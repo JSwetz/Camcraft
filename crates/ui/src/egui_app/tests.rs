@@ -4094,3 +4094,39 @@ fn selecting_a_post_script_is_a_command_with_the_pane_labels() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// M10.1 C, the ui half of the honest after-state: delete the seed's one
+/// tool out from under Contour1 and the op stays in the tree, its row's
+/// status column reads BLOCKED with the app's sentence, and the open
+/// property page says the same on its status line. Undo mends the world
+/// and both marks retire - the ui only renders the app's predicate.
+#[test]
+fn a_deleted_tool_marks_the_row_and_the_page_blocked() {
+    let mut harness = shell_harness();
+    harness.run();
+    let why = "Contour1's tool 'EM-0600-4FL' is gone; a 2D Contour operation cuts with a flat end mill or bull-nose";
+    let row_suffix = |st: &State| {
+        let (rows, _) = panes::browser_rows(st);
+        rows.iter()
+            .find(|r| r.label == "Contour1")
+            .map(|r| r.suffix.clone())
+            .expect("the op row stays visible")
+    };
+    assert!(!row_suffix(&harness.state().state).contains("BLOCKED"));
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::DeleteByName("EM-0600-4FL".into()));
+    harness.run();
+    let suffix = row_suffix(&harness.state().state);
+    assert!(suffix.contains("BLOCKED") && suffix.contains(why), "{suffix}");
+    let page = format!("Status: BLOCKED - {why}");
+    assert!(harness.query_by_label_contains(&page).is_some(), "the page names the block");
+
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    let suffix = row_suffix(&harness.state().state);
+    assert!(!suffix.contains("BLOCKED") && suffix.contains("ok"), "{suffix}");
+    assert!(harness.query_by_label_contains("Status: BLOCKED").is_none(), "undo clears the page");
+}
