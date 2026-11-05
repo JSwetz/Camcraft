@@ -455,3 +455,39 @@ fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
     );
     assert_eq!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(0.0, 0.0, 90.0)));
 }
+
+#[test]
+fn the_arc_entry_splits_the_stamp_and_leaves_the_others_alone() {
+    // M11.1 arc entry: the new word is a new digest byte (3), so an
+    // Arc op is never served a Ramp or Helix cache - and the three old
+    // words keep the bytes they always wrote.
+    let world = crate::world::new_world();
+    let pocket = |entry: Entry3D| OpParams::Pocket {
+        tilt: None,
+        stepover: 3.0,
+        stock_to_leave: 0.0,
+        clearance_z: Height::fixed(5.0),
+        retract_z: None,
+        top_z: Height::fixed(0.0),
+        bottom_z: Height::fixed(-4.0),
+        stepdown: 2.0,
+        feed: 400.0,
+        plunge_feed: 80.0,
+        climb: true,
+        strategy: PocketStrategy::Zigzag,
+        entry,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
+        blend_turns: false,
+    };
+    let digest = |p: &OpParams| {
+        let mut h = std::hash::DefaultHasher::new();
+        p.stamp_with(&world, None, &mut h);
+        h.finish()
+    };
+    let arc = digest(&pocket(Entry3D::Arc));
+    for other in [Entry3D::Plunge, Entry3D::Ramp, Entry3D::Helix] {
+        assert_ne!(arc, digest(&pocket(other)), "Arc must not share {other:?}'s stamp");
+    }
+    assert_eq!(arc, digest(&pocket(Entry3D::Arc)), "the stamp is a function");
+}

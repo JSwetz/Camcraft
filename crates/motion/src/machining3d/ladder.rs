@@ -6,10 +6,11 @@ use super::shell::Field;
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::{chord_hits_plan, dive_room, helix_down};
+use crate::entry_arc::{arc_lead, pts_dir, push_arc_lead};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{
-    chord_clears, plan_passes, GenError,
+    chord_clears, plan_passes, GenError, ARC_FIT_TOL,
 };
 use crate::stock_sim::Dexel;
 /// One ladder run: the level loop shared by both entry points. `zs` is
@@ -208,6 +209,26 @@ pub(super) fn ladder(
                     }
                 } else {
                     substituted_dive(&mut b, &lvl, entry, "the ramp's chord is blocked");
+                }
+            }
+            // The circular ramp (M11.1): the ramp's chord law on the
+            // lead chord behind the entry, the fan posted by
+            // `entry_arc`. A shell lifts the destination off the plane
+            // and no proof here follows the fan onto a lifted tip, so
+            // it substitutes, said.
+            Entry3D::Arc if rest.is_none() => {
+                let lead = match lvl.field {
+                    Some(_) => Err("the arc entry is not proved onto a lifted shell"),
+                    None => pts_dir(entry, first_pass)
+                        .ok_or("the first cut has no direction to be tangent to")
+                        .and_then(|d| {
+                            let ok = |s, q| chord_clears(&center, s, q);
+                            arc_lead(entry, d, prev_z, z, p.tool_diameter, ARC_FIT_TOL, ok)
+                        }),
+                };
+                match lead {
+                    Ok(l) => push_arc_lead(&mut b, &l, p.clearance_z, prev_z, p.feed),
+                    Err(why) => substituted_dive(&mut b, &lvl, entry, why),
                 }
             }
             Entry3D::Helix if rest.is_none() => {

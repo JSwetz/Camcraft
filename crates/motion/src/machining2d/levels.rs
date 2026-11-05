@@ -2,10 +2,11 @@
 
 use crate::cl::{MoveKind, PathBuilder};
 use crate::entry::{Entry3D, chord_hits_plan, dive_room, helix_down};
+use crate::entry_arc::{arc_lead, pts_dir, push_arc_lead, seg_dir};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
-use super::arcs::{Seg, fit_arcs, push_segs};
+use super::arcs::{ARC_FIT_TOL, Seg, fit_arcs, push_segs};
 use super::slots::chord_clears;
 
 /// The certified legal-center area a descent is proved against (M8.2
@@ -110,6 +111,8 @@ pub(super) struct Motion {
     /// radii against the tool, the way `machining3d`'s does.
     entry: Entry3D,
     helix_radius: f64,
+    /// The arc entry's nominal radius (M11.1); 0 asks the quarter turn.
+    arc_radius: f64,
 }
 
 impl Motion {
@@ -129,6 +132,7 @@ impl Motion {
             plunge_feed,
             entry: Entry3D::default(),
             helix_radius: 0.0,
+            arc_radius: 0.0,
         }
     }
 
@@ -138,6 +142,12 @@ impl Motion {
     pub(super) fn with_entry(mut self, entry: Entry3D, helix_radius: f64) -> Self {
         self.entry = entry;
         self.helix_radius = helix_radius;
+        self
+    }
+
+    /// The arc entry's first-asked radius (callers: the tool diameter).
+    pub(super) fn with_arc_radius(mut self, r: f64) -> Self {
+        self.arc_radius = r;
         self
     }
 }
@@ -266,6 +276,21 @@ pub(super) fn run_level_walks(
                             m,
                             "the widened disc fits nowhere at this level",
                         );
+                    }
+                }
+                (true, Entry3D::Arc, Some(cen)) => {
+                    // The circular ramp: the ramp's chord law on its
+                    // lead chord is its whole proof (see `entry_arc`).
+                    let prev_z = last_cut_z.unwrap_or(m.clearance_z);
+                    let walk = runs.and_then(|r| r.get(pi)).and_then(|w| w.first());
+                    let dir = walk.map_or_else(|| pts_dir(e, rest), |s| seg_dir(e, s));
+                    let lead = dir.ok_or("the first cut has no direction to be tangent to");
+                    let lead = lead.and_then(|d| {
+                        arc_lead(e, d, prev_z, z, m.arc_radius, ARC_FIT_TOL, |s, q| cen.chord_ok(s, q))
+                    });
+                    match lead {
+                        Ok(l) => push_arc_lead(b, &l, m.clearance_z, prev_z, m.feed),
+                        Err(why) => substituted_dive(b, cen, passes, e, z, m, why),
                     }
                 }
                 (true, Entry3D::Plunge, Some(cen)) => {

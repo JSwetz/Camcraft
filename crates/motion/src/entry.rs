@@ -34,6 +34,11 @@ pub enum Entry3D {
     /// widened arc law, see `cl.rs`). Air orbits above stock are never
     /// posted: the first level's dive is the surface itself.
     Helix,
+    /// Circular ramp (M11.1): an arc in the vertical plane of the first
+    /// cut, tangent to it at the bottom, from the plane the ramp starts
+    /// at - certified by the ramp's chord law and posted as a chord fan
+    /// (see `entry_arc`). Opt-in: no existing operation chose it.
+    Arc,
 }
 
 /// One helical dive between two planes: at least one full turn (split

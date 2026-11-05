@@ -269,7 +269,8 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         PocketStrategy::Waterline | PocketStrategy::Adaptive => Some(ARC_FIT_TOL),
     };
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed)
-        .with_entry(p.entry, p.helix_radius);
+        .with_entry(p.entry, p.helix_radius)
+        .with_arc_radius(p.tool_diameter);
     // The walks: fitted where the strategy fits, then - opted in - the
     // corner fillets, proved inside the cutter-center area. Passes are
     // one plan at every level, so the plan's refusals are said once.

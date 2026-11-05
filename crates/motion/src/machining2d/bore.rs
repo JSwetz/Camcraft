@@ -201,7 +201,9 @@ pub fn bore(p: &BoreParams) -> Result<Toolpath, GenError> {
     let r = p.tool_diameter * 0.5;
     let mut motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
     if p.entry != Entry3D::Plunge {
-        motion = motion.with_entry(p.entry, p.helix_radius);
+        motion = motion
+            .with_entry(p.entry, p.helix_radius)
+            .with_arc_radius(p.tool_diameter);
     }
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
 

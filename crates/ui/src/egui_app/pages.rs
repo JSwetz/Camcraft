@@ -99,7 +99,7 @@ const TOOL_KINDS: [&str; 11] = [
 const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
 /// Descent combo items - the whole `Entry3D` vocabulary, index order
 /// matching the combo-arm mapping in the 3-D pocket's passes section.
-const ENTRY_KINDS: [&str; 3] = ["Plunge", "Ramp", "Helix"];
+const ENTRY_KINDS: [&str; 4] = ["Plunge", "Ramp", "Helix", "Arc"];
 /// The 3-D finish kinematics, in the order the combo maps them.
 const FINISH_PATTERNS: [&str; 18] = [
     "Waterline",
@@ -638,6 +638,7 @@ fn roughing2d_pane(
             camcraft_app::machining3d::Entry3D::Plunge => 0,
             camcraft_app::machining3d::Entry3D::Ramp => 1,
             camcraft_app::machining3d::Entry3D::Helix => 2,
+            camcraft_app::machining3d::Entry3D::Arc => 3,
         };
         let before = e_idx;
         combo(ui, &format!("{tag}_entry"), &mut e_idx, &ENTRY_KINDS);
@@ -645,6 +646,7 @@ fn roughing2d_pane(
             *entry = match e_idx {
                 1 => camcraft_app::machining3d::Entry3D::Ramp,
                 2 => camcraft_app::machining3d::Entry3D::Helix,
+                3 => camcraft_app::machining3d::Entry3D::Arc,
                 _ => camcraft_app::machining3d::Entry3D::Plunge,
             };
         }
@@ -652,6 +654,9 @@ fn roughing2d_pane(
             field(ui, "Helix lead radius");
             num(ui, u, helix_radius);
             ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+        }
+        if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
+            ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
         }
     }
     if tab == SEC_FEEDS {
@@ -971,6 +976,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::machining3d::Entry3D::Plunge => 0,
                     camcraft_app::machining3d::Entry3D::Ramp => 1,
                     camcraft_app::machining3d::Entry3D::Helix => 2,
+                    camcraft_app::machining3d::Entry3D::Arc => 3,
                 };
                 let before = e_idx;
                 combo(ui, "c_entry", &mut e_idx, &ENTRY_KINDS);
@@ -978,6 +984,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *entry = match e_idx {
                         1 => camcraft_app::machining3d::Entry3D::Ramp,
                         2 => camcraft_app::machining3d::Entry3D::Helix,
+                        3 => camcraft_app::machining3d::Entry3D::Arc,
                         _ => camcraft_app::machining3d::Entry3D::Plunge,
                     };
                 }
@@ -985,6 +992,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     field(ui, "Helix lead radius");
                     num(ui, u, helix_radius);
                     ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
+                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
                 }
                 field(ui, "Tab count");
                 let mut tabs = f64::from(*tab_count);
@@ -1105,6 +1115,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::machining3d::Entry3D::Plunge => 0,
                     camcraft_app::machining3d::Entry3D::Ramp => 1,
                     camcraft_app::machining3d::Entry3D::Helix => 2,
+                    camcraft_app::machining3d::Entry3D::Arc => 3,
                 };
                 let before = e_idx;
                 combo(ui, "p_entry", &mut e_idx, &ENTRY_KINDS);
@@ -1112,6 +1123,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *entry = match e_idx {
                         1 => camcraft_app::machining3d::Entry3D::Ramp,
                         2 => camcraft_app::machining3d::Entry3D::Helix,
+                        3 => camcraft_app::machining3d::Entry3D::Arc,
                         _ => camcraft_app::machining3d::Entry3D::Plunge,
                     };
                 }
@@ -1119,6 +1131,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     field(ui, "Helix lead radius");
                     num(ui, u, helix_radius);
                     ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
+                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
                 }
                 if let Some(note) = &auto_note {
                     ui.label(note.clone());
@@ -1273,6 +1288,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::machining3d::Entry3D::Plunge => 0,
                     camcraft_app::machining3d::Entry3D::Ramp => 1,
                     camcraft_app::machining3d::Entry3D::Helix => 2,
+                    camcraft_app::machining3d::Entry3D::Arc => 3,
                 };
                 let before = e_idx;
                 combo(ui, "s_entry", &mut e_idx, &ENTRY_KINDS);
@@ -1280,6 +1296,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *entry = match e_idx {
                         1 => camcraft_app::machining3d::Entry3D::Ramp,
                         2 => camcraft_app::machining3d::Entry3D::Helix,
+                        3 => camcraft_app::machining3d::Entry3D::Arc,
                         _ => camcraft_app::machining3d::Entry3D::Plunge,
                     };
                 }
@@ -1287,6 +1304,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     field(ui, "Helix lead radius");
                     num(ui, u, helix_radius);
                     ui.label("the channel's own width certifies the orbit - a full-width slot has no room and plunges instead");
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
+                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
                 }
             }
         }
@@ -1595,6 +1615,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::machining3d::Entry3D::Plunge => 0,
                     camcraft_app::machining3d::Entry3D::Ramp => 1,
                     camcraft_app::machining3d::Entry3D::Helix => 2,
+                    camcraft_app::machining3d::Entry3D::Arc => 3,
                 };
                 let before = e_idx;
                 combo(ui, "circ_entry", &mut e_idx, &ENTRY_KINDS);
@@ -1602,12 +1623,16 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *entry = match e_idx {
                         1 => camcraft_app::machining3d::Entry3D::Ramp,
                         2 => camcraft_app::machining3d::Entry3D::Helix,
+                        3 => camcraft_app::machining3d::Entry3D::Arc,
                         _ => camcraft_app::machining3d::Entry3D::Plunge,
                     };
                 }
                 if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
                     field(ui, "Helix lead radius");
                     num(ui, u, helix_radius);
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
+                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
                 }
             }
         }
@@ -2064,6 +2089,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::machining3d::Entry3D::Plunge => 0,
                     camcraft_app::machining3d::Entry3D::Ramp => 1,
                     camcraft_app::machining3d::Entry3D::Helix => 2,
+                    camcraft_app::machining3d::Entry3D::Arc => 3,
                 };
                 let before = e_idx;
                 combo(ui, "p3_entry", &mut e_idx, &ENTRY_KINDS);
@@ -2071,6 +2097,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *entry = match e_idx {
                         1 => camcraft_app::machining3d::Entry3D::Ramp,
                         2 => camcraft_app::machining3d::Entry3D::Helix,
+                        3 => camcraft_app::machining3d::Entry3D::Arc,
                         _ => camcraft_app::machining3d::Entry3D::Plunge,
                     };
                 }
@@ -2078,6 +2105,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     field(ui, "Helix lead radius");
                     num(ui, u, helix_radius);
                     ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
+                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
                 }
                 ui.checkbox(rest_rough, "Rest roughing");
                 ui.label("a closing ladder, half the step, cuts what the levels leave standing");
@@ -2916,6 +2946,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::machining3d::Entry3D::Plunge => 0,
                     camcraft_app::machining3d::Entry3D::Ramp => 1,
                     camcraft_app::machining3d::Entry3D::Helix => 2,
+                    camcraft_app::machining3d::Entry3D::Arc => 3,
                 };
                 let before = e_idx;
                 combo(ui, "ro_entry", &mut e_idx, &ENTRY_KINDS);
@@ -2923,6 +2954,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *entry = match e_idx {
                         1 => camcraft_app::machining3d::Entry3D::Ramp,
                         2 => camcraft_app::machining3d::Entry3D::Helix,
+                        3 => camcraft_app::machining3d::Entry3D::Arc,
                         _ => camcraft_app::machining3d::Entry3D::Plunge,
                     };
                 }
@@ -2930,6 +2962,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     field(ui, "Helix lead radius");
                     num(ui, u, helix_radius);
                     ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
+                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
                 }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
@@ -3060,6 +3095,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     camcraft_app::machining3d::Entry3D::Plunge => 0,
                     camcraft_app::machining3d::Entry3D::Ramp => 1,
                     camcraft_app::machining3d::Entry3D::Helix => 2,
+                    camcraft_app::machining3d::Entry3D::Arc => 3,
                 };
                 let before = e_idx;
                 combo(ui, "ma_entry", &mut e_idx, &ENTRY_KINDS);
@@ -3067,6 +3103,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     *entry = match e_idx {
                         1 => camcraft_app::machining3d::Entry3D::Ramp,
                         2 => camcraft_app::machining3d::Entry3D::Helix,
+                        3 => camcraft_app::machining3d::Entry3D::Arc,
                         _ => camcraft_app::machining3d::Entry3D::Plunge,
                     };
                 }
@@ -3074,6 +3111,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     field(ui, "Helix lead radius");
                     num(ui, u, helix_radius);
                     ui.label("a plunge stands in wherever a helix of this radius cannot fit");
+                }
+                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
+                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
                 }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);

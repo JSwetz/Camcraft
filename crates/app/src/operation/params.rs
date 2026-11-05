@@ -173,6 +173,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 wt(h, *tilt);
                 // M11.1 B: written only when ON (A's word), so every
@@ -223,6 +224,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 // v5-era hop plane: presence, then the value (same shape
                 // as Face's staging fields appended above).
@@ -266,6 +268,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 wh_opt(h, *retract_z);
                 wt(h, *tilt);
@@ -298,6 +301,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 wh_opt(h, *retract_z);
                 wt(h, *tilt);
@@ -340,6 +344,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 wh_opt(h, *retract_z);
                 // v12-era rest pass: the flag is the generator's
@@ -664,6 +669,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 for v in [*tolerance, *lead_deg, *lag_deg, *max_tilt_deg] {
                     w(h, v);
@@ -716,6 +722,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 wh_opt(h, *retract_z);
                 for v in [*tolerance, *lead_deg, *lag_deg, *max_tilt_deg] {
@@ -805,6 +812,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 wt(h, *tilt);
             }
@@ -920,6 +928,7 @@ impl OpParams {
                     Entry3D::Plunge => 0,
                     Entry3D::Ramp => 1,
                     Entry3D::Helix => 2,
+                    Entry3D::Arc => 3,
                 });
                 wh_opt(h, *retract_z);
                 wt(h, *tilt);

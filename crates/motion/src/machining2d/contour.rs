@@ -4,6 +4,7 @@
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::{Entry3D, dive_room, helix_down};
+use crate::entry_arc::{arc_lead, push_arc_lead, seg_dir};
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
 
@@ -272,7 +273,8 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     // the pocket ladders' word verbatim (hop = retract clamped at
     // clearance, exactly what `hop` below computes).
     let m = Motion::new(p.clearance_z, Some(p.retract_z), p.feed, p.plunge_feed)
-        .with_entry(p.entry, p.helix_radius);
+        .with_entry(p.entry, p.helix_radius)
+        .with_arc_radius(p.tool_diameter);
     let mut refused_said = false;
     let mut tabbed_said = false;
     let cert = Cert::Region(&center);
@@ -452,6 +454,23 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                                     );
                                 }
                             }
+                            Entry3D::Arc => {
+                                // The circular ramp onto the lead-in's
+                                // own first move, certified by the
+                                // ramp's chord law (see `entry_arc`).
+                                let first = lead.first().or(walk.first());
+                                let lead_arc = first
+                                    .and_then(|s| seg_dir(e2, s))
+                                    .ok_or("the first cut has no direction to be tangent to")
+                                    .and_then(|d| {
+                                        let ok = |s, q| chord_clears(&center, s, q);
+                                        arc_lead(e2, d, prev_z, z, p.tool_diameter, p.tolerance, ok)
+                                    });
+                                match lead_arc {
+                                    Ok(l) => push_arc_lead(&mut b, &l, p.clearance_z, prev_z, p.feed),
+                                    Err(why) => substituted_dive(&mut b, &cert, &plan, e2, z, &m, why),
+                                }
+                            }
                             Entry3D::Helix => {
                                 let cur = b.at();
                                 let leg = Point2::new(cur.x, cur.y);
@@ -504,6 +523,7 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                             let arm = match p.entry {
                                 Entry3D::Ramp => "ramp",
                                 Entry3D::Helix => "helix",
+                                Entry3D::Arc => "arc",
                                 Entry3D::Plunge => "plunge",
                             };
                             b.note(format!(
@@ -601,6 +621,7 @@ pub fn contour_along_chain(
         let arm = match p.entry {
             Entry3D::Ramp => "ramp",
             Entry3D::Helix => "helix",
+            Entry3D::Arc => "arc",
             Entry3D::Plunge => "plunge",
         };
         b.note(format!(

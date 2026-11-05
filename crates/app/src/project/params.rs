@@ -1032,6 +1032,9 @@ pub enum EntryDto {
     Plunge,
     Ramp,
     Helix,
+    /// The circular ramp (M11.1). Appended: the file word is new, so no
+    /// earlier file can hold it and every earlier word reads as before.
+    Arc,
 }
 
 /// One hole of a drill op's list, on the wire: world XY, the model's

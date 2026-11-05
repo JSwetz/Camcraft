@@ -194,7 +194,9 @@ pub fn circular(_region: &Region, p: &CircularParams) -> Result<Toolpath, GenErr
     };
     let mut motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
     if p.entry != Entry3D::Plunge {
-        motion = motion.with_entry(p.entry, p.helix_radius);
+        motion = motion
+            .with_entry(p.entry, p.helix_radius)
+            .with_arc_radius(p.tool_diameter);
     }
     let cert = center_region.as_ref().map(Cert::Region);
 

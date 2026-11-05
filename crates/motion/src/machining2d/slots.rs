@@ -167,7 +167,9 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
     let tess = if p.entry == Entry3D::Plunge {
         None
     } else {
-        motion = motion.with_entry(p.entry, p.helix_radius);
+        motion = motion
+            .with_entry(p.entry, p.helix_radius)
+            .with_arc_radius(p.tool_diameter);
         let t = stadium_center(a, b, h);
         if t.is_none() {
             bld.note(
