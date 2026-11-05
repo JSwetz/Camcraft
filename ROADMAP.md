@@ -1477,6 +1477,35 @@ degree.")
       air-cutting; measured, not asserted: max engagement, max curvature and
       air-time reported per path and gated by tests.
 
+### M11.5 - Area control: the selection is where, the boundary settings are how far
+**Goal: every operation's affected area is user-controlled - the selection
+names the general area, and containment, offset, extension and extra
+boundaries decide exactly where the tool may go.** — 📋
+
+(User review, 2026-11-05: "Facing operation stays strictly within selection,
+and there is no ability to extend it outside, or expand its area in any way.
+Which makes no sense. We should have control over the area an operation
+affects, selection is just determining the general area. This is a general
+problem with the operations, there is lack of control on area affected.")
+
+- **A - tool containment**: per operation, the tool inside the boundary /
+      tool centre on the boundary / tool outside (past) the boundary - the
+      region law of M11.4 A applies it once, every strategy inherits it.
+- **B - boundary offset and extension**: grow or shrink the area by a
+      distance (with corner style); extend past open/exterior edges by a
+      distance (facing clears off the part's edge: default for Face is past
+      the stock outline by a stated amount, so the existing facing goldens
+      stay byte-identical only if the default reproduces today - else the
+      change is named and the goldens re-blessed with reason).
+- **C - additional boundaries**: extra include / exclude regions (picked
+      faces, sketches/loops, the stock outline, the silhouette of the part),
+      combined by the same 2D boolean law (clipper2).
+- **D - every op, one place**: the controls live in a "Geometry" /
+      "Boundary" group on every kind with an area (2D and 3D families), with
+      defaults that reproduce today's output; legality unchanged - an area
+      that would put the tool in the part still meets the depth-aware verify
+      and the post gate.
+
 ## Phase 12 — Geometry kernel: Solidcore
 
 The kernel decision open since M1.3 ("benchmark truck vs an OpenCascade
@@ -1558,6 +1587,7 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen | 📋 |
 | **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab | 📋 |
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path | 📋 |
+| **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area | 📋 |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
 
 ## Open questions & deferred
