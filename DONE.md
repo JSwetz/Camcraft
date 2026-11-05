@@ -1271,3 +1271,64 @@ gone, and existing operations edit in place.** — 📋
   0.5.0 if green before Phase 8's close, otherwise the release right
   after.
 
+
+## Phase 10 — The tool law: an operation opens only where a tool can cut it
+
+M3.3's machine-kind gate says which op families a setup may offer; it
+says nothing about the tool list. Today a setup holding one 10 mm
+4-flute endmill will take a grooving operation - the op is legal for the
+machine, the tool is illegal for the op, and nothing refuses until the
+generator reads whatever numbers it can off the wrong tool. A drill op
+wants a drill, a groove wants a grooving blade, a turned form wants a
+form gauge. The gate belongs where the mistake is made: at creation,
+named, never silent.
+
+### M10.1 - Tool/operation compatibility
+**Goal: an operation cannot be created, assigned or generated against a
+tool that cannot machine it - and every refusal names the tool kind
+missing.** — ✅
+
+- **A - the table**: every `KindInfo` row declares `tool_kinds: &[ToolKind]`
+      - the registry is the one truth (M5.0's one-table-row cost), no
+      per-panel match arms. Family defaults: the 2D/3D milling strategies
+      take the mill forms their geometry actually reads (EndMill /
+      BallNose / BullNose, waterline-class tangent laws still preferring
+      round noses); the drilling cycles take the tool the cycle expands
+      into (drill families Drill, tap cycles Tap, bore cycles Bore -
+      Spot is never automatic, M1.6's rule restated); the turning
+      families take their blade (facing/profile Turning, grooving and
+      parting Groove, threading Thread, form turning Form, boring Bore,
+      live-tooling drilling Drill on a mill-turn). The generators' own
+      shape refusals (Waterline's flat tool, the blade verdicts) stay
+      exactly where they are - the table gates the family match, the
+      generators still gate the shape; neither replaces the other.
+- **B - the gates, all at command creation**: `CreateOperation` refuses a
+      kind with no compatible tool in the active setup's tool list -
+      by name, before any entity exists (validate early, Prime
+      Directive), so the UI, the CLI, boa verbs and undo replay all hit
+      the same wall. The ribbon pre-validates it (M1.4's law): the
+      button darkens, the tooltip says "No drill in Setup1's tools".
+      Darkening, not hiding - unlike M6.2's machine door the fix is one
+      library click away, so the button must stay there to explain
+      itself. `ChangeTool` and a tool retype through `EditOperationParams`
+      refuse the mismatch the same way; opening an existing operation
+      is never gated - viewing is not cutting.
+- **C - the honest after-state**: a tool edited or deleted out from under
+      a referencing operation leaves it visible and blocked, never
+      silently mached: a named warning in the tree and its page says
+      which kind is missing, generation refuses, the project file is
+      untouched - old files load as they are (format = compatibility
+      contract, no PROJECT_VERSION bump, no migration rewrites user
+      data), surfacing the same warning the moment an op reads stale.
+- **D - the law tests**: every registry row names a non-empty kind set
+      and every ToolKind is claimed by some family (no orphan tools);
+      a command-layer refusal per family edge - the endmill-in-a-groove
+      hand-test case and its mirror; a ribbon test that the create
+      button darkens with the reason when the setup's tool list has
+      nothing that fits.
+
+Stretch, deferred: the refusal naming a starter-catalog entry
+("add a 8 mm drill from the catalog?") - the library is one click
+away today, so the door stays open, not urgent.
+
+Close-out (2026-11-05): A+D 101d4de, B 0e61fa0, C 4ec4a1d; debug ladder, heavy lane and provenance review green; decisions in RECOMMENDED.md (M10.1 A+D / B / C).
