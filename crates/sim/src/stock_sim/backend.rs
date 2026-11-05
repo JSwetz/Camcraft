@@ -45,7 +45,7 @@ use super::march;
 use super::march_verdicts;
 
 use crate::geo2d::{Point2, Region};
-use crate::geometry::{cube, Point3, Triangle};
+use crate::geometry::{Point3, Triangle};
 use crate::stock::{stock_mesh, StockShape};
 
 /// Which engine a stock is built on. `Column` is the dexel height
@@ -61,6 +61,12 @@ pub enum Backend {
 
 /// The shipped field band, in cells (see `Backend::Field`).
 pub const FIELD_BAND: u32 = 4;
+
+/// The field's declared verdict epsilon, in mm of column height: the
+/// march's solver floor (golden-section and bisection residuals, ~1e-7
+/// per column) with headroom. Two engines agree when every column's
+/// deviation lands within it and every verdict word matches (M7.3).
+pub const FIELD_VERDICT_EPS: f64 = 1e-5;
 
 /// One stock, one verdict API, two engines behind it.
 #[derive(Clone, Debug)]
@@ -239,7 +245,10 @@ impl Stock {
     /// arm writes a cell, so a bad op cannot leave half a stock; past
     /// that gate the column arm is `cut::simulate` unchanged and the
     /// field arm walks the same moves through the same three solids,
-    /// with `spanning_flank` giving the flat tool the column's reach.
+    /// with `spanning_flank` giving the flat tool - and the ball its
+    /// shank (M7.3: the bare sphere left a waterline's stock top
+    /// floating above the cut) - the column's reach, batched per
+    /// brick (M7.3's cost law, `field_batch`).
     pub fn simulate(&mut self, ops: &[SimOp]) -> Result<(), StockError> {
         match self {
             Stock::Column(d) => super::cut::simulate(d, ops),
@@ -249,14 +258,14 @@ impl Stock {
                 let flank = spanning_flank(f);
                 for (i, op) in ops.iter().enumerate() {
                     let tool = if op.ball {
-                        SdfTool::Ball { r: op.radius }
+                        SdfTool::Shanked { r: op.radius, shank: flank }
                     } else if let Some(cot) = op.cone {
                         SdfTool::Taper { r: op.radius, cot }
                     } else {
                         SdfTool::Flat { r: op.radius, flank }
                     };
-                    for m in op.moves {
-                        f.subtract(m, &tool, chord_tol).map_err(|e| named_op(i, e))?;
+                    for chunk in op.moves.chunks(super::field_batch::BATCH_MOVES) {
+                        f.subtract_batch(chunk, &tool, chord_tol).map_err(|e| named_op(i, e))?;
                     }
                 }
                 Ok(())
@@ -359,11 +368,16 @@ fn block_field(
         )));
     }
     let span = (x1 - x0).max(y1 - y0).max(cell);
-    let m = cube(
+    // Tessellated to the cell (M7.3): ten spans of side as one quad
+    // out-ran the per-facet seed ceiling and refused a block the
+    // column builds - a backend-dependent refusal, the law above's
+    // exact violation.
+    let m = super::field_gen::box_shell(
         Point3::new(x0, y0, top_z - 10.0 * span),
         Point3::new(x1, y1, top_z),
+        cell,
     );
-    SdfField::from_mesh(&m.facets, cell, band)
+    SdfField::from_mesh(&m, cell, band)
 }
 
 /// The flank that makes the field's flat tool reach what the column

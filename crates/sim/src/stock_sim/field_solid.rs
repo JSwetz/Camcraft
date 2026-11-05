@@ -23,7 +23,90 @@
 //!   only SHRINK the claimed removal: the conservative direction,
 //!   chosen not born.
 
+use super::field_cut::SdfTool;
+use super::kernel::StockError;
+
 use crate::geometry::Point3;
+
+/// Which tool, pre-validated.
+pub(crate) enum ToolKind {
+    Ball(f64),
+    Shanked { r: f64, shank: f64 },
+    Flat { r: f64, flank: f64 },
+    Taper { r: f64, cot: f64 },
+}
+
+/// The tool's parameters, refused by name when nonsense.
+pub(crate) fn tool_kind(tool: &SdfTool) -> Result<ToolKind, StockError> {
+    let radius = |r: &f64| -> Result<(), StockError> {
+        if !r.is_finite() || *r <= 0.0 {
+            return Err(StockError::Invalid(format!(
+                "field subtract: tool radius {r} is not a positive finite number"
+            )));
+        }
+        Ok(())
+    };
+    let length = |what: &str, v: &f64| -> Result<(), StockError> {
+        if !v.is_finite() || *v <= 0.0 {
+            return Err(StockError::Invalid(format!(
+                "field subtract: {what} {v} is not a positive finite number"
+            )));
+        }
+        Ok(())
+    };
+    Ok(match tool {
+        SdfTool::Ball { r } => {
+            radius(r)?;
+            ToolKind::Ball(*r)
+        }
+        SdfTool::Shanked { r, shank } => {
+            radius(r)?;
+            length("shank length", shank)?;
+            ToolKind::Shanked { r: *r, shank: *shank }
+        }
+        SdfTool::Flat { r, flank } => {
+            radius(r)?;
+            length("flank length", flank)?;
+            ToolKind::Flat { r: *r, flank: *flank }
+        }
+        SdfTool::Taper { r, cot } => {
+            radius(r)?;
+            length("cone slope", cot)?;
+            ToolKind::Taper { r: *r, cot: *cot }
+        }
+    })
+}
+
+/// The distance from `q` to the parallelogram `o + s e1 + t e2`,
+/// `s, t` in [0, 1] (the shanked ball's swept core): the plane's
+/// perpendicular where the foot lands inside, else the nearest of the
+/// four edges - exact both ways; a degenerate (parallel-sided) one is
+/// its edges alone.
+pub(crate) fn dist_pt_para(q: Point3, o: Point3, e1: Vec3, e2: Vec3) -> f64 {
+    let n = cross(e1, e2);
+    let nn = dot(n, n);
+    let w = sub(q, o);
+    if nn > 1e-24 * (dot(e1, e1) * dot(e2, e2)) && nn > 0.0 {
+        let s = dot(cross(w, e2), n) / nn;
+        let t = dot(cross(e1, w), n) / nn;
+        if (0.0..=1.0).contains(&s) && (0.0..=1.0).contains(&t) {
+            return dot(w, n).abs() / nn.sqrt();
+        }
+    }
+    let seg = |a: Point3, d: Vec3| {
+        let dd = dot(d, d);
+        let v = sub(q, a);
+        let t = if dd > 0.0 { (dot(v, d) / dd).clamp(0.0, 1.0) } else { 0.0 };
+        let r = sub(q, add(a, scale(d, t)));
+        dot(r, r).sqrt()
+    };
+    let (o1, o2) = (add(o, e1), add(o, e2));
+    seg(o, e1).min(seg(o, e2)).min(seg(o1, e2)).min(seg(o2, e1))
+}
+
+fn cross(a: Vec3, b: Vec3) -> Vec3 {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
 
 /// The revolved profiles, in their own frame: radius, and the
 /// along-axis extent from the tip anchor.
@@ -120,6 +203,17 @@ mod tests {
         // The 45-degree cone, a point on its flank line: distance 0.
         let f = pose_dist(ax, p(0.0, 0.0, 0.0), p(2.0, 0.0, 2.0), &RevKind::Taper { r: 4.0, cot: 1.0 });
         assert!(f.abs() < 1e-12, "on the flank: {f}");
+    }
+
+    #[test]
+    fn the_parallelogram_distance_is_exact_inside_and_at_the_edges() {
+        let (o, e1, e2) = (p(0.0, 0.0, 0.0), [4.0, 0.0, 0.0], [0.0, 0.0, 10.0]);
+        assert!((dist_pt_para(p(2.0, 3.0, 5.0), o, e1, e2) - 3.0).abs() < 1e-12, "the face");
+        assert!((dist_pt_para(p(7.0, 4.0, 5.0), o, e1, e2) - 5.0).abs() < 1e-12, "an edge");
+        assert!((dist_pt_para(p(-3.0, 0.0, -4.0), o, e1, e2) - 5.0).abs() < 1e-12, "a corner");
+        // Degenerate: e1 parallel to e2 is the long segment.
+        let d = dist_pt_para(p(0.0, 2.0, 7.0), o, [0.0, 0.0, 1.0], e2);
+        assert!((d - 2.0).abs() < 1e-12, "a plunge's core is a segment: {d}");
     }
 
     #[test]

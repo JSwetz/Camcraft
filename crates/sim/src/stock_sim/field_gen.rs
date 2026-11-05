@@ -148,6 +148,7 @@ impl SdfField {
             bricks: HashMap::new(),
             cuts: HashMap::new(),
             cut_ups: HashMap::new(),
+            cost: Box::default(),
         };
         for (&key, &v) in &done {
             // Clamped: a stored value past the band is `cap`, exactly
@@ -155,8 +156,55 @@ impl SdfField {
             // holds for the magnitude everywhere, not by luck.
             field.brick_mut(key)[in_brick(key)] = v.min(cap);
         }
+        field.cost.region = super::field_batch::region_of(&field);
         Ok(field)
     }
+}
+
+/// Facet edge ceiling for `box_shell`, in cells: a 256-cell square's
+/// inflated scan stays far under `MAX_CELLS_PER_FACET`.
+const BOX_EDGE_CELLS: f64 = 256.0;
+
+/// The closed box `[lo, hi]` as a watertight shell tessellated so no
+/// facet's seed scan can refuse (M7.3: a deep block's side, as one
+/// quad, spanned more candidate cells than the per-facet ceiling and
+/// refused a stock the column builds). Every face is a grid on the
+/// SAME per-axis coordinate rows, so shared edges meet at bit-equal
+/// vertices and the edge gate sees every edge used exactly twice.
+pub(crate) fn box_shell(lo: Point3, hi: Point3, cell: f64) -> Vec<Triangle> {
+    let rows = |a: f64, b: f64| -> Vec<f64> {
+        let n = ((b - a) / (BOX_EDGE_CELLS * cell)).ceil().clamp(1.0, 4096.0) as usize;
+        (0..=n)
+            .map(|k| if k == n { b } else { a + (b - a) * (k as f64 / n as f64) })
+            .collect()
+    };
+    let (xs, ys, zs) = (rows(lo.x, hi.x), rows(lo.y, hi.y), rows(lo.z, hi.z));
+    let mut out = Vec::new();
+    // One face: the fixed axis at `w`, gridded over rows `us` x `vs`;
+    // `pt` places (w, u, v) in the world.
+    let mut face = |w: f64, us: &[f64], vs: &[f64], pt: &dyn Fn(f64, f64, f64) -> Point3| {
+        for i in 0..us.len().saturating_sub(1) {
+            for j in 0..vs.len().saturating_sub(1) {
+                let (a, b) = (pt(w, us[i], vs[j]), pt(w, us[i + 1], vs[j]));
+                let (c, d) = (pt(w, us[i + 1], vs[j + 1]), pt(w, us[i], vs[j + 1]));
+                out.push(Triangle::new(a, b, c));
+                out.push(Triangle::new(a, c, d));
+            }
+        }
+    };
+    let px = |w: f64, u: f64, v: f64| Point3::new(w, u, v);
+    let py = |w: f64, u: f64, v: f64| Point3::new(u, w, v);
+    let pz = |w: f64, u: f64, v: f64| Point3::new(u, v, w);
+    for w in [lo.x, hi.x] {
+        face(w, &ys, &zs, &px);
+    }
+    for w in [lo.y, hi.y] {
+        face(w, &xs, &zs, &py);
+    }
+    for w in [lo.z, hi.z] {
+        face(w, &xs, &ys, &pz);
+    }
+    out
 }
 
 /// Bucket of a value on the graph metric, clamped into range.

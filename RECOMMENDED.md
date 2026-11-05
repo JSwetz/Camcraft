@@ -9128,3 +9128,45 @@ CL and 15 NC goldens. A golden that encodes a gouge is itself a finding.
 (so a bore lead keeps its full size); stop tab-window leads nibbling
 the tab; account for fit tolerance adding to the gouge budget
 (10.35 um seen); split contour.rs under 400 lines.
+
+## M7.3 A - both engines side by side, and the cost law: six decisions (2026-11-05)
+
+(1) **Agreement fixtures are the goldens' own bytes.** The heavy suite
+replays the committed `.cl` files (a reader in tests/common). The 3D
+finishes are judged against their generator meshes. The 2D and drilling
+goldens have no part, so they are judged against two probe plates (the
+deepest tip, and halfway up so both rest and gouge show). Dropped:
+re-running the generators (it duplicates golden_cl's parameters) and
+synthesising intended parts (a second source of truth). Result: 35
+program/part pairs agree, worst column difference 1.3e-12.
+
+(2) **The declared epsilon is `FIELD_VERDICT_EPS = 1e-5` mm of column
+height.** Agreement means every column within epsilon, every verdict
+word equal, identical counts, and identical abstentions.
+
+(3) **The verdict path's ball nose gets a shank (`SdfTool::Shanked`).**
+The waterline-cone golden showed a bare sphere leaving the stock above
+a deep ball pass floating: a 20.4 mm disagreement in 4030 columns. The
+column engine's ball atom clears everything above the ball. Dropped:
+loosening the tolerance, or calling it a blessed divergence. Follow-up:
+the display cut (`simulate_display`) still uses the bare sphere.
+
+(4) **The refusal ceiling counts the clipped window.** The old ceiling
+refused face, slot and contour goldens the column engine runs, which
+broke backend-independent refusals. Block stock is now a tessellated
+shell (`box_shell`), because a ten-span side as one quad was over the
+per-facet seed limit.
+
+(5) **Cost law: every skip is a proof.** Clip to the region where a cut
+can change an answer; one distance check per brick decides skip or
+fill; full cells are final; batch per brick (exact, since max and min
+commute; a test holds batched == per-move bit for bit). The upright
+flat-tool fast path is nudged up by ~1e-12 so a tie never counts as
+removed. Result: 70-1400x cheaper per move (contour_disc_hole 12 s ->
+13 ms), and face_square, refused before, now runs.
+
+(6) **Owed.** The ten-span-deep verdict block costs 5-48 s per build in
+release, which now dominates both heavy suites; field_cut.rs and
+backend.rs sit at ~405 lines, field.rs at 447; switching the display
+cut to the shanked ball is a follow-up. Bullet 3 of M7.3 (retiring the
+column engine) is next.

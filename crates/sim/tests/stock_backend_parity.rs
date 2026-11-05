@@ -182,6 +182,19 @@ fn ball_groove_is_the_same_surface() {
 }
 
 #[test]
+fn a_deep_ball_pass_clears_the_stock_above_it() {
+    // M7.3 (the waterline-cone golden's finding): a ball running more
+    // than its own diameter under the stock top. The column's atom
+    // clears everything above the ball's bottom; a bare sphere left
+    // the top 3 mm floating over the groove. The shank closes it.
+    let moves = [feed(p(3.0, 5.0, 0.5), p(7.0, 5.0, 0.5))];
+    let (c, f) = sim(&moves, 1.0, true, None);
+    let (dc, df) = (c.deviate(&plate(1.0), DEV_TOL).unwrap(), f.deviate(&plate(1.0), DEV_TOL).unwrap());
+    dev_parity(&dc, &df, 1e-5);
+    assert!(dc.gouge_cells > 0, "fixture: the groove bottoms at 0.5, under the plate");
+}
+
+#[test]
 fn deep_rest_is_heights_not_magnitudes() {
     // 7 mm of rest standing over the model - past the field's band cap
     // - reads the same number as it does on the column, because a

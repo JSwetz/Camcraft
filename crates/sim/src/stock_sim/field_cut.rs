@@ -53,12 +53,12 @@
 //!   that spans the stock to agree.
 //! - **Total input.** A non-finite move endpoint, a non-positive or
 //!   non-finite tool parameter, a nonsense axis, or a move whose
-//!   swept window would span more than `MAX_CELLS_PER_MOVE` cells
+//!   swept window - clipped to the region a cut can matter in (M7.3,
+//!   `field_batch`) - would span more than `MAX_CELLS_PER_MOVE` cells
 //!   refuses by name before a single brick is written.
 
-use super::field::{center_of, cell_of, SdfField};
-use super::field_ray;
-use super::field_solid::{add, dot, pose_dist, scale, sub, RevKind};
+use super::field::{cell_of, SdfField};
+use super::field_solid::{add, dist_pt_para, dot, pose_dist, scale, sub, tool_kind, RevKind, ToolKind};
 use super::kernel::StockError;
 use super::scan::dist_pt_seg3;
 
@@ -77,13 +77,21 @@ const GS_ITERS: u32 = 32;
 /// The golden-section contraction ratio, (sqrt(5) - 1) / 2.
 const PHI: f64 = 0.6180339887498949;
 
+/// The golden section's final bracket, as a fraction of t's unit
+/// interval, with room to spare: PHI^GS_ITERS is ~2e-7.
+const GS_RESIDUAL: f64 = 1e-6;
+
 /// The tool solids of the field's vocabulary - the same three the
 /// dexel sweeps (`Dexel::subtract`, `subtract_ball`, `subtract_cone`).
 #[derive(Clone, Copy, Debug)]
 pub enum SdfTool {
     /// Ball nose of radius `r`; moves carry tip positions and the
-    /// center rides `r` above along the axis.
+    /// center rides `r` above along the axis. The bare sphere.
     Ball { r: f64 },
+    /// Ball nose on a shank of its own radius, `shank` long above the
+    /// center (M7.3): the capsule the column's ball atom implies -
+    /// it removes everything above the ball's bottom - made finite.
+    Shanked { r: f64, shank: f64 },
     /// Flat endmill: disc of `r`, flank of `flank` along the axis.
     Flat { r: f64, flank: f64 },
     /// Taper: cone of maximum cutting radius `r`, apex at the tip
@@ -97,6 +105,9 @@ pub enum SdfTool {
 pub(crate) enum Sweep {
     /// The capsule of a ball center path.
     Ball { c0: Point3, c1: Point3, r: f64 },
+    /// The ball center path swept up the axis by `up` (the shank),
+    /// dilated by `r`: a parallelogram's offset, closed form.
+    Shanked { c0: Point3, c1: Point3, up: [f64; 3], r: f64 },
     /// The Minkowski sum of a tip path and a revolved profile.
     Revolve { a: Point3, b: Point3, kind: RevKind },
 }
@@ -109,6 +120,7 @@ impl Sweep {
     fn extent(&self) -> f64 {
         match self {
             Sweep::Ball { r, .. } => *r,
+            Sweep::Shanked { r, up, .. } => r + dot(*up, *up).sqrt(),
             Sweep::Revolve { kind, .. } => match kind {
                 RevKind::Flat { r, flank } => r.hypot(*flank),
                 RevKind::Taper { r, cot } => r.hypot(r * cot),
@@ -118,10 +130,14 @@ impl Sweep {
 
     /// The solid's own reach: (lateral, along-axis). A vertical tool
     /// is r wide and flank tall - the honest box the window dilates
-    /// by, axis component for axis component.
+    /// by, axis component for axis component. The along-axis reach
+    /// runs one way, from the tip UP the axis (M7.3: a flank never
+    /// reaches below its own tip); the ball's path is its center
+    /// path, so its solid is the path dilated by `r` and nothing more.
     fn reach(&self) -> (f64, f64) {
         match self {
-            Sweep::Ball { r, .. } => (*r, *r),
+            Sweep::Ball { r, .. } => (*r, 0.0),
+            Sweep::Shanked { r, up, .. } => (*r, dot(*up, *up).sqrt()),
             Sweep::Revolve { kind, .. } => match kind {
                 RevKind::Flat { r, flank } => (*r, *flank),
                 RevKind::Taper { r, cot } => (*r, r * cot),
@@ -133,14 +149,33 @@ impl Sweep {
     /// for the ball).
     fn path(&self) -> (Point3, Point3) {
         match self {
-            Sweep::Ball { c0, c1, .. } => (*c0, *c1),
+            Sweep::Ball { c0, c1, .. } | Sweep::Shanked { c0, c1, .. } => (*c0, *c1),
             Sweep::Revolve { a, b, .. } => (*a, *b),
+        }
+    }
+
+    /// The lattice window this sweep can reach (`window_of`).
+    pub(crate) fn window(&self, cell: f64, cap: f64, ax: [f64; 3]) -> [(i32, i32); 3] {
+        window_of(self, cell, cap, ax)
+    }
+
+    /// How far `dist` may sit ABOVE the true distance: the golden
+    /// section's final bracket times the path length (the anchor
+    /// moves `|b - a|` per unit t, and one pose's distance is
+    /// 1-Lipschitz in its anchor); the capsule is closed-form.
+    pub(crate) fn residual(&self) -> f64 {
+        match self {
+            Sweep::Ball { .. } | Sweep::Shanked { .. } => 0.0,
+            Sweep::Revolve { a, b, .. } => {
+                let d = sub(*b, *a);
+                dot(d, d).sqrt() * GS_RESIDUAL
+            }
         }
     }
 
     /// A cheap LOWER bound of `dist` (a stadium, not the solid), used
     /// to skip window corners before the honest evaluation.
-    fn stadium(&self, q: Point3) -> f64 {
+    pub(crate) fn stadium(&self, q: Point3) -> f64 {
         let (p0, p1) = self.path();
         dist_pt_seg3(q.x, q.y, q.z, p0, p1) - self.extent()
     }
@@ -151,10 +186,18 @@ impl Sweep {
     pub(crate) fn dist(&self, ax: [f64; 3], q: Point3) -> f64 {
         match self {
             Sweep::Ball { c0, c1, r } => dist_pt_seg3(q.x, q.y, q.z, *c0, *c1) - r,
+            Sweep::Shanked { c0, c1, up, r } => dist_pt_para(q, *c0, sub(*c1, *c0), *up) - r,
             Sweep::Revolve { a, b, kind } => {
                 let d = sub(*b, *a);
                 if dot(d, d) == 0.0 {
                     return pose_dist(ax, *a, q, kind); // a station: one pose
+                }
+                if let Some(t) = upright_flat_foot(ax, *a, d, q, kind) {
+                    // Exact, then nudged a rounding-scale hair UP: the
+                    // golden section's conservative direction kept, so
+                    // a tie on the solid's face never claims removal.
+                    let v = pose_dist(ax, add(*a, scale(d, t)), q, kind);
+                    return v + 1e-12 + 1e-15 * v.abs();
                 }
                 // Golden section on the convex map t -> phi(q - (a + t*d)).
                 let (mut lo, mut hi) = (0.0f64, 1.0f64);
@@ -183,13 +226,6 @@ impl Sweep {
     }
 }
 
-/// Which tool, pre-validated.
-enum ToolKind {
-    Ball(f64),
-    Flat { r: f64, flank: f64 },
-    Taper { r: f64, cot: f64 },
-}
-
 impl SdfField {
     /// Subtract one CL move: the tool rides the move's path (its
     /// chords, arcs reduced under the uniform-Z helix law) and the
@@ -201,159 +237,130 @@ impl SdfField {
         tool: &SdfTool,
         chord_tol: f64,
     ) -> Result<(), StockError> {
-        let radius = |r: &f64| -> Result<(), StockError> {
-            if !r.is_finite() || *r <= 0.0 {
-                return Err(StockError::Invalid(format!(
-                    "field subtract: tool radius {r} is not a positive finite number"
-                )));
-            }
-            Ok(())
-        };
-        let kind = match tool {
-            SdfTool::Ball { r } => {
-                radius(r)?;
-                ToolKind::Ball(*r)
-            }
-            SdfTool::Flat { r, flank } => {
-                radius(r)?;
-                if !flank.is_finite() || *flank <= 0.0 {
-                    return Err(StockError::Invalid(format!(
-                        "field subtract: flank length {flank} is not a positive finite number"
-                    )));
-                }
-                ToolKind::Flat { r: *r, flank: *flank }
-            }
-            SdfTool::Taper { r, cot } => {
-                radius(r)?;
-                if !cot.is_finite() || *cot <= 0.0 {
-                    return Err(StockError::Invalid(format!(
-                        "field subtract: cone slope {cot} is not a positive finite number"
-                    )));
-                }
-                ToolKind::Taper { r: *r, cot: *cot }
-            }
-        };
+        self.subtract_batch(std::slice::from_ref(m), tool, chord_tol)
+    }
+
+    /// Subtract a batch of moves cut by one tool - the same answer as
+    /// one `subtract` per move, bit for bit (both layers commute), at
+    /// one visit per dirty brick for the whole batch (M7.3's cost law,
+    /// `field_batch`). Every move is validated and every chord's
+    /// window proved payable BEFORE any write, so a refusal leaves the
+    /// field exactly as it stood.
+    pub fn subtract_batch(
+        &mut self,
+        moves: &[Move],
+        tool: &SdfTool,
+        chord_tol: f64,
+    ) -> Result<(), StockError> {
+        let kind = tool_kind(tool)?;
         if !chord_tol.is_finite() || chord_tol < 0.0 {
             return Err(StockError::Invalid(format!(
                 "field subtract: chord tolerance {chord_tol} is not a finite non-negative number"
             )));
         }
-        if !m.is_finite() {
-            return Err(StockError::Invalid(
-                "field subtract: the move has a non-finite endpoint".into(),
-            ));
-        }
-        if m.kind == MoveKind::Rapid {
-            return Ok(()); // rapids touch nothing (RS-274 G0, the dexel's law)
-        }
-        let ax = match m.axis {
-            None => [0.0, 0.0, 1.0],
-            Some(a) => {
-                let nn = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
-                if !a[0].is_finite() || !a[1].is_finite() || !a[2].is_finite() || nn == 0.0 {
+        let mut sweeps: Vec<([f64; 3], Sweep)> = Vec::new();
+        for m in moves {
+            if !m.is_finite() {
+                return Err(StockError::Invalid(
+                    "field subtract: the move has a non-finite endpoint".into(),
+                ));
+            }
+            if m.kind == MoveKind::Rapid {
+                continue; // rapids touch nothing (RS-274 G0, the dexel's law)
+            }
+            let ax = match m.axis {
+                None => [0.0, 0.0, 1.0],
+                Some(a) => {
+                    let nn = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+                    if !a[0].is_finite() || !a[1].is_finite() || !a[2].is_finite() || nn == 0.0 {
+                        return Err(StockError::Invalid(format!(
+                            "field subtract: axis {:?} is not a finite nonzero direction",
+                            a
+                        )));
+                    }
+                    [a[0] / nn, a[1] / nn, a[2] / nn]
+                }
+            };
+            for (a, b) in chords(m, chord_tol) {
+                let sw = match &kind {
+                    ToolKind::Ball(r) => {
+                        let off = scale(ax, *r);
+                        Sweep::Ball { c0: add(a, off), c1: add(b, off), r: *r }
+                    }
+                    ToolKind::Shanked { r, shank } => {
+                        let off = scale(ax, *r);
+                        Sweep::Shanked { c0: add(a, off), c1: add(b, off), up: scale(ax, *shank), r: *r }
+                    }
+                    ToolKind::Flat { r, flank } => Sweep::Revolve {
+                        a,
+                        b,
+                        kind: RevKind::Flat { r: *r, flank: *flank },
+                    },
+                    ToolKind::Taper { r, cot } => Sweep::Revolve {
+                        a,
+                        b,
+                        kind: RevKind::Taper { r: *r, cot: *cot },
+                    },
+                };
+                // The ceiling bounds the WORK: the window as clipped
+                // to the cut region, the only cells the walk can visit.
+                let work = self.clipped(sw.window(self.cell, self.cap, ax)).map_or(0, window_cells);
+                if work > MAX_CELLS_PER_MOVE {
                     return Err(StockError::Invalid(format!(
-                        "field subtract: axis {:?} is not a finite nonzero direction",
-                        a
+                        "field subtract: a chord's swept window spans more than {MAX_CELLS_PER_MOVE} cells at cell size {} - the move is too long for one field update; segment it",
+                        self.cell
                     )));
                 }
-                [a[0] / nn, a[1] / nn, a[2] / nn]
-            }
-        };
-        let sweeps: Vec<Sweep> = chords(m, chord_tol)
-            .into_iter()
-            .map(|(a, b)| match &kind {
-                ToolKind::Ball(r) => {
-                    let off = scale(ax, *r);
-                    Sweep::Ball {
-                        c0: add(a, off),
-                        c1: add(b, off),
-                        r: *r,
-                    }
-                }
-                ToolKind::Flat { r, flank } => Sweep::Revolve {
-                    a,
-                    b,
-                    kind: RevKind::Flat { r: *r, flank: *flank },
-                },
-                ToolKind::Taper { r, cot } => Sweep::Revolve {
-                    a,
-                    b,
-                    kind: RevKind::Taper { r: *r, cot: *cot },
-                },
-            })
-            .collect();
-        // Every chord's window is proved payable BEFORE any write,
-        // so a refusal never leaves half a move subtracted.
-        for sw in &sweeps {
-            if window_cells(sw, self.cell, self.cap, ax) > MAX_CELLS_PER_MOVE {
-                return Err(StockError::Invalid(format!(
-                    "field subtract: a chord's swept window spans more than {MAX_CELLS_PER_MOVE} cells at cell size {} - the move is too long for one field update; segment it",
-                    self.cell
-                )));
+                sweeps.push((ax, sw));
             }
         }
-        for sw in &sweeps {
-            self.cut_sweep(ax, sw);
-        }
+        self.cut_batch(&sweeps);
         Ok(())
-    }
-
-    /// Every cell center whose cut value could beat the mesh's worst
-    /// (`-cap`) rides the window; each gets a `max` into the cut
-    /// layer. Values are clamped at `cap`, so the field's magnitude
-    /// law survives subtraction. The window was proved payable by the
-    /// caller's pre-scan, so this walk cannot refuse.
-    fn cut_sweep(&mut self, ax: [f64; 3], sw: &Sweep) {
-        let [(i0, i1), (j0, j1), (k0, k1)] = window_of(sw, self.cell, self.cap, ax);
-        for i in i0..=i1 {
-            for j in j0..=j1 {
-                for k in k0..=k1 {
-                    let q = Point3::new(
-                        center_of(i, self.cell),
-                        center_of(j, self.cell),
-                        center_of(k, self.cell),
-                    );
-                    if sw.stadium(q) >= self.cap {
-                        continue; // a window corner, by one cheap test
-                    }
-                    let phi = sw.dist(ax, q);
-                    if phi >= self.cap {
-                        continue; // its cut could never beat the mesh's -cap
-                    }
-                    let v = (-phi).min(self.cap);
-                    let key = [i, j, k];
-                    // The ray-entry companion rides every claim, no
-                    // matter whether its magnitude wins the max: the
-                    // lowest proven crossing is the surface's law,
-                    // independent of which claim measures closest.
-                    let u = field_ray::vertical_entry(ax, sw, q, self.cell);
-                    if u.is_finite() {
-                        self.up_record(key, u);
-                    }
-                    let slot = self.cut_mut(key);
-                    if slot.is_nan() || v > *slot {
-                        *slot = v;
-                    }
-                }
-            }
-        }
     }
 }
 
-/// The lattice window one sweep can reach: the path's AABB dilated
-/// per world axis by the solid's reach on that axis (lateral plus the
-/// axial component along the tool's axis), the cap, and one cell. A
-/// spanning flank reaches far along the axis and not one micron
-/// sideways; dilating every axis by the bounding radius (the old
-/// law) refused a vertical tool's own window as absurd.
+/// The exact minimizer of `t -> pose_dist` for an upright flat tool
+/// on the two moves 2.5-D paths are made of (M7.3's per-cell cost):
+/// on a level move `zl` is fixed and the distance only grows with the
+/// radial offset, so the minimum sits at the XY foot of the path; on
+/// a plunge `rho` is fixed and the box distance is convex in `zl`
+/// with its minimum at mid-flank. `None` sends every other move to
+/// the golden section.
+fn upright_flat_foot(ax: [f64; 3], a: Point3, d: [f64; 3], q: Point3, kind: &RevKind) -> Option<f64> {
+    let RevKind::Flat { flank, .. } = kind else {
+        return None;
+    };
+    if ax != [0.0, 0.0, 1.0] {
+        return None;
+    }
+    if d[2] == 0.0 {
+        let dd = d[0] * d[0] + d[1] * d[1];
+        let t = ((q.x - a.x) * d[0] + (q.y - a.y) * d[1]) / dd;
+        return t.is_finite().then(|| t.clamp(0.0, 1.0));
+    }
+    if d[0] == 0.0 && d[1] == 0.0 {
+        let t = (q.z - a.z - 0.5 * flank) / d[2];
+        return t.is_finite().then(|| t.clamp(0.0, 1.0));
+    }
+    None
+}
+
+/// The lattice window one sweep can reach: the path's AABB swept
+/// along the tool axis by the solid's axial reach (one way: tip to
+/// top, M7.3), then dilated by the lateral reach, the cap, and one
+/// cell. A spanning flank reaches far up its axis and not one micron
+/// sideways or below its tip; dilating every axis by the bounding
+/// radius (the M7.1 B law), or the axial reach both ways (M7.1 C),
+/// made a vertical tool's window as deep as it is tall.
 fn window_of(sw: &Sweep, cell: f64, cap: f64, ax: [f64; 3]) -> [(i32, i32); 3] {
     let (p0, p1) = sw.path();
     let (lat, axial) = sw.reach();
     let span = |lo: f64, hi: f64, u: usize| {
-        let reach = lat + axial * ax[u].abs() + cap + cell;
+        let e = axial * ax[u];
+        let pad = lat + cap + cell;
         (
-            cell_of(lo.min(hi) - reach, cell),
-            cell_of(lo.max(hi) + reach, cell),
+            cell_of(lo.min(hi) + e.min(0.0) - pad, cell),
+            cell_of(lo.max(hi) + e.max(0.0) + pad, cell),
         )
     };
     [
@@ -365,8 +372,7 @@ fn window_of(sw: &Sweep, cell: f64, cap: f64, ax: [f64; 3]) -> [(i32, i32); 3] {
 
 /// Cells in a chord's window: saturating, so an absurd dilation
 /// answers absurd (and refuses), never an overflowed count.
-fn window_cells(sw: &Sweep, cell: f64, cap: f64, ax: [f64; 3]) -> u64 {
-    let w = window_of(sw, cell, cap, ax);
+fn window_cells(w: [(i32, i32); 3]) -> u64 {
     let cnt = |s: (i32, i32)| (s.1 as i64 - s.0 as i64 + 1).max(0) as u64;
     cnt(w[0])
         .saturating_mul(cnt(w[1]))

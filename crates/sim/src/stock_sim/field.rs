@@ -95,6 +95,10 @@ pub struct SdfField {
     /// solid" - lateral claims like a pocket's rim, whose surface
     /// stays the mesh's own. `field_ray` owns the law.
     pub(crate) cut_ups: HashMap<[i32; 3], Box<[f64; BRICK3]>>,
+    /// M7.3's cost law: the cut region, the full-brick ledger and the
+    /// counters (`field_batch::CostLedger`), boxed so the `Stock`
+    /// enum's arms stay the same size class.
+    pub(crate) cost: Box<super::field_batch::CostLedger>,
 }
 
 /// World cell of a point on the origin-locked lattice.

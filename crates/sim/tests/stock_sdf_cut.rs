@@ -395,14 +395,18 @@ fn nonsense_inputs_refuse_by_name() {
 
 #[test]
 fn an_unpayable_window_refuses_and_writes_nothing() {
-    // Atomicity: a move too long for the lattice refuses BEFORE any
-    // brick is touched, so the field answers exactly as it did.
+    // Atomicity: a move whose work is too big for one update refuses
+    // BEFORE any brick is touched, so the field answers exactly as it
+    // did. Since M7.3 the ceiling bounds the window AS CLIPPED to the
+    // region a cut can matter in (a long move over a small stock pays
+    // only its in-stock part - `stock_field_cost`), so the unpayable
+    // move here is a wide flat crossing the whole fine box.
     let mut f = SdfField::from_mesh(&box_mesh(0.0, 10.0), 0.05, 4).unwrap();
     let pts: Vec<Point3> = vec![p(5.0, 5.0, 5.0), p(0.5, 5.5, 9.5), p(9.5, 0.5, 0.5)];
     let before: Vec<f64> = pts.iter().map(|q| f.distance(*q)).collect();
-    let m = feed_mv(p(0.0, 0.0, 5.0), p(400.0, 5.0, 5.0));
-    let e = match f.subtract(&m, &SdfTool::Ball { r: 0.5 }, 0.01) {
-        Ok(()) => panic!("a 400 mm move at cell 0.05 must refuse, not chew"),
+    let m = feed_mv(p(0.0, 0.0, 5.0), p(10.0, 10.0, 5.0));
+    let e = match f.subtract(&m, &SdfTool::Flat { r: 5.0, flank: 10.0 }, 0.01) {
+        Ok(()) => panic!("a ~10M-cell window at cell 0.05 must refuse, not chew"),
         Err(e) => e,
     };
     assert!(format!("{e}").contains("segment"), "{e}");

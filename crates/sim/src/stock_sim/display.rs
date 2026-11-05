@@ -14,7 +14,10 @@
 //! So the picture is the verdict's own geometry wherever there is
 //! stock to see, at a window bounded by the stock's height. Posed
 //! (multi-axis) moves fall back to the spanning law - a tilted flank
-//! is not this argument's to shorten.
+//! is not this argument's to shorten. (Since M7.3 every walk is
+//! clipped to the region a cut can matter in and batched per brick -
+//! `field_batch` - so the spanning flank no longer costs its length;
+//! the shorter flank stays as this module's exactness argument.)
 
 use super::backend::Stock;
 use super::cut::{check_ops, SimOp};
@@ -53,8 +56,8 @@ impl Stock {
             } else {
                 SdfTool::Flat { r: op.radius, flank }
             };
-            for m in op.moves {
-                f.subtract(m, &tool, chord_tol).map_err(|e| match e {
+            for chunk in op.moves.chunks(super::field_batch::BATCH_MOVES) {
+                f.subtract_batch(chunk, &tool, chord_tol).map_err(|e| match e {
                     StockError::Invalid(s) => StockError::Invalid(format!("op {i}: {s}")),
                     other => other,
                 })?;
