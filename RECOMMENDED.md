@@ -9288,3 +9288,32 @@ restating G17 in the preamble, which would change every golden.
 plane is bound to the tool-call spindle axis, so a free G18 could
 reinterpret the tool axis. Dropped: refusing the program, which would
 block every Heidenhain program once M11.2 B adds vertical entries.
+
+## M11.3 A - heights from the selection: five decisions (2026-11-05)
+
+(1) **Two variants, one combo entry.** `TopOfSelection` and
+`BottomOfSelection`, matching the stock/model Top/Bottom pairs, keep
+the resolver independent of which height slot asks. The UI offers one
+"Selection" entry, and the row decides the end (Bottom rows store the
+lowest Z; Clearance, Retract and Top store the highest). Dropped: one
+slot-dependent variant, because the stamp, setup sheet and echo don't
+know their slot.
+
+(2) **What the selection spans.** A picked face: its boundary loops. A
+welded wall: every strip face. An edge chain: its points. A whole
+model: its world bounding box. A stock source resolves to the stock
+box rather than refusing, so switching an op's source never leaves its
+heights unusable (it goes Stale instead).
+
+(3) **Never a silent 0.** An empty or vanished selection refuses by
+name at create, edit, retype, re-pick, source change and generation.
+Re-picking or moving the picked part makes the op Stale; undo restores
+Ok.
+
+(4) **Format.** `top_of_selection` / `bottom_of_selection` are appended
+words with no version bump; stamp tags 6 and 7 appear only when used,
+so no existing op's stamp changes.
+
+(5) **Owed.** The "retract above clearance" notes outside the Heights
+section show nothing for Selection heights (never a wrong number);
+heights.rs is ~400 lines.

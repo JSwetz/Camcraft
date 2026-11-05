@@ -47,10 +47,16 @@ impl SetOperationGeometry {
         for g in &deduped {
             valid_pick(world, g)?;
         }
-        let next = Operation {
-            src: SrcRef::Selection(deduped),
-            ..prev.clone()
-        };
+        let src = SrcRef::Selection(deduped);
+        // A re-pick moves every From: Selection height (M11.3 A): the
+        // new picks must answer them, in order, before the swap lands.
+        // Params that never read the selection pass exactly as before.
+        let mut reads_sel = false;
+        prev.params.for_each_height(|h| reads_sel |= h.reference.is_selection());
+        if reads_sel {
+            super::gates::heights_gate(world, prev.setup.as_deref(), &src, &prev.params)?;
+        }
+        let next = Operation { src, ..prev.clone() };
         Ok(SetOperationGeometry { name: name.to_string(), prev, next })
     }
 }

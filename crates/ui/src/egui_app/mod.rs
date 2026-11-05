@@ -54,6 +54,8 @@ pub(crate) mod world;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod heights_tests;
 
 /// Entry for `--ui egui`; returns the process exit code. `--headless`
 /// selects the no-window proof (seeded document, fallback adapter, View3D

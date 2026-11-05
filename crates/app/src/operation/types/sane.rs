@@ -11,7 +11,10 @@ impl OpParams {
     /// heights and runs in [`crate::operation::depth_sane`] wherever a command holds the
     /// world; the generators own the deep rules (stepover vs diameter,
     /// lead sizes), which still fire inside `GenerateOperation`'s
-    /// constructor.
+    /// constructor. A From: Selection height (M11.3 A) is structurally
+    /// sane like any reference - a finite offset; whether the op's source
+    /// answers it is a world question, asked by the commands' heights
+    /// door (`selection_heights_sane`) and refused there by name.
     #[must_use]
     pub fn is_sane(&self) -> bool {
         let pos = |v: f64| v.is_finite() && v > 0.0;

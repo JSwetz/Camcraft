@@ -9,11 +9,16 @@ impl OpParams {
     /// entity - a stock-sourced Face with a `TopOfModel` cut height must
     /// go Stale when a model moves, and nothing else feeds that world in.
     /// Resolved Zs are not double-counted for Fixed heights: their
-    /// offset bits are the whole truth.
+    /// offset bits are the whole truth. The Selection references (M11.3
+    /// A) take the appended tags 6/7 and resolve against `src`, the op's
+    /// own source: a selection change moves the resolved Z, so the op
+    /// goes Stale; a params set that never reads the selection writes
+    /// exactly its old bytes.
     pub(super) fn stamp_with(
         &self,
         world: &World,
         setup: Option<&str>,
+        src: Option<&SrcRef>,
         h: &mut std::hash::DefaultHasher,
     ) {
         let w = |h: &mut std::hash::DefaultHasher, v: f64| h.write(&v.to_bits().to_le_bytes());
@@ -25,12 +30,14 @@ impl OpParams {
                 HeightReference::TopOfModel => (3, 0),
                 HeightReference::BottomOfModel => (4, 0),
                 HeightReference::WorkOffset(i) => (5, i.min(255) as u8),
+                HeightReference::TopOfSelection => (6, 0),
+                HeightReference::BottomOfSelection => (7, 0),
             };
             h.write_u8(tag);
             h.write_u8(slot);
             w(h, v.offset);
             if tag != 0 {
-                match resolve_height(world, setup, v) {
+                match resolve_height(world, setup, src, v) {
                     Some(z) => {
                         h.write_u8(1);
                         w(h, z);

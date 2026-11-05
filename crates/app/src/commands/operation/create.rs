@@ -12,7 +12,7 @@ use crate::operation::{OpParams, SrcRef};
 use crate::schema::{Location, Operation, Toolpath};
 use crate::verify::Warning;
 
-use super::gates::{check_tool, family_gate, tool_gate, valid_src};
+use super::gates::{check_tool, family_gate, heights_gate, tool_gate, valid_src};
 
 /// Create an operation entity. Deliberately does not generate: a new
 /// operation reads "never generated" until `GenerateOperation` runs, the
@@ -51,13 +51,9 @@ impl CreateOperation {
         }
         // Ordering needs resolved heights, and the world is in hand right
         // here: an operation that would cut upward is refused at creation
-        // (AGENTS.md: validate early), not deep in the generator.
-        if !crate::operation::depth_sane(world, setup.as_deref(), &params) {
-            return Err(CommandError::Invalid(format!(
-                "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
-                params.kind()
-            )));
-        }
+        // (AGENTS.md: validate early), not deep in the generator - and
+        // so is a From: Selection height its source cannot answer.
+        heights_gate(world, setup.as_deref(), &src, &params)?;
         if let Some(msg) = crate::operation::side_sane(&params, &src) {
             return Err(CommandError::Invalid(msg));
         }

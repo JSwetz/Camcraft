@@ -468,7 +468,9 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
     params_fields(ui, state, tab);
     // The whole-panel unresolved line is operations.rs's law, same as the
     // retired imgui page's.
-    if let Some(note) = unresolved_note(&state.world, live_setup, &state.op_ui.params) {
+    if let Some(note) =
+        unresolved_note(&state.world, live_setup, Some(&state.op_ui.src()), &state.op_ui.params)
+    {
         ui.label(note);
     }
     ui.separator();
@@ -636,6 +638,10 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
     let op_ctx: Option<String> = model::find_by_name(&state.world, &nm)
         .and_then(|e| model::operation_of(&state.world, &e))
         .and_then(|o| o.setup);
+    // ...and against the operation's own source, which a From: Selection
+    // height reads (M11.3 A): handed to every height editor of this
+    // pass through the frame's temp data, so no row signature moves.
+    ui.data_mut(|d| d.insert_temp(egui::Id::new(HEIGHT_SRC_ID), state.op_ui.src()));
     if let OpParams::Drill {
         cycle: camcraft_app::drilling::CycleChoice::Auto,
         holes,
@@ -4129,8 +4135,19 @@ fn height_editor(
     tag: &str,
 ) {
     ui.push_id(tag, |ui| {
-        height_editor_inner(ui, world, setup, h);
+        height_editor_inner(ui, world, setup, h, height_tag_is_bottom(tag));
     });
+}
+
+/// The frame-temp key `params_fields` stores the edited op's source under,
+/// for the height editors' From: Selection echo (M11.3 A).
+const HEIGHT_SRC_ID: &str = "camcraft.height_src";
+
+/// Whether a height editor's tag names a floor - the last level, the cut
+/// plane, the facing or parting plane - so "Selection" there measures from
+/// the selection's LOWEST Z; every other height from its highest.
+fn height_tag_is_bottom(tag: &str) -> bool {
+    [".bottom", ".cut", ".face", ".plane"].iter().any(|s| tag.ends_with(s))
 }
 
 fn height_editor_inner(
@@ -4138,9 +4155,11 @@ fn height_editor_inner(
     world: &flecs_ecs::prelude::World,
     setup: Option<&str>,
     h: &mut Height,
+    bottom: bool,
 ) {
     let u = units::of(world);
-    let mut idx = h.reference.kind_index().min(5);
+    let src: Option<SrcRef> = ui.data(|d| d.get_temp(egui::Id::new(HEIGHT_SRC_ID)));
+    let mut idx = h.reference.kind_index().min(HeightReference::KIND_LABELS.len() - 1);
     let before = idx;
     ui.horizontal(|ui| {
         ui.label("From");
@@ -4153,7 +4172,8 @@ fn height_editor_inner(
             2 => HeightReference::BottomOfStock,
             3 => HeightReference::TopOfModel,
             4 => HeightReference::BottomOfModel,
-            _ => HeightReference::WorkOffset(h.reference.wcs_slot().min(WCS_SLOTS.len() - 1)),
+            5 => HeightReference::WorkOffset(h.reference.wcs_slot().min(WCS_SLOTS.len() - 1)),
+            _ => HeightReference::selection_for(bottom),
         };
     }
     if matches!(h.reference, HeightReference::WorkOffset(_)) {
@@ -4170,7 +4190,8 @@ fn height_editor_inner(
         ui.label(offset_label(h.reference));
         num(ui, u, &mut h.offset);
         ui.add(
-            Label::new(egui::RichText::new(height_echo(world, setup, h)).weak()).selectable(false),
+            Label::new(egui::RichText::new(height_echo(world, setup, src.as_ref(), h)).weak())
+                .selectable(false),
         );
     });
 }

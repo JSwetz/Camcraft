@@ -319,13 +319,14 @@ fn render_operations(world: &World, target: Option<&String>, out: &mut String) {
         let mut notes: Vec<String> = Vec::new();
         for (i, (col, field, expr)) in cols.iter().enumerate() {
             match expr {
-                Some(h) => match operation::resolve_height(world, op.setup.as_deref(), *h) {
+                Some(h) => match operation::resolve_height(world, op.setup.as_deref(), Some(&op.src), *h) {
                     Some(z) => cells[i] = mm(z),
                     None => {
                         cells[i] = "-".to_string();
                         let why = operation::missing_source(
                             world,
                             op.setup.as_deref(),
+                            Some(&op.src),
                             h.reference,
                         )
                         .unwrap_or("the height does not resolve");
@@ -354,7 +355,7 @@ fn render_operations(world: &World, target: Option<&String>, out: &mut String) {
             out.push_str(&n);
             out.push('\n');
         }
-        render_cycles(world, op.setup.as_deref(), &op.tool, &op.params, out);
+        render_cycles(world, op.setup.as_deref(), &op.src, &op.tool, &op.params, out);
     }
     if count == 0 {
         out.push_str("  (no operations in this setup)\n");
@@ -370,6 +371,7 @@ fn render_operations(world: &World, target: Option<&String>, out: &mut String) {
 fn render_cycles(
     world: &World,
     op_setup: Option<&str>,
+    src: &operation::SrcRef,
     tool_name: &str,
     params: &OpParams,
     out: &mut String,
@@ -388,8 +390,9 @@ fn render_cycles(
         out.push_str("      (no holes)\n");
         return;
     }
-    let r_z = operation::resolve_height(world, op_setup, *top_z);
-    let override_z = (*bottom_z).and_then(|b| operation::resolve_height(world, op_setup, b));
+    let r_z = operation::resolve_height(world, op_setup, Some(src), *top_z);
+    let override_z =
+        (*bottom_z).and_then(|b| operation::resolve_height(world, op_setup, Some(src), b));
     let tool = model::find_by_name(world, tool_name).and_then(|e| model::tool_of(world, &e));
     for (i, h) in holes.iter().enumerate() {
         let bottom = override_z.unwrap_or(h.floor_z);

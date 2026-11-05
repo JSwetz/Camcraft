@@ -69,6 +69,8 @@ use crate::verify::{self, VerifyContext, Warning};
 
 mod heights;
 pub use heights::*;
+mod heights_sel;
+pub use heights_sel::*;
 mod kinds;
 pub use kinds::*;
 pub mod tool_law;

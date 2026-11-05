@@ -1601,7 +1601,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
         setup: None,
     };
-    assert_eq!(operation::region_z(&world, None, &trace.params), Some(10.0));
+    assert_eq!(operation::region_z(&world, None, None, &trace.params), Some(10.0));
     let region = operation::region_of(&world, &trace).expect("a box sections cleanly at 10 mm");
     assert_eq!(region.loops().len(), 1);
     // The section keeps the mesh's per-face triangle splits, so the ring
@@ -1638,7 +1638,7 @@ fn region_of_is_the_preview_of_what_generate_would_cut() {
         stamp: None,
         setup: None,
     };
-    assert_eq!(operation::region_z(&world, None, &face.params), Some(19.5));
+    assert_eq!(operation::region_z(&world, None, None, &face.params), Some(19.5));
     assert!(
         !operation::region_of(&world, &face)
             .expect("footprint")

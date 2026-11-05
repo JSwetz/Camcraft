@@ -21,18 +21,29 @@ pub enum HeightReference {
     /// existing-but-unplaced slot reads as the world origin, exactly as
     /// the rest of the world treats an entity nobody has moved.
     WorkOffset(usize),
+    /// The highest Z of the operation's OWN source geometry (M11.3 A):
+    /// its picked features, its named entity's bounds, or the setup's
+    /// stock box - [`crate::operation::selection_z_range`] states the
+    /// rule per source. Appended after every older reference so no
+    /// existing kind index, stamp tag or file word moves.
+    TopOfSelection,
+    /// The lowest Z of the same geometry (a picked flat face: its Z).
+    BottomOfSelection,
 }
 
 impl HeightReference {
     /// Panel combo entries, in this order; WorkOffset gets its slot name
     /// appended by the panel.
-    pub const KIND_LABELS: [&'static str; 6] = [
+    /// "Selection" is ONE entry for both selection ends: the height it is
+    /// chosen for decides the end ([`Self::selection_for`]).
+    pub const KIND_LABELS: [&'static str; 7] = [
         "Fixed value",
         "Top of stock",
         "Bottom of stock",
         "Top of model",
         "Bottom of model",
         "Work offset",
+        "Selection",
     ];
 
     /// Which entry of [`Self::KIND_LABELS`] this reference's kind is.
@@ -45,7 +56,26 @@ impl HeightReference {
             HeightReference::TopOfModel => 3,
             HeightReference::BottomOfModel => 4,
             HeightReference::WorkOffset(_) => 5,
+            HeightReference::TopOfSelection | HeightReference::BottomOfSelection => 6,
         }
+    }
+
+    /// The "Selection" entry spoken for one height slot (M11.3 A): a
+    /// bottom (floor / cut / parting plane) measures from the
+    /// selection's lowest Z; clearance, retract and top from its highest.
+    #[must_use]
+    pub fn selection_for(bottom: bool) -> Self {
+        if bottom {
+            HeightReference::BottomOfSelection
+        } else {
+            HeightReference::TopOfSelection
+        }
+    }
+
+    /// Whether this reference reads the operation's own selection.
+    #[must_use]
+    pub fn is_selection(&self) -> bool {
+        matches!(self, HeightReference::TopOfSelection | HeightReference::BottomOfSelection)
     }
 
     /// The slot index for WorkOffset references, 0 for everything else.
@@ -82,6 +112,8 @@ impl core::fmt::Display for HeightReference {
                 Some(name) => f.write_str(name),
                 None => write!(f, "work offset #{i}"),
             },
+            HeightReference::TopOfSelection => f.write_str("selection top"),
+            HeightReference::BottomOfSelection => f.write_str("selection bottom"),
         }
     }
 }

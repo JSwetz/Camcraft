@@ -1193,6 +1193,11 @@ pub enum HeightRefDto {
     TopOfModel,
     BottomOfModel,
     WorkOffset { slot: usize },
+    /// The selection references (M11.3 A). Appended words: no earlier
+    /// file can hold them and every earlier word reads as before, so
+    /// the format version does not move (the EntryDto::Arc law).
+    TopOfSelection,
+    BottomOfSelection,
 }
 
 /// One stored height: `{"reference": ..., "offset": z}`. A bare number
@@ -1267,6 +1272,8 @@ impl From<crate::operation::HeightReference> for HeightRefDto {
             R::TopOfModel => HeightRefDto::TopOfModel,
             R::BottomOfModel => HeightRefDto::BottomOfModel,
             R::WorkOffset(slot) => HeightRefDto::WorkOffset { slot },
+            R::TopOfSelection => HeightRefDto::TopOfSelection,
+            R::BottomOfSelection => HeightRefDto::BottomOfSelection,
         }
     }
 }
@@ -1281,6 +1288,8 @@ impl From<HeightRefDto> for crate::operation::HeightReference {
             HeightRefDto::TopOfModel => R::TopOfModel,
             HeightRefDto::BottomOfModel => R::BottomOfModel,
             HeightRefDto::WorkOffset { slot } => R::WorkOffset(slot),
+            HeightRefDto::TopOfSelection => R::TopOfSelection,
+            HeightRefDto::BottomOfSelection => R::BottomOfSelection,
         }
     }
 }

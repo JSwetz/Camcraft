@@ -1010,7 +1010,7 @@ pub(crate) fn region_lines(state: &State) -> Vec<[f32; 6]> {
         let Some(op) = model::operation_of(&state.world, &entity) else {
             continue;
         };
-        let Some(z) = operation::region_z(&state.world, op.setup.as_deref(), &op.params) else {
+        let Some(z) = operation::region_z(&state.world, op.setup.as_deref(), Some(&op.src), &op.params) else {
             continue; // the region plane's source is gone - draw nothing
                       // rather than an outline at a guessed level
         };
@@ -1065,7 +1065,7 @@ pub(crate) fn shown_regions(state: &State) -> Vec<(f64, Option<Region>)> {
             continue;
         };
         let region = operation::region_of(&state.world, &op);
-        if let Some(z) = operation::region_z(&state.world, op.setup.as_deref(), &op.params)
+        if let Some(z) = operation::region_z(&state.world, op.setup.as_deref(), Some(&op.src), &op.params)
             && (region.is_some() || !operation::chains_of(&state.world, &op).is_empty())
         {
             out.push((z, region));
@@ -1129,9 +1129,12 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
     // an unavailable source drops its plane (never a rectangle at a
     // guessed z) - the panel says why, and generation refuses by name.
     let world = &state.world;
+    // A From: Selection height reads the open op's own source (M11.3 A).
+    let src_owned = state.op_ui.src();
+    let src = Some(&src_owned);
     let mut out = Vec::new();
     let clr = draft.clearance();
-    if let Some(z) = clr.z(world) {
+    if let Some(z) = clr.z_in(world, None, src) {
         out.push(HeightPlane {
             z,
             src: clr,
@@ -1223,7 +1226,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         | operation::OpParams::Deburr { .. } => None,
     };
     if let Some(hop) = hop
-        && let (Some(r), Some(c)) = (hop.z(world), draft.clearance().z(world))
+        && let (Some(r), Some(c)) = (hop.z_in(world, None, src), draft.clearance().z_in(world, None, src))
     {
         out.push(HeightPlane {
             z: r.min(c),
@@ -1240,9 +1243,9 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // stages: then its Top is the first level, drawn like the depth
         // kinds' Top, with the finished Cut below it.
         operation::OpParams::Face { top_z, cut_z, .. } => {
-            let cut = cut_z.z(world);
+            let cut = cut_z.z_in(world, None, src);
             if let (Some(t), Some(c)) = ((*top_z).to_owned(), cut)
-                && let Some(tz) = t.z(world)
+                && let Some(tz) = t.z_in(world, None, src)
                 && tz != c
             {
                 out.push(HeightPlane {
@@ -1346,7 +1349,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // loci are clipped by (M2.5 E B).
         | operation::OpParams::BoringTurning { top_z, bottom_z, .. }
         | operation::OpParams::Deburr { top_z, bottom_z, .. } => {
-            if let Some(z) = top_z.z(world) {
+            if let Some(z) = top_z.z_in(world, None, src) {
                 out.push(HeightPlane {
                     z,
                     src: *top_z,
@@ -1356,7 +1359,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                     skip_rect: stands(z),
                 });
             }
-            if let Some(z) = bottom_z.z(world) {
+            if let Some(z) = bottom_z.z_in(world, None, src) {
                 out.push(HeightPlane {
                     z,
                     src: *bottom_z,
@@ -1373,7 +1376,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // blade severs comes from the model, so painting a Top the
         // path never walks to would advertise a window it cuts past.
         operation::OpParams::Part { bottom_z, .. } => {
-            if let Some(z) = bottom_z.z(world) {
+            if let Some(z) = bottom_z.z_in(world, None, src) {
                 out.push(HeightPlane {
                     z,
                     src: *bottom_z,
@@ -1392,7 +1395,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         // measured against is not. The corner Z rides the pane's read
         // of the same two numbers.
         operation::OpParams::Chamfer2D { top_z, .. } => {
-            if let Some(z) = top_z.z(world) {
+            if let Some(z) = top_z.z_in(world, None, src) {
                 out.push(HeightPlane {
                     z,
                     src: *top_z,
@@ -1412,7 +1415,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
         operation::OpParams::Drill { top_z, bottom_z, .. }
         | operation::OpParams::Bore { top_z, bottom_z, .. }
         | operation::OpParams::Thread { top_z, bottom_z, .. } => {
-            if let Some(z) = top_z.z(world) {
+            if let Some(z) = top_z.z_in(world, None, src) {
                 out.push(HeightPlane {
                     z,
                     src: *top_z,
@@ -1423,7 +1426,7 @@ pub(crate) fn height_planes(state: &State) -> Vec<HeightPlane> {
                 });
             }
             if let Some(b) = bottom_z
-                && let Some(z) = b.z(world)
+                && let Some(z) = b.z_in(world, None, src)
             {
                 out.push(HeightPlane {
                     z,

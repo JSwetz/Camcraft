@@ -114,3 +114,26 @@ pub(super) fn tool_gate(world: &World, params: &OpParams, tool: &str) -> Result<
         None => Ok(()),
     }
 }
+
+/// The heights door (M11.3 A), one call for every command that writes
+/// params or a source: ordering on resolved values (an op that would cut
+/// upward), then every From: Selection height resolving against the
+/// op's own source - an empty or vanished selection refuses by name
+/// here, never reaches a generator as a silent 0.
+pub(super) fn heights_gate(
+    world: &World,
+    setup: Option<&str>,
+    src: &SrcRef,
+    params: &OpParams,
+) -> Result<(), CommandError> {
+    if let Some(why) = operation::selection_heights_sane(world, setup, src, params) {
+        return Err(CommandError::Invalid(why));
+    }
+    if !operation::depth_sane(world, setup, Some(src), params) {
+        return Err(CommandError::Invalid(format!(
+            "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
+            params.kind()
+        )));
+    }
+    Ok(())
+}

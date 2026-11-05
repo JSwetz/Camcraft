@@ -10,7 +10,7 @@ use crate::model;
 use crate::operation::{self, OpParams, SrcRef};
 use crate::schema::Operation;
 
-use super::gates::{check_tool, family_gate, tool_gate, valid_src};
+use super::gates::{check_tool, family_gate, heights_gate, tool_gate, valid_src};
 
 /// Replace an operation's parameters. The cache is left alone and the
 /// stamp is dropped, so the operation reads Stale immediately: the old
@@ -46,12 +46,7 @@ impl EditOperationParams {
                 params.kind()
             )));
         }
-        if !crate::operation::depth_sane(world, prev.setup.as_deref(), &params) {
-            return Err(CommandError::Invalid(format!(
-                "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
-                params.kind()
-            )));
-        }
+        heights_gate(world, prev.setup.as_deref(), &prev.src, &params)?;
         if let Some(msg) = crate::operation::side_sane(&params, &prev.src) {
             return Err(CommandError::Invalid(msg));
         }
@@ -114,12 +109,7 @@ impl ChangeOperationKind {
                 params.kind()
             )));
         }
-        if !crate::operation::depth_sane(world, prev.setup.as_deref(), &params) {
-            return Err(CommandError::Invalid(format!(
-                "a {} operation must cut downward: its top height resolves below its bottom height (check the From references)",
-                params.kind()
-            )));
-        }
+        heights_gate(world, prev.setup.as_deref(), &prev.src, &params)?;
         if let Some(msg) = crate::operation::side_sane(&params, &prev.src) {
             return Err(CommandError::Invalid(msg));
         }
@@ -186,6 +176,15 @@ impl EditOperationLinks {
             // generate for commands that arrive via file load.
             if let Some(msg) = crate::operation::side_sane(&next.params, &src) {
                 return Err(CommandError::Invalid(msg));
+            }
+            // From: Selection heights re-resolve against the NEW source
+            // (M11.3 A): one it cannot answer, or answers out of order,
+            // is refused by name here. Params that never read the
+            // selection pass exactly as before.
+            let mut reads_sel = false;
+            next.params.for_each_height(|h| reads_sel |= h.reference.is_selection());
+            if reads_sel {
+                heights_gate(world, prev.setup.as_deref(), &src, &next.params)?;
             }
             next.src = src;
         }

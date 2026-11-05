@@ -98,7 +98,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // The height seam, refused by name before anything else (as the old
     // head refused it, `resolve_params` being the first fallible read
     // after the material).
-    let hs = resolve_params(world, setup, &op.params).map_err(GenError::Invalid)?;
+    let hs = resolve_params(world, setup, Some(&op.src), &op.params).map_err(GenError::Invalid)?;
 
     // The 3+2 wrap (M5.1 B), same refusals, same order: non-finite
     // letters first, then the tilted-selection lock.
@@ -130,7 +130,7 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     // The arm-scoped world reads, precomputed under the same guards
     // that decide which arm runs them; each result surfaces at its
     // arm's own statement in `run_job`.
-    let section_z = section_z_of(world, setup, &op.params);
+    let section_z = section_z_of(world, setup, Some(&op.src), &op.params);
     let picked_region = match (&op.params, &op.src) {
         // Contour's Selection pair is resolved as raw geometry below
         // (its arm never asks for a region first); every other kind

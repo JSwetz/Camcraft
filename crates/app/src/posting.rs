@@ -445,7 +445,7 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             .and_then(|t| model::tool_of(world, &t))
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
         let setup = op.setup.as_deref();
-        let hs = operation::resolve_params(world, setup, &op.params)
+        let hs = operation::resolve_params(world, setup, Some(&op.src), &op.params)
             .map_err(|err| format!("{name}: {err}"))?;
         let tool_number = tool_ranks
             .iter()

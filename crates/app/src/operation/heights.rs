@@ -13,13 +13,26 @@ impl Height {
     }
 
     /// The same resolve in a declared setup context ([`crate::setup`]).
+    /// No operation source is in hand, so a Selection reference reads
+    /// None here - callers holding the op use [`resolve_height`].
     #[must_use]
     pub fn z_for(
         &self,
         world: &flecs_ecs::prelude::World,
         setup: Option<&str>,
     ) -> Option<f64> {
-        resolve_height(world, setup, *self)
+        resolve_height(world, setup, None, *self)
+    }
+
+    /// The full resolve: setup context plus the operation's own source.
+    #[must_use]
+    pub fn z_in(
+        &self,
+        world: &flecs_ecs::prelude::World,
+        setup: Option<&str>,
+        src: Option<&SrcRef>,
+    ) -> Option<f64> {
+        resolve_height(world, setup, src, *self)
     }
 
 }
@@ -34,10 +47,14 @@ impl Height {
 /// lookup exactly - the implicit-setup law of [`crate::setup`]). The
 /// model bounds are document-wide: the part is the part whatever setup
 /// holds it; only the stock box and the offset planes follow the setup.
+/// `src` is the asking operation's own source, which the Selection
+/// references read ([`selection_z_range`], M11.3 A); None = no op in
+/// hand, and a Selection reference is then unresolved, never guessed.
 #[must_use]
 pub fn resolve_height(
     world: &flecs_ecs::prelude::World,
     setup: Option<&str>,
+    src: Option<&SrcRef>,
     h: Height,
 ) -> Option<f64> {
     let base = match h.reference {
@@ -50,6 +67,9 @@ pub fn resolve_height(
             let entity = crate::setup::wcs_entity(world, setup, i)?;
             model::transform_of(world, &entity).unwrap_or_default().pos.z
         }
+        HeightReference::TopOfSelection | HeightReference::BottomOfSelection => {
+            selection_base(world, setup, src, h.reference)?
+        }
     };
     (base + h.offset).is_finite().then_some(base + h.offset)
 }
@@ -60,9 +80,14 @@ pub fn resolve_height(
 pub fn missing_source(
     world: &flecs_ecs::prelude::World,
     setup: Option<&str>,
+    src: Option<&SrcRef>,
     r: HeightReference,
 ) -> Option<&'static str> {
     match r {
+        HeightReference::TopOfSelection | HeightReference::BottomOfSelection => match src {
+            None => Some(SELECTION_UNKNOWN),
+            Some(s) => selection_z_range(world, setup, s).err(),
+        },
         HeightReference::Fixed => None,
         HeightReference::TopOfStock | HeightReference::BottomOfStock => {
             model::stock_world_aabb_for(world, setup)
@@ -88,12 +113,13 @@ pub fn missing_source(
 pub fn region_z(
     world: &flecs_ecs::prelude::World,
     setup: Option<&str>,
+    src: Option<&SrcRef>,
     params: &OpParams,
 ) -> Option<f64> {
     match params {
         OpParams::Face { top_z, cut_z, .. } => top_z
-            .map(|t| resolve_height(world, setup, t))
-            .unwrap_or_else(|| resolve_height(world, setup, *cut_z)),
+            .map(|t| resolve_height(world, setup, src, t))
+            .unwrap_or_else(|| resolve_height(world, setup, src, *cut_z)),
         OpParams::Contour { top_z, .. }
         | OpParams::Pocket { top_z, .. }
         // The roughing twins name the pocket's high station (M2.4 A),
@@ -140,7 +166,7 @@ pub fn region_z(
         | OpParams::Thread { top_z, .. }
         // The deburr window's ceiling names the same high station:
         // the ride's tips stand at or below it (M2.5 E B).
-        | OpParams::Deburr { top_z, .. } => resolve_height(world, setup, *top_z),
+        | OpParams::Deburr { top_z, .. } => resolve_height(world, setup, src, *top_z),
     }
 }
 
@@ -179,10 +205,12 @@ impl ResolvedHeights {
 pub fn resolve_params(
     world: &flecs_ecs::prelude::World,
     setup: Option<&str>,
+    src: Option<&SrcRef>,
     params: &OpParams,
 ) -> Result<ResolvedHeights, String> {
     let req = |what: &str, h: Height| -> Result<f64, String> {
-        resolve_height(world, setup, h).ok_or_else(|| unresolved_msg(what, h, world, setup))
+        resolve_height(world, setup, src, h)
+            .ok_or_else(|| unresolved_msg(what, h, world, setup, src))
     };
     let opt = |what: &str, h: Option<Height>| -> Result<Option<f64>, String> {
         h.map(|v| req(what, v)).transpose()
@@ -354,9 +382,10 @@ pub fn resolve_params(
 pub fn resolve_map(
     world: &flecs_ecs::prelude::World,
     setup: Option<&str>,
+    src: Option<&SrcRef>,
     params: &OpParams,
 ) -> (Option<f64>, Option<f64>) {
-    match resolve_params(world, setup, params) {
+    match resolve_params(world, setup, src, params) {
         Ok(r) => {
             if matches!(params, OpParams::Face { .. }) {
                 let cut = r.bottom;
@@ -366,30 +395,5 @@ pub fn resolve_map(
             }
         }
         Err(_) => (None, None),
-    }
-}
-
-/// Ordering sanity on resolved values: an operation whose top is not
-/// above its bottom (or whose finished cut is not below its first stage)
-/// is refused at command creation. A height that cannot resolve is not
-/// here's business: `resolve_params` refuses it at generation, by name.
-#[must_use]
-pub fn depth_sane(
-    world: &flecs_ecs::prelude::World,
-    setup: Option<&str>,
-    params: &OpParams,
-) -> bool {
-    let Ok(r) = resolve_params(world, setup, params) else {
-        return true; // unresolved is refused elsewhere, never a false lie here
-    };
-    match params {
-        OpParams::Face { .. } => match (r.face_top, r.bottom) {
-            (Some(t), Some(c)) => t >= c,
-            _ => true,
-        },
-        _ => match (r.top, r.bottom) {
-            (Some(t), Some(b)) => t > b,
-            _ => true,
-        },
     }
 }

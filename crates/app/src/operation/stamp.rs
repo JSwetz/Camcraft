@@ -110,7 +110,7 @@ pub fn current_stamp(
     if matches!(params, OpParams::Thread { .. }) {
         w(&mut h, tool.pitch);
     }
-    params.stamp_with(world, setup, &mut h);
+    params.stamp_with(world, setup, Some(src), &mut h);
     match src {
         SrcRef::Stock => {
             h.write_u8(b'S');
@@ -338,7 +338,9 @@ pub fn stale_reason(
         }
     }
     for h in collect_heights(&op.params) {
-        if let Some(missing) = missing_source(world, op.setup.as_deref(), h.reference) {
+        if let Some(missing) =
+            missing_source(world, op.setup.as_deref(), Some(&op.src), h.reference)
+        {
             return Some(format!("a height is measured from {missing}"));
         }
     }

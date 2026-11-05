@@ -217,15 +217,24 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
     }
     let material = material_of(world, op.setup.as_deref(), &op.src).ok()?;
     match &frame {
-        None => region_for(world, op.setup.as_deref(), &material, &op.params, None).ok(),
+        None => region_for(world, op.setup.as_deref(), Some(&op.src), &material, &op.params, None).ok(),
         Some(f) => {
             let local = Material {
                 facets: f.local_facets(&material.facets),
                 top: material.top - f.origin.z,
             };
-            let local = region_for(world, op.setup.as_deref(), &local, &op.params, Some(f)).ok()?;
+            let local = region_for(
+                world,
+                op.setup.as_deref(),
+                Some(&op.src),
+                &local,
+                &op.params,
+                Some(f),
+            )
+            .ok()?;
             let zl =
-                resolve_height(world, op.setup.as_deref(), op.params.region_height())? - f.origin.z;
+                resolve_height(world, op.setup.as_deref(), Some(&op.src), op.params.region_height())?
+                    - f.origin.z;
             f.world_region(&local, zl).ok()
         }
     }
@@ -364,11 +373,12 @@ pub(super) fn selection_drives_region(params: &OpParams) -> bool {
 pub(super) fn region_for(
     world: &World,
     setup: Option<&str>,
+    src: Option<&SrcRef>,
     material: &Material,
     params: &OpParams,
     frame: Option<&crate::cl::TiltedFrame>,
 ) -> Result<Region, GenError> {
-    let z = section_z_of(world, setup, params).unwrap_or(Ok(0.0));
+    let z = section_z_of(world, setup, src, params).unwrap_or(Ok(0.0));
     region_core(material, params, frame, z)
 }
 
@@ -382,6 +392,7 @@ pub(super) fn region_for(
 pub(super) fn section_z_of(
     world: &World,
     setup: Option<&str>,
+    src: Option<&SrcRef>,
     params: &OpParams,
 ) -> Option<Result<f64, GenError>> {
     let top_z = match params {
@@ -400,8 +411,8 @@ pub(super) fn section_z_of(
         _ => return None,
     };
     Some(
-        resolve_height(world, setup, top_z)
-            .ok_or_else(|| unresolved_err("Top of Part Z", top_z, world, setup)),
+        resolve_height(world, setup, src, top_z)
+            .ok_or_else(|| unresolved_err("Top of Part Z", top_z, world, setup, src)),
     )
 }
 
@@ -634,12 +645,18 @@ pub(super) fn rim_is(l: &Loop, h: Hole) -> bool {
 /// The shared refusal phrasing for an unresolved height, named by field.
 /// One source so `resolve_params`, the region builders and every command
 /// error read identically.
-pub fn unresolved_msg(what: &str, h: Height, world: &World, setup: Option<&str>) -> String {
+pub fn unresolved_msg(
+    what: &str,
+    h: Height,
+    world: &World,
+    setup: Option<&str>,
+    src: Option<&SrcRef>,
+) -> String {
     format!(
         "{what} (From: {ref}, offset {off}) is unresolved: {why}",
         ref = h.reference,
         off = h.offset,
-        why = missing_source(world, setup, h.reference)
+        why = missing_source(world, setup, src, h.reference)
             .unwrap_or("the source has no finite height"),
     )
 }
@@ -649,8 +666,9 @@ pub(super) fn unresolved_err(
     h: Height,
     world: &World,
     setup: Option<&str>,
+    src: Option<&SrcRef>,
 ) -> GenError {
-    GenError::Invalid(unresolved_msg(what, h, world, setup))
+    GenError::Invalid(unresolved_msg(what, h, world, setup, src))
 }
 
 /// A required height slot of an already-`Ok` `ResolvedHeights` is `Some`

@@ -41,7 +41,7 @@ fn params_sanity_gates() {
         plunge_feed: 100.0,
         climb: true,
     };
-    assert!(ok.is_sane() && depth_sane(&world, None, &ok));
+    assert!(ok.is_sane() && depth_sane(&world, None, None, &ok));
     // Staged facing is sane when it descends: a top below the
     // finished height, or a zero stepdown, is not.
     let staged = OpParams::Face { tilt: None, blend_turns: false,
@@ -54,7 +54,7 @@ fn params_sanity_gates() {
         plunge_feed: 100.0,
         climb: true,
     };
-    assert!(staged.is_sane() && depth_sane(&world, None, &staged));
+    assert!(staged.is_sane() && depth_sane(&world, None, None, &staged));
     let low = OpParams::Face { tilt: None, blend_turns: false,
         stepover: 8.0,
         clearance_z: Height::fixed(5.0),
@@ -67,7 +67,7 @@ fn params_sanity_gates() {
     };
     assert!(low.is_sane(), "structurally fine - the order is the flaw");
     assert!(
-        !depth_sane(&world, None, &low),
+        !depth_sane(&world, None, None, &low),
         "staged top below the finished height"
     );
     let no_step = OpParams::Face { tilt: None, blend_turns: false,
@@ -112,7 +112,7 @@ fn params_sanity_gates() {
         climb: true,
     };
     assert!(up.is_sane());
-    assert!(!depth_sane(&world, None, &up));
+    assert!(!depth_sane(&world, None, None, &up));
     // An out-of-range slot is structural: there is no seventh offset.
     let ghost = OpParams::Trace { tilt: None,
         clearance_z: Height::fixed(5.0),
@@ -168,9 +168,9 @@ fn stamp_follows_every_input() {
     let mut ha = std::hash::DefaultHasher::new();
     let mut hb = std::hash::DefaultHasher::new();
     let mut hc = std::hash::DefaultHasher::new();
-    a.stamp_with(&world, None, &mut ha);
-    b.stamp_with(&world, None, &mut hb);
-    c.stamp_with(&world, None, &mut hc);
+    a.stamp_with(&world, None, None, &mut ha);
+    b.stamp_with(&world, None, None, &mut hb);
+    c.stamp_with(&world, None, None, &mut hc);
     assert_ne!(ha.finish(), hb.finish());
     assert_ne!(ha.finish(), hc.finish(), "staging moves the stamp");
     // The registry law (M5.0.2): one row per kind, table order ==
@@ -222,7 +222,7 @@ fn face_stamp_moves_with_stepdown() {
     };
     let digest = |p: &OpParams| {
         let mut h = std::hash::DefaultHasher::new();
-        p.stamp_with(&world, None, &mut h);
+        p.stamp_with(&world, None, None, &mut h);
         h.finish()
     };
     let legacy = face_with(None, None);
@@ -260,7 +260,7 @@ fn advanced_swarf_stamp_moves_with_passes() {
     };
     let digest = |p: &OpParams| {
         let mut h = std::hash::DefaultHasher::new();
-        p.stamp_with(&world, None, &mut h);
+        p.stamp_with(&world, None, None, &mut h);
         h.finish()
     };
     assert_ne!(digest(&ladder(1)), digest(&ladder(2)), "a rung is geometry");
@@ -319,7 +319,7 @@ fn rotary_twins_stamp_apart_and_with_their_stepover() {
     };
     let digest = |p: &OpParams| {
         let mut h = std::hash::DefaultHasher::new();
-        p.stamp_with(&world, None, &mut h);
+        p.stamp_with(&world, None, None, &mut h);
         h.finish()
     };
     assert_ne!(digest(&contour), digest(&parallel(None)), "the twins are different rows");
@@ -358,7 +358,7 @@ fn rotary_offset_stamp_moves_with_its_wrap_numbers() {
     };
     let digest = |p: &OpParams| {
         let mut h = std::hash::DefaultHasher::new();
-        p.stamp_with(&world, None, &mut h);
+        p.stamp_with(&world, None, None, &mut h);
         h.finish()
     };
     let auto = PocketStrategy::Auto;
@@ -414,7 +414,7 @@ fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
     };
     let digest = |p: &OpParams| {
         let mut h = std::hash::DefaultHasher::new();
-        p.stamp_with(&world, None, &mut h);
+        p.stamp_with(&world, None, None, &mut h);
         h.finish()
     };
     assert_ne!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(10.0, 0.0, 90.0)), "lead poses every flank");
@@ -482,7 +482,7 @@ fn the_arc_entry_splits_the_stamp_and_leaves_the_others_alone() {
     };
     let digest = |p: &OpParams| {
         let mut h = std::hash::DefaultHasher::new();
-        p.stamp_with(&world, None, &mut h);
+        p.stamp_with(&world, None, None, &mut h);
         h.finish()
     };
     let arc = digest(&pocket(Entry3D::Arc));

@@ -124,7 +124,7 @@ fn work_offset_reference_reads_the_slots_plane() {
     // and the diagnostic says what to do about it.
     let g54 = h(HeightReference::WorkOffset(0), 0.0);
     assert_eq!(g54.z(&world), None);
-    assert!(operation::missing_source(&world, None,g54.reference)
+    assert!(operation::missing_source(&world, None, None, g54.reference)
         .unwrap()
         .contains("no origin yet"));
     history.execute(
@@ -147,7 +147,7 @@ fn work_offset_reference_reads_the_slots_plane() {
     );
     assert_eq!(h(HeightReference::WorkOffset(5), 0.0).z(&world), Some(7.0));
     assert_eq!(h(HeightReference::WorkOffset(6), 0.0).z(&world), None);
-    assert!(operation::missing_source(&world, None,HeightReference::WorkOffset(6))
+    assert!(operation::missing_source(&world, None, None, HeightReference::WorkOffset(6))
         .unwrap()
         .contains("out of range"));
     // Only the plane's z feeds a height: XY and rotations stay outside.
@@ -173,7 +173,7 @@ fn resolve_params_agrees_with_resolving_heights_one_by_one() {
         h(HeightReference::TopOfModel, 0.0),
         h(HeightReference::WorkOffset(0), 0.0),
     );
-    let r = operation::resolve_params(&world, None,&params).expect("all sources stand");
+    let r = operation::resolve_params(&world, None, None, &params).expect("all sources stand");
     if let OpParams::Pocket { clearance_z, top_z, bottom_z, retract_z, .. } = &params {
         assert_eq!(r.clearance, clearance_z.z(&world).unwrap());
         assert_eq!(r.top, top_z.z(&world));
@@ -185,7 +185,7 @@ fn resolve_params_agrees_with_resolving_heights_one_by_one() {
     assert_eq!((Some(r.clearance), r.top, r.bottom), (Some(25.0), Some(9.0), Some(-1.0)));
     assert_eq!(r.depth(), (Some(9.0), Some(-1.0)));
     // resolve_map hands panels and verify the same pair.
-    assert_eq!(operation::resolve_map(&world, None,&params), (Some(9.0), Some(-1.0)));
+    assert_eq!(operation::resolve_map(&world, None, None, &params), (Some(9.0), Some(-1.0)));
 }
 
 #[test]
@@ -202,18 +202,18 @@ fn missing_sources_are_an_honest_mixed_state() {
     let top = h(HeightReference::TopOfModel, 0.0);
     let bottom = h(HeightReference::WorkOffset(0), 0.0);
     assert_eq!(clearance.z(&world), None);
-    assert!(operation::missing_source(&world, None,clearance.reference)
+    assert!(operation::missing_source(&world, None, None, clearance.reference)
         .unwrap()
         .contains("no stock yet"));
     assert_eq!(top.z(&world), None);
-    assert!(operation::missing_source(&world, None,top.reference)
+    assert!(operation::missing_source(&world, None, None, top.reference)
         .unwrap()
         .contains("no model loaded"));
     assert_eq!(bottom.z(&world), Some(0.0));
     // The same three in a params set refuse as a whole; the message
     // names the height and its source, never a silent z.
     let params = pocket(clearance, top, bottom);
-    let err = operation::resolve_params(&world, None,&params).expect_err("no stock, no model");
+    let err = operation::resolve_params(&world, None, None, &params).expect_err("no stock, no model");
     assert!(err.contains("Clearance Z"), "{err}");
     assert!(err.contains("no stock yet"), "{err}");
 }
@@ -266,14 +266,14 @@ fn depth_ordering_is_checked_on_resolved_values() {
         h(HeightReference::TopOfModel, 0.0),     // 9.0 - above its own top
     );
     assert!(up.is_sane(), "each number is fine on its own");
-    assert!(!operation::depth_sane(&world, None,&up), "but 5 -> 9 cuts upward");
+    assert!(!operation::depth_sane(&world, None, None, &up), "but 5 -> 9 cuts upward");
     let unsight = pocket(
         Height::fixed(25.0),
         h(HeightReference::WorkOffset(4), 0.0), // G58 never placed
         h(HeightReference::TopOfModel, 0.0),
     );
     assert!(
-        operation::depth_sane(&world, None,&unsight),
+        operation::depth_sane(&world, None, None, &unsight),
         "an unresolved top is generate's problem, never a false ordering failure",
     );
     let ok = pocket(
@@ -281,7 +281,7 @@ fn depth_ordering_is_checked_on_resolved_values() {
         h(HeightReference::TopOfModel, 0.0),     // 9.0
         h(HeightReference::BottomOfModel, 0.0),  // 5.0
     );
-    assert!(operation::depth_sane(&world, None,&ok));
+    assert!(operation::depth_sane(&world, None, None, &ok));
 }
 
 #[test]
