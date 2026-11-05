@@ -13,16 +13,18 @@
 use std::f64::consts::TAU;
 
 use crate::cl::{MoveKind, PathBuilder};
-use crate::entry::{Entry3D, dive_room, helix_down};
-use crate::entry_arc::{arc_lead, push_arc_lead, seg_dir};
+use crate::entry::{Entry3D, dive_room, helix_turns_down};
+use crate::entry_arc::{arc_lead, push_arc_lead, push_vertical_arc, seg_dir};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
+use crate::links::helix_turns;
 
 use super::arcs::{Seg, walk_tangent};
 use super::contour::{ContourParams, Lead, air_side};
+use super::descent::{dive_link, substituted_dive};
 use super::fillet::Legal;
 use super::lead_fit::{plan_leads, segs_hold, slack};
-use super::levels::{Cert, Motion, dive_link, substituted_dive};
+use super::levels::{Cert, Motion};
 use super::ring::dist;
 use super::slots::chord_clears;
 
@@ -40,77 +42,56 @@ pub(super) struct Engage<'a> {
 /// the bounded air exactly, so every arm certifies against it with the
 /// pocket ladders' own machinery - the dive stands in the floor's room,
 /// never dwells on the finished wall.
+/// `arm` is the motion (the entry, or the user's level transition),
+/// `pitch` a transition helix's Z per turn (0: the entry's law), and
+/// `tz` the plane the tool traverses at (clearance, or the retract
+/// plane under that level link) - at clearance and the entry's own arm
+/// this posts exactly the pre-M11.2 descent.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn bore_entry(
     b: &mut PathBuilder,
     eng: &Engage,
+    arm: Entry3D,
+    pitch: f64,
     e2: Point2,
     z: f64,
     prev_z: f64,
+    tz: f64,
     lead: &[Seg],
     walk: &[Seg],
-) {
+) -> Option<Point2> {
     let Engage { p, center, cert, plan, m, .. } = *eng;
-    match p.entry {
+    let sub = |b: &mut PathBuilder, why: &str| substituted_dive(b, cert, plan, e2, z, m, why, tz);
+    let cur = b.at();
+    let leg = Point2::new(cur.x, cur.y);
+    match arm {
         Entry3D::Plunge => match dive_room(center, 0.0) {
             Some(d) => {
-                let cur = b.at();
-                if cur.x != d.x || cur.y != d.y {
-                    b.push(
-                        MoveKind::Rapid,
-                        Point3::new(d.x, d.y, p.clearance_z),
-                        None,
-                    );
+                if leg.x != d.x || leg.y != d.y {
+                    b.push(MoveKind::Rapid, Point3::new(d.x, d.y, tz), None);
                 }
-                b.push(
-                    MoveKind::Plunge,
-                    Point3::new(d.x, d.y, z),
-                    Some(p.plunge_feed),
-                );
+                b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z), Some(p.plunge_feed));
                 dive_link(b, cert, plan, d, e2, z, m);
+                Some(d)
             }
-            None => substituted_dive(
-                b,
-                cert,
-                plan,
-                e2,
-                z,
-                m,
-                "the disc fits nowhere here",
-            ),
+            None => sub(b, "the disc fits nowhere here"),
         },
         Entry3D::Ramp => {
-            // One chord test covers the whole
-            // interpolated descent: the region is
-            // one at every plane, and the
-            // destination's room bounds every
-            // plane above it (M8.1's superset law,
-            // here at its simplest - a planar
-            // contour's single center).
-            let cur = b.at();
-            let leg = Point2::new(cur.x, cur.y);
+            // One chord test covers the whole interpolated descent: the
+            // region is one at every plane, and the destination's room
+            // bounds every plane above it (M8.1's superset law, here at
+            // its simplest - a planar contour's single center).
             if chord_clears(center, leg, e2) {
-                b.push(
-                    MoveKind::Rapid,
-                    Point3::new(leg.x, leg.y, prev_z),
-                    None,
-                );
+                b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
                 b.push(MoveKind::Feed, Point3::new(e2.x, e2.y, z), Some(p.feed));
+                None
             } else {
-                substituted_dive(
-                    b,
-                    cert,
-                    plan,
-                    e2,
-                    z,
-                    m,
-                    "the ramp's chord is blocked",
-                );
+                sub(b, "the ramp's chord is blocked")
             }
         }
         Entry3D::Arc => {
-            // The circular ramp onto the lead-in's
-            // own first move, certified by the
-            // ramp's chord law (see `entry_arc`).
+            // The circular ramp onto the lead-in's own first move,
+            // certified by the ramp's chord law (see `entry_arc`).
             let first = lead.first().or(walk.first());
             let lead_arc = first
                 .and_then(|s| seg_dir(e2, s))
@@ -120,44 +101,31 @@ pub(super) fn bore_entry(
                     arc_lead(e2, d, prev_z, z, p.tool_diameter, p.tolerance, ok)
                 });
             match lead_arc {
-                Ok(l) => push_arc_lead(b, &l, p.clearance_z, prev_z, p.feed),
-                Err(why) => substituted_dive(b, cert, plan, e2, z, m, why),
+                Ok(l) => {
+                    push_arc_lead(b, &l, tz, prev_z, p.feed);
+                    None
+                }
+                Err(why) => sub(b, why),
             }
         }
         Entry3D::Helix => {
-            let cur = b.at();
-            let leg = Point2::new(cur.x, cur.y);
-            // The found point is the orbit's
-            // CENTER; the dive starts at its near
-            // side, `rh` west - one radius of
-            // center-room certifies the whole
-            // swept tube exactly (see
-            // `entry::dive_room`, M2.5 F's dome;
-            // the 2-radius ask over-refused the
-            // channel, M8.2's slot).
-            match dive_room(center, p.helix_radius + 1e-3) {
-                Some(c) => {
+            // The found point is the orbit's CENTER; the dive starts at
+            // its near side, `rh` west - one radius of center-room
+            // certifies the whole swept tube exactly (`entry::dive_room`).
+            let turns = helix_turns(prev_z - z, p.helix_radius, pitch);
+            match (dive_room(center, p.helix_radius + 1e-3), turns) {
+                (Some(c), Some(t)) => {
                     let d = Point2::new(c.x - p.helix_radius, c.y);
                     if leg.x != d.x || leg.y != d.y {
-                        b.push(
-                            MoveKind::Rapid,
-                            Point3::new(d.x, d.y, p.clearance_z),
-                            None,
-                        );
+                        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, tz), None);
                     }
                     b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
-                    helix_down(b, d, prev_z, z, p.helix_radius, p.feed);
+                    helix_turns_down(b, d, prev_z, z, p.helix_radius, t, p.feed);
                     dive_link(b, cert, plan, d, e2, z, m);
+                    Some(d)
                 }
-                None => substituted_dive(
-                    b,
-                    cert,
-                    plan,
-                    e2,
-                    z,
-                    m,
-                    "the widened disc fits nowhere at this level",
-                ),
+                (Some(_), None) => sub(b, "the helix pitch asks too many turns"),
+                (None, _) => sub(b, "the widened disc fits nowhere at this level"),
             }
         }
     }
@@ -190,7 +158,7 @@ pub(super) fn wall_arc_top(p: &ContourParams, zs: &[f64], zi: usize, hop_z: f64)
 /// The approach is the retract-and-re-enter sequence: the tool lifts to
 /// the hop (retract) plane, traverses, drops at rapid only to the top of
 /// the cut, and feeds the rest of the way at the plunge feed (staying
-/// down is the user's `LevelLink` choice, ramped in `contour_link`). Nothing is pushed on `Err`: the
+/// down is the user's keep-down level link, `contour_link`). Nothing is pushed on `Err`: the
 /// caller substitutes and says why.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn wall_arc(
@@ -219,9 +187,7 @@ pub(super) fn wall_arc(
     if z_top < air {
         b.push(MoveKind::Plunge, Point3::new(s.x, s.y, z_top), Some(p.plunge_feed));
     }
-    for q in &arc.fan {
-        b.push(MoveKind::Feed, *q, Some(p.feed));
-    }
+    push_vertical_arc(b, &arc, p.feed);
     Ok(())
 }
 

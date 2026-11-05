@@ -69,6 +69,7 @@ fn stock_and_block() -> (World, History) {
 /// so the three heights are the only knobs this literal exposes).
 fn pocket(clearance_z: Height, top_z: Height, bottom_z: Height) -> OpParams {
     OpParams::Pocket { tilt: None,
+        links: camcraft_app::links::Links::PLANAR,
         stepover: 3.0,
         stock_to_leave: 0.0,
         clearance_z,

@@ -111,6 +111,8 @@ mod params;
 pub use params::*;
 mod entity;
 mod params_impl;
+mod links;
+pub use links::*;
 pub use entity::*;
 mod wire;
 pub use wire::*;

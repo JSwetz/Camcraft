@@ -689,15 +689,15 @@ fn seed_contour(c: &Carried) -> OpParams {
         // Turning-point blends are opt-in (M11.1 B), as on Face.
         blend_turns: false,
         // Retract and re-enter: the transition every earlier contour
-        // posted; staying down is the user's pick on Leads & Links.
-        level_link: crate::machining2d::LevelLink::RetractReenter,
-        ramp_angle: crate::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        // posted; staying down is the user's pick on Lead in / Lead out.
+        links: crate::links::Links::PLANAR,
         tilt: c.tilt,
     }
 }
 
 fn seed_pocket(c: &Carried) -> OpParams {
     OpParams::Pocket {
+        links: crate::links::Links::PLANAR,
         stepover: c.stepover,
         stock_to_leave: 0.0,
         clearance_z: c.clearance,
@@ -730,6 +730,7 @@ fn seed_pocket(c: &Carried) -> OpParams {
 /// (optimal_load) stays visible.
 fn seed_adaptive2d(c: &Carried) -> OpParams {
     OpParams::Adaptive2D {
+        links: crate::links::Links::PLANAR,
         stepover: c.stepover,
         stock_to_leave: 0.0,
         clearance_z: c.clearance,
@@ -752,6 +753,7 @@ fn seed_adaptive2d(c: &Carried) -> OpParams {
 /// the pane must not show.
 fn seed_offset2d(c: &Carried) -> OpParams {
     OpParams::Offset2D {
+        links: crate::links::Links::PLANAR,
         stepover: c.stepover,
         stock_to_leave: 0.0,
         clearance_z: c.clearance,
@@ -807,6 +809,7 @@ fn seed_chamfer2d(c: &Carried) -> OpParams {
 /// radius flat floors at the pocket family's numbers.
 fn seed_circular(c: &Carried) -> OpParams {
     OpParams::Circular {
+        links: crate::links::Links::PLANAR,
         center: Point2::new(0.0, 0.0),
         radius: 25.0,
         vault: false,
@@ -828,6 +831,7 @@ fn seed_circular(c: &Carried) -> OpParams {
 
 fn seed_slot(c: &Carried) -> OpParams {
     OpParams::Slot {
+        links: crate::links::Links::PLANAR,
         a: Point2::new(-20.0, 0.0),
         b: Point2::new(20.0, 0.0),
         width: 4.0,
@@ -890,6 +894,7 @@ fn seed_drill(c: &Carried) -> OpParams {
 /// the boring pane grows the choice (the kernel takes it).
 fn seed_standalone_bore(c: &Carried) -> OpParams {
     OpParams::Bore {
+        links: crate::links::Links::PLANAR,
         clearance_z: c.clearance,
         retract_z: None,
         top_z: c.top,
@@ -926,6 +931,7 @@ fn seed_thread_mill(c: &Carried) -> OpParams {
 
 fn seed_pocket3d(c: &Carried) -> OpParams {
     OpParams::Pocket3D {
+        links: crate::links::Links::ROUGH3D,
         stepover: c.stepover,
         stock_to_leave: 0.0,
         clearance_z: c.clearance,
@@ -1410,6 +1416,7 @@ fn seed_rotary_parallel(c: &Carried) -> OpParams {
 /// machinist asks for more).
 fn seed_multiaxis_rough(c: &Carried) -> OpParams {
     OpParams::MultiAxisRough {
+        links: crate::links::Links::ROUGH3D,
         tolerance: 0.05,
         stepover: c.stepover,
         stock_to_leave: 0.0,
@@ -1440,6 +1447,7 @@ fn seed_multiaxis_rough(c: &Carried) -> OpParams {
 /// fields the kernel cannot honor (variant docs in types::params).
 fn seed_rotary_offset(c: &Carried) -> OpParams {
     OpParams::RotaryOffset {
+        links: crate::links::Links::ROUGH3D,
         tolerance: 0.05,
         stepover: c.stepover,
         stock_to_leave: 0.0,

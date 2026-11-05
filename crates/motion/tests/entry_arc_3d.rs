@@ -55,6 +55,7 @@ fn slab_with_boss() -> Vec<Triangle> {
 
 fn params(strategy: PocketStrategy) -> Pocket3DParams {
     Pocket3DParams {
+        links: camcraft_motion::links::Links::ROUGH3D,
         tool_diameter: 8.0,
         stepover: 3.0,
         stock_to_leave: 0.0,

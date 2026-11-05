@@ -46,17 +46,18 @@ pub enum Entry3D {
 /// descending linearly with the orbit. The builder must stand at `xy`
 /// on plane `z0` (the caller's rapid to the dive point); an even
 /// number of half turns ends back on `xy` at `z1` by construction -
-/// each turn is two 180° arcs whose XY net is zero. Both ladders'
-/// Helix arm ends here.
-pub(crate) fn helix_down(b: &mut PathBuilder, xy: Point2, z0: f64, z1: f64, rh: f64, feed: f64) {
+/// each turn is two 180° arcs whose XY net is zero. Every ladder's
+/// Helix arm ends here, at the `turns` `links::helix_turns` counts: the
+/// entry's law (one turn per `2 rh` of drop, at least one -
+/// the bore's slope stays inside the circle's reach), or a helix
+/// transition's pitch (M11.2 C). The CL arc carries the Z change, so
+/// consecutive half turns are one continuous helix, each starting where
+/// the last ended.
+pub(crate) fn helix_turns_down(b: &mut PathBuilder, xy: Point2, z0: f64, z1: f64, rh: f64, turns: f64, feed: f64) {
     let span = z0 - z1;
-    if span <= 0.0 || rh <= 0.0 {
+    if span <= 0.0 || rh <= 0.0 || !(turns.is_finite() && turns >= 1.0) {
         return;
     }
-    // At least one turn per dive; one more when the span is deeper than
-    // the circle's own reach, so the bore's slope stays inside the tool
-    // diameter's width.
-    let turns = (span / (rh * 2.0)).ceil().max(1.0);
     let half_turns = ((turns * 2.0).ceil() as u32).max(2);
     // Orbit about the circle whose near side is the entry point: center
     // offset +rh in X. Endpoints sit lattice-snapped (the arc law wants
@@ -114,7 +115,7 @@ pub(crate) fn chord_hits_plan(a: Point2, b: Point2, passes: &[Vec<Point2>]) -> b
 /// clear of the boundary - the widest open floor the region offers
 /// under a disc of that reach, not a search along the planned passes'
 /// chords. A helix asks `radius + a micron's insurance` and takes the
-/// FOUND point as the orbit's CENTER: `helix_down` orbits the circle
+/// FOUND point as the orbit's CENTER: `helix_turns_down` orbits the circle
 /// whose NEAR side is the anchor, so the caller dives from `found -
 /// (rh, 0)` and every point of the swept tube stands a radius inside
 /// the certified disc. Asking the radius of the ANCHOR certified only

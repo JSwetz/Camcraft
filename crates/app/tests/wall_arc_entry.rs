@@ -4,7 +4,7 @@
 //! a blind bore) contoured by its whole section with a tangential lead
 //! and Entry = Arc, regenerated through the commands; and a single-ring
 //! wall to pin the level-to-level link - retract and re-enter by
-//! default, stay down and ramp when the user picks it (`LevelLink`).
+//! default, stay down and ramp when the user picks it (`links::Links`).
 //! Every path must verify silent - against the part SOLID, which is how
 //! the blind bore's ring below its floor stopped passing (the depth law).
 //!
@@ -52,8 +52,7 @@ fn user_op() -> OpParams {
         helix_radius: 1.0,
         blend_turns: true,
         tilt: None,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     }
 }
 
@@ -263,8 +262,7 @@ fn wall_params(entry: Entry3D, tabs: u32) -> ContourParams {
         entry,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     }
 }
 
@@ -344,10 +342,10 @@ fn a_single_wall_ring_retracts_and_reenters_by_default() {
 
 #[test]
 fn a_single_wall_ring_stays_down_and_ramps_when_asked() {
-    use camcraft_app::machining2d::LevelLink;
+    use camcraft_app::links::{Link, Links};
     let r = disc();
     for angle in [3.0_f64, 1.0] {
-        let p = ContourParams { level_link: LevelLink::StayDownRamp, ramp_angle: angle, ..wall_params(Entry3D::Arc, 0) };
+        let p = ContourParams { links: Links { level: Link::KeepDown, transition: Some(Entry3D::Ramp), ramp_angle: angle, ..Links::PLANAR }, ..wall_params(Entry3D::Arc, 0) };
         let t = contour(&r, &p).expect("contour");
         assert_eq!(verify_wall(&t, &r), Vec::new(), "{:?}", t.notes);
         // One entry from clearance; after it the tool never plunges,
@@ -382,10 +380,10 @@ fn a_single_wall_ring_stays_down_and_ramps_when_asked() {
 
 #[test]
 fn the_stay_down_ramp_falls_back_to_retract_by_name() {
-    use camcraft_app::machining2d::LevelLink;
+    use camcraft_app::links::{Link, Links};
     let r = disc();
     // Tabbed bottom level: the ramp would ride through a standing tab.
-    let p = ContourParams { level_link: LevelLink::StayDownRamp, ..wall_params(Entry3D::Arc, 3) };
+    let p = ContourParams { links: Links { level: Link::KeepDown, transition: Some(Entry3D::Ramp), ..Links::PLANAR }, ..wall_params(Entry3D::Arc, 3) };
     let t = contour(&r, &p).expect("contour");
     assert_eq!(verify_wall(&t, &r), Vec::new(), "{:?}", t.notes);
     assert!(
@@ -394,7 +392,7 @@ fn the_stay_down_ramp_falls_back_to_retract_by_name() {
         t.notes
     );
     // An angle the ring cannot hold: 0.01 deg over 5 mm wants ~130 laps.
-    let p = ContourParams { level_link: LevelLink::StayDownRamp, ramp_angle: 0.01, ..wall_params(Entry3D::Arc, 0) };
+    let p = ContourParams { links: Links { level: Link::KeepDown, transition: Some(Entry3D::Ramp), ramp_angle: 0.01, ..Links::PLANAR }, ..wall_params(Entry3D::Arc, 0) };
     let t = contour(&r, &p).expect("contour");
     assert_eq!(verify_wall(&t, &r), Vec::new(), "{:?}", t.notes);
     assert!(t.notes.iter().any(|n| n.contains("too short for a 0.0 deg ramp")), "{:?}", t.notes);
@@ -405,7 +403,7 @@ fn the_stay_down_ramp_falls_back_to_retract_by_name() {
         assert!(top >= 30.0, "{above} -> {below}: the fallback retracts, got {top}");
     }
     // A nonsense angle is refused, never guessed.
-    let p = ContourParams { level_link: LevelLink::StayDownRamp, ramp_angle: 90.0, ..wall_params(Entry3D::Arc, 0) };
+    let p = ContourParams { links: Links { level: Link::KeepDown, transition: Some(Entry3D::Ramp), ramp_angle: 90.0, ..Links::PLANAR }, ..wall_params(Entry3D::Arc, 0) };
     assert!(contour(&r, &p).is_err());
 }
 
@@ -435,7 +433,7 @@ fn plunge_entry_on_the_wall_is_unchanged_by_the_arc_law() {
 
 #[test]
 fn the_users_part_links_levels_as_the_user_picks() {
-    use camcraft_app::machining2d::LevelLink;
+    use camcraft_app::links::{Link, Links};
     let outer = |m: &Move| m.to.x.hypot(m.to.y) > 30.0;
     // Default: every level change of either ring lifts to the retract
     // plane (stock top + 13.5 = Z 33.5) before the next entry.
@@ -448,9 +446,8 @@ fn the_users_part_links_levels_as_the_user_picks() {
     // Stay down and ramp: each ring all the way down, ramping along
     // itself at <= 3 deg; only the ring-to-ring move retracts.
     let mut op = user_op();
-    if let OpParams::Contour { level_link, ramp_angle, .. } = &mut op {
-        *level_link = LevelLink::StayDownRamp;
-        *ramp_angle = 3.0;
+    if let OpParams::Contour { links, .. } = &mut op {
+        *links = Links { level: Link::KeepDown, transition: Some(Entry3D::Ramp), ramp_angle: 3.0, ..Links::PLANAR };
     }
     let (t, w) = user_job_with(op);
     assert_eq!(w, 0, "{:?}", t.notes);

@@ -133,8 +133,7 @@ impl OpParams {
                 entry,
                 helix_radius,
                 blend_turns,
-                level_link,
-                ramp_angle,
+                links: _,
                 tilt,
             } => {
                 w(h, *stock_to_leave);
@@ -190,15 +189,10 @@ impl OpParams {
                 if *blend_turns {
                     h.write_u8(0xB1);
                 }
-                // The stay-down link changes the moves (and reads its
-                // angle); written only when chosen, so every retract-
-                // and-re-enter contour keeps its cached digest.
-                if *level_link == crate::machining2d::LevelLink::StayDownRamp {
-                    h.write_u8(0xC1);
-                    w(h, *ramp_angle);
-                }
+                // The level links ride the shared tail below (M11.2).
             }
             OpParams::Pocket {
+                links: _,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -256,6 +250,7 @@ impl OpParams {
             // pins which ladder runs, and a field that cannot move
             // has nothing to say about staleness.
             OpParams::Adaptive2D {
+                links: _,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -290,6 +285,7 @@ impl OpParams {
                 wt(h, *tilt);
             }
             OpParams::Offset2D {
+                links: _,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -323,6 +319,7 @@ impl OpParams {
                 wt(h, *tilt);
             }
             OpParams::Pocket3D {
+                links: _,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -648,6 +645,7 @@ impl OpParams {
             // the three pose angles appended - the ladder's numbers,
             // read the wrap's way, digest as the ladder it is.
             OpParams::RotaryOffset {
+                links: _,
                 tolerance,
                 stepover,
                 stock_to_leave,
@@ -699,6 +697,7 @@ impl OpParams {
             // path, so it moves the stamp even though no position
             // moves.
             OpParams::MultiAxisRough {
+                links: _,
                 tolerance,
                 stepover,
                 stock_to_leave,
@@ -790,6 +789,7 @@ impl OpParams {
                 h.write_u32(*passes);
             }
             OpParams::Slot {
+                links: _,
                 a,
                 b,
                 width,
@@ -911,6 +911,7 @@ impl OpParams {
             // plus the authored disk: center, radius, and the dome
             // law's one bit (M2.4 B).
             OpParams::Circular {
+                links: _,
                 center,
                 radius,
                 vault,
@@ -1286,6 +1287,7 @@ impl OpParams {
             // digest, and the Thread's pitch needs no word here
             // because it is the TOOL's: the tool row carries it.
             OpParams::Bore {
+                links: _,
                 clearance_z,
                 retract_z,
                 top_z,
@@ -1344,6 +1346,34 @@ impl OpParams {
                     h.write_u8(u8::from(hole.through));
                     h.write_u8(u8::from(hole.stepped));
                 }
+            }
+        }
+        // M11.2 C/D: the level transitions and links change the moves,
+        // so they change the digest - appended only when they differ
+        // from the kind's pre-M11.2 shape, so every op that never
+        // touched them keeps the digest it was cached under. (A contour
+        // saved with the old stay-down ramp goes Stale once and
+        // regenerates the same path - the mechanism saying so.)
+        if let Some(l) = self.links()
+            && *l != self.default_links()
+        {
+            h.write_u8(0xC2);
+            let link = |k: crate::links::Link| match k {
+                crate::links::Link::Clearance => 0u8,
+                crate::links::Link::Retract => 1,
+                crate::links::Link::KeepDown => 2,
+            };
+            h.write_u8(match l.transition {
+                None => 0,
+                Some(Entry3D::Plunge) => 1,
+                Some(Entry3D::Ramp) => 2,
+                Some(Entry3D::Helix) => 3,
+                Some(Entry3D::Arc) => 4,
+            });
+            h.write_u8(link(l.level));
+            h.write_u8(link(l.pass));
+            for v in [l.ramp_angle, l.helix_pitch, l.max_stay_down] {
+                w(h, v);
             }
         }
     }

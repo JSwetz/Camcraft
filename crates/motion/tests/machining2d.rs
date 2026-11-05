@@ -328,8 +328,7 @@ fn cp() -> ContourParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_motion::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_motion::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_motion::links::Links::PLANAR,
     }
 }
 
@@ -950,6 +949,7 @@ fn contour_is_deterministic() {
 
 fn pp() -> PocketParams {
     PocketParams {
+        links: camcraft_motion::links::Links::PLANAR,
         tool_diameter: 10.0,
         stepover: 5.0,
         stock_to_leave: 0.0,
@@ -1558,6 +1558,7 @@ fn rectangular_pocket_stays_zigzag_under_auto() {
 
 fn sp() -> SlotParams {
     SlotParams {
+        links: camcraft_motion::links::Links::PLANAR,
         tool_diameter: 10.0,
         width: 10.0,
         stock_to_leave: 0.0,

@@ -29,6 +29,7 @@ fn p3(x: f64, y: f64, z: f64) -> Point3 {
 /// STATION window here, the ρ ladder the kernel derives itself.
 fn params(v_top: f64, v_bot: f64) -> Pocket3DParams {
     Pocket3DParams {
+        links: camcraft_motion::links::Links::ROUGH3D,
         tool_diameter: 2.0 * R,
         stepover: 0.8,
         stock_to_leave: 0.0,

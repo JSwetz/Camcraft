@@ -100,6 +100,7 @@ fn rotated_by_90(m: Mesh) -> Mesh {
 /// test that generates a warning per level tests nothing.
 fn pocket(tilt: Option<Tilt>, top_z: f64) -> OpParams {
     OpParams::Pocket {
+        links: camcraft_app::links::Links::PLANAR,
         tilt,
         stepover: 3.0,
         stock_to_leave: 0.0,
@@ -129,6 +130,7 @@ fn pocket(tilt: Option<Tilt>, top_z: f64) -> OpParams {
 /// must therefore choose heights by the door, not by hand.
 fn pocket_parked() -> OpParams {
     OpParams::Pocket {
+        links: camcraft_app::links::Links::PLANAR,
         tilt: Some(tilt90_parked()),
         stepover: 3.0,
         stock_to_leave: 0.0,
@@ -380,8 +382,7 @@ fn tilt_on_a_picked_selection_refuses_by_name() {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     };
     // The prismatic control: the same pick on the same part is legal.
     history.execute(

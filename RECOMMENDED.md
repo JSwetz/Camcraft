@@ -9382,3 +9382,51 @@ inclusive, bottom exclusive). This replaces part of M7.3 A (5)'s
 uniform nudge; worst deviation between engines fell to 4.5e-13. Owed:
 field `measure` proven on the goldens, exact floors for ball and
 taper, dexel.rs at 445 lines.
+
+## M11.2 C+D - transitions and keep-down links on every ladder op: eight decisions (2026-11-05)
+
+(1) **The descent between levels is its own parameter.** Default "same
+as entry" posts today's entry byte for byte; Plunge / Ramp (angle) /
+Helix (pitch) / vertical Arc are explicit choices. Dropped: reusing
+the entry (it can't keep down while entering differently) and a
+per-op `level_link` (contour's is now one instance of `Links`).
+
+(2) **One `Links` struct on every ladder kind,** compared against each
+kind's own default. The 3D ladder's default pass link is keep-down,
+because that is what it always did; one uniform default would have
+changed every 3D rough.
+
+(3) **An explicit Ramp zig-zags along the first cut at no more than the
+angle; a "same as entry" Ramp keeps its single steep chord**, so
+existing ramp paths don't change.
+
+(4) **The keep-down proof.** A link stays down only inside the
+certified area, crossing none of the level's planned passes or that
+plane's dive links (found by test: the verifier flagged a crossing),
+within `max_stay_down`. Otherwise it lifts to the retract plane, with
+one note per reason. 3D unproved pass hops stay silent as before.
+
+(5) **The helix was never broken in the CL.** Each half-turn is one arc
+carrying its own Z; the viewport drew every chord at the move's start
+Z. The display spreads Z along the chords, merged with M11.2 A's
+vertical-arc chords into one `segments3` route. The helix dive point
+snaps to the 1 um grid so a keep-down link meets it exactly (under
+0.5 um; no golden uses a helix).
+
+(6) **Format.** An optional, diff-only `links` key with no version bump.
+Contour's old keys are still read, and still written when they say
+everything, so the previous build reads them. An older build ignores
+`links` and loads defaults (the `blend_turns` exposure). A contour
+saved with the old stay-down ramp goes Stale once and regenerates
+identically.
+
+(7) **Contour keep-down Arc falls back to a plunge on the ring, named.**
+Once the lead-out is skipped the tool is committed to staying down,
+and a plunge on the proven ring is always legal.
+
+(8) **"Leads & Links" is renamed "Lead in / Lead out"** and appears on
+every ladder kind; Entry moved there from Passes and Feeds. Found,
+owed: a 3D Pocket with Helix entry run to the stock bottom on the
+user's part makes a sliver level under the bore's solid floor (caught
+by verify, post blocked - not silent; the generator fix is tracked).
+contour.rs dropped 689 -> 338 lines and ladder.rs 596 -> 295.

@@ -1,5 +1,4 @@
 use super::*;
-use crate::machining2d::LevelLink;
 
 impl ParamsDto {
     pub(super) fn from_params(p: &OpParams) -> Self {
@@ -46,8 +45,7 @@ impl ParamsDto {
                 entry,
                 helix_radius,
                 blend_turns,
-                level_link,
-                ramp_angle,
+                links,
                 tilt,
             } => ParamsDto::Contour {
                 stock_to_leave: *stock_to_leave,
@@ -82,14 +80,14 @@ impl ParamsDto {
                 },
                 helix_radius: *helix_radius,
                 blend_turns: *blend_turns,
-                level_link: match level_link {
-                    LevelLink::RetractReenter => LevelLinkDto::RetractReenter,
-                    LevelLink::StayDownRamp => LevelLinkDto::StayDownRamp,
-                },
-                ramp_angle: *ramp_angle,
+                // The old keys where they say it all, else `links`.
+                level_link: contour_links_dto(links).0,
+                ramp_angle: contour_links_dto(links).1,
+                links: contour_links_dto(links).2,
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Pocket {
+                links,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -107,6 +105,7 @@ impl ParamsDto {
                 blend_turns,
                 tilt,
             } => ParamsDto::Pocket {
+                links: links_to_dto(links, &p.default_links()),
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -140,6 +139,7 @@ impl ParamsDto {
             // The twins drop the strategy tag - the variant itself
             // says which ladder runs (M2.4 A).
             OpParams::Adaptive2D {
+                links,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -155,6 +155,7 @@ impl ParamsDto {
                 optimal_load,
                 tilt,
             } => ParamsDto::Adaptive2D {
+                links: links_to_dto(links, &p.default_links()),
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -177,6 +178,7 @@ impl ParamsDto {
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Offset2D {
+                links,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -191,6 +193,7 @@ impl ParamsDto {
                 helix_radius,
                 tilt,
             } => ParamsDto::Offset2D {
+                links: links_to_dto(links, &p.default_links()),
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -265,6 +268,7 @@ impl ParamsDto {
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Circular {
+                links,
                 center,
                 radius,
                 vault,
@@ -282,6 +286,7 @@ impl ParamsDto {
                 helix_radius,
                 tilt,
             } => ParamsDto::Circular {
+                links: links_to_dto(links, &p.default_links()),
                 center: [center.x, center.y],
                 radius: *radius,
                 vault: *vault,
@@ -305,6 +310,7 @@ impl ParamsDto {
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Pocket3D {
+                links,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -323,6 +329,7 @@ impl ParamsDto {
                 feed_opt,
                 shell,
             } => ParamsDto::Pocket3D {
+                links: links_to_dto(links, &p.default_links()),
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -600,6 +607,7 @@ impl ParamsDto {
             // The wrap ladder (M5.1 stage E2): the pocket's bridge,
             // minus the retract key the kernel could never honor.
             OpParams::RotaryOffset {
+                links,
                 tolerance,
                 stepover,
                 stock_to_leave,
@@ -618,6 +626,7 @@ impl ParamsDto {
                 lag_deg,
                 max_tilt_deg,
             } => ParamsDto::RotaryOffset {
+                links: links_to_dto(links, &p.default_links()),
                 tolerance: *tolerance,
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -652,6 +661,7 @@ impl ParamsDto {
             // the pocket ladder) and the rest/feed-opt switches
             // absent (the kernel runs neither, variant docs).
             OpParams::MultiAxisRough {
+                links,
                 tolerance,
                 stepover,
                 stock_to_leave,
@@ -672,6 +682,7 @@ impl ParamsDto {
                 max_tilt_deg,
                 shank_avoid,
             } => ParamsDto::MultiAxisRough {
+                links: links_to_dto(links, &p.default_links()),
                 tolerance: *tolerance,
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -1005,6 +1016,7 @@ impl ParamsDto {
                 plunge_feed: *plunge_feed,
             },
             OpParams::Slot {
+                links,
                 a,
                 b,
                 width,
@@ -1022,6 +1034,7 @@ impl ParamsDto {
                 helix_radius,
                 tilt,
             } => ParamsDto::Slot {
+                links: links_to_dto(links, &p.default_links()),
                 a: [a.x, a.y],
                 b: [b.x, b.y],
                 width: *width,
@@ -1102,6 +1115,7 @@ impl ParamsDto {
             // optional heights absent-means-law, the holes as
             // recognized - no silent re-detect survives a round trip.
             OpParams::Bore {
+                links,
                 clearance_z,
                 retract_z,
                 top_z,
@@ -1114,6 +1128,7 @@ impl ParamsDto {
                 tolerance,
                 holes,
             } => ParamsDto::Bore {
+                links: links_to_dto(links, &p.default_links()),
                 clearance_z: (*clearance_z).into(),
                 retract_z: (*retract_z).map(Into::into),
                 top_z: (*top_z).into(),
@@ -1199,6 +1214,7 @@ impl ParamsDto {
                 blend_turns,
                 level_link,
                 ramp_angle,
+                links,
                 tilt,
             } => OpParams::Contour {
                 stock_to_leave: *stock_to_leave,
@@ -1235,14 +1251,14 @@ impl ParamsDto {
                 },
                 helix_radius: *helix_radius,
                 blend_turns: *blend_turns,
-                level_link: match level_link {
-                    LevelLinkDto::RetractReenter => LevelLink::RetractReenter,
-                    LevelLinkDto::StayDownRamp => LevelLink::StayDownRamp,
-                },
-                ramp_angle: *ramp_angle,
+                // The pre-M11.2 keys migrate in memory (a stay-down ramp
+                // is level Keep down + a Ramp transition); `links` lays
+                // over them.
+                links: contour_links(*level_link, *ramp_angle, links.as_ref()),
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Pocket {
+                links,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -1261,6 +1277,7 @@ impl ParamsDto {
                 blend_turns,
                 tilt,
             } => OpParams::Pocket {
+                links: links_from_dto(links.as_ref(), crate::links::Links::PLANAR),
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -1291,6 +1308,7 @@ impl ParamsDto {
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Adaptive2D {
+                links,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -1307,6 +1325,7 @@ impl ParamsDto {
                 optimal_load,
                 tilt,
             } => OpParams::Adaptive2D {
+                links: links_from_dto(links.as_ref(), crate::links::Links::PLANAR),
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -1328,6 +1347,7 @@ impl ParamsDto {
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Offset2D {
+                links,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -1342,6 +1362,7 @@ impl ParamsDto {
                 helix_radius,
                 tilt,
             } => OpParams::Offset2D {
+                links: links_from_dto(links.as_ref(), crate::links::Links::PLANAR),
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -1413,6 +1434,7 @@ impl ParamsDto {
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Circular {
+                links,
                 center,
                 radius,
                 vault,
@@ -1430,6 +1452,7 @@ impl ParamsDto {
                 helix_radius,
                 tilt,
             } => OpParams::Circular {
+                links: links_from_dto(links.as_ref(), crate::links::Links::PLANAR),
                 center: Point2::new(center[0], center[1]),
                 radius: *radius,
                 vault: *vault,
@@ -1453,6 +1476,7 @@ impl ParamsDto {
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Pocket3D {
+                links,
                 stepover,
                 stock_to_leave,
                 clearance_z,
@@ -1472,6 +1496,7 @@ impl ParamsDto {
                 feed_opt,
                 shell,
             } => OpParams::Pocket3D {
+                links: links_from_dto(links.as_ref(), crate::links::Links::ROUGH3D),
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
                 clearance_z: (*clearance_z).into(),
@@ -1730,6 +1755,7 @@ impl ParamsDto {
             // The wrap ladder reads back whole; `validate_kind` has
             // already refused anything the door would fail (M5.1 E2).
             ParamsDto::RotaryOffset {
+                links,
                 tolerance,
                 stepover,
                 stock_to_leave,
@@ -1749,6 +1775,7 @@ impl ParamsDto {
                 lag_deg,
                 max_tilt_deg,
             } => OpParams::RotaryOffset {
+                links: links_from_dto(links.as_ref(), crate::links::Links::ROUGH3D),
                 tolerance: *tolerance,
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -1780,6 +1807,7 @@ impl ParamsDto {
             // The stamped ladder reads back whole; `validate_kind` has
             // already refused anything the door would fail (M5.1 E3).
             ParamsDto::MultiAxisRough {
+                links,
                 tolerance,
                 stepover,
                 stock_to_leave,
@@ -1801,6 +1829,7 @@ impl ParamsDto {
                 max_tilt_deg,
                 shank_avoid,
             } => OpParams::MultiAxisRough {
+                links: links_from_dto(links.as_ref(), crate::links::Links::ROUGH3D),
                 tolerance: *tolerance,
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -2134,6 +2163,7 @@ impl ParamsDto {
                 plunge_feed: *plunge_feed,
             },
             ParamsDto::Slot {
+                links,
                 a,
                 b,
                 width,
@@ -2151,6 +2181,7 @@ impl ParamsDto {
                 helix_radius,
                 tilt,
             } => OpParams::Slot {
+                links: links_from_dto(links.as_ref(), crate::links::Links::PLANAR),
                 a: Point2::new(a[0], a[1]),
                 b: Point2::new(b[0], b[1]),
                 width: *width,
@@ -2231,6 +2262,7 @@ impl ParamsDto {
             // absent optionals decode to the hole-shaped defaults
             // (M2.4 C).
             ParamsDto::Bore {
+                links,
                 clearance_z,
                 retract_z,
                 top_z,
@@ -2243,6 +2275,7 @@ impl ParamsDto {
                 tolerance,
                 holes,
             } => OpParams::Bore {
+                links: links_from_dto(links.as_ref(), crate::links::Links::PLANAR),
                 clearance_z: (*clearance_z).into(),
                 retract_z: retract_z.map(Into::into),
                 top_z: (*top_z).into(),

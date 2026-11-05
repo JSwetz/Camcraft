@@ -37,6 +37,7 @@ use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::Entry3D;
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
+use crate::links::Links;
 
 use super::face::GenError;
 use super::levels::{Cert, Motion, cut_levels, run_levels};
@@ -69,6 +70,9 @@ pub struct CircularParams {
     pub vault: bool,
     pub entry: Entry3D,
     pub helix_radius: f64,
+    /// Level transitions and links (M11.2 C/D) within each ring's
+    /// ladder; [`Links::PLANAR`] is every earlier circular op.
+    pub links: Links,
 }
 
 impl CircularParams {
@@ -126,7 +130,8 @@ impl CircularParams {
         if self.retract_z.is_some_and(|rz| rz < self.top_z) {
             return Err(GenError::Invalid("retract plane sits inside the material".into()));
         }
-        if self.entry == Entry3D::Helix
+        self.links.validate().map_err(|e| GenError::Invalid(e.into()))?;
+        if (self.entry == Entry3D::Helix || self.links.transition == Some(Entry3D::Helix))
             && !(0.0..=(self.tool_diameter * 0.5)).contains(&self.helix_radius)
         {
             return Err(GenError::Invalid(
@@ -198,6 +203,7 @@ pub fn circular(_region: &Region, p: &CircularParams) -> Result<Toolpath, GenErr
             .with_entry(p.entry, p.helix_radius)
             .with_arc_radius(p.tool_diameter);
     }
+    let motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius);
     let cert = center_region.as_ref().map(Cert::Region);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
@@ -226,7 +232,7 @@ pub fn circular(_region: &Region, p: &CircularParams) -> Result<Toolpath, GenErr
         } else {
             cut_levels(p.top_z, p.bottom_z, p.stepdown)
         };
-        run_levels(&mut b, &pass, &zs, &motion, None, cert.as_ref());
+        run_levels(&mut b, &pass, &zs, &motion, None, cert.as_ref(), cert.as_ref());
         k += 1;
     }
     let cur = b.at();

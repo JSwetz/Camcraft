@@ -62,6 +62,9 @@ pub enum ParamsDto {
         tilt: Option<TiltDto>,
     },
     Contour {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         stock_to_leave: f64,
         clearance_z: HeightDto,
         retract_z: HeightDto,
@@ -109,6 +112,9 @@ pub enum ParamsDto {
         tilt: Option<TiltDto>,
     },
     Pocket {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         stepover: f64,
         stock_to_leave: f64,
         clearance_z: HeightDto,
@@ -160,6 +166,9 @@ pub enum ParamsDto {
     /// the kind fixes the ladder; every default the pocket needs, this
     /// arm states (the fields arrived with the kind, v43).
     Adaptive2D {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         stepover: f64,
         stock_to_leave: f64,
         clearance_z: HeightDto,
@@ -193,6 +202,9 @@ pub enum ParamsDto {
     /// 2D Offset (M2.4 A): the same arm minus the engagement door -
     /// style-A rings are spaced by the stepover alone.
     Offset2D {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         stepover: f64,
         stock_to_leave: f64,
         clearance_z: HeightDto,
@@ -258,6 +270,9 @@ pub enum ParamsDto {
     /// is the dome law's one bool (the fields arrived with the
     /// kind, v44).
     Circular {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         center: [f64; 2],
         radius: f64,
         vault: bool,
@@ -281,6 +296,9 @@ pub enum ParamsDto {
         tilt: Option<TiltDto>,
     },
     Slot {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         a: [f64; 2],
         b: [f64; 2],
         width: f64,
@@ -359,6 +377,9 @@ pub enum ParamsDto {
     /// `pocket3_d`, and a file contract deserves the cleaner word.
     #[serde(rename = "pocket3d")]
     Pocket3D {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         stepover: f64,
         stock_to_leave: f64,
         clearance_z: HeightDto,
@@ -630,6 +651,9 @@ pub enum ParamsDto {
     /// could only ever be ignored, and the file contract says what
     /// the machine hears.
     RotaryOffset {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         tolerance: f64,
         /// Developed arc-length spacing, a plain number like the
         /// pocket's - the ladder has no cos-law to derive from.
@@ -671,6 +695,9 @@ pub enum ParamsDto {
     /// file contract says what the generator reads, and the
     /// generator reads these and nothing else.
     MultiAxisRough {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         tolerance: f64,
         stepover: f64,
         stock_to_leave: f64,
@@ -929,6 +956,9 @@ pub enum ParamsDto {
     /// drill's absent-means-law shape; the hole list is the drill's
     /// `HoleDto` verbatim - recognition data, editable, stamped.
     Bore {
+        /// M11.2 level transitions and links: absent is the kind's earlier shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        links: Option<LinksDto>,
         clearance_z: HeightDto,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retract_z: Option<HeightDto>,
@@ -1088,7 +1118,8 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
-/// The file mirror of `machining2d::LevelLink`; `default` is the
+/// The pre-M11.2 contour level-link word, still read and written (`links.rs`
+/// migrates it in memory: stay_down_ramp = Keep down + Ramp); `default` is the
 /// retract-and-re-enter transition every earlier contour posted.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

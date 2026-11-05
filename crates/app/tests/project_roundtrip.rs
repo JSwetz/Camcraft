@@ -491,8 +491,7 @@ fn arc_move_round_trips() {
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
                 blend_turns: false,
-                level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-                ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+                links: camcraft_app::links::Links::PLANAR,
             },
         )
         .expect("create"),
@@ -968,6 +967,7 @@ fn v5_roundtrips_retract_and_auto() {
             "EM-0400-2FL",
             SrcRef::Stock,
             OpParams::Pocket { tilt: None,
+                links: camcraft_app::links::Links::PLANAR,
                 stepover: 1.0,
                 stock_to_leave: 0.0,
                 clearance_z: Height::fixed(25.0),
@@ -1167,8 +1167,7 @@ fn a_selection_round_trips_and_stays_ok() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     };
     history.execute(
         &world,
@@ -2618,8 +2617,9 @@ fn tangential_lead_round_trips() {
 
 #[test]
 fn level_link_choice_round_trips_and_the_default_writes_no_key() {
-    use camcraft_app::machining2d::LevelLink;
-    let job = |link: LevelLink, angle: f64| {
+    use camcraft_app::links::{Link, Links};
+    let stay = |angle: f64| Links { level: Link::KeepDown, transition: Some(camcraft_app::machining3d::Entry3D::Ramp), ramp_angle: angle, ..Links::PLANAR };
+    let job = |links: Links| {
         let world = new_world();
         let mut history = History::default();
         history.execute(
@@ -2655,8 +2655,7 @@ fn level_link_choice_round_trips_and_the_default_writes_no_key() {
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             blend_turns: false,
-            level_link: link,
-            ramp_angle: angle,
+            links,
         };
         history.execute(
             &world,
@@ -2667,12 +2666,12 @@ fn level_link_choice_round_trips_and_the_default_writes_no_key() {
     };
     // The default is absent from the file - every earlier save holds.
     let path = tmp_path("link-default");
-    project::save(&job(LevelLink::RetractReenter, 3.0), &path).expect("save");
+    project::save(&job(Links::PLANAR), &path).expect("save");
     let text = std::fs::read_to_string(&path).expect("read");
-    assert!(!text.contains("level_link") && !text.contains("ramp_angle"), "{text}");
+    assert!(!text.contains("level_link") && !text.contains("ramp_angle") && !text.contains("\"links\""), "{text}");
     // The user's pick and angle write back, and round-trip byte-for-byte.
     let path = tmp_path("link-stay");
-    project::save(&job(LevelLink::StayDownRamp, 5.0), &path).expect("save");
+    project::save(&job(stay(5.0)), &path).expect("save");
     let first = std::fs::read_to_string(&path).expect("read");
     assert!(first.contains("\"level_link\": \"stay_down_ramp\""), "{first}");
     assert!(first.contains("\"ramp_angle\": 5.0"), "{first}");
@@ -2684,10 +2683,10 @@ fn level_link_choice_round_trips_and_the_default_writes_no_key() {
     assert_eq!(first, second);
     let e = model::find_by_name(&world2, "C1").expect("op");
     let o = model::operation_of(&world2, &e).expect("operation");
-    let OpParams::Contour { level_link, ramp_angle, .. } = o.params else {
+    let OpParams::Contour { links, .. } = o.params else {
         panic!("contour expected");
     };
-    assert_eq!((level_link, ramp_angle), (LevelLink::StayDownRamp, 5.0));
+    assert_eq!(links, stay(5.0), "the old keys migrate in memory to Keep down + Ramp");
 }
 
 #[test]
@@ -2744,8 +2743,7 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
                 blend_turns: false,
-                level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-                ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+                links: camcraft_app::links::Links::PLANAR,
             },
         )
         .expect("create"),
@@ -2819,8 +2817,7 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
                 blend_turns: false,
-                level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-                ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+                links: camcraft_app::links::Links::PLANAR,
             },
         )
         .expect("create C2"),

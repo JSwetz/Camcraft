@@ -3,7 +3,8 @@
 use crate::drilling::{CycleChoice, Hole};
 use crate::finishing3d;
 use crate::geo2d::Point2;
-use crate::machining2d::{Lead, LevelLink, PocketStrategy, Side};
+use crate::links::Links;
+use crate::machining2d::{Lead, PocketStrategy, Side};
 use crate::machining3d::Entry3D;
 
 use super::height::Height;
@@ -119,13 +120,12 @@ pub enum OpParams {
         /// it (`machining2d::fillet_corners`); `false` is the sharp
         /// walk every pre-M11.1 file holds.
         blend_turns: bool,
-        /// Level to level (the Leads & Links choice): retract and
-        /// re-enter - every file before the option - or stay down and
-        /// ramp along the ring (`machining2d::LevelLink`).
-        level_link: LevelLink,
-        /// Maximum stay-down ramp angle, degrees; read only under
-        /// `LevelLink::StayDownRamp`.
-        ramp_angle: f64,
+        /// Level transitions and links (M11.2 C/D, the Lead in / Lead
+        /// out choice): the descent between levels, and clearance /
+        /// retract / keep-down between levels and between rings. The
+        /// pre-M11.2 `level_link` stay-down ramp is level Keep down with
+        /// a Ramp transition (`crate::links::Links`).
+        links: Links,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },
@@ -150,6 +150,7 @@ pub enum OpParams {
         /// Helix centerline radius, mm; read only when `entry` is
         /// Helix, validated there against the tool radius at generate.
         helix_radius: f64,
+        links: Links,
         /// The `Adaptive` strategy's optimal load (M11.4 B): radial width
         /// of cut as a fraction of the tool diameter (ae/D), the ring
         /// step `optimal_load x D` and the contact angle derived
@@ -188,6 +189,7 @@ pub enum OpParams {
         entry: Entry3D,
         /// Helix centerline radius, mm; read only when `entry` is Helix.
         helix_radius: f64,
+        links: Links,
         /// Optimal load, ae/D (M11.4 B): the ring step the ladder keeps;
         /// the law `PocketStrategy::Adaptive` reads.
         optimal_load: f64,
@@ -216,6 +218,7 @@ pub enum OpParams {
         entry: Entry3D,
         /// Helix centerline radius, mm; read only when `entry` is Helix.
         helix_radius: f64,
+        links: Links,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },
@@ -299,6 +302,7 @@ pub enum OpParams {
         entry: Entry3D,
         /// Helix centerline radius, mm; read only when `entry` is Helix.
         helix_radius: f64,
+        links: Links,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },
@@ -327,6 +331,7 @@ pub enum OpParams {
         /// Helix, certified per level against the stadium (a
         /// full-width channel has no room for an orbit and says so).
         helix_radius: f64,
+        links: Links,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },
@@ -401,6 +406,7 @@ pub enum OpParams {
         /// Helix centerline radius, mm; read only when `entry` is
         /// Helix, validated there against the tool radius at generate.
         helix_radius: f64,
+        links: Links,
         /// Close the level ladder's staircase with a rest-material
         /// pass aimed at what the dexel sim says still stands
         /// ([`crate::machining3d::pocket3d_with_rest`], M2.1b).
@@ -714,6 +720,7 @@ pub enum OpParams {
         strategy: PocketStrategy,
         entry: Entry3D,
         helix_radius: f64,
+        links: Links,
         /// Optimal load, ae/D (M11.4 B), read under Adaptive.
         optimal_load: f64,
         lead_deg: f64,
@@ -746,6 +753,7 @@ pub enum OpParams {
         strategy: PocketStrategy,
         entry: Entry3D,
         helix_radius: f64,
+        links: Links,
         /// Optimal load, ae/D (M11.4 B), read under Adaptive.
         optimal_load: f64,
         lead_deg: f64,
@@ -1062,6 +1070,7 @@ pub enum OpParams {
         /// Sagitta budget for the wall circle's arc fit.
         tolerance: f64,
         holes: Vec<Hole>,
+        links: Links,
     },
     /// Helical thread milling (M2.4 C). Pitch is the TOOL's, read at
     /// generate the way the tap cycle reads it - a thread mill that

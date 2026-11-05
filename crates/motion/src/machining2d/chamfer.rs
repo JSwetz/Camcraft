@@ -129,7 +129,7 @@ pub fn chamfer(region: &crate::geo2d::Region, p: &ChamferParams) -> Result<Toolp
     // The one level the ride owns: not a ladder - the cone's
     // generatrix meets the wall at exactly one depth.
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
-    run_levels(&mut b, &passes, &[z], &motion, None, None);
+    run_levels(&mut b, &passes, &[z], &motion, None, None, None);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 

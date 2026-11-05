@@ -108,8 +108,7 @@ fn contour_disc_hole_matches_golden() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     };
     let t = contour(&region, &p).unwrap();
     assert!(t.has_arcs(), "a fine polygon bore rim must fit to arcs");
@@ -145,8 +144,7 @@ fn contour_tangential_lead_matches_golden() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     };
     let t = contour(&region, &p).unwrap();
     assert!(t.has_arcs());
@@ -250,8 +248,7 @@ fn contour_plate_with_hole_matches_golden() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     };
     let t = contour(&plate_with_hole(), &p).unwrap();
     write_golden("contour_plate_with_hole.cl", &gen_to_cltext(&t));
@@ -262,6 +259,7 @@ fn pocket_zigzag_plate_with_island_matches_golden() {
     // 30x30 region with a centered 10x10 island; zigzag rows must stop
     // at the island and step over it between levels.
     let p = PocketParams {
+        links: camcraft_app::links::Links::PLANAR,
         tool_diameter: 8.0,
         stepover: 3.0,
         stock_to_leave: 0.0,
@@ -311,8 +309,7 @@ fn contour_plate_with_hole_blended_matches_golden() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: true,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     };
     let t = contour(&plate_with_hole(), &p).unwrap();
     let sharp = contour(&plate_with_hole(), &ContourParams { blend_turns: false, ..p }).unwrap();
@@ -328,6 +325,7 @@ fn pocket_zigzag_plate_with_island_blended_matches_golden() {
     // of at most stepover/2); plunges, lifts and pass starts are the
     // sharp golden's to the byte.
     let p = PocketParams {
+        links: camcraft_app::links::Links::PLANAR,
         tool_diameter: 8.0,
         stepover: 3.0,
         stock_to_leave: 0.0,
@@ -356,6 +354,7 @@ fn pocket_waterline_matches_golden() {
     // ring ordering is a place where a "small" generator change tends to
     // reorder everything.
     let p = PocketParams {
+        links: camcraft_app::links::Links::PLANAR,
         tool_diameter: 8.0,
         stepover: 3.0,
         stock_to_leave: 0.0,
@@ -382,6 +381,7 @@ fn slot_fullwidth_centerline_matches_golden() {
     // Tool fills the channel (dia 10 = width 10): one centerline row per
     // level, the everyday slot.
     let p = SlotParams {
+        links: camcraft_app::links::Links::PLANAR,
         tool_diameter: 10.0,
         width: 10.0,
         stock_to_leave: 0.0,
@@ -407,6 +407,7 @@ fn slot_wide_channel_rows_matches_golden() {
     // each shortened by the round-end reach sqrt(h^2 - d^2) - the case
     // where the closed-form stadium math must agree with a Clipper offset.
     let p = SlotParams {
+        links: camcraft_app::links::Links::PLANAR,
         tool_diameter: 6.0,
         width: 20.0,
         stock_to_leave: 0.0,

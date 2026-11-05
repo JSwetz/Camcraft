@@ -7,6 +7,7 @@ use crate::entry::Entry3D;
 use crate::load::{load_in_door, load_step};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
+use crate::links::Links;
 
 use super::face::{GenError, band};
 use super::levels::{Cert, Motion, cut_levels, run_level_walks};
@@ -111,6 +112,9 @@ pub struct PocketParams {
     /// path's notes, with the worst corner rest. `false` - every
     /// pre-M11.1 file - is the sharp walk, unchanged to the byte.
     pub blend_turns: bool,
+    /// Level transitions and links (M11.2 C/D); [`Links::PLANAR`] is
+    /// the ladder every earlier pocket posted.
+    pub links: Links,
 }
 
 impl PocketParams {
@@ -181,7 +185,8 @@ impl PocketParams {
         if self.retract_z.is_some_and(|rz| rz < self.top_z) {
             return Err(GenError::Invalid("retract plane sits inside the material".into()));
         }
-        if self.entry == Entry3D::Helix {
+        self.links.validate().map_err(|e| GenError::Invalid(e.into()))?;
+        if self.entry == Entry3D::Helix || self.links.transition == Some(Entry3D::Helix) {
             let r = self.tool_diameter * 0.5;
             if self.helix_radius <= 0.0 || self.helix_radius > r {
                 return Err(GenError::Invalid(
@@ -270,7 +275,8 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     };
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed)
         .with_entry(p.entry, p.helix_radius)
-        .with_arc_radius(p.tool_diameter);
+        .with_arc_radius(p.tool_diameter)
+        .with_links(p.links, p.helix_radius);
     // The walks: fitted where the strategy fits, then - opted in - the
     // corner fillets, proved inside the cutter-center area. Passes are
     // one plan at every level, so the plan's refusals are said once.
@@ -305,6 +311,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         &zs,
         &motion,
         runs.as_deref(),
+        Some(&Cert::Region(&center)),
         Some(&Cert::Region(&center)),
     );
     let cur = b.at();

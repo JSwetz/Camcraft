@@ -30,7 +30,7 @@ use super::theme::Tokens;
 /// The section names in tab-bar order. The guard indices in
 /// `pages::params_fields` are these same numbers - one placement law,
 /// table and guards read each other.
-pub(crate) const SECTIONS: [&str; 6] = ["Geometry", "Heights", "Passes", "Leads & Links", "Feeds", "Machine"];
+pub(crate) const SECTIONS: [&str; 6] = ["Geometry", "Heights", "Passes", "Lead in / Lead out", "Feeds", "Machine"];
 pub(super) const SEC_GEO: usize = 0;
 pub(super) const SEC_HEIGHTS: usize = 1;
 pub(super) const SEC_PASSES: usize = 2;
@@ -42,7 +42,9 @@ pub(super) const SEC_MACHINE: usize = 5;
 /// for: Geometry/Heights/Feeds always; Passes except the single-pass rides
 /// (Trace and its engrave twin, the chamfer whose floor is derived from
 /// width and angle, the deburr's one edge - none has a stepover or a leave
-/// to show); Leads & Links only Contour - it is the kind with lead moves
+/// to show); Lead in / Lead out (M11.2, the user's "as is common in most
+/// CAM packages") on every level-ladder kind - the entry, the descent
+/// between levels and the links live there, with the contour's lead moves
 /// and tabs; Machine only Part - the bar feeder's signals are the one
 /// lifecycle group no cutting tab names (M5.2 G.2). The tab bar shows
 /// exactly these: no dead tabs.
@@ -55,7 +57,19 @@ pub(crate) fn has_section(kind: OpType, s: usize) -> bool {
                 OpType::Trace | OpType::Engrave | OpType::Chamfer2D | OpType::Deburr
             )
         }
-        SEC_LEADS => matches!(kind, OpType::Contour),
+        SEC_LEADS => matches!(
+            kind,
+            OpType::Contour
+                | OpType::Pocket
+                | OpType::Adaptive2D
+                | OpType::Offset2D
+                | OpType::Circular
+                | OpType::Slot
+                | OpType::Bore
+                | OpType::Pocket3D
+                | OpType::RotaryOffset
+                | OpType::MultiAxisRough
+        ),
         SEC_MACHINE => matches!(kind, OpType::Part),
         _ => false,
     }

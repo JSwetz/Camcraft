@@ -26,7 +26,12 @@ impl OpParams {
         // different question and belongs to generation, which names
         // the machine when the angle is past it.
         let tilt_ok = self.tilt().is_none_or(|t| t.is_sane());
+        // The level transitions and links (M11.2) answer at the door for
+        // every ladder kind at once: the ramp angle where it is read, a
+        // pitch and a stay-down limit that are zero or positive.
+        let links_ok = self.links().is_none_or(|l| l.validate().is_ok());
         tilt_ok
+            && links_ok
             && match self {
             OpParams::Face {
                 stepover,
@@ -60,8 +65,6 @@ impl OpParams {
                 tab_width,
                 tab_height,
                 helix_radius,
-                level_link,
-                ramp_angle,
                 ..
             } => {
                 // Structural only, the pocket doors' word (M8.2 A): a
@@ -82,10 +85,6 @@ impl OpParams {
                     && nneg(*tab_height)
                     && pos(*helix_radius)
                     && lead_sane(lead)
-                    // The stay-down ramp reads its angle; a retract
-                    // link never does, so any stored number is inert.
-                    && (*level_link == crate::machining2d::LevelLink::RetractReenter
-                        || (ramp_angle.is_finite() && *ramp_angle > 0.0 && *ramp_angle < 90.0))
             }
             OpParams::Pocket {
                 stepover,

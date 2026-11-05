@@ -173,6 +173,16 @@ pub(crate) fn push_arc_lead(b: &mut PathBuilder, lead: &ArcLead, clearance_z: f6
         b.push(MoveKind::Rapid, Point3::new(s.x, s.y, clearance_z), None);
     }
     b.push(MoveKind::Rapid, Point3::new(s.x, s.y, z_top), None);
+    push_vertical_arc(b, lead, feed);
+}
+
+/// THE one place a vertical-plane arc is emitted (M11.2 C): every arc
+/// entry, wall arc and arc level transition posts through here, so the
+/// day the CL carries the arc's plane (M11.2 B) this body becomes one
+/// G18/G19 arc move and nothing else changes. Today: the certified
+/// chord fan, each chord's sagitta inside the tolerance it was planned
+/// at. The builder must stand at `lead.start` on the arc's top plane.
+pub(crate) fn push_vertical_arc(b: &mut PathBuilder, lead: &ArcLead, feed: f64) {
     for q in &lead.fan {
         b.push(MoveKind::Feed, *q, Some(feed));
     }

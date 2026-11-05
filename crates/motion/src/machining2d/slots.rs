@@ -4,6 +4,7 @@ use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::Entry3D;
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
+use crate::links::Links;
 
 use super::face::{GenError, band};
 use super::levels::{Cert, Motion, cut_levels, run_levels};
@@ -60,6 +61,9 @@ pub struct SlotParams {
     /// stadium wall (the contour law), not by a static cap: a full-
     /// width slot (h = 0) has no room for any orbit, and says so.
     pub helix_radius: f64,
+    /// Level transitions and links (M11.2 C/D), proved against the
+    /// closed-form stadium; [`Links::PLANAR`] is every earlier slot.
+    pub links: Links,
 }
 
 impl SlotParams {
@@ -99,7 +103,9 @@ impl SlotParams {
         if self.width <= 0.0 {
             return Err(GenError::Invalid("slot width must be positive".into()));
         }
-        if self.entry == Entry3D::Helix && self.helix_radius <= 0.0 {
+        self.links.validate().map_err(|e| GenError::Invalid(e.into()))?;
+        let helix = self.entry == Entry3D::Helix || self.links.transition == Some(Entry3D::Helix);
+        if helix && self.helix_radius <= 0.0 {
             // Only positivity (the contour law): whether the corridor
             // can HOLD the orbit is certified per level by `dive_room`
             // against the stadium, where too wide is refused loudly.
@@ -179,7 +185,19 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
         t
     };
     let center = tess.as_ref().map(|t| Cert::Stadium { a, b, h, tess: t });
-    run_levels(&mut bld, &[pass], &zs, &motion, None, center.as_ref());
+    // The links' area (M11.2): the same stadium, asked for even under a
+    // Plunge entry - only when the user chose something to prove.
+    let link_tess = match &tess {
+        Some(_) => None,
+        None if p.links == Links::PLANAR => None,
+        None => stadium_center(a, b, h),
+    };
+    motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius);
+    let link_cert = match (&tess, &link_tess) {
+        (Some(t), _) | (None, Some(t)) => Some(Cert::Stadium { a, b, h, tess: t }),
+        (None, None) => None,
+    };
+    run_levels(&mut bld, &[pass], &zs, &motion, None, center.as_ref(), link_cert.as_ref());
     let cur = bld.at();
     bld.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
@@ -333,7 +351,7 @@ pub fn trace(region: &Region, p: &TraceParams) -> Result<Toolpath, GenError> {
     // for an engraved line the whole cut is one kerf deep - nothing
     // above the level is material to avoid).
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed);
-    run_levels(&mut b, &passes, &zs, &motion, None, None);
+    run_levels(&mut b, &passes, &zs, &motion, None, None, None);
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 

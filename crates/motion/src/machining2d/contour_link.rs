@@ -1,43 +1,48 @@
-//! How a multi-depth contour moves from one level to the next - the
-//! user's choice, never a premade one. Provenance: the two standard
-//! multi-depth profile transitions of published CAM practice - lead
-//! out, retract, traverse and re-enter by the chosen entry; or stay at
-//! depth and ramp down along the profile itself at a stated maximum
-//! ramp angle (the cutter walks the ring it just finished, so the
-//! center never leaves the proven ring). RS-274 / ISO 6983 linear
-//! interpolation for the ramp's 3-axis feeds. No vendor material.
+//! How a multi-depth contour moves from one level to the next and from
+//! one ring to the next - the user's choice (`links::Links`), never a
+//! premade one. Provenance: the standard multi-depth profile transitions
+//! of published CAM practice - lead out, retract (to clearance or the
+//! retract plane), traverse and re-enter by the chosen entry; or stay at
+//! depth and descend on the ring itself: ramp along it at a stated
+//! maximum angle, helix along it at a pitch, plunge at the seam, or a
+//! vertical-plane arc onto the seam (the cutter center never leaves the
+//! proven ring or the room the lead law proved). RS-274 / ISO 6983
+//! linear interpolation for the ramp's 3-axis feeds. No vendor material.
 
 use crate::cl::{MoveKind, PathBuilder};
+use crate::entry::Entry3D;
+use crate::entry_arc::{arc_lead, push_vertical_arc, seg_dir};
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
+use crate::links::{Link, Links};
 
+use super::arcs::Seg;
 use super::contour::ContourParams;
 use super::contour_depth::Ladder;
 use super::contour_entry::say;
+use super::fillet::Legal;
+use super::lead_fit::{segs_hold, slack};
 use super::ring::dist;
 
-/// The level-to-level transition of a contour.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum LevelLink {
-    /// Lead out, lift to the retract (hop) plane, move over, and enter
-    /// the next level by the chosen Entry - every pre-option file.
-    #[default]
-    RetractReenter,
-    /// Stay at depth: skip the lead-out, ramp down along the ring just
-    /// cut at no more than the ramp angle, and walk the next level from
-    /// the seam the ramp lands on. Where it cannot be proved (tabbed
-    /// levels, a ring too short for the angle, another ring cut in
-    /// between) that level retracts and re-enters instead, by name.
-    StayDownRamp,
-}
-
-/// Default maximum ramp angle (degrees) of the stay-down ramp: a gentle
-/// helical-along-the-wall descent a flat end mill takes without a
-/// center-cutting plunge.
-pub const DEFAULT_LEVEL_RAMP_ANGLE: f64 = 3.0;
+/// Default maximum ramp angle (degrees) of the stay-down ramp - the
+/// links' own default, re-exported under its pre-M11.2 name.
+pub const DEFAULT_LEVEL_RAMP_ANGLE: f64 = crate::links::DEFAULT_RAMP_ANGLE;
 /// Laps of the ring a single ramp may take; past this the ring is too
 /// short for the angle and the level retracts instead.
 const MAX_RAMP_LAPS: usize = 64;
+
+/// How a stay-down level is descended onto, planned per schedule item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Stay {
+    /// Ramp (or helix) along the ring, this many laps.
+    Laps(usize),
+    /// Plunge straight down at the seam - on the ring the level law
+    /// proved at this depth.
+    Plunge,
+    /// The vertical-plane arc onto the seam, proved at push time; it
+    /// falls back to the seam plunge, named.
+    Arc,
+}
 
 /// Laps the ramp needs to descend `dz` along a ring of length `len` at
 /// no more than `angle_deg`; `None` when the ring cannot hold it.
@@ -49,6 +54,13 @@ pub(super) fn ramp_laps(len: f64, dz: f64, angle_deg: f64) -> Option<usize> {
     let run = dz / tan;
     let laps = (run / len).ceil().max(1.0);
     (laps <= MAX_RAMP_LAPS as f64).then_some(laps as usize)
+}
+
+/// Laps a helix along the ring takes for `dz` at `pitch` per lap; a zero
+/// pitch descends in one lap.
+fn helix_laps(dz: f64, pitch: f64) -> Option<usize> {
+    let laps = if pitch > 0.0 { (dz / pitch).ceil().max(1.0) } else { 1.0 };
+    (laps.is_finite() && laps <= MAX_RAMP_LAPS as f64).then_some(laps as usize)
 }
 
 /// Push the ramp: from the ring's seam `poly[0]` at `z_from`, `laps`
@@ -76,72 +88,206 @@ pub(super) fn push_ramp(b: &mut PathBuilder, poly: &[Point2], laps: usize, z_fro
     }
 }
 
+/// Push a planned stay-down descent: the tool stands on the seam
+/// `poly[0]` at `zp` (its lead-out skipped). `Arc` is proved here - its
+/// lead chord behind the seam must hold the lead room - and falls back
+/// to the plunge at the seam, named.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn push_stay(
+    b: &mut PathBuilder,
+    stay: Stay,
+    poly: &[Point2],
+    walk: &[Seg],
+    zp: f64,
+    z: f64,
+    p: &ContourParams,
+    legal: &Legal,
+    notes: &mut Vec<String>,
+) {
+    let Some(&seam) = poly.first() else {
+        return;
+    };
+    match stay {
+        Stay::Laps(laps) => push_ramp(b, poly, laps, zp, z, p.feed),
+        Stay::Plunge => b.push(MoveKind::Plunge, Point3::new(seam.x, seam.y, z), Some(p.plunge_feed)),
+        Stay::Arc => {
+            let tol = slack(p);
+            let holds = |a: Point2, q: Point2| segs_hold(legal, a, &[Seg::Line(vec![q])], tol);
+            let arc = walk
+                .first()
+                .and_then(|s| seg_dir(seam, s))
+                .ok_or("the first cut has no direction to be tangent to")
+                .and_then(|d| arc_lead(seam, d, zp, z, p.tool_diameter, p.tolerance, holds));
+            match arc {
+                Ok(a) => {
+                    // Back along the proved lead chord at the level just
+                    // cut, then the arc down onto the seam.
+                    b.push(MoveKind::Feed, Point3::new(a.start.x, a.start.y, zp), Some(p.feed));
+                    push_vertical_arc(b, &a, p.feed);
+                }
+                Err(why) => {
+                    say(
+                        notes,
+                        format!(
+                            "level link: no stay-down arc onto Z {z:.3} at the seam ({:.3}, {:.3}) - \
+                             {why}; plunged on the ring there",
+                            seam.x, seam.y
+                        ),
+                    );
+                    b.push(MoveKind::Plunge, Point3::new(seam.x, seam.y, z), Some(p.plunge_feed));
+                }
+            }
+        }
+    }
+}
+
 /// The cut order and its stay-down links. Level by level (every ring at
-/// a level, then the next level) under retract-and-re-enter; ring by
-/// ring under the stay-down ramp, each ring all the way down before the
-/// next, so a ring's levels follow one another and the ramp can link
-/// them. `ramp[i]` is the lap count of the ramp onto item `i`, `None`
+/// a level, then the next level) unless the level link is Keep down;
+/// ring by ring then, each ring all the way down before the next, so a
+/// ring's levels follow one another and the descent can link them.
+/// `stay[i]` is how item `i` is descended onto from item `i - 1`, `None`
 /// where item `i` is entered from above; every stay-down level that
-/// cannot ramp is named in `notes`.
+/// cannot stay is named in `notes`.
 pub(super) fn plan_links(
     p: &ContourParams,
     lad: &Ladder,
     plan: &[Vec<Point2>],
     notes: &mut Vec<String>,
-) -> (Vec<(f64, usize)>, Vec<Option<usize>>) {
+) -> (Vec<(f64, usize)>, Vec<Option<Stay>>) {
     let is_tabbed = |z: f64| p.tab_count > 0 && z < p.bottom_z + p.tab_height;
     let loops = lad.per_ring.len();
-    // The cut order: level by level (every ring at a level, then the
-    // next level) - or, staying down, ring by ring, each ring all the
-    // way down before the next, so a ring's levels follow one another
-    // and the ramp can link them.
-    let sched: Vec<(f64, usize)> = if p.level_link == LevelLink::StayDownRamp {
+    let keep = p.links.level == Link::KeepDown;
+    let sched: Vec<(f64, usize)> = if keep {
         (0..loops).flat_map(|li| lad.ring(li).iter().map(move |&z| (z, li))).collect()
     } else {
         lad.zs.iter()
             .flat_map(|&z| (0..loops).filter(move |&li| lad.walks(li, z)).map(move |li| (z, li)))
             .collect()
     };
-    // Where the ramp links item i to item i - 1: the same ring, its
-    // previous level just cut, neither level tabbed, and a ring long
-    // enough for the angle. Every other level change of a stay-down
-    // contour retracts and re-enters, and says why.
-    let mut ramp: Vec<Option<usize>> = vec![None; sched.len()];
-    if p.level_link == LevelLink::StayDownRamp {
-        for i in 1..sched.len() {
-            let ((z, li), (zp, lp)) = (sched[i], sched[i - 1]);
-            if li != lp {
-                continue;
-            }
-            let at = plan[li].first().copied().unwrap_or(Point2::new(0.0, 0.0));
-            if is_tabbed(z) || is_tabbed(zp) {
-                say(
-                    notes,
-                    format!(
-                        "level link: no stay-down ramp onto Z {z:.3} on the ring at ({:.3}, {:.3}) - \
-                         a standing tab is material on the ring; retract and re-enter there",
-                        at.x, at.y
-                    ),
-                );
-                continue;
-            }
-            let len: f64 = plan[li].windows(2).map(|w| dist(w[0], w[1])).sum();
-            match ramp_laps(len, zp - z, p.ramp_angle) {
-                Some(n) => ramp[i] = Some(n),
-                None => say(
-                    notes,
-                    format!(
-                        "level link: no stay-down ramp onto Z {z:.3} on the ring at ({:.3}, {:.3}) - \
-                         the ring is too short for a {:.1} deg ramp over {:.3} mm; retract and \
-                         re-enter there",
-                        at.x,
-                        at.y,
-                        p.ramp_angle,
-                        zp - z
-                    ),
+    let mut stay: Vec<Option<Stay>> = vec![None; sched.len()];
+    if !keep {
+        return (sched, stay);
+    }
+    let arm = p.links.arm(p.entry);
+    let word = match arm {
+        Entry3D::Ramp => "ramp",
+        Entry3D::Helix => "helix",
+        Entry3D::Plunge => "plunge",
+        Entry3D::Arc => "arc",
+    };
+    for i in 1..sched.len() {
+        let ((z, li), (zp, lp)) = (sched[i], sched[i - 1]);
+        if li != lp {
+            continue;
+        }
+        let at = plan[li].first().copied().unwrap_or(Point2::new(0.0, 0.0));
+        let refuse = |notes: &mut Vec<String>, why: String| {
+            say(
+                notes,
+                format!(
+                    "level link: no stay-down {word} onto Z {z:.3} on the ring at ({:.3}, {:.3}) - \
+                     {why}; retract and re-enter there",
+                    at.x, at.y
                 ),
+            );
+        };
+        if is_tabbed(z) || is_tabbed(zp) {
+            refuse(notes, "a standing tab is material on the ring".into());
+            continue;
+        }
+        let len: f64 = plan[li].windows(2).map(|w| dist(w[0], w[1])).sum();
+        stay[i] = match arm {
+            Entry3D::Ramp => match ramp_laps(len, zp - z, p.links.ramp_angle) {
+                Some(n) => Some(Stay::Laps(n)),
+                None => {
+                    refuse(
+                        notes,
+                        format!(
+                            "the ring is too short for a {:.1} deg ramp over {:.3} mm",
+                            p.links.ramp_angle,
+                            zp - z
+                        ),
+                    );
+                    None
+                }
+            },
+            Entry3D::Helix => match helix_laps(zp - z, p.links.helix_pitch) {
+                Some(n) => Some(Stay::Laps(n)),
+                None => {
+                    refuse(notes, format!("a {:.3} mm pitch asks too many laps", p.links.helix_pitch));
+                    None
+                }
+            },
+            Entry3D::Plunge => Some(Stay::Plunge),
+            Entry3D::Arc => Some(Stay::Arc),
+        };
+    }
+    (sched, stay)
+}
+
+/// The ring-to-ring move within one level (the pass link). `Ok(true)`:
+/// the link was posted and the tool stands on `e2` at `z`. Keep down
+/// feeds there when the straight link holds the lead room, crosses no
+/// planned ring, stays under the stay-down limit and no tab stands on
+/// the level; otherwise - and for the retract choices - the hop template
+/// lifts, at the retract plane or clearance.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn ring_link(
+    b: &mut PathBuilder,
+    p: &ContourParams,
+    legal: &Legal,
+    cut: &[&[Vec<Point2>]],
+    e2: Point2,
+    z: f64,
+    hop_z: f64,
+    tabbed: bool,
+    lifted: &mut crate::links::LinkTally,
+) {
+    let cur = b.at();
+    let at = Point2::new(cur.x, cur.y);
+    if p.links.pass == Link::KeepDown {
+        let proof = keep_down_proof(p, legal, cut, at, e2, tabbed, &p.links);
+        match proof {
+            Ok(()) => {
+                b.push(MoveKind::Feed, Point3::new(e2.x, e2.y, z), Some(p.feed));
+                return;
             }
+            Err(why) => lifted.lift(why, at, z),
         }
     }
-    (sched, ramp)
+    if cur.z < hop_z {
+        b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop_z), Some(p.feed));
+    }
+    if p.links.pass == Link::Clearance {
+        b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+        b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, p.clearance_z), None);
+    }
+    b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop_z), None);
+    b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
+}
+
+/// The contour's keep-down law: the cutter center on the legal side of
+/// the part offset all along the link (`lead_fit`'s room law), no planned
+/// ring crossed, within the limit, and no tab standing on the level.
+fn keep_down_proof(
+    p: &ContourParams,
+    legal: &Legal,
+    cut: &[&[Vec<Point2>]],
+    a: Point2,
+    e: Point2,
+    tabbed: bool,
+    links: &Links,
+) -> Result<(), &'static str> {
+    if tabbed {
+        return Err("a standing tab is material the link cannot see");
+    }
+    if !links.within_stay_down(dist(a, e)) {
+        return Err(crate::links::TOO_LONG);
+    }
+    let room = segs_hold(legal, a, &[Seg::Line(vec![e])], slack(p));
+    if room && !cut.iter().any(|c| crate::entry::chord_hits_plan(a, e, c)) {
+        Ok(())
+    } else {
+        Err(crate::links::NOT_PROVED)
+    }
 }

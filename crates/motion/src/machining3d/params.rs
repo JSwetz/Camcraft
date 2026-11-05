@@ -4,6 +4,7 @@
 use crate::machining2d::{
     GenError, PocketStrategy,
 };
+use crate::links::Links;
 use crate::stock_sim::StockError;
 /// The sim's chord budget for arc moves - the sagitta law's own number,
 /// the same one `Move::chords` is tested at. Finer than the lattice by
@@ -53,6 +54,10 @@ pub struct Pocket3DParams {
     /// ring step is `optimal_load x D` - the whole of constant-engagement
     /// roughing's geometry law (M2.1c), the contact angle derived.
     pub optimal_load: f64,
+    /// Level transitions and links (M11.2 C/D); [`Links::ROUGH3D`] is
+    /// the ladder every earlier 3-D rough posted (its pass links have
+    /// always stayed down where proved).
+    pub links: Links,
 }
 
 impl Pocket3DParams {
@@ -99,7 +104,8 @@ impl Pocket3DParams {
         if self.retract_z.is_some_and(|rz| rz < self.top_z) {
             return Err(GenError::Invalid("retract plane sits inside the material".into()));
         }
-        if self.entry == Entry3D::Helix {
+        self.links.validate().map_err(|e| GenError::Invalid(e.into()))?;
+        if self.entry == Entry3D::Helix || self.links.transition == Some(Entry3D::Helix) {
             let r = self.tool_diameter * 0.5;
             if self.helix_radius <= 0.0 || self.helix_radius > r {
                 return Err(GenError::Invalid(

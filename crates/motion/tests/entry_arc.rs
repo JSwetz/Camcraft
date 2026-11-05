@@ -207,8 +207,7 @@ fn cp() -> ContourParams {
         entry: Entry3D::Arc,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_motion::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_motion::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_motion::links::Links::PLANAR,
     }
 }
 
@@ -338,6 +337,7 @@ fn the_wall_side_enters_on_a_tangent_arc_in_the_air_beside_the_wall() {
 
 fn pp() -> PocketParams {
     PocketParams {
+        links: camcraft_motion::links::Links::PLANAR,
         tool_diameter: 6.0,
         stepover: 3.0,
         stock_to_leave: 0.0,
@@ -377,6 +377,7 @@ fn a_pocket_arc_entry_is_tangent_or_named_and_always_safe() {
 #[test]
 fn a_slot_arc_entry_stays_inside_the_channel_stadium() {
     let p = SlotParams {
+        links: camcraft_motion::links::Links::PLANAR,
         tool_diameter: 6.0,
         width: 10.0,
         stock_to_leave: 0.0,

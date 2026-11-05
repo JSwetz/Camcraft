@@ -131,6 +131,7 @@ fn chamfer(width: f64) -> OpParams {
 
 fn circular(vault: bool, stepover: f64, radius: f64) -> OpParams {
     OpParams::Circular {
+        links: camcraft_app::links::Links::PLANAR,
         center: Point2::new(0.0, 0.0),
         radius,
         vault,

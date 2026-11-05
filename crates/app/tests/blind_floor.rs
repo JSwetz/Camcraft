@@ -95,8 +95,7 @@ fn contour_op(stepdown: f64, leave: f64) -> OpParams {
         helix_radius: 1.0,
         blend_turns: false,
         tilt: None,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     }
 }
 
@@ -179,8 +178,7 @@ fn direct_params(stepdown: f64, leave: f64) -> ContourParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     }
 }
 

@@ -131,6 +131,7 @@ fn hole(x: f64, y: f64, radius: f64, floor_z: f64, through: bool) -> Hole {
 
 fn bore(holes: Vec<Hole>) -> OpParams {
     OpParams::Bore {
+        links: camcraft_app::links::Links::PLANAR,
         clearance_z: Height::fixed(25.0),
         retract_z: None,
         top_z: Height::fixed(20.0),

@@ -82,6 +82,7 @@ fn params_sanity_gates() {
     };
     assert!(!no_step.is_sane(), "stepdown must be positive when set");
     let bad = OpParams::Pocket { tilt: None,
+        links: crate::links::Links::PLANAR,
         stepover: f64::NAN,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(5.0),
@@ -337,6 +338,7 @@ fn rotary_offset_stamp_moves_with_its_wrap_numbers() {
     let world = crate::world::new_world();
     let offset = |stepover: f64, stepdown: f64, strategy: PocketStrategy| {
         OpParams::RotaryOffset {
+            links: crate::links::Links::ROUGH3D,
             tolerance: 0.05,
             stepover,
             stock_to_leave: 0.0,
@@ -392,6 +394,7 @@ fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
     // moves the stamp on its own.
     let world = crate::world::new_world();
     let rough = |lead: f64, lag: f64, tilt: f64| OpParams::MultiAxisRough {
+        links: crate::links::Links::ROUGH3D,
         tolerance: 0.05,
         stepover: 4.0,
         stock_to_leave: 0.0,
@@ -421,6 +424,7 @@ fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
     assert_ne!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(0.0, 7.0, 90.0)), "lag is the stamp's too");
     assert_ne!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(0.0, 0.0, 45.0)), "the cone caps the lean");
     let pocket = OpParams::Pocket3D {
+        links: crate::links::Links::ROUGH3D,
         stepover: 4.0,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(25.0),
@@ -463,6 +467,7 @@ fn the_arc_entry_splits_the_stamp_and_leaves_the_others_alone() {
     // words keep the bytes they always wrote.
     let world = crate::world::new_world();
     let pocket = |entry: Entry3D| OpParams::Pocket {
+        links: crate::links::Links::PLANAR,
         tilt: None,
         stepover: 3.0,
         stock_to_leave: 0.0,

@@ -1,12 +1,17 @@
-//! Split from `machining2d.rs` by M5.0.1; structure only.
+//! The planar level ladder (split from `machining2d.rs` by M5.0.1): cut
+//! levels, the certified area, and the walk of passes level by level -
+//! with M11.2's user-chosen level transitions and links (provenance in
+//! `links.rs`; the descents in `descent.rs`, the links in
+//! `ladder_links.rs`).
 
 use crate::cl::{MoveKind, PathBuilder};
-use crate::entry::{Entry3D, chord_hits_plan, dive_room, helix_down};
-use crate::entry_arc::{arc_lead, pts_dir, push_arc_lead, seg_dir};
+use crate::entry::Entry3D;
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
+use crate::links::Links;
 
-use super::arcs::{ARC_FIT_TOL, Seg, fit_arcs, push_segs};
+use super::arcs::{Seg, fit_arcs, push_segs};
+use super::ladder_links::{LevelWalk, LinkState, descend, level_link, pass_link};
 use super::slots::chord_clears;
 
 /// The certified legal-center area a descent is proved against (M8.2
@@ -29,7 +34,7 @@ pub(super) enum Cert<'a> {
 
 impl Cert<'_> {
     /// The region `dive_room` triangulates.
-    fn room(&self) -> &Region {
+    pub(super) fn room(&self) -> &Region {
         match self {
             Cert::Region(r) => r,
             Cert::Stadium { tess, .. } => tess,
@@ -40,7 +45,7 @@ impl Cert<'_> {
     /// endpoints the generators construct on the boundary; it is a
     /// tenth of a micrometer, below any cut tolerance and any gouge
     /// that could matter.
-    fn chord_ok(&self, p: Point2, q: Point2) -> bool {
+    pub(super) fn chord_ok(&self, p: Point2, q: Point2) -> bool {
         match self {
             Cert::Region(r) => chord_clears(r, p, q),
             Cert::Stadium { a, b, h, .. } => {
@@ -80,39 +85,27 @@ pub(crate) fn cut_levels(top: f64, bottom: f64, stepdown: f64) -> Vec<f64> {
     zs
 }
 
-/// Run XY passes at each of the cut levels: every pass starts with a lift
-/// (except the very first entry) and a rapid transfer, then plunges at
-/// the pass start and feeds along it. The builder drops zero-length
-/// moves, so the first entry's lift collapses when the path already
-/// starts at clearance above the entry point. A level change lifts to
-/// `clearance_z` - the new level engages material the previous one never
-/// touched, and clearance is the honest plane for that. A between-pass
-/// lift *within* a level travels `hop_z`: floor already swept, air over
-/// everything still standing, and a full clearance climb between passes
-/// of one level pays a climb nobody asked for. `hop_z` is validated at
-/// or above `top_z`, so a hop is never a slide through solid. Shared by
-/// the depth-stepping area operations (pocket, slot, trace).
-/// `fit = Some(tol)` runs each pass through [`fit_arcs`] once (the walk
-/// shape is level-independent): waterline rings of a fine tessellation
-/// travel as arcs. `None` keeps the per-point feed walk every straight
-/// generator has always had.
 /// The motion envelope a depth-stepping generator shares with
 /// [`run_levels`]: the two lift planes (clearance for a level change,
-/// hop between passes of one level), the two feeds, and the entry
-/// family the ladder crosses a level plane with (M5.1 H).
+/// hop between passes of one level), the two feeds, the entry family the
+/// ladder first engages with (M5.1 H), and the level transitions and
+/// links the user chose (M11.2 C/D, [`Links`]).
 pub(super) struct Motion {
-    clearance_z: f64,
-    hop_z: f64,
-    feed: f64,
-    plunge_feed: f64,
-    /// How a level change engages material. `Plunge` is the legacy
-    /// climb-and-dive every depth-stepping operation has always
-    /// posted; the pocket's validation already proved the other arms'
-    /// radii against the tool, the way `machining3d`'s does.
-    entry: Entry3D,
-    helix_radius: f64,
+    pub(super) clearance_z: f64,
+    pub(super) hop_z: f64,
+    pub(super) feed: f64,
+    pub(super) plunge_feed: f64,
+    /// How the first engagement goes. `Plunge` is the legacy climb-and-
+    /// dive every depth-stepping operation has always posted; the
+    /// pocket's validation already proved the other arms' radii against
+    /// the tool, the way `machining3d`'s does.
+    pub(super) entry: Entry3D,
+    pub(super) helix_radius: f64,
     /// The arc entry's nominal radius (M11.1); 0 asks the quarter turn.
-    arc_radius: f64,
+    pub(super) arc_radius: f64,
+    /// Level transitions and links; [`Links::PLANAR`] is the legacy
+    /// ladder byte for byte.
+    pub(super) links: Links,
 }
 
 impl Motion {
@@ -133,6 +126,7 @@ impl Motion {
             entry: Entry3D::default(),
             helix_radius: 0.0,
             arc_radius: 0.0,
+            links: Links::PLANAR,
         }
     }
 
@@ -150,14 +144,27 @@ impl Motion {
         self.arc_radius = r;
         self
     }
+
+    /// The user's level transitions and links (M11.2 C/D).
+    pub(super) fn with_links(mut self, links: Links, helix_radius: f64) -> Self {
+        self.links = links;
+        if links.transition == Some(Entry3D::Helix) {
+            self.helix_radius = helix_radius;
+        }
+        self
+    }
 }
 
-/// `center` is the level plan's cutter-center area - the same region at
-/// every level, because a planar pocket's passes are one tiling walked
-/// at each plane. `Some` lets the entry family prove its descents
-/// against it, at the first level and at every crossing (M8.1); `None`
-/// keeps the climb-and-dive slot and trace have always posted, which
-/// no arm can change without new proofs.
+/// Run XY passes at each of the cut levels. `center` is the level plan's
+/// cutter-center area - the same region at every level, because a
+/// planar pocket's passes are one tiling walked at each plane. `Some`
+/// lets the entry family prove its descents against it, at the first
+/// level and at every crossing (M8.1); `None` keeps the climb-and-dive
+/// slot and trace have always posted. `links_cert` is the area the
+/// level transitions and keep-down links (M11.2) are proved against -
+/// the same area, handed over even where the entry stays the plain dive
+/// (a slot or a bore whose entry is Plunge still has a certified band).
+/// `fit = Some(tol)` runs each pass through [`fit_arcs`] once.
 pub(super) fn run_levels(
     b: &mut PathBuilder,
     passes: &[Vec<Point2>],
@@ -165,16 +172,27 @@ pub(super) fn run_levels(
     m: &Motion,
     fit: Option<f64>,
     center: Option<&Cert<'_>>,
+    links_cert: Option<&Cert<'_>>,
 ) {
     let runs: Option<Vec<Vec<Seg>>> =
         fit.map(|tol| passes.iter().map(|p| fit_arcs(p, tol)).collect());
-    run_level_walks(b, passes, zs, m, runs.as_deref(), center);
+    run_level_walks(b, passes, zs, m, runs.as_deref(), center, links_cert);
 }
 
 /// [`run_levels`] with the walks already built: `runs[i]` is pass `i`
 /// past its first point as [`Seg`]s (fitted arcs, M11.1's corner
-/// fillets); `None` walks the points. Entries, lifts and links read
-/// `passes` exactly as before - a walk only replaces the feed along it.
+/// fillets); `None` walks the points.
+///
+/// The ladder's three moments: the path's first entry (the `entry`
+/// family from clearance - M8.1's level-0 law); a level change (the
+/// transition - `links.transition`, else the entry - reached by the
+/// level link: from clearance, from the retract plane, or staying at
+/// the level above and feeding to the descent's start where that link
+/// is proved); and a pass change within a level (the pass link: the
+/// retract-plane hop every planar ladder has posted, the clearance
+/// climb, or a keep-down feed where proved). The z the tool last
+/// ENGAGED decides which moment is which: a level whose earlier passes
+/// came out degenerate still crosses in over new material.
 pub(super) fn run_level_walks(
     b: &mut PathBuilder,
     passes: &[Vec<Point2>],
@@ -182,14 +200,11 @@ pub(super) fn run_level_walks(
     m: &Motion,
     runs: Option<&[Vec<Seg>]>,
     center: Option<&Cert<'_>>,
+    links_cert: Option<&Cert<'_>>,
 ) {
     let mut first = true;
-    // The z the tool last ENGAGED (cut at), not the z the loop last
-    // visited: a hop is earned only by having floor already swept at
-    // this very level. A level change - or a first entry, or a level
-    // whose earlier passes came out degenerate - crosses in over new
-    // material and keeps the full clearance climb.
     let mut last_cut_z: Option<f64> = None;
+    let mut st = LinkState::default();
     for &z in zs {
         for (pi, pass) in passes.iter().enumerate() {
             let Some((entry, rest)) = pass.split_first() else {
@@ -198,133 +213,29 @@ pub(super) fn run_level_walks(
             if rest.is_empty() {
                 continue;
             }
-            let lift_z = if last_cut_z == Some(z) { m.hop_z } else { m.clearance_z };
-            if !first {
-                let cur = b.at();
-                b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, lift_z), None);
-            }
             let e = Point2::new(entry.x, entry.y);
-            // A move onto fresh material: a plane crossing (the tool
-            // last cut at another z) or the path's very first entry -
-            // the entry family's arms replace the climb-and-dive on
-            // BOTH (M8.1's law reads the family from level 0, not
-            // only at crossings; the `!first` gate cc5d89d left in
-            // place made a chosen Helix open with a straight wall
-            // plunge, the founding defect wearing a different hat).
-            // Every arm ends standing at (e, z), so the walk below is
-            // shared. Between-pass moves WITHIN a level never take an
-            // arm - their floors are already swept; that is the
-            // ladder.rs split too.
-            let entering = first || last_cut_z != Some(z);
-            match (entering, m.entry, center) {
-                (true, Entry3D::Ramp, Some(cen)) => {
-                    // The diagonal's legality is the single center the
-                    // whole ladder shares: it is the deepest cut at the
-                    // crossing's bottom, every plane above crosses the
-                    // same material columns already swept by the level
-                    // above, and one chord test covers the move. A
-                    // blocked chord is substituted, not skipped: M8.1
-                    // sends the fallback to the floor's own dive room
-                    // (the wall dive it used to post is what the entry
-                    // law refuses), and says so.
-                    let cur = b.at();
-                    let leg = Point2::new(cur.x, cur.y);
-                    let prev_z = last_cut_z.unwrap_or(m.clearance_z);
-                    if cen.chord_ok(leg, e) {
-                        b.push(MoveKind::Rapid, Point3::new(leg.x, leg.y, prev_z), None);
-                        b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(m.feed));
-                    } else {
-                        substituted_dive(b, cen, passes, e, z, m, "the ramp's chord is blocked");
-                    }
-                }
-                (true, Entry3D::Helix, Some(cen)) => {
-                    // The orbit's landing spot is the floor's own room
-                    // (M8.1): the destination center eroded by the
-                    // widened disc, taken at its widest open triangle.
-                    // The old chord-midpoint scan resolved None on every
-                    // all-arcs ring plan - the tessellated waterline's
-                    // midpoints sit on the ring lines, not in the eroded
-                    // leg - and the helix died silently into a wall
-                    // plunge. Room at the destination is room across the
-                    // whole crossed depth: the pocket's plan is one
-                    // region at every plane.
-                    let cur = b.at();
-                    let leg = Point2::new(cur.x, cur.y);
-                    let prev_z = last_cut_z.unwrap_or(m.clearance_z);
-                    // The found point is the orbit's CENTER; the dive
-                    // starts at its near side, `rh` west - one radius
-                    // of center-room certifies the whole swept tube
-                    // exactly (see `entry::dive_room`, M2.5 F's dome;
-                    // the 2-radius ask over-refused the channel,
-                    // M8.2's slot).
-                    let dive = dive_room(cen.room(), m.helix_radius + 1e-3);
-                    if let Some(c) = dive {
-                        let d = Point2::new(c.x - m.helix_radius, c.y);
-                        if leg.x != d.x || leg.y != d.y {
-                            b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.clearance_z), None);
-                        }
-                        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
-                        helix_down(b, d, prev_z, z, m.helix_radius, m.feed);
-                        dive_link(b, cen, passes, d, e, z, m);
-                    } else {
-                        substituted_dive(
-                            b,
-                            cen,
-                            passes,
-                            e,
-                            z,
-                            m,
-                            "the widened disc fits nowhere at this level",
-                        );
-                    }
-                }
-                (true, Entry3D::Arc, Some(cen)) => {
-                    // The circular ramp: the ramp's chord law on its
-                    // lead chord is its whole proof (see `entry_arc`).
-                    let prev_z = last_cut_z.unwrap_or(m.clearance_z);
-                    let walk = runs.and_then(|r| r.get(pi)).and_then(|w| w.first());
-                    let dir = walk.map_or_else(|| pts_dir(e, rest), |s| seg_dir(e, s));
-                    let lead = dir.ok_or("the first cut has no direction to be tangent to");
-                    let lead = lead.and_then(|d| {
-                        arc_lead(e, d, prev_z, z, m.arc_radius, ARC_FIT_TOL, |s, q| cen.chord_ok(s, q))
-                    });
-                    match lead {
-                        Ok(l) => push_arc_lead(b, &l, m.clearance_z, prev_z, m.feed),
-                        Err(why) => substituted_dive(b, cen, passes, e, z, m, why),
-                    }
-                }
-                (true, Entry3D::Plunge, Some(cen)) => {
-                    // The family's axial arm dives where the disc has
-                    // room at this level's floor, never at `passes[0]`
-                    // on the wall (M8.1). The link to the pass start
-                    // then runs over the level's own fresh plane.
-                    match dive_room(cen.room(), 0.0) {
-                        Some(d) => {
-                            let cur = b.at();
-                            if cur.x != d.x || cur.y != d.y {
-                                b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.clearance_z), None);
-                            }
-                            b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z), Some(m.plunge_feed));
-                            dive_link(b, cen, passes, d, e, z, m);
-                        }
-                        None => {
-                            substituted_dive(b, cen, passes, e, z, m, "the disc fits nowhere here")
-                        }
-                    }
-                }
-                // An in-level join, or a ladder that passed no
-                // center: the climb-and-dive this function has
-                // always posted - the floor its neighbours already
-                // cleared, and the slot/trace shape no arm can
-                // change without proofs.
-                _ => {
-                    b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lift_z), None);
-                    b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
-                }
+            let walk = runs.and_then(|r| r.get(pi)).map(Vec::as_slice);
+            let prev_z = last_cut_z.unwrap_or(m.clearance_z);
+            let lv = LevelWalk { passes, pass, walk, z, prev_z };
+            if first {
+                // The first entry: the entry family, from clearance.
+                let dove = descend(b, m.entry, false, center, &lv, m.clearance_z, m);
+                st.begin_level(e, dove);
+            } else if last_cut_z == Some(z) {
+                pass_link(b, e, z, m, links_cert, passes, &mut st);
+            } else {
+                // A level change. The transition, when the user set one,
+                // proves against the link area; "same as entry" keeps
+                // the entry's own certification, byte for byte.
+                let (arm, zig, cert) = match m.links.transition {
+                    Some(t) => (t, true, links_cert),
+                    None => (m.entry, false, center),
+                };
+                level_link(b, arm, zig, cert, &lv, m, &mut st);
             }
             first = false;
-            match runs.and_then(|r| r.get(pi)) {
-                Some(walk) => push_segs(b, walk, z, m.feed),
+            match walk {
+                Some(w) => push_segs(b, w, z, m.feed),
                 None => {
                     for q in rest {
                         b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(m.feed));
@@ -334,67 +245,5 @@ pub(super) fn run_level_walks(
             last_cut_z = Some(z);
         }
     }
-}
-
-/// The link from a just-completed dive at `d` up to plane `z` to the
-/// pass start `e`: feed it when the chord is proven (inside the
-/// center, crossing none of the level's planned paths), fly it over -
-/// hop, traverse, dive - when it is not. Shared by every arm's entry
-/// so the law reads once: an unproven chord never drags the tool
-/// across a wall face it has no right to cross. `pub(super)` since
-/// M8.2 A: the contour ladder runs the same law with its rings as
-/// the plan.
-pub(super) fn dive_link(
-    b: &mut PathBuilder,
-    cen: &Cert,
-    passes: &[Vec<Point2>],
-    d: Point2,
-    e: Point2,
-    z: f64,
-    m: &Motion,
-) {
-    if cen.chord_ok(d, e) && !chord_hits_plan(d, e, passes) {
-        b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(m.feed));
-    } else {
-        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.hop_z), None);
-        b.push(MoveKind::Rapid, Point3::new(e.x, e.y, m.hop_z), None);
-        b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
-    }
-}
-
-/// The entry family's honorable failure (M8.1): the stated motion
-/// could not be honored at this level for `why`, so the ladder
-/// substitutes the axial dive at the floor's own room - and says so on
-/// the status line. A floor with no room either (a region too dense to
-/// triangulate, an erosion that vanished) falls back to the wall dive
-/// the pocket used to post, still loud. `pub(super)` since M8.2 A:
-/// the contour ladder's substitutions need the same words spoken the
-/// same way.
-pub(super) fn substituted_dive(
-    b: &mut PathBuilder,
-    cen: &Cert,
-    passes: &[Vec<Point2>],
-    e: Point2,
-    z: f64,
-    m: &Motion,
-    why: &str,
-) {
-    match dive_room(cen.room(), 0.0) {
-        Some(d) => {
-            b.note(format!("entry: {why} - axial dive on the floor instead"));
-            let cur = b.at();
-            if cur.x != d.x || cur.y != d.y {
-                b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.clearance_z), None);
-            }
-            b.push(MoveKind::Plunge, Point3::new(d.x, d.y, z), Some(m.plunge_feed));
-            dive_link(b, cen, passes, d, e, z, m);
-        }
-        None => {
-            b.note(format!(
-                "entry: {why} - the floor has no dive room either; dived at the pass start"
-            ));
-            b.push(MoveKind::Rapid, Point3::new(e.x, e.y, m.clearance_z), None);
-            b.push(MoveKind::Plunge, Point3::new(e.x, e.y, z), Some(m.plunge_feed));
-        }
-    }
+    st.tally.say(b, "level/pass");
 }

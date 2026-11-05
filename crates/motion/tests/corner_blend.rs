@@ -67,13 +67,13 @@ fn cp(side: Side, climb: bool, blend: bool) -> ContourParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: blend,
-        level_link: camcraft_motion::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_motion::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_motion::links::Links::PLANAR,
     }
 }
 
 fn pp(strategy: PocketStrategy, blend: bool) -> PocketParams {
     PocketParams {
+        links: camcraft_motion::links::Links::PLANAR,
         tool_diameter: 8.0,
         stepover: 3.0,
         stock_to_leave: 0.0,

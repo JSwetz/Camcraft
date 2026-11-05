@@ -16,6 +16,8 @@ pub mod viewport;
 #[cfg(test)]
 mod law_tests;
 #[cfg(test)]
+mod helix_view_tests;
+#[cfg(test)]
 mod field_view_tests;
 
 /// Entry point used by `main.rs`; returns the process exit code. The egui

@@ -42,6 +42,7 @@ fn chamfer_params() -> ChamferParams {
 
 fn circular_params(vault: bool, stepover: f64, radius: f64) -> CircularParams {
     CircularParams {
+        links: camcraft_motion::links::Links::PLANAR,
         center: Point2::new(0.0, 0.0),
         radius,
         vault,

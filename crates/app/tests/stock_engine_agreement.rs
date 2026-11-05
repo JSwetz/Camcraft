@@ -219,6 +219,7 @@ fn the_pocket3d_consumers_read_both_engines_alike() {
             entry: Entry3D::Plunge,
             helix_radius: 1.0,
             optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
+            links: camcraft_app::links::Links::ROUGH3D,
         };
         let path = pocket3d(&facets, &region, &p).expect("the pocket generates");
         let at = format!("pocket3d {strategy:?}");

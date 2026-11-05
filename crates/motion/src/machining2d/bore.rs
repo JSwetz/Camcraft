@@ -32,6 +32,7 @@ use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::Entry3D;
 use crate::geo2d::{Loop, Point2, Region};
 use crate::geometry::Point3;
+use crate::links::Links;
 
 use super::face::GenError;
 use super::levels::{Cert, Motion, cut_levels, run_levels};
@@ -85,6 +86,9 @@ pub struct BoreParams {
     pub tolerance: f64,
     pub entry: Entry3D,
     pub helix_radius: f64,
+    /// Level transitions and links (M11.2 C/D) within each hole's
+    /// ladder; [`Links::PLANAR`] is every earlier bore.
+    pub links: Links,
 }
 
 impl BoreParams {
@@ -139,7 +143,11 @@ impl BoreParams {
         if self.retract_z.is_some_and(|rz| rz < top) {
             return Err(GenError::Invalid("retract plane sits inside the material".into()));
         }
+        self.links.validate().map_err(|e| GenError::Invalid(e.into()))?;
         for h in &self.holes {
+            if self.links.transition == Some(Entry3D::Helix) && self.helix_radius <= 0.0 {
+                return Err(GenError::Invalid("helix radius must be positive".into()));
+            }
             if h.radius <= 0.0 {
                 return Err(GenError::Invalid("hole radius must be positive".into()));
             }
@@ -205,6 +213,7 @@ pub fn bore(p: &BoreParams) -> Result<Toolpath, GenError> {
             .with_entry(p.entry, p.helix_radius)
             .with_arc_radius(p.tool_diameter);
     }
+    let motion = motion.with_arc_radius(p.tool_diameter).with_links(p.links, p.helix_radius);
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
 
     for h in &p.holes {
@@ -242,7 +251,7 @@ pub fn bore(p: &BoreParams) -> Result<Toolpath, GenError> {
         // law: it lifts to clearance, positions over the dive point,
         // and only then opens the ladder - the same motion the pocket
         // posts between its islands, so no second hop is added here.
-        run_levels(&mut b, &passes, &zs, &motion, Some(p.tolerance), cert.as_ref());
+        run_levels(&mut b, &passes, &zs, &motion, Some(p.tolerance), cert.as_ref(), cert.as_ref());
         // Close this hole at the clearance plane so the next hole's
         // hop (or the path's end) starts from a safe Z.
         let cur = b.at();

@@ -55,7 +55,7 @@ use egui::{
 
 use camcraft_app::geometry::{quat_from_axis_angle, quat_from_euler, quat_mul, quat_to_euler};
 use camcraft_app::machine;
-use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, LevelLink, PocketStrategy, Side};
+use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
 use camcraft_app::model;
 use camcraft_app::operation::{
     self, GeoSel, Height, HeightReference, OpParams, SrcRef, Tilt,
@@ -98,11 +98,6 @@ const TOOL_KINDS: [&str; 11] = [
 /// Lead in/out combo items - the whole `Lead` vocabulary, index order
 /// matching the combo-arm mapping in the contour page.
 const LEADS: [&str; 4] = ["None", "Linear", "Arc", "Tangential"];
-/// Descent combo items - the whole `Entry3D` vocabulary, index order
-/// matching the combo-arm mapping in the 3-D pocket's passes section.
-const ENTRY_KINDS: [&str; 4] = ["Plunge", "Ramp", "Helix", "Arc"];
-/// Contour level-to-level links, index order matching the combo arm.
-const LEVEL_LINKS: [&str; 2] = ["Retract and re-enter", "Stay down and ramp"];
 /// The 3-D finish kinematics, in the order the combo maps them.
 const FINISH_PATTERNS: [&str; 18] = [
     "Waterline",
@@ -134,6 +129,7 @@ const NOTE: Color32 = Color32::from_rgb(0x9E, 0xA8, 0xB8);
 
 // The section table and the tab strip live in `op_tabs` (the M1.4 bar,
 // restored after M9.1 B): the guard indices below read its SEC_* numbers.
+use super::lead_page;
 use super::op_tabs::{SEC_FEEDS, SEC_GEO, SEC_HEIGHTS, SEC_LEADS, SEC_MACHINE, SEC_PASSES};
 
 // --------------------------------------------------------------- properties
@@ -541,6 +537,7 @@ fn roughing2d_pane(
     entry: &mut camcraft_app::machining3d::Entry3D,
     helix_radius: &mut f64,
     optimal_load: Option<&mut f64>,
+    links: &mut camcraft_app::links::Links,
     tilt: &mut Option<Tilt>,
 ) {
     if tab == SEC_HEIGHTS {
@@ -586,31 +583,10 @@ fn roughing2d_pane(
                 ui.label("concentric rings from the boundary inward, one stepover apart");
             }
         }
-        field(ui, "Entry");
-        let mut e_idx = match entry {
-            camcraft_app::machining3d::Entry3D::Plunge => 0,
-            camcraft_app::machining3d::Entry3D::Ramp => 1,
-            camcraft_app::machining3d::Entry3D::Helix => 2,
-            camcraft_app::machining3d::Entry3D::Arc => 3,
-        };
-        let before = e_idx;
-        combo(ui, &format!("{tag}_entry"), &mut e_idx, &ENTRY_KINDS);
-        if e_idx != before {
-            *entry = match e_idx {
-                1 => camcraft_app::machining3d::Entry3D::Ramp,
-                2 => camcraft_app::machining3d::Entry3D::Helix,
-                3 => camcraft_app::machining3d::Entry3D::Arc,
-                _ => camcraft_app::machining3d::Entry3D::Plunge,
-            };
-        }
-        if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
-            field(ui, "Helix lead radius");
-            num(ui, u, helix_radius);
-            ui.label("a plunge stands in wherever a helix of this radius cannot fit");
-        }
-        if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
-            ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
-        }
+    }
+    if tab == SEC_LEADS {
+        lead_page::entry_editor(ui, u, tag, entry, helix_radius);
+        lead_page::links_editor(ui, u, tag, Some(*entry), None, links);
     }
     if tab == SEC_FEEDS {
         field(ui, &format!("Feed ({})", u.feed_suffix()));
@@ -826,8 +802,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             entry,
             helix_radius,
             blend_turns,
-            level_link,
-            ramp_angle,
+            links,
             tilt,
         } => {
             if tab == SEC_GEO {
@@ -930,50 +905,9 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     }
                     Lead::None => {}
                 }
-                field(ui, "Entry");
-                let mut e_idx = match entry {
-                    camcraft_app::machining3d::Entry3D::Plunge => 0,
-                    camcraft_app::machining3d::Entry3D::Ramp => 1,
-                    camcraft_app::machining3d::Entry3D::Helix => 2,
-                    camcraft_app::machining3d::Entry3D::Arc => 3,
-                };
-                let before = e_idx;
-                combo(ui, "c_entry", &mut e_idx, &ENTRY_KINDS);
-                if e_idx != before {
-                    *entry = match e_idx {
-                        1 => camcraft_app::machining3d::Entry3D::Ramp,
-                        2 => camcraft_app::machining3d::Entry3D::Helix,
-                        3 => camcraft_app::machining3d::Entry3D::Arc,
-                        _ => camcraft_app::machining3d::Entry3D::Plunge,
-                    };
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
-                    field(ui, "Helix lead radius");
-                    num(ui, u, helix_radius);
-                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
-                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
-                }
-                // The level-to-level transition is the user's pick:
-                // lift and re-enter by the Entry above, or stay at
-                // depth and ramp down along the ring just cut.
-                field(ui, "Level to level");
-                let mut k_idx = match level_link {
-                    LevelLink::RetractReenter => 0,
-                    LevelLink::StayDownRamp => 1,
-                };
-                combo(ui, "c_level_link", &mut k_idx, &LEVEL_LINKS);
-                *level_link = if k_idx == 1 {
-                    LevelLink::StayDownRamp
-                } else {
-                    LevelLink::RetractReenter
-                };
-                if *level_link == LevelLink::StayDownRamp {
-                    field(ui, "Ramp angle (deg)");
-                    num_plain(ui, ramp_angle);
-                    ui.label("each ring is cut all the way down, ramping along itself; a level that cannot ramp (tabs, a short ring) retracts and re-enters, named in the status line");
-                }
+                lead_page::entry_editor(ui, u, "c", entry, helix_radius);
+                lead_page::links_editor(ui, u, "c", Some(*entry), None, links);
+                ui.label("keep down between levels cuts each ring all the way down, descending on the ring itself");
                 field(ui, "Tab count");
                 let mut tabs = f64::from(*tab_count);
                 num_plain(ui, &mut tabs);
@@ -992,6 +926,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             }
         }
         OpParams::Pocket {
+            links,
             stepover,
             stock_to_leave,
             clearance_z,
@@ -1009,6 +944,10 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             blend_turns,
             tilt,
         } => {
+            if tab == SEC_LEADS {
+                lead_page::entry_editor(ui, u, "p", entry, helix_radius);
+                lead_page::links_editor(ui, u, "p", Some(*entry), None, links);
+            }
             if tab == SEC_HEIGHTS {
                 orientation_editor(ui, u, tilt);
                 field(ui, "Clearance Z");
@@ -1086,31 +1025,6 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if matches!(strategy, PocketStrategy::Adaptive) {
                     super::load_field::optimal_load_field(ui, optimal_load);
                 }
-                field(ui, "Entry");
-                let mut e_idx = match entry {
-                    camcraft_app::machining3d::Entry3D::Plunge => 0,
-                    camcraft_app::machining3d::Entry3D::Ramp => 1,
-                    camcraft_app::machining3d::Entry3D::Helix => 2,
-                    camcraft_app::machining3d::Entry3D::Arc => 3,
-                };
-                let before = e_idx;
-                combo(ui, "p_entry", &mut e_idx, &ENTRY_KINDS);
-                if e_idx != before {
-                    *entry = match e_idx {
-                        1 => camcraft_app::machining3d::Entry3D::Ramp,
-                        2 => camcraft_app::machining3d::Entry3D::Helix,
-                        3 => camcraft_app::machining3d::Entry3D::Arc,
-                        _ => camcraft_app::machining3d::Entry3D::Plunge,
-                    };
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
-                    field(ui, "Helix lead radius");
-                    num(ui, u, helix_radius);
-                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
-                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
-                }
                 if let Some(note) = &auto_note {
                     ui.label(note.clone());
                 }
@@ -1128,6 +1042,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         // choice that would undo the name is not offered. Adaptive
         // shows the engagement door; Offset has none to show.
         OpParams::Adaptive2D {
+            links,
             stepover,
             stock_to_leave,
             clearance_z,
@@ -1162,9 +1077,11 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             entry,
             helix_radius,
             Some(optimal_load),
+            links,
             tilt,
         ),
         OpParams::Offset2D {
+            links,
             stepover,
             stock_to_leave,
             clearance_z,
@@ -1198,9 +1115,11 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             entry,
             helix_radius,
             None,
+            links,
             tilt,
         ),
         OpParams::Slot {
+            links,
             a,
             b,
             width,
@@ -1218,6 +1137,10 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             helix_radius,
             tilt,
         } => {
+            if tab == SEC_LEADS {
+                lead_page::entry_editor(ui, u, "s", entry, helix_radius);
+                lead_page::links_editor(ui, u, "s", Some(*entry), None, links);
+            }
             if tab == SEC_GEO {
                 field(ui, "A X");
                 num(ui, u, &mut a.x);
@@ -1259,31 +1182,6 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
                 num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
-                field(ui, "Entry");
-                let mut e_idx = match entry {
-                    camcraft_app::machining3d::Entry3D::Plunge => 0,
-                    camcraft_app::machining3d::Entry3D::Ramp => 1,
-                    camcraft_app::machining3d::Entry3D::Helix => 2,
-                    camcraft_app::machining3d::Entry3D::Arc => 3,
-                };
-                let before = e_idx;
-                combo(ui, "s_entry", &mut e_idx, &ENTRY_KINDS);
-                if e_idx != before {
-                    *entry = match e_idx {
-                        1 => camcraft_app::machining3d::Entry3D::Ramp,
-                        2 => camcraft_app::machining3d::Entry3D::Helix,
-                        3 => camcraft_app::machining3d::Entry3D::Arc,
-                        _ => camcraft_app::machining3d::Entry3D::Plunge,
-                    };
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
-                    field(ui, "Helix lead radius");
-                    num(ui, u, helix_radius);
-                    ui.label("the channel's own width certifies the orbit - a full-width slot has no room and plunges instead");
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
-                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
-                }
             }
         }
         // The engrave twin (M2.4 B): Trace's fields verbatim under the
@@ -1509,6 +1407,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         // pocket's shape, and `vault` stands the floor on the dome law
         // instead of at Bottom Z.
         OpParams::Circular {
+            links,
             center,
             radius,
             vault,
@@ -1526,6 +1425,10 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             helix_radius,
             tilt,
         } => {
+            if tab == SEC_LEADS {
+                lead_page::entry_editor(ui, u, "circ", entry, helix_radius);
+                lead_page::links_editor(ui, u, "circ", Some(*entry), None, links);
+            }
             if tab == SEC_GEO {
                 field(ui, "Center X");
                 num(ui, u, &mut center.x);
@@ -1586,30 +1489,6 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 field(ui, &format!("Plunge feed ({})", u.feed_suffix()));
                 num_feed(ui, u, plunge_feed);
                 ui.checkbox(climb, "Climb milling");
-                field(ui, "Entry");
-                let mut e_idx = match entry {
-                    camcraft_app::machining3d::Entry3D::Plunge => 0,
-                    camcraft_app::machining3d::Entry3D::Ramp => 1,
-                    camcraft_app::machining3d::Entry3D::Helix => 2,
-                    camcraft_app::machining3d::Entry3D::Arc => 3,
-                };
-                let before = e_idx;
-                combo(ui, "circ_entry", &mut e_idx, &ENTRY_KINDS);
-                if e_idx != before {
-                    *entry = match e_idx {
-                        1 => camcraft_app::machining3d::Entry3D::Ramp,
-                        2 => camcraft_app::machining3d::Entry3D::Helix,
-                        3 => camcraft_app::machining3d::Entry3D::Arc,
-                        _ => camcraft_app::machining3d::Entry3D::Plunge,
-                    };
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
-                    field(ui, "Helix lead radius");
-                    num(ui, u, helix_radius);
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
-                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
-                }
             }
         }
         OpParams::Drill {
@@ -1761,6 +1640,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         // a tolerance for the ring's chords) and its ladder is the
         // stepdown's, spoken on one circle per hole.
         OpParams::Bore {
+            links,
             clearance_z,
             retract_z,
             top_z,
@@ -1773,6 +1653,12 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             tolerance,
             holes,
         } => {
+            if tab == SEC_LEADS {
+                // Each hole opens with the dive at its centre; the
+                // descents between levels and the links are the user's.
+                ui.label("each hole opens with a plunge at its centre");
+                lead_page::links_editor(ui, u, "bore", None, None, links);
+            }
             if tab == SEC_GEO {
                 field(ui, "Holes");
                 if holes.is_empty() {
@@ -1968,6 +1854,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             }
         }
         OpParams::Pocket3D {
+            links,
             stepover,
             stock_to_leave,
             clearance_z,
@@ -1986,6 +1873,10 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             feed_opt,
             shell,
         } => {
+            if tab == SEC_LEADS {
+                lead_page::entry_editor(ui, u, "p3", entry, helix_radius);
+                lead_page::links_editor(ui, u, "p3", Some(*entry), None, links);
+            }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
                 height_editor(
@@ -2058,31 +1949,6 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 ui.label("levels come from the mesh: each shelf cuts around the material standing above it");
                 ui.checkbox(shell, "Offset shells");
                 ui.label("rings ride the model's own normals between levels - the staircase becomes a waterline wherever the wall turns steep");
-                field(ui, "Entry");
-                let mut e_idx = match entry {
-                    camcraft_app::machining3d::Entry3D::Plunge => 0,
-                    camcraft_app::machining3d::Entry3D::Ramp => 1,
-                    camcraft_app::machining3d::Entry3D::Helix => 2,
-                    camcraft_app::machining3d::Entry3D::Arc => 3,
-                };
-                let before = e_idx;
-                combo(ui, "p3_entry", &mut e_idx, &ENTRY_KINDS);
-                if e_idx != before {
-                    *entry = match e_idx {
-                        1 => camcraft_app::machining3d::Entry3D::Ramp,
-                        2 => camcraft_app::machining3d::Entry3D::Helix,
-                        3 => camcraft_app::machining3d::Entry3D::Arc,
-                        _ => camcraft_app::machining3d::Entry3D::Plunge,
-                    };
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
-                    field(ui, "Helix lead radius");
-                    num(ui, u, helix_radius);
-                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
-                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
-                }
                 ui.checkbox(rest_rough, "Rest roughing");
                 ui.label("a closing ladder, half the step, cuts what the levels leave standing");
                 ui.checkbox(feed_opt, "Feed optimization");
@@ -2837,6 +2703,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         // retract row anywhere: the kernel's rapids ride the skin by
         // law, and the panel says so where the field would stand.
         OpParams::RotaryOffset {
+            links,
             tolerance,
             stepover,
             stock_to_leave,
@@ -2855,6 +2722,10 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             lag_deg,
             max_tilt_deg,
         } => {
+            if tab == SEC_LEADS {
+                lead_page::entry_editor(ui, u, "ro", entry, helix_radius);
+                lead_page::links_editor(ui, u, "ro", Some(*entry), None, links);
+            }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
                 height_editor(
@@ -2913,31 +2784,6 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 if matches!(strategy, PocketStrategy::Adaptive) {
                     super::load_field::optimal_load_field(ui, optimal_load);
                 }
-                field(ui, "Entry");
-                let mut e_idx = match entry {
-                    camcraft_app::machining3d::Entry3D::Plunge => 0,
-                    camcraft_app::machining3d::Entry3D::Ramp => 1,
-                    camcraft_app::machining3d::Entry3D::Helix => 2,
-                    camcraft_app::machining3d::Entry3D::Arc => 3,
-                };
-                let before = e_idx;
-                combo(ui, "ro_entry", &mut e_idx, &ENTRY_KINDS);
-                if e_idx != before {
-                    *entry = match e_idx {
-                        1 => camcraft_app::machining3d::Entry3D::Ramp,
-                        2 => camcraft_app::machining3d::Entry3D::Helix,
-                        3 => camcraft_app::machining3d::Entry3D::Arc,
-                        _ => camcraft_app::machining3d::Entry3D::Plunge,
-                    };
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
-                    field(ui, "Helix lead radius");
-                    num(ui, u, helix_radius);
-                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
-                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
-                }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
                 ui.label(
@@ -2958,6 +2804,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
         // kernel runs neither over a stamp - plus the tolerance (verify
         // budget) and the cone the poses live inside.
         OpParams::MultiAxisRough {
+            links,
             tolerance,
             stepover,
             stock_to_leave,
@@ -2978,6 +2825,10 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             max_tilt_deg,
             shank_avoid,
         } => {
+            if tab == SEC_LEADS {
+                lead_page::entry_editor(ui, u, "ma", entry, helix_radius);
+                lead_page::links_editor(ui, u, "ma", Some(*entry), None, links);
+            }
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
                 height_editor(
@@ -3060,31 +2911,6 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 ui.label("levels come from the mesh: each shelf cuts around the material standing above it");
-                field(ui, "Entry");
-                let mut e_idx = match entry {
-                    camcraft_app::machining3d::Entry3D::Plunge => 0,
-                    camcraft_app::machining3d::Entry3D::Ramp => 1,
-                    camcraft_app::machining3d::Entry3D::Helix => 2,
-                    camcraft_app::machining3d::Entry3D::Arc => 3,
-                };
-                let before = e_idx;
-                combo(ui, "ma_entry", &mut e_idx, &ENTRY_KINDS);
-                if e_idx != before {
-                    *entry = match e_idx {
-                        1 => camcraft_app::machining3d::Entry3D::Ramp,
-                        2 => camcraft_app::machining3d::Entry3D::Helix,
-                        3 => camcraft_app::machining3d::Entry3D::Arc,
-                        _ => camcraft_app::machining3d::Entry3D::Plunge,
-                    };
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Helix) {
-                    field(ui, "Helix lead radius");
-                    num(ui, u, helix_radius);
-                    ui.label("a plunge stands in wherever a helix of this radius cannot fit");
-                }
-                if matches!(entry, camcraft_app::machining3d::Entry3D::Arc) {
-                    ui.label("a tangent arc onto the first cut; a plunge stands in wherever its lead cannot fit");
-                }
                 field(ui, "Tolerance");
                 num(ui, u, tolerance);
                 ui.label(

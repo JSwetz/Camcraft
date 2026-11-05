@@ -18,6 +18,7 @@
 pub mod drilling;
 pub mod entry;
 pub mod entry_arc;
+pub mod links;
 pub mod load;
 pub mod finishing3d;
 pub mod machining2d;

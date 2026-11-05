@@ -74,8 +74,7 @@ fn contour_params() -> OpParams {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     }
 }
 
@@ -84,6 +83,7 @@ fn contour_params() -> OpParams {
 /// either side of the axis - room for a 2 mm orbit, none for a 4 mm one.
 fn slot_params() -> OpParams {
     OpParams::Slot {
+        links: camcraft_app::links::Links::PLANAR,
         a: camcraft_app::geo2d::Point2::new(0.0, 10.0),
         b: camcraft_app::geo2d::Point2::new(40.0, 10.0),
         width: 12.0,
@@ -1926,6 +1926,7 @@ fn pocket_refuses_an_open_run() {
         tool: "EM-0600-4FL".into(),
         src: sel("part", open),
         params: OpParams::Pocket {
+            links: camcraft_app::links::Links::PLANAR,
             tilt: None,
             stepover: 3.0,
             stock_to_leave: 0.0,
@@ -2407,8 +2408,7 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     };
     history.execute(
         &world,
@@ -3219,8 +3219,7 @@ fn selection_notes_report_stitching_and_extension() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     };
     let notes = operation::selection_notes(&world, None, &items, &contour);
     assert!(
@@ -3267,8 +3266,7 @@ fn contour_at(side: Side, z: f64) -> OpParams {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-        ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: camcraft_app::links::Links::PLANAR,
     }
 }
 
@@ -5538,6 +5536,7 @@ fn rotary_offset_params(top_z: f64, bottom_z: f64) -> OpParams {
     // plane one infeed and one tool radius outside the skin, because
     // a world-Z hop would be a plunge into the bar.
     OpParams::RotaryOffset {
+        links: camcraft_app::links::Links::ROUGH3D,
         tolerance: 0.1,
         stepover: 4.0,
         stock_to_leave: 0.5,
@@ -6064,6 +6063,7 @@ fn slab_boss_mesh() -> Mesh {
 
 fn multiaxis_rough_params() -> OpParams {
     OpParams::MultiAxisRough {
+        links: camcraft_app::links::Links::ROUGH3D,
         tolerance: 0.1,
         stepover: 3.0,
         stock_to_leave: 0.0,
@@ -6088,6 +6088,7 @@ fn multiaxis_rough_params() -> OpParams {
 
 fn multiaxis_rough_pocket_twin() -> OpParams {
     OpParams::Pocket3D {
+        links: camcraft_app::links::Links::ROUGH3D,
         stepover: 3.0,
         stock_to_leave: 0.0,
         clearance_z: Height::fixed(5.0),

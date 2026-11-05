@@ -101,7 +101,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     });
     let m_gen = material_local.as_ref().unwrap_or(&material);
 
-    // Region + path per kind.
+    // Region + path per kind. The level transitions and links (M11.2)
+    // are read once: every ladder kind hands them to its generator.
+    let lk =params.links().copied().unwrap_or_else(|| params.default_links());
     let (region, path) = match &params {
         OpParams::Face {
             stepover,
@@ -152,8 +154,6 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             entry,
             helix_radius,
             blend_turns,
-            level_link,
-            ramp_angle,
             ..
         } => {
             // Backstop for a committed file that carries Inside on a
@@ -182,8 +182,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 entry: *entry,
                 helix_radius: *helix_radius,
                 blend_turns: *blend_turns,
-                level_link: *level_link,
-                ramp_angle: *ramp_angle,
+            links: lk,
             };
             let (region, path) = match &src {
                 SrcRef::Selection(_) => {
@@ -275,6 +274,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let path = machining2d::pocket(
                 &region,
                 &PocketParams {
+                    links: lk,
                     tool_diameter: d,
                     stepover: *stepover,
                     stock_to_leave: *stock_to_leave,
@@ -323,6 +323,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let path = machining2d::pocket(
                 &region,
                 &PocketParams {
+                    links: lk,
                     tool_diameter: d,
                     stepover: *stepover,
                     stock_to_leave: *stock_to_leave,
@@ -365,6 +366,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let path = machining2d::pocket(
                 &region,
                 &PocketParams {
+                    links: lk,
                     tool_diameter: d,
                     stepover: *stepover,
                     stock_to_leave: *stock_to_leave,
@@ -415,6 +417,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 frame.as_ref(),
             )?;
             let pp = Pocket3DParams {
+                links: lk,
                 tool_diameter: d,
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -1000,6 +1003,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 frame.as_ref(),
             )?;
             let pp = Pocket3DParams {
+                links: lk,
                 tool_diameter: d,
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -1070,6 +1074,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 frame.as_ref(),
             )?;
             let pp = Pocket3DParams {
+                links: lk,
                 tool_diameter: d,
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -1283,6 +1288,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 *a,
                 *b,
                 &SlotParams {
+                    links: lk,
                     tool_diameter: d,
                     entry: *entry,
                     helix_radius: *helix_radius,
@@ -1482,6 +1488,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             let path = machining2d::circular(
                 &region,
                 &CircularParams {
+                    links: lk,
                     center: *center,
                     radius: *radius,
                     vault: *vault,
@@ -1622,6 +1629,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 frame.as_ref(),
             )?;
             let path = machining2d::bore(&machining2d::BoreParams {
+                links: lk,
                 holes: holes
                     .iter()
                     .map(|h| machining2d::BoreHole {

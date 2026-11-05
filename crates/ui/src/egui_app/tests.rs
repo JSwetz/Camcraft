@@ -765,7 +765,7 @@ fn every_field_lives_on_exactly_one_section() {
                     ],
                 ),
                 ("Passes", vec!["Stock to leave"]),
-                ("Leads & Links", vec!["Lead in/out", "Tab count", "Tab width", "Tab height"]),
+                ("Lead in / Lead out", vec!["Lead in/out", "Entry", "Level to level descent", "Between levels", "Between passes", "Tab count", "Tab width", "Tab height"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -775,6 +775,7 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Geometry", vec!["Click selects:"]),
                 ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
                 ("Passes", vec!["Stepover", "Stock to leave", "Strategy"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -784,6 +785,7 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Geometry", vec!["Click selects:", "A X", "A Y", "B X", "B Y", "Slot width"]),
                 ("Heights", vec!["Clearance Z", "Top Z", "Bottom Z", "Stepdown"]),
                 ("Passes", vec!["Stock to leave", "Stepover"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -813,7 +815,8 @@ fn every_field_lives_on_exactly_one_section() {
                     "Heights",
                     vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
                 ),
-                ("Passes", vec!["Stepover", "Stock to leave", "Optimal load (% of D)", "Entry"]),
+                ("Passes", vec!["Stepover", "Stock to leave", "Optimal load (% of D)"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -825,7 +828,8 @@ fn every_field_lives_on_exactly_one_section() {
                     "Heights",
                     vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
                 ),
-                ("Passes", vec!["Stepover", "Stock to leave", "Entry"]),
+                ("Passes", vec!["Stepover", "Stock to leave"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -878,7 +882,8 @@ fn every_field_lives_on_exactly_one_section() {
                     vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
                 ),
                 ("Passes", vec!["Stock to leave", "Stepover"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling", "Entry"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
+                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
         (
@@ -907,7 +912,7 @@ fn every_field_lives_on_exactly_one_section() {
         ),
         (
             // A drill has no climb (the cycle owns the retract), no
-            // Leads & Links (no wall to enter), and its Passes are the
+            // Lead in / Lead out (no wall to enter), and its Passes are the
             // cycle's own numbers - the section law this row pins.
             "Drill",
             vec![
@@ -948,6 +953,7 @@ fn every_field_lives_on_exactly_one_section() {
                     ],
                 ),
                 ("Passes", vec!["Stock to leave", "Tolerance"]),
+                ("Lead in / Lead out", vec!["Level to level descent", "Between levels", "Between passes"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -978,10 +984,10 @@ fn every_field_lives_on_exactly_one_section() {
                     "Stock to leave",
                     "Strategy",
                     "Offset shells",
-                    "Entry",
                     "Rest roughing",
                     "Feed optimization",
                 ]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -1106,16 +1112,16 @@ fn tab_click_navigates_and_queues_nothing() {
     assert_eq!(harness.state().state.op_tab, 1, "a resync must not reset the open tab");
     assert!(harness.query_by_label("Clearance Z").is_some());
 
-    // Leads & Links is Contour's alone: open it, then show a Pocket - the
-    // tab falls back to Geometry; Heights, which Pocket has, would stay.
-    harness.get_by_label("Leads & Links").click();
+    // Lead in / Lead out is the level-ladder kinds': open it on the Contour, then show
+    // a Face (no ladder to link) - the tab falls back to Geometry; Heights stays.
+    harness.get_by_label("Lead in / Lead out").click();
     harness.run();
     assert_eq!(harness.state().state.op_tab, 3);
     let cur = harness.state().state.op_ui.params.clone();
-    harness.state_mut().state.op_ui.params = crate::operations::retype(&cur, 2);
+    harness.state_mut().state.op_ui.params = crate::operations::retype(&cur, 0);
     harness.run();
     assert_eq!(harness.state().state.op_tab, 0, "a missing section falls back to the first tab");
-    assert!(harness.query_by_label("Leads & Links").is_none(), "Pocket has no Leads tab");
+    assert!(harness.query_by_label("Lead in / Lead out").is_none(), "Face has no Lead tab");
     harness.get_by_label("Heights").click();
     harness.run();
     let cur = harness.state().state.op_ui.params.clone();

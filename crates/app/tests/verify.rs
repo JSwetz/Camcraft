@@ -95,6 +95,7 @@ fn clean_pocket_verifies_silent() {
     let t = pocket(
         &r,
         &PocketParams {
+            links: camcraft_app::links::Links::PLANAR,
             tool_diameter: 8.0,
             stepover: 3.0,
             stock_to_leave: 0.0,
@@ -129,6 +130,7 @@ fn a_ramp_pocket_verifies_silent() {
     let t = pocket(
         &r,
         &PocketParams {
+            links: camcraft_app::links::Links::PLANAR,
             tool_diameter: 8.0,
             stepover: 4.0,
             stock_to_leave: 0.0,
@@ -168,6 +170,7 @@ fn a_helix_pocket_verifies_silent() {
     let t = pocket(
         &r,
         &PocketParams {
+            links: camcraft_app::links::Links::PLANAR,
             tool_diameter: 8.0,
             stepover: 4.0,
             stock_to_leave: 0.0,
@@ -222,8 +225,7 @@ fn clean_contour_verifies_silent() {
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             blend_turns: false,
-            level_link: camcraft_app::machining2d::LevelLink::RetractReenter,
-            ramp_angle: camcraft_app::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+            links: camcraft_app::links::Links::PLANAR,
         },
     )
     .unwrap();
@@ -329,6 +331,7 @@ fn holder_hits_a_part_island_when_the_flute_is_short() {
     let t = pocket(
         &r,
         &PocketParams {
+            links: camcraft_app::links::Links::PLANAR,
             tool_diameter: 8.0,
             stepover: 3.0,
             stock_to_leave: 0.0,

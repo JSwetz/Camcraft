@@ -133,8 +133,7 @@ fn contour_side(side: Side) -> ContourParams {
         entry: crate::entry::Entry3D::Plunge,
         helix_radius: 1.0,
         blend_turns: false,
-        level_link: crate::machining2d::LevelLink::RetractReenter,
-        ramp_angle: crate::machining2d::DEFAULT_LEVEL_RAMP_ANGLE,
+        links: crate::links::Links::PLANAR,
     }
 }
 
@@ -252,6 +251,7 @@ fn bore_hole(xy: [f64; 2], radius: f64, stepped: bool) -> BoreHole {
 
 fn bore_params(holes: Vec<BoreHole>, dia: f64) -> BoreParams {
     BoreParams {
+        links: crate::links::Links::PLANAR,
         holes,
         tool_diameter: dia,
         stock_to_leave: 0.0,

@@ -869,22 +869,7 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
             if m.arc.is_some() {
                 // Arcs draw as chords (one law, one tolerance story) and
                 // take no chevrons: the curve itself reads as direction.
-                // `segments3` is the XY chords at the start Z for a
-                // planar arc as drawn since M1.5, and the arc's own
-                // 3-D chords for an XZ / YZ one (M11.2 A).
-                let cs: Vec<(Point3, Point3)> = match m.arc {
-                    Some(a) if !a.plane.is_xy() => m.segments3(DISPLAY_CHORD_TOL),
-                    _ => m
-                        .chords(DISPLAY_CHORD_TOL)
-                        .into_iter()
-                        .map(|(a, b)| {
-                            (
-                                Point3::new(a.x, a.y, m.from.z),
-                                Point3::new(b.x, b.y, m.from.z),
-                            )
-                        })
-                        .collect(),
-                };
+                let cs = arc_segments(m);
                 if out.len() + 2 * cs.len() + 2 > MAX_OVERLAY_VERTICES {
                     eprintln!(
                         "overlay: the cached paths outgrew the {MAX_OVERLAY_VERTICES}-vertex \
@@ -915,6 +900,16 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
         }
     }
     out
+}
+
+/// An arc move as displayed 3-D chords - `Move::segments3`, the one
+/// plane-aware law (M11.2 A). A helical XY arc (the helix entry's half
+/// turns) descends linearly in sweep, Z riding the equal-sweep chord
+/// index: drawing every chord at `from.z` showed a continuous helix as
+/// flat arcs stepping between planes (user hand-test, 2026-11-05). An
+/// XZ / YZ arc draws its own vertical chords.
+pub(crate) fn arc_segments(m: &camcraft_app::cl::Move) -> Vec<(Point3, Point3)> {
+    m.segments3(DISPLAY_CHORD_TOL)
 }
 
 /// Chevron size follows the document: 1% of the solid extent, floored so
