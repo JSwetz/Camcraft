@@ -1408,6 +1408,42 @@ we choose to? keepdown is a common strategy we should honor and make definable."
       link proved clear of the part, else it lifts - named). Contour's
       `level_link` (2026-11-05) is the first instance; D generalises it.
 
+### M11.3 - Lead in / lead out: the full parameter set, and heights from the selection
+**Goal: every entry, lead and engagement choice a CAM user expects is a
+parameter on the operation, grouped under its own "Lead in / Lead out"
+section, and every height can be measured from the operation's own
+selection.** — 📋
+
+(User review, 2026-11-05: "All heights should have the option Selection ...
+Entry - Arc should have an option of setting radius and length of the arc.
+Entry - Ramp lacks all usual settings, like angle or length of ramp. All entry
+methods are missing extension values. These should be under its own section ...
+called Lead in / Lead out as is common in most CAM packages. We are also missing
+plunge data or for that matter how much the lead in / lead-out strategies should
+handle engagement.")
+
+- **A - heights from the selection**: Clearance, Retract, Top and Bottom each
+      gain a "Selection" reference (the op's picked geometry - its top / bottom
+      / the picked face's height), beside Stock / Model / Work offset /
+      Absolute, resolved by the same height law and shown with its resolved Z.
+- **B - entry parameters, complete**: Ramp - angle, maximum ramp length,
+      ramp-in-to-depth vs per-level; Helix - radius, pitch (or angle),
+      direction, continuous helical G2/G3 (a hand-test found stepped flat
+      arcs - fixed under M11.2); Arc - radius and sweep length (arc angle),
+      plane (vertical / horizontal); Plunge - plunge height above the
+      material, plunge feed.
+- **C - extensions and lead geometry**: every lead-in / lead-out carries
+      its extension values (linear extension before/after the arc, vertical
+      lead height, overlap past the start), tangential / perpendicular /
+      arc / linear lead shapes with their sizes.
+- **D - engagement and feed control at entry**: entry/ramp/plunge feeds,
+      lead-in feed reduction, and an engagement limit the entry honours
+      (the M2.1 engagement law applied to the entry and the lead) - all named
+      parameters with defaults that reproduce today's output.
+- **The section**: entry, leads, transitions and links live under one
+      "Lead in / Lead out" tab on every kind that has them (moved out of
+      Passes); defaults reproduce every existing golden byte for byte.
+
 ## Phase 12 — Geometry kernel: Solidcore
 
 The kernel decision open since M1.3 ("benchmark truck vs an OpenCascade
@@ -1487,6 +1523,7 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
 | **M10.1** | A tool that can cut the operation | Done: the tool law - `KindInfo.tool_kinds` one table (A), `CreateOperation` / tool reassignment / op retype / tool retype refuse the mismatch at command construction by name and the ribbon darkens with the reason (B), an op whose tool is gone or wrong reads BLOCKED - generation and the post refuse, nothing stored, old files load untouched (C), the law tests (D); generator shape refusals stand as the backstop | ✅ |
 | **M11.1** | Smooth transitions | Arc blends at feed-path turning points (facing reversals, corners, links) as single G2/G3 moves instead of G1 stops; circular-ramp arc entry beside plunge/ramp/helix | 📋 |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen | 📋 |
+| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab | 📋 |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
 
 ## Open questions & deferred
