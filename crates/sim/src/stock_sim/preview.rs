@@ -39,7 +39,11 @@
 //!   this runs at low resolution and upsamples - never a black
 //!   screen (the Prime Directive's "never crash" includes it).
 
+pub mod pack;
+
 mod march;
+
+pub use pack::{pack_field, pack_target, DistanceLattice, FieldLattice, LatticeMeta};
 
 use std::collections::HashMap;
 
@@ -54,6 +58,19 @@ use march::{add, scale, unit, Eye, Seen, STEP_EPS};
 /// borderline pixels toward clean - the one direction that cannot
 /// accuse a good program or absolve a gouge by a whole cell.
 const HIT_GATE: f64 = 0.15;
+
+/// The class gate a frame judges by: `tol` plus the march's own
+/// landing slack. One law for both eyes - the GPU pass asks here.
+#[must_use]
+pub fn gate_tol(tol: f64, cell: f64) -> f64 {
+    tol.max(0.0) + cell * HIT_GATE
+}
+
+/// The hit threshold at a cell size: one law for both eyes.
+#[must_use]
+pub fn step_eps(cell: f64) -> f64 {
+    cell * STEP_EPS
+}
 
 /// Where the eye stands: an orthonormal basis built by `look_at`,
 /// which refuses a degenerate frame by name (a camera cannot lie).
@@ -148,11 +165,11 @@ pub fn preview(
         solid: (b.min, b.max),
         world,
         cell,
-        eps: cell * STEP_EPS,
+        eps: step_eps(cell),
     };
     // The gate is `tol` plus the march's own landing slack, once for
     // the frame: a borderline pixel is named clean, never accused.
-    let tol = tol.max(0.0) + cell * HIT_GATE;
+    let tol = gate_tol(tol, cell);
     let n = (w as usize) * (h as usize);
     let mut pv = Preview { w, h, depth: vec![f64::NAN; n], class: vec![3.0; n], shade: vec![0.0; n], unresolved: 0 };
     for py in 0..h {

@@ -10,6 +10,7 @@ pub mod egui_app;
 pub mod interact;
 pub mod operations;
 pub mod state;
+pub mod trace;
 pub mod viewport;
 
 #[cfg(test)]

@@ -8537,3 +8537,54 @@ a test could tell about them). The 400-line law split the module the
 same way M7.1 C split the march: `preview.rs` keeps the camera, the
 frame and the class law; `preview/march.rs` the Eye, the trace and
 the shading - each file one concern of the eye.
+
+## M7.2 B2 - the GPU eye: five decisions the compute pass rests on (2026-11-05)
+
+(1) **The field ships to the GPU as a dense lattice, not as bricks.**
+`preview::pack` flattens the field's own per-cell scalars - the
+signed band magnitude wearing its column's parity, and the clamped
+cut layer (`-4 cap` where no tool claimed the cell) - into two f32
+layers over the shell's AABB plus a margin of `cap + 2` cells (the
+band's horizon, so a clamped border texel answers exactly what the
+march's unallocated-brick path answers). One documented rounding:
+f64 to f32 texels. The brick map with an HDDA walk was dropped for
+this stage: the dense pack is one trilinear read per sample in WGSL
+and needs no hash on the GPU; the brick walk is the cost-law's job
+(M7.3), not the picture's. A pack past `MAX_TEXELS` (8M texels,
+32 MB a layer) answers `None` - the caller keeps the CPU march.
+
+(2) **One march, two eyes, and a parity suite holding them to it.**
+`trace.wgsl` ports `march.rs` term for term - the ray law
+(`PreviewCamera::ray_dir`), the z-x-y blend of each layer then the
+max, the hit-at-or-one-cell-deeper law, the creep, the relaxed step
+with the exact AABB gap jump, the gradient-plus-AO shade - and each
+constant names its Rust twin. `TracePass::trace` returns the sim's
+own `Preview`, so no consumer can tell which eye answered.
+`tests/trace_parity.rs` runs on the fallback adapter (WARP on
+Windows) and demands >= 99% hit-mask and depth (0.1 mm) agreement,
+>= 97% class agreement, and the centre rays exactly; it skips with
+a note only where no adapter exists (the `gpu_render` precedent).
+
+(3) **The one stated difference: the GPU classes by the target's
+lattice.** The CPU eye asks the model's exact facet distance; a
+facet scan per pixel is not a GPU budget. `pack_target` packs the
+model's signed band, which is exact near the surface and answers
+`cap` with the right sign beyond it, judged by the same gate
+(`gate_tol` is now one function both eyes call, as is `step_eps`).
+The sliver of disagreement sits at class borders - measured by the
+parity suite, not assumed away.
+
+(4) **Status, not NaN, on the wire.** WGSL has no portable NaN, so
+the kernel writes per pixel (depth, class, shade, status: empty /
+hit / unreadable) and the host turns status into the NaN-depth,
+class-3, `unresolved` law - the frame stays honest on both sides of
+the bus.
+
+(5) **Refusal is the fallback's doorbell.** `TracePass::new` builds
+the kernel inside a validation error scope; a device that cannot
+compute-shade, a lattice past the storage binding limit, a malformed
+pack, a frame past the CPU path's own caps - each answers `Err` by
+name and the viewport falls back to the CPU march (stage B3). The
+first gate caught the one way this law can bite: `target` is a
+reserved WGSL word, and the kernel never compiled - which the Err
+path reported by name instead of crashing.
