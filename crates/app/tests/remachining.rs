@@ -145,7 +145,7 @@ fn pocket(bottom_z: f64) -> OpParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         rest_rough: false,
-        max_engagement: 60.0,
+        optimal_load: camcraft_app::load::load_of_degrees(60.0),
         feed_opt: false,
         shell: false,
     }

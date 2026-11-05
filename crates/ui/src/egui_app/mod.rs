@@ -30,6 +30,7 @@ pub(crate) mod gpu;
 pub mod contrast;
 mod icons;
 mod layout;
+mod load_field;
 // pub(crate) past egui_app: `State::machine_editor` names its draft
 // type (M3.3 stage C), so state.rs has to see through the door.
 pub(crate) mod machine_editor;

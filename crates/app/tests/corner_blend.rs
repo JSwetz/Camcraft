@@ -110,7 +110,7 @@ fn pp(strategy: PocketStrategy, blend: bool) -> PocketParams {
         strategy,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: blend,
     }
 }
@@ -155,7 +155,7 @@ fn pocket_op(blend: bool) -> OpParams {
         strategy: PocketStrategy::Zigzag,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: blend,
         tilt: None,
     }

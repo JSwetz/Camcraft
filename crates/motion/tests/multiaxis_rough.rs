@@ -74,7 +74,7 @@ fn params() -> Pocket3DParams {
         retract_z: None,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_motion::load::DEFAULT_OPTIMAL_LOAD,
     }
 }
 

@@ -116,7 +116,7 @@ fn pocket(tilt: Option<Tilt>, top_z: f64) -> OpParams {
         // test flips either field.
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     }
 }
@@ -143,7 +143,7 @@ fn pocket_parked() -> OpParams {
         strategy: PocketStrategy::Zigzag,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     }
 }

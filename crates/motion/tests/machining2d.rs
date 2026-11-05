@@ -967,7 +967,7 @@ fn pp() -> PocketParams {
         // and the law's 45° reading only under Adaptive.
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_motion::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     }
 }
@@ -1276,13 +1276,13 @@ fn pocket_refuses_bad_input() {
         {
             let mut p = pp();
             p.strategy = PocketStrategy::Adaptive;
-            p.max_engagement = 0.0; // a zero step is an infinite ladder
+            p.optimal_load = 0.0; // a zero step is an infinite ladder
             p
         },
         {
             let mut p = pp();
             p.strategy = PocketStrategy::Adaptive;
-            p.max_engagement = 91.0; // past where consecutive rings overlap
+            p.optimal_load = 0.51; // past where consecutive rings overlap
             p
         },
     ];
@@ -2039,7 +2039,7 @@ fn adaptive_is_the_engagement_law_on_the_plane() {
     w.strategy = PocketStrategy::Waterline;
     let mut a = pp();
     a.strategy = PocketStrategy::Adaptive;
-    a.max_engagement = 90.0;
+    a.optimal_load = 0.5;
     a.stepover = 9.0; // the ignored field, deliberately out of reach
     let tw = pocket(&region, &w).expect("waterline valid");
     let ta = pocket(&region, &a).expect("90 degrees is the one-radius step");
@@ -2051,7 +2051,7 @@ fn adaptive_is_the_engagement_law_on_the_plane() {
     // a 45 budget bites at r(1 - cos 45) ~ 1.46 and rings far denser.
     let mut s = pp();
     s.strategy = PocketStrategy::Adaptive;
-    s.max_engagement = 45.0;
+    s.optimal_load = camcraft_motion::load::DEFAULT_OPTIMAL_LOAD;
     let ts = pocket(&region, &s).expect("adaptive at 45 valid");
     assert!(
         ts.moves.len() > tw.moves.len(),

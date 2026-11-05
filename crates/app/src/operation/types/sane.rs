@@ -99,14 +99,15 @@ impl OpParams {
                 plunge_feed,
                 helix_radius,
                 strategy,
-                max_engagement,
+                optimal_load,
                 ..
             } => {
                 // The entry family joined the planar pocket at M5.1 H,
                 // so its door mirrors Pocket3D's word for word: the
                 // generator owns the radius-vs-tool check (it owns the
-                // tool), and the engagement angle is finite always,
-                // bounded (0, 90] only when Adaptive reads it.
+                // tool), and the optimal load is finite always,
+                // bounded (0, 50%] of D only when Adaptive reads it
+                // (the old (0, 90] degree door, M11.4 B).
                 pos(*stepover)
                     && nneg(*stock_to_leave)
                     && clearance_z.is_sane()
@@ -117,9 +118,9 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
-                    && (max_engagement.is_finite()
+                    && (optimal_load.is_finite()
                         && (!matches!(strategy, PocketStrategy::Adaptive)
-                            || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
+                            || crate::load::load_in_door(*optimal_load)))
             }
             // The twins' doors are the pocket's, read with the
             // strategy already decided (M2.4 A): Adaptive's engagement
@@ -137,7 +138,7 @@ impl OpParams {
                 feed,
                 plunge_feed,
                 helix_radius,
-                max_engagement,
+                optimal_load,
                 ..
             } => {
                 pos(*stepover)
@@ -150,7 +151,7 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
-                    && (*max_engagement > 0.0 && *max_engagement <= 90.0)
+                    && crate::load::load_in_door(*optimal_load)
             }
             OpParams::Offset2D {
                 stepover,
@@ -269,7 +270,7 @@ impl OpParams {
                 plunge_feed,
                 helix_radius,
                 strategy,
-                max_engagement,
+                optimal_load,
                 ..
             } => {
                 // Structural only, like the pocket's: the helix radius
@@ -291,9 +292,9 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
-                    && (max_engagement.is_finite()
+                    && (optimal_load.is_finite()
                         && (!matches!(strategy, PocketStrategy::Adaptive)
-                            || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
+                            || crate::load::load_in_door(*optimal_load)))
             }
             OpParams::Finish3D {
                 stepover,
@@ -521,7 +522,7 @@ impl OpParams {
                 plunge_feed,
                 helix_radius,
                 strategy,
-                max_engagement,
+                optimal_load,
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
@@ -538,9 +539,9 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
-                    && (max_engagement.is_finite()
+                    && (optimal_load.is_finite()
                         && (!matches!(strategy, PocketStrategy::Adaptive)
-                            || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
+                            || crate::load::load_in_door(*optimal_load)))
                     && angle(lead_deg)
                     && angle(lag_deg)
                     && *max_tilt_deg > 0.0
@@ -565,7 +566,7 @@ impl OpParams {
                 plunge_feed,
                 helix_radius,
                 strategy,
-                max_engagement,
+                optimal_load,
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
@@ -583,9 +584,9 @@ impl OpParams {
                     && pos(*feed)
                     && pos(*plunge_feed)
                     && pos(*helix_radius)
-                    && (max_engagement.is_finite()
+                    && (optimal_load.is_finite()
                         && (!matches!(strategy, PocketStrategy::Adaptive)
-                            || (*max_engagement > 0.0 && *max_engagement <= 90.0)))
+                            || crate::load::load_in_door(*optimal_load)))
                     && angle(lead_deg)
                     && angle(lag_deg)
                     && *max_tilt_deg > 0.0

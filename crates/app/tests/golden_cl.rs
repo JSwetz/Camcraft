@@ -276,7 +276,7 @@ fn pocket_zigzag_plate_with_island_matches_golden() {
         strategy: PocketStrategy::Zigzag,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     };
     let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();
@@ -342,7 +342,7 @@ fn pocket_zigzag_plate_with_island_blended_matches_golden() {
         strategy: PocketStrategy::Zigzag,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: true,
     };
     let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();
@@ -370,7 +370,7 @@ fn pocket_waterline_matches_golden() {
         strategy: PocketStrategy::Waterline,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     };
     let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();

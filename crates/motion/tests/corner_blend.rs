@@ -88,7 +88,7 @@ fn pp(strategy: PocketStrategy, blend: bool) -> PocketParams {
         strategy,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_motion::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: blend,
     }
 }

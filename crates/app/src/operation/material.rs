@@ -426,6 +426,19 @@ pub(super) fn region_core(
     frame: Option<&crate::cl::TiltedFrame>,
     z: Result<f64, GenError>,
 ) -> Result<Region, GenError> {
+    // Every source-built region (Face's silhouette included) crosses the
+    // one area-controls seam the selection-built ones cross (M11.4 A;
+    // M11.5's controls attach there, identity today).
+    apply_area_controls(source_region(material, params, frame, z)?, &AreaControls::default())
+}
+
+/// The source-built region per kind, before the area controls.
+fn source_region(
+    material: &Material,
+    params: &OpParams,
+    frame: Option<&crate::cl::TiltedFrame>,
+    z: Result<f64, GenError>,
+) -> Result<Region, GenError> {
     // The section plane as the material's coordinates read it: the
     // world height minus the anchor's z is the frame's own distance
     // law (M5.1 B); None frame leaves every number untouched.

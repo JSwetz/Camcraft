@@ -109,7 +109,7 @@ fn clean_pocket_verifies_silent() {
             strategy: PocketStrategy::Zigzag,
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
-            max_engagement: 45.0,
+            optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
             blend_turns: false,
         },
     )
@@ -143,7 +143,7 @@ fn a_ramp_pocket_verifies_silent() {
             strategy: PocketStrategy::Zigzag,
             entry: camcraft_app::machining3d::Entry3D::Ramp,
             helix_radius: 1.0,
-            max_engagement: 45.0,
+            optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
             blend_turns: false,
         },
     )
@@ -182,7 +182,7 @@ fn a_helix_pocket_verifies_silent() {
             strategy: PocketStrategy::Zigzag,
             entry: camcraft_app::machining3d::Entry3D::Helix,
             helix_radius: 2.0,
-            max_engagement: 45.0,
+            optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
             blend_turns: false,
         },
     )
@@ -343,7 +343,7 @@ fn holder_hits_a_part_island_when_the_flute_is_short() {
             strategy: PocketStrategy::Zigzag,
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
-            max_engagement: 45.0,
+            optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
             blend_turns: false,
         },
     )

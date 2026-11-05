@@ -47,12 +47,12 @@ pub struct Pocket3DParams {
     /// Helix centerline circle radius (mm); validated ≤ tool radius so
     /// successive turns overlap and the dive cuts a clean bore.
     pub helix_radius: f64,
-    /// The `Adaptive` strategy's engagement bound, in degrees of
-    /// instant cutter contact (ignored by the other strategies, still
-    /// validated finite). Drives the ring step through
-    /// [`engagement_step`] - the whole of constant-engagement
-    /// roughing's geometry law (M2.1c).
-    pub max_engagement: f64,
+    /// The `Adaptive` strategy's optimal load: radial width of cut as a
+    /// fraction of the tool diameter (ae/D, M11.4 B - `crate::load`;
+    /// ignored by the other strategies, still validated finite). The
+    /// ring step is `optimal_load x D` - the whole of constant-engagement
+    /// roughing's geometry law (M2.1c), the contact angle derived.
+    pub optimal_load: f64,
 }
 
 impl Pocket3DParams {
@@ -68,7 +68,7 @@ impl Pocket3DParams {
             self.feed,
             self.plunge_feed,
             self.helix_radius,
-            self.max_engagement,
+            self.optimal_load,
         ]
         .into_iter()
         .all(f64::is_finite);
@@ -108,14 +108,14 @@ impl Pocket3DParams {
             }
         }
         if self.strategy == PocketStrategy::Adaptive {
-            // The law's own bounds: a zero angle is a zero step (an
-            // infinite ladder), and past 90 degrees the sagitta passes
-            // one radius - past where consecutive rings still overlap,
+            // The law's own bounds: a zero load is a zero step (an
+            // infinite ladder), and past half the diameter (90 degrees
+            // of contact) the step passes one radius - past where consecutive rings still overlap,
             // which is where the waterline reach law already says
             // rings stop covering honestly.
-            if self.max_engagement <= 0.0 || self.max_engagement > 90.0 {
+            if !crate::load::load_in_door(self.optimal_load) {
                 return Err(GenError::Invalid(
-                    "engagement angle must be in (0, 90] degrees".into(),
+                    "optimal load must be in (0, 50] % of the tool diameter".into(),
                 ));
             }
         }
@@ -129,7 +129,7 @@ impl Pocket3DParams {
     /// law's own bands.
     pub(super) fn tiling_step(&self) -> f64 {
         match self.strategy {
-            PocketStrategy::Adaptive => engagement_step(self.tool_diameter * 0.5, self.max_engagement),
+            PocketStrategy::Adaptive => crate::load::load_step(self.tool_diameter, self.optimal_load),
             _ => self.stepover,
         }
     }

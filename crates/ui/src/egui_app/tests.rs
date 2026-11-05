@@ -813,7 +813,7 @@ fn every_field_lives_on_exactly_one_section() {
                     "Heights",
                     vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
                 ),
-                ("Passes", vec!["Stepover", "Stock to leave", "Max engagement (deg)", "Entry"]),
+                ("Passes", vec!["Stepover", "Stock to leave", "Optimal load (% of D)", "Entry"]),
                 ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
             ],
         ),
@@ -956,7 +956,7 @@ fn every_field_lives_on_exactly_one_section() {
             // the region - islands are computed, never selected): its
             // Geometry group is the bare pick law, and its Passes carry
             // the entry ladder's own fields. "Retract Z", "Helix lead
-            // radius" and "Max engagement (deg)" are guard-rendered
+            // radius" and "Optimal load (% of D)" are guard-rendered
             // (retype's defaults have none of them on), so they are not
             // in this table.
             "3D Pocket",

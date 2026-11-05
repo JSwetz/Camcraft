@@ -136,8 +136,18 @@ pub enum ParamsDto {
         /// law's 45° (`pocket3d`'s law, same word). Pre-H files that
         /// stored Adaptive meant the waterline alias - they now ring
         /// at r(1 - cos 45); RECOMMENDED.md owns that statement.
-        #[serde(default = "default_engagement_deg")]
-        max_engagement: f64,
+        /// The pre-M11.4 word: the contact angle in degrees. Still READ
+        /// (absent meant the law's 45 deg), converted to `optimal_load`
+        /// in memory on load - exact, `crate::load` - and never written
+        /// again: a saved file carries `optimal_load` instead (additive,
+        /// the format version does not move; M11.4 B).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_engagement: Option<f64>,
+        /// M11.4 B: the adaptive optimal load, radial width as a fraction
+        /// of the tool diameter (ae/D; the page shows it in % of D).
+        /// Absent on every older file, which reads `max_engagement`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        optimal_load: Option<f64>,
         /// M11.1 C turning-point blends: absent (written only when ON)
         /// is the sharp walk every earlier file held - no version step.
         #[serde(default, skip_serializing_if = "is_false")]
@@ -165,8 +175,18 @@ pub enum ParamsDto {
         entry: EntryDto,
         #[serde(default = "default_helix_radius")]
         helix_radius: f64,
-        #[serde(default = "default_engagement_deg")]
-        max_engagement: f64,
+        /// The pre-M11.4 word: the contact angle in degrees. Still READ
+        /// (absent meant the law's 45 deg), converted to `optimal_load`
+        /// in memory on load - exact, `crate::load` - and never written
+        /// again: a saved file carries `optimal_load` instead (additive,
+        /// the format version does not move; M11.4 B).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_engagement: Option<f64>,
+        /// M11.4 B: the adaptive optimal load, radial width as a fraction
+        /// of the tool diameter (ae/D; the page shows it in % of D).
+        /// Absent on every older file, which reads `max_engagement`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        optimal_load: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,
     },
@@ -361,11 +381,20 @@ pub enum ParamsDto {
         /// the plain level ladder is exactly what they generated.
         #[serde(default)]
         rest_rough: bool,
-        /// Max engagement angle, degrees; read only when `strategy` is
-        /// `Adaptive`. Absent means the law's 45° - v12 files can carry
-        /// no Adaptive ring family to feed it.
-        #[serde(default = "default_engagement_deg")]
-        max_engagement: f64,
+        /// (v13: read only when `strategy` is `Adaptive`; v12 files can
+        /// carry no Adaptive ring family to feed it.)
+        /// The pre-M11.4 word: the contact angle in degrees. Still READ
+        /// (absent meant the law's 45 deg), converted to `optimal_load`
+        /// in memory on load - exact, `crate::load` - and never written
+        /// again: a saved file carries `optimal_load` instead (additive,
+        /// the format version does not move; M11.4 B).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_engagement: Option<f64>,
+        /// M11.4 B: the adaptive optimal load, radial width as a fraction
+        /// of the tool diameter (ae/D; the page shows it in % of D).
+        /// Absent on every older file, which reads `max_engagement`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        optimal_load: Option<f64>,
         /// Absent means off: v13 files posted every F word at the
         /// programmed feed, which is exactly what "no modulation"
         /// means for them.
@@ -619,8 +648,18 @@ pub enum ParamsDto {
         entry: EntryDto,
         /// Read only when `entry` is Helix; the pocket's law.
         helix_radius: f64,
-        #[serde(default = "default_engagement_deg")]
-        max_engagement: f64,
+        /// The pre-M11.4 word: the contact angle in degrees. Still READ
+        /// (absent meant the law's 45 deg), converted to `optimal_load`
+        /// in memory on load - exact, `crate::load` - and never written
+        /// again: a saved file carries `optimal_load` instead (additive,
+        /// the format version does not move; M11.4 B).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_engagement: Option<f64>,
+        /// M11.4 B: the adaptive optimal load, radial width as a fraction
+        /// of the tool diameter (ae/D; the page shows it in % of D).
+        /// Absent on every older file, which reads `max_engagement`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        optimal_load: Option<f64>,
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,
@@ -650,8 +689,18 @@ pub enum ParamsDto {
         entry: EntryDto,
         /// Read only when `entry` is Helix; the pocket's law.
         helix_radius: f64,
-        #[serde(default = "default_engagement_deg")]
-        max_engagement: f64,
+        /// The pre-M11.4 word: the contact angle in degrees. Still READ
+        /// (absent meant the law's 45 deg), converted to `optimal_load`
+        /// in memory on load - exact, `crate::load` - and never written
+        /// again: a saved file carries `optimal_load` instead (additive,
+        /// the format version does not move; M11.4 B).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_engagement: Option<f64>,
+        /// M11.4 B: the adaptive optimal load, radial width as a fraction
+        /// of the tool diameter (ae/D; the page shows it in % of D).
+        /// Absent on every older file, which reads `max_engagement`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        optimal_load: Option<f64>,
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,
@@ -1015,8 +1064,16 @@ impl From<crate::finishing3d::FinishPattern> for FinishPatternDto {
     }
 }
 
-pub(super) fn default_engagement_deg() -> f64 {
-    45.0
+/// The file's adaptive words to the in-memory load (M11.4 B): the new
+/// key wins, else the legacy degree word converted exactly (its old door
+/// verdict kept - `load_of_legacy_degrees`), else the 45 deg default
+/// every pre-v13 file meant, as a load.
+pub(super) fn load_from_file(optimal_load: Option<f64>, legacy_deg: Option<f64>) -> f64 {
+    match (optimal_load, legacy_deg) {
+        (Some(l), _) => l,
+        (None, Some(d)) => crate::load::load_of_legacy_degrees(d),
+        (None, None) => crate::load::DEFAULT_OPTIMAL_LOAD,
+    }
 }
 
 /// The seed's helix centerline radius, mm (M5.1 H gave the planar

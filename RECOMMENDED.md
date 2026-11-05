@@ -9317,3 +9317,41 @@ so no existing op's stamp changes.
 (5) **Owed.** The "retract above clearance" notes outside the Heights
 section show nothing for Selection heights (never a wrong number);
 heights.rs is ~400 lines.
+
+## M11.4 A+B - one region whatever was picked; optimal load in % of D: six decisions (2026-11-05)
+
+(1) **Measured first: the pick type was not swapping generators.** On
+the user's bore, every pick (floor face, rim chains, wall patch, pairs)
+gave byte-identical CL under Adaptive/Zigzag/Auto. The circles come
+from what 2D Adaptive is today: `waterline_passes`, offset rings
+stepped by the engagement law. That is the reopened M2.4 spec, owed in
+M11.4 C. Only Auto swaps by shape (`ring_is_circular`), by design.
+
+(2) **Islands come from the part at each cut level.** Part-picked
+pockets take the enclosed area minus the material standing in it
+(`slice::material_above`, the verifier's own section law). This fixes
+the real face-vs-edge gap (a rim pick cut through a boss the face pick
+avoided) and stops through-holes in a floor being treated as islands.
+New named refusals: a Bottom below the selected floor, and a pick that
+encloses only part material.
+
+(3) **`canon_ring` mirror fix.** The mirrored walk is now actually
+checked, so reversed duplicate rings dedupe instead of relying on
+`Region::new`'s union.
+
+(4) **The M11.5 seam.** `AreaControls` with `apply_area_controls`
+(identity today) is the one place every region passes through last:
+selection regions, source-built regions (Face included) and the
+Contour selection arm.
+
+(5) **Optimal load is % of D, the angle derived.** ae = load x D, angle
+= acos(1 - 2*ae/D), the straight-wall radial-engagement geometry of
+peripheral milling. It is stored as the ratio and shown as a percentage
+with the angle as a hint. The default (1 - cos 45)/2 = 14.6447% is
+bit-exact to the old 45 degrees (11 diameters x 900 angles tested).
+Legacy `max_engagement` is read and converted exactly; there is no
+version bump; old Adaptive ops go Stale once and regenerate identical.
+
+(6) **Open, for the user.** A Pocket whose source is the whole model
+clears the part's own section silently - the documented "a whole-model
+source is the volume to remove" contract. Kept for now; flagged.

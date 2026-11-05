@@ -540,7 +540,7 @@ fn roughing2d_pane(
     climb: &mut bool,
     entry: &mut camcraft_app::machining3d::Entry3D,
     helix_radius: &mut f64,
-    max_engagement: Option<&mut f64>,
+    optimal_load: Option<&mut f64>,
     tilt: &mut Option<Tilt>,
 ) {
     if tab == SEC_HEIGHTS {
@@ -580,12 +580,8 @@ fn roughing2d_pane(
         num(ui, u, stepover);
         field(ui, "Stock to leave");
         num(ui, u, stock_to_leave);
-        match max_engagement {
-            Some(m) => {
-                field(ui, "Max engagement (deg)");
-                num_plain(ui, m);
-                ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
-            }
+        match optimal_load {
+            Some(m) => super::load_field::optimal_load_field(ui, m),
             None => {
                 ui.label("concentric rings from the boundary inward, one stepover apart");
             }
@@ -1009,7 +1005,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             strategy,
             entry,
             helix_radius,
-            max_engagement,
+            optimal_load,
             blend_turns,
             tilt,
         } => {
@@ -1088,9 +1084,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     };
                 }
                 if matches!(strategy, PocketStrategy::Adaptive) {
-                    field(ui, "Max engagement (deg)");
-                    num_plain(ui, max_engagement);
-                    ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
+                    super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 field(ui, "Entry");
                 let mut e_idx = match entry {
@@ -1146,7 +1140,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             climb,
             entry,
             helix_radius,
-            max_engagement,
+            optimal_load,
             tilt,
         } => roughing2d_pane(
             ui,
@@ -1167,7 +1161,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             climb,
             entry,
             helix_radius,
-            Some(max_engagement),
+            Some(optimal_load),
             tilt,
         ),
         OpParams::Offset2D {
@@ -1988,7 +1982,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             entry,
             helix_radius,
             rest_rough,
-            max_engagement,
+            optimal_load,
             feed_opt,
             shell,
         } => {
@@ -2059,9 +2053,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     };
                 }
                 if matches!(strategy, PocketStrategy::Adaptive) {
-                    field(ui, "Max engagement (deg)");
-                    num_plain(ui, max_engagement);
-                    ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
+                    super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 ui.label("levels come from the mesh: each shelf cuts around the material standing above it");
                 ui.checkbox(shell, "Offset shells");
@@ -2858,7 +2850,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             strategy,
             entry,
             helix_radius,
-            max_engagement,
+            optimal_load,
             lead_deg,
             lag_deg,
             max_tilt_deg,
@@ -2919,9 +2911,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     };
                 }
                 if matches!(strategy, PocketStrategy::Adaptive) {
-                    field(ui, "Max engagement (deg)");
-                    num_plain(ui, max_engagement);
-                    ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
+                    super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 field(ui, "Entry");
                 let mut e_idx = match entry {
@@ -2982,7 +2972,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             strategy,
             entry,
             helix_radius,
-            max_engagement,
+            optimal_load,
             lead_deg,
             lag_deg,
             max_tilt_deg,
@@ -3067,9 +3057,7 @@ pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     };
                 }
                 if matches!(strategy, PocketStrategy::Adaptive) {
-                    field(ui, "Max engagement (deg)");
-                    num_plain(ui, max_engagement);
-                    ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
+                    super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 ui.label("levels come from the mesh: each shelf cuts around the material standing above it");
                 field(ui, "Entry");

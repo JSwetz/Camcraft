@@ -3,7 +3,8 @@
 //! `fillet.rs` (tangent circle to two lines, RS-274 / ISO 6983 G2/G3).
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
-use crate::entry::{engagement_step, Entry3D};
+use crate::entry::Entry3D;
+use crate::load::{load_in_door, load_step};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
@@ -23,13 +24,12 @@ pub enum PocketStrategy {
     Waterline,
     /// Constant-engagement rings (M2.1c's law, real for the planar
     /// pocket since M5.1 H): the same ring tiling as Waterline, but
-    /// spaced at the engagement-law step `r (1 - cos theta_max)` from
-    /// the params' `max_engagement` instead of a free stepover, so
-    /// every pass bites the wall by the same bound the cutter's
-    /// contact angle was chosen for. Until H this was Waterline's
-    /// geometry at the stated stepover - a documented alias; the law
-    /// now runs here too, through the same `engagement_step` the 3-D
-    /// ladder reads.
+    /// spaced at the params' `optimal_load` x D (M11.4 B: the radial
+    /// width as a fraction of the diameter; the contact angle
+    /// `acos(1 - 2 ae/D)` is derived from it, `crate::load`) instead of
+    /// a free stepover, so every pass bites the wall by the same bound.
+    /// Until H this was Waterline's geometry at the stated stepover - a
+    /// documented alias; the law runs here and in the 3-D ladder alike.
     Adaptive,
     /// Waterline where the pocket's outer boundary is round enough for
     /// rings to be the honest shape, Zigzag otherwise. The resolution is
@@ -98,10 +98,12 @@ pub struct PocketParams {
     /// radius so successive turns overlap and the dive cuts a clean
     /// bore - the 3-D ladder's door, same words.
     pub helix_radius: f64,
-    /// The `Adaptive` strategy's engagement bound, in degrees of
-    /// instant cutter contact; read only under `Adaptive` (through
-    /// [`PocketParams::tiling_step`], still validated finite.
-    pub max_engagement: f64,
+    /// The `Adaptive` strategy's optimal load: radial width of cut as a
+    /// fraction of the tool diameter (ae/D, `crate::load`); read only
+    /// under `Adaptive` (through [`PocketParams::tiling_step`]), still
+    /// validated finite. `crate::load::DEFAULT_OPTIMAL_LOAD` is exactly
+    /// the step the old 45-degree default cut.
+    pub optimal_load: f64,
     /// Turning-point blends (M11.1 C): every line-to-line corner of a
     /// pass - the zigzag's row-to-link jogs, a ring's corners - rides
     /// one tangent fillet where `fillet.rs`'s law proves it inside the
@@ -124,7 +126,7 @@ impl PocketParams {
             self.feed,
             self.plunge_feed,
             self.helix_radius,
-            self.max_engagement,
+            self.optimal_load,
         ]
         .into_iter()
         .all(f64::is_finite);
@@ -189,27 +191,25 @@ impl PocketParams {
         }
         if self.strategy == PocketStrategy::Adaptive {
             // The law's own bounds, same as the 3-D ladder's door: a
-            // zero angle is a zero step (an infinite ladder), and past
-            // 90 degrees the sagitta passes one radius - past where
-            // consecutive rings still overlap.
-            if self.max_engagement <= 0.0 || self.max_engagement > 90.0 {
+            // zero load is a zero step (an infinite ladder), and past
+            // half the diameter (90 degrees of contact) the step passes
+            // one radius - past where consecutive rings still overlap.
+            if !load_in_door(self.optimal_load) {
                 return Err(GenError::Invalid(
-                    "engagement angle must be in (0, 90] degrees".into(),
+                    "optimal load must be in (0, 50] % of the tool diameter".into(),
                 ));
             }
         }
         Ok(())
     }
 
-    /// What actually spaces the passes at a level: the engagement-law
+    /// What actually spaces the passes at a level: the optimal-load
     /// step under `Adaptive`, the stated stepover otherwise. The pass
     /// plan and the reach door both ask this one function, mirroring
     /// `Pocket3DParams::tiling_step` (M5.1 H).
     fn tiling_step(&self) -> f64 {
         match self.strategy {
-            PocketStrategy::Adaptive => {
-                engagement_step(self.tool_diameter * 0.5, self.max_engagement)
-            }
+            PocketStrategy::Adaptive => load_step(self.tool_diameter, self.optimal_load),
             _ => self.stepover,
         }
     }

@@ -12,6 +12,7 @@ pub mod fixture;
 pub use camcraft_motion::finishing3d;
 pub use camcraft_geometry::geo2d;
 pub mod geometry;
+pub use camcraft_motion::load;
 pub use camcraft_motion::machining2d;
 pub use camcraft_motion::machining3d;
 pub use camcraft_motion::multiaxis;

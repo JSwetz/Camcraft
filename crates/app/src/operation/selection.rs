@@ -477,6 +477,12 @@ pub(super) fn selection_geometry_impl(
 /// every non-contour generator wants: bounds, or a named refusal - never
 /// a silently empty area. A Contour of pure open runs is the case that
 /// skips this and reads `selection_geometry` directly.
+///
+/// The pocket family picked on a part takes the one region law of
+/// [`pocket_region_on_part`] (M11.4 A): the area the picks enclose, the
+/// part's own material at the ladder's planes as the islands - so a
+/// face, its edge loop and its wall resolve to the same region. Every
+/// kind's answer then crosses the area-controls seam (M11.5's home).
 pub(super) fn selection_region(
     world: &World,
     setup: Option<&str>,
@@ -489,5 +495,9 @@ pub(super) fn selection_region(
             "nothing in the selection bounds an area".into(),
         ));
     }
-    Region::new(loops).map_err(Into::into)
+    let region = match pocket_ladder(world, setup, items, params)? {
+        Some((part, planes)) => pocket_region_on_part(loops, &part, &planes)?,
+        None => Region::new(loops)?,
+    };
+    apply_area_controls(region, &AreaControls::default())
 }

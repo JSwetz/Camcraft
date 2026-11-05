@@ -212,7 +212,7 @@ impl OpParams {
                 strategy,
                 entry,
                 helix_radius,
-                max_engagement,
+                optimal_load,
                 blend_turns,
                 tilt,
             } => {
@@ -226,7 +226,7 @@ impl OpParams {
                 // digest the same way (and pre-H ops go Stale once and
                 // regenerate byte-identically - the mechanism saying
                 // so, as it did for `rest_rough` and `feed_opt`).
-                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *optimal_load] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
@@ -268,7 +268,7 @@ impl OpParams {
                 climb,
                 entry,
                 helix_radius,
-                max_engagement,
+                optimal_load,
                 tilt,
             } => {
                 w(h, *stepover);
@@ -276,7 +276,7 @@ impl OpParams {
                 wh(h, *clearance_z);
                 wh(h, *top_z);
                 wh(h, *bottom_z);
-                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *optimal_load] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
@@ -337,7 +337,7 @@ impl OpParams {
                 entry,
                 helix_radius,
                 rest_rough,
-                max_engagement,
+                optimal_load,
                 feed_opt,
                 shell,
             } => {
@@ -346,7 +346,7 @@ impl OpParams {
                 wh(h, *clearance_z);
                 wh(h, *top_z);
                 wh(h, *bottom_z);
-                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *optimal_load] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
@@ -661,7 +661,7 @@ impl OpParams {
                 strategy,
                 entry,
                 helix_radius,
-                max_engagement,
+                optimal_load,
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
@@ -671,7 +671,7 @@ impl OpParams {
                 wh(h, *clearance_z);
                 wh(h, *top_z);
                 wh(h, *bottom_z);
-                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *optimal_load] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));
@@ -713,7 +713,7 @@ impl OpParams {
                 strategy,
                 entry,
                 helix_radius,
-                max_engagement,
+                optimal_load,
                 lead_deg,
                 lag_deg,
                 max_tilt_deg,
@@ -724,7 +724,7 @@ impl OpParams {
                 wh(h, *clearance_z);
                 wh(h, *top_z);
                 wh(h, *bottom_z);
-                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *max_engagement] {
+                for v in [*stepdown, *feed, *plunge_feed, *helix_radius, *optimal_load] {
                     w(h, v);
                 }
                 h.write_u8(u8::from(*climb));

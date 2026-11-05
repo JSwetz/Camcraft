@@ -717,7 +717,7 @@ fn seed_pocket(c: &Carried) -> OpParams {
         strategy: PocketStrategy::Auto,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         // Turning-point blends are opt-in (M11.1 C), as on Face.
         blend_turns: false,
         tilt: c.tilt,
@@ -727,7 +727,7 @@ fn seed_pocket(c: &Carried) -> OpParams {
 /// 2D Adaptive (M2.4 A): the pocket seed with the strategy pinned out
 /// of the params - the kind IS the engagement ladder, so the numbers
 /// ride the pocket's defaults and only the door the strategy hides
-/// (max_engagement) stays visible.
+/// (optimal_load) stays visible.
 fn seed_adaptive2d(c: &Carried) -> OpParams {
     OpParams::Adaptive2D {
         stepover: c.stepover,
@@ -742,7 +742,7 @@ fn seed_adaptive2d(c: &Carried) -> OpParams {
         climb: c.climb,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         tilt: c.tilt,
     }
 }
@@ -946,7 +946,7 @@ fn seed_pocket3d(c: &Carried) -> OpParams {
         rest_rough: false,
         // The law's default (r·(1−cos 45°) ≈ 15% of the diameter);
         // reads only under Adaptive, which the fresh op does not pick.
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         // Feed modulation costs a sim run; the fresh op posts the
         // programmed feed everywhere until the user asks otherwise.
         feed_opt: false,
@@ -1424,7 +1424,7 @@ fn seed_multiaxis_rough(c: &Carried) -> OpParams {
         strategy: PocketStrategy::Auto,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         lead_deg: 0.0,
         lag_deg: 0.0,
         max_tilt_deg: 90.0,
@@ -1453,7 +1453,7 @@ fn seed_rotary_offset(c: &Carried) -> OpParams {
         strategy: PocketStrategy::Auto,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         lead_deg: 0.0,
         lag_deg: 0.0,
         max_tilt_deg: 90.0,

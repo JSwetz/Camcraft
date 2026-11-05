@@ -1175,7 +1175,7 @@ mod height_plane_tests {
             strategy: PocketStrategy::Zigzag,
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
-            max_engagement: 45.0,
+            optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
             blend_turns: false,
         }
     }

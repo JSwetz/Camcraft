@@ -107,7 +107,7 @@ fn pocket(strategy: PocketStrategy, eng: f64) -> OpParams {
         strategy,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: eng,
+        optimal_load: camcraft_app::load::load_of_degrees(eng),
         tilt: None,
         blend_turns: false,
     }
@@ -127,7 +127,7 @@ fn adaptive(eng: f64) -> OpParams {
         climb: true,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: eng,
+        optimal_load: camcraft_app::load::load_of_degrees(eng),
         tilt: None,
     }
 }
@@ -224,11 +224,11 @@ fn a_retype_carries_the_numbers_and_pins_the_ladder() {
     // Feed and geometry ride; the hidden choices are the kind's own.
     let p = pocket(PocketStrategy::Zigzag, 60.0);
     let re = operation::retype_params(&p, OpType::Adaptive2D.ordinal());
-    let OpParams::Adaptive2D { feed, stepover, entry, helix_radius, max_engagement, retract_z, .. } = &re else {
+    let OpParams::Adaptive2D { feed, stepover, entry, helix_radius, optimal_load, retract_z, .. } = &re else {
         panic!("the Adaptive2D row seeds an Adaptive2D");
     };
     assert_eq!((*feed, *stepover, *helix_radius), (800.0, 3.0, 1.0), "shared numbers ride");
-    assert_eq!((*entry, *max_engagement, retract_z.is_none()), (Entry3D::Plunge, 45.0, true), "the ladder and its door seed at the catalog default - a Zigzag pocket's 60 was never in play");
+    assert_eq!((*entry, *optimal_load, retract_z.is_none()), (Entry3D::Plunge, camcraft_app::load::DEFAULT_OPTIMAL_LOAD, true), "the ladder and its door seed at the catalog default - a Zigzag pocket's 60 was never in play");
     // The Offset row has no engagement field to carry INTO: the
     // pocket's 60 is dropped, not hidden - checked by the seed
     // compiling against the variant that has no such field, and by

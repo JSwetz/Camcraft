@@ -150,12 +150,13 @@ pub enum OpParams {
         /// Helix centerline radius, mm; read only when `entry` is
         /// Helix, validated there against the tool radius at generate.
         helix_radius: f64,
-        /// Degrees of cutter contact the `Adaptive` strategy keeps its
-        /// ring step under via `engagement_step`; read only when
-        /// `strategy` is Adaptive, bounds checked there at generate
-        /// (M5.1 H made the planar pocket read this instead of riding
-        /// Waterline as an alias).
-        max_engagement: f64,
+        /// The `Adaptive` strategy's optimal load (M11.4 B): radial width
+        /// of cut as a fraction of the tool diameter (ae/D), the ring
+        /// step `optimal_load x D` and the contact angle derived
+        /// (`crate::load`); read only when `strategy` is Adaptive,
+        /// bounds checked there at generate (M5.1 H made the planar
+        /// pocket read the law instead of riding Waterline as an alias).
+        optimal_load: f64,
         /// Turning-point blends (M11.1 C): pass corners and the
         /// zigzag's row-to-link jogs ride one tangent G2/G3 fillet
         /// inside the cutter-center area where the law proves it;
@@ -166,7 +167,7 @@ pub enum OpParams {
     },
     /// 2D Adaptive roughing (M2.4 A): the pocket's constant-engagement
     /// ladder as its own catalog name. The rings are the `Adaptive`
-    /// strategy's - `engagement_step` spaces them, so `stepover` rides
+    /// strategy's - the optimal load spaces them, so `stepover` rides
     /// the retype law inert, exactly as it does on a Pocket set to
     /// Adaptive. `machining2d::pocket` does the work; the kind is the
     /// name, the seed, and the golden.
@@ -187,9 +188,9 @@ pub enum OpParams {
         entry: Entry3D,
         /// Helix centerline radius, mm; read only when `entry` is Helix.
         helix_radius: f64,
-        /// Degrees of cutter contact the ladder keeps its ring step
-        /// under; the law `PocketStrategy::Adaptive` reads.
-        max_engagement: f64,
+        /// Optimal load, ae/D (M11.4 B): the ring step the ladder keeps;
+        /// the law `PocketStrategy::Adaptive` reads.
+        optimal_load: f64,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },
@@ -404,11 +405,11 @@ pub enum OpParams {
         /// pass aimed at what the dexel sim says still stands
         /// ([`crate::machining3d::pocket3d_with_rest`], M2.1b).
         rest_rough: bool,
-        /// Degrees of cutter contact the `Adaptive` strategy keeps its
-        /// ring step under via [`crate::machining3d::engagement_step`]
-        /// (M2.1c); read only when `strategy` is Adaptive, bounds
-        /// checked there at generate.
-        max_engagement: f64,
+        /// The `Adaptive` strategy's optimal load, ae/D (M11.4 B; the
+        /// M2.1c engagement law with the angle derived - `crate::load`);
+        /// read only when `strategy` is Adaptive, bounds checked there
+        /// at generate.
+        optimal_load: f64,
         /// Modulate every planar feed's rate by the engagement the
         /// dexel sim says the move actually meets, median-anchored to
         /// the programmed feed ([`crate::machining3d::optimize_feed`],
@@ -713,7 +714,8 @@ pub enum OpParams {
         strategy: PocketStrategy,
         entry: Entry3D,
         helix_radius: f64,
-        max_engagement: f64,
+        /// Optimal load, ae/D (M11.4 B), read under Adaptive.
+        optimal_load: f64,
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,
@@ -744,7 +746,8 @@ pub enum OpParams {
         strategy: PocketStrategy,
         entry: Entry3D,
         helix_radius: f64,
-        max_engagement: f64,
+        /// Optimal load, ae/D (M11.4 B), read under Adaptive.
+        optimal_load: f64,
         lead_deg: f64,
         lag_deg: f64,
         max_tilt_deg: f64,

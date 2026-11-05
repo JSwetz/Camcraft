@@ -825,12 +825,12 @@ fn pocket_entry_family_is_a_step_up_on_the_wire() {
     project::open(&world, plain).expect("a pre-H pocket file must read verbatim");
     let e = model::find_by_name(&world, "Op1").expect("op");
     let o = model::operation_of(&world, &e).expect("operation");
-    let OpParams::Pocket { entry, helix_radius, max_engagement, .. } = &o.params else {
+    let OpParams::Pocket { entry, helix_radius, optimal_load, .. } = &o.params else {
         panic!("pocket params expected, got {:?}", o.params);
     };
     assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Plunge, "absent means the dive");
     assert_eq!(*helix_radius, 1.0, "absent means the seed's lead radius");
-    assert_eq!(*max_engagement, 45.0, "absent means the law's 45 degrees");
+    assert_eq!(*optimal_load, camcraft_app::load::DEFAULT_OPTIMAL_LOAD, "absent means the law's 45 degrees, as a load");
 
     // The explicit shape, hand-written so the tags are pinned.
     let text = plain
@@ -839,13 +839,14 @@ fn pocket_entry_family_is_a_step_up_on_the_wire() {
     project::open(&world2, &text).expect("the grown pocket grammar must read");
     let e2 = model::find_by_name(&world2, "Op1").expect("op");
     let o2 = model::operation_of(&world2, &e2).expect("operation");
-    let OpParams::Pocket { strategy, entry, helix_radius, max_engagement, .. } = &o2.params else {
+    let OpParams::Pocket { strategy, entry, helix_radius, optimal_load, .. } = &o2.params else {
         panic!("pocket params expected, got {:?}", o2.params);
     };
     assert_eq!(*strategy, PocketStrategy::Adaptive);
     assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix);
     assert_eq!(*helix_radius, 2.5);
-    assert_eq!(*max_engagement, 30.0);
+    // M11.4 B: the legacy degree word converts exactly on load.
+    assert_eq!(optimal_load.to_bits(), camcraft_app::load::load_of_degrees(30.0).to_bits());
 
     // Write-parse-write is a fixed point, and the entry tag is snake_case.
     let path = tmp_path("hentry");
@@ -980,7 +981,7 @@ fn v5_roundtrips_retract_and_auto() {
                 strategy: PocketStrategy::Auto,
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
-                max_engagement: 45.0,
+                optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
                 blend_turns: false,
             },
         )
@@ -1718,13 +1719,13 @@ fn v12_file_steps_to_v13() {
     project::open(&world, text).expect("v12 file must migrate");
     let e = model::find_by_name(&world, "P3").expect("op");
     let o = model::operation_of(&world, &e).expect("operation");
-    let OpParams::Pocket3D { strategy, max_engagement, .. } = &o.params else {
+    let OpParams::Pocket3D { strategy, optimal_load, .. } = &o.params else {
         panic!("the pocket3d params must read unchanged, got {:?}", o.params);
     };
     assert_eq!(*strategy, PocketStrategy::Adaptive);
     assert!(
-        (*max_engagement - 45.0).abs() < 1e-12,
-        "absent means the law's 45°, got {max_engagement}"
+        *optimal_load == camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
+        "absent means the law's 45°, got {optimal_load}"
     );
 
     let path = tmp_path("v13");
@@ -1738,7 +1739,9 @@ fn v12_file_steps_to_v13() {
     // The learned key is written in its stated state: a fixed point, so
     // a second open cannot drift the number.
     assert!(saved.contains("\"strategy\": \"adaptive\""), "{saved}");
-    assert!(saved.contains("\"max_engagement\": 45"), "{saved}");
+    // M11.4 B: the new key is written, the legacy word never again.
+    assert!(saved.contains("\"optimal_load\": 0.1464466094067262"), "{saved}");
+    assert!(!saved.contains("max_engagement"), "{saved}");
 }
 
 #[test]
@@ -1771,14 +1774,14 @@ fn v13_file_steps_to_v14() {
     project::open(&world, text).expect("v13 file must migrate");
     let e = model::find_by_name(&world, "P3").expect("op");
     let o = model::operation_of(&world, &e).expect("operation");
-    let OpParams::Pocket3D { feed_opt, rest_rough, max_engagement, .. } = &o.params else {
+    let OpParams::Pocket3D { feed_opt, rest_rough, optimal_load, .. } = &o.params else {
         panic!("the pocket3d params must read unchanged, got {:?}", o.params);
     };
     assert!(!*feed_opt, "a v13 file never modulated feeds; off is its meaning");
     assert!(*rest_rough, "the stated keys ride through the step-up untouched");
     assert!(
-        (*max_engagement - 40.0).abs() < 1e-12,
-        "a stated angle must survive the migration, got {max_engagement}"
+        optimal_load.to_bits() == camcraft_app::load::load_of_degrees(40.0).to_bits(),
+        "a stated angle must survive the migration, got {optimal_load}"
     );
 
     let path = tmp_path("v14");
@@ -3378,7 +3381,7 @@ fn v26_file_steps_to_v27_and_the_wrap_ladder_grammar_round_trips() {
     let OpParams::RotaryOffset {
         strategy,
         entry,
-        max_engagement,
+        optimal_load,
         stepdown,
         stock_to_leave,
         ..
@@ -3388,7 +3391,7 @@ fn v26_file_steps_to_v27_and_the_wrap_ladder_grammar_round_trips() {
     };
     assert_eq!(*strategy, PocketStrategy::Waterline);
     assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Plunge, "absent entry means the dive");
-    assert_eq!(*max_engagement, 45.0, "absent engagement means the law's 45");
+    assert_eq!(*optimal_load, camcraft_app::load::DEFAULT_OPTIMAL_LOAD, "absent engagement means the law's 45, as a load");
     assert_eq!((*stepdown, *stock_to_leave), (3.0, 0.5));
 
     // Write-parse-write is a fixed point, and the retract key appears
@@ -3531,7 +3534,7 @@ fn v27_file_steps_to_v28_and_the_stamped_ladder_grammar_round_trips() {
     let OpParams::MultiAxisRough {
         strategy,
         entry,
-        max_engagement,
+        optimal_load,
         retract_z,
         lead_deg,
         lag_deg,
@@ -3543,7 +3546,7 @@ fn v27_file_steps_to_v28_and_the_stamped_ladder_grammar_round_trips() {
     };
     assert_eq!(*strategy, PocketStrategy::Zigzag);
     assert_eq!(*entry, camcraft_app::machining3d::Entry3D::Helix);
-    assert_eq!(*max_engagement, 45.0, "absent engagement means the law's 45");
+    assert_eq!(*optimal_load, camcraft_app::load::DEFAULT_OPTIMAL_LOAD, "absent engagement means the law's 45, as a load");
     assert!(retract_z.is_some(), "a stated hop must survive as a hop");
     assert_eq!((*lead_deg, *lag_deg, *max_tilt_deg), (3.0, 2.0, 60.0));
 

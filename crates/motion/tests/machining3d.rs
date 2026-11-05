@@ -95,7 +95,7 @@ fn params(entry: Entry3D, helix_radius: f64) -> Pocket3DParams {
         helix_radius,
         // The law's default; reads only under Adaptive, which the
         // helpers here pick explicitly when they need it.
-        max_engagement: 45.0,
+        optimal_load: camcraft_motion::load::DEFAULT_OPTIMAL_LOAD,
     }
 }
 
@@ -705,7 +705,7 @@ fn adaptive_refuses_what_the_law_refuses() {
             &Pocket3DParams {
                 strategy,
                 stepover,
-                max_engagement: angle,
+                optimal_load: camcraft_motion::load::load_of_legacy_degrees(angle),
                 ..params(Entry3D::Plunge, 1.0)
             },
         )

@@ -95,7 +95,7 @@ fn params_sanity_gates() {
         strategy: PocketStrategy::Zigzag,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     };
     assert!(!bad.is_sane());
@@ -350,7 +350,7 @@ fn rotary_offset_stamp_moves_with_its_wrap_numbers() {
             strategy,
             entry: crate::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
-            max_engagement: 45.0,
+            optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
             lead_deg: 0.0,
             lag_deg: 0.0,
             max_tilt_deg: 90.0,
@@ -406,7 +406,7 @@ fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
         strategy: PocketStrategy::Auto,
         entry: crate::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         lead_deg: lead,
         lag_deg: lag,
         max_tilt_deg: tilt,
@@ -435,7 +435,7 @@ fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
         entry: crate::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         rest_rough: false,
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         feed_opt: false,
         shell: false,
     };
@@ -477,7 +477,7 @@ fn the_arc_entry_splits_the_stamp_and_leaves_the_others_alone() {
         strategy: PocketStrategy::Zigzag,
         entry,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     };
     let digest = |p: &OpParams| {

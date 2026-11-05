@@ -210,7 +210,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     let region = if loops.is_empty() {
                         Region::empty()
                     } else {
-                        Region::new(loops)?
+                        // The one area-controls seam (M11.4 A / M11.5).
+                        apply_area_controls(Region::new(loops)?, &AreaControls::default())?
                     };
                     let mut path = if region.is_empty() {
                         Toolpath::new(Vec::new())
@@ -259,7 +260,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             strategy,
             entry,
             helix_radius,
-            max_engagement,
+            optimal_load,
             blend_turns,
             ..
         } => {
@@ -288,7 +289,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     strategy: *strategy,
                     entry: *entry,
                     helix_radius: *helix_radius,
-                    max_engagement: *max_engagement,
+                    optimal_load: *optimal_load,
                     blend_turns: *blend_turns,
                 },
             )?;
@@ -308,7 +309,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             climb,
             entry,
             helix_radius,
-            max_engagement,
+            optimal_load,
             ..
         } => {
             let region = region_for_job(
@@ -336,7 +337,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     strategy: PocketStrategy::Adaptive,
                     entry: *entry,
                     helix_radius: *helix_radius,
-                    max_engagement: *max_engagement,
+                    optimal_load: *optimal_load,
                     blend_turns: false,
                 },
             )?;
@@ -378,7 +379,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     strategy: PocketStrategy::Waterline,
                     entry: *entry,
                     helix_radius: *helix_radius,
-                    max_engagement: 45.0,
+                    optimal_load: crate::load::DEFAULT_OPTIMAL_LOAD,
                     blend_turns: false,
                 },
             )?;
@@ -395,7 +396,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             entry,
             helix_radius,
             rest_rough,
-            max_engagement,
+            optimal_load,
             feed_opt,
             shell,
             ..
@@ -428,7 +429,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 retract_z: hl.retract,
                 entry: *entry,
                 helix_radius: *helix_radius,
-                max_engagement: *max_engagement,
+                optimal_load: *optimal_load,
             };
             // Re-machining (M3.1 D): what the program ahead of this
             // pocket left standing bounds the coarse run, so it cuts
@@ -977,7 +978,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             strategy,
             entry,
             helix_radius,
-            max_engagement,
+            optimal_load,
             tolerance,
             lead_deg,
             lag_deg,
@@ -1013,7 +1014,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 retract_z: hl.retract,
                 entry: *entry,
                 helix_radius: *helix_radius,
-                max_engagement: *max_engagement,
+                optimal_load: *optimal_load,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,
@@ -1046,7 +1047,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             strategy,
             entry,
             helix_radius,
-            max_engagement,
+            optimal_load,
             tolerance,
             lead_deg,
             lag_deg,
@@ -1083,7 +1084,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 retract_z: hl.retract,
                 entry: *entry,
                 helix_radius: *helix_radius,
-                max_engagement: *max_engagement,
+                optimal_load: *optimal_load,
             };
             let axis = crate::multiaxis::AxisControl {
                 lead_deg: *lead_deg,

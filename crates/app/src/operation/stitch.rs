@@ -388,8 +388,13 @@ pub(super) fn canon_ring(ring: &[(i64, i64)]) -> Vec<(i64, i64)> {
         return Vec::new();
     }
     let mut best: Option<Vec<(i64, i64)>> = None;
+    // The two directions: forward (step 1) and mirrored (step n - 1,
+    // i.e. backward). M11.4 A: the old second step was 2, which is no
+    // mirror at all - a face loop and its edge chain walked the other
+    // way never deduped (harmless for `Region::new`'s union, but two
+    // copies of one boundary for every consumer counting loops).
     for start in 0..n {
-        for step in [1usize, 2] {
+        for step in [1usize, n - 1] {
             let walk: Vec<(i64, i64)> = (0..n).map(|k| ring[(start + k * step) % n]).collect();
             if best.as_ref().is_none_or(|b| walk < *b) {
                 best = Some(walk);

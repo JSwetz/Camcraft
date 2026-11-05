@@ -101,7 +101,7 @@ fn pocket_from_selection() -> OpParams {
         strategy: PocketStrategy::Zigzag,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     }
 }
@@ -249,7 +249,7 @@ fn creation_and_edits_refuse_a_selection_that_yields_no_height() {
         strategy: PocketStrategy::Zigzag,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     };
     history.execute(
@@ -304,7 +304,7 @@ fn an_edit_to_selection_rides_edit_params_and_undoes() {
         strategy: PocketStrategy::Zigzag,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
-        max_engagement: 45.0,
+        optimal_load: camcraft_app::load::DEFAULT_OPTIMAL_LOAD,
         blend_turns: false,
     };
     history.execute(
