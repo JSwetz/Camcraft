@@ -2,7 +2,8 @@
 //! max-law layer, the closed-form tool solids, and the tube walk.
 //! Split from `field.rs` by the 400-line law; the storage and the
 //! sign live there, the construction in `field_gen.rs`, the solid's
-//! own geometry in `field_solid.rs`.
+//! own geometry in `field_solid.rs`, the ray-entry companion layer
+//! (M7.1 C) in `field_ray.rs`.
 //!
 //! Provenance: SDF boolean subtraction (the distance-function CSG of
 //! the published implicit-surface literature: stock minus tool is
@@ -56,6 +57,7 @@
 //!   refuses by name before a single brick is written.
 
 use super::field::{center_of, cell_of, SdfField};
+use super::field_ray;
 use super::field_solid::{add, dot, pose_dist, scale, sub, RevKind};
 use super::kernel::StockError;
 use super::scan::dist_pt_seg3;
@@ -90,8 +92,9 @@ pub enum SdfTool {
     Taper { r: f64, cot: f64 },
 }
 
-/// One chord's swept solid, prepped for the walk.
-enum Sweep {
+/// One chord's swept solid, prepped for the walk (`field_ray` reads
+/// it too - the ray-entry layer is this layer's companion).
+pub(crate) enum Sweep {
     /// The capsule of a ball center path.
     Ball { c0: Point3, c1: Point3, r: f64 },
     /// The Minkowski sum of a tip path and a revolved profile.
@@ -100,13 +103,28 @@ enum Sweep {
 
 impl Sweep {
     /// Radius of a ball this solid fits in around any anchor point:
-    /// the window's dilation and the quick reject's slack.
+    /// the quick reject's slack. NOT the window's dilation - a
+    /// spanning flank (M7.1 C) is a cylinder's bounding radius
+    /// inflated into every axis, which would refuse payables.
     fn extent(&self) -> f64 {
         match self {
             Sweep::Ball { r, .. } => *r,
             Sweep::Revolve { kind, .. } => match kind {
                 RevKind::Flat { r, flank } => r.hypot(*flank),
                 RevKind::Taper { r, cot } => r.hypot(r * cot),
+            },
+        }
+    }
+
+    /// The solid's own reach: (lateral, along-axis). A vertical tool
+    /// is r wide and flank tall - the honest box the window dilates
+    /// by, axis component for axis component.
+    fn reach(&self) -> (f64, f64) {
+        match self {
+            Sweep::Ball { r, .. } => (*r, *r),
+            Sweep::Revolve { kind, .. } => match kind {
+                RevKind::Flat { r, flank } => (*r, *flank),
+                RevKind::Taper { r, cot } => (*r, r * cot),
             },
         }
     }
@@ -130,7 +148,7 @@ impl Sweep {
     /// The distance from `q` to the swept solid: negative inside,
     /// and every evaluation of the convex 1-D minimum is an UPPER
     /// bound of the truth (the conservative half of the law above).
-    fn dist(&self, ax: [f64; 3], q: Point3) -> f64 {
+    pub(crate) fn dist(&self, ax: [f64; 3], q: Point3) -> f64 {
         match self {
             Sweep::Ball { c0, c1, r } => dist_pt_seg3(q.x, q.y, q.z, *c0, *c1) - r,
             Sweep::Revolve { a, b, kind } => {
@@ -267,7 +285,7 @@ impl SdfField {
         // Every chord's window is proved payable BEFORE any write,
         // so a refusal never leaves half a move subtracted.
         for sw in &sweeps {
-            if window_cells(sw, self.cell, self.cap) > MAX_CELLS_PER_MOVE {
+            if window_cells(sw, self.cell, self.cap, ax) > MAX_CELLS_PER_MOVE {
                 return Err(StockError::Invalid(format!(
                     "field subtract: a chord's swept window spans more than {MAX_CELLS_PER_MOVE} cells at cell size {} - the move is too long for one field update; segment it",
                     self.cell
@@ -286,7 +304,7 @@ impl SdfField {
     /// law survives subtraction. The window was proved payable by the
     /// caller's pre-scan, so this walk cannot refuse.
     fn cut_sweep(&mut self, ax: [f64; 3], sw: &Sweep) {
-        let [(i0, i1), (j0, j1), (k0, k1)] = window_of(sw, self.cell, self.cap);
+        let [(i0, i1), (j0, j1), (k0, k1)] = window_of(sw, self.cell, self.cap, ax);
         for i in i0..=i1 {
             for j in j0..=j1 {
                 for k in k0..=k1 {
@@ -303,7 +321,16 @@ impl SdfField {
                         continue; // its cut could never beat the mesh's -cap
                     }
                     let v = (-phi).min(self.cap);
-                    let slot = self.cut_mut([i, j, k]);
+                    let key = [i, j, k];
+                    // The ray-entry companion rides every claim, no
+                    // matter whether its magnitude wins the max: the
+                    // lowest proven crossing is the surface's law,
+                    // independent of which claim measures closest.
+                    let u = field_ray::vertical_entry(ax, sw, q, self.cell);
+                    if u.is_finite() {
+                        self.up_record(key, u);
+                    }
+                    let slot = self.cut_mut(key);
                     if slot.is_nan() || v > *slot {
                         *slot = v;
                     }
@@ -313,24 +340,33 @@ impl SdfField {
     }
 }
 
-/// The lattice window one sweep can reach: the path's AABB dilated by
-/// the solid's bounding radius, the cap, and one cell.
-fn window_of(sw: &Sweep, cell: f64, cap: f64) -> [(i32, i32); 3] {
+/// The lattice window one sweep can reach: the path's AABB dilated
+/// per world axis by the solid's reach on that axis (lateral plus the
+/// axial component along the tool's axis), the cap, and one cell. A
+/// spanning flank reaches far along the axis and not one micron
+/// sideways; dilating every axis by the bounding radius (the old
+/// law) refused a vertical tool's own window as absurd.
+fn window_of(sw: &Sweep, cell: f64, cap: f64, ax: [f64; 3]) -> [(i32, i32); 3] {
     let (p0, p1) = sw.path();
-    let reach = sw.extent() + cap + cell;
-    let span = |lo: f64, hi: f64| {
+    let (lat, axial) = sw.reach();
+    let span = |lo: f64, hi: f64, u: usize| {
+        let reach = lat + axial * ax[u].abs() + cap + cell;
         (
             cell_of(lo.min(hi) - reach, cell),
             cell_of(lo.max(hi) + reach, cell),
         )
     };
-    [span(p0.x, p1.x), span(p0.y, p1.y), span(p0.z, p1.z)]
+    [
+        span(p0.x, p1.x, 0),
+        span(p0.y, p1.y, 1),
+        span(p0.z, p1.z, 2),
+    ]
 }
 
 /// Cells in a chord's window: saturating, so an absurd dilation
 /// answers absurd (and refuses), never an overflowed count.
-fn window_cells(sw: &Sweep, cell: f64, cap: f64) -> u64 {
-    let w = window_of(sw, cell, cap);
+fn window_cells(sw: &Sweep, cell: f64, cap: f64, ax: [f64; 3]) -> u64 {
+    let w = window_of(sw, cell, cap, ax);
     let cnt = |s: (i32, i32)| (s.1 as i64 - s.0 as i64 + 1).max(0) as u64;
     cnt(w[0])
         .saturating_mul(cnt(w[1]))

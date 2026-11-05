@@ -53,18 +53,23 @@
 
 
 
+mod backend;
 mod cut;
 mod dexel;
 mod deviate;
 mod field;
 mod field_cut;
 mod field_gen;
+mod field_ray;
 mod field_solid;
 mod gouge;
 mod kernel;
+mod march;
+mod march_verdicts;
 mod scan;
 mod tiles;
 
+pub use backend::{Backend, Stock, FIELD_BAND};
 pub use cut::{auto_cell, simulate, SimOp};
 pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSurface};
 pub use dexel::{reach, Dexel};

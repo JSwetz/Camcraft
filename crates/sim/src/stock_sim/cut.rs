@@ -135,6 +135,31 @@ impl Dexel {
 /// Refusals happen BEFORE any subtraction, so a bad op cannot leave a
 /// half-run grid that looks like a sim.
 pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
+    check_ops(ops)?;
+    // A display lattice cut: the chord budget follows the cell the
+    // viewer chose, which is honest for what this is - a picture of
+    // stock being removed. The VERDICT scan (`envelope_scan`) keeps
+    // the stricter quarter-tolerance law, because a measurement may
+    // never be coarser than the promise it measures.
+    let chord_tol = (dex.cell * 0.25).max(1e-9);
+    for op in ops {
+        for m in op.moves {
+            match op.cone {
+                Some(cot) => dex.subtract_cone(m, op.radius, cot, chord_tol),
+                None if op.ball => dex.subtract_ball(m, op.radius, chord_tol),
+                None => dex.subtract(m, op.radius, chord_tol),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The program's input gate, shared by both sim arms (M7.1 C): a
+/// refusal the seam states identically whichever engine was asked,
+/// so a verdict never depends on which backend a call happened to
+/// build. Checked BEFORE any subtraction, so a bad op cannot leave
+/// a half-run stock that looks like a sim.
+pub(crate) fn check_ops(ops: &[SimOp]) -> Result<(), StockError> {
     for (i, op) in ops.iter().enumerate() {
         if !(op.radius.is_finite() && op.radius > 0.0) {
             return Err(StockError::Invalid(format!(
@@ -157,21 +182,6 @@ pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
                 "op {i} cone slope {:?} is not finite-positive",
                 op.cone
             )));
-        }
-    }
-    // A display lattice cut: the chord budget follows the cell the
-    // viewer chose, which is honest for what this is - a picture of
-    // stock being removed. The VERDICT scan (`envelope_scan`) keeps
-    // the stricter quarter-tolerance law, because a measurement may
-    // never be coarser than the promise it measures.
-    let chord_tol = (dex.cell * 0.25).max(1e-9);
-    for op in ops {
-        for m in op.moves {
-            match op.cone {
-                Some(cot) => dex.subtract_cone(m, op.radius, cot, chord_tol),
-                None if op.ball => dex.subtract_ball(m, op.radius, chord_tol),
-                None => dex.subtract(m, op.radius, chord_tol),
-            }
         }
     }
     Ok(())

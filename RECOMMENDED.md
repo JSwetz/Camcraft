@@ -8342,3 +8342,116 @@ triangle - its nearest surface point provably rides the query's own
 half-plane). The arc test measures the sagitta contract instead:
 chord sweep vs true arc sweep, within the tolerance the chords were
 built under.
+
+## M7.1 C - the seam and the marched height: seven decisions the parity law rests on (2026-11-05)
+
+**Chosen: `Stock` becomes a two-armed enum (`Column(Dexel) |
+Field(SdfField)`) behind the identical verdict API, and the field arm's
+column heights come from a sphere-trace march whose bracket is read at
+a per-cell RAY-ENTRY layer (`cut_ups`, `field_ray`).** Considered and
+dropped, decision by decision.
+
+(1) **The seam's shape.** A `dyn StockBackend` trait object was
+considered for the dual engine and dropped: components are
+Rust-owned types under the current schema policy, the enum is the same
+dispatch without the indirection, and every call site (deviate,
+measure, the viewer's sheet, `surface_z`) already crosses one function
+- which arm answers is the enum's one opinion. Verdict law stays a
+copy of the column engine's, line for line: the parity law of stage C
+is that a verdict does not learn which arm read it. `tol` rides
+measure exactly as the column takes it (no `max(0)`, no gate); a NaN
+column means NO verdict, never a zero - `Unreadable` and `NoMaterial`
+join air in that rule.
+
+(2) **The height law - the crux.** A per-cell scalar cannot position
+a sub-cell surface, and four cheap rules were analyzed against the
+parity fixtures before one was trusted:
+- *bisection on point-signal sign flips*: exact for mesh-driven
+  flips, but a cut-driven flip (a flank crossing inside a cell whose
+  centers are both air-side in magnitude) converges to the CELL
+  BOUNDARY - the cone fixture's flank columns answered 4.0 where the
+  truth is 3+d=3.707, a hidden gouge of 0.29 (the worst direction) and
+  an `is_clean` verdict that FLIPS against the column. Refused.
+- *center interpolation* (lateral |phi| as vertical lift): invalid at
+  rim columns, where the nearest solid point is lateral, not above -
+  it phantom-removed the pocket's rim wall (broke 7 parity tests
+  when tried). Refused.
+- *one-step* (`cm + |phi(center)|`): exact-ward for curved cuts but
+  the same rim lie in smaller clothing (4.621 where the answer is
+  5.0; broke 5 parity tests). Refused.
+- *max(half-cell, |phi|)*: planars exact, cone flank still flips to
+  clean whenever |phi| < half-cell. Refused - a rule that changes an
+  `is_clean` verdict by which arm applies it is the Prime Directive's
+  silent wrong answer.
+Chosen instead: **the cut layer carries a companion, not a
+replacement**. Per claimed cell, `field_ray` stores the distance UP
+the vertical ray from the cell center to the first PROVEN-inside point
+of the swept solid (NaN when the ray never meets it inside the cell).
+A swept solid is a Minkowski sum of a segment and a convex profile, so
+its intersection with the vertical line is ONE interval - the entry is
+a 1-D convex root, found by golden section then bisection KEEPING THE
+INSIDE SIDE, which makes it a LOWER bound of the true crossing: the
+layer can only report material below the truth (ghost rest, the
+blessed direction), never above it. The march's bracket reads that
+entry where the column's flip was cut-driven, the cell boundary where
+it was mesh-driven (the mesh's planes, exact), and half a cell
+otherwise. Merged across moves by MIN - the union of removals upward
+along a ray, the dual of the cut layer's running max; both commute,
+so replay stays order-independent. Mesh-only walks (the uncut stock
+top, the column's pre-program height) pass `cuts=false` and never see
+the layer. This OVERTURNS the earlier decision of this stage to defer
+`cut_ups` to M7.3: the deferral presumed a verdict-neutral addition,
+and the flank analysis shows the opposite - without it the field arm
+would judge `is_clean` differently from the column, and a deferred
+decision that flips a safety verdict is not deferred, it is refused.
+
+(3) **Where the two arms may differ, and why those are blessed.** The
+flat endmill's FINITE flank (stage B's `SdfTool::Flat`) shows rest
+above its ceiling where the column's infinite cylinder shows air, and
+the truncated cone shows rest above its max-radius disc where the
+column's cone equation cuts a chimney forever; both divergences are
+rest OVER-reported, never removal, and both are probed by name
+(`the_flat_sweep_says_cylinder_not_column` and the cone's fixture
+checks). The reconciliation the ROADMAP asked for: a flank tall
+enough to span the stock agrees with the column to one cell - i.e.
+every divergence is bounded by a geometric fact a user can read off
+the tool definition, and the parity suite's other 11 tests are
+tolerance-free or solver-floor-free agreements.
+
+(4) **The residue is stated, not smoothed.** The march's heights carry
+a solver floor (~1e-7 per column: golden-section and bisection
+endpoint residuals), NOT a cell; the single-height parity assertions
+read 1e-5 and the summed-volume ones 1e-5 too (a dozen floor errors
+add up, and a 1e-6 assert was the floor speaking, not the law). Cone
+gouge counts are asserted EXACT (twelve bitten columns, the d=2.121
+corners standing untouched past the cone's own reach) - a count is
+where a floor error would have to cross a threshold, and none does.
+Honest numbers in the ledger beat tuned numbers in the fixtures.
+
+(5) **Window dilation is per-axis.** The first C-day law dilated a
+chord's AABB by the solid's BOUNDING radius in every axis, which
+refused a spanning vertical flank as absurd (r=3, flank=60 -> a
+cube 126 cells tall in a stock 5 tall). Chosen: dilate each world
+axis by that axis's own reach (`lateral + axial*|a_u| + cap + cell`),
+and keep the refusal ceiling as an atomic PRE-scan over all chords
+before any write, so an absurd move still refuses with the field
+untouched.
+
+(6) **Refusals are parity too.** A non-finite tolerance, a grid past
+`MAX_CELLS_PER_AXIS`, a non-finite move: both arms name it, the same
+words where they can share them. The field adds only the window
+refusal, and `field subtract`'s input gates run BEFORE the rapid skip
+(the B lesson: garbage rapids sailing through "touch nothing").
+`surface_z` on an empty footprint is the empty verdict, not an error,
+in both arms.
+
+(7) **The seam lives in sim.** M7.1 C ships the dual engines and the
+marched verdicts INSIDE `camcraft-sim`; app, motion and the viewport
+keep calling the same functions and stay on the column until their
+own stages flip them: the 3D view wants a traced mesh (M7.2), the
+gouge checker's per-triangle distances ride the retirement (M7.3),
+and `Backend` selection is explicit (a parameter, not a global) so no
+call site can be surprised mid-release. The 400-line law shaped the
+file layout, not the design: `march.rs` keeps the descent and its
+bracket, `march_verdicts.rs` the three consumers, `field_ray.rs` the
+entry law - each file one concern of the march.

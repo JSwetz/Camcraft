@@ -28,9 +28,12 @@
 //!   `cap`; `cap` sits within two cells of the band's truth edge -
 //!   clearance rounds TOWARD the surface up to that slack, the
 //!   direction the ROADMAP's subtraction law and the dexel header's
-//!   "over-reporting rest is honest noise" choose on purpose. The
-//!   eikonal re-normalization sweep that makes the magnitude exact
-//!   everywhere rides stage C.
+//!   "over-reporting rest is honest noise" choose on purpose. Stage
+//!   C retired this slack's verdict half without an eikonal: the
+//!   seam's ray march (`march`) reads only the sign and the step
+//!   bound, so column heights come out exact where stored values
+//!   under-read. The eikonal sweep now belongs to the render pass
+//!   (M7.2), where smooth shading wants the gradient honest.
 //! - **Sparse by brick, not octree.** 8x8x8-cell bricks of f64 under
 //!   a flat hash map; only near-surface bricks exist. An allocated
 //!   brick's out-of-band cell is NaN, and NaN answers the same law as
@@ -51,14 +54,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::geometry::{Point3, Triangle};
+use crate::geometry::{Aabb, Point3, Triangle};
 use crate::solid_rest::{column_crossings, Crossings};
 
 use super::kernel::StockError;
 
 /// Cells on a brick edge: 512 f64 per allocated brick.
 pub(crate) const BRICK: i32 = 8;
-const BRICK3: usize = (BRICK * BRICK * BRICK) as usize;
+pub(crate) const BRICK3: usize = (BRICK * BRICK * BRICK) as usize;
 
 /// The seed shell radius, in cells: every surface point has a cell
 /// center within half a diagonal (sqrt(3)/2 cells), so a radius of
@@ -74,6 +77,7 @@ pub(crate) const HOP: f64 = 0.5773502691896258; // 1 / sqrt(3), cells
 
 /// One narrow-band signed-distance grid: a watertight mesh sampled
 /// once into sparse bricks. Construct with `SdfField::from_mesh`.
+#[derive(Debug)]
 pub struct SdfField {
     pub(crate) cell: f64,
     /// Magnitudes beyond the band answer `sign * cap`.
@@ -84,6 +88,13 @@ pub struct SdfField {
     /// negated swept-tool distances; NaN cells and absent bricks say
     /// "no tool has claimed this cell".
     pub(crate) cuts: HashMap<[i32; 3], Box<[f64; BRICK3]>>,
+    /// M7.1 C's ray-entry companion: per claimed cell, the lowest
+    /// point ABOVE the center whose proven-removed status is certain
+    /// (the vertical ray's first solid crossing, a lower bound),
+    /// kept as a min. NaN says "this cell's ray never meets the
+    /// solid" - lateral claims like a pocket's rim, whose surface
+    /// stays the mesh's own. `field_ray` owns the law.
+    pub(crate) cut_ups: HashMap<[i32; 3], Box<[f64; BRICK3]>>,
 }
 
 /// World cell of a point on the origin-locked lattice.
@@ -94,6 +105,19 @@ pub(crate) fn cell_of(v: f64, cell: f64) -> i32 {
 /// Cell-center coordinate of lattice index `i`.
 pub(crate) fn center_of(i: i32, cell: f64) -> f64 {
     (i as f64 + 0.5) * cell
+}
+
+/// The band magnitude wearing the parity sign: the shell's own point
+/// (magnitude zero) reads zero whatever parity says - only a removal
+/// claim moves it, the `distance` law stated once.
+pub(crate) fn signed(mag: f64, inside: bool) -> f64 {
+    if mag == 0.0 {
+        0.0
+    } else if inside {
+        -mag
+    } else {
+        mag
+    }
 }
 
 impl SdfField {
@@ -128,8 +152,27 @@ impl SdfField {
             return f64::NAN;
         }
         let key = [cell_of(p.x, self.cell), cell_of(p.y, self.cell), cell_of(p.z, self.cell)];
-        let cut = self.cut_at(key);
-        let mag = match self.bricks.get(&brick_of(key)) {
+        self.mesh_distance(p).max(self.cut_at(key))
+    }
+
+    /// The mesh term alone - the stock BEFORE any cut. Negative in
+    /// material, positive in air, same sign law as `distance`; the
+    /// cut layer never lifts it here. The verdict march (`march`)
+    /// walks this to find the uncut column top, so a report can say
+    /// what the program removed, not only what it left.
+    #[must_use]
+    pub fn mesh_distance(&self, p: Point3) -> f64 {
+        if !p.is_finite() {
+            return f64::NAN;
+        }
+        let key = [cell_of(p.x, self.cell), cell_of(p.y, self.cell), cell_of(p.z, self.cell)];
+        signed(self.mag_at(key), self.inside(p))
+    }
+
+    /// The stored magnitude at a cell: out of band, in an unallocated
+    /// brick, or in a brick's NaN cell, it is `cap` by one law.
+    pub(crate) fn mag_at(&self, key: [i32; 3]) -> f64 {
+        match self.bricks.get(&brick_of(key)) {
             Some(b) => {
                 let v = b[in_brick(key)];
                 if v.is_nan() {
@@ -139,12 +182,53 @@ impl SdfField {
                 }
             }
             None => self.cap,
-        };
-        if mag == 0.0 {
-            return cut.max(0.0); // on the shell: only a removal claim moves it
         }
-        let sign = if self.inside(p) { -1.0 } else { 1.0 };
-        (sign * mag).max(cut)
+    }
+
+    /// The cached parity column for ray `(x, y)`: the crossings a
+    /// vertical query stands in, `None` for an `Open` column (whose
+    /// law is material). `inside` does this scan per call; the verdict
+    /// march walks a column at FIXED XY, so one scan serves every
+    /// probe - the ray-keyed acceleration stage A promised to stage C.
+    #[must_use]
+    pub fn shell_crossings(&self, x: f64, y: f64) -> Option<Vec<f64>> {
+        match column_crossings(&self.mesh, x, y) {
+            Crossings::Paired(z) => Some(z),
+            Crossings::Open { .. } => None,
+        }
+    }
+
+    /// Parity at height `z` from a cached `shell_crossings` column.
+    #[must_use]
+    pub fn parity_of(crossings: &Option<Vec<f64>>, z: f64) -> bool {
+        match crossings {
+            None => true, // Open answers material, the `inside` law
+            Some(v) => v.iter().filter(|&&c| c > z).count() % 2 == 1,
+        }
+    }
+
+    /// The shell the field was seeded from - the mesh stays the
+    /// source of truth, so a verdict can re-read it (part surfaces,
+    /// the march's world).
+    #[must_use]
+    pub fn facets(&self) -> &[Triangle] {
+        &self.mesh
+    }
+
+    /// The shell's bounding box: the world the verdict march runs in.
+    #[must_use]
+    pub fn bounds(&self) -> Aabb {
+        let (mut lo, mut hi) = (
+            Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+        );
+        for t in self.mesh.iter() {
+            for v in [t.a, t.b, t.c] {
+                lo = Point3::new(lo.x.min(v.x), lo.y.min(v.y), lo.z.min(v.z));
+                hi = Point3::new(hi.x.max(v.x), hi.y.max(v.y), hi.z.max(v.z));
+            }
+        }
+        Aabb { min: lo, max: hi }
     }
 
     /// The cut layer's value at a cell: NEGATIVE INFINITY where no
@@ -176,10 +260,7 @@ impl SdfField {
     /// material - never hidden material is the law.
     #[must_use]
     pub fn inside(&self, p: Point3) -> bool {
-        match column_crossings(&self.mesh, p.x, p.y) {
-            Crossings::Paired(z) => z.iter().filter(|&&c| c > p.z).count() % 2 == 1,
-            Crossings::Open { .. } => true,
-        }
+        Self::parity_of(&self.shell_crossings(p.x, p.y), p.z)
     }
 
     /// The exact unsigned distance from `p` to the shell, mesh-read:
