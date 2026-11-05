@@ -66,6 +66,7 @@ mod gouge;
 mod kernel;
 mod march;
 mod march_verdicts;
+pub mod preview;
 mod scan;
 mod tiles;
 
@@ -77,4 +78,5 @@ pub use field::SdfField;
 pub use field_cut::SdfTool;
 pub use gouge::dist_seg_tri;
 pub use kernel::{measure, part_surface, StockError, StockReport};
+pub use preview::{preview, Preview, PreviewCamera};
 pub use scan::{envelope_scan, envelope_scan_centers, EnvelopeReport};

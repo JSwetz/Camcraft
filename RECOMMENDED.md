@@ -8455,3 +8455,85 @@ call site can be surprised mid-release. The 400-line law shaped the
 file layout, not the design: `march.rs` keeps the descent and its
 bracket, `march_verdicts.rs` the three consumers, `field_ray.rs` the
 entry law - each file one concern of the march.
+
+## M7.2 A - the march's eye: six decisions the preview law rests on (2026-11-05)
+
+**Chosen: a CPU sphere-trace preview INSIDE `camcraft-sim`
+(`stock_sim::preview`), marched over a trilinear blend of the stock's
+own lattice, classed per pixel by the TARGET's exact distance at the
+hit point, reached through `Stock::preview` on the field arm only.**
+The viewport pass (M7.2 B) will trace the same laws on the GPU; this
+stage is the law, its parity against the verdicts, and the never-
+black-screen fallback. Considered and dropped, decision by decision.
+
+(1) **Field arm only, refusing by name.** The column's
+`Stock::distance` is the VERTICAL distance to a flat top - a lateral
+ray marched on it would slip past walls that are not vertical
+metaphors. Giving the column arm an axis-aligned fake (marching its
+height field as a box union) was considered and refused: it would
+paint a volume the engine cannot defend, and the sheet already shows
+that arm honestly. So `preview` answers `Invalid("... needs the field
+arm")` - the retirement (M7.3) is where the sheet loses its job, not
+here.
+
+(2) **The marched field is the blended lattice, not the stored
+scalar.** Hart's step law needs a LOWER bound of true clearance; the
+field's per-cell value is quantized (two centers straddling a plane
+each store half a cell), and tracing it raw makes rays ORBIT cell-
+boundary planes forever - never landing, always budget-exhausting.
+Chosen: trilinear blend of the eight corner values (mesh layer signed
+by each corner's own cached column parity, cut layer interpolated
+with its no-claim floor held at -4 cap), and the step spends 0.9 of
+the certified radius (RELAX): relaxation can only fall short of the
+surface, never past it, so convergence is bought at 10% of the steps.
+The AABB gap jump stays UNrelaxed - it is exact, not interpolated.
+Bisecting the lattice instead was dropped: a blend of near-exact
+BFS/cut samples is already within the lattice's own slack, and a
+bracket needs a proven-negative endpoint the bound step does not
+hand it for free.
+
+(3) **Hit validation is a MATERIAL-BEHIND probe, not a live sign.**
+The first cut at this checked the raw `distance(p)` sign at the
+candidate - and the parity law makes that wrong exactly where it
+matters: crossings count STRICTLY above the probe's z, so a hit
+standing on a lattice plane reads air and an honest surface pixel
+would loop to `Unreadable`. Chosen instead: the candidate stands iff
+material proves at `p` or one cell DEEPER along the ray (the same
+climb-to-topmost-material law `march` answers heights by); a phantom
+- blend grazing zero inside an air pocket - creeps a few eps and
+marches on. What this law can still thread is a wall thinner than one
+cell, silently and at the budget's edge; the field header already
+names that exception, and the VERDICT paths stay exact-parity truth.
+A preview is a picture.
+
+(4) **The class oracle is the target's EXACT distance.** The hit
+point's deviation asks `true_distance` (the point-triangle kernel)
+and `inside` (ray parity) of the MODEL's field - not its lattice:
+the model never carries cuts, so quantizing it would add a half-cell
+lie the verdict has no reason to make. The gate is `tol + 0.15 cell`:
+widening only moves borderline pixels toward CLEAN, never across a
+gouge accusation. The cheap lattice read was dropped for this reason
+alone - it would have named gouge on the model's own surface at
+columns a raw lattice call already refuses to round.
+
+(5) **The render-side acceleration, promised by the field header, is
+the column-parity cache.** One `shell_crossings` scan per XY column
+per frame (a HashMap, `get` not `clone` in the hot loop); samples
+wear their column's cached crossings, which is exactly the
+acceleration `field.rs` deferred to "the render stage". The
+per-sample live scan (the verdict march's own law) was kept as the
+oracle in the header's text and refused in the hot loop: 64 steps x
+8 corners x a facet list per pixel is not a fallback, it is a stall.
+
+(6) **The frame's honesty, and its shape.** No-verdict pixels carry
+NaN depth and class 3 - the `color_classes` law extended to pixels,
+never a zero dressed as a clean bill of health; budget exhaustion
+counts itself in `Preview::unresolved`, which is the status line's
+"this is a fallback", not a render artifact. `Preview` is three flat
+buffers (depth f64, class f32, shade f32) because M7.2 B uploads
+exactly these; the seam test compares them BITWISE (NaNs on both
+sides of a sky row are equal as bits, and `==` on NaN is the one lie
+a test could tell about them). The 400-line law split the module the
+same way M7.1 C split the march: `preview.rs` keeps the camera, the
+frame and the class law; `preview/march.rs` the Eye, the trace and
+the shading - each file one concern of the eye.

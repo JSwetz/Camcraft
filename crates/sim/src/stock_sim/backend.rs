@@ -300,6 +300,34 @@ impl Stock {
             Stock::Field(f) => march_verdicts::sheet_field(f, classes),
         }
     }
+
+    /// The machined volume as the eye sees it (M7.2): a sphere-traced
+    /// frame of this stock, classed per pixel against `target` - the
+    /// model's own field, so the deviation is located wherever the
+    /// ray lands, not only at column tops. The field arm only: the
+    /// column's vertical distance would let a lateral ray slip past
+    /// its walls, so that arm keeps the sheet until M7.3 retires it,
+    /// and says so by name.
+    pub fn preview(
+        &self,
+        target: Option<&Stock>,
+        cam: &super::preview::PreviewCamera,
+        w: u32,
+        h: u32,
+        tol: f64,
+    ) -> Result<super::preview::Preview, StockError> {
+        let f = self
+            .field()
+            .ok_or_else(|| StockError::Invalid("the column arm previews through its sheet mesh; the ray march needs the field arm".into()))?;
+        let mut tf = None;
+        if let Some(t) = target {
+            tf = Some(
+                t.field()
+                    .ok_or_else(|| StockError::Invalid("the deviation target must be a field: the model needs a signed distance, not a height field".into()))?,
+            );
+        }
+        super::preview::preview(f, tf, cam, w, h, tol)
+    }
 }
 
 /// The box gate, `Dexel::block`'s own words, then a solid whose floor
