@@ -121,6 +121,7 @@ fn synth_stream() -> String {
             feed,
             center: None,
             ccw: false,
+            plane: Default::default(),
             abc: None,
         })
     };
@@ -144,6 +145,7 @@ fn synth_stream() -> String {
             feed: Some(500.0),
             center: Some((40.0, 35.0)),
             ccw: true,
+            plane: Default::default(),
             abc: None,
         }),
         // Hole chains: the approach rapid (moves 3..7) then the cycle

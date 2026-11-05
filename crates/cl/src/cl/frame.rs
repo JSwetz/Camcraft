@@ -182,6 +182,38 @@ impl TiltedFrame {
         let mut moves = Vec::with_capacity(local.moves.len());
         for m in &local.moves {
             match &m.arc {
+                // Upright, vertical plane (M11.2 A): the identity
+                // basis keeps the plane, the center rides the
+                // translation in its own word pair.
+                Some(arc) if self.is_upright() && !arc.plane.is_xy() => {
+                    let (cu, cv) = arc.plane.center_uv(arc.center);
+                    let c3 = self.to_world(arc.plane.point(cu, cv, 0.0));
+                    moves.push(Move {
+                        kind: m.kind,
+                        from: self.to_world(m.from),
+                        to: self.to_world(m.to),
+                        feed: m.feed,
+                        arc: Some(super::ArcMove { center: arc.plane.words(c3), ..*arc }),
+                        axis: stamp,
+                    });
+                }
+                // Tilted, vertical plane: its own 3-D chords, mapped.
+                Some(arc) if !arc.plane.is_xy() => {
+                    for (a, b) in m.segments3(chord_tol) {
+                        let (a, b) = (self.to_world(a), self.to_world(b));
+                        if a == b {
+                            continue; // a collapsed chord is no motion
+                        }
+                        moves.push(Move {
+                            kind: m.kind,
+                            from: a,
+                            to: b,
+                            feed: m.feed,
+                            arc: None,
+                            axis: stamp,
+                        });
+                    }
+                }
                 // Upright: an arc is still an arc — translate and go.
                 Some(arc) if self.is_upright() => {
                     moves.push(Move {

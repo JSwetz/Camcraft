@@ -354,6 +354,15 @@ pub(super) fn center_segments(
                 Point3::new(m.from.x, m.from.y, m.from.z + center_lift),
                 Point3::new(m.to.x, m.to.y, m.to.z + center_lift),
             )),
+            // XZ / YZ arcs (M11.2 A): their own 3-D chords, lifted.
+            Some(arc) if !arc.plane.is_xy() => {
+                for (a, b) in m.segments3(chord_tol) {
+                    segs.push((
+                        Point3::new(a.x, a.y, a.z + center_lift),
+                        Point3::new(b.x, b.y, b.z + center_lift),
+                    ));
+                }
+            }
             Some(arc) => {
                 let a2 = Point2::new(m.from.x, m.from.y);
                 let b2 = Point2::new(m.to.x, m.to.y);

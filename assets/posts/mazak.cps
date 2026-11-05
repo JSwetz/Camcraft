@@ -81,6 +81,38 @@ function coolantCode() {
   return first;
 }
 
+// ------------------------------------------------------------ the plane
+// M11.2 A: the arc's plane (RS-274 / ISO 6983 G17 XY, G18 XZ, G19 YZ),
+// stated modally. G17 is the state every program starts in (the
+// control's power-on plane; a preamble that writes G17 restates it),
+// so a program whose arcs are all XY writes no new word. A G18/G19 is
+// taken back to G17 before the next XY arc, before any canned cycle
+// (a drilling cycle runs along the plane's normal axis) and at section
+// end (the next tool's length offset must not meet a stale plane).
+// Direction needs no translation: the stream's CW/CCW is G2/G3 by the
+// same view-from-the-positive-normal rule the control applies.
+var planeG = 17;
+function planeOf(p) {
+  return p.CircularPlane === "XZ" ? 18 : (p.CircularPlane === "YZ" ? 19 : 17);
+}
+function planeWord(g) {  // "" while modal; the word (and the new state) on change
+  if (g === planeG) return "";
+  planeG = g;
+  return "G" + g;
+}
+function restorePlane() { var pw = planeWord(17); if (pw) block([pw]); }
+// The center words of the arc's plane - I J (XY), I K (XZ), J K (YZ) -
+// as increments from the start point: a shared translation cancels in
+// an increment, so the origin must NOT enter them.
+function centerWords(p) {
+  var c = p.IJKIncrement || {};
+  return [
+    w("I", has(c.I) && has(p.StartX) ? c.I - p.StartX : null),
+    w("J", has(c.J) && has(p.StartY) ? c.J - p.StartY : null),
+    w("K", has(c.K) && has(p.StartZ) ? c.K - p.StartZ : null),
+  ];
+}
+
 // -------------------------------------------------------------- header
 function onOpen() {
   var nm = (typeof machine !== "undefined" && machine.name) || "CAMCRAFT";
@@ -115,6 +147,7 @@ function startPreamble() {
   if (sectionOpen) return;
   sectionOpen = true;
   block(["G17", "G90", wcsWord, "G40", "G49", "G80"]);
+  planeG = 17;              // the preamble states the plane
   if (toolWait) {
     block(["T" + ni(tNo), "M6"]);
     block(["G43", "H" + ni(tNo)]);
@@ -130,6 +163,7 @@ function startPreamble() {
 
 function endPreamble() {
   if (!sectionOpen) return;
+  restorePlane();            // M11.2 A: the plane never leaks past its section
   sectionOpen = false;
   if (inCycle) block(["G80"]);
   inCycle = false;
@@ -158,16 +192,11 @@ function onCircular() {
   startPreamble();
   if (!tiltOk(properties) || inCycle) return;
   var p = properties;
-  var c = p.IJKIncrement || {};
   block([
+    planeWord(planeOf(p)),
     p.CircularDirection === "CW" ? "G02" : "G03",
     wo("X", p.X, orgX), wo("Y", p.Y, orgY), wo("Z", p.Z, orgZ),
-    // I/J are increments: a shared translation cancels, so the origin
-    // must NOT enter them - center minus start in the stream's frame.
-    w("I", has(c.I) && has(p.StartX) ? c.I - p.StartX : null),
-    w("J", has(c.J) && has(p.StartY) ? c.J - p.StartY : null),
-    fw(p.FeedRate),
-  ]);
+  ].concat(centerWords(p)).concat([fw(p.FeedRate)]));
 }
 
 // ------------------------------------------------------- canned cycles
@@ -178,6 +207,7 @@ function onCircular() {
 // law); a legacy marker carries none, and the modal feed stands.
 function onCycle() {
   startPreamble();
+  restorePlane();            // M11.2 A: a cycle drills along G17's Z
   var p = properties;
   var ms = has(p.P) ? Math.round(p.P * 1000) : 0; // P is seconds
   var g = "G81";

@@ -5,7 +5,8 @@ use crate::geo2d::Point2;
 use crate::geometry::Point3;
 use crate::geometry::units::Unit;
 
-use super::moves::{Move, MoveKind};
+use super::moves::{lattice, Move, MoveKind};
+use super::plane::{z_extrema, ArcPlane};
 use super::cycle::Cycle;
 use super::pose::{is_vertical, normalize_axis};
 
@@ -255,6 +256,64 @@ impl PathBuilder {
         }
         self.moves
             .push(Move::new(kind, self.at, to, feed).with_arc(center, ccw).attach_axis(self.axis));
+        self.at = to;
+        self.at_pose = self.axis;
+    }
+
+    /// [`push_arc`](Self::push_arc) in any plane (M11.2 A): `center`
+    /// in `plane`'s word order (`(x, y)` / `(x, z)` / `(y, z)`), `ccw`
+    /// the G3 sense by the RS-274 view-from-+normal rule
+    /// ([`super::plane`]). XY is exactly `push_arc`. A vertical arc
+    /// with no in-plane motion is the straight move; one that turns
+    /// past the top or bottom of its circle is SPLIT there (lattice-
+    /// snapped joints), so every XZ / YZ arc in a path is Z-monotone
+    /// and its endpoints bound its Z - the reading the endpoint-Z
+    /// laws downstream take. Same circle, same motion, more blocks.
+    pub fn push_arc_in(
+        &mut self,
+        kind: MoveKind,
+        to: Point3,
+        feed: Option<f64>,
+        center: Point2,
+        ccw: bool,
+        plane: ArcPlane,
+    ) {
+        if plane.is_xy() {
+            self.push_arc(kind, to, feed, center, ccw);
+            return;
+        }
+        let (u0, v0, _) = plane.uvw(self.at);
+        let (u1, v1, _) = plane.uvw(to);
+        let arcable =
+            (u0 != u1 || v0 != v1) && center.x.is_finite() && center.y.is_finite();
+        if !arcable {
+            self.push(kind, to, feed);
+            return;
+        }
+        let probe = Move::new(kind, self.at, to, feed).with_arc_in(center, ccw, plane);
+        let Some(arc) = probe.arc else {
+            self.push(kind, to, feed);
+            return;
+        };
+        let from = self.at;
+        for f in z_extrema(&arc, from, to) {
+            if let Some(p) = arc.point_at(from, to, f) {
+                let p = Point3::new(lattice(p.x), lattice(p.y), lattice(p.z));
+                if p != self.at && p != to {
+                    self.moves.push(
+                        Move::new(kind, self.at, p, feed)
+                            .with_arc_in(center, ccw, plane)
+                            .attach_axis(self.axis),
+                    );
+                    self.at = p;
+                }
+            }
+        }
+        self.moves.push(
+            Move::new(kind, self.at, to, feed)
+                .with_arc_in(center, ccw, plane)
+                .attach_axis(self.axis),
+        );
         self.at = to;
         self.at_pose = self.axis;
     }

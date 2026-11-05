@@ -232,6 +232,13 @@ fn swing_hit(
 /// the Z lerp does the work - which is the whole point for a plunge
 /// that turns while it descends.
 fn path_point(m: &Move, t: f64, chord_tol: f64) -> Point3 {
+    // An XZ / YZ arc (M11.2 A) moves in Z along its sweep, not on the
+    // endpoints' lerp: its own exact point at the sweep fraction.
+    if let Some(a) = m.arc.filter(|a| !a.plane.is_xy())
+        && let Some(p) = a.point_at(m.from, m.to, t)
+    {
+        return p;
+    }
     let chords = m.chords(chord_tol);
     let mut total = 0.0;
     for (a, b) in &chords {

@@ -37,6 +37,7 @@ fn sample() -> Vec<Record> {
             feed: None,
             center: None,
             ccw: false,
+            plane: Default::default(),
             abc: None,
         }),
         Record::Move(MoveRec {
@@ -47,6 +48,7 @@ fn sample() -> Vec<Record> {
             feed: Some(1200.0),
             center: None,
             ccw: false,
+            plane: Default::default(),
             abc: None,
         }),
         Record::Move(MoveRec {
@@ -57,6 +59,7 @@ fn sample() -> Vec<Record> {
             feed: Some(1200.0),
             center: Some((1.5, -2.0)),
             ccw: true,
+            plane: Default::default(),
             abc: None,
         }),
         Record::Section { begin: false },
@@ -553,6 +556,7 @@ fn tilted_moves_roundtrip_their_words() {
         feed: Some(500.0),
         center: None,
         ccw: false,
+        plane: Default::default(),
         abc: Some([40.0, -90.0, 0.125]),
     })];
     let text = cnc::serialize(&recs);
@@ -588,11 +592,11 @@ function onClose() { writeln("M30"); }
     let text = cnc::serialize(&[
         Record::Move(MoveRec {
             kind: MoveKind::Rapid, x: 0.0, y: 0.0, z: 0.0,
-            feed: None, center: None, ccw: false, abc: None,
+            feed: None, center: None, ccw: false, plane: Default::default(), abc: None,
         }),
         Record::Move(MoveRec {
             kind: MoveKind::Feed, x: 1.0, y: 0.0, z: 0.0,
-            feed: Some(100.0), center: None, ccw: false, abc: None,
+            feed: Some(100.0), center: None, ccw: false, plane: Default::default(), abc: None,
         }),
     ]);
     let out = engine::run(cps, &json!(null), &text).expect("post");
@@ -662,6 +666,7 @@ fn part_events_voice_the_lifecycle_defaults() {
             feed: Some(100.0),
             center: None,
             ccw: false,
+            plane: Default::default(),
             abc: None,
         }),
         Record::Part { loading: false, advance: 0.0 },

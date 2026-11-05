@@ -293,6 +293,12 @@ impl Dexel {
         }
         match m.arc {
             None => self.cut_cone(m.from, m.to, r, cot),
+            // XZ / YZ arcs (M11.2 A): their own 3-D chords.
+            Some(arc) if !arc.plane.is_xy() => {
+                for (a, b) in m.segments3(chord_tol) {
+                    self.cut_cone(a, b, r, cot);
+                }
+            }
             Some(arc) => {
                 let a2 = Point2::new(m.from.x, m.from.y);
                 let b2 = Point2::new(m.to.x, m.to.y);
@@ -328,6 +334,16 @@ impl Dexel {
                 Point3::new(m.to.x, m.to.y, m.to.z + r),
                 r,
             ),
+            // XZ / YZ arcs (M11.2 A): their own 3-D chords, lifted.
+            Some(arc) if !arc.plane.is_xy() => {
+                for (a, b) in m.segments3(chord_tol) {
+                    self.cut_ball(
+                        Point3::new(a.x, a.y, a.z + r),
+                        Point3::new(b.x, b.y, b.z + r),
+                        r,
+                    );
+                }
+            }
             Some(arc) => {
                 let a2 = Point2::new(m.from.x, m.from.y);
                 let b2 = Point2::new(m.to.x, m.to.y);
@@ -357,6 +373,12 @@ impl Dexel {
         }
         match m.arc {
             None => self.cut_chord(m.from, m.to, r),
+            // XZ / YZ arcs (M11.2 A): their own 3-D chords.
+            Some(arc) if !arc.plane.is_xy() => {
+                for (a, b) in m.segments3(chord_tol) {
+                    self.cut_chord(a, b, r);
+                }
+            }
             Some(arc) => {
                 let a2 = Point2::new(m.from.x, m.from.y);
                 let b2 = Point2::new(m.to.x, m.to.y);

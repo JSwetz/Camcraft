@@ -119,6 +119,11 @@ fn path_hash(moves: &[Move]) -> u64 {
                 h.write(&a.center.x.to_bits().to_le_bytes());
                 h.write(&a.center.y.to_bits().to_le_bytes());
                 h.write_u8(u8::from(a.ccw));
+                // M11.2 A: only a vertical plane adds a byte, so every
+                // XY arc hashes exactly as it always did.
+                if !a.plane.is_xy() {
+                    h.write_u8(a.plane.g_code());
+                }
             }
             None => h.write_u8(0),
         }

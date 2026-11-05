@@ -29,7 +29,7 @@ committed golden is a legal post input.
 | `Rapid X <i> Y <i> Z <i>` | G0 move to, µm integers |
 | `Feed X <i> Y <i> Z <i> F <i>` | G1 feed move, F = mm/min × 1000 |
 | `Plunge X <i> Y <i> Z <i> F <i>` | G1 at the plunge feed |
-| `Arc CW\|CCW X.. Y.. Z.. F.. I.. J..` | planar arc; I J = absolute center |
+| `Arc CW\|CCW X.. Y.. Z.. F.. I.. J..` | arc; the center pair names its plane (M11.2 A): I J = XY (G17), I K = XZ (G18), J K = YZ (G19); absolute center coordinates in that plane; CW/CCW by the RS-274 rule (seen from the plane normal's positive end); exactly two of I J K or the line is refused |
 | `CYCLE <TYPE> X.. Y.. Z.. [R.. ENTRY.. Q.. P.. F.. AT..]` | one canned cycle |
 | `PART LOAD [ADVANCE <µm>]` / `PART UNLOAD` | a part lifecycle event: `dump` brackets each section with them; ADVANCE rides the LOAD alone (the bar's next bite, µm) |
 | `PART TRANSFER <from> <to>` | the handoff step of the same family: station `from` (1-based, the order the machine file states its spindles) hands the part to station `to`; both operands required, a missing or zero-station number refuses by name |
@@ -76,7 +76,8 @@ behavior only):
 | `StartX` `StartY` `StartZ` | current point before the record (mm) |
 | `X` `Y` `Z` | record end point (mm; cycles: center XY, bottom Z) |
 | `A` `B` `C` | commanded tool angles, degrees — ABSENT unless the record carries the words above |
-| `IJKIncrement` | absolute arc center, mm (from `Arc` I J) |
+| `IJKIncrement` | absolute arc center, mm, keyed by the plane's center letters: `{I, J}` (XY), `{I, K}` (XZ), `{J, K}` (YZ) |
+| `CircularPlane` | `XY` / `XZ` / `YZ` (arcs; M11.2 A) - a post states G17/G18/G19 modally from it |
 | `FeedRate` | in-feed, mm/min (from F × 0.001) |
 | `FeedReference` | `surface` when set |
 | `ToolNumber` `ToolName` | from `TOOL` |

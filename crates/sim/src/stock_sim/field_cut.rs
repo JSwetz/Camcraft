@@ -385,6 +385,8 @@ fn window_cells(w: [(i32, i32); 3]) -> u64 {
 fn chords(m: &Move, chord_tol: f64) -> Vec<(Point3, Point3)> {
     match m.arc {
         None => vec![(m.from, m.to)],
+        // XZ / YZ arcs (M11.2 A): their own 3-D chords.
+        Some(arc) if !arc.plane.is_xy() => m.segments3(chord_tol),
         Some(arc) => {
             let a2 = Point2::new(m.from.x, m.from.y);
             let b2 = Point2::new(m.to.x, m.to.y);

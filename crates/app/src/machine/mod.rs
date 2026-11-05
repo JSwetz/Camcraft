@@ -298,6 +298,19 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
 /// direction of error.)
 fn move_extremes(mv: &crate::cl::Move) -> Vec<Point3> {
     let mut v = vec![mv.from, mv.to];
+    // XZ / YZ (M11.2 A): the same four quarters, in the arc's plane.
+    if let Some(arc) = mv.arc.filter(|a| !a.plane.is_xy()) {
+        let pl = arc.plane;
+        let (cu, cv) = pl.center_uv(arc.center);
+        let (u0, v0, _) = pl.uvw(mv.from);
+        let (_, _, w1) = pl.uvw(mv.to);
+        let r = ((u0 - cu).powi(2) + (v0 - cv).powi(2)).sqrt();
+        v.push(pl.point(cu + r, cv, w1));
+        v.push(pl.point(cu - r, cv, w1));
+        v.push(pl.point(cu, cv + r, w1));
+        v.push(pl.point(cu, cv - r, w1));
+        return v;
+    }
     if let Some(arc) = &mv.arc {
         let dx = mv.from.x - arc.center.x;
         let dy = mv.from.y - arc.center.y;

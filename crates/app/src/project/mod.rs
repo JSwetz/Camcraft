@@ -88,7 +88,7 @@ use flecs_ecs::core::EntityViewGet; // not re-exported in prelude (0.2.2)
 use flecs_ecs::prelude::World;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::cl::{Cycle, CycleKind, Move, MoveKind, Toolpath, lattice};
+use crate::cl::{ArcPlane, Cycle, CycleKind, Move, MoveKind, Toolpath, lattice};
 use crate::drilling::{CrossHole, CycleChoice, Hole};
 use crate::geo2d::Point2;
 use crate::geometry::{IDENTITY_Q, Point3, Triangle};

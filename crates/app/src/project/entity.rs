@@ -23,12 +23,53 @@ pub struct MoveDto {
     pub axis: Option<[f64; 3]>,
 }
 
-/// An arc move's center, in the XY plane, with direction. `kind` stays
-/// the motion class (rapid/feed/plunge); the arc is geometry.
+/// An arc move's center with direction. `kind` stays the motion class
+/// (rapid/feed/plunge); the arc is geometry. `center` is the plane's
+/// word-order pair (`cl::ArcPlane`): XY's (x, y) for every arc saved
+/// before M11.2.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct ArcDto {
     pub center: [f64; 2],
     pub ccw: bool,
+    /// Added with M11.2 A (no version bump - the arc-v5 / axis-v22
+    /// additive precedent): `"xz"` / `"yz"` for a vertical-plane arc;
+    /// absent is XY, which every pre-M11.2 file holds and every XY arc
+    /// still writes - the key skips serialization, so a save of an
+    /// XY-only document is byte-identical to its pre-M11.2 self.
+    #[serde(default, skip_serializing_if = "ArcPlaneDto::is_xy")]
+    pub plane: ArcPlaneDto,
+}
+
+/// The stored plane spelling (`cl::ArcPlane`'s file face).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ArcPlaneDto {
+    #[default]
+    Xy,
+    Xz,
+    Yz,
+}
+
+impl ArcPlaneDto {
+    fn is_xy(&self) -> bool {
+        *self == ArcPlaneDto::Xy
+    }
+
+    fn from_plane(p: ArcPlane) -> Self {
+        match p {
+            ArcPlane::Xy => ArcPlaneDto::Xy,
+            ArcPlane::Xz => ArcPlaneDto::Xz,
+            ArcPlane::Yz => ArcPlaneDto::Yz,
+        }
+    }
+
+    fn to_plane(self) -> ArcPlane {
+        match self {
+            ArcPlaneDto::Xy => ArcPlane::Xy,
+            ArcPlaneDto::Xz => ArcPlane::Xz,
+            ArcPlaneDto::Yz => ArcPlane::Yz,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,6 +245,7 @@ impl MoveDto {
             arc: m.arc.map(|a| ArcDto {
                 center: [lattice(a.center.x), lattice(a.center.y)],
                 ccw: a.ccw,
+                plane: ArcPlaneDto::from_plane(a.plane),
             }),
             // The exact vertical stays exactly (0, 0, 1) through the
             // snap (zeros and ones are lattice fixed points), so a
@@ -227,7 +269,11 @@ impl MoveDto {
             self.feed,
         );
         let m = match self.arc {
-            Some(a) => m.with_arc(Point2::new(a.center[0], a.center[1]), a.ccw),
+            Some(a) => m.with_arc_in(
+                Point2::new(a.center[0], a.center[1]),
+                a.ccw,
+                a.plane.to_plane(),
+            ),
             None => m,
         };
         // VERBATIM, not `with_axis`: the file's numbers are the law -

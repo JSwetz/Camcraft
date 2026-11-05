@@ -331,7 +331,7 @@ fn an_arcs_sweep_rides_its_chords_within_tolerance() {
     // The chord law, measured: the field's arc answer differs from
     // the true arc sweep by at most the sagitta budget it was given.
     let mut f = field();
-    let arc = ArcMove { center: Point2::new(5.0, 5.0), ccw: true };
+    let arc = ArcMove::xy(Point2::new(5.0, 5.0), true);
     let mut m = feed_mv(p(5.0, 3.0, 5.0), p(7.0, 5.0, 5.0));
     m.arc = Some(arc);
     let t = SdfTool::Ball { r: 1.0 };

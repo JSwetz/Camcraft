@@ -108,7 +108,10 @@ fn q(mm: f64) -> i64 {
 /// the same grammar the `.cnc` reader takes for a pose, and never
 /// silently dropped: a tilted path that dumped without its letters
 /// would make the golden lie about what the path is. A prismatic path
-/// dumps byte-for-byte as v1-v3 always did.
+/// dumps byte-for-byte as v1-v3 always did. M11.2 A: an arc's center
+/// words name its plane - `I`/`J` for XY (every arc dumped before,
+/// unchanged), `I`/`K` for XZ, `J`/`K` for YZ - the `.cnc` stream's
+/// own law; no version bump, since an XY arc states nothing new.
 pub fn gen_to_cltext(t: &Toolpath) -> String {
     let version = if !t.is_prismatic() {
         4
@@ -136,8 +139,9 @@ pub fn gen_to_cltext(t: &Toolpath) -> String {
             // anything else), so the token loses nothing but the
             // redundancy.
             k = "Arc";
+            let (l0, l1) = a.plane.center_letters();
             arc = format!(
-                " I{} J{} S{}",
+                " {l0}{} {l1}{} S{}",
                 q(a.center.x),
                 q(a.center.y),
                 if a.ccw { 1 } else { -1 }

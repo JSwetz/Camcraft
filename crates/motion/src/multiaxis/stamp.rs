@@ -119,7 +119,7 @@ fn stamp_inner(
         }
         b.set_axis(axis);
         match &mv.arc {
-            Some(a) => b.push_arc(mv.kind, mv.to, mv.feed, a.center, a.ccw),
+            Some(a) => b.push_arc_in(mv.kind, mv.to, mv.feed, a.center, a.ccw, a.plane),
             None => b.push(mv.kind, mv.to, mv.feed),
         }
     }

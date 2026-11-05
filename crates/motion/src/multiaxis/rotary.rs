@@ -200,6 +200,30 @@ fn posed(
             // Upright frame: the local XY circle IS a world XY
             // circle - its center rides the frame's translation and
             // the arc intent survives to the post verbatim.
+            // XZ / YZ (M11.2 A), upright: the identity basis keeps the
+            // plane; the center rides the translation in its own pair.
+            Some(arc) if upright && !arc.plane.is_xy() => {
+                let (cu, cv) = arc.plane.center_uv(arc.center);
+                let c3 = f.to_world(arc.plane.point(cu, cv, 0.0));
+                pose(mv.to, mv.to - mv.from, &mut b);
+                b.push_arc_in(
+                    mv.kind,
+                    f.to_world(mv.to),
+                    mv.feed,
+                    arc.plane.words(c3),
+                    arc.ccw,
+                    arc.plane,
+                );
+            }
+            // XZ / YZ, tilted: the arc's own 3-D chords, posed per chord.
+            Some(arc) if !arc.plane.is_xy() => {
+                let mut from = mv.from;
+                for (_a, to) in mv.segments3(ARC_FIT_TOL) {
+                    pose(to, to - from, &mut b);
+                    b.push(mv.kind, f.to_world(to), mv.feed);
+                    from = to;
+                }
+            }
             Some(arc) if upright => {
                 let center = f.to_world(Point3::new(arc.center.x, arc.center.y, mv.to.z));
                 pose(mv.to, mv.to - mv.from, &mut b);

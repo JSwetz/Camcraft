@@ -215,6 +215,7 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             feed: m.feed,
             center: m.arc.map(|a| (a.center.x, a.center.y)),
             ccw: m.arc.map(|a| a.ccw).unwrap_or(false),
+            plane: m.arc.map(|a| a.plane).unwrap_or_default(),
             // Pose (M5.1 stage A): a move that states a leaning axis
             // commands its canonical letter angles (the cl::pose law,
             // converted here once); a prismatic move - no axis, or

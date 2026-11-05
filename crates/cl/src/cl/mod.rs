@@ -26,13 +26,17 @@ mod cycle;
 mod frame;
 mod moves;
 mod path;
+mod plane;
 mod pose;
 
 pub use cycle::{Cycle, CycleKind};
 pub use frame::TiltedFrame;
 pub use moves::{arc_chords, lattice, ArcMove, Move, MoveKind, MAX_ARC_CHORDS};
 pub use path::{PathBuilder, Toolpath};
+pub use plane::ArcPlane;
 pub use pose::{angles_to_axis, axis_to_angles, is_vertical, normalize_axis};
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod plane_tests;

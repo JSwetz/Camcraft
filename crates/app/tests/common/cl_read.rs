@@ -7,7 +7,7 @@
 //! (`A`/`B`/`C` words) is refused: the goldens replayed here are
 //! prismatic, and a pose read wrongly would be a silent lie.
 
-use camcraft_app::cl::{ArcMove, Move, MoveKind};
+use camcraft_app::cl::{ArcMove, ArcPlane, Move, MoveKind};
 use camcraft_app::geo2d::Point2;
 use camcraft_app::geometry::Point3;
 
@@ -54,13 +54,14 @@ pub fn parse_cl(text: &str) -> Result<Vec<Move>, String> {
             "Plunge" => MoveKind::Plunge,
             k => return Err(format!("line {}: unknown move kind {k}", n + 1)),
         };
-        let (mut feed, mut ci, mut cj, mut sense) = (None, None, None, None);
+        let (mut feed, mut ci, mut cj, mut ck, mut sense) = (None, None, None, None, None);
         for t in &w[4..] {
             let (key, val) = t.split_at(1);
             match key {
                 "F" => feed = Some(mm(val)?), // x1000 mm/min: the same scale
                 "I" => ci = Some(mm(val)?),
                 "J" => cj = Some(mm(val)?),
+                "K" => ck = Some(mm(val)?),
                 "S" => sense = Some(val == "1"),
                 "A" | "B" | "C" => {
                     return Err(format!(
@@ -72,9 +73,16 @@ pub fn parse_cl(text: &str) -> Result<Vec<Move>, String> {
             }
         }
         let arc = if w[0] == "Arc" {
-            match (ci, cj, sense) {
-                (Some(x), Some(y), Some(ccw)) => Some(ArcMove { center: Point2::new(x, y), ccw }),
-                _ => return Err(format!("line {}: an Arc without I/J/S", n + 1)),
+            // The center pair names the plane (M11.2 A): I J, I K, J K.
+            let (pair, plane) = match (ci, cj, ck) {
+                (Some(a), Some(b), None) => ((a, b), ArcPlane::Xy),
+                (Some(a), None, Some(b)) => ((a, b), ArcPlane::Xz),
+                (None, Some(a), Some(b)) => ((a, b), ArcPlane::Yz),
+                _ => return Err(format!("line {}: an Arc without one I/J/K pair", n + 1)),
+            };
+            match sense {
+                Some(ccw) => Some(ArcMove::in_plane(Point2::new(pair.0, pair.1), ccw, plane)),
+                None => return Err(format!("line {}: an Arc without S", n + 1)),
             }
         } else {
             None

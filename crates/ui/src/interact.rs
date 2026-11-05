@@ -869,7 +869,22 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
             if m.arc.is_some() {
                 // Arcs draw as chords (one law, one tolerance story) and
                 // take no chevrons: the curve itself reads as direction.
-                let cs = m.chords(DISPLAY_CHORD_TOL);
+                // `segments3` is the XY chords at the start Z for a
+                // planar arc as drawn since M1.5, and the arc's own
+                // 3-D chords for an XZ / YZ one (M11.2 A).
+                let cs: Vec<(Point3, Point3)> = match m.arc {
+                    Some(a) if !a.plane.is_xy() => m.segments3(DISPLAY_CHORD_TOL),
+                    _ => m
+                        .chords(DISPLAY_CHORD_TOL)
+                        .into_iter()
+                        .map(|(a, b)| {
+                            (
+                                Point3::new(a.x, a.y, m.from.z),
+                                Point3::new(b.x, b.y, m.from.z),
+                            )
+                        })
+                        .collect(),
+                };
                 if out.len() + 2 * cs.len() + 2 > MAX_OVERLAY_VERTICES {
                     eprintln!(
                         "overlay: the cached paths outgrew the {MAX_OVERLAY_VERTICES}-vertex \
@@ -879,13 +894,7 @@ pub(crate) fn toolpath_lines(state: &State) -> Vec<[f32; 6]> {
                     return out;
                 }
                 for (a, b) in cs {
-                    let za = m.from.z;
-                    push_line(
-                        &mut out,
-                        Point3::new(a.x, a.y, za),
-                        Point3::new(b.x, b.y, za),
-                        c,
-                    );
+                    push_line(&mut out, a, b, c);
                 }
                 continue;
             }

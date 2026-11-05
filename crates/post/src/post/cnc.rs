@@ -10,7 +10,7 @@
 //! Deterministic text in, deterministic record stream out - no
 //! timestamps, no ordering luck.
 
-use crate::cl::{CycleKind, MoveKind};
+use crate::cl::{ArcPlane, CycleKind, MoveKind};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -77,9 +77,15 @@ pub struct MoveRec {
     pub y: f64,
     pub z: f64,
     pub feed: Option<f64>,
-    /// Arc: the absolute XY center.
+    /// Arc: the absolute center, as the two in-plane coordinates of
+    /// `plane` in word order - `(X, Y)` (I J), `(X, Z)` (I K) or
+    /// `(Y, Z)` (J K).
     pub center: Option<(f64, f64)>,
     pub ccw: bool,
+    /// The arc's plane (M11.2 A); `Xy` for every straight record and
+    /// every arc written before M11.2. Meaningless when `center` is
+    /// None.
+    pub plane: ArcPlane,
     /// Commanded absolute A/B/C angles, degrees (M3.3 stage D, RTCP).
     /// `None` - every record our generators write - means the tool
     /// stands as it always has: vertical, table at home. `Some` means
@@ -129,7 +135,15 @@ impl MoveRec {
                 "CircularDirection".into(),
                 json!(if self.ccw { "CCW" } else { "CW" }),
             );
-            m.insert("IJKIncrement".into(), json!({ "I": cx, "J": cy }));
+            // The center words of the arc's plane (M11.2 A): I J for
+            // XY - the pre-M11.2 object exactly - I K for XZ, J K
+            // for YZ; `CircularPlane` names it for the script.
+            let (a, b) = self.plane.center_letters();
+            let mut ijk = serde_json::Map::new();
+            ijk.insert(a.to_string(), json!(cx));
+            ijk.insert(b.to_string(), json!(cy));
+            m.insert("IJKIncrement".into(), Value::Object(ijk));
+            m.insert("CircularPlane".into(), json!(self.plane.name()));
         }
         m.insert("X".into(), json!(self.x));
         m.insert("Y".into(), json!(self.y));
@@ -199,8 +213,15 @@ impl Record {
                 };
                 let mut s = format!("{kind} → {}", pos(m.x, m.y, m.z));
                 if m.center.is_some() {
+                    // A vertical-plane arc names its plane (M11.2 A);
+                    // an XY arc's label is what it always was.
+                    let plane = if m.plane.is_xy() {
+                        String::new()
+                    } else {
+                        format!(" {}", m.plane.name())
+                    };
                     s = format!(
-                        "arc {} → {}",
+                        "arc {}{plane} → {}",
                         if m.ccw { "ccw" } else { "cw" },
                         pos(m.x, m.y, m.z)
                     );
@@ -288,15 +309,21 @@ pub fn serialize(records: &[Record]) -> String {
                     .map(|[a, b, c]| format!(" A {} B {} C {}", q(a), q(b), q(c)))
                     .unwrap_or_default();
                 match m.center {
-                    Some((cx, cy)) => s.push_str(&format!(
-                        "Arc {} X {} Y {} Z {}{f}{abc} I {} J {}\n",
-                        if m.ccw { "CCW" } else { "CW" },
-                        q(m.x),
-                        q(m.y),
-                        q(m.z),
-                        q(cx),
-                        q(cy),
-                    )),
+                    // The center words name the plane (M11.2 A): I J
+                    // is XY - byte-identical to every pre-M11.2
+                    // stream - I K is XZ, J K is YZ.
+                    Some((cx, cy)) => {
+                        let (a, b) = m.plane.center_letters();
+                        s.push_str(&format!(
+                            "Arc {} X {} Y {} Z {}{f}{abc} {a} {} {b} {}\n",
+                            if m.ccw { "CCW" } else { "CW" },
+                            q(m.x),
+                            q(m.y),
+                            q(m.z),
+                            q(cx),
+                            q(cy),
+                        ));
+                    }
                     None => s.push_str(&format!(
                         "{} X {} Y {} Z {}{f}{abc}\n",
                         match m.kind {
@@ -449,6 +476,7 @@ fn normalize_key(k: &str) -> Option<&'static str> {
         "F" => "F",
         "I" => "I",
         "J" => "J",
+        "K" => "K",
         "S" => "S",
         // Stage D: commanded rotary angles, absolute degrees written
         // in milli-degrees. Keyed words only - a positional value
@@ -633,6 +661,7 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                 let mut feed = None;
                 let mut ci = None;
                 let mut cj = None;
+                let mut ck = None;
                 let mut abc = [0.0f64; 3];
                 let mut tilted = false;
                 let mut pos = 0usize;
@@ -654,6 +683,7 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                             "F" => feed = Some(v / 1000.0),
                             "I" => ci = Some(v / 1000.0),
                             "J" => cj = Some(v / 1000.0),
+                            "K" => ck = Some(v / 1000.0),
                             "S" => ccw = v >= 0.0,
                             "A" => {
                                 abc[0] = v / 1000.0;
@@ -676,13 +706,22 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                 };
                 let z = z.unwrap_or(last_z);
                 last_z = z;
-                let center = match (ci, cj) {
-                    (Some(i), Some(j)) => Some((i, j)),
-                    (None, None) => None,
-                    _ => return Err(fail("arc center needs both I and J".into())),
+                // The center pair names the plane (M11.2 A): exactly
+                // two of I J K, or none. One alone, or all three, is
+                // no plane at all - refused by name, never guessed.
+                let (center, plane) = match (ci, cj, ck) {
+                    (Some(i), Some(j), None) => (Some((i, j)), ArcPlane::Xy),
+                    (Some(i), None, Some(k)) => (Some((i, k)), ArcPlane::Xz),
+                    (None, Some(j), Some(k)) => (Some((j, k)), ArcPlane::Yz),
+                    (None, None, None) => (None, ArcPlane::Xy),
+                    _ => {
+                        return Err(fail(
+                            "arc center needs exactly two of I, J, K (I J, I K or J K)".into(),
+                        ))
+                    }
                 };
                 if head == "Arc" && center.is_none() {
-                    return Err(fail("arc needs a center (I and J)".into()));
+                    return Err(fail("arc needs a center (I J, I K or J K)".into()));
                 }
                 out.push(Record::Move(MoveRec {
                     kind: match head {
@@ -696,6 +735,7 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     feed,
                     center,
                     ccw,
+                    plane,
                     abc: tilted.then_some(abc),
                 }));
                 move_idx += 1;

@@ -11,13 +11,17 @@
 //! an XY circle is a helix, which the timeline (`sim::path_len`,
 //! exact arc length over Z) and the post (`G2/G3` blocks carry the Z
 //! word) already read. Endpoints whose XY coincides are never an arc:
-//! that is a plunge, and straight it stays.
+//! that is a plunge, and straight it stays. M11.2 A gave the arc its
+//! plane ([`ArcPlane`]: XY / XZ / YZ, G17 / G18 / G19) - the
+//! convention, direction rule and worked examples live in
+//! [`super::plane`]; an XY arc is exactly the arc it always was.
 
 use std::f64::consts::PI;
 
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
 
+use super::plane::{vertical_segments, ArcPlane};
 use super::pose::normalize_axis;
 
 /// G0 rapid, G1 feed, G1 with a plunge (reduced) feed - the three verbs a
@@ -42,10 +46,15 @@ pub enum MoveKind {
 /// bits it was written from - an arc cache could not then round-trip
 /// byte-identically. Endpoints stay exact, so chaining and the sagitta
 /// law are measured against the plan, never against the snap.
+///
+/// `plane` (M11.2 A) names the plane the circle lies in; `center` is
+/// then that plane's word-order pair and `ccw` is G3 by the RS-274
+/// view-from-+normal rule - [`super::plane`] states it all once.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ArcMove {
     pub center: Point2,
     pub ccw: bool,
+    pub plane: ArcPlane,
 }
 
 /// Snap to the project's fixed-point grid (microns): the same lattice the
@@ -100,10 +109,20 @@ impl Move {
 
     /// This move, traversing the circular segment about `center`
     /// (snapped to the arc center lattice - see [`ArcMove`]).
-    pub fn with_arc(mut self, center: Point2, ccw: bool) -> Self {
+    pub fn with_arc(self, center: Point2, ccw: bool) -> Self {
+        self.with_arc_in(center, ccw, ArcPlane::Xy)
+    }
+
+    /// This move, traversing the circular segment about `center` in
+    /// `plane` (center in the plane's word order, snapped to the
+    /// lattice like every center). No split happens here - the
+    /// builder's [`super::PathBuilder::push_arc_in`] is the door that
+    /// keeps vertical arcs Z-monotone.
+    pub fn with_arc_in(mut self, center: Point2, ccw: bool, plane: ArcPlane) -> Self {
         self.arc = Some(ArcMove {
             center: Point2::new(lattice(center.x), lattice(center.y)),
             ccw,
+            plane,
         });
         self
     }
@@ -155,12 +174,50 @@ impl Move {
     /// that measures along a path - the verifier's laws, the overlay,
     /// the golden dump - goes through here so all three agree on what
     /// an arc means geometrically.
+    ///
+    /// A vertical-plane (XZ / YZ) arc answers its 3-D chords projected
+    /// to XY: a back-and-forth trace along one line, exactly what the
+    /// tool's XY footprint is. Laws that need its Z read
+    /// [`Move::segments3`].
     pub fn chords(&self, tol: f64) -> Vec<(Point2, Point2)> {
         let a = Point2::new(self.from.x, self.from.y);
         let b = Point2::new(self.to.x, self.to.y);
         match self.arc {
             None => vec![(a, b)],
-            Some(arc) => arc_chords(a, b, arc, tol),
+            Some(arc) if arc.plane.is_xy() => arc_chords(a, b, arc, tol),
+            Some(arc) => vertical_segments(self, arc, tol)
+                .into_iter()
+                .map(|(p, q)| (Point2::new(p.x, p.y), Point2::new(q.x, q.y)))
+                .collect(),
+        }
+    }
+
+    /// The 3-D straight segments this move traverses at sagitta `tol`:
+    /// itself for a straight move; for an XY arc its chords with Z
+    /// interpolated uniformly at each joint (the helix law the stock
+    /// engines read, float for float); for an XZ / YZ arc its chords
+    /// in its own plane, normal coordinate linear in the sweep, both
+    /// endpoints exact.
+    pub fn segments3(&self, tol: f64) -> Vec<(Point3, Point3)> {
+        match self.arc {
+            None => vec![(self.from, self.to)],
+            Some(arc) if arc.plane.is_xy() => {
+                let a2 = Point2::new(self.from.x, self.from.y);
+                let b2 = Point2::new(self.to.x, self.to.y);
+                let cs = arc_chords(a2, b2, arc, tol);
+                let n = cs.len().max(1) as f64;
+                let dz = self.to.z - self.from.z;
+                cs.into_iter()
+                    .enumerate()
+                    .map(|(j, (ca, cb))| {
+                        (
+                            Point3::new(ca.x, ca.y, self.from.z + dz * (j as f64 / n)),
+                            Point3::new(cb.x, cb.y, self.from.z + dz * ((j + 1) as f64 / n)),
+                        )
+                    })
+                    .collect()
+            }
+            Some(arc) => vertical_segments(self, arc, tol),
         }
     }
 }

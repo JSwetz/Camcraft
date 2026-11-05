@@ -235,6 +235,10 @@ fn move_len(m: &Move) -> f64 {
     };
     match m.arc {
         None => (dxy().powi(2) + dz * dz).sqrt(),
+        // XZ / YZ (M11.2 A): `cl`'s in-plane length - the timeline's.
+        Some(arc) if !arc.plane.is_xy() => arc
+            .length(m.from, m.to)
+            .unwrap_or_else(|| (dxy().powi(2) + dz * dz).sqrt()),
         Some(arc) => {
             let (r, d) = arc_sweep(m.from, m.to, arc.center, arc.ccw);
             let xy = if d > 0.0 { r * d } else { dxy() };

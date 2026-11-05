@@ -9257,3 +9257,34 @@ rubbing the finished wall.
 
 (6) **Owed.** contour.rs is ~690 lines (split due); depth-aware verify
 for the left-out kinds; no UI-level test drives the new combo.
+
+## M11.2 A - the arc plane in the CL and the posts: five decisions (2026-11-05)
+
+(1) **`ArcPlane` on `ArcMove`; the centre is the centre-word pair.**
+(X,Y) for I/J, (X,Z) for I/K, (Y,Z) for J/K. `ccw` means G3 by RS-274's
+view-from-the-positive-normal rule in every plane, so G18 arcs read
+reversed on an X-right/Z-up drawing. All arc maths runs in an in-plane
+frame that is the identity for XY, so every XY arc computes exactly as
+before. Chosen over a 3-D centre or a separate vertical-arc type: the
+existing code and formats stay byte-identical, and the pairs map
+one-to-one onto I/J/K.
+
+(2) **Vertical arcs are split at their highest and lowest points**, so
+each piece stays between its endpoint heights and the verify laws
+that check endpoint heights stay honest without per-law arc
+knowledge.
+
+(3) **Spelling.** The centre letters name the plane in the CL dump and
+the stream; the project file adds a `plane` key only for vertical
+arcs. No version bumps.
+
+(4) **Modal plane words in the G-code posts** (Fanuc, Haas, 840D,
+Mazak). The plane word goes in the arc's block, only when the plane
+changes; G17 is restored before an XY arc, before any canned cycle (or
+the cycle drills along the wrong axis), and at section end. Dropped:
+restating G17 in the preamble, which would change every golden.
+
+(5) **Heidenhain posts vertical arcs as 1 um chord fans.** Its working
+plane is bound to the tool-call spindle axis, so a free G18 could
+reinterpret the tool axis. Dropped: refusing the program, which would
+block every Heidenhain program once M11.2 B adds vertical entries.

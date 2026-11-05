@@ -134,6 +134,11 @@ pub(super) fn wrap_exit(
         // tolerance with rho carried linearly; a line is its endpoints.
         let mut poly: Vec<Point3> = Vec::new();
         match &mv.arc {
+            // XZ / YZ (M11.2 A): the arc's own 3-D chords.
+            Some(a) if !a.plane.is_xy() => {
+                poly.push(mv.from);
+                poly.extend(mv.segments3(ARC_FIT_TOL).into_iter().map(|(_, e)| e));
+            }
             Some(_) => {
                 let ch = mv.chords(ARC_FIT_TOL);
                 let n = ch.len().max(1) as f64;

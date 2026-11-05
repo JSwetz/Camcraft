@@ -124,10 +124,7 @@ fn arc_chords_under_sweep_so_the_sim_only_over_reports() {
         from: p(5.0, 0.0, -1.0),
         to: p(0.0, 5.0, -1.0),
         feed: Some(500.0),
-        arc: Some(ArcMove {
-            center: Point2::new(0.0, 0.0),
-            ccw: true,
-        }),
+        arc: Some(ArcMove::xy(Point2::new(0.0, 0.0), true)),
         axis: None,
     };
     d.subtract(&m, 1.0, 2.0);

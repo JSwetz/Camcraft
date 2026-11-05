@@ -160,10 +160,62 @@ function onLinear() {
   if (!tiltOk(properties) || inCycle) return;
   block(["G1"].concat(xyz(properties), [fw(properties.FeedRate)]));
 }
+// M11.2 A - arcs off the XY plane. This family's DIN/ISO mode binds
+// the main plane to the spindle axis the T block sets (the published
+// ISO programming manuals: a circle belongs to the main plane defined
+// with the tool axis - G17 for a Z spindle; circles off it are the
+// tilted-plane function's or Q-parameter work). A free G18/G19 word is
+// therefore not this dialect's way to state an XZ/YZ arc, and writing
+// one would be re-interpreting the program's tool axis. The house
+// choice: a vertical-plane arc posts as its chord polyline, G1 blocks
+// whose sagitta stays within ARC_CHORD_TOL (1 um - under the 3-decimal
+// word resolution), the normal coordinate linear along the sweep. The
+// motion is the arc's own to the output resolution; the plane word
+// is never touched, so G17 stays the program's only plane.
+var ARC_CHORD_TOL = 0.001;
+var ARC_MAX_CHORDS = 1024;
+function verticalArc(p) {
+  var c = p.IJKIncrement || {};
+  var yz = p.CircularPlane === "YZ";
+  // The right-handed in-plane frame (u, v) with u x v = +normal:
+  // XZ is (Z, X) about +Y, YZ is (Y, Z) about +X - so CCW (G3, seen
+  // from the positive normal) is the ordinary atan2 sense in both.
+  var cu = yz ? c.J : c.K, cv = yz ? c.K : c.I;
+  var u0 = yz ? p.StartY : p.StartZ, v0 = yz ? p.StartZ : p.StartX;
+  var w0 = yz ? p.StartX : p.StartY;
+  var u1 = yz ? p.Y : p.Z, v1 = yz ? p.Z : p.X, w1 = yz ? p.X : p.Y;
+  var ra = Math.sqrt((u0 - cu) * (u0 - cu) + (v0 - cv) * (v0 - cv));
+  var rb = Math.sqrt((u1 - cu) * (u1 - cu) + (v1 - cv) * (v1 - cv));
+  var r = Math.max(ra, rb);
+  var a0 = Math.atan2(v0 - cv, u0 - cu), a1 = Math.atan2(v1 - cv, u1 - cu);
+  var ccw = p.CircularDirection !== "CW";
+  var d = ccw ? a1 - a0 : a0 - a1;
+  d = ((d % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  var n = 1;
+  if (has(r) && has(d) && r > 1e-12 && d > 0) {
+    var step = 2 * Math.acos(Math.max(-1, Math.min(1, 1 - Math.min(ARC_CHORD_TOL / r, 1))));
+    n = step > 0 ? Math.ceil(d / step - 1e-9) : ARC_MAX_CHORDS;
+    n = Math.max(1, Math.min(ARC_MAX_CHORDS, n));
+  }
+  for (var j = 1; j <= n; j++) {
+    var x = p.X, y = p.Y, z = p.Z;
+    if (j < n) {
+      var f = j / n, th = a0 + (ccw ? d * f : -d * f);
+      var u = cu + r * Math.cos(th), v = cv + r * Math.sin(th), wn = w0 + (w1 - w0) * f;
+      if (yz) { x = wn; y = u; z = v; } else { x = v; y = wn; z = u; }
+    }
+    block(["G1", wo("X", x, orgX), wo("Y", y, orgY), wo("Z", z, orgZ), fw(p.FeedRate)]);
+  }
+}
+
 function onCircular() {
   startPreamble();
   if (!tiltOk(properties) || inCycle) return;
   var p = properties;
+  if (p.CircularPlane === "XZ" || p.CircularPlane === "YZ") {
+    verticalArc(p);
+    return;
+  }
   var c = p.IJKIncrement || {};
   block([
     p.CircularDirection === "CW" ? "G2" : "G3",

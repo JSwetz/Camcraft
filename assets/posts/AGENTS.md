@@ -78,6 +78,13 @@ write (the gate), so the released program never carries one.
   (stage D). The cycle group suppresses its expanded chain — one
   cycle block per hole, bare X Y continuations when the signature is
   unchanged, `G80` before any cycle-signature change or section end.
+  The arc plane (M11.2 A) is modal too: `CircularPlane` XY/XZ/YZ maps
+  to G17/G18/G19, written only on change (an XY-only program writes
+  nothing new), with the plane's own center words (`IJKIncrement`
+  carries I J / I K / J K) - and G17 comes back before any canned
+  cycle and at section end. A dialect that cannot state a plane
+  without touching the tool axis (Heidenhain DIN/ISO) posts the arc
+  as its chord fan instead - never a word it would misread.
 - **Legacy tolerance.** It must run on a `.cl`-only stream: guard
   absent properties (`has(properties.A)` is the tilt test), default
   everything, and let the modal feed stand where `FeedRate` is null.
