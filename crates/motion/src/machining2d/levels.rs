@@ -228,12 +228,15 @@ pub(super) fn run_levels(
                     let cur = b.at();
                     let leg = Point2::new(cur.x, cur.y);
                     let prev_z = last_cut_z.unwrap_or(m.clearance_z);
-                    // The bore orbits about `d + (rh, 0)` (the anchor
-                    // is the circle's near side), so the room must
-                    // clear 2 radii from the anchor - see
-                    // `entry::dive_room` (M2.5 F law fix).
-                    let dive = dive_room(cen.room(), 2.0 * m.helix_radius + 1e-3);
-                    if let Some(d) = dive {
+                    // The found point is the orbit's CENTER; the dive
+                    // starts at its near side, `rh` west - one radius
+                    // of center-room certifies the whole swept tube
+                    // exactly (see `entry::dive_room`, M2.5 F's dome;
+                    // the 2-radius ask over-refused the channel,
+                    // M8.2's slot).
+                    let dive = dive_room(cen.room(), m.helix_radius + 1e-3);
+                    if let Some(c) = dive {
+                        let d = Point2::new(c.x - m.helix_radius, c.y);
                         if leg.x != d.x || leg.y != d.y {
                             b.push(MoveKind::Rapid, Point3::new(d.x, d.y, m.clearance_z), None);
                         }

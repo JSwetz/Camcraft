@@ -290,6 +290,23 @@ fn the_shell_entrants_land_on_the_shell() {
     for (entry, hr) in [(Entry3D::Ramp, 1.0), (Entry3D::Helix, 3.0), (Entry3D::Plunge, 1.0)] {
         let t = pocket3d_offset(&f, &region, &params(entry, hr))
             .unwrap_or_else(|e| panic!("{entry:?} entry refused on the dome: {e}"));
+        if entry == Entry3D::Helix {
+            // The corrected dive-room law lets the widened disc LAND
+            // at the -5.0 plane - and a landed bore is not yet a
+            // Crossing-clean one: the shell's -5.0 rows stand lifted
+            // (their tips on the dome's roof) where the descending
+            // arcs cross them, a positive Z interval in the
+            // verifier's eyes. The arm substitutes, and says so: an
+            // axial dive shares no XY ground with anything, the one
+            // motion the Crossing law cannot name.
+            assert!(
+                t.notes
+                    .iter()
+                    .any(|n| n.contains("the shell lifts legs the bore would cross")),
+                "the dome's helix must substitute by name, notes: {:?}",
+                t.notes
+            );
+        }
         assert_eq!(verify_against(&f, &region, &t), Vec::new(), "{entry:?} entry");
         assert!(
             t.moves.iter().all(|m| m.kind != MoveKind::Plunge || m.from.x == m.to.x),

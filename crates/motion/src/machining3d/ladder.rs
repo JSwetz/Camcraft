@@ -222,28 +222,63 @@ pub(super) fn ladder(
                 // in the eroded leg, `dive` resolved None on every
                 // tessellated model this ladder meets, and the orbit
                 // died into a wall plunge without a word.
-                // The margin is 2 radii, not 1: `helix_down` orbits
-                // about the point `rh` east of the anchor (the anchor
-                // is the circle's NEAR side, where the dive provably
-                // starts), so the orbit's own disc must clear `rh`
-                // from there - `2 rh` from the anchor. Asking 1 rh
-                // certified only half the tube: on curved relief the
-                // far side bit `rh` into the island (M2.5 F's dome
-                // walked into this plain-ladder gap; the sim said so).
-                let dive = dive_room(&center, 2.0 * p.helix_radius + 1e-3);
-                if let Some(d) = dive {
-                    if leg.x != d.x || leg.y != d.y {
-                        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, p.clearance_z), None);
+                // The margin certifies the ORBIT's disc, so the found
+                // point is taken as the orbit's CENTER and the dive
+                // starts at the anchor `rh` west of it - `helix_down`
+                // orbits the circle whose near side is the anchor.
+                // One radius of center-room is exact: the tube spans
+                // `r + rh` from the certified center, and the anchor
+                // is inside the certified disc by the triangle
+                // inequality. Asking 1 rh OF THE ANCHOR certified
+                // half the tube (M2.5 F's dome gouged that way);
+                // asking 2 of the anchor over-refused the straight
+                // channel (M8.2's slot) the orbit always proved.
+                let dive = dive_room(&center, p.helix_radius + 1e-3);
+                if let Some(c) = dive {
+                    // A landed bore is not yet a Crossing-clean one.
+                    // The plain ladder never asks: its legs sit exactly
+                    // on their planes, so a bore crossing one shares
+                    // only the crossing depth - a measure-zero graze,
+                    // the tolerance the ramp law already reads. On the
+                    // shell a leg can stand lifted BELOW the plane it
+                    // cut at (the roof dipped under its disc), and an
+                    // arc chord crossing it then shares a positive Z
+                    // interval - the Crossing the verifier names. Only
+                    // the previous level's legs can reach into the
+                    // bore's band: a leg at any earlier plane floors
+                    // at `pz` or above, and this level's own legs are
+                    // cut under the bore's last depth, so checking the
+                    // one plane is complete. A first level has no cut
+                    // legs at all.
+                    let crosses = match (lvl.field, prev_state) {
+                        (Some(_), Some((pz, _))) => bore_meets_lifted_leg(&lvl, pz, c),
+                        _ => false,
+                    };
+                    if crosses {
+                        // Same honorable failure as a disc with no
+                        // room: the dive substitutes, the level walks.
+                        substituted_dive(
+                            &mut b,
+                            &lvl,
+                            entry,
+                            "the shell lifts legs the bore would cross",
+                        );
+                    } else {
+                        let d = Point2::new(c.x - p.helix_radius, c.y);
+                        if leg.x != d.x || leg.y != d.y {
+                            b.push(MoveKind::Rapid, Point3::new(d.x, d.y, p.clearance_z), None);
+                        }
+                        b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
+                        // The orbit's tube is the widened disc about
+                        // `d`, so the whole helix lands at the one tip
+                        // that decision disc earns (no chord reaches
+                        // beyond it: the corridor already carries
+                        // `2 * helix_radius`, the tube's full span
+                        // about the center).
+                        let z_hel = lvl.tip(d, p.helix_radius * 2.0);
+                        helix_down(&mut b, d, prev_z, z_hel, p.helix_radius, p.feed);
+                        dive_link(&mut b, &lvl, d, entry);
                     }
-                    b.push(MoveKind::Rapid, Point3::new(d.x, d.y, prev_z), None);
-                    // The orbit's tube is the widened disc about `d`,
-                    // so the whole helix lands at the one tip that
-                    // decision disc earns (no chord reaches beyond it:
-                    // the corridor already carries `2 * helix_radius`,
-                    // the tube's full span about the center).
-                    let z_hel = lvl.tip(d, p.helix_radius * 2.0);
-                    helix_down(&mut b, d, prev_z, z_hel, p.helix_radius, p.feed);
-                    dive_link(&mut b, &lvl, d, entry);
                 } else {
                     substituted_dive(
                         &mut b,
@@ -460,6 +495,64 @@ fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, why: &str) {
             );
         }
     }
+}
+
+/// Does the helix bore about orbit center `c` cross a leg the shell
+/// left lifted under the previous plane `pz`? A leg's XY is level
+/// invariant - one tiling walked at every plane - so the candidates
+/// are the previous level's own legs, sampled with the cap and tip
+/// that level's walker posted (the `extra = 0` disc: the narrowest
+/// read, the conservative one). Crossing is the verifier's law,
+/// exactly: XY reaches the bore's circle, and the leg's Z interval
+/// overlaps the bore's band `(z, pz)` with positive measure - which
+/// for legs floored at `z` reads as `min tip < pz` and `max tip > z`.
+/// Legs at any earlier plane floor at `pz` or above and cannot
+/// overlap the band at all; this level's legs are cut under the
+/// bore's last depth; so the one plane is the complete ask.
+fn bore_meets_lifted_leg(lvl: &LevelCtx, pz: f64, c: Point2) -> bool {
+    let Some(f) = lvl.field else {
+        return false;
+    };
+    let p = lvl.p;
+    let (rh, cap) = (p.helix_radius, (p.tool_diameter * 0.5).max(f64::EPSILON));
+    let floor = (pz - p.stepdown).max(p.bottom_z);
+    let z = lvl.z;
+    lvl.passes.iter().any(|pass| {
+        pass.windows(2).any(|w| {
+            let (a, b) = (w[0], w[1]);
+            if seg_reach(a, b, c) >= rh - 1e-9 {
+                return false; // stays clear of the bore's circle
+            }
+            let (dx, dy) = (b.x - a.x, b.y - a.y);
+            let n = (dx.hypot(dy) / cap).ceil();
+            if !n.is_finite() || n > 1024.0 {
+                return true; // nonsense geometry: refuse loudly
+            }
+            let n = (n as usize).max(1);
+            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+            for i in 0..=n {
+                let t = i as f64 / n as f64;
+                let q = Point2::new(a.x + dx * t, a.y + dy * t);
+                let zq = f.tip(q, pz, p.tool_diameter, p.stock_to_leave, floor);
+                lo = lo.min(zq);
+                hi = hi.max(zq);
+            }
+            lo < pz - 1e-9 && hi > z + 1e-9
+        })
+    })
+}
+
+/// The closest an XY segment comes to a point: 0 when it straddles
+/// or contains it.
+fn seg_reach(a: Point2, b: Point2, c: Point2) -> f64 {
+    let (ux, uy) = (b.x - a.x, b.y - a.y);
+    let uu = ux * ux + uy * uy;
+    let t = if uu > 0.0 {
+        (((c.x - a.x) * ux + (c.y - a.y) * uy) / uu).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (a.x + ux * t - c.x).hypot(a.y + uy * t - c.y)
 }
 
 /// Feed-walk a pass's points at the level (plane `z`, or the shell

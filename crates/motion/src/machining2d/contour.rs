@@ -435,13 +435,17 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                             Entry3D::Helix => {
                                 let cur = b.at();
                                 let leg = Point2::new(cur.x, cur.y);
-                                // The bore orbits about `d + (rh, 0)`
-                                // (the anchor is the circle's near
-                                // side), so the widened disc spans 2
-                                // radii from the anchor - see
-                                // `entry::dive_room` (M2.5 F law fix).
-                                match dive_room(&center, 2.0 * p.helix_radius + 1e-3) {
-                                    Some(d) => {
+                                // The found point is the orbit's
+                                // CENTER; the dive starts at its near
+                                // side, `rh` west - one radius of
+                                // center-room certifies the whole
+                                // swept tube exactly (see
+                                // `entry::dive_room`, M2.5 F's dome;
+                                // the 2-radius ask over-refused the
+                                // channel, M8.2's slot).
+                                match dive_room(&center, p.helix_radius + 1e-3) {
+                                    Some(c) => {
+                                        let d = Point2::new(c.x - p.helix_radius, c.y);
                                         if leg.x != d.x || leg.y != d.y {
                                             b.push(
                                                 MoveKind::Rapid,

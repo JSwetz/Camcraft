@@ -108,14 +108,17 @@ pub(crate) fn chord_hits_plan(a: Point2, b: Point2, passes: &[Vec<Point2>]) -> b
 /// `center`'s own triangulation whose centre sits at least `margin`
 /// clear of the boundary - the widest open floor the region offers
 /// under a disc of that reach, not a search along the planned passes'
-/// chords. A helix asks `2 * radius + a micron's insurance`:
-/// `helix_down` orbits the circle whose NEAR side is the chosen point
-/// (the dive starts where room was proven), so the orbit's center
-/// sits one radius from the anchor and its swept disc must clear one
-/// radius from THERE - two from here. Asking one radius certified
-/// only half the tube, and the far side bit a radius into curved
-/// relief (M2.5 F's dome exposed this plain-ladder gap; the sim said
-/// so). An axial plunge passes 0.0 and needs only the center itself.
+/// chords. A helix asks `radius + a micron's insurance` and takes the
+/// FOUND point as the orbit's CENTER: `helix_down` orbits the circle
+/// whose NEAR side is the anchor, so the caller dives from `found -
+/// (rh, 0)` and every point of the swept tube stands a radius inside
+/// the certified disc. Asking the radius of the ANCHOR certified only
+/// half the tube - the far side bit a radius into curved relief (M2.5
+/// F's dome); asking TWO radii of the anchor over-refused the
+/// straight channel the orbit proves (M8.2's slot). The center
+/// convention is exact: the disc is the tube, and the anchor stands
+/// inside the certified disc by the triangle inequality. An axial
+/// plunge passes 0.0 and needs only the center itself.
 ///
 /// M8.1 replaced `dive_point`'s chord-midpoint scan with this after
 /// the scan's defect came to light: on an all-arcs plan (every
