@@ -17,6 +17,8 @@
 //! EditOperationParams undo).
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod common;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
@@ -199,11 +201,7 @@ fn a_bore_kind_refuses_the_wrong_tool_by_name() {
     // generator's, and a turning insert is not hole steel - the
     // refusal names the op's tool and what that tool is.
     let (world, mut history) = bore_world();
-    history.execute(
-        &world,
-        CreateOperation::new(&world, "BT1", "TN-1600-0R8", SrcRef::Entity("bar".into()), bore_params())
-            .expect("the door is family-only"),
-    );
+    common::create_past_the_tool_law(&world, &mut history, "BT1", "TN-1600-0R8", SrcRef::Entity("bar".into()), bore_params());
     let Err(err) = GenerateOperation::new(&world, "BT1") else {
         panic!("an outside insert cannot ride an inside wall");
     };

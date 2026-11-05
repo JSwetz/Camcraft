@@ -315,13 +315,19 @@ pub(crate) fn open_tool_editor(state: &mut State, name: &str) {
 /// Quick-add an operation of `kind` (index into the registry the ribbon's
 /// Create cells follow): name it after the kind it is - "2D Pocket2" says
 /// what geometry is coming, the way a pressed tool previews its work
-/// (M9.1) - give it the newest tool, cut the stock with retyped default
+/// (M9.1) - give it the newest tool that can cut the kind (the M10.1
+/// tool law's table, asked of app), cut the stock with retyped default
 /// params, then make it both selected and targeted so the operation's
 /// own pane lands on the click. Without a tool the refusal is loud on
 /// the status line - the ribbon disables the button too, but every
-/// surface shares this one effect.
+/// surface shares this one effect. With tools but none that fit, the
+/// newest one is handed on so `CreateOperation` refuses by name.
 pub(crate) fn add_operation(state: &mut State, kind: usize) {
-    let Some(tool) = state.tool_names().pop() else {
+    let fitting = camcraft_app::operation::KindInfo::ALL
+        .get(kind)
+        .map(|k| camcraft_app::operation::tool_gate::fitting_tools(&state.world, k))
+        .unwrap_or_default();
+    let Some(tool) = fitting.last().cloned().or_else(|| state.tool_names().pop()) else {
         state.status = String::from("cannot add an operation: no tool in the document");
         return;
     };

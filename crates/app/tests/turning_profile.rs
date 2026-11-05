@@ -18,6 +18,8 @@
 //! registry, the tool door at generation.
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod common;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
@@ -295,11 +297,7 @@ fn the_profile_kinds_refuse_a_mill_tool_by_name() {
         mount(&world, &mut history, "lathe");
         add_tool(&world, &mut history, "EM-0400-2FL");
         let name = format!("X{tag}");
-        history.execute(
-            &world,
-            CreateOperation::new(&world, &name, "EM-0400-2FL", SrcRef::Entity("bar".into()), params)
-                .expect("the door is family-only"),
-        );
+        common::create_past_the_tool_law(&world, &mut history, &name, "EM-0400-2FL", SrcRef::Entity("bar".into()), params);
         let Err(err) = GenerateOperation::new(&world, &name) else {
             panic!("a flat nose cannot ride a profile");
         };

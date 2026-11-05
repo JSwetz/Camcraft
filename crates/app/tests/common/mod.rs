@@ -11,7 +11,44 @@
 
 use std::path::PathBuf;
 
+use flecs_ecs::prelude::World;
+
 use camcraft_app::cl::{MoveKind, Toolpath};
+use camcraft_app::commands::{AddTool, CreateOperation, DeleteTool, History};
+use camcraft_app::model;
+use camcraft_app::operation::{OpParams, SrcRef};
+
+/// M10.1: land an operation on a tool its family cannot cut with, for the
+/// tests that pin the GENERATORS' shape refusals (the backstop the tool
+/// law keeps). The command door refuses the direct creation - asserted
+/// here first, so every caller also pins the gate - and the only road
+/// left is M10.1 C's after-state: the op is created against a fitting
+/// stand-in under the tool's name, then the tool is deleted and re-added
+/// with its own (mismatched) definition out from under it.
+pub fn create_past_the_tool_law(
+    world: &World,
+    history: &mut History,
+    name: &str,
+    tool: &str,
+    src: SrcRef,
+    params: OpParams,
+) {
+    let refused = CreateOperation::new(world, name, tool, src.clone(), params.clone());
+    assert!(refused.is_err(), "the tool law must refuse '{tool}' for {name} at the door");
+    let entity = model::find_by_name(world, tool).expect("the tool is on the rack");
+    let own = model::tool_of(world, &entity).expect("a tool definition");
+    let info = params.kind().info();
+    let stand_in = camcraft_app::tools::catalog()
+        .into_iter()
+        .map(|(_, t)| t)
+        .find(|t| info.accepts(t.kind))
+        .expect("the catalog holds a fitting tool for every kind");
+    history.execute(world, DeleteTool::new(world, tool).expect("delete"));
+    history.execute(world, AddTool::new(world, tool, stand_in).expect("stand-in"));
+    history.execute(world, CreateOperation::new(world, name, tool, src, params).expect("create"));
+    history.execute(world, DeleteTool::new(world, tool).expect("delete stand-in"));
+    history.execute(world, AddTool::new(world, tool, own).expect("restore"));
+}
 
 /// Golden coordinate resolution in mm: 0.001 = 1 um.
 pub const CL_SCALE: f64 = 0.001;

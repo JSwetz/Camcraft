@@ -18,6 +18,8 @@
 //! GenerateOperation, ChangeTool undo).
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod common;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
@@ -232,11 +234,7 @@ fn a_blade_kind_refuses_the_wrong_tool_by_name() {
     // generator's, and the kerf's width IS the tool - so a turning
     // insert on a Part names the op, the tool and what the tool is.
     let (world, mut history) = blade_world();
-    history.execute(
-        &world,
-        CreateOperation::new(&world, "T1", "TN-1600-0R8", SrcRef::Entity("bar".into()), part_params(-10.0))
-            .expect("the door is family-only"),
-    );
+    common::create_past_the_tool_law(&world, &mut history, "T1", "TN-1600-0R8", SrcRef::Entity("bar".into()), part_params(-10.0));
     let Err(err) = GenerateOperation::new(&world, "T1") else {
         panic!("a round nose cannot cut a band");
     };

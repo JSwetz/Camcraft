@@ -8823,3 +8823,50 @@ keeps its frozen-evidence law and does not track edits.
 That is simple and correct, and costly on big programs. A per-frame
 move budget and dirty-brick uploads are M7.3's cost law, recorded there
 rather than half-built here.
+
+## M10.1 B - the tool law at command creation: six decisions (2026-11-05)
+
+(1) **"The active setup's tool list" is the document's tool library,
+named after the active setup.** Tools are document-wide entities with no
+per-setup ownership, so the gate reads the whole library and names
+`setup::active` in the refusal. A document with no setups says "the
+setup's tools", matching the browser's single Setup row. Dropped:
+`tool_list::for_setup`, which is built from ops, so an empty setup
+would always refuse; and a made-up `Setup1` name for the no-setup case.
+
+(2) **CreateOperation checks the named tool; the setup-level sentence
+wins when nothing fits.** An end mill on a groove op is refused even
+when a blade is in the library ("'X' is a flat end mill; ... cuts with
+a grooving blade"). When no tool fits at all, the refusal is the more
+useful "No grooving blade in Setup1's tools". The gate runs after
+`family_gate`, so the machine-family refusal still comes first.
+Dropped: checking only that some fitting tool exists, which would let
+the hand-test case through.
+
+(3) **The roadmap's "ChangeTool" is two commands here.** Assigning a
+tool goes through `EditOperationLinks`, gated only when the tool
+actually changes, so a source-only edit on an old mismatched file
+still works. Editing a tool's definition goes through `ChangeTool`,
+which refuses a kind change that would strand an op and names that op;
+edits that keep the kind are never gated. Dropped: gating `DeleteTool`
+(that is item C's after-state).
+
+(4) **"A tool retype through EditOperationParams" maps to
+`ChangeOperationKind`.** `EditOperationParams` already refuses kind
+changes, and retyping has gone through `ChangeOperationKind` since
+M9.1; it now checks the new kind against the op's current tool.
+
+(5) **Quick-add picks the newest fitting tool.** `actions::add_operation`
+asks app's `fitting_tools`. When nothing fits it hands on the newest
+tool, so the command refuses by name. Dropped: always taking the newest
+tool, which would make a lit cell fail whenever the newest tool belongs
+to another family.
+
+(6) **Generator wrong-tool tests reach the generator by delete-and-re-add,
+not through a weaker gate.** The shared helper
+`create_past_the_tool_law` first asserts that the gate refuses. It then
+puts the mismatched tool under the op through the ungated
+delete/re-add path. All 15 generator-refusal tests keep their asserts.
+Not done: `commands/operation.rs` is now ~750 lines, further over the
+400-line cap (split owed); the op page's tool dropdown still lists
+every tool, and a wrong pick is refused by `EditOperationLinks`.

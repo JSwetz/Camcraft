@@ -165,6 +165,26 @@ fn shell_harness() -> Harness<'static, ShellUi> {
         .build_ui_state(frame, ShellUi::seeded())
 }
 
+/// Rack catalog tools into the document through the command queue (the
+/// M10.1 tool law: a kind is only created against a tool that can cut
+/// it - the seeded demo carries one flat end mill, so a test reaching
+/// any other family puts its fitting tool on the rack first).
+fn rack(state: &mut State, names: &[&str]) {
+    for name in names {
+        let tool = camcraft_app::tools::catalog()
+            .into_iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, t)| t)
+            .expect("catalog entry");
+        state.pending.push_back(CommandKind::AddTool { name: (*name).into(), tool });
+    }
+    state.drain_actions();
+}
+
+/// Every lathe kind's family, from the catalog: insert, blade, thread
+/// insert, form gauge, boring bar.
+const LATHE_RACK: &[&str] = &["TN-1600-0R8", "GT-0200", "TD-0866-60", "FG-0600-04", "BR-1000"];
+
 /// A frame body with ONLY the keyboard layer: no shell, and crucially no
 /// `drain_actions` - `State::run`'s dialog arms open real rfd modals, so
 /// the file-key proof here is queue membership, never an executed command.
@@ -2306,8 +2326,16 @@ fn tips_match_the_imgui_table() {
     for (i, t) in panes::TYPES.iter().enumerate() {
         let is_turn = camcraft_app::operation::KindInfo::ALL[i].family()
             == camcraft_app::operation::Family::Turn;
+        let tool_law = camcraft_app::operation::tool_gate::create_refusal(
+            &with_tool.world,
+            &camcraft_app::operation::KindInfo::ALL[i],
+        );
         let want = if is_turn {
             "The document's machine is a mill - turning operations do not drive it; mount a lathe or a mill-turn (Setup > Machine)".to_owned()
+        } else if let Some(reason) = tool_law {
+            // M10.1 B: the demo's one flat end mill cannot cut every
+            // mill kind - those cells say which tool kind is missing.
+            reason
         } else if i == 0 {
             // imgui's own spelling of the first kind survives verbatim
             // (a Face mill, not a "Face operation") - the one string
@@ -2697,6 +2725,7 @@ fn ribbon_drill_cell_creates_a_drill_operation() {
     // `the_dropdown_reaches_a_folded_kind`) - pin the Drill's kind and
     // the default-parameter proof rides the live cell.
     camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[kind]);
+    rack(&mut harness.state_mut().state, &["DR-0400"]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
@@ -2724,6 +2753,56 @@ fn ribbon_drill_cell_creates_a_drill_operation() {
     };
     assert!(holes.is_empty(), "a fresh drill starts without a hole list");
     assert_eq!(*cycle, camcraft_app::drilling::CycleChoice::Auto);
+}
+
+/// M10.1 B/D, the ribbon half of the tool law: the seeded demo racks
+/// one flat end mill, so the Drill cell DARKENS - it stays on the bar
+/// (darken, not hide: the fix is one library click away), its tip says
+/// which tool kind the setup lacks, and a click anyway creates nothing
+/// and says why. Racking a drill lights it again.
+#[test]
+fn a_create_cell_darkens_with_the_tool_laws_reason() {
+    let mut harness = shell_harness();
+    let kind = camcraft_app::operation::OpType::Drill as usize;
+    camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[kind]);
+    harness.run();
+    let label = camcraft_app::operation::KindInfo::ALL[kind].label;
+    let reason = format!(
+        "No drill, tap or boring bar in the setup's tools - a {label} operation cuts with one; add it to the tool library"
+    );
+    {
+        let st = &harness.state().state;
+        assert!(!st.tool_names().is_empty(), "the darkening is the tool law, not an empty rack");
+        assert!(!panes::enabled(Cmd::Create(kind), st), "no fitting tool: the cell is dark");
+        assert_eq!(panes::tip_of(Cmd::Create(kind), st), reason, "the tip names the missing kind");
+    }
+    let (cells, _, _, _) = panes::ribbon_cells(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
+        &theme::current(),
+        &panes::ribbon_plan(camcraft_app::machine::Kind::Mill, &[kind]),
+    );
+    let drill = cells
+        .iter()
+        .find(|c| c.cmd == Cmd::Create(kind))
+        .expect("darkened, not hidden: the Drill cell still stands on the bar");
+    let at = drill.rect.center();
+    set_pos(&mut harness, at);
+    button_at(&mut harness, egui::PointerButton::Primary, at, true);
+    button_at(&mut harness, egui::PointerButton::Primary, at, false);
+    harness.run_steps(2);
+    {
+        let st = &harness.state().state;
+        assert!(model::find_by_name(&st.world, "Drill1").is_none(), "a dark cell creates nothing");
+        assert!(st.status.contains(&reason), "the click answers with the reason: {}", st.status);
+    }
+    rack(&mut harness.state_mut().state, &["DR-0400"]);
+    harness.run();
+    let st = &harness.state().state;
+    assert!(panes::enabled(Cmd::Create(kind), st), "a racked drill lights the cell");
+    assert_eq!(
+        panes::tip_of(Cmd::Create(kind), st),
+        format!("Add a {label} operation\tRight-click to pin/unpin")
+    );
 }
 
 /// M3.2 stage E, the workspaces-by-kind law: the ribbon follows the
@@ -2809,6 +2888,7 @@ fn a_lathe_machine_darkens_the_mill_cells() {
 #[test]
 fn a_lathe_document_lights_the_turning_cell() {
     let mut harness = shell_harness();
+    rack(&mut harness.state_mut().state, LATHE_RACK);
     harness.run();
     let turn = camcraft_app::operation::OpType::Facing as usize;
     assert!(
@@ -2988,6 +3068,7 @@ fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
     // Pinned, so the cell stands on the bar (the ribbon law) - the
     // default-parameter proof rides the live cell.
     camcraft_app::ribbon::pinned_set(&harness.state().state.world, &[kind]);
+    rack(&mut harness.state_mut().state, &["BN-0600"]);
     harness.run();
     let (cells, _, _, _) = panes::ribbon_cells(
         egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1280.0, super::shell::RIBBON_H)),
@@ -3047,6 +3128,7 @@ fn ribbon_finish3d_cell_creates_a_3d_finish_operation() {
 #[test]
 fn finish3d_pattern_and_stepover_apply_through_commands() {
     let mut harness = shell_harness();
+    rack(&mut harness.state_mut().state, &["BN-0600"]);
     crate::actions::add_operation(&mut harness.state_mut().state, camcraft_app::operation::OpType::Finish3D as usize);
     harness.run_steps(2);
     let staged = |h: &Harness<'static, ShellUi>| match h.state().state.op_ui.params {
@@ -3264,6 +3346,7 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
 #[test]
 fn detect_holes_refuses_recognizes_and_undo_empties_again() {
     let mut harness = shell_harness();
+    rack(&mut harness.state_mut().state, &["DR-0400"]);
     crate::actions::add_operation(&mut harness.state_mut().state, camcraft_app::operation::OpType::Drill as usize);
     harness.run_steps(2);
     // The pane now targets the new Drill op; the Geometry group is the
@@ -3478,6 +3561,7 @@ fn radial_detect_fills_the_cross_list_on_a_millturn() {
     .expect("write machine file");
 
     let mut harness = shell_harness();
+    rack(&mut harness.state_mut().state, &["DR-0400"]);
     crate::actions::add_operation(&mut harness.state_mut().state, camcraft_app::operation::OpType::Drill as usize);
     harness.run_steps(2);
     {

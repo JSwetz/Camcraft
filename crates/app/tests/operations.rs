@@ -5,6 +5,8 @@
 //!
 //! Gate map (M4.4): covers app::cl, app::commands, app::drilling, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::model, app::operation, app::schema, app::stock, app::tools, app::verify, app::world.
 
+mod common;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
@@ -4677,16 +4679,13 @@ fn finish3d_refuses_a_flat_bottomed_tool() {
     box_stock(&world, &mut history, 60.0, 60.0, 25.0);
     add_tool(&world, &mut history, "EM-0600-4FL");
     history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
-    history.execute(
+    common::create_past_the_tool_law(
         &world,
-        CreateOperation::new(
-            &world,
-            "FinishE",
-            "EM-0600-4FL",
-            SrcRef::Entity("dome".into()),
-            finish_params(18.0, DOME_RIM_Z, 0.1),
-        )
-        .expect("create"),
+        &mut history,
+        "FinishE",
+        "EM-0600-4FL",
+        SrcRef::Entity("dome".into()),
+        finish_params(18.0, DOME_RIM_Z, 0.1),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "FinishE")
         .err()
@@ -5000,16 +4999,13 @@ fn axis_twins_refuse_a_flat_bottomed_tool_by_name() {
         box_stock(&world, &mut history, 60.0, 60.0, 25.0);
         add_tool(&world, &mut history, "EM-0600-4FL");
         history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
-        history.execute(
+        common::create_past_the_tool_law(
             &world,
-            CreateOperation::new(
-                &world,
-                name,
-                "EM-0600-4FL",
-                SrcRef::Entity("dome".into()),
-                params,
-            )
-            .expect("create"),
+            &mut history,
+            name,
+            "EM-0600-4FL",
+            SrcRef::Entity("dome".into()),
+            params,
         );
         let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
             .err()
@@ -5289,16 +5285,13 @@ fn swarf_family_refuses_a_flat_tool_by_name() {
         box_stock(&world, &mut history, 60.0, 60.0, 25.0);
         add_tool(&world, &mut history, "EM-0600-4FL");
         history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
-        history.execute(
+        common::create_past_the_tool_law(
             &world,
-            CreateOperation::new(
-                &world,
-                name,
-                "EM-0600-4FL",
-                SrcRef::Entity("blade".into()),
-                params,
-            )
-            .expect("create"),
+            &mut history,
+            name,
+            "EM-0600-4FL",
+            SrcRef::Entity("blade".into()),
+            params,
         );
         let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
             .err()
@@ -5759,16 +5752,13 @@ fn rotary_twins_refuse_a_flat_bottomed_tool_by_name() {
         box_stock(&world, &mut history, 40.0, 40.0, 40.0);
         add_tool(&world, &mut history, "EM-0600-4FL");
         history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
-        history.execute(
+        common::create_past_the_tool_law(
             &world,
-            CreateOperation::new(
-                &world,
-                name,
-                "EM-0600-4FL",
-                SrcRef::Entity("lathe".into()),
-                params,
-            )
-            .expect("create"),
+            &mut history,
+            name,
+            "EM-0600-4FL",
+            SrcRef::Entity("lathe".into()),
+            params,
         );
         let CommandError::Machining(msg) = GenerateOperation::new(&world, name)
             .err()
@@ -5943,16 +5933,13 @@ fn rotary_offset_refuses_a_flat_tool_by_name() {
     box_stock(&world, &mut history, 40.0, 40.0, 40.0);
     add_tool(&world, &mut history, "EM-0600-4FL");
     history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
-    history.execute(
+    common::create_past_the_tool_law(
         &world,
-        CreateOperation::new(
-            &world,
-            "ROf",
-            "EM-0600-4FL",
-            SrcRef::Entity("lathe".into()),
-            rotary_offset_params(14.0, -14.0),
-        )
-        .expect("create"),
+        &mut history,
+        "ROf",
+        "EM-0600-4FL",
+        SrcRef::Entity("lathe".into()),
+        rotary_offset_params(14.0, -14.0),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "ROf")
         .err()
@@ -6244,16 +6231,13 @@ fn multiaxis_rough_refuses_a_flat_tool_by_name() {
     history.execute(&world, cmd.expect("box stock"));
     add_tool(&world, &mut history, "EM-0600-4FL");
     history.execute(&world, ImportModel::from_mesh("slabboss", slab_boss_mesh()));
-    history.execute(
+    common::create_past_the_tool_law(
         &world,
-        CreateOperation::new(
-            &world,
-            "MAF",
-            "EM-0600-4FL",
-            SrcRef::Entity("slabboss".into()),
-            multiaxis_rough_params(),
-        )
-        .expect("create"),
+        &mut history,
+        "MAF",
+        "EM-0600-4FL",
+        SrcRef::Entity("slabboss".into()),
+        multiaxis_rough_params(),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "MAF")
         .err()
@@ -6949,16 +6933,13 @@ fn multiaxis_contour_refuses_a_flat_tool_and_nonsense_pose_by_name() {
     let (world, mut history) = box_part_world();
     add_tool(&world, &mut history, "BN-0600");
     let src = mac_top_edges(&world);
-    history.execute(
+    common::create_past_the_tool_law(
         &world,
-        CreateOperation::new(
-            &world,
-            "MT1",
-            "EM-0600-4FL",
-            src.clone(),
-            multiaxis_contour_params(6.0, 4.0),
-        )
-        .expect("create"),
+        &mut history,
+        "MT1",
+        "EM-0600-4FL",
+        src.clone(),
+        multiaxis_contour_params(6.0, 4.0),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "MT1")
         .err()
@@ -7227,16 +7208,13 @@ fn deburr_refuses_a_plain_end_mill_by_name() {
         &world,
         ImportModel::from_mesh("brick", deburr_brick()),
     );
-    history.execute(
+    common::create_past_the_tool_law(
         &world,
-        CreateOperation::new(
-            &world,
-            "DB",
-            "EM-0600-4FL",
-            SrcRef::Entity("brick".into()),
-            deburr_params(2.0, 8.0, 6.0),
-        )
-        .expect("create"),
+        &mut history,
+        "DB",
+        "EM-0600-4FL",
+        SrcRef::Entity("brick".into()),
+        deburr_params(2.0, 8.0, 6.0),
     );
     let CommandError::Machining(msg) = GenerateOperation::new(&world, "DB")
         .err()

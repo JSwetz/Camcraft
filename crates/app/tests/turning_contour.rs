@@ -20,6 +20,8 @@
 //! EditOperationParams undo).
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod common;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
@@ -347,11 +349,7 @@ fn contour_kinds_refuse_the_wrong_tool_by_name() {
     // the generator's, and a contour ride's steel is the nose
     // circle - a blade edge or a fluted mill cannot trace it.
     let (world, mut history) = contour_world();
-    history.execute(
-        &world,
-        CreateOperation::new(&world, "CT1", "GT-0300", SrcRef::Entity("bar".into()), ch_params(45.0))
-            .expect("the door is family-only"),
-    );
+    common::create_past_the_tool_law(&world, &mut history, "CT1", "GT-0300", SrcRef::Entity("bar".into()), ch_params(45.0));
     let Err(err) = GenerateOperation::new(&world, "CT1") else {
         panic!("a blade edge cannot ride a cone face");
     };
@@ -360,11 +358,7 @@ fn contour_kinds_refuse_the_wrong_tool_by_name() {
         msg.contains("needs a turning insert") && msg.contains("GT-0300") && msg.contains("grooving blade"),
         "{msg}"
     );
-    history.execute(
-        &world,
-        CreateOperation::new(&world, "CT2", "EM-0400-2FL", SrcRef::Entity("taper".into()), tp_params(20.0, 16.0))
-            .expect("create"),
-    );
+    common::create_past_the_tool_law(&world, &mut history, "CT2", "EM-0400-2FL", SrcRef::Entity("taper".into()), tp_params(20.0, 16.0));
     let Err(err) = GenerateOperation::new(&world, "CT2") else {
         panic!("an end mill cannot turn a taper");
     };

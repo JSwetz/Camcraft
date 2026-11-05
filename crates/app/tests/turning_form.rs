@@ -20,6 +20,8 @@
 //! EditOperationParams undo).
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod common;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
@@ -210,11 +212,7 @@ fn a_form_kind_refuses_the_wrong_tool_by_name() {
     // grooving blade (a straight edge, no crown at all) names
     // the op's tool and what that tool is.
     let (world, mut history) = form_world();
-    history.execute(
-        &world,
-        CreateOperation::new(&world, "FT1", "GT-0300", SrcRef::Entity("bar".into()), form_params())
-            .expect("the door is family-only"),
-    );
+    common::create_past_the_tool_law(&world, &mut history, "FT1", "GT-0300", SrcRef::Entity("bar".into()), form_params());
     let Err(err) = GenerateOperation::new(&world, "FT1") else {
         panic!("a straight edge cannot stamp a crown");
     };

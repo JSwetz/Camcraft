@@ -20,6 +20,8 @@
 //! GenerateOperation, ChangeTool, EditOperationParams undo).
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod common;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
@@ -220,11 +222,7 @@ fn a_threading_kind_refuses_the_wrong_tool_by_name() {
     // grooving blade (no flanks at all) names the op's tool and
     // what that tool is.
     let (world, mut history) = thread_world();
-    history.execute(
-        &world,
-        CreateOperation::new(&world, "TT1", "GT-0300", SrcRef::Entity("bar".into()), thread_params())
-            .expect("the door is family-only"),
-    );
+    common::create_past_the_tool_law(&world, &mut history, "TT1", "GT-0300", SrcRef::Entity("bar".into()), thread_params());
     let Err(err) = GenerateOperation::new(&world, "TT1") else {
         panic!("a rectangular kerf cannot cut a V");
     };

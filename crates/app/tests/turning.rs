@@ -19,6 +19,8 @@
 //! generation path.
 //! Lane shape (M4.4): all tests here run in seconds.
 
+mod common;
+
 use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
@@ -305,11 +307,7 @@ fn facing_refuses_a_mill_tool_by_name() {
     let (world, mut history) = bar_world();
     mount(&world, &mut history, "lathe");
     add_tool(&world, &mut history, "EM-0400-2FL");
-    history.execute(
-        &world,
-        CreateOperation::new(&world, "F1", "EM-0400-2FL", SrcRef::Entity("bar".into()), facing_params(14.0))
-            .expect("the door is family-only"),
-    );
+    common::create_past_the_tool_law(&world, &mut history, "F1", "EM-0400-2FL", SrcRef::Entity("bar".into()), facing_params(14.0));
     let Err(err) = GenerateOperation::new(&world, "F1") else {
         panic!("a flat nose cannot face a lathe");
     };

@@ -114,6 +114,18 @@ fn family_gate(world: &World, params: &OpParams) -> Result<(), CommandError> {
     )))
 }
 
+/// The tool law's door (M10.1 B): the named tool must belong to the
+/// kind's family per the `tool_kinds` table, and when the active
+/// setup's tools hold nothing that fits, the refusal says so by kind
+/// and setup name. Runs at construction, before any entity exists, so
+/// every surface (UI, CLI, scripts, undo replay) meets the same wall.
+fn tool_gate(world: &World, params: &OpParams, tool: &str) -> Result<(), CommandError> {
+    match operation::tool_gate::tool_refusal(world, params.kind().info(), tool) {
+        Some(msg) => Err(CommandError::Invalid(msg)),
+        None => Ok(()),
+    }
+}
+
 /// Create an operation entity. Deliberately does not generate: a new
 /// operation reads "never generated" until `GenerateOperation` runs, the
 /// same lifecycle the tree and status surface are built around.
@@ -162,6 +174,7 @@ impl CreateOperation {
             return Err(CommandError::Invalid(msg));
         }
         family_gate(world, &params)?;
+        tool_gate(world, &params, tool)?;
         Ok(CreateOperation {
             name: name.to_string(),
             operation: Operation {
@@ -302,6 +315,9 @@ impl ChangeOperationKind {
         if let Some(msg) = crate::operation::side_sane(&params, &prev.src) {
             return Err(CommandError::Invalid(msg));
         }
+        // The retype is a creation of the new kind against the op's
+        // current tool: the same tool-law door (M10.1 B).
+        tool_gate(world, &params, &prev.tool)?;
         let next = Operation { params, stamp: None, ..prev.clone() };
         Ok(ChangeOperationKind { name: name.to_string(), prev, next })
     }
@@ -347,6 +363,12 @@ impl EditOperationLinks {
         };
         if let Some(tool) = tool {
             check_tool(world, tool)?;
+            // Reassigning the tool meets the tool law (M10.1 B); naming
+            // the tool the op already holds is no reassignment, so a
+            // source-only edit never trips over a legacy mismatch.
+            if tool != prev.tool {
+                tool_gate(world, &next.params, tool)?;
+            }
             next.tool = tool.to_string();
         }
         if let Some(src) = src {

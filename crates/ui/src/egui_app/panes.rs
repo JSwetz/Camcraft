@@ -358,6 +358,8 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
                         "The document's machine is a {} - {fword} operations do not drive it; mount a {mword} or a mill-turn (Setup > Machine)",
                         machine.word()
                     )
+                } else if let Some(reason) = tool_law_note(i, state) {
+                    reason
                 } else if i == 0 {
                     "Add a Face mill operation\tRight-click to pin/unpin".into()
                 } else {
@@ -395,7 +397,9 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
             let kind_admits = camcraft_app::operation::KindInfo::ALL
                 .get(i)
                 .is_none_or(|k| k.family().admits(machine));
-            kind_admits && !state.tool_names().is_empty()
+            // The tool law (M10.1 B): darken, never hide - the cell
+            // stays to explain itself, the fix is a library click away.
+            kind_admits && !state.tool_names().is_empty() && tool_law_note(i, state).is_none()
         }
         // A dropdown button is live whenever it is on the ribbon; the
         // kinds behind it carry their own gates.
@@ -444,8 +448,21 @@ fn gate_note(c: Cmd, state: &State) -> Option<String> {
                 machine.word(),
             ))
         }
-        None => None,
+        None => tool_law_note(i, state).map(|r| {
+            let label = camcraft_app::operation::KindInfo::ALL.get(i).map_or("", |k| k.label);
+            format!("cannot add a {label} operation: {r}")
+        }),
     }
+}
+
+/// The tool law's darkening (M10.1 B): the app's own refusal sentence
+/// for creating kind `i` against the active setup's tools, or `None`
+/// when a fitting tool is there. The predicate lives in app (the same
+/// one `CreateOperation` enforces); the ribbon only renders it.
+fn tool_law_note(i: usize, state: &State) -> Option<String> {
+    camcraft_app::operation::KindInfo::ALL
+        .get(i)
+        .and_then(|k| camcraft_app::operation::tool_gate::create_refusal(&state.world, k))
 }
 
 pub(super) fn toggled(c: Cmd, state: &State) -> bool {
