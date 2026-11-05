@@ -1962,6 +1962,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             rest_rough,
             max_engagement,
             feed_opt,
+            shell,
         } => {
             if tab == SEC_HEIGHTS {
                 field(ui, "Clearance Z");
@@ -2035,6 +2036,8 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                     ui.label("rings step by tool_r x (1 - cos a): 45 deg bites about 15% of the diameter");
                 }
                 ui.label("levels come from the mesh: each shelf cuts around the material standing above it");
+                ui.checkbox(shell, "Offset shells");
+                ui.label("rings ride the model's own normals between levels - the staircase becomes a waterline wherever the wall turns steep");
                 field(ui, "Entry");
                 let mut e_idx = match entry {
                     camcraft_app::machining3d::Entry3D::Plunge => 0,

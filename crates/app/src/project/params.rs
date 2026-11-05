@@ -349,6 +349,13 @@ pub enum ParamsDto {
         /// means for them.
         #[serde(default)]
         feed_opt: bool,
+        /// Absent means off: the offset-shell roughing (M2.5 F)
+        /// arrived after every stored file, and the level ladder is
+        /// exactly what they generated. An append-only key - the
+        /// version stands, per the step-up law for keys whose absence
+        /// IS the old behavior.
+        #[serde(default)]
+        shell: bool,
     },
     /// Declared at v15 with the waterline. The rename states the tag
     /// for the same reason `pocket3d` does - the automatic snake_case

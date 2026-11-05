@@ -937,6 +937,9 @@ fn seed_pocket3d(c: &Carried) -> OpParams {
         // Feed modulation costs a sim run; the fresh op posts the
         // programmed feed everywhere until the user asks otherwise.
         feed_opt: false,
+        // Off is the ladder exactly as it always generated; the shell
+        // is the user's ask, not the fresh op's guess (M2.5 F).
+        shell: false,
     }
 }
 

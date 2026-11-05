@@ -147,6 +147,7 @@ fn pocket(bottom_z: f64) -> OpParams {
         rest_rough: false,
         max_engagement: 60.0,
         feed_opt: false,
+        shell: false,
     }
 }
 

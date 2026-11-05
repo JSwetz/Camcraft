@@ -5090,3 +5090,107 @@ fn the_deburr_params_grammar_round_trips() {
         "a negative break width is refused, not defaulted"
     );
 }
+
+#[test]
+fn the_shell_key_round_trips_and_absent_means_the_ladder() {
+    // M2.5 F B rides the wire like the slot's entry family (M8.2 C):
+    // one appended #[serde(default)] key, no PROJECT_VERSION bump -
+    // a file that never heard of shells has the key absent, and the
+    // default (off) is exactly the plain ladder it generated. Stated,
+    // the flag round-trips; the file writes it in both states, so
+    // save-load-save is a fixed point.
+    let body = |shell: &str| {
+        // The v45 ladder test's idiom: a plain raw string (single
+        // braces, the grammar pinned by hand) plus a token for the
+        // version - the round-trip asserts must state the head, never
+        // pin a literal that future bumps carry past.
+        let mut t = String::from(
+            r#"{
+        "version": PROJECT_VERSION,
+        "entities": [
+            {"name": "T1", "translation": [0.0, 0.0, 0.0], "kind": "tool",
+             "tool": {"kind": "ball_nose", "diameter": 6.0, "corner_r": 3.0,
+                      "flute_len": 15.0, "shank_d": 8.0, "shank_len": 40.0,
+                      "holder_d": 44.0, "holder_len": 35.0,
+                      "material_group": "general", "rpm": 9000.0, "feed": 1500.0}},
+            {"name": "P3", "translation": [0.0, 0.0, 0.0], "kind": "operation",
+             "operation": {"tool": "T1", "src": "stock", "params": {"pocket3d": {
+                 "stepover": 2.5, "stock_to_leave": 0.0,
+                 "clearance_z": {"reference": "fixed", "offset": 10.0},
+                 "top_z": {"reference": "top_of_model", "offset": 0.0},
+                 "bottom_z": {"reference": "bottom_of_model", "offset": 0.0},
+                 "stepdown": 1.5, "feed": 900.0, "plunge_feed": 150.0, "climb": true,
+                 "strategy": "waterline", "entry": "plunge", "helix_radius": 1.0,
+                 "rest_rough": false, "max_engagement": 40.0, "feed_opt": false"#,
+        );
+        t = t.replace(
+            "PROJECT_VERSION",
+            &project::PROJECT_VERSION.to_string(),
+        );
+        t.push_str(shell);
+        t.push_str("}}}}\n        ]\n    }");
+        t
+    };
+    let shell_of = |world: &flecs_ecs::prelude::World| {
+        let e = model::find_by_name(world, "P3").expect("op");
+        let o = model::operation_of(world, &e).expect("operation");
+        let OpParams::Pocket3D { shell, feed_opt, rest_rough, .. } = &o.params else {
+            panic!("pocket3d params expected, got {:?}", o.params);
+        };
+        (*shell, *feed_opt, *rest_rough)
+    };
+
+    // Stated on: the key reads, and the file keeps it.
+    let world = new_world();
+    project::open(&world, &body(", \"shell\": true")).expect("the shell key must read");
+    assert_eq!(
+        shell_of(&world),
+        (true, false, false),
+        "the stated shell lands, its neighbours untouched"
+    );
+    let p = tmp_path("shell");
+    project::save(&world, &p).expect("save");
+    let saved = std::fs::read_to_string(&p).expect("read");
+    assert!(saved.contains("\"shell\": true"), "{saved}");
+
+    // Absent means off: the same file with the key cut still opens,
+    // and opens as the ladder every pre-shell file ran.
+    // The strip is JSON surgery, not a string hunt: project::save
+    // pretty-prints, so the key sits on its own line and a `, "shell"
+    // ...` replace would miss it - the way an old file never wrote it.
+    // get_mut, never index chains: mutable indexing UPGRADES a missing
+    // key through Null into an object, which would graft a vestigial
+    // `operation: {params: {pocket3d: null}}` onto the tool row - and
+    // the loader, rightly, refuses that shape by name.
+    let mut doc: serde_json::Value = serde_json::from_str(&saved).expect("the save is JSON");
+    for ent in doc["entities"].as_array_mut().expect("entities") {
+        if let Some(p3) = ent
+            .get_mut("operation")
+            .and_then(|o| o.get_mut("params"))
+            .and_then(|p| p.get_mut("pocket3d"))
+            .and_then(|c| c.as_object_mut())
+        {
+            p3.remove("shell");
+        }
+    }
+    let stripped = serde_json::to_string(&doc).expect("reserialize");
+    assert!(
+        !stripped.contains("\"shell\""),
+        "the strip must reach the key: {stripped}"
+    );
+    let world2 = new_world();
+    project::open(&world2, &stripped).expect("a shell-less file must still read");
+    assert!(!shell_of(&world2).0, "absence is the plain ladder");
+
+    // Fixed point: off writes false, and false reads back off - a
+    // second cycle cannot drift the answer.
+    project::save(&world2, &p).expect("resave");
+    let second = std::fs::read_to_string(&p).expect("reread");
+    assert!(second.contains("\"shell\": false"), "{second}");
+    let world3 = new_world();
+    project::load(&world3, &p).expect("reload");
+    project::save(&world3, &p).expect("resave");
+    let third = std::fs::read_to_string(&p).expect("reread");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(second, third, "the shell shape round-trips byte-identically");
+}

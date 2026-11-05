@@ -372,6 +372,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             rest_rough,
             max_engagement,
             feed_opt,
+            shell,
             ..
         } => {
             // The region is the model's own silhouette (see
@@ -420,11 +421,33 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // still reports after the closing ladder is the closing
             // report's business (the simulation view), not a silent
             // extra here.
-            let generated = if *rest_rough {
-                machining3d::pocket3d_with_rest_prev(&material.facets, &region, &pp, mask)
+            let generated = match (*shell, *rest_rough) {
+                // The level ladder, and its rest-closing sibling:
+                // planes all the way down (M2.1b).
+                (false, false) => {
+                    machining3d::pocket3d_prev(&material.facets, &region, &pp, mask)
+                }
+                (false, true) => {
+                    machining3d::pocket3d_with_rest_prev(&material.facets, &region, &pp, mask)
+                        .map(|(p, _)| p)
+                }
+                // The offset shells (M2.5 F): the same XY plan, the
+                // same superset laws, the rings riding the model's
+                // relief between the planes - and on steep flanks
+                // answering at the waterline, exactly where the plain
+                // ladder's rings already stood.
+                (true, false) => {
+                    machining3d::pocket3d_offset_prev(&material.facets, &region, &pp, mask)
+                }
+                (true, true) => {
+                    machining3d::pocket3d_offset_with_rest_prev(
+                        &material.facets,
+                        &region,
+                        &pp,
+                        mask,
+                    )
                     .map(|(p, _)| p)
-            } else {
-                machining3d::pocket3d_prev(&material.facets, &region, &pp, mask)
+                }
             };
             let path = match generated {
                 Ok(path) => path,

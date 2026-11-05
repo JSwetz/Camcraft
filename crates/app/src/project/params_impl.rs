@@ -300,6 +300,7 @@ impl ParamsDto {
                 rest_rough,
                 max_engagement,
                 feed_opt,
+                shell,
             } => ParamsDto::Pocket3D {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -326,6 +327,7 @@ impl ParamsDto {
                 rest_rough: *rest_rough,
                 max_engagement: *max_engagement,
                 feed_opt: *feed_opt,
+                shell: *shell,
             },
             OpParams::Finish3D {
                 pattern,
@@ -1419,6 +1421,7 @@ impl ParamsDto {
                 rest_rough,
                 max_engagement,
                 feed_opt,
+                shell,
             } => OpParams::Pocket3D {
                 stepover: *stepover,
                 stock_to_leave: *stock_to_leave,
@@ -1445,6 +1448,7 @@ impl ParamsDto {
                 rest_rough: *rest_rough,
                 max_engagement: *max_engagement,
                 feed_opt: *feed_opt,
+                shell: *shell,
             },
             ParamsDto::Finish3D {
                 pattern,

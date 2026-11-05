@@ -301,6 +301,7 @@ impl OpParams {
                 rest_rough,
                 max_engagement,
                 feed_opt,
+                shell,
             } => {
                 w(h, *stepover);
                 w(h, *stock_to_leave);
@@ -330,6 +331,13 @@ impl OpParams {
                 // Same law for the v14 feed modulation: flipping it
                 // changes every F word, so it changes the stamp.
                 h.write_u8(u8::from(*feed_opt));
+                // Appended last, per the digest's append-only law:
+                // a no-shell op's stamp bytes are exactly the
+                // pre-shell stream, so nothing goes Stale that didn't
+                // change
+                // (the shell flag is the generator's switch, like
+                // `rest_rough` before it).
+                h.write_u8(u8::from(*shell));
             }
             OpParams::Finish3D {
                 pattern,

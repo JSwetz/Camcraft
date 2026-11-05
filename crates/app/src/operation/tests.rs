@@ -436,11 +436,21 @@ fn multiaxis_rough_stamp_moves_with_its_ladder_and_cone() {
         rest_rough: false,
         max_engagement: 45.0,
         feed_opt: false,
+        shell: false,
     };
     assert_ne!(
         digest(&rough(0.0, 0.0, 90.0)),
         digest(&pocket),
         "the same ladder with poses is a different kind - the tag splits them"
+    );
+    let mut shelled = pocket.clone();
+    if let OpParams::Pocket3D { shell, .. } = &mut shelled {
+        *shell = true;
+    }
+    assert_ne!(
+        digest(&pocket),
+        digest(&shelled),
+        "the shell is another XY plan - the stamp must hear it"
     );
     assert_eq!(digest(&rough(0.0, 0.0, 90.0)), digest(&rough(0.0, 0.0, 90.0)));
 }

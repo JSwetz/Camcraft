@@ -392,6 +392,15 @@ pub enum OpParams {
         /// the programmed feed ([`crate::machining3d::optimize_feed`],
         /// M2.1d). Geometry is untouched; only feed words move.
         feed_opt: bool,
+        /// Rough by OFFSET SHELLS of the model
+        /// ([`crate::machining3d::pocket3d_offset`], M2.5 F): the
+        /// level ladder keeps its XY plan and its dive superset law,
+        /// but each cut vertex rides the model's own relief between
+        /// the planes instead of the plane itself - the staircase's
+        /// pyramids come off in the roughing pass, and the rest
+        /// ladder (if any) owes the closing half-step less. Off is
+        /// the level ladder exactly as it always generated.
+        shell: bool,
     },
     /// Ball-nose surface finishing. The model is the finished
     /// surface. `Waterline`: each ring is the ball-center tangent

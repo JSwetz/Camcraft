@@ -1303,6 +1303,50 @@ fn pocket3d_params_5() -> OpParams {
 }
 
 #[test]
+fn the_shell_switch_sends_the_pocket_to_the_offset_engine() {
+    // M2.5 F B, the app seam: one OpParams bool is the whole wire —
+    // generate dispatches pocket3d_offset over the plain ladder with
+    // nothing else changed. The cube's walls are vertical, so the
+    // shell's tips fall exactly on the planes (the roof over every
+    // decision disc is the open column above); the proof the flag
+    // moved is the XY plan disagreeing - offset rings against the
+    // zigzag - while BOTH roads verify clean. Off staying byte-for-byte
+    // the old ladder is the .nc goldens' claim; this is the ON half.
+    let run = |shell: bool| {
+        let world = new_world();
+        let mut history = History::default();
+        box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+        add_tool(&world, &mut history, "BN-0600");
+        history.execute(
+            &world,
+            ImportModel::from_mesh("part", cube(Point3::ZERO, Point3::new(30.0, 30.0, 5.0))),
+        );
+        let mut p = pocket3d_params_5();
+        let OpParams::Pocket3D { shell: s, .. } = &mut p else {
+            unreachable!()
+        };
+        *s = shell;
+        let cmd =
+            CreateOperation::new(&world, "P", "BN-0600", SrcRef::Entity("part".into()), p)
+                .expect("create op");
+        history.execute(&world, cmd);
+        let cmd = GenerateOperation::new(&world, "P").expect("generate op");
+        history.execute(&world, cmd);
+        assert_eq!(status(&world, "P"), OpStatus::Ok, "shell={shell}");
+        let t = cache(&world, "P").expect("cache");
+        assert!(t.warnings.is_empty(), "shell={shell}: {:?}", t.warnings);
+        t.path
+    };
+    let ladder = run(false);
+    let shells = run(true);
+    assert!(!ladder.is_empty() && !shells.is_empty());
+    assert_ne!(
+        ladder, shells,
+        "the flag must move the XY plan, not just its name"
+    );
+}
+
+#[test]
 fn threaded_batch_matches_the_serial_loop_bit_for_bit() {
     // M5.3 B's determinism claim, tested as a law: `RegenerateAll`
     // stages every stale job against the frozen world, then FINISHES
@@ -6070,6 +6114,7 @@ fn multiaxis_rough_pocket_twin() -> OpParams {
         rest_rough: false,
         max_engagement: 45.0,
         feed_opt: false,
+        shell: false,
     }
 }
 
