@@ -1,0 +1,223 @@
+//! Operation generation commands: generate one operation, regenerate every stale one.
+//!
+//! Provenance: our own domain model, following the same command pattern
+//! as the import/stock siblings.
+
+use flecs_ecs::prelude::{ComponentId, World};
+
+use crate::commands::{Command, CommandError};
+use crate::model;
+use crate::operation;
+use crate::schema::{Operation, Toolpath};
+
+/// Generate (or re-generate) an operation: the constructor runs the
+/// whole pipeline - region, generator, verification, stamp - so a
+/// failure refuses the command instead of half-writing the world, and a
+/// success carries its finished output as inert fields.
+pub struct GenerateOperation {
+    name: String,
+    prev_operation: Operation,
+    prev_cache: Option<Toolpath>,
+    next_operation: Operation,
+    output: Toolpath,
+}
+
+/// The constructor split at M5.3 B's seam: [`stage_generation`] does
+/// EVERY world read - the entity, the components, the whole job
+/// collection, the stamp - and [`Staged::finish`] runs the pure result.
+/// One op does stage and finish together, exactly as before; a batch
+/// stages all and finishes in parallel, and because a constructor
+/// never writes the world, that batch is byte-identical to the serial
+/// loop it replaces.
+struct Staged {
+    name: String,
+    prev_operation: Operation,
+    prev_cache: Option<Toolpath>,
+    job: operation::GenJob,
+    stamp: Option<operation::GenStamp>,
+}
+
+fn stage_generation(world: &World, name: &str) -> Result<Staged, CommandError> {
+    let Some(entity) = model::find_by_name(world, name) else {
+        return Err(CommandError::NotFound(name.to_string()));
+    };
+    let prev_operation = model::operation_of(world, &entity)
+        .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not an operation")))?;
+    // M10.1 C: a tool gone or of the wrong family blocks generation by
+    // name, before the generator runs - the generators' shape doors stay
+    // the backstop behind this one, never the first word.
+    if let Some(why) = operation::tool_gate::tool_problem(world, name, &prev_operation) {
+        return Err(CommandError::Machining(why));
+    }
+    let prev_cache = model::toolpath_of(world, &entity);
+    let job = operation::collect_job(world, &prev_operation, name)
+        .map_err(|e| CommandError::Machining(format!("{name}: {e}")))?;
+    let stamp = operation::current_stamp(
+        world,
+        &prev_operation.tool,
+        &prev_operation.src,
+        &prev_operation.params,
+        name,
+        prev_operation.setup.as_deref(),
+    );
+    Ok(Staged {
+        name: name.to_string(),
+        prev_operation,
+        prev_cache,
+        job,
+        stamp,
+    })
+}
+
+impl Staged {
+    fn finish(self) -> Result<GenerateOperation, CommandError> {
+        let (path, warnings) = operation::run_job(self.job)
+            .map_err(|e| CommandError::Machining(format!("{}: {e}", self.name)))?;
+        let stamp = self.stamp.ok_or_else(|| {
+            CommandError::Machining(format!(
+                "{}: its tool or geometry source vanished mid-generation",
+                self.name
+            ))
+        })?;
+        let next_operation = Operation {
+            stamp: Some(stamp),
+            ..self.prev_operation.clone()
+        };
+        Ok(GenerateOperation {
+            name: self.name,
+            prev_operation: self.prev_operation,
+            prev_cache: self.prev_cache,
+            next_operation,
+            output: Toolpath { path, warnings },
+        })
+    }
+}
+
+impl GenerateOperation {
+    pub fn new(world: &World, name: &str) -> Result<Self, CommandError> {
+        stage_generation(world, name)?.finish()
+    }
+}
+
+impl Command for GenerateOperation {
+    fn apply(&self, world: &World) {
+        let Some(entity) = model::find_by_name(world, &self.name) else {
+            return; // the tree deleted it underneath us; nothing to write
+        };
+        entity.entity_view(world).set(self.next_operation.clone());
+        entity
+            .entity_view(world)
+            .set(self.output.clone());
+    }
+
+    fn invert(&self, world: &World) {
+        let Some(entity) = model::find_by_name(world, &self.name) else {
+            return;
+        };
+        entity.entity_view(world).set(self.prev_operation.clone());
+        match &self.prev_cache {
+            Some(cache) => {
+                entity.entity_view(world).set(cache.clone());
+            }
+            None => {
+                // No cache existed before: remove the component by its id
+                // (flecs removals are id-based for data components; the
+                // value form only works for tags).
+                entity
+                    .entity_view(world)
+                    .remove(Toolpath::entity_id(world));
+            }
+        }
+    }
+}
+
+/// The M3.1 payoff command: one click brings the job current after a
+/// model revision, instead of rebuilding it op by op. Construction
+/// decides everything - it finds the Stale operations in tree order and
+/// runs each generator exactly as `GenerateOperation` would (validate
+/// early, errors still land here) - so `apply` and `invert` are the
+/// batch's pure writes. An operation whose regeneration fails is
+/// SKIPPED, not fatal: one broken pick must not block the rest of the
+/// job (never crash, never gouge - the failed op keeps its old cache and
+/// its STALE tag, honestly). Undo inverts the whole batch in reverse,
+/// one undo unit for one user action, and operations that were only
+/// skipped were never touched, so nothing needs restoring for them.
+pub struct RegenerateAll {
+    parts: Vec<GenerateOperation>,
+    skipped: Vec<(String, String)>,
+}
+
+impl RegenerateAll {
+    /// Runs every stale operation's generator against the current world.
+    /// `Never` and `Ok` operations are left alone - this command is for
+    /// what a revision invalidated, not for first-time generation.
+    ///
+    /// The M5.3 B shape: stage every op first (all world reads, tree
+    /// order, the same status gate the serial loop had), then finish the
+    /// jobs through rayon - ordered `collect`, so `parts` is tree order
+    /// and every result is what the serial batch produced, byte for
+    /// byte. `skipped` lists stage failures before run failures; the
+    /// set is unchanged.
+    pub fn new(world: &World) -> Self {
+        let mut parts = Vec::new();
+        let mut skipped = Vec::new();
+        let mut staged = Vec::new();
+        // THE program order (M3.2 A): a rest-aware op regenerates AFTER
+        // what it re-machines, so one round converges - the same walk
+        // the post makes. Nothing here writes the world (constructors
+        // only read), so the frozen batch every job collects against
+        // is the same frozen batch the serial loop ran on.
+        for (name, entity) in crate::setup::operation_order(world) {
+            if operation::status_of(world, &entity) != operation::OpStatus::Stale {
+                continue;
+            }
+            match stage_generation(world, &name) {
+                Ok(job) => staged.push(job),
+                Err(err) => skipped.push((name, err.to_string())),
+            }
+        }
+        use rayon::prelude::*;
+        let results: Vec<(String, Result<GenerateOperation, CommandError>)> = staged
+            .into_par_iter()
+            .map(|job| {
+                let name = job.name.clone();
+                (name, job.finish())
+            })
+            .collect();
+        for (name, result) in results {
+            match result {
+                Ok(part) => parts.push(part),
+                Err(err) => skipped.push((name, err.to_string())),
+            }
+        }
+        RegenerateAll { parts, skipped }
+    }
+
+    /// Nothing will be written: the UI skips the history entirely then.
+    pub fn is_empty(&self) -> bool {
+        self.parts.is_empty()
+    }
+
+    pub fn regenerated(&self) -> usize {
+        self.parts.len()
+    }
+
+    /// The names whose generators refused, with the refusal text.
+    pub fn skipped(&self) -> &[(String, String)] {
+        &self.skipped
+    }
+}
+
+impl Command for RegenerateAll {
+    fn apply(&self, world: &World) {
+        for part in &self.parts {
+            part.apply(world);
+        }
+    }
+
+    fn invert(&self, world: &World) {
+        for part in self.parts.iter().rev() {
+            part.invert(world);
+        }
+    }
+}
