@@ -44,6 +44,7 @@ impl ParamsDto {
                 side,
                 entry,
                 helix_radius,
+                blend_turns,
                 tilt,
             } => ParamsDto::Contour {
                 stock_to_leave: *stock_to_leave,
@@ -76,6 +77,7 @@ impl ParamsDto {
                     Entry3D::Helix => EntryDto::Helix,
                 },
                 helix_radius: *helix_radius,
+                blend_turns: *blend_turns,
                 tilt: (*tilt).map(Into::into),
             },
             OpParams::Pocket {
@@ -93,6 +95,7 @@ impl ParamsDto {
                 entry,
                 helix_radius,
                 max_engagement,
+                blend_turns,
                 tilt,
             } => ParamsDto::Pocket {
                 stepover: *stepover,
@@ -120,6 +123,7 @@ impl ParamsDto {
                 },
                 helix_radius: *helix_radius,
                 max_engagement: *max_engagement,
+                blend_turns: *blend_turns,
                 tilt: (*tilt).map(Into::into),
             },
             // The twins drop the strategy tag - the variant itself
@@ -1170,6 +1174,7 @@ impl ParamsDto {
                 side,
                 entry,
                 helix_radius,
+                blend_turns,
                 tilt,
             } => OpParams::Contour {
                 stock_to_leave: *stock_to_leave,
@@ -1204,6 +1209,7 @@ impl ParamsDto {
                     EntryDto::Helix => Entry3D::Helix,
                 },
                 helix_radius: *helix_radius,
+                blend_turns: *blend_turns,
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Pocket {
@@ -1221,6 +1227,7 @@ impl ParamsDto {
                 entry,
                 helix_radius,
                 max_engagement,
+                blend_turns,
                 tilt,
             } => OpParams::Pocket {
                 stepover: *stepover,
@@ -1248,6 +1255,7 @@ impl ParamsDto {
                 },
                 helix_radius: *helix_radius,
                 max_engagement: *max_engagement,
+                blend_turns: *blend_turns,
                 tilt: (*tilt).map(Into::into),
             },
             ParamsDto::Adaptive2D {

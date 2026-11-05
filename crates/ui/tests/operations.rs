@@ -934,6 +934,7 @@ fn contour_draft() -> OpParams {
         tab_height: 1.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     }
 }
 

@@ -132,6 +132,7 @@ fn contour_side(side: Side) -> ContourParams {
         tab_height: 0.0,
         entry: crate::entry::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     }
 }
 

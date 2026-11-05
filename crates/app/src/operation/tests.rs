@@ -96,6 +96,7 @@ fn params_sanity_gates() {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         max_engagement: 45.0,
+        blend_turns: false,
     };
     assert!(!bad.is_sane());
     // A depth range that runs upward is nonsense, refused at command

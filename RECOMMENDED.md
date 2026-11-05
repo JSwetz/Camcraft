@@ -8904,3 +8904,51 @@ no consumer needs the triangles there today; `MeshCache` is the seam
 when one does. This is a scope call for the close-out: the ROADMAP
 clause names those consumers, and here they are served by the eye,
 not by triangles.
+
+## M11.1 corners + links - tangent fillets on contour corners and pocket links: eight decisions (2026-11-05)
+
+(1) **The fillet radius is the largest legal one, not tolerance-bound.**
+rho = min(tool radius, half of each leg); the op tolerance only sets the
+floor (rho >= max(tol, 0.01 mm)). The rest the rounding leaves,
+rho(sec(theta/2) - 1), is allowed and stated in the notes for the stock
+sim to measure. Dropped: bounding the rest by the tolerance, which
+gives ~0.024 mm fillets at 90 degrees - a G2/G3 too small to change
+how the machine moves.
+
+(2) **Corners that turn toward the part are always refused.** The
+offset's round joins already round those corners, and a fillet inside
+such a turn would sit on the part's side of a path that already grazes
+it. Refused and counted as "toward the part". Turns toward the air
+round, and leave corner rest, never a gouge.
+
+(3) **Legality is a triangle test against the cutter-centre region.**
+The triangle (corner, two tangent points) contains the whole arc. A
+refused radius is halved up to four times before the corner counts as
+blocked. Dropped: chord-sample checks, which miss the arc's bulge
+between samples.
+
+(4) **Only line-to-line corners round.** Corners next to an arc stay
+sharp and are counted, and so does a closed walk's start/end corner:
+rounding it would move the plunge and lead join, which belong to the
+entry law. Line-to-arc fillets are deferred.
+
+(5) **"Between-pass links" means the pocket's straight feed links**
+(zigzag row-to-link jogs) plus ring corners, since they share one walk.
+Contour levels connect by lifts, not feed links, so there is nothing to
+fillet there. Adaptive2D/Offset2D are hard-wired off; surfacing the
+toggle there is a later call.
+
+(6) **Open centerline runs never blend.** They have no region and no
+side to prove against, which is named once in the notes.
+
+(7) **Kinks under 0.5 degrees are tessellation noise.** They pass
+through uncounted. Every number avoids transcendental calls, so the
+bytes match on every platform's libm (the M4.2b lesson).
+
+(8) **Opt-in, no format churn.** The `blend_turns` key is skipped when
+false, so there is no PROJECT_VERSION bump, and the cache digest byte
+0xB1 is written only when it is on. Every existing golden stays
+byte-identical; two new blended `.cl` goldens are added. They are not
+posted to NC goldens, matching A's facing precedent. Open: contour.rs
+(~650 lines) and commands/operation.rs (~750) are past the 400-line
+cap, and a seam split is owed.

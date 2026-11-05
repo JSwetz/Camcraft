@@ -1,4 +1,6 @@
-//! Split from `machining2d.rs` by M5.0.1; structure only.
+//! Offset contouring (split from `machining2d.rs` by M5.0.1); M11.1 B
+//! adds the optional corner fillets - provenance in `fillet.rs`
+//! (tangent circle to two lines, RS-274 / ISO 6983 G2/G3).
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::{Entry3D, dive_room, helix_down};
@@ -9,6 +11,8 @@ use super::arcs::{fit_arcs, lead_in, lead_out, push_segs, walk_tangent};
 use super::levels::{Cert, Motion, cut_levels, dive_link, substituted_dive};
 use super::ring::Ring;
 use super::face::GenError;
+use super::fillet::{Legal, fillet_corners};
+use super::fillet_tally::{FilletTally, fillet_floor};
 use super::slots::chord_clears;
 /// Entry/exit motion appended to each contour subpath. Every lead that
 /// is not [`Lead::None`] keeps the tool from dwelling (and gouging) at a
@@ -113,6 +117,12 @@ pub struct ContourParams {
     /// the roughing overlap law: a contour orbit descends air, so a
     /// radius above the tool's is legal wherever the bore holds it.
     pub helix_radius: f64,
+    /// Turning-point blends (M11.1 B): line-to-line corners that turn
+    /// toward the air ride one tangent fillet where `fillet.rs`'s law
+    /// proves it; corners toward the part, and every other refusal,
+    /// stay sharp and are named in the notes with the worst corner
+    /// rest. `false` - every pre-M11.1 file - is unchanged to the byte.
+    pub blend_turns: bool,
 }
 
 impl ContourParams {
@@ -266,6 +276,11 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     let mut refused_said = false;
     let mut tabbed_said = false;
     let cert = Cert::Region(&center);
+    // Climb travel keeps the part on the left on both sides (see the
+    // per-loop flip below), so the air - the only side a fillet may
+    // stand on - is right for climb, left for conventional.
+    let legal = Legal { region: &center, inside, air_left: Some(!p.climb) };
+    let mut tally = FilletTally::default();
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let hop = p.retract_z.min(p.clearance_z);
@@ -309,7 +324,12 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 if poly.len() < 2 {
                     continue;
                 }
-                let walk = fit_arcs(&poly, p.tolerance);
+                let mut walk = fit_arcs(&poly, p.tolerance);
+                if p.blend_turns {
+                    let (w, t) = fillet_corners(&walk, poly[0], r, p.tolerance, &legal);
+                    walk = w;
+                    tally.add(t);
+                }
                 // The lead meets the wall on the wall's own tangent at
                 // the joint - the fitted walk's true circle tangent, not
                 // a chord across it, or the join kinks at the very seam
@@ -518,6 +538,9 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     }
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+    for n in tally.notes("walked", fillet_floor(p.tolerance)) {
+        b.note(n);
+    }
 
     let path = b.finish();
     if !path.all_finite() {
@@ -565,6 +588,10 @@ pub fn contour_along_chain(
     let out = lead_out(poly[n - 1], t1, air_side(t1, p.climb), p);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
+    if p.blend_turns {
+        // No region, no side: nothing a fillet could be proved against.
+        b.note("turn blends: an open centerline run bounds no area to prove a fillet against - its corners kept sharp");
+    }
     // An open run bounds no area, so no dive on it can be certified
     // against air that exists: the chosen entry family is refused by
     // name once, and every level dives at the lead-in's start as the

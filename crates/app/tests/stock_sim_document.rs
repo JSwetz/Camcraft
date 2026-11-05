@@ -207,6 +207,7 @@ fn missing_pieces_refuse_by_name() {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     };
     let cmd = CreateOperation::new(&world, "Contour1", "EM-0600-4FL", SrcRef::Entity("part".into()), params);
     history.execute(&world, cmd.expect("create"));

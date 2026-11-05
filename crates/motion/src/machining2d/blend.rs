@@ -4,8 +4,8 @@
 //! path-filleting practice of general machining knowledge; clean-room.
 //!
 //! Scope: the facing serpentine's row-end reversals. Contour corners and
-//! between-pass links are later stages (ROADMAP M11.1) and do not read
-//! this module yet.
+//! between-pass links (M11.1 B/C) round by the tangent-fillet law in
+//! `fillet.rs`, which shares this module's resolution floor.
 //!
 //! # The legality law (Prime Directive: never gouge, never silent)
 //!

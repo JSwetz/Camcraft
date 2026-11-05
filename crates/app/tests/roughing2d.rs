@@ -109,6 +109,7 @@ fn pocket(strategy: PocketStrategy, eng: f64) -> OpParams {
         helix_radius: 1.0,
         max_engagement: eng,
         tilt: None,
+        blend_turns: false,
     }
 }
 

@@ -125,6 +125,7 @@ impl OpParams {
                 climb,
                 entry,
                 helix_radius,
+                blend_turns,
                 tilt,
             } => {
                 w(h, *stock_to_leave);
@@ -174,6 +175,11 @@ impl OpParams {
                     Entry3D::Helix => 2,
                 });
                 wt(h, *tilt);
+                // M11.1 B: written only when ON (A's word), so every
+                // legacy sharp contour keeps its cached digest.
+                if *blend_turns {
+                    h.write_u8(0xB1);
+                }
             }
             OpParams::Pocket {
                 stepover,
@@ -190,6 +196,7 @@ impl OpParams {
                 entry,
                 helix_radius,
                 max_engagement,
+                blend_turns,
                 tilt,
             } => {
                 w(h, *stepover);
@@ -221,6 +228,10 @@ impl OpParams {
                 // as Face's staging fields appended above).
                 wh_opt(h, *retract_z);
                 wt(h, *tilt);
+                // M11.1 C: written only when ON, as for Face/Contour.
+                if *blend_turns {
+                    h.write_u8(0xB1);
+                }
             }
             // The roughing twins (M2.4 A): the pocket's digest minus
             // the strategy byte - the kind tag at the head already

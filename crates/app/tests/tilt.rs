@@ -117,6 +117,7 @@ fn pocket(tilt: Option<Tilt>, top_z: f64) -> OpParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         max_engagement: 45.0,
+        blend_turns: false,
     }
 }
 
@@ -143,6 +144,7 @@ fn pocket_parked() -> OpParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         max_engagement: 45.0,
+        blend_turns: false,
     }
 }
 
@@ -377,6 +379,7 @@ fn tilt_on_a_picked_selection_refuses_by_name() {
         tab_height: 0.0,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     };
     // The prismatic control: the same pick on the same part is legal.
     history.execute(

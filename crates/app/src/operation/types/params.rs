@@ -114,6 +114,11 @@ pub enum OpParams {
         /// Helix, and certified against the bore's wall per level by
         /// the generator's dive room, not by the roughing overlap law.
         helix_radius: f64,
+        /// Turning-point blends (M11.1 B): air-side line-to-line
+        /// corners ride one tangent G2/G3 fillet where the law proves
+        /// it (`machining2d::fillet_corners`); `false` is the sharp
+        /// walk every pre-M11.1 file holds.
+        blend_turns: bool,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },
@@ -144,6 +149,11 @@ pub enum OpParams {
         /// (M5.1 H made the planar pocket read this instead of riding
         /// Waterline as an alias).
         max_engagement: f64,
+        /// Turning-point blends (M11.1 C): pass corners and the
+        /// zigzag's row-to-link jogs ride one tangent G2/G3 fillet
+        /// inside the cutter-center area where the law proves it;
+        /// `false` is the sharp walk every pre-M11.1 file holds.
+        blend_turns: bool,
         /// 3+2 index; see [`OpParams::Face`]'s field.
         tilt: Option<Tilt>,
     },

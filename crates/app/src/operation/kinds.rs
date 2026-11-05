@@ -686,6 +686,8 @@ fn seed_contour(c: &Carried) -> OpParams {
         // entry starts from a legal one.
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
+        // Turning-point blends are opt-in (M11.1 B), as on Face.
+        blend_turns: false,
         tilt: c.tilt,
     }
 }
@@ -712,6 +714,8 @@ fn seed_pocket(c: &Carried) -> OpParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         max_engagement: 45.0,
+        // Turning-point blends are opt-in (M11.1 C), as on Face.
+        blend_turns: false,
         tilt: c.tilt,
     }
 }

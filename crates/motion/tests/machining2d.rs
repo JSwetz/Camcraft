@@ -327,6 +327,7 @@ fn cp() -> ContourParams {
         tab_height: 0.0,
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     }
 }
 
@@ -960,6 +961,7 @@ fn pp() -> PocketParams {
         entry: Entry3D::Plunge,
         helix_radius: 1.0,
         max_engagement: 45.0,
+        blend_turns: false,
     }
 }
 

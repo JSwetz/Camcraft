@@ -855,6 +855,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             tab_height,
             entry,
             helix_radius,
+            blend_turns,
             tilt,
         } => {
             if tab == SEC_GEO {
@@ -919,6 +920,10 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             if tab == SEC_PASSES {
                 field(ui, "Stock to leave");
                 num(ui, u, stock_to_leave);
+                // M11.1 B: air-side corners round on one arc where it
+                // is legal; the status line names every corner left
+                // sharp and the corner rest the rounding leaves.
+                ui.checkbox(blend_turns, "Arc turns at corners");
             }
             if tab == SEC_LEADS {
                 field(ui, "Lead in/out");
@@ -1005,6 +1010,7 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
             entry,
             helix_radius,
             max_engagement,
+            blend_turns,
             tilt,
         } => {
             if tab == SEC_HEIGHTS {
@@ -1056,6 +1062,9 @@ fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
                 num(ui, u, stepover);
                 field(ui, "Stock to leave");
                 num(ui, u, stock_to_leave);
+                // M11.1 C: pass corners and row-to-row links round on
+                // one arc inside the cleared area where it is legal.
+                ui.checkbox(blend_turns, "Arc turns at corners and links");
                 field(ui, "Strategy");
                 // M5.1 H: the 2-D combo offers Adaptive beside the 3-D
                 // one's - the law runs on the plane now, so hiding the

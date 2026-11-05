@@ -110,6 +110,7 @@ fn clean_pocket_verifies_silent() {
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             max_engagement: 45.0,
+            blend_turns: false,
         },
     )
     .unwrap();
@@ -143,6 +144,7 @@ fn a_ramp_pocket_verifies_silent() {
             entry: camcraft_app::machining3d::Entry3D::Ramp,
             helix_radius: 1.0,
             max_engagement: 45.0,
+            blend_turns: false,
         },
     )
     .unwrap();
@@ -181,6 +183,7 @@ fn a_helix_pocket_verifies_silent() {
             entry: camcraft_app::machining3d::Entry3D::Helix,
             helix_radius: 2.0,
             max_engagement: 45.0,
+            blend_turns: false,
         },
     )
     .unwrap();
@@ -218,6 +221,7 @@ fn clean_contour_verifies_silent() {
             tab_height: 0.0,
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
+            blend_turns: false,
         },
     )
     .unwrap();
@@ -338,6 +342,7 @@ fn holder_hits_a_part_island_when_the_flute_is_short() {
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             max_engagement: 45.0,
+            blend_turns: false,
         },
     )
     .unwrap();

@@ -107,6 +107,7 @@ fn contour_disc_hole_matches_golden() {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     };
     let t = contour(&region, &p).unwrap();
     assert!(t.has_arcs(), "a fine polygon bore rim must fit to arcs");
@@ -141,6 +142,7 @@ fn contour_tangential_lead_matches_golden() {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     };
     let t = contour(&region, &p).unwrap();
     assert!(t.has_arcs());
@@ -243,6 +245,7 @@ fn contour_plate_with_hole_matches_golden() {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     };
     let t = contour(&plate_with_hole(), &p).unwrap();
     write_golden("contour_plate_with_hole.cl", &gen_to_cltext(&t));
@@ -268,9 +271,75 @@ fn pocket_zigzag_plate_with_island_matches_golden() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         max_engagement: 45.0,
+        blend_turns: false,
     };
     let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();
     write_golden("pocket_zigzag_plate_with_island.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn contour_plate_with_hole_blended_matches_golden() {
+    // M11.1 B's byte witness: the plate-with-hole job with turning-point
+    // blends on. The outer ring's corners are round joins already (no
+    // line-to-line corner to fillet); the hole's ring turns toward the
+    // hole's air at its corners, and each one but the seam (where the
+    // lead joins) rides one tangent `Arc` of the tool radius. The sharp
+    // golden above stays byte-identical: blends are opt-in.
+    let p = ContourParams {
+        tool_diameter: 6.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        retract_z: 2.0,
+        top_z: 0.0,
+        bottom_z: -4.0,
+        stepdown: 2.0,
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        side: Side::Auto,
+        lead: Lead::Arc { radius: 3.0 },
+        tolerance: 0.01,
+        tab_count: 0,
+        tab_width: 0.0,
+        tab_height: 0.0,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        blend_turns: true,
+    };
+    let t = contour(&plate_with_hole(), &p).unwrap();
+    let sharp = contour(&plate_with_hole(), &ContourParams { blend_turns: false, ..p }).unwrap();
+    assert!(t.arc_count() > sharp.arc_count(), "{:?}", t.notes);
+    assert!(t.notes.iter().any(|n| n.contains("rounded")), "{:?}", t.notes);
+    write_golden("contour_plate_with_hole_blended.cl", &gen_to_cltext(&t));
+}
+
+#[test]
+fn pocket_zigzag_plate_with_island_blended_matches_golden() {
+    // M11.1 C's byte witness: the zigzag-around-an-island job with the
+    // row-to-link jogs filleted inside the cleared floor (quarter arcs
+    // of at most stepover/2); plunges, lifts and pass starts are the
+    // sharp golden's to the byte.
+    let p = PocketParams {
+        tool_diameter: 8.0,
+        stepover: 3.0,
+        stock_to_leave: 0.0,
+        clearance_z: 5.0,
+        retract_z: None,
+        top_z: 0.0,
+        bottom_z: -4.0,
+        stepdown: 2.0,
+        feed: 400.0,
+        plunge_feed: 80.0,
+        climb: true,
+        strategy: PocketStrategy::Zigzag,
+        entry: camcraft_app::machining3d::Entry3D::Plunge,
+        helix_radius: 1.0,
+        max_engagement: 45.0,
+        blend_turns: true,
+    };
+    let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();
+    assert!(t.has_arcs(), "{:?}", t.notes);
+    write_golden("pocket_zigzag_plate_with_island_blended.cl", &gen_to_cltext(&t));
 }
 
 #[test]
@@ -294,6 +363,7 @@ fn pocket_waterline_matches_golden() {
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
         max_engagement: 45.0,
+        blend_turns: false,
     };
     let t = pocket(&square_with_center(0.0, 0.0, 30.0, 30.0), &p).unwrap();
     write_golden("pocket_waterline_plate_with_island.cl", &gen_to_cltext(&t));

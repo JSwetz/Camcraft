@@ -490,6 +490,7 @@ fn arc_move_round_trips() {
                 tab_height: 0.0,
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
+                blend_turns: false,
             },
         )
         .expect("create"),
@@ -978,6 +979,7 @@ fn v5_roundtrips_retract_and_auto() {
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
                 max_engagement: 45.0,
+                blend_turns: false,
             },
         )
         .expect("pocket"),
@@ -1161,6 +1163,7 @@ fn a_selection_round_trips_and_stays_ok() {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     };
     history.execute(
         &world,
@@ -2659,6 +2662,7 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
                 tab_height: 0.0,
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
+                blend_turns: false,
             },
         )
         .expect("create"),
@@ -2731,6 +2735,7 @@ fn side_choice_round_trips_and_a_hand_edited_inside_refuses_at_generate() {
                 tab_height: 0.0,
                 entry: camcraft_app::machining3d::Entry3D::Plunge,
                 helix_radius: 1.0,
+                blend_turns: false,
             },
         )
         .expect("create C2"),

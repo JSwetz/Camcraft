@@ -6,7 +6,8 @@
 //! literature; the arc fitter is the classic three-point circle with a
 //! two-sided sagitta bound (geometry handbooks, e.g. Farin's curves and
 //! surfaces primer); turning-point blends are RS-274 / ISO 6983 G2/G3
-//! path filleting (general machining knowledge). Every number (parameter model, entry/exit overruns,
+//! path filleting (general machining knowledge), and the contour /
+//! pass-link corner fillets the classical circle tangent to two lines. Every number (parameter model, entry/exit overruns,
 //! snap rules) is ours. Pure module: no flecs, no
 //! world access - the command layer resolves geometry into regions, this
 //! module only cuts them.
@@ -27,6 +28,8 @@ mod circular;
 mod thread_mill;
 mod contour;
 mod face;
+mod fillet;
+mod fillet_tally;
 mod levels;
 mod pocket;
 mod ring;
@@ -49,6 +52,8 @@ pub use chamfer::{chamfer, ChamferParams};
 pub use circular::{circular, CircularParams};
 pub use contour::{contour, contour_along_chain, ContourParams, Lead, Side};
 pub use face::{face, FaceParams, GenError};
+pub use fillet::{fillet_corners, Legal};
+pub use fillet_tally::{fillet_floor, FilletTally};
 pub(crate) use levels::cut_levels;
 pub use pocket::{pocket, PocketParams, PocketStrategy};
 pub use ring::{on_boundary, ring_is_circular};

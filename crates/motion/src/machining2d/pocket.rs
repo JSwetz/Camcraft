@@ -1,4 +1,6 @@
-//! Split from `machining2d.rs` by M5.0.1; structure only.
+//! Zigzag / waterline pocketing (split from `machining2d.rs` by M5.0.1);
+//! M11.1 C adds the optional corner/link fillets - provenance in
+//! `fillet.rs` (tangent circle to two lines, RS-274 / ISO 6983 G2/G3).
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::{engagement_step, Entry3D};
@@ -6,8 +8,10 @@ use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 
 use super::face::{GenError, band};
-use super::levels::{Cert, Motion, cut_levels, run_levels};
-use super::arcs::ARC_FIT_TOL;
+use super::levels::{Cert, Motion, cut_levels, run_level_walks};
+use super::arcs::{ARC_FIT_TOL, Seg, fit_arcs};
+use super::fillet::{Legal, fillet_corners};
+use super::fillet_tally::{FilletTally, fillet_floor};
 use super::ring::ring_is_circular;
 use super::waterscan::{scan_row, waterline_passes};
 use super::slots::chord_clears;
@@ -98,6 +102,13 @@ pub struct PocketParams {
     /// instant cutter contact; read only under `Adaptive` (through
     /// [`PocketParams::tiling_step`], still validated finite.
     pub max_engagement: f64,
+    /// Turning-point blends (M11.1 C): every line-to-line corner of a
+    /// pass - the zigzag's row-to-link jogs, a ring's corners - rides
+    /// one tangent fillet where `fillet.rs`'s law proves it inside the
+    /// cutter-center area; refusals stay sharp and are named in the
+    /// path's notes, with the worst corner rest. `false` - every
+    /// pre-M11.1 file - is the sharp walk, unchanged to the byte.
+    pub blend_turns: bool,
 }
 
 impl PocketParams {
@@ -259,12 +270,40 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     };
     let motion = Motion::new(p.clearance_z, p.retract_z, p.feed, p.plunge_feed)
         .with_entry(p.entry, p.helix_radius);
-    run_levels(
+    // The walks: fitted where the strategy fits, then - opted in - the
+    // corner fillets, proved inside the cutter-center area. Passes are
+    // one plan at every level, so the plan's refusals are said once.
+    let runs: Option<Vec<Vec<Seg>>> = if p.blend_turns {
+        let legal = Legal { region: &center, inside: true, air_left: None };
+        let mut tally = FilletTally::default();
+        let runs = passes
+            .iter()
+            .map(|pass| {
+                let Some((first, rest)) = pass.split_first() else {
+                    return Vec::new();
+                };
+                let walk = match fit {
+                    Some(tol) => fit_arcs(pass, tol),
+                    None => vec![Seg::Line(rest.to_vec())],
+                };
+                let (walk, t) = fillet_corners(&walk, *first, r, ARC_FIT_TOL, &legal);
+                tally.add(t);
+                walk
+            })
+            .collect();
+        for n in tally.notes("pass", fillet_floor(ARC_FIT_TOL)) {
+            b.note(n);
+        }
+        Some(runs)
+    } else {
+        fit.map(|tol| passes.iter().map(|p| fit_arcs(p, tol)).collect())
+    };
+    run_level_walks(
         &mut b,
         &passes,
         &zs,
         &motion,
-        fit,
+        runs.as_deref(),
         Some(&Cert::Region(&center)),
     );
     let cur = b.at();

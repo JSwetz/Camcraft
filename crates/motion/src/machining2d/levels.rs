@@ -156,10 +156,23 @@ pub(super) fn run_levels(
     fit: Option<f64>,
     center: Option<&Cert<'_>>,
 ) {
-    let runs: Vec<Vec<Seg>> = match fit {
-        Some(tol) => passes.iter().map(|p| fit_arcs(p, tol)).collect(),
-        None => Vec::new(),
-    };
+    let runs: Option<Vec<Vec<Seg>>> =
+        fit.map(|tol| passes.iter().map(|p| fit_arcs(p, tol)).collect());
+    run_level_walks(b, passes, zs, m, runs.as_deref(), center);
+}
+
+/// [`run_levels`] with the walks already built: `runs[i]` is pass `i`
+/// past its first point as [`Seg`]s (fitted arcs, M11.1's corner
+/// fillets); `None` walks the points. Entries, lifts and links read
+/// `passes` exactly as before - a walk only replaces the feed along it.
+pub(super) fn run_level_walks(
+    b: &mut PathBuilder,
+    passes: &[Vec<Point2>],
+    zs: &[f64],
+    m: &Motion,
+    runs: Option<&[Vec<Seg>]>,
+    center: Option<&Cert<'_>>,
+) {
     let mut first = true;
     // The z the tool last ENGAGED (cut at), not the z the loop last
     // visited: a hop is earned only by having floor already swept at
@@ -285,8 +298,8 @@ pub(super) fn run_levels(
                 }
             }
             first = false;
-            match fit {
-                Some(_) => push_segs(b, &runs[pi], z, m.feed),
+            match runs.and_then(|r| r.get(pi)) {
+                Some(walk) => push_segs(b, walk, z, m.feed),
                 None => {
                     for q in rest {
                         b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(m.feed));

@@ -56,6 +56,7 @@ fn contour_params(lead: Lead) -> ContourParams {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     }
 }
 

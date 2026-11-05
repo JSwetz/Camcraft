@@ -150,6 +150,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             tab_height,
             entry,
             helix_radius,
+            blend_turns,
             ..
         } => {
             // Backstop for a committed file that carries Inside on a
@@ -177,6 +178,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 tab_height: *tab_height,
                 entry: *entry,
                 helix_radius: *helix_radius,
+                blend_turns: *blend_turns,
             };
             let (region, path) = match &src {
                 SrcRef::Selection(_) => {
@@ -241,6 +243,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             entry,
             helix_radius,
             max_engagement,
+            blend_turns,
             ..
         } => {
             let region = region_for_job(
@@ -269,6 +272,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     entry: *entry,
                     helix_radius: *helix_radius,
                     max_engagement: *max_engagement,
+                    blend_turns: *blend_turns,
                 },
             )?;
             (region, path)
@@ -316,6 +320,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     entry: *entry,
                     helix_radius: *helix_radius,
                     max_engagement: *max_engagement,
+                    blend_turns: false,
                 },
             )?;
             (region, path)
@@ -357,6 +362,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     entry: *entry,
                     helix_radius: *helix_radius,
                     max_engagement: 45.0,
+                    blend_turns: false,
                 },
             )?;
             (region, path)

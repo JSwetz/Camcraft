@@ -73,6 +73,7 @@ fn contour_params() -> OpParams {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     }
 }
 
@@ -1938,6 +1939,7 @@ fn pocket_refuses_an_open_run() {
             entry: camcraft_app::machining3d::Entry3D::Plunge,
             helix_radius: 1.0,
             max_engagement: 45.0,
+            blend_turns: false,
         },
         stamp: None,
         setup: None,
@@ -2402,6 +2404,7 @@ fn a_closed_chain_routes_the_boundary_path_not_a_centerline() {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     };
     history.execute(
         &world,
@@ -3211,6 +3214,7 @@ fn selection_notes_report_stitching_and_extension() {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     };
     let notes = operation::selection_notes(&world, None, &items, &contour);
     assert!(
@@ -3256,6 +3260,7 @@ fn contour_at(side: Side, z: f64) -> OpParams {
         tab_height: 0.0,
         entry: camcraft_app::machining3d::Entry3D::Plunge,
         helix_radius: 1.0,
+        blend_turns: false,
     }
 }
 

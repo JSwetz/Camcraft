@@ -91,6 +91,10 @@ pub enum ParamsDto {
         /// 1.0 mm, the same default the pockets carry.
         #[serde(default = "default_helix_radius")]
         helix_radius: f64,
+        /// M11.1 B turning-point blends: absent (written only when ON)
+        /// is the sharp walk every earlier file held - no version step.
+        #[serde(default, skip_serializing_if = "is_false")]
+        blend_turns: bool,
         /// 3+2 index; see the Face arm.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,
@@ -125,6 +129,10 @@ pub enum ParamsDto {
         /// at r(1 - cos 45); RECOMMENDED.md owns that statement.
         #[serde(default = "default_engagement_deg")]
         max_engagement: f64,
+        /// M11.1 C turning-point blends: absent (written only when ON)
+        /// is the sharp walk every earlier file held - no version step.
+        #[serde(default, skip_serializing_if = "is_false")]
+        blend_turns: bool,
         /// 3+2 index; see the Face arm.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tilt: Option<TiltDto>,
