@@ -106,6 +106,18 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## truck (STEP import and tessellation, crates/app/src/geometry/import/step.rs; reference kernel in crates/kernel's tests)
+
+`truck-stepio`, `truck-meshalgo`, `truck-modeling`, `truck-polymesh`,
+`truck-topology`, `truck-geometry`, `truck-geotrait`, `truck-base` (and,
+for crates/kernel's own tests only, `truck-shapeops`) - ricosjp/truck,
+https://github.com/ricosjp/truck, authored by Yoshinori Tanimura (RICOS
+Co. Ltd.), licensed Apache-2.0 per each crate's Cargo.toml. The crates
+as published carry no NOTICE file. The Apache License 2.0 text is
+reproduced in full in the solidcore section below; it applies to these
+crates as well. Retained as a license condition, same posture as the
+clipper2-rust notice.
+
 ## solidcore (B-rep kernel on trial, crates/kernel - M12.1 stage 1)
 
 solidcore 1.0.1 (https://github.com/tangency-labs/solidcore), a Rust port of
