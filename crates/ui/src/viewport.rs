@@ -735,6 +735,21 @@ impl View3D {
         eye: [f32; 3],
         display: crate::state::DisplayMode,
     ) {
+        self.render_with(queue, encoder, mvp, eye, display, None);
+    }
+
+    /// `render` with the stock slot handed to `stock` (M7.2 B3b's
+    /// traced stock): when given, it draws in place of the stock sheet's
+    /// faces and wire, in shaded mode only, and group 0 is re-bound after.
+    pub fn render_with(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        mvp: &[[f32; 4]; 4],
+        eye: [f32; 3],
+        display: crate::state::DisplayMode,
+        stock: Option<&dyn Fn(&mut wgpu::RenderPass<'_>)>,
+    ) {
         let wireframe = display == crate::state::DisplayMode::Wireframe;
         let mut data = [0u8; 80];
         let mut o = 0usize;
@@ -807,12 +822,16 @@ impl View3D {
             if self.model_edge_count > 0 {
                 pass.draw_indexed(0..self.model_edge_count, 0, 0..1);
             }
-            if self.model_index_count < self.stock_index_end && !wireframe {
+            let traced = stock.filter(|_| !wireframe);
+            if let Some(draw) = traced {
+                draw(&mut pass);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+            } else if self.model_index_count < self.stock_index_end && !wireframe {
                 pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_pipeline(&self.stock_pipeline);
                 pass.draw_indexed(self.model_index_count..self.stock_index_end, 0, 0..1);
             }
-            if self.model_edge_count < self.edge_count {
+            if traced.is_none() && self.model_edge_count < self.edge_count {
                 pass.set_index_buffer(self.edge_buf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_pipeline(&self.line_pipeline);
                 pass.draw_indexed(self.model_edge_count..self.edge_count, 0, 0..1);
@@ -1154,7 +1173,7 @@ impl Camera {
     }
 
     #[must_use]
-    fn eye(&self) -> [f64; 3] {
+    pub(crate) fn eye(&self) -> [f64; 3] {
         let cp = self.pitch.cos();
         [
             self.target[0] + self.dist * cp * self.yaw.cos(),

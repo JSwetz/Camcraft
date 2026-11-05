@@ -95,6 +95,9 @@ struct Shell {
     egui_ctx: egui::Context,
     dock_state: DockState<Tab>,
     view: Option<View3D>,
+    /// M7.2 B3b: the traced-stock eye; `None` where the device cannot
+    /// composite it (the stock sheet then stands, said once at init).
+    stock_eye: Option<crate::trace::eye::StockEye>,
     view_tex: Option<egui::TextureId>,
     /// The bundled glyphs, built once on the first GPU-backed frame (the
     /// retired imgui loader's law: lazy, and `None` means painted fallback,
@@ -176,6 +179,7 @@ impl Shell {
             egui_ctx: egui::Context::default(),
             dock_state,
             view: None,
+            stock_eye: None,
             view_tex: None,
             icons: None,
             viewport_points: [600.0, 400.0],
@@ -302,6 +306,13 @@ impl Shell {
         self.scene_digest = scene.digest();
         view.set_document(&device, &queue, &scene.parts);
         view.set_overlay(&device, &queue, &scene.overlay);
+        let stock_eye = match crate::trace::eye::StockEye::new(&device, VIEW3D_FORMAT) {
+            Ok(e) => Some(e),
+            Err(err) => {
+                eprintln!("stock eye: {err} - the deviate sheet stands in");
+                None
+            }
+        };
         let tex =
             renderer.register_native_texture(&device, view.color_view(), wgpu::FilterMode::Linear);
         let winit_state = egui_winit::State::new(
@@ -322,6 +333,7 @@ impl Shell {
         self.renderer = Some(renderer);
         self.winit_state = Some(winit_state);
         self.view = Some(view);
+        self.stock_eye = stock_eye;
         self.view_tex = Some(tex);
     }
 
@@ -360,6 +372,7 @@ impl Shell {
             egui_ctx,
             dock_state,
             view,
+            stock_eye,
             view_tex,
             icons,
             viewport_points,
@@ -468,7 +481,31 @@ impl Shell {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("egui-shell-frame"),
         });
-        view.render(queue, &mut encoder, &mvp, eye, state.display);
+        // The traced stock (M7.2 B3b) takes the sheet's slot when the eye
+        // has a frame; the field view is walked once per Deviate arming.
+        let mut traced = false;
+        if let Some(se) = stock_eye.as_mut() {
+            if state.display != crate::state::DisplayMode::Wireframe {
+                crate::actions::ensure_field_view(state);
+            }
+            let fv = match &state.field_view {
+                Some(Ok(fv)) if state.display != crate::state::DisplayMode::Wireframe => Some(fv),
+                _ => None,
+            };
+            match se.prepare(device, queue, &mut encoder, fv, &state.cam, &mvp, (ew, eh)) {
+                Ok(t) => traced = t,
+                Err(err) => {
+                    state.status += &format!(" | traced stock: {err} - the sheet stands");
+                }
+            }
+        }
+        match stock_eye.as_ref().filter(|_| traced) {
+            Some(se) => {
+                let draw = |pass: &mut wgpu::RenderPass<'_>| se.draw(pass);
+                view.render_with(queue, &mut encoder, &mvp, eye, state.display, Some(&draw));
+            }
+            None => view.render(queue, &mut encoder, &mvp, eye, state.display),
+        }
 
         // Pass 2: egui over the surface.
         let sd = ScreenDescriptor {

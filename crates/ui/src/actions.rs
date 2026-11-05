@@ -115,6 +115,7 @@ pub(crate) fn frame_at(state: &mut State, p: [f64; 3]) {
 /// simulation reads the world and writes nothing to it; a refusal
 /// leaves the cell dark and the status line says why.
 pub(crate) fn toggle_deviate(state: &mut State) {
+    state.field_view = None; // either way, the old traced stock retires
     if state.program_sim.is_some() {
         state.program_sim = None;
         state.status = String::from("deviate off");
@@ -134,6 +135,29 @@ pub(crate) fn toggle_deviate(state: &mut State) {
         Err(err) => {
             state.program_sim = None;
             state.status = format!("deviate refused: {err}");
+        }
+    }
+}
+
+/// M7.2 B3b: walk the armed program through the field arm for the
+/// traced viewport stock, once per arming. Asked by the GPU-backed
+/// shell only (a headless run never pays for a picture it cannot
+/// show); a refusal is kept and said on the status line - the sheet
+/// stands, named.
+pub(crate) fn ensure_field_view(state: &mut State) {
+    if state.program_sim.is_none() || state.field_view.is_some() {
+        return;
+    }
+    match camcraft_app::stock_view::field_view(&state.world) {
+        Ok(fv) => {
+            if let Some(note) = &fv.target_note {
+                state.status += &format!(" | traced stock unjudged: {note}");
+            }
+            state.field_view = Some(Ok(std::sync::Arc::new(fv)));
+        }
+        Err(err) => {
+            state.status += &format!(" | traced stock refused: {err} - the sheet stands");
+            state.field_view = Some(Err(err));
         }
     }
 }

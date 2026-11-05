@@ -21,6 +21,9 @@
 //!   the CPU path's own caps: each is an `Err` naming its reason, and
 //!   the caller falls back to the CPU march. No `unwrap` on any of it.
 
+pub mod composite;
+pub mod eye;
+
 use egui_wgpu::wgpu;
 use wgpu::util::DeviceExt;
 

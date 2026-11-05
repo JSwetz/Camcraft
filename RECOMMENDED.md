@@ -8721,3 +8721,50 @@ untouched; the general per-brick cost law is still M7.3's. Display
 budget default lowered to MAX_TEXELS/32; the fixtures use a coarse
 `field_view_with` budget because they test wiring and classes, not
 resolution.
+
+## M7.2 B3b - the traced stock in the viewport: six decisions (2026-11-05)
+
+(1) **The field view is walked lazily, by the GPU-backed shell only**
+(`actions::ensure_field_view`), not inside `toggle_deviate` as the B3
+handoff planned. `field_view` costs seconds and up (tens of seconds in
+debug), and every headless Deviate test would have paid it for a
+picture no headless run can show. The arming still retires and resets
+the view (`field_view = None` on each toggle, document switch and
+open); the first shaded frame after arming walks it once and keeps the
+answer or the refusal (`Option<Result<Arc<FieldView>, String>>`).
+Considered: computing in `toggle_deviate` (rejected - test cost);
+computing on a worker thread (deferred - it blocks the frame once per
+arming today, the same synchronous law `simulate_document` already
+follows; M7.2 C playback is the natural home for a background walk).
+
+(2) **The composite reads the trace buffer as fragment storage**, a
+fullscreen triangle writing `frag_depth = (mvp*hit).z/w` from the hit
+rebuilt along the FRAGMENT's own ray (viewport aspect), with `t` taken
+from the covering trace pixel. A device whose fragment stage binds no
+storage refuses at construction and keeps the sheet, said once in the
+log. Considered: copying the buffer into an Rgba32Float texture (row
+pitch alignment forces a padded copy per frame; rejected as more moving
+parts for no device we target).
+
+(3) **Frames are cached, not re-marched per redraw**: the trace re-runs
+only when the camera basis, the viewport extent or the field `Arc`
+changes. The GPU trace budget is 2M pixels (an integer downscale `k`
+past it - a 4K panel traces at half resolution); the CPU fallback
+budget is 32k pixels, upsampled by the same composite.
+
+(4) **Shading is `tint x (0.2 + 0.8 shade)`, opaque**, fs_stock's
+verdict palette (steel / amber / red / gray). The 0.2 ambient floor
+keeps an unlit wall readable as material instead of a hole. With no
+target the whole stock is class 3 gray - honest, and the status line
+names why (`target_note`).
+
+(5) **The traced stock takes the sheet's whole slot - faces and wire -
+in shaded modes only.** The sheet's feature edges would outline the
+UNMACHINED block over the machined field; wireframe mode keeps the
+sheet wire, since a sphere-traced surface has no wire to offer.
+
+(6) **Refusals are said once per state**: `StockEye::prepare` answers
+`Err` the first time a camera/extent/field fails and the shell appends
+it to the status line; the same state is not retried every frame.
+`StockEye::cpu_only` exists so the fallback is tested on purpose
+(`tests/trace_composite.rs` holds GPU and CPU to the same pixel).
