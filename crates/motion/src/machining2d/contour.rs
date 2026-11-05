@@ -14,6 +14,7 @@ use super::ring::Ring;
 use super::face::GenError;
 use super::fillet::{Legal, fillet_corners};
 use super::fillet_tally::{FilletTally, fillet_floor};
+use super::lead_fit::{plan_leads, reseat};
 use super::slots::chord_clears;
 /// Entry/exit motion appended to each contour subpath. Every lead that
 /// is not [`Lead::None`] keeps the tool from dwelling (and gouging) at a
@@ -283,6 +284,8 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
     // stand on - is right for climb, left for conventional.
     let legal = Legal { region: &center, inside, air_left: Some(!p.climb) };
     let mut tally = FilletTally::default();
+    // Lead shrinks, refusals and reseated starts, each said once.
+    let mut lead_notes: Vec<String> = Vec::new();
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let hop = p.retract_z.min(p.clearance_z);
@@ -315,6 +318,15 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
             } else {
                 l.points().iter().rev().copied().collect()
             };
+            // A closed ring whose start leaves the lead no room (a
+            // bore inset's corner) starts mid-run instead; tabbed
+            // levels keep the start their windows are measured from
+            // and settle per window in plan_leads.
+            let pts = if tabbed {
+                pts
+            } else {
+                reseat(&pts, p, &legal, &mut lead_notes).unwrap_or(pts)
+            };
             let ring = Ring::new(pts);
             let keeps = if tabbed {
                 ring.tab_keeps(p.tab_count as usize, p.tab_width)
@@ -336,8 +348,11 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 // the joint - the fitted walk's true circle tangent, not
                 // a chord across it, or the join kinks at the very seam
                 // the fitter just smoothed.
-                let t0 = walk_tangent(&walk, &poly, true);
-                let (entry, lead) = lead_in(poly[0], t0, air_side(t0, p.climb), p);
+                // Both leads keep the cutter center in the legal room
+                // (lead_fit.rs): full size where they fit, else shrunk,
+                // else refused - by name, never through a wall.
+                let (entry, lead, lead_off) =
+                    plan_leads(&walk, &poly, p, &legal, &mut lead_notes);
                 let e2 = Point2::new(entry.x, entry.y);
                 if k == 0 && li > 0 && !first_entry {
                     // Loop to loop within one level: the tab-hop
@@ -545,19 +560,15 @@ pub fn contour(region: &Region, p: &ContourParams) -> Result<Toolpath, GenError>
                 first_entry = false;
                 push_segs(&mut b, &lead, z, p.feed);
                 push_segs(&mut b, &walk, z, p.feed);
-                let n = poly.len();
-                let t1 = walk_tangent(&walk, &poly, false);
-                push_segs(
-                    &mut b,
-                    &lead_out(poly[n - 1], t1, air_side(t1, p.climb), p),
-                    z,
-                    p.feed,
-                );
+                push_segs(&mut b, &lead_off, z, p.feed);
             }
         }
     }
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+    for n in lead_notes {
+        b.note(n);
+    }
     for n in tally.notes("walked", fillet_floor(p.tolerance)) {
         b.note(n);
     }

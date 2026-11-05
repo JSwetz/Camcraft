@@ -9098,3 +9098,33 @@ logged in its own entry.
   has") and plunged, and the level-to-level transitions looked broken
   in the viewport. Rework in flight: an arc entry in the air beside an
   outside wall, and a clean lead-out/link/entry sequence per level.
+
+## Contour lead room - a Prime Directive fix: five decisions (2026-11-05)
+
+(1) **The bug was real.** Contour leads were always built at the ring's
+start vertex with no room check. On an inset ring every vertex is a
+corner, where no lead fits, so the lead put the cutter up to a tool
+radius into the wall. The app's verifier caught it and the post
+refused, so it was never silent on the app path. Direct `contour()`
+callers got it with no warning, though, and four committed CL goldens
+encoded it (mm-scale in the plate hole; 74 um on a bore lead-out tilted
+by a short-chord end tangent).
+
+(2) **The lead room law.** Every lead is sampled every 20 um against the
+cutter-centre region the walk was planned in, with 5 um slack (half the
+verifier's gouge budget). Chosen over trusting the verifier as the
+backstop, which catches it only at post time.
+
+(3) **The fallback order.** Keep the start if any halving of the lead
+fits (fewest changed goldens); else move the start to a long-edge
+midpoint with the largest lead first; else shrink per end; else refuse
+by name in the notes. Tabbed levels never move the start, since tab
+positions are measured from it, so they only shrink or refuse.
+
+(4) **Goldens that encoded a gouge are regenerated, not preserved.** 4
+CL and 15 NC goldens. A golden that encodes a gouge is itself a finding.
+
+(5) **Follow-ups.** Use the ring's true circle tangent at the lead-out
+(so a bore lead keeps its full size); stop tab-window leads nibbling
+the tab; account for fit tolerance adding to the gouge budget
+(10.35 um seen); split contour.rs under 400 lines.

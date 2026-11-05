@@ -30,6 +30,7 @@ mod contour;
 mod face;
 mod fillet;
 mod fillet_tally;
+mod lead_fit;
 mod levels;
 mod pocket;
 mod ring;

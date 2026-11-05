@@ -928,3 +928,76 @@ fn the_trace_rides_the_program_it_wrote() {
         }
     }
 }
+
+/// A 40x40x5 block (centered on the origin) with a 16x16 square through
+/// hole: one wall quad per side, caps wound outward. Sectioned, the
+/// hole stays a sharp-cornered square loop - its tool-radius inset
+/// starts the contour's ring on a corner.
+fn square_holed_block() -> camcraft_app::geometry::Mesh {
+    use camcraft_app::geometry::Triangle;
+    let tau = std::f64::consts::TAU;
+    let at = |i: usize, half: f64, z: f64| {
+        let a = tau * (i % 4) as f64 / 4.0 + tau / 8.0;
+        let (x, y) = (a.cos(), a.sin());
+        let s = x.abs().max(y.abs());
+        Point3::new(x * half / s, y * half / s, z)
+    };
+    let quad = |a: Point3, b: Point3, c: Point3, d: Point3, f: &mut Vec<Triangle>| {
+        f.push(Triangle::new(a, b, c));
+        f.push(Triangle::new(a, c, d));
+    };
+    let mut f = Vec::new();
+    for i in 0..4 {
+        let j = i + 1;
+        quad(at(j, 8.0, 5.0), at(i, 8.0, 5.0), at(i, 20.0, 5.0), at(j, 20.0, 5.0), &mut f);
+        quad(at(i, 8.0, 0.0), at(j, 8.0, 0.0), at(j, 20.0, 0.0), at(i, 20.0, 0.0), &mut f);
+        quad(at(i, 8.0, 5.0), at(j, 8.0, 5.0), at(j, 8.0, 0.0), at(i, 8.0, 0.0), &mut f);
+        quad(at(j, 20.0, 5.0), at(i, 20.0, 5.0), at(i, 20.0, 0.0), at(j, 20.0, 0.0), &mut f);
+    }
+    camcraft_app::geometry::Mesh::from_facets(f)
+}
+
+#[test]
+fn an_arc_lead_at_a_hole_corner_neither_gouges_nor_blocks_the_post() {
+    // The corner-start lead bug end to end: the square hole's inset ring
+    // starts on a corner, where the quarter arc used to begin a full
+    // tool radius into the wall. The verifier caught it (a Gouge
+    // warning) and the gate refused the post - safe, but the generator
+    // itself must never emit it: the lead moves to a straight run (or
+    // shrinks, or is refused by name) and the program posts clean.
+    let world = new_world();
+    let mut history = History::default();
+    // Stock flush with the block top: the loop-to-loop hop rides the
+    // 8 mm retract plane, which must clear the stock.
+    box_stock(&world, &mut history, 100.0, 100.0, 5.0);
+    add_tool(&world, &mut history, "EM-0600-4FL");
+    history.execute(&world, ImportModel::from_mesh("holed", square_holed_block()));
+    let mut params = contour_params();
+    if let OpParams::Contour { lead, .. } = &mut params {
+        *lead = Lead::Arc { radius: 3.0 };
+    }
+    let cmd = CreateOperation::new(
+        &world,
+        "Holed1",
+        "EM-0600-4FL",
+        SrcRef::Entity("holed".into()),
+        params,
+    );
+    history.execute(&world, cmd.expect("create"));
+    history.execute(
+        &world,
+        GenerateOperation::new(&world, "Holed1").expect("generate"),
+    );
+    let e = model::find_by_name(&world, "Holed1").expect("op");
+    let cache = model::toolpath_of(&world, &e).expect("cache");
+    let path = tmp_nc("holed");
+    let posted = posting::post_setup(&world, &path);
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        cache.warnings.is_empty(),
+        "the lead must not gouge the hole wall: {:?} / post: {:?}",
+        cache.warnings,
+        posted.as_ref().err()
+    );
+    posted.expect("a clean contour posts");
+}
