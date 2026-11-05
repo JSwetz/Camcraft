@@ -8194,3 +8194,35 @@ differ while both verify clean: on vertical walls the shell's tips fall
 exactly on the planes, so what moves is the XY plan - rings where
 zigzag was - and that is the whole claim a switch can make without a
 dome fixture (the dome's geometry law is stage A's own suite).
+
+## M2.5 reference revisit — the placements the papers challenge, closed without re-strategizing (2026-11-05, close-out)
+
+**Chosen: the 45-deg auto-split and the polar-spiral placement stand
+re-confirmed, on measured comparison.** The `pdf-sources` papers entered
+the graph after those placements were verified, and the ROADMAP's ⚠️
+reopened them for review, not repair. Kumazawa/Feng, CAD 2015 (book2)
+measures 1.9-8.2% travel savings over a plain iso-scallop seed - but
+only on free-form PFD-topology surfaces, and on its own
+no-degenerate-point revolution case the proposed paths ARE
+circumferential iso-scallop, the family our ring ladder already rides
+at the same cusp promise; `SPLIT_MZ = cos 45` (params.rs) is the
+scallop law's own jurisdiction limit, which the paper never crosses.
+Zhou et al., CAD 2015 (book1)'s 16-26% finish-time win is over
+commercial zig-zag/contour-parallel on a fish pocket (Example 5:
+2h23m vs 3h13m/2h51m, PDF pp.16-18), while its parametric domain map
+degenerates to concentric circles on every fixture in our suite
+(dome/cone/box/plateau) - where `spiral()` is already the single
+retract-free curve - and its own text admits 3-5 boundary-corner paths
+needing tightened scallop, the violations our envelope lane exists to
+veto. Considered and dropped: a PFD tensor-field + separatrix
+segmentation module (its measured baselines are not ours; on our
+fixture class it invents region borders only the verifier would pay
+for), and a parametric-domain double-spiral tour (needs S(u,v)
+machinery we don't carry, would re-gate every M2.3 verdict, and its
+mesh-native cousin - distance-field contours - already shipped as
+Geodesic at M2.5 C). The hop-vs-smooth-link tour-closure choice is
+unmoved: a hop is a machine movement that is TRUE, a crossing feed is
+a crash. M2.1d's feed modulation is unchallenged by either paper; the
+NIST doc (RS274/NGC) is the language, not a strategy. No re-gate: the
+gate for a revisit that changes nothing is the evidence itself, and
+it's in this file's pages.

@@ -75,7 +75,7 @@ home - and, from M10.1, a declared set of tool kinds that can cut it
 | Operation | Status | Home |
 |-----------|--------|------|
 | 3D Adaptive roughing | ✅ | M2.1 |
-| 3D Offset pocket roughing | ⚠️ level staircase today, not offsets | M2.5 |
+| 3D Offset pocket roughing | ✅ | M2.5 |
 | 3D Contour | ✅ | M2.2 |
 | Horizontal (waterline) | ✅ | M2.2 |
 | Parallel | ✅ | M2.2 |
@@ -841,6 +841,29 @@ From prismatic parts to molds and dies. Roughing that holds constant tool
 load, finishing that meets a surface tolerance, and simulation you trust
 before touching metal.
 
+> Reference on the graph: two published papers on tool-path generation and
+> path efficiency sit in `pdf-sources/`, extracted into the knowledge graph
+> as this phase's speccing literature (public technical literature; nothing
+> from HSMWorks):
+>
+> - `pdf-sources/book2.pdf` — Kumazawa, Feng & Barakchi Fard, "Preferred
+>   feed direction field: a new tool path generation method for efficient
+>   sculptured surface machining", Computer-Aided Design 67–68 (2015) 1–12:
+>   a preferred-feed-direction (PFD) tensor field over the surface — at
+>   each point the feed direction that maximizes machining-strip width —
+>   whose degenerate points and separatrices segment the surface so
+>   iso-scallop paths follow each region's field with less strip overlap
+>   and a shorter total path. Speccing literature for M2.2's parallel and
+>   scallop placement laws and M2.5's steep-and-shallow partition.
+> - `pdf-sources/book1.pdf` — Zhou, Zhao & Li, "CNC double spiral tool-path
+>   generation based on parametric surface mapping", Computer-Aided Design
+>   67–68 (2015) 87–106: tool paths as isothermal lines of a
+>   thermal-conductivity PDE solved in a flattened parametric domain,
+>   smoothed by a bounded-curvature optimization and mapped back onto the
+>   NURBS surface; the double-spiral tour links without retractions.
+>   Speccing literature for the polar/spiral placements (M2.2), M2.5's
+>   morphed-spiral and flow items, and M11.1's smoothness thread.
+
 ### M2.1 - 3D Roughing
 **Goal: high-efficiency roughing that keeps the tool loaded and cool.**
 
@@ -1096,7 +1119,7 @@ before touching metal.
       M1.6 established for tap without sync)
 
 ### M2.5 - 3D Strategy Completeness
-**Goal: 3-axis finishing answers every surface type.** — 📋
+**Goal: 3-axis finishing answers every surface type.** — ✅
 
 - **Steep-and-shallow**: flat regions to the parallel/waterline law, steep
       to scallop - M2.2's 45-deg auto-split becomes the partition, not
@@ -1113,6 +1136,30 @@ before touching metal.
       the surface's own normals, waterlined where the shell turns
       steep), not the level ladder's XY rings; the M2.3 dexel sim
       judges the rest, as ever
+- **Reference revisit — the placements the papers challenge** (⚠️ reopens
+      done features for review, not for repair): M2.1d's feed modulation,
+      M2.2's parallel/scallop and polar-spiral placements and the ring-tour
+      join law were verified before the `pdf-sources` references (Phase 2
+      note) entered the graph. Re-run the efficiency comparison against
+      them on the standard finishing fixtures — PFD region segmentation vs.
+      the 45-deg auto-split, double-spiral domain-mapped tours vs. the
+      spiral placement — and let measured wins (shorter travel, fewer
+      retractions, tolerance held) re-strategize the done paths; absent a
+      win, the current strategies stand re-confirmed.
+      **Verdict (2026-11-05): done, and nothing re-strategized.** The PFD
+      paper's 1.9-8.2% wins are measured against iso-scallop seeds on
+      free-form PFD-topology surfaces; on its own no-degenerate-point cone
+      the field reduces to circumferential iso-scallop — our ring ladder's
+      family — and `SPLIT_MZ = cos 45°` is the scallop law's own
+      jurisdiction limit, which the paper never crosses. The double-spiral
+      paper's 25.9%/16.4% wins are against zig-zag/contour-parallel on a
+      fish pocket; on our revolution fixtures the map degenerates to
+      concentric circles, its corner scallop violations are what our
+      envelope lane would veto, and its mesh-native cousin already shipped
+      as Geodesic (M2.5 C). The hop-vs-smooth-link choice rides the
+      recorded tour-closure law. M2.1d's feed modulation is unchallenged
+      by either paper; the NIST doc is the RS-274 language, not a
+      strategy. Full evidence with page cites: RECOMMENDED.md.
 
 ---
 
@@ -1438,10 +1485,10 @@ at arm's length - the clean-room cuts toward reading SMLib, not away from it.
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) | ✅ |
-| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop, the polar placements (radial, spiral), the solid-truth hidden rest and the center-shadow families (contour, project) done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair, ray-parity material intervals, closed-loop march, the certified diagonal chain between raster lines); surface-finish params open | ⚠️ |
+| **M2.2** | Finish 3D to tolerance | Waterline, the tolerance-verification kernel, the parallel raster and scallop, the polar placements (radial, spiral), the solid-truth hidden rest and the center-shadow families (contour, project) done (tangent-locus rings and Z-follow lines, two-truth envelope, measured verdicts, 45-deg auto-split, the diagonal crossing pair, ray-parity material intervals, closed-loop march, the certified diagonal chain between raster lines); the four surface-finish params (tolerance, stepover, min_step, ramp_angle) went live and MEASURED at M2.5 A, which closes this row's last open clause | ✅ |
 | **M2.3** | Trust before cutting | Done: program material sim (chained cached ops), deviation color map with located verdicts, machine-definition checker (.mch travel/feed/spindle), verification made the post gate, 0.2.0 | ✅ |
-| **M2.4** | 2D, complete | 2D adaptive + offset pocket roughing, engrave, 2D chamfer, circular, standalone bore, helical thread milling | 📋 |
-| **M2.5** | 3-axis, complete | Steep-and-shallow, flat-area, pencil, ramp, morphed spiral, geodesic, blend/morph/corner, flow (freeform), deburr; M2.2's surface-finish params | 📋 |
+| **M2.4** | 2D, complete | Done: 2D adaptive + offset pocket roughing, engrave, 2D chamfer, circular, standalone bore, helical thread milling (row 78's offset-shell roughing rides on to M2.5 F) | ✅ |
+| **M2.5** | 3-axis, complete | Done: steep-and-shallow, flat-area, pencil, ramp, morphed spiral, geodesic, blend/morph/corner, flow (freeform), deburr, and 3D Offset pocket roughing (the shell); M2.2's surface-finish params; reference revisit vs. the `pdf-sources` papers (PFD field, double spiral) on the M2.1d/M2.2 placements closed - both placements stand re-confirmed on the literature | ✅ |
 | **M3.1** | Model changes, toolpaths update | Done: stable feature identity + `UpdateModel` revision (A), stamp inputs - tool/WCS/FromModel stock propagate, staleness rides the copy (B), live-question `stale_reason` + one-undo-unit `RegenerateAll` (C), re-MACHining - rest masks from predecessors' recorded paths, converges in two rounds (D) | ✅ |
 | **M3.2** | Production setups | Done: multi-setup with implicit-setup law + datum transfer (A); fixtures - user STEP solids wearing a marker, spindle/table bands from the `.mch`, live-gate collision law (B); per-setup tool list in change order (C); setup sheets, one form-fed page per setup, no timestamps (D); workspaces by machine kind, axis-inventory inference (E) | ✅ |
 | **M3.3** | Every control covered | Done: post template engine - mounted `.mch` shapes output, `SelectPost` rides the undo history, user `.cps` refuse by name (A); five built-in posts - Fanuc, Haas, 840D, Heidenhain, Mazak - by-name registry, conformance goldens (B); machine definitions - declared kind gates the op families, full numbers mirrored, coolant M-codes, changer capacity, draft-law editor (C); RTCP - G43.4 delegates pivots to the controller, rotaries mirror as geometry, angle words modal both ways; block-by-block post trace with derived selection (D); 0.3.0 | ✅ |
