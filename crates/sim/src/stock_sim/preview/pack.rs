@@ -327,10 +327,16 @@ mod tests {
 
     #[test]
     fn the_gate_refuses_a_huge_region_by_size_not_by_crash() {
-        // A long thin bar: every facet stays cheap to seed while
-        // the region itself blows the dense budget - the pack, not
-        // the builder, is the first thing to say no.
-        let f = box_field(Point3::new(0.0, 0.0, 0.0), Point3::new(1200.0, 90.0, 90.0), 1.0);
-        assert!(pack_field(&f).is_none(), "1212 * 102 * 102 cells is far past the 8M budget");
+        // Two 1 mm cubes at opposite corners of a 220 mm span: the
+        // sparse builder seeds only their ~24 facets (a long bar's
+        // whole skin cost ~50-80 s in debug), while the dense region
+        // still blows the budget - the pack, not the builder, is the
+        // first thing to say no.
+        let near = cube(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
+        let far = cube(Point3::new(220.0, 220.0, 220.0), Point3::new(221.0, 221.0, 221.0));
+        let facets: Vec<_> = near.facets.iter().chain(far.facets.iter()).copied().collect();
+        let f = SdfField::from_mesh(&facets, 1.0, FIELD_BAND).unwrap();
+        assert!(pack_field(&f).is_none(), "~234^3 = 12.8M cells is past the 8M budget");
+        assert!(pack_target(&f).is_none(), "the target pack shares the gate");
     }
 }

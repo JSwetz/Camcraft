@@ -20,10 +20,17 @@ use camcraft_app::stock::StockShape;
 use camcraft_app::stock_sim::{PreviewCamera, DEV_TOL};
 use camcraft_app::stock_view::{field_view, field_view_with, subdivide};
 
-/// A deliberately coarse display budget (~1.5 mm cells on the 60x60x20
-/// fixture): the wiring and the classes are the law under test, not
-/// resolution - and a debug build cuts it in seconds, not minutes.
-const COARSE: f64 = 20_000.0;
+/// Half the fixture's footprint. The M2.3 box is 60x60; the display
+/// cut's cost is the Face program's swept area (~16 s a document in
+/// debug at 60), so the eye suite faces a 20x20 box - same heights,
+/// same cell (COARSE scales with the volume), a ninth of the area.
+const HALF: f64 = 10.0;
+
+/// A deliberately coarse display budget (~1.5 mm cells: the fixture's
+/// volume over 3.6 mm^3 a texel): the wiring and the classes are the
+/// law under test, not resolution - and a debug build cuts it in
+/// seconds, not minutes.
+const COARSE: f64 = (2.0 * HALF) * (2.0 * HALF) * 20.0 / 3.6;
 use camcraft_app::tools::catalog;
 use camcraft_app::world::new_world;
 
@@ -31,18 +38,18 @@ fn catalog_tool(name: &str) -> camcraft_app::tools::Tool {
     catalog().into_iter().find(|(n, _)| *n == name).map(|(_, t)| t).expect("catalog entry")
 }
 
-/// The M2.3 fixture: a 60x60x20 box stock at `at`, a model box of
+/// The M2.3 fixture shrunk to 20x20 (see `HALF`): a box stock at `at`, a model box of
 /// `model_top` on the same footprint, one Face op to z 18 - generated.
 fn faced_doc(at: Point3, model_top: f64) -> (World, History) {
     let world = new_world();
     let mut history = History::default();
     let loc = Location { pos: at, rot: IDENTITY_Q };
-    let cmd = SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, loc);
+    let cmd = SetStock::new(&world, StockShape::Box { dx: 2.0 * HALF, dy: 2.0 * HALF, dz: 20.0 }, loc);
     history.execute(&world, cmd.expect("box stock"));
     let cmd = AddTool::new(&world, "EM-0400-2FL", catalog_tool("EM-0400-2FL"));
     history.execute(&world, cmd.expect("catalog tool"));
-    let lo = Point3::new(at.x - 30.0, at.y - 30.0, 0.0);
-    let hi = Point3::new(at.x + 30.0, at.y + 30.0, model_top);
+    let lo = Point3::new(at.x - HALF, at.y - HALF, 0.0);
+    let hi = Point3::new(at.x + HALF, at.y + HALF, model_top);
     history.execute(&world, ImportModel::from_mesh("part", cube(lo, hi)));
     let params = OpParams::Face {
         tilt: None,
