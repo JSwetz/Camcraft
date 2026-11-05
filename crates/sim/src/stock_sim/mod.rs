@@ -56,6 +56,8 @@
 mod cut;
 mod dexel;
 mod deviate;
+mod field;
+mod field_gen;
 mod gouge;
 mod kernel;
 mod scan;
@@ -64,6 +66,7 @@ mod tiles;
 pub use cut::{auto_cell, simulate, SimOp};
 pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSurface};
 pub use dexel::{reach, Dexel};
+pub use field::SdfField;
 pub use gouge::dist_seg_tri;
 pub use kernel::{measure, part_surface, StockError, StockReport};
 pub use scan::{envelope_scan, envelope_scan_centers, EnvelopeReport};

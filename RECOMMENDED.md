@@ -8226,3 +8226,49 @@ a crash. M2.1d's feed modulation is unchallenged by either paper; the
 NIST doc (RS274/NGC) is the language, not a strategy. No re-gate: the
 gate for a revisit that changes nothing is the evidence itself, and
 it's in this file's pages.
+
+## M7.1 A — the brick SDF field: five decisions the stage-A law rests on (2026-11-05)
+
+**Chosen: sign by live ray-parity at the query point, magnitude by the
+BFS graph value, band truncated on the value and clamped at cap.**
+Considered and dropped, decision by decision. (1) A per-column cache
+of the CENTER ray's crossings for the sign - O(1) queries, the shape
+`solid_rest`'s column walk suggests - is NOT exact: a wall thinner than
+a cell passes between the point and its column's center and flips the
+answer. The fin test (`a_sub_cell_wall_still_flips_the_sign...`) proves
+the error class exists and that the live call survives it; speed rides
+stage C's ray-keyed acceleration, honesty now. (2) Hop cost: a six-
+neighbor step advances one cell; charging it a full cell over-reports
+clearance along diagonals (the direction the dexel header forbids),
+charging it `cell / sqrt(3)` makes every straight path's graph cost
+its true length plus the seed's half-diagonal at worst - under-report,
+which the ROADMAP's subtraction law blesses ("clearance rounds toward
+danger, never a hidden gouge"). `HOP = 1/sqrt(3)`, proved in the value
+test's lower bound. (3) Truncation: first pass cut on `v <= cap + 2`
+alone and let stored values ABOVE `cap` leak into answers - "beyond the
+band answers cap" died at true distance 1.5. Second pass cut on hop
+count and restored the leak's opposite (in-band cells answering cap at
+a diagonal factor's distance short of the band edge). Final law takes
+both halves: expand on the value horizon, STORE `min(v, cap)` - the
+magnitude is `cap` past the band whether the cell is allocated or not,
+and the staircase bound `v <= t + 1.73*cells` proves every cell at
+truth <= cap gets stored, so `cap` over-reports by no more than two
+cells. The eikonal sweep that makes magnitude exact everywhere is
+stage C, per the ROADMAP. (4) Sparsity claimed honestly: an L1 BFS
+footprint is an octahedron, so "band 2" stores ~9 cells of reach both
+ways; a sphere 100 cells across is ~a third of its box, not 1-5%. The
+ROADMAP's "1-5% of the nominal grid" is the clipmap/multi-resolution
+regime (M7.1 C), and the test measures the bbox law the stage ships.
+(5) Watertightness: every canonical edge used exactly twice - catches
+holes AND (mostly) non-manifold joints, the exact precondition parity
+needs; the edge key must carry BOTH endpoints by bits (a single-
+endpoint key made every edge at a shared vertex "used 6 time(s)" and
+refused good boxes - the bug the first build taught). Two disjoint
+shells pass the gate and read their overlap as air, which is what
+even-odd parity MEANS (the fin test states it; the stage-B subtraction
+consumes it unchanged).
+
+Gate note: the R=200 sparsity parameter caught a cell-of-two bug -
+`seed_exact` divided its scan bounds by `cell` twice, which is invisible
+at cell 1.0 and empty everywhere else. The lattice tests now carry a
+non-unit cell each; that is the class the bug belonged to.

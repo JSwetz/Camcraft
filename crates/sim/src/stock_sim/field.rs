@@ -1,0 +1,322 @@
+//! The signed-distance stock field behind the `stock_sim` seam (M7.1 A).
+//!
+//! Provenance: narrow-band sparse-field CSG and the brick (clipmap)
+//! storage layout are published implicit-surface practice - the
+//! multi-source BFS distance transform of Barilla et al. (2024) and the
+//! brick-map discipline the Phase 7 reference note names. The sign is
+//! the ray-parity law this codebase already ships in `solid_rest`,
+//! reused whole. Nothing derived from vendor binaries or forensics.
+//!
+//! ## The laws here
+//!
+//! - **The mesh stays the source of truth.** This field is the
+//!   preview/verdict-display stock of Phase 7: what it says about a
+//!   point answers "what is left here" where a column top cannot speak
+//!   (undercuts, radially-machine bodies, 5-axis sweeps), and the M2.2
+//!   parity module remains the sign's only author.
+//! - **Sign exact, magnitude bounded.** The sign is ray-parity along
+//!   the query's OWN ray, evaluated against the shell live: no cell
+//!   size, band width, or BFS slack can ever call material "air" -
+//!   material is never hidden. (A per-column cache of the CENTER
+//!   ray's crossings is what this module planned first; it is not
+//!   exact - a wall thinner than a cell can pass between the point
+//!   and its column's center and flip the answer - so stage A keeps
+//!   the honest live call and leaves the ray-keyed render-side
+//!   acceleration to stage C.) The band magnitude is the BFS graph
+//!   distance, within about a cell of the true distance near the
+//!   surface, clamped so nothing past the band is ever bigger than
+//!   `cap`; `cap` sits within two cells of the band's truth edge -
+//!   clearance rounds TOWARD the surface up to that slack, the
+//!   direction the ROADMAP's subtraction law and the dexel header's
+//!   "over-reporting rest is honest noise" choose on purpose. The
+//!   eikonal re-normalization sweep that makes the magnitude exact
+//!   everywhere rides stage C.
+//! - **Sparse by brick, not octree.** 8x8x8-cell bricks of f64 under
+//!   a flat hash map; only near-surface bricks exist. An allocated
+//!   brick's out-of-band cell is NaN, and NaN answers the same law as
+//!   an absent brick: `cap`.
+//! - **Total input.** A non-finite vertex, a zero-area facet, a
+//!   non-watertight shell, or a nonsense cell size refuses with the
+//!   defect named, before any cell is written. The query contract
+//!   carries the law through: a non-finite point answers NaN, never
+//!   a panic; an `Open` parity column (unreachable past the gate)
+//!   answers material.
+//! - **Orientation-free.** Distance reads points, parity reads
+//!   crossings; flipping every facet's winding changes nothing (the
+//!   `solid_rest` law (c), inherited whole).
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use crate::geometry::{Point3, Triangle};
+use crate::solid_rest::{column_crossings, Crossings};
+
+use super::kernel::StockError;
+
+/// Cells on a brick edge: 512 f64 per allocated brick.
+pub(crate) const BRICK: i32 = 8;
+const BRICK3: usize = (BRICK * BRICK * BRICK) as usize;
+
+/// The seed shell radius, in cells: every surface point has a cell
+/// center within half a diagonal (sqrt(3)/2 cells), so a radius of
+/// sqrt(3) cells keeps the seed set dense on the shell and the BFS
+/// never starts from nothing.
+pub(crate) const SEED_R: f64 = 1.7320508075688772; // sqrt(3), cells
+
+/// BFS hop cost, in cells: a six-neighbor hop steps exactly one cell,
+/// and an L1 staircase costs L1/sqrt(3) <= its own straight length,
+/// which is the bound that keeps the graph distance under the true
+/// distance near the surface.
+pub(crate) const HOP: f64 = 0.5773502691896258; // 1 / sqrt(3), cells
+
+/// One narrow-band signed-distance grid: a watertight mesh sampled
+/// once into sparse bricks. Construct with `SdfField::from_mesh`.
+pub struct SdfField {
+    pub(crate) cell: f64,
+    /// Magnitudes beyond the band answer `sign * cap`.
+    pub(crate) cap: f64,
+    pub(crate) mesh: Arc<Vec<Triangle>>,
+    pub(crate) bricks: HashMap<[i32; 3], Box<[f64; BRICK3]>>,
+}
+
+/// World cell of a point on the origin-locked lattice.
+pub(crate) fn cell_of(v: f64, cell: f64) -> i32 {
+    (v / cell).floor().clamp(i32::MIN as f64, i32::MAX as f64) as i32
+}
+
+/// Cell-center coordinate of lattice index `i`.
+pub(crate) fn center_of(i: i32, cell: f64) -> f64 {
+    (i as f64 + 0.5) * cell
+}
+
+impl SdfField {
+    /// The field's cell edge length.
+    #[must_use]
+    pub fn cell(&self) -> f64 {
+        self.cell
+    }
+
+    /// The far-field magnitude every out-of-band query returns.
+    #[must_use]
+    pub fn cap(&self) -> f64 {
+        self.cap
+    }
+
+    /// Allocated bricks: the sparsity promise is measurable.
+    #[must_use]
+    pub fn brick_count(&self) -> usize {
+        self.bricks.len()
+    }
+
+    /// The signed distance at `p`: negative in material, positive in
+    /// air, zero at the shell. The sign is exact (parity on p's own
+    /// ray); the magnitude is the band value near the surface and
+    /// `cap` beyond it, in the conservative direction the header
+    /// names.
+    #[must_use]
+    pub fn distance(&self, p: Point3) -> f64 {
+        if !p.is_finite() {
+            return f64::NAN;
+        }
+        let key = [cell_of(p.x, self.cell), cell_of(p.y, self.cell), cell_of(p.z, self.cell)];
+        let mag = match self.bricks.get(&brick_of(key)) {
+            Some(b) => {
+                let v = b[in_brick(key)];
+                if v.is_nan() {
+                    self.cap
+                } else {
+                    v
+                }
+            }
+            None => self.cap,
+        };
+        if mag == 0.0 {
+            return 0.0; // on the shell: either sign would be a lie
+        }
+        let sign = if self.inside(p) { -1.0 } else { 1.0 };
+        sign * mag
+    }
+
+    /// Ray-parity membership of `p` on p's own ray, the `solid_rest`
+    /// law: an odd number of shell crossings strictly above `p.z` is
+    /// inside. `Open` is unreachable past `from_mesh`'s watertightness
+    /// gate; should a mesh ever be built around it, it answers
+    /// material - never hidden material is the law.
+    #[must_use]
+    pub fn inside(&self, p: Point3) -> bool {
+        match column_crossings(&self.mesh, p.x, p.y) {
+            Crossings::Paired(z) => z.iter().filter(|&&c| c > p.z).count() % 2 == 1,
+            Crossings::Open { .. } => true,
+        }
+    }
+
+    /// The exact unsigned distance from `p` to the shell, mesh-read:
+    /// the number the band's magnitude is bounded against. Linear in
+    /// the facets - a calibration and a test oracle, never a hot path.
+    #[must_use]
+    pub fn true_distance(&self, p: Point3) -> f64 {
+        let mut best = f64::INFINITY;
+        for t in self.mesh.iter() {
+            best = best.min(super::gouge::dist_pt_tri(p, t));
+        }
+        best
+    }
+
+    /// The band cell's storage slot, allocating its brick.
+    pub(crate) fn brick_mut(&mut self, key: [i32; 3]) -> &mut [f64; BRICK3] {
+        self.bricks
+            .entry(brick_of(key))
+            .or_insert_with(|| Box::new([f64::NAN; BRICK3]))
+    }
+}
+
+/// The brick a cell lives in.
+pub(crate) fn brick_of(key: [i32; 3]) -> [i32; 3] {
+    [
+        key[0].div_euclid(BRICK),
+        key[1].div_euclid(BRICK),
+        key[2].div_euclid(BRICK),
+    ]
+}
+
+/// The cell's slot inside its brick (x fastest, then y, then z).
+pub(crate) fn in_brick(key: [i32; 3]) -> usize {
+    let (x, y, z) = (
+        key[0].rem_euclid(BRICK) as usize,
+        key[1].rem_euclid(BRICK) as usize,
+        key[2].rem_euclid(BRICK) as usize,
+    );
+    x + BRICK as usize * y + BRICK as usize * BRICK as usize * z
+}
+
+/// Shared input gate for every field constructor: a non-empty mesh of
+/// finite, non-degenerate facets whose every edge is used by exactly
+/// two of them (the closed shell parity needs), and a sane cell and
+/// band. The defect is named, never a silent repair.
+pub(crate) fn validate_shell(facets: &[Triangle], cell: f64, band: u32) -> Result<(), StockError> {
+    if facets.is_empty() {
+        return Err(StockError::Invalid("sdf field: the mesh is empty".into()));
+    }
+    if !cell.is_finite() || cell <= 0.0 {
+        return Err(StockError::Invalid(format!(
+            "sdf field: cell size {cell} is not a positive finite number"
+        )));
+    }
+    if band == 0 {
+        return Err(StockError::Invalid("sdf field: band must be at least one cell wide".into()));
+    }
+    let mut edges: HashMap<[u64; 6], u32> = HashMap::new();
+    for (n, t) in facets.iter().enumerate() {
+        if !(t.a.is_finite() && t.b.is_finite() && t.c.is_finite()) {
+            return Err(StockError::Invalid(format!(
+                "sdf field: facet {n} has a non-finite vertex"
+            )));
+        }
+        let (e0, e1) = (t.b - t.a, t.c - t.a);
+        let cr = e0.cross(e1);
+        if cr.dot(cr) <= 1e-24 {
+            return Err(StockError::Invalid(format!(
+                "sdf field: facet {n} has zero area (degenerate triangle)"
+            )));
+        }
+        for (u, v) in [(t.a, t.b), (t.b, t.c), (t.c, t.a)] {
+            *edges.entry(edge_key(u, v)).or_insert(0) += 1;
+        }
+    }
+    if let Some((k, c)) = edges.iter().find(|entry| *entry.1 != 2) {
+        return Err(StockError::Invalid(format!(
+            "sdf field: shell is not watertight - the edge from ({}, {}, {}) to ({}, {}, {}) is used {} time(s); closed parity needs 2",
+            k[0], k[1], k[2], k[3], k[4], k[5], c
+        )));
+    }
+    Ok(())
+}
+
+/// Canonical edge key from two finite points: both endpoints, by bit
+/// pattern, earlier one first. -0.0 folds to 0.0 so shared vertices
+/// agree in bits the way they already agree in value.
+fn edge_key(a: Point3, b: Point3) -> [u64; 6] {
+    let canon = |q: Point3| {
+        let f = |v: f64| if v == 0.0 { 0.0 } else { v };
+        [f(q.x).to_bits(), f(q.y).to_bits(), f(q.z).to_bits()]
+    };
+    let (ka, kb) = (canon(a), canon(b));
+    if ka <= kb {
+        [ka[0], ka[1], ka[2], kb[0], kb[1], kb[2]]
+    } else {
+        [kb[0], kb[1], kb[2], ka[0], ka[1], ka[2]]
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    #[test]
+    fn brick_slot_round_trips_across_negatives() {
+        for k in [[-1i32, -2, 3], [0, 0, 0], [7, -8, 9], [-9_000, 1, -1]] {
+            let b = brick_of(k);
+            let slot = in_brick(k);
+            let back = [
+                b[0] * BRICK + slot.rem_euclid(BRICK as usize) as i32,
+                b[1] * BRICK + (slot / BRICK as usize).rem_euclid(BRICK as usize) as i32,
+                b[2] * BRICK + (slot / (BRICK * BRICK) as usize).rem_euclid(BRICK as usize) as i32,
+            ];
+            assert_eq!(back, k, "slot {slot} of brick {b:?} must name cell {k:?}");
+        }
+    }
+
+    #[test]
+    fn a_hole_in_the_shell_refuses_by_name() {
+        // The box's 12 triangles minus one: a square seam used once.
+        let mut f = box_facets();
+        f.pop();
+        let e = validate_shell(&f, 1.0, 4).unwrap_err();
+        assert!(format!("{e}").contains("watertight"), "{e}");
+    }
+
+    #[test]
+    fn degenerate_and_non_finite_inputs_refuse_by_name() {
+        let e = validate_shell(&[], 1.0, 4).unwrap_err();
+        assert!(format!("{e}").contains("empty"), "{e}");
+        let f = vec![Triangle::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(2.0, 0.0, 0.0),
+        )];
+        let e = validate_shell(&f, 1.0, 4).unwrap_err();
+        assert!(format!("{e}").contains("zero area"), "{e}");
+        let mut g = box_facets();
+        g[0].c.z = f64::NAN;
+        let e = validate_shell(&g, 1.0, 4).unwrap_err();
+        assert!(format!("{e}").contains("non-finite"), "{e}");
+        let e = validate_shell(&box_facets(), 0.0, 4).unwrap_err();
+        assert!(format!("{e}").contains("cell size"), "{e}");
+        let e = validate_shell(&box_facets(), f64::NAN, 4).unwrap_err();
+        assert!(format!("{e}").contains("cell size"), "{e}");
+        let e = validate_shell(&box_facets(), 1.0, 0).unwrap_err();
+        assert!(format!("{e}").contains("band"), "{e}");
+    }
+
+    /// The 4x4x4 box at the origin, 12 triangles.
+    pub(crate) fn box_facets() -> Vec<Triangle> {
+        let v = |i: usize| {
+            Point3::new(
+                [0.0, 4.0][i & 1],
+                [0.0, 4.0][(i >> 1) & 1],
+                [0.0, 4.0][(i >> 2) & 1],
+            )
+        };
+        let quad = |a: usize, b: usize, c: usize, d: usize| -> [Triangle; 2] {
+            [Triangle::new(v(a), v(b), v(c)), Triangle::new(v(a), v(c), v(d))]
+        };
+        let mut t = Vec::with_capacity(12);
+        t.extend(quad(4, 5, 7, 6));
+        t.extend(quad(0, 2, 3, 1));
+        t.extend(quad(0, 1, 5, 4));
+        t.extend(quad(2, 6, 7, 3));
+        t.extend(quad(1, 3, 7, 5));
+        t.extend(quad(2, 0, 4, 6));
+        t
+    }
+}

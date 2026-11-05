@@ -191,7 +191,7 @@ pub fn dist_seg_tri(a: Point3, b: Point3, t: &Triangle) -> f64 {
 /// projection lands inside, the three edges everywhere else (a
 /// degenerate triangle IS nothing but its edges - true geometry, not
 /// a fallback).
-fn dist_pt_tri(p: Point3, t: &Triangle) -> f64 {
+pub(crate) fn dist_pt_tri(p: Point3, t: &Triangle) -> f64 {
     let (a, b, c) = (t.a, t.b, t.c);
     let (e0, e1) = (
         (b.x - a.x, b.y - a.y, b.z - a.z),
