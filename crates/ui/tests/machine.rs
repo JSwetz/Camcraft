@@ -35,7 +35,7 @@ fn tmp_mch(tag: &str, text: &str) -> PathBuf {
 fn mch_text(spindle_max: &str) -> String {
     format!(
         r#"{{
-      "general": {{"model": "TestMill 1", "vendor": "Hsmworks Testbench"}},
+      "general": {{"model": "TestMill 1", "vendor": "CamCraft Testbench"}},
       "kinematics": {{"default": {{
         "units": {{"angle": "degrees", "length": "mm"}},
         "parts": [
@@ -71,7 +71,7 @@ fn load_machine_names_it_and_undo_mutes_it() {
     state.pending.push_back(CommandKind::LoadMachineFile(path.clone()));
     state.drain_actions();
     assert!(
-        state.status.starts_with("machine: Hsmworks Testbench TestMill 1"),
+        state.status.starts_with("machine: CamCraft Testbench TestMill 1"),
         "the status names the machine: {}",
         state.status
     );

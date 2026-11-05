@@ -2239,7 +2239,7 @@ fn v18_file_steps_to_v19_and_the_machine_grammar_round_trips() {
         "version": 19,
         "entities": [],
         "machine": {"path": "testbench.mch", "machine": {
-            "model": "Testbench 1", "vendor": "Hsmworks Testbench",
+            "model": "Testbench 1", "vendor": "CamCraft Testbench",
             "spindle_min": 50.0, "spindle_max": 12000.0,
             "axes": [
                 {"name": "X", "feed": 5000.0, "rapid": 15000.0, "travel": [-100.0, 100.0]},
@@ -3339,7 +3339,7 @@ fn the_stage_c_machine_fields_round_trip_and_unset_ones_mint_nothing() {
     let world = new_world();
     let m = machine::Machine {
         model: "Wide 1".into(),
-        vendor: "Hsmworks Testbench".into(),
+        vendor: "CamCraft Testbench".into(),
         kind: Some("mill-turn".into()),
         spindle_power: Some(18.5),
         tool_count: Some(40),

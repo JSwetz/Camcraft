@@ -2819,7 +2819,7 @@ fn a_lathe_machine_darkens_the_mill_cells() {
         std::fs::write(
             &path,
             format!(
-                r#"{{"general":{{"model":"TestBench","vendor":"Hsmworks Testbench"}},
+                r#"{{"general":{{"model":"TestBench","vendor":"CamCraft Testbench"}},
                     "kinematics":{{"default":{{"units":{{"length":"mm"}},"parts":[
                       {axes}
                     ]}}}}}}"#
