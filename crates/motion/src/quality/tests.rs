@@ -98,3 +98,22 @@ fn rest_area_counts_what_stands_inside() {
     let a = rest_area(&dex, &reg, -1.0);
     assert!((a - 100.0).abs() < 3.0, "uncut square stands whole: {a}");
 }
+
+#[test]
+fn a_lifted_return_over_the_cut_floor_is_lift_not_floor_air() {
+    // A slot cut at z = -1, then back over it 0.3 above the floor (a
+    // microlift return), then the same return on the floor itself.
+    let spec = QualitySpec::new(10.0);
+    let mut dex = block(&spec);
+    // A 14 mm channel first: the returns below run 6 mm off its walls.
+    let _ = measure(&pass((0.0, -2.0), (50.0, -2.0), -1.0), &mut dex, &spec);
+    let mut moves = pass((0.0, 2.0), (40.0, 2.0), -1.0).moves;
+    moves.push(Move::new(MoveKind::Feed, Point3::new(40.0, 2.0, -1.0), Point3::new(40.0, 0.0, -0.7), Some(1000.0)));
+    moves.push(feed((40.0, 0.0), (10.0, 0.0), -0.7));
+    moves.push(Move::new(MoveKind::Feed, Point3::new(10.0, 0.0, -0.7), Point3::new(10.0, 0.0, -1.0), Some(1000.0)));
+    moves.push(feed((10.0, 0.0), (30.0, 0.0), -1.0));
+    let q = measure(&Toolpath::new(moves), &mut dex, &spec);
+    assert!(q.cut_len > 30.0, "the second pass bites: {}", q.cut_len);
+    assert!((q.lift_len - 30.0).abs() < 1.0, "the lifted return: {}", q.lift_len);
+    assert!((q.air_len - 20.0).abs() < 1.0, "the floor return is floor air: {}", q.air_len);
+}

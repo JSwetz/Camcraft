@@ -150,14 +150,6 @@ impl Star {
         self.rows.first().map_or(0.0, |r| r.0)
     }
 
-    /// Shortest over longest ray of the final row: how round the cell is.
-    pub(super) fn aspect(&self) -> f64 {
-        let Some((_, r)) = self.rows.first() else { return 0.0 };
-        let lo = r.iter().copied().fold(f64::INFINITY, f64::min);
-        let hi = r.iter().copied().fold(0.0, f64::max);
-        if hi > 0.0 { lo / hi } else { 0.0 }
-    }
-
     /// Shortest ray of the final row.
     pub(super) fn shortest(&self) -> f64 {
         self.rows.first().map_or(0.0, |r| r.1.iter().copied().fold(f64::INFINITY, f64::min))
@@ -191,4 +183,58 @@ impl Star {
         let row = |m: usize| self.rows[m].1[j0] * (1.0 - u) + self.rows[m].1[j1] * u;
         row(i) * (1.0 - w) + row(j) * w
     }
+}
+
+/// The star admission (round 4): the area is one morph spiral's only
+/// where it is [`STAR_WIDTH_PER_R`] tool radii wide everywhere - the
+/// erosion by that half-width stays one piece, and its opening comes
+/// back to within the half-width of every vertex (only corner wedges of
+/// 60 degrees and wider are lost). A narrower channel (a 22 mm one with
+/// a D10, round as its rays are) overloads a morph front that sweeps it
+/// sideways; the growth rings (`grow`) take it. Width by morphological
+/// erosion and opening, Serra (1982); the threshold is ours.
+pub(super) fn wide_enough(center: &Region, half: f64) -> Result<bool, GenError> {
+    let eroded = center.offset(-half)?;
+    let [l] = eroded.loops() else { return Ok(false) };
+    if l.area() <= 0.0 {
+        return Ok(false);
+    }
+    let opened = eroded.offset(half)?;
+    let far = |v: Point2| !opened.contains(v) && super::loops::boundary_dist(&opened, v) > half;
+    Ok(!center.loops().iter().flat_map(|l| l.points().iter()).any(|&v| far(v)))
+}
+
+/// The star cell's width law: [`wide_enough`] at half this many radii
+/// (1.4 D wide).
+pub(super) const STAR_WIDTH_PER_R: f64 = 2.8;
+
+/// The star cell the morph spiral runs over, when the whole center area
+/// is one, seen from the seed, and wide enough ([`wide_enough`]);
+/// `None` sends the plan to the growth rings or the engagement fronts.
+pub(super) fn star_cell(center: &Region, s: &super::AdaptiveSpec) -> Result<Option<Star>, GenError> {
+    let rho_c = corner_radius(center, s.r);
+    let radii: Vec<f64> = (0..12).map(|k| rho_c * 1.6f64.powi(k)).collect();
+    let orbit = (s.seed, orbit_radius(s));
+    if !wide_enough(center, 0.5 * STAR_WIDTH_PER_R * s.r)? {
+        return Ok(None);
+    }
+    // The rays leave from the seed (`kernel::preferred_seed` put it
+    // where they are most alike, when the entry let it choose).
+    let cell = Star::new(center, s.seed, &radii, orbit)?;
+    Ok(cell.filter(|c| (c.min_rho() - rho_c).abs() < 1e-9))
+}
+
+/// The radius the morph spiral's last ring rounds the walls' corners
+/// at: [`super::CORNER_PER_R`] of the tool radius, or under half the area's
+/// inscribed radius where the area is narrower (a channel's opening must
+/// not vanish).
+pub(crate) fn corner_radius(center: &Region, r: f64) -> f64 {
+    let rho = r * super::CORNER_PER_R;
+    super::widest_point(center).map_or(rho, |w| rho.min(0.45 * w.1))
+}
+
+/// The radius of the entry's orbit: the helix's, or a hair out of a
+/// tool-size bore.
+pub(super) fn orbit_radius(s: &super::AdaptiveSpec) -> f64 {
+    if s.helix_r > 1e-6 { s.helix_r } else { (0.05 * s.r).min(s.bore.max(1e-3)) }
 }

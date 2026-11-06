@@ -273,13 +273,13 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     };
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     // The HSM plan may choose where its entry stands (`pocket_hsm`).
-    let (passes, strategy, room) = match strategy {
+    let (passes, strategy, room, joins) = match strategy {
         PocketStrategy::Adaptive => {
-            let (passes, notes, s, room) = adaptive_passes(&center, p)?;
+            let (passes, notes, s, room, joins) = adaptive_passes(&center, p)?;
             notes.into_iter().for_each(|n| b.note(n));
-            (passes, s, room)
+            (passes, s, room, joins)
         }
-        s => (plan_passes(&center, p.tiling_step(), p.climb, s)?, s, None),
+        s => (plan_passes(&center, p.tiling_step(), p.climb, s)?, s, None, Vec::new()),
     };
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     // Waterline rings circle around material, so they get the arc fitter
@@ -297,7 +297,8 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         .with_entry(p.entry, helix_r)
         .with_arc_radius(p.tool_diameter)
         .with_links(p.links, helix_r)
-        .with_top(p.top_z);
+        .with_top(p.top_z)
+        .with_microlift(joins);
     // The walks: fitted where the strategy fits, then - opted in - the
     // corner fillets, proved inside the cutter-center area. Passes are
     // one plan at every level, so the plan's refusals are said once.

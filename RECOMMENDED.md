@@ -10135,3 +10135,67 @@ Owed:
 - a Face fallback that moves the entry out past the stock instead of refusing;
 - guards for 5-axis Contour/Parallel (tilted descents);
 - counting stock that earlier ops already cleared.
+
+## M11.4 C round 5: microlift returns, a hop budget, and the honest 5° kink law: three decisions (2026-11-06)
+
+(1) **Microlift returns land for grown plans (slot, channel, island).** Rounds
+4 and 5 are merged; the crossing-law part landed separately in 6ba671b. The
+spiral is cut only where it bites. Its pieces are joined by lifted returns
+that:
+- go straight across already-cleared stock;
+- are checked to stay in the area, sweep no stock, avoid the entry helix,
+  and never cross another return.
+
+Narrow slot results:
+- floor air 11 m -> 0.9 m;
+- moves 68k -> 43k;
+- load 15.4%;
+- verify clean.
+
+Star plans (bore, rectangle, L) are not lifted; they post the round-2 spiral.
+Dropped: cell decomposition, which needs a new descent per cell and so breaks
+the one-descent-per-level law.
+
+(2) **A retract-hop budget of 8 per level.** A plan that would need more
+retract hops is refused, and the pocket falls back to Offset rings by name,
+for example: "the HSM plan would reach 9 passes a level by retract hops (over
+8) - Offset rings cut this pocket instead". The island now does this in 109 s
+instead of 492 s of routing. Scheduling stops early once the cap is passed,
+and a half-scheduled plan is never posted.
+
+(3) **The 5° kink law is measured honestly and ratcheted.** Main's report
+printed "past 5 deg" but measured at the 10° default. At a true 5°:
+- rectangle shows 110 breaks (worst 6.4°);
+- L shows 202 breaks (worst 6.6°);
+- the slot's entry orbit shows 2 breaks (5.0°).
+
+These star-plan morph seams were never measured before and are not a
+regression. The full report pins them as an upper bound (`KINK_RATCHET`): any
+rise in count or in the worst angle fails. Driving them to zero (morph-seam
+smoothing for star plans) is owed.
+
+Dropped: setting the threshold back to 10°, which would hide them; and leaving
+the heavy lane red.
+
+## Operation dialog polish: three decisions (2026-11-06)
+
+(1) **Every caption that sat above its control is now a same-row property
+row.** This covers Side, Strategy, Pattern, Stepover and Minimum step. Captions
+that only repeated a control's own label were removed.
+
+(2) **Every kind's Heights tab ends in a "Levels" group** holding whichever it
+has: retract hop and Retract Z, Face depth staging, the hole override,
+Stepdown. Retract Z therefore now reads after Top/Bottom Z.
+
+(3) **The remaining "0 means auto" fields became Auto toggles.** Seeds:
+- Peck 2.0 mm;
+- Bar advance 10.0 mm;
+- Probe budget 0.02 mm;
+- Stepover √(24·tol);
+- Minimum step 0.1·√(12·tol);
+- Steep stepover √(12·tol);
+- Reference ball 24 mm.
+
+Option-backed fields use `auto_opt`, where Auto means None. Real zeros (Bore
+stock to leave, Dwell) stay plain numbers. Drill "Dwell at bottom" now reads
+seconds, not mm through the inch conversion (a units bug fixed in passing).

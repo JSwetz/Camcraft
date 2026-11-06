@@ -65,6 +65,9 @@ pub struct PathQuality {
     /// Planar feed length in material / in air, rapid length (mm).
     pub cut_len: f64,
     pub air_len: f64,
+    /// Planar feed length in air ABOVE the plane last cut (mm): lifted
+    /// returns (microlifts) - feed travel, not floor air, not a rapid.
+    pub lift_len: f64,
     pub rapid_len: f64,
     /// Air feed + rapid time (s) at the path's own feeds.
     pub air_time_s: f64,
@@ -101,6 +104,7 @@ impl Default for PathQuality {
             max_curvature: 0.0,
             cut_len: 0.0,
             air_len: 0.0,
+            lift_len: 0.0,
             rapid_len: 0.0,
             air_time_s: 0.0,
             retracts: 0,
@@ -151,7 +155,7 @@ impl PathQuality {
     pub fn report_line(&self, name: &str) -> String {
         format!(
             "{name:<24} max {:5.1} deg = load {:5.1}% D at ({:.2},{:.2}) p50 {:3.0} p95 {:3.0} | slot {:5.1} mm \
-             | breaks {:3} (worst {:5.1} deg) kmax {:5.3}/mm | cut {:7.1} air {:7.1} rapid {:6.1} mm, air {:5.1} s \
+             | breaks {:3} (worst {:5.1} deg) kmax {:5.3}/mm | cut {:7.1} air {:7.1} lift {:6.1} rapid {:6.1} mm, air {:5.1} s \
              | retracts {} descents {}",
             self.max_deg,
             self.max_load() * 100.0,
@@ -165,6 +169,7 @@ impl PathQuality {
             self.max_curvature,
             self.cut_len,
             self.air_len,
+            self.lift_len,
             self.rapid_len,
             self.air_time_s,
             self.retracts,

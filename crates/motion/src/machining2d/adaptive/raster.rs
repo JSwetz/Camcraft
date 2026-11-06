@@ -174,6 +174,28 @@ impl Raster {
         best as f64 * 180.0 / FRONT_SAMPLES as f64
     }
 
+    /// Grid size (cells along x, along y).
+    pub(super) fn dims(&self) -> (usize, usize) {
+        (self.nx, self.ny)
+    }
+
+    /// Is cell `i` stock or wall?
+    pub(super) fn blocked(&self, i: usize) -> bool {
+        self.cells.get(i).copied().unwrap_or(true) || self.wall.get(i).copied().unwrap_or(true)
+    }
+
+    /// The cell `p` lies in, when on the grid.
+    pub(super) fn cell_of(&self, p: Point2) -> Option<(usize, usize)> {
+        let fx = (p.x - self.x0) / self.h;
+        let fy = (p.y - self.y0) / self.h;
+        (fx >= 0.0 && fy >= 0.0 && fx < self.nx as f64 && fy < self.ny as f64).then_some((fx as usize, fy as usize))
+    }
+
+    /// The center of cell `i`.
+    pub(super) fn center(&self, i: usize) -> Point2 {
+        Point2::new(self.x0 + ((i % self.nx) as f64 + 0.5) * self.h, self.y0 + ((i / self.nx) as f64 + 0.5) * self.h)
+    }
+
     /// Material cells standing (the progress yardstick of a round).
     pub(super) fn standing(&self) -> usize {
         self.cells.iter().filter(|&&c| c).count()
@@ -237,6 +259,75 @@ impl Raster {
             }
         }
         worst
+    }
+
+    /// [`Raster::walk`], read per segment: the worst angle each segment
+    /// `pts[i] -> pts[i + 1]` read (the microlift's air/cut marks).
+    pub(super) fn walk_marks(&mut self, pts: &[Point2], (r, rim, step): (f64, f64, f64)) -> Vec<f64> {
+        let mut marks = Vec::with_capacity(pts.len().saturating_sub(1));
+        if let Some(&s) = pts.first() {
+            self.cut(s, s, r);
+        }
+        for w in pts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let len = (b.x - a.x).hypot(b.y - a.y);
+            let mut worst = 0.0f64;
+            if len > 1e-12 {
+                let dir = Point2::new((b.x - a.x) / len, (b.y - a.y) / len);
+                let n = ((len / step).ceil() as usize).clamp(1, 1 << 16);
+                let mut prev = a;
+                for k in 1..=n {
+                    let t = k as f64 / n as f64;
+                    let p = Point2::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+                    worst = worst.max(self.engage(p, dir, rim));
+                    self.cut(prev, p, r);
+                    prev = p;
+                }
+            }
+            marks.push(worst);
+        }
+        marks
+    }
+
+    /// Does the capsule of radius `rad` about `a -> b` hold no stock
+    /// and no wall cell? (A lifted link's test: it cuts nothing.)
+    pub(super) fn capsule_clear(&self, a: Point2, b: Point2, rad: f64) -> bool {
+        self.capsule_free(a, b, rad, true)
+    }
+
+    /// Does the disc of radius `rad` at `p` hold no stock (walls aside)?
+    /// (A landing's test: the rim there reads nothing.)
+    pub(super) fn stock_clear(&self, p: Point2, rad: f64) -> bool {
+        self.capsule_free(p, p, rad, false)
+    }
+
+    fn capsule_free(&self, a: Point2, b: Point2, rad: f64, walls: bool) -> bool {
+        if !(a.x.is_finite() && a.y.is_finite() && b.x.is_finite() && b.y.is_finite() && rad >= 0.0) {
+            return false;
+        }
+        let h = self.h;
+        let iy0 = ((a.y.min(b.y) - rad - self.y0) / h - 0.5).ceil();
+        let iy1 = ((a.y.max(b.y) + rad - self.y0) / h - 0.5).floor();
+        if iy0 < 0.0 || iy1 >= self.ny as f64 {
+            return false;
+        }
+        for iy in iy0 as usize..=iy1 as usize {
+            let y = self.y0 + (iy as f64 + 0.5) * h;
+            let Some((xl, xr)) = capsule_row(a, b, rad, y) else { continue };
+            let i0 = ((xl - self.x0) / h - 0.5).ceil();
+            let i1 = ((xr - self.x0) / h - 0.5).floor();
+            if i1 < i0 {
+                continue;
+            }
+            if i0 < 0.0 || i1 >= self.nx as f64 {
+                return false;
+            }
+            let row = iy * self.nx;
+            if (i0 as usize..=i1 as usize).any(|ix| self.cells[row + ix] || (walls && self.wall[row + ix])) {
+                return false;
+            }
+        }
+        true
     }
 
     /// Worst contact angle along `pts` without cutting (links: they

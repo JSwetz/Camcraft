@@ -14,7 +14,7 @@ fn orient(a: Point2, b: Point2, c: Point2) -> f64 {
 
 /// Do segments `ab` and `cd` cross properly (each strictly straddles
 /// the other's line)?
-fn proper(a: Point2, b: Point2, c: Point2, d: Point2) -> bool {
+pub(super) fn proper(a: Point2, b: Point2, c: Point2, d: Point2) -> bool {
     let (d1, d2) = (orient(a, b, c), orient(a, b, d));
     let (d3, d4) = (orient(c, d, a), orient(c, d, b));
     ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
@@ -24,6 +24,30 @@ fn proper(a: Point2, b: Point2, c: Point2, d: Point2) -> bool {
 /// (consecutive segments of one walk share a vertex and never count),
 /// or `None`.
 pub(crate) fn first_crossing(walks: &[Vec<Point2>]) -> Option<Point2> {
+    let mut first = None;
+    scan(walks, |_, _, p| {
+        first = Some(p);
+        true
+    });
+    first
+}
+
+/// The pairs of walks (by index, ascending, once each) that cross
+/// properly; a walk crossing itself pairs with itself.
+pub(super) fn crossing_pairs(walks: &[Vec<Point2>]) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::new();
+    scan(walks, |a, b, _| {
+        pairs.push((a.min(b), a.max(b)));
+        false
+    });
+    pairs.sort_unstable();
+    pairs.dedup();
+    pairs
+}
+
+/// Every proper crossing of two segments of the walks, as (walk, walk,
+/// point), until `f` says stop.
+fn scan(walks: &[Vec<Point2>], mut f: impl FnMut(usize, usize, Point2) -> bool) {
     let segs: Vec<(usize, usize, Point2, Point2)> = walks
         .iter()
         .enumerate()
@@ -38,7 +62,7 @@ pub(crate) fn first_crossing(walks: &[Vec<Point2>]) -> Option<Point2> {
         }
     }
     if segs.len() < 2 || !(lo.x.is_finite() && hi.x.is_finite()) {
-        return None;
+        return;
     }
     let n = ((segs.len() as f64).sqrt().ceil() as usize).clamp(1, 512);
     let (cw, ch) = (((hi.x - lo.x) / n as f64).max(1e-9), ((hi.y - lo.y) / n as f64).max(1e-9));
@@ -63,13 +87,12 @@ pub(crate) fn first_crossing(walks: &[Vec<Point2>]) -> Option<Point2> {
                 if s.0 == t.0 && s.1.abs_diff(t.1) <= 1 {
                     continue;
                 }
-                if proper(s.2, s.3, t.2, t.3) {
-                    return Some(s.3);
+                if proper(s.2, s.3, t.2, t.3) && f(s.0, t.0, s.3) {
+                    return;
                 }
             }
         }
     }
-    None
 }
 
 #[cfg(test)]

@@ -110,6 +110,9 @@ pub(super) struct Motion {
     /// by the approach's plunge height and ramp-to-depth (M11.3 B);
     /// clearance until a ladder states it, which leaves both inert.
     pub(super) top_z: f64,
+    /// Per pass: reached from the last by a microlift return (the HSM
+    /// plan's, `microlift`) instead of the pass link; empty: none is.
+    pub(super) micro: Vec<Option<super::adaptive::Return>>,
 }
 
 impl Motion {
@@ -132,7 +135,14 @@ impl Motion {
             arc_radius: 0.0,
             links: Links::PLANAR,
             top_z: clearance_z,
+            micro: Vec::new(),
         }
+    }
+
+    /// The HSM plan's microlift returns, per pass (M11.4 C round 4).
+    pub(super) fn with_microlift(mut self, joins: Vec<Option<super::adaptive::Return>>) -> Self {
+        self.micro = joins;
+        self
     }
 
     /// The tool radius the centre-cutting plunge law reads (`plunge_law`):
@@ -251,7 +261,11 @@ pub(super) fn run_level_walks(
                 let dove = descend(b, m.entry, false, center, &lv, m.clearance_z, m);
                 st.begin_level(e, dove);
             } else if last_cut_z == Some(z) {
-                pass_link(b, &lv, m, links_cert, &mut st);
+                if let Some(Some(ret)) = m.micro.get(pi) {
+                    super::microlift::link(b, ret, z, m);
+                } else {
+                    pass_link(b, &lv, m, links_cert, &mut st);
+                }
             } else {
                 // A level change. The transition, when the user set one,
                 // proves against the link area; "same as entry" keeps

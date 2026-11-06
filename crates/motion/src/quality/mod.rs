@@ -113,12 +113,17 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
     let mut ends: Vec<(f64, f64)> = Vec::with_capacity(path.moves.len());
     // (in a descent, it bit stock)
     let mut desc = (false, false);
+    // The floor being cut: the lowest plane a planar feed bit since the
+    // last rapid. A planar feed above it in air is a lifted return
+    // (`lift_len`), not floor air.
+    let mut plane: Option<f64> = None;
     for m in &path.moves {
         if m.kind == MoveKind::Rapid && desc.0 {
             q.descents += usize::from(desc.1);
             desc = (false, false);
         }
         if m.kind == MoveKind::Rapid {
+            plane = None;
             let d = dist3(m.from, m.to);
             q.rapid_len += d;
             q.air_time_s += d / spec.rapid_rate * 60.0;
@@ -143,6 +148,8 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
         let feed = m.feed.unwrap_or(1.0).max(1e-6);
         let (mut first, mut last, mut peak) = (None, 0.0f64, 0.0f64);
         let air0 = q.air_len;
+        let lifted = planar && plane.is_some_and(|z| m.to.z > z + 1e-6);
+        let mut bit = false;
         for (a, b) in m.segments3(CHORD_TOL) {
             let len = dist3(a, b);
             let n = ((len / step).ceil() as usize).clamp(1, 1 << 16);
@@ -164,6 +171,10 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
                     }
                     if deg > cut_deg {
                         q.cut_len += piece;
+                        bit = true;
+                    } else if lifted {
+                        q.lift_len += piece;
+                        q.air_time_s += piece / feed * 60.0;
                     } else {
                         q.air_len += piece;
                         q.air_time_s += piece / feed * 60.0;
@@ -183,6 +194,9 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
                 dex.cut_chord(prev, p, r);
                 prev = p;
             }
+        }
+        if bit {
+            plane = Some(plane.map_or(m.to.z, |p: f64| p.min(m.to.z)));
         }
         ends.push((first.unwrap_or(0.0), last));
         q.move_max.push(peak);

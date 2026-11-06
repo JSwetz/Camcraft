@@ -290,6 +290,10 @@ impl Planner<'_> {
             };
             self.note_worst(w);
             self.ras = trial;
+            if t + d >= 1.0 - 1e-12 {
+                // The last revolution rides the walls whole (`lift`).
+                (self.laps_from, self.fin_from) = (self.walk.len(), self.walk.len());
+            }
             self.push_walk(&rev);
             t += d;
             dt = d;

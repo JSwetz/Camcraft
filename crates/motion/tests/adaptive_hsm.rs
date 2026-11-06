@@ -15,7 +15,7 @@ use camcraft_motion::geometry::{Point3, Triangle};
 use camcraft_motion::load::DEFAULT_OPTIMAL_LOAD;
 use camcraft_motion::machining2d::{PocketParams, PocketStrategy, pocket};
 use camcraft_motion::quality::{PathQuality, QualitySpec, measure, rest_area, stock_for};
-use camcraft_motion::verify::{Mode, ToolGeom, VerifyContext, Warning, verify};
+use camcraft_motion::verify::{Mode, ToolGeom, VerifyContext, Warning, crossed_pairs, crossed_pairs_all, verify};
 
 const D: f64 = 10.0;
 const BOTTOM: f64 = -5.0;
@@ -58,6 +58,9 @@ fn fixtures() -> Vec<(&'static str, Region)> {
         ),
         ("island 60x40, 12x12", region(vec![rect(0.0, 0.0, 60.0, 40.0), rect(24.0, 14.0, 36.0, 26.0)])),
         ("narrow slot 14x60", region(vec![rect(0.0, 0.0, 60.0, 14.0)])),
+        // Round 4: a 2.2 D channel, round enough for the old star ratio
+        // (it overloaded there at 17.7%) but under the 1.4 D width law.
+        ("channel 22x60", region(vec![rect(0.0, 0.0, 60.0, 22.0)])),
     ]
 }
 
@@ -191,6 +194,8 @@ fn run(reg: &Region, strategy: PocketStrategy, cell: f64) -> (Toolpath, PathQual
     }
     let mut spec = QualitySpec::new(D);
     spec.cell = cell;
+    // The acceptance law reads breaks past 5 degrees in cut.
+    spec.break_deg = 5.0;
     // The stock stands one stepdown above Top: the ladder's first level
     // (at Top) is a real cut, not the zero-depth skin.
     let Ok(mut dex) = stock_for(reg, 5.0, BOTTOM, 1.0, &spec) else { panic!("stock") };
@@ -239,10 +244,21 @@ fn dump(dir: &str, reg: &Region, path: &Toolpath, q: &PathQuality, strategy: Poc
     let _ = std::fs::write(format!("{dir}/{n}_{strategy:?}.txt"), s);
 }
 
-/// The fixtures the round-2 plan holds every law on (one star cell from
-/// the entry each); the island and the 1.4 D slot are owed - their plan
-/// falls back to Offset rings by name, and the report prints it.
-const HELD: [&str; 3] = ["bore", "rectangle", "L-pocket"];
+/// The fixtures the plan holds every law on: the round star cells
+/// (round 2) and, since round 3, the 1.4 D slot too - grown as one ring
+/// family (`adaptive::grow`), never the Offset rings' fallback. The
+/// island and the channel are owed (round 5): their lifted plan runs
+/// past the hop or rest budget and falls back to the Offset rings BY
+/// NAME, which the report prints as a GAP.
+const HELD: [&str; 4] = ["bore", "rectangle", "L-pocket", "narrow slot"];
+
+/// Round 4: the fixtures cut with microlift returns, and the practicality
+/// law they are held to - out-of-cut travel (floor air plus lifted
+/// returns, `quality`'s air and lift) at most this share of the cut, and
+/// at most [`MOVES_MAX`] moves for the whole program.
+const LIFTED: [&str; 4] = ["L-pocket", "island", "narrow slot", "channel"];
+const NONCUT_PER_CUT: f64 = 1.5;
+const MOVES_MAX: usize = 120_000;
 
 /// The M11.4 C acceptance law, per fixture, measured: (1) the load
 /// within 10% of the optimal load, (2) no fallback, (3) no direction
@@ -255,20 +271,52 @@ fn judge(name: &str, reg: &Region, (cell, tol): (f64, f64), print: bool) -> Vec<
     let (path, new, new_rest) = run(reg, PocketStrategy::Adaptive, cell);
     let warns = verified(&path, reg, D);
     let fell = path.notes.iter().any(|n| n.contains("Offset rings cut this pocket instead"));
-    let air_ok = new.air_len <= 2.0 * base.air_len;
+    let air_ok = new.air_len <= 3.0 * base.air_len;
+    let noncut = new.air_len + new.lift_len;
     if print {
         println!("{}", base.report_line(&format!("{name} / rings")));
-        println!("    rest {base_rest:.2} mm2, verify {}", warn_kinds(&verified(&base_path, reg, D)));
+        println!("    rest {base_rest:.2} mm2, verify {}, moves {}", warn_kinds(&verified(&base_path, reg, D)), base_path.moves.len());
         println!("{}", new.report_line(&format!("{name} / HSM")));
         println!("    rest {new_rest:.2} mm2, verify {} {}, moves {}", warns.len(), warn_kinds(&warns), path.moves.len());
+        println!(
+            "    ROW {name}: air {:.0} lift {:.0} out-of-cut {:.0} cut {:.0} mm (x{:.2}) | rings air {:.0} (air x{:.1} of rings) | moves {} | breaks>5 {} | load {:.1}%",
+            new.air_len,
+            new.lift_len,
+            noncut,
+            new.cut_len,
+            noncut / new.cut_len.max(1e-9),
+            base.air_len,
+            new.air_len / base.air_len.max(1e-9),
+            path.moves.len(),
+            new.breaks,
+            new.max_load() * 100.0
+        );
         println!("    notes: {:?}", path.notes);
         if !air_ok {
-            println!("    GAP {name}: air {:.0} mm past twice the rings' {:.0} mm", new.air_len, base.air_len);
+            println!("    GAP {name}: floor air {:.0} mm past 3x the rings' {:.0} mm", new.air_len, base.air_len);
         }
     }
     let mut bad = Vec::new();
     if !warns.is_empty() {
         bad.push(format!("{name}: verifier {}", warn_kinds(&warns)));
+    }
+    // Round 4: the bucketed crossing law reports the all-pairs law's
+    // move pairs exactly, on both plans.
+    for (who, p) in [("rings", &base_path), ("HSM", &path)] {
+        if crossed_pairs(p, 0.01) != crossed_pairs_all(p, 0.01) {
+            bad.push(format!("{name} / {who}: the bucketed crossing law differs from all pairs"));
+        }
+    }
+    // Round 4's practicality law on the lifted plans: out of cut (floor
+    // air and lifted returns) at most the budget's share of the cut, and
+    // a bounded program.
+    if LIFTED.iter().any(|h| name.starts_with(h)) && !fell {
+        if noncut > NONCUT_PER_CUT * new.cut_len {
+            bad.push(format!("{name}: {noncut:.0} mm out of cut past {NONCUT_PER_CUT}x the {:.0} mm cut", new.cut_len));
+        }
+        if path.moves.len() > MOVES_MAX {
+            bad.push(format!("{name}: {} moves past {MOVES_MAX}", path.moves.len()));
+        }
     }
     if fell {
         if print {
@@ -288,8 +336,26 @@ fn judge(name: &str, reg: &Region, (cell, tol): (f64, f64), print: bool) -> Vec<
     if new.max_load() > DEFAULT_OPTIMAL_LOAD * (1.0 + tol) {
         bad.push(format!("{name}: load {:.1}% D past {:.1}% + {:.0}%", new.max_load() * 100.0, DEFAULT_OPTIMAL_LOAD * 100.0, tol * 100.0));
     }
-    if new.breaks > 0 {
-        bad.push(format!("{name}: {} in-cut breaks past 5 deg, worst {:.1}", new.breaks, new.worst_break_deg));
+    // The 5 deg law is measured honestly since round 4 (main's report had
+    // read 10 deg under a "5 deg" label). The star plans' morph seams on
+    // rectangle and L, and the slot's entry orbit, were never measured at
+    // 5 deg before; their counts are a RATCHET (RECOMMENDED "M11.4 C
+    // round 5" (3)): any rise, or a worse worst angle, fails - driving
+    // them to zero is owed (ROADMAP M11.4).
+    const KINK_RATCHET: &[(&str, usize, f64)] = &[
+        ("rectangle", 110, 6.5),
+        ("L-pocket", 202, 6.7),
+        ("narrow slot", 2, 5.05),
+    ];
+    let (cap, worst_cap) = KINK_RATCHET
+        .iter()
+        .find(|(p, _, _)| name.starts_with(p))
+        .map_or((0, 0.0), |&(_, c, w)| (c, w));
+    if new.breaks > cap || (new.breaks > 0 && new.worst_break_deg > worst_cap) {
+        bad.push(format!(
+            "{name}: {} in-cut breaks past 5 deg, worst {:.1} (ratchet: <= {cap}, worst <= {worst_cap:.2})",
+            new.breaks, new.worst_break_deg
+        ));
     }
     // Rest: grid crumbs, or the corner scallop the plan named.
     let scallop = path.notes.iter().any(|n| n.contains("corner scallop"));
@@ -364,5 +430,8 @@ fn hsm_one() {
         let w = verified(&path, &reg, D);
         println!("{}", q.report_line(name));
         println!("    rest {rest:.2} mm2, moves {}, verify {}, notes: {:?}", path.moves.len(), warn_kinds(&w), path.notes);
+        let mut br: Vec<String> = q.break_list.iter().take(40).map(|(p, t)| format!("({:.2},{:.2},{:.1}) {t:.1}", p.x, p.y, p.z)).collect();
+        br.truncate(40);
+        println!("    breaks: {br:?}");
     }
 }

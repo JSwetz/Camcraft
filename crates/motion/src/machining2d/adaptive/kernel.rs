@@ -177,3 +177,83 @@ pub(crate) fn widest_point(center: &Region) -> Option<(Point2, f64)> {
     }
     (best.0 > 0.0).then_some((best.1, best.0))
 }
+
+/// The entry the growth rings want in an area that is no star cell
+/// (round 3): among the roomy spots (clearance within [`ROOMY`] of the
+/// widest), the one whose farthest point is nearest along the area
+/// (least geodesic eccentricity: the graph center of the area's grid,
+/// by Dijkstra's shortest paths, 1959) - the fronts from it finish
+/// soonest, and around an island its arms arrive together. With the
+/// clearance there.
+pub(crate) fn central_point(center: &Region) -> Option<(Point2, f64)> {
+    let (lo, hi) = center.bounds()?;
+    let span = (hi.x - lo.x).max(hi.y - lo.y);
+    if !(span.is_finite() && span > 0.0) {
+        return None;
+    }
+    let h = (span / 150.0).max(0.1);
+    let (nx, ny) = (((hi.x - lo.x) / h).ceil() as usize + 1, ((hi.y - lo.y) / h).ceil() as usize + 1);
+    let at = |i: usize, j: usize| Point2::new(lo.x + i as f64 * h, lo.y + j as f64 * h);
+    let clear: Vec<f64> = (0..nx * ny)
+        .map(|k| {
+            let p = at(k % nx, k / nx);
+            if center.contains(p) { super::loops::boundary_dist(center, p) } else { -1.0 }
+        })
+        .collect();
+    let cmax = clear.iter().copied().fold(0.0, f64::max);
+    if cmax <= 0.0 {
+        return None;
+    }
+    let roomy: Vec<usize> = (0..clear.len()).filter(|&k| clear[k] >= ROOMY * cmax).collect();
+    let stride = (roomy.len() / MAX_CANDIDATES).max(1);
+    let mut best: Option<(f64, f64, usize)> = None;
+    for &k in roomy.iter().step_by(stride) {
+        let ecc = eccentricity(&clear, (nx, ny), h, k);
+        if best.is_none_or(|b| ecc < b.0 - 1e-9 || (ecc < b.0 + 1e-9 && clear[k] > b.1)) {
+            best = Some((ecc, clear[k], k));
+        }
+    }
+    best.map(|(_, c, k)| (at(k % nx, k / nx), c))
+}
+
+/// Roomy spots: clearance at least this share of the widest.
+const ROOMY: f64 = 0.85;
+
+/// At most this many roomy spots are weighed.
+const MAX_CANDIDATES: usize = 48;
+
+/// The farthest any inside node of the grid is from node `k` along the
+/// grid's 8-neighbour paths.
+fn eccentricity(clear: &[f64], (nx, ny): (usize, usize), h: f64, k: usize) -> f64 {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let mut d = vec![f64::INFINITY; clear.len()];
+    let mut q = BinaryHeap::new();
+    d[k] = 0.0;
+    q.push(Reverse((0u64, k)));
+    let key = |x: f64| (x * 1e6) as u64;
+    let mut far = 0.0f64;
+    while let Some(Reverse((dk, u))) = q.pop() {
+        let du = d[u];
+        if key(du) < dk {
+            continue;
+        }
+        far = far.max(du);
+        let (i, j) = ((u % nx) as i64, (u / nx) as i64);
+        for (di, dj, w) in [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0), (1, 1, 1.5), (1, -1, 1.5), (-1, 1, 1.5), (-1, -1, 1.5)] {
+            let (a, b) = (i + di, j + dj);
+            if a < 0 || b < 0 || a >= nx as i64 || b >= ny as i64 {
+                continue;
+            }
+            let v = a as usize + b as usize * nx;
+            // 1.5 for a diagonal: an octile metric that never cuts a
+            // corner shorter than it is (sqrt 2 rounded up).
+            let nd = du + w * h;
+            if clear[v] > 0.0 && nd < d[v] {
+                d[v] = nd;
+                q.push(Reverse((key(nd), v)));
+            }
+        }
+    }
+    far
+}

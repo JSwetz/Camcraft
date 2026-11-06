@@ -8,12 +8,13 @@
 //! (`levels::run_level_walks`, consumed, not changed) is handed that
 //! spot as its certified room, so the plan starts exactly where the
 //! dive ends. A helix too wide for the area is narrowed to the widest
-//! it holds, and said.
+//! it holds (round 3: at most [`HELIX_SHARE`] of the room, so a
+//! channel's growth rings can part from the orbit), and said.
 
 use crate::entry::{Entry3D, dive_room};
 use crate::geo2d::{Loop, Point2, Region};
 
-use super::adaptive::{AdaptiveSpec, boundary_dist, corner_radius, first_crossing, plan, preferred_seed, widest_point};
+use super::adaptive::{AdaptiveSpec, Return, Travel, boundary_dist, central_point, corner_radius, first_crossing, plan, preferred_seed};
 use super::face::GenError;
 use super::pocket::{PocketParams, PocketStrategy, plan_passes};
 
@@ -31,37 +32,80 @@ pub(super) struct EntryRoom {
 
 /// The Adaptive pocket's passes: the HSM plan, or - when it would leave
 /// more than [`HSM_REST_MAX`] of the reachable stock uncut within twice
-/// the load - the Offset rings, named in the notes (an incomplete plan
-/// is never posted as if it were the clearing). Returns the strategy
-/// that actually planned them and, for the HSM plan, its entry.
-pub(super) fn adaptive_passes(
-    center: &Region,
-    p: &PocketParams,
-) -> Result<(Walks, Vec<String>, PocketStrategy, Option<EntryRoom>), GenError> {
-    let (passes, notes, rest, room) = hsm_passes(center, p)?;
+/// the load, or run past its budget ([`over_budget`]) - the Offset
+/// rings, named in the notes (an incomplete or impractical plan is
+/// never posted as if it were the clearing). Returns the strategy that
+/// actually planned them and, for the HSM plan, its entry.
+pub(super) fn adaptive_passes(center: &Region, p: &PocketParams) -> Result<Planned, GenError> {
+    let (passes, notes, rest, room, joins, travel) = hsm_passes(center, p)?;
     // A plan that would cross itself is never posted (the verifier's
     // crossing law, asked of the plan first).
     let cross = first_crossing(&passes);
-    if rest <= HSM_REST_MAX && cross.is_none() {
-        return Ok((passes, notes, PocketStrategy::Adaptive, room));
+    let levels = super::levels::cut_levels(p.top_z, p.bottom_z, p.stepdown).len();
+    let budget = over_budget(&travel, levels);
+    if rest <= HSM_REST_MAX && cross.is_none() && budget.is_none() {
+        return Ok((passes, notes, PocketStrategy::Adaptive, room, joins));
     }
     let s = PocketStrategy::OffsetRings;
-    let note = match cross {
-        Some(x) => format!(
-            "adaptive: the HSM plan for this area (engagement fronts: it is no star cell from the entry) crosses itself at ({:.2}, {:.2}) - Offset rings cut this pocket instead",
+    let note = match (cross, budget) {
+        (Some(x), _) => format!(
+            "adaptive: the HSM plan for this area crosses itself at ({:.2}, {:.2}) - Offset rings cut this pocket instead",
             x.x, x.y
         ),
-        None => format!(
+        (None, Some(why)) => format!("adaptive: the HSM plan {why} - Offset rings cut this pocket instead"),
+        (None, None) => format!(
             "adaptive: the HSM plan left {:.0}% of the area it could not cut within twice the load - Offset rings cut this pocket instead",
             rest * 100.0
         ),
     };
     let step = crate::load::load_step(p.tool_diameter, p.optimal_load);
-    Ok((plan_passes(center, step, p.climb, s)?, vec![note], s, None))
+    Ok((plan_passes(center, step, p.climb, s)?, vec![note], s, None, Vec::new()))
 }
 
 /// Cutter-center walks, one per pass.
 type Walks = Vec<Vec<Point2>>;
+
+/// The pocket's passes, notes, the strategy that planned them, the HSM
+/// plan's entry and its joins.
+pub(super) type Planned = (Walks, Vec<String>, PocketStrategy, Option<EntryRoom>, Joins);
+
+/// The HSM plan's passes, notes, share of stock left, entry, joins and
+/// travel.
+type HsmPlanned = (Walks, Vec<String>, f64, Option<EntryRoom>, Joins, Travel);
+
+/// The HSM plan's budget (round 4): it may travel at most this many times
+/// its cutting length out of cut (floor air and lifted returns) ...
+pub const NONCUT_PER_CUT: f64 = 1.5;
+
+/// ... and post at most this many moves over all its levels ...
+pub const MOVE_BUDGET: usize = 120_000;
+
+/// ... and reach at most this many passes a level by the ladder's retract
+/// hop (round 5): a piece no microlift return reaches costs a full
+/// retract, a rapid and a plunge-feed descent each - a plan of many is
+/// slower than the rings it replaces.
+pub const HOP_BUDGET: usize = 8;
+
+/// Why a plan with `travel` (per level) over `levels` levels is past its
+/// budget, or `None`.
+fn over_budget(t: &Travel, levels: usize) -> Option<String> {
+    let moves = t.moves.saturating_mul(levels.max(1));
+    if t.air + t.lift > NONCUT_PER_CUT * t.cut {
+        return Some(format!(
+            "would travel {:.0} mm out of cut for {:.0} mm in cut a level (over {NONCUT_PER_CUT:.1}x)",
+            t.air + t.lift,
+            t.cut
+        ));
+    }
+    if t.hops > HOP_BUDGET {
+        return Some(format!("would reach {} passes a level by retract hops (over {HOP_BUDGET})", t.hops));
+    }
+    (moves > MOVE_BUDGET).then(|| format!("would post {moves} moves (over {MOVE_BUDGET})"))
+}
+
+/// Per pass: the microlift's down ramp it is reached by (`None`: the
+/// ladder's own pass link).
+pub(super) type Joins = Vec<Option<Return>>;
 
 /// The contact-angle margin the planner holds (fraction of the
 /// optimal load; negative = under it): the plan is read on the
@@ -72,6 +116,12 @@ pub const PLAN_TOL: f64 = 0.05;
 /// The share of the reachable stock an HSM plan may leave standing (grid
 /// crumbs) before the pocket falls back to Offset rings.
 pub const HSM_REST_MAX: f64 = 0.02;
+
+/// A helix takes at most this share of the room about its spot (round
+/// 3): in a channel the spiral's first rings need the rest to grow
+/// apart from the orbit at the walls (rings microns apart cross on their
+/// chords).
+const HELIX_SHARE: f64 = 0.6;
 
 /// The lead/link arc radius as a fraction of the tool radius.
 pub const SMOOTH_PER_R: f64 = 0.5;
@@ -108,7 +158,9 @@ fn triangle_about(c: Point2, inr: f64) -> Result<Region, GenError> {
 }
 
 /// The entry the plan chooses for a helix or plunge: the morph spiral's
-/// kernel spot when the area is one star cell, else the widest point;
+/// kernel spot when the area is one star cell, else the roomy spot of
+/// least geodesic eccentricity (round 3: where the growth rings finish
+/// soonest);
 /// the helix narrowed to fit. `None` leaves the ladder's own choice.
 fn choose_entry(center: &Region, p: &PocketParams, notes: &mut Vec<String>) -> Result<Option<EntryRoom>, GenError> {
     let helix = p.entry == Entry3D::Helix;
@@ -118,9 +170,9 @@ fn choose_entry(center: &Region, p: &PocketParams, notes: &mut Vec<String>) -> R
     let r = p.tool_diameter * 0.5;
     let hr0 = if helix { p.helix_radius } else { 0.0 };
     let pick = preferred_seed(center, corner_radius(center, r), hr0 + 0.02)?;
-    let Some(cand) = pick.or_else(|| widest_point(center).map(|w| w.0)) else { return Ok(None) };
+    let Some(cand) = pick.or_else(|| central_point(center).map(|w| w.0)) else { return Ok(None) };
     let clear = boundary_dist(center, cand);
-    let hr = if helix { hr0.min(clear - 0.01) } else { 0.0 };
+    let hr = if helix { hr0.min(clear - 0.01).min(HELIX_SHARE * clear) } else { 0.0 };
     if helix && hr < 1e-3 {
         return Ok(None);
     }
@@ -128,7 +180,7 @@ fn choose_entry(center: &Region, p: &PocketParams, notes: &mut Vec<String>) -> R
     let Some(seed) = dive_room(&tess, if helix { hr + 1e-3 } else { 0.0 }) else { return Ok(None) };
     if helix && hr < hr0 {
         notes.push(format!(
-            "entry: a helix of radius {hr0:.3} does not fit the area - radius {hr:.3}, the widest it holds, used"
+            "entry: a helix of radius {hr0:.3} does not fit the area - radius {hr:.3}, the widest it holds with room to spiral out, used"
         ));
     }
     Ok(Some(EntryRoom { seed, clear: boundary_dist(center, seed) - 1e-6, helix_r: hr, tess }))
@@ -136,10 +188,12 @@ fn choose_entry(center: &Region, p: &PocketParams, notes: &mut Vec<String>) -> R
 
 /// Cutter-center walks for an Adaptive pocket, the plan's notes, the
 /// share of the reachable stock it leaves standing and its entry.
-fn hsm_passes(center: &Region, p: &PocketParams) -> Result<(Walks, Vec<String>, f64, Option<EntryRoom>), GenError> {
+fn hsm_passes(center: &Region, p: &PocketParams) -> Result<HsmPlanned, GenError> {
     let r = p.tool_diameter * 0.5;
     let mut notes = Vec::new();
     let mut passes = Vec::new();
+    let mut joins = Vec::new();
+    let mut travel = Travel::default();
     let (mut rest, mut area) = (0.0, 0.0);
     let room = choose_entry(center, p, &mut notes)?;
     // Where the entry law stands the tool (`run_level_walks`): the room
@@ -193,8 +247,32 @@ fn hsm_passes(center: &Region, p: &PocketParams) -> Result<(Walks, Vec<String>, 
         let pl = plan(&reach, comp, &spec)?;
         rest += pl.rest;
         area += reach.area();
+        // Each piece's passes after its first may be microlift-joined.
+        joins.extend((0..pl.passes.len()).map(|k| if k > 0 { pl.joins.get(k).cloned().flatten() } else { None }));
         passes.extend(pl.passes);
+        let t = pl.travel;
+        (travel.cut, travel.air, travel.lift, travel.moves) = (travel.cut + t.cut, travel.air + t.air, travel.lift + t.lift, travel.moves + t.moves);
+        travel.hops += t.hops;
         notes.extend(pl.notes);
     }
-    Ok((passes, notes, if area > 0.0 { rest / area } else { 0.0 }, room))
+    Ok((passes, notes, if area > 0.0 { rest / area } else { 0.0 }, room, joins, travel))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Round 4's budget: a plan riding air past 1.5x its cut, or posting
+    /// past the move budget, is named and handed to the Offset rings.
+    #[test]
+    fn a_plan_past_its_air_or_move_budget_is_refused_by_name() {
+        let ok = Travel { cut: 1000.0, air: 300.0, lift: 900.0, moves: 9000, hops: 2 };
+        assert!(over_budget(&ok, 2).is_none());
+        let airy = Travel { air: 2000.0, ..ok };
+        assert!(over_budget(&airy, 2).is_some_and(|w| w.contains("out of cut")));
+        let long = Travel { moves: 70_000, ..ok };
+        assert!(over_budget(&long, 2).is_some_and(|w| w.contains("moves")));
+        let hoppy = Travel { hops: HOP_BUDGET + 1, ..ok };
+        assert!(over_budget(&hoppy, 2).is_some_and(|w| w.contains("retract hops")));
+    }
 }

@@ -8,21 +8,21 @@
 //! entry is put in its kernel, `kernel`), the plan is ONE morph spiral
 //! (`morph`, `star`: Held & Spielberger 2009; Bieterman & Sandstrom
 //! 2003) from the orbit to the walls - no link, no crossing, every
-//! revolution's step chosen on the stock. Elsewhere the engagement
-//! fronts below plan it, and a plan that would cross itself is refused
-//! (`guard`, the verifier's crossing law asked first).
+//! revolution's step chosen on the stock. Round 3: every other area -
+//! channels, islands (cut open by `slit`) - is ONE spiral too, over the
+//! cleared area grown ring by ring (`grow`, `rings`). Round 4: that
+//! spiral is cut only where it bites, its air returns lifted over the
+//! floor (`lift`, `route`). Only where no spiral can be built do the
+//! engagement fronts below plan it; a plan that would cross itself is
+//! refused (`guard`, the verifier's law first).
 //!
 //! The fronts' plan, in order:
-//! 1. **Bore and spiral** - the spiral starts on the entry's own orbit
-//!    (one descent per level, no replunge). Each revolution morphs onto
-//!    the next engagement front - the cutter centers `r - a` from the
-//!    stock still standing (Stori & Wright 2000, "Constant engagement
-//!    tool path generation for convex geometries", J. Manuf. Systems
-//!    19(3), taken against the in-process stock), riding the walls
-//!    where the front has met them (`loops`) - as ONE spiral (`spiral`:
-//!    Held & Spielberger 2009's offset morph), never rings joined by
-//!    steps; the step shrinks where the loop is tight (their convex-path
-//!    law: small loops out of a bore overload at the nominal width).
+//! 1. **Bore and spiral** - from the entry's own orbit, each revolution
+//!    morphs onto the next engagement front, the cutter centers `r - a`
+//!    from the stock still standing (Stori & Wright 2000, J. Manuf.
+//!    Systems 19(3), on the in-process stock), riding the walls where
+//!    the front met them (`loops`), as ONE spiral (`spiral`: Held &
+//!    Spielberger 2009); the step shrinks where the loop is tight.
 //! 2. **Open rounds** (`rounds`) - once the cleared area's boundary is
 //!    mostly wall, its nearest cutting run is cut each round, one front
 //!    step on, entered and left on Dubins links (`link`); in a channel
@@ -38,13 +38,21 @@
 //! too much is left). Every loop is capped; the plan cannot hang.
 
 mod front;
+mod grow;
 mod guard;
 mod kernel;
+mod lift;
+mod lift_link;
+mod lift_split;
 mod link;
 mod loops;
 mod morph;
+mod near;
 mod raster;
+mod rings;
 mod rounds;
+mod route;
+mod slit;
 mod spiral;
 mod star;
 mod tidy;
@@ -53,12 +61,18 @@ mod wall;
 use crate::geo2d::{Point2, Region};
 use crate::load::{deg_at_rim, load_at_rim};
 
-pub(crate) use kernel::{preferred_seed, widest_point};
+pub(crate) use kernel::{central_point, preferred_seed, widest_point};
+pub(crate) use star::corner_radius;
+use star::orbit_radius;
 pub(crate) use guard::first_crossing;
+
+pub(crate) use lift::Travel;
+pub(crate) use lift_link::Return;
 pub(crate) use loops::boundary_dist;
 
 use super::GenError;
-use front::{densify, dist, rotate_to, tail};
+use front::{dist, rotate_to, tail};
+use rings::circle;
 use raster::Raster;
 
 /// The worst contact angle a trial walk read, and where.
@@ -101,9 +115,8 @@ const GRID_PER_D: f64 = 120.0;
 /// share of the tool radius (the named corner scallop).
 pub(crate) const CORNER_PER_R: f64 = 0.5;
 
-/// A star cell whose shortest ray is under this share of its longest
-/// (a channel) is cleared by the engagement fronts instead.
-const STAR_ASPECT: f64 = 0.1;
+/// The growth rings' wall margin, tried widening (`grow`).
+const MARGIN_SCALES: [f64; 3] = [1.0, 1.6, 2.4];
 
 /// What one planar area is planned with.
 #[derive(Clone, Copy, Debug)]
@@ -130,9 +143,14 @@ pub(crate) struct AdaptiveSpec {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct AdaptivePlan {
     pub passes: Vec<Vec<Point2>>,
+    /// Per pass: reached from the last by a microlift return (`lift`)
+    /// rather than the ladder's own pass link (empty: none is).
+    pub joins: Vec<Option<Return>>,
     pub notes: Vec<String>,
     /// Stock the plan leaves standing in the reach (mm^2, planner grid).
     pub rest: f64,
+    /// Its travel, read on the planner's stock (`lift::travel`).
+    pub travel: lift::Travel,
 }
 
 struct Planner<'a> {
@@ -152,6 +170,10 @@ struct Planner<'a> {
     walk: Vec<Point2>,
     plan: AdaptivePlan,
     worst: (f64, Point2),
+    /// Where the growth rings' closing laps begin in the walk (`grow`).
+    laps_from: usize,
+    /// ... and where the last lap begins.
+    fin_from: usize,
 }
 
 /// Plan the area `reach` (the material the cutter can reach) from the
@@ -182,25 +204,61 @@ pub(crate) fn plan(reach: &Region, center: &Region, s: &AdaptiveSpec) -> Result<
         walk: vec![s.start],
         plan: AdaptivePlan::default(),
         worst: (0.0, s.start),
+        laps_from: usize::MAX,
+        fin_from: usize::MAX,
     };
     if s.bore > 0.0 {
         p.ras.cut(s.seed, s.seed, s.bore);
         p.mat = p.mat.difference(&Region::sweep(&[vec![s.seed]], s.bore)?)?;
     }
-    let star = star_cell(center, s)?;
+    let ras0 = p.ras.clone();
+    let star = star::star_cell(center, s)?;
+    let mut fronts = false;
     if let Some(star) = &star {
         p.orbit();
         p.morph(star, orbit_radius(s))?;
     } else {
-        let heading = p.core_spiral()?;
-        p.open_rounds(heading)?;
+        // Round 3: the area grown as one ring family (channels, islands);
+        // where it cannot be, the engagement fronts plan it.
+        let (walk, notes, ras, worst) = (p.walk.clone(), p.plan.notes.len(), p.ras.clone(), p.worst);
+        let mut grown = grow::Grown::Unfit;
+        for (k, scale) in MARGIN_SCALES.iter().enumerate() {
+            (p.walk, p.ras, p.worst) = (walk.clone(), ras.clone(), worst);
+            p.plan.notes.truncate(notes);
+            let ring0 = p.orbit();
+            grown = p.grow(&ring0, (*scale, k + 1 == MARGIN_SCALES.len()))?;
+            if grown != grow::Grown::Short {
+                break;
+            }
+        }
+        if grown != grow::Grown::Done {
+            (p.walk, p.ras, p.worst) = (walk, ras, worst);
+            p.plan.notes.truncate(notes);
+            let heading = p.core_spiral()?;
+            p.open_rounds(heading)?;
+            fronts = true;
+        }
     }
-    let mut out = p.plan;
-    out.rest = p.ras.standing() as f64 * p.ras.h * p.ras.h;
-    if p.walk.len() >= 2 {
-        out.passes.push(p.walk);
+    // Round 4: the spiral (grown or morphed) cut where it bites, its air
+    // returns lifted (`lift`).
+    let lifted = if fronts { None } else { p.lift_returns(&ras0)? };
+    let mut out = std::mem::take(&mut p.plan);
+    match lifted {
+        Some(l) => {
+            out.notes.push(lift::note(&l));
+            out.rest = l.ras.standing() as f64 * l.ras.h * l.ras.h;
+            p.worst = l.worst;
+            (out.passes, out.joins) = (l.passes, l.joins);
+        }
+        None => {
+            out.rest = p.ras.standing() as f64 * p.ras.h * p.ras.h;
+            if p.walk.len() >= 2 {
+                out.passes.push(std::mem::take(&mut p.walk));
+            }
+        }
     }
-    if star.is_none() {
+    out.travel = lift::travel(&ras0, &out.passes, &out.joins, (s.r, rim, p.step, p.bite));
+    if fronts {
         // Kinks the morph seams and blend joints left are spread out
         // (inside the center area only), so the walk reads smooth.
         for pass in &mut out.passes {
@@ -331,49 +389,7 @@ impl Planner<'_> {
 
 }
 
-/// The radius the morph spiral's last ring rounds the walls' corners
-/// at: [`CORNER_PER_R`] of the tool radius, or under half the area's
-/// inscribed radius where the area is narrower (a channel's opening must
-/// not vanish).
-pub(crate) fn corner_radius(center: &Region, r: f64) -> f64 {
-    let rho = r * CORNER_PER_R;
-    widest_point(center).map_or(rho, |w| rho.min(0.45 * w.1))
-}
-
-/// The radius of the entry's orbit: the helix's, or a hair out of a
-/// tool-size bore.
-fn orbit_radius(s: &AdaptiveSpec) -> f64 {
-    if s.helix_r > 1e-6 { s.helix_r } else { (0.05 * s.r).min(s.bore.max(1e-3)) }
-}
-
-/// The star cell the morph spiral runs over, when the whole center area
-/// is one (seen from the seed, round enough that its rays agree within
-/// [`STAR_ASPECT`]); `None` sends the plan to the engagement fronts.
-fn star_cell(center: &Region, s: &AdaptiveSpec) -> Result<Option<star::Star>, GenError> {
-    let rho_c = corner_radius(center, s.r);
-    let radii: Vec<f64> = (0..12).map(|k| rho_c * 1.6f64.powi(k)).collect();
-    let orbit = (s.seed, orbit_radius(s));
-    // The rays leave from the seed (`kernel::preferred_seed` put it
-    // where they are most alike, when the entry let it choose).
-    let cell = star::Star::new(center, s.seed, &radii, orbit)?;
-    Ok(cell.filter(|c| c.aspect() >= STAR_ASPECT && (c.min_rho() - rho_c).abs() < 1e-9))
-}
-
-/// A closed circle about `c` of radius `rr` starting at `start`'s angle,
-/// travelled counter-clockwise for climb (material outside on the right)
-/// and clockwise otherwise.
-fn circle(c: Point2, rr: f64, start: Point2, climb: bool, seg: f64) -> Vec<Point2> {
-    let a0 = (start.y - c.y).atan2(start.x - c.x);
-    let n = ((std::f64::consts::TAU * rr / seg.max(1e-6)).ceil() as usize).clamp(72, 4096);
-    let dir = if climb { 1.0 } else { -1.0 };
-    let pts: Vec<Point2> = (0..=n)
-        .map(|k| {
-            let a = a0 + dir * std::f64::consts::TAU * k as f64 / n as f64;
-            Point2::new(c.x + rr * a.cos(), c.y + rr * a.sin())
-        })
-        .collect();
-    densify(&pts, seg, false)
-}
-
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod lift_tests;
