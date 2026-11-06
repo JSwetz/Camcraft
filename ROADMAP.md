@@ -1911,7 +1911,7 @@ pushed by the session; the user pushes the tag.
 
 | Train | Cut (local) | Theme | Musts | Nice-to-have |
 |---|---|---|---|---|
-| **0.8.0** | Mon 2026-11-10 12:00 | Every 0.7.0 known limit closed; the zip runs on any machine | themes resolved beside the exe (M13.3); M11.3 ✅; M13.7 ✅ (mid-move pose decided) | M11.4 island on HSM + slot entry kinks; M13.8 ✅; material.rs split; `scripts/release.ps1` (one command: gate → bump → zip) |
+| **0.8.0** | CUT Fri 2026-11-06 (early, to park) - tag v0.8.0 on b78b25b, dist/camcraft-0.8.0-win-x64.zip; carries most of 0.9.0 and 0.10.0 too (RECOMMENDED "Release 0.8.0") | Every 0.7.0 known limit closed; the zip runs on any machine | themes resolved beside the exe (M13.3); M11.3 ✅; M13.7 ✅ (mid-move pose decided) | M11.4 island on HSM + slot entry kinks; M13.8 ✅; material.rs split; `scripts/release.ps1` (one command: gate → bump → zip) |
 | **0.9.0** | Thu 2026-11-13 12:00 | Area control and stock everywhere | M11.5 ✅ (3+2 boundaries, group on every kind); M13.1 lathe/rotary swept solids; M13.9 scallop law live | viewer/picking mesh, jump throughput, CPU-fallback eye (M13.1); M7.3 retirement if unblocked |
 | **0.10.0** | Mon 2026-11-17 12:00 | Install it, turn it | M13.3 installer-vs-zip decision + signed build path; M13.5 C-axis live tooling; M11.4 arc output + Pocket3D port | M1.x ⚠️ leftovers audit; M13.6 feature-recognition spike |
 
