@@ -198,6 +198,18 @@ impl PathBuilder {
         self.moves.len()
     }
 
+    /// The moves laid down so far (M11.3): what a law reading the path
+    /// already cut stands on - the centre-cutting plunge law asks it
+    /// whether a column is cleared before a plunge posts.
+    pub fn moves(&self) -> &[Move] {
+        &self.moves
+    }
+
+    /// The notes stated so far.
+    pub fn notes(&self) -> &[String] {
+        &self.notes
+    }
+
     /// Declare the tool pose the following moves hold (M5.1 stage A):
     /// `Some(vector)` normalizes through [`Move::with_axis`]'s law
     /// (a direction-stating vector, refused LOUDLY otherwise), `None`

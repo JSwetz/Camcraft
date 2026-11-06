@@ -6,13 +6,15 @@
 //! are this crate's (M8.1's plan law, M11.3's one-entry law). No vendor
 //! material consulted.
 
-use crate::approach::CENTER_CUT_REFUSAL;
+use crate::approach::{CENTER_CUT_REFUSAL, NOT_CENTER_CUTTING};
 use crate::cl::{MoveKind, PathBuilder};
+use crate::entry::Entry3D;
+use crate::plunge_law;
 use crate::entry::chord_hits_plan;
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
 
-use super::descent::{Lvl, dive_point};
+use super::descent::{Descent, Lvl, dive_point, plan_arm, ramp_fallback};
 use super::levels::{Cert, Motion};
 
 /// The axial feed down onto `(xy, z)` from where the tool stands over
@@ -27,6 +29,10 @@ pub(super) fn feed_down(b: &mut PathBuilder, xy: Point2, z: f64, mat_top: f64, m
     if h > 0.0 && hz.is_finite() && hz < b.at().z && hz > z {
         b.push(MoveKind::Rapid, Point3::new(xy.x, xy.y, hz), None);
     }
+    // The centre-cutting law's backstop (`plunge_law`): every planar
+    // plunge asks it; a site that can stand a helix or ramp in asked
+    // first.
+    plunge_law::guard(b, m.links.approach.center_cutting, m.tool_r(), xy, z, mat_top, "a plunge");
     b.push(MoveKind::Plunge, Point3::new(xy.x, xy.y, z), Some(feed));
 }
 
@@ -59,12 +65,10 @@ pub(super) fn link_at_depth(
     if cen.chord_ok(d, e) && !chord_hits_plan(d, e, passes) {
         b.push(MoveKind::Feed, Point3::new(e.x, e.y, z), Some(m.links.approach.lead_feed(m.feed)));
     } else {
-        if !m.links.approach.center_cutting {
-            b.note_once(&format!(
-                "{CENTER_CUT_REFUSAL} - the pass start ({:.3}, {:.3}) is reached only by a second dive into solid",
-                e.x, e.y
-            ));
-        }
+        // A second dive into solid refuses a tool that is not
+        // centre-cutting, by the one plunge law.
+        let cc = m.links.approach.center_cutting;
+        plunge_law::guard(b, cc, m.tool_r(), e, z, mat_top, "the second dive at the pass start");
         b.note(format!(
             "entry: a second dive at the pass start ({:.3}, {:.3}) - the link from the entry at ({:.3}, {:.3}) \
              is not proved clear at depth",
@@ -74,6 +78,43 @@ pub(super) fn link_at_depth(
         b.push(MoveKind::Rapid, Point3::new(e.x, e.y, m.hop_z), None);
         feed_down(b, e, z, mat_top, m, m.plunge_feed);
     }
+}
+
+/// Does the planned descent drop axially into the level's material -
+/// a plunge, a substituted dive, a sweep-capped arc whose top sits under
+/// the material's top (the rest of its drop is an axial feed), a ramp
+/// "chord" with no run? `Some(why)` for the centre-cutting law to stand
+/// a helix or ramp in.
+pub(super) fn axial_why(d: &Descent, l: &Lvl) -> Option<&'static str> {
+    const EPS: f64 = 1e-6;
+    let e = l.pass.first()?;
+    match d {
+        Descent::Plunge(_) => Some("the plunge arm"),
+        Descent::Sub(why) => Some(*why),
+        Descent::Arc(lead, zf) if lead.top < zf - EPS && lead.top < l.mat_top - EPS => {
+            Some("the arc's capped sweep ends in an axial drop")
+        }
+        Descent::Ramp(s, _) if (s.x - e.x).hypot(s.y - e.y) <= EPS => Some("the ramp has no run - it is a plunge"),
+        _ => None,
+    }
+}
+
+/// A pass start inside a level that a tool which is not centre-cutting
+/// would plunge into solid (M11.3, the between-pass law): entered like a
+/// level - the helix onto it, else the ramp along the pass - from `from`,
+/// or refused by name. Never a plunge.
+pub(super) fn restart(l: &Lvl, leg: Point2, z: f64, from: f64, m: &Motion) -> Descent {
+    let e = l.pass.first().copied().unwrap_or(leg);
+    let site = format!("the pass start ({:.3}, {:.3})", e.x, e.y);
+    if let h @ Descent::Helix(..) = plan_arm(Entry3D::Helix, false, l, leg, z, from, m) {
+        return Descent::Named(Box::new(h), format!("{NOT_CENTER_CUTTING} at a pass start inside a level - helix entry instead"));
+    }
+    if let Some(r) = ramp_fallback(l, z, from, m) {
+        return Descent::Named(Box::new(r), format!("{NOT_CENTER_CUTTING} at a pass start inside a level - ramp along the pass instead"));
+    }
+    Descent::Refused(format!(
+        "{CENTER_CUT_REFUSAL} - {site} would be a plunge into solid at Z {z:.3}, and no helix or ramp fits onto it"
+    ))
 }
 
 /// The entry family's honorable failure (M8.1): the stated motion

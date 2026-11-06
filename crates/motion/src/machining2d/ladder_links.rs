@@ -14,7 +14,8 @@ use crate::geometry::Point3;
 use crate::links::{Link, LinkTally, Links, NOT_PROVED, TOO_LONG};
 
 use super::arcs::Seg;
-use super::descent::{Lvl, feed_down, plan, push, start};
+use super::descent::{Lvl, feed_down, plan, push, restart, start};
+use crate::plunge_law;
 use super::levels::{Cert, Motion};
 
 /// One pass's place in the ladder, as a descent onto it reads it.
@@ -140,17 +141,11 @@ pub(super) fn level_link(
 }
 
 /// The move between two passes of one level, by the pass link.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn pass_link(
-    b: &mut PathBuilder,
-    e: Point2,
-    z: f64,
-    mat_top: f64,
-    m: &Motion,
-    cert: Option<&Cert<'_>>,
-    passes: &[Vec<Point2>],
-    st: &mut LinkState,
-) {
+pub(super) fn pass_link(b: &mut PathBuilder, lv: &LevelWalk, m: &Motion, cert: Option<&Cert<'_>>, st: &mut LinkState) {
+    let (passes, z, mat_top) = (lv.passes, lv.z, lv.mat_top);
+    let Some(&e) = lv.pass.first() else {
+        return;
+    };
     let cur = b.at();
     let at = Point2::new(cur.x, cur.y);
     let plane = match m.links.pass {
@@ -173,6 +168,22 @@ pub(super) fn pass_link(
     // The climb-and-dive every planar ladder has posted between passes:
     // the floor its neighbours already cleared, crossed in air.
     b.push(MoveKind::Rapid, Point3::new(at.x, at.y, plane), None);
+    // M11.3 (the centre-cutting law between passes): a tool that may not
+    // plunge into solid enters a pass start its neighbours have not
+    // cleared like a level - the helix onto it, else the ramp along the
+    // pass - or the op is refused by name (`plunge_law`).
+    if !m.links.approach.center_cutting
+        && plunge_law::into_solid(b, e, z, mat_top, m.tool_r())
+        && let Some(cen) = cert
+    {
+        let l = Lvl { cen, passes, pass: lv.pass, walk: lv.walk, mat_top };
+        let from = (mat_top + m.links.approach.plunge_height).min(plane);
+        let d = restart(&l, at, z, from, m);
+        if let Some(dv) = push(b, &d, &l, z, plane, m) {
+            st.level.push(vec![dv, e]);
+        }
+        return;
+    }
     b.push(MoveKind::Rapid, Point3::new(e.x, e.y, plane), None);
     feed_down(b, e, z, mat_top, m, m.plunge_feed);
 }

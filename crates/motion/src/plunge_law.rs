@@ -1,0 +1,101 @@
+//! The centre-cutting plunge law (M11.3, owed from B-D (4)): a tool whose
+//! end edges stop short of its axis may never feed straight down into
+//! solid - not on a level's entry, and not on any plunge between passes
+//! inside a level (a zigzag row restart, a ring-to-ring dive, a slot or
+//! bore re-entry, a 3-D ladder's pass hop, a second dive, a contour's
+//! lead-in or stay-down plunge). ONE check every axial descent of the
+//! planar, contour and 3-D ladders asks before it posts: is the column
+//! under the tool already cleared at the plunge's depth by this path?
+//!
+//! The reading: solid is everything under the material's top that no
+//! earlier cutting move of the same path has removed. A column counts as
+//! cleared at depth `z` when an earlier feed - a straight, an arc, a
+//! helix chord, a ramp leg - lying wholly at or below `z` passed within
+//! `(1 - CORE)` tool radii of the plunge's axis, so the uncut core
+//! (`CORE` radii about the axis, where a non-centre-cutting end mill
+//! leaves a stub) sits over removed material. Conservative by design: a
+//! ramp or helix still descending past `z` clears nothing yet, a rapid
+//! never cuts, and stock the generator cannot see is solid. A wrong
+//! "solid" only costs a helix, a ramp or a named refusal; a wrong
+//! "cleared" would snap a tool, so there is none.
+//!
+//! Provenance: the centre-cutting / non-centre-cutting end mill
+//! distinction of machining handbooks (a non-centre-cutting end mill may
+//! ramp or helix into material but not plunge); the cleared-column test
+//! is this crate's own geometry. No vendor material consulted.
+
+use crate::approach::CENTER_CUT_REFUSAL;
+use crate::cl::{Move, MoveKind, PathBuilder};
+use crate::geo2d::Point2;
+
+/// The uncut core of a non-centre-cutting end mill, as a fraction of its
+/// radius: half the radius (a quarter of the diameter) - wider than the
+/// centre holes and gashes such tools carry, so the law errs to solid.
+pub const CORE: f64 = 0.5;
+
+/// Height slack: a cut on the plunge's own plane counts as at its depth.
+const Z_EPS: f64 = 1e-6;
+
+/// Chord tolerance the cleared test reads arcs and helices at (mm).
+const CHORD_TOL: f64 = 0.01;
+
+/// Has an earlier cutting move in `moves` cleared the column at `xy`
+/// down to `z` for a tool of radius `tool_r` (see the module law)? A
+/// non-positive or non-finite radius clears nothing.
+#[must_use]
+pub fn column_cleared(moves: &[Move], xy: Point2, z: f64, tool_r: f64) -> bool {
+    let reach = tool_r * (1.0 - CORE);
+    if !(reach.is_finite() && reach > 0.0 && z.is_finite()) {
+        return false;
+    }
+    moves.iter().rev().filter(|m| m.kind != MoveKind::Rapid).any(|m| {
+        if m.from.z.min(m.to.z) > z + Z_EPS {
+            return false;
+        }
+        m.segments3(CHORD_TOL).iter().any(|(a, b)| {
+            a.z.max(b.z) <= z + Z_EPS && seg_dist(xy, Point2::new(a.x, a.y), Point2::new(b.x, b.y)) <= reach
+        })
+    })
+}
+
+/// Would an axial plunge at `xy` down to `z` be INTO SOLID - below the
+/// material's top `mat_top`, over a column the path has not cleared?
+#[must_use]
+pub fn into_solid(b: &PathBuilder, xy: Point2, z: f64, mat_top: f64, tool_r: f64) -> bool {
+    z < mat_top - Z_EPS && !column_cleared(b.moves(), xy, z, tool_r)
+}
+
+/// The check every axial descent posts through: for a tool that is not
+/// centre-cutting, a plunge into solid refuses the operation by name (the
+/// [`CENTER_CUT_REFUSAL`] note, said once per path - the generator turns
+/// it into its error, `approach::refusal`). `site` names the motion.
+/// Returns whether it refused. A centre-cutting tool is never refused.
+pub fn guard(
+    b: &mut PathBuilder,
+    center_cutting: bool,
+    tool_r: f64,
+    xy: Point2,
+    z: f64,
+    mat_top: f64,
+    site: &str,
+) -> bool {
+    if center_cutting || !into_solid(b, xy, z, mat_top, tool_r) {
+        return false;
+    }
+    if !b.notes().iter().any(|n| n.starts_with(CENTER_CUT_REFUSAL)) {
+        b.note(format!(
+            "{CENTER_CUT_REFUSAL} - {site} at ({:.3}, {:.3}) would plunge axially into solid down to Z {z:.3}, \
+             and no helix or ramp stands in there; pick a centre-cutting tool or a ramp/helix entry with room",
+            xy.x, xy.y
+        ));
+    }
+    true
+}
+
+/// Distance from `p` to the segment `a -> b`.
+fn seg_dist(p: Point2, a: Point2, b: Point2) -> f64 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let dd = dx * dx + dy * dy;
+    let t = if dd > 0.0 && dd.is_finite() { (((p.x - a.x) * dx + (p.y - a.y) * dy) / dd).clamp(0.0, 1.0) } else { 0.0 };
+    (p.x - a.x - t * dx).hypot(p.y - a.y - t * dy)
+}

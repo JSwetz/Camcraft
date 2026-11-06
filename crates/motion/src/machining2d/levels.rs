@@ -4,7 +4,7 @@
 //! `links.rs`; the descents in `descent.rs`, the links in
 //! `ladder_links.rs`).
 
-use crate::cl::{MoveKind, PathBuilder};
+use crate::cl::{MoveKind, PathBuilder, lattice};
 use crate::entry::Entry3D;
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
@@ -135,6 +135,14 @@ impl Motion {
         }
     }
 
+    /// The tool radius the centre-cutting plunge law reads (`plunge_law`):
+    /// half the arc radius every entry-capable ladder sets to the tool
+    /// diameter; `0` where none is set (chamfer, trace), which clears no
+    /// column - the law errs to solid.
+    pub(super) fn tool_r(&self) -> f64 {
+        (self.arc_radius * 0.5).max(0.0)
+    }
+
     /// The top of the cut (M11.3 B), clamped under clearance.
     pub(super) fn with_top(mut self, top_z: f64) -> Self {
         if top_z.is_finite() {
@@ -243,7 +251,7 @@ pub(super) fn run_level_walks(
                 let dove = descend(b, m.entry, false, center, &lv, m.clearance_z, m);
                 st.begin_level(e, dove);
             } else if last_cut_z == Some(z) {
-                pass_link(b, e, z, mat_top, m, links_cert, passes, &mut st);
+                pass_link(b, &lv, m, links_cert, &mut st);
             } else {
                 // A level change. The transition, when the user set one,
                 // proves against the link area; "same as entry" keeps
@@ -254,12 +262,25 @@ pub(super) fn run_level_walks(
                 };
                 level_link(b, arm, zig, cert, &lv, m, &mut st);
             }
+            // The engagement limit (M11.3 D, owed): the cut out of a
+            // level's descent stays slowed for its first tool diameter,
+            // until the full-width engagement of the bore settles.
+            let entered = last_cut_z != Some(z);
+            let scale = m.links.approach.engagement_scale();
             first = false;
-            match walk {
-                Some(w) => push_segs(b, w, z, m.feed),
-                None => {
-                    for q in rest {
-                        b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(m.feed));
+            if entered && scale < 1.0 && m.arc_radius > 0.0 {
+                let segs = match walk {
+                    Some(w) => w.to_vec(),
+                    None => vec![Seg::Line(rest.to_vec())],
+                };
+                push_settling(b, &segs, z, m.feed, m.feed * scale, m.arc_radius);
+            } else {
+                match walk {
+                    Some(w) => push_segs(b, w, z, m.feed),
+                    None => {
+                        for q in rest {
+                            b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(m.feed));
+                        }
                     }
                 }
             }
@@ -271,5 +292,40 @@ pub(super) fn run_level_walks(
         && !first
     {
         b.note_once(&n);
+    }
+}
+
+/// Walk `segs` at plane `z`, the first `stretch` mm (XY path length) at
+/// `slow` and the rest at `feed`: a straight crossing the stretch's end
+/// is split there (lattice-snapped); an arc that starts inside it is
+/// slowed whole - never faster than asked.
+fn push_settling(b: &mut PathBuilder, segs: &[Seg], z: f64, feed: f64, slow: f64, stretch: f64) {
+    let mut run = 0.0;
+    for seg in segs {
+        let at = b.at();
+        match seg {
+            Seg::Line(qs) => {
+                let mut cur = Point2::new(at.x, at.y);
+                for q in qs {
+                    let d = (q.x - cur.x).hypot(q.y - cur.y);
+                    if run < stretch && run + d > stretch && d.is_finite() && d > 0.0 {
+                        let f = (stretch - run) / d;
+                        let s = Point2::new(lattice(cur.x + (q.x - cur.x) * f), lattice(cur.y + (q.y - cur.y) * f));
+                        b.push(MoveKind::Feed, Point3::new(s.x, s.y, z), Some(slow));
+                        b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(feed));
+                    } else {
+                        let f = if run < stretch { slow } else { feed };
+                        b.push(MoveKind::Feed, Point3::new(q.x, q.y, z), Some(f));
+                    }
+                    run += if d.is_finite() { d } else { 0.0 };
+                    cur = *q;
+                }
+            }
+            Seg::Arc { center, ccw, to } => {
+                let f = if run < stretch { slow } else { feed };
+                b.push_arc(MoveKind::Feed, Point3::new(to.x, to.y, z), Some(f), *center, *ccw);
+                run += (to.x - at.x).hypot(to.y - at.y);
+            }
+        }
     }
 }

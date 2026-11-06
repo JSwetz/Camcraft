@@ -4,7 +4,7 @@
 
 use super::descent::{self, Ask, descend};
 use super::level_ctx::{LevelCtx, feed_leg, walk_pass};
-use super::params::Pocket3DParams;
+use super::params::{Entry3D, Pocket3DParams};
 use super::rest::level_target;
 use super::shell::Field;
 
@@ -14,6 +14,7 @@ use crate::geo2d::{Point2, Region};
 use crate::geometry::{Point3, Triangle};
 use crate::links::{Link, LinkTally, NOT_PROVED, TOO_LONG};
 use crate::machining2d::{chord_clears, plan_passes, GenError};
+use crate::plunge_law;
 use crate::stock_sim::Dexel;
 /// One ladder run: the level loop shared by both entry points. `zs` is
 /// the plane list, `rest` the post-coarse state whose still-standing
@@ -235,6 +236,7 @@ pub(super) fn ladder(
         // Crossing at the cut depth; fly over it instead). The pass link
         // (M11.2 D): keep down where proved (every earlier 3-D rough),
         // or always lift - to the retract plane or to clearance.
+        let mut restarts: Vec<Vec<Point2>> = Vec::new();
         for pass in &passes[1..] {
             let Some(&next_entry) = pass.first() else {
                 continue;
@@ -265,6 +267,30 @@ pub(super) fn ladder(
                 None => feed_leg(&mut b, &lvl, next_entry, 0.0),
                 Some(hz) => {
                     b.push(MoveKind::Rapid, Point3::new(prev.x, prev.y, hz), None);
+                    // M11.3: a tool that is not centre-cutting enters a
+                    // pass start its neighbours have not cleared like a
+                    // level (helix, ramp along the pass) or the op is
+                    // refused by name (`plunge_law`).
+                    let again = Ask {
+                        arm: Entry3D::Plunge,
+                        transition: false,
+                        rest: false,
+                        entry: next_entry,
+                        first_pass: pass,
+                        prev_z: prev_state.as_ref().map_or(hz, |(q, _)| *q),
+                        prev_cut: prev_state.as_ref().map(|(q, _)| *q),
+                    };
+                    let (tip, top) = (lvl.tip(next_entry, 0.0), descent::mat_top(&lvl, &again));
+                    if !p.links.approach.center_cutting && plunge_law::into_solid(&b, next_entry, tip, top, r) {
+                        lvl.tz = hz;
+                        let why = "a pass start inside the level";
+                        if let Some(d) = descent::fallback(&mut b, &lvl, &again, why, false) {
+                            restarts.push(vec![d, next_entry]);
+                        }
+                        lvl.tz = p.clearance_z;
+                        walk_pass(&mut b, pass, &lvl, /*skip_first=*/ true);
+                        continue;
+                    }
                     b.push(MoveKind::Rapid, Point3::new(next_entry.x, next_entry.y, hz), None);
                     b.push(
                         MoveKind::Plunge,
@@ -280,6 +306,7 @@ pub(super) fn ladder(
         // a descent from here will cross.
         prev_passes = passes.clone();
         prev_passes.extend(dove.map(|d| vec![d, entry]));
+        prev_passes.extend(restarts);
         prev_state = Some((z, center));
     }
     lifted.say(&mut b, "level/pass");

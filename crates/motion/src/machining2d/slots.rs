@@ -170,7 +170,9 @@ pub fn slot(a: Point2, b: Point2, p: &SlotParams) -> Result<Toolpath, GenError> 
     // never bless). A channel with no width to certify (h = 0) hands
     // the ladder nothing, and says so once - the descent it then posts
     // is the correct one (the starter hole IS the plunge at h=0).
-    let tess = if p.entry == Entry3D::Plunge {
+    // A tool that is not centre-cutting needs the stadium under a Plunge
+    // entry too: the helix or ramp that stands in proves against it.
+    let tess = if p.entry == Entry3D::Plunge && p.links.approach.center_cutting {
         None
     } else {
         motion = motion

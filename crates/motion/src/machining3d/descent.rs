@@ -23,6 +23,7 @@ use crate::geo2d::Point2;
 use crate::geometry::Point3;
 use crate::links::{helix_turns, plan_zig_capped, push_zig};
 use crate::machining2d::{chord_clears, ARC_FIT_TOL};
+use crate::plunge_law;
 
 /// One level's descent: the motion and how it reads the level.
 pub(super) struct Ask<'a> {
@@ -56,7 +57,7 @@ fn from(lvl: &LevelCtx, a: &Ask, ramp: bool) -> f64 {
 /// The material's top under a plunge at this level: the plane above on
 /// the plain ladder; on a lifted shell (whose previous level may have cut
 /// higher than its plane) and on the first level, the top of the cut.
-fn mat_top(lvl: &LevelCtx, a: &Ask) -> f64 {
+pub(super) fn mat_top(lvl: &LevelCtx, a: &Ask) -> f64 {
     match (lvl.field, a.prev_cut) {
         (None, Some(pz)) => pz,
         _ => lvl.p.top_z,
@@ -72,6 +73,8 @@ fn feed_down(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, xy: Point2, z_tip: f6
     if h > 0.0 && hz.is_finite() && hz < b.at().z && hz > z_tip {
         b.push(MoveKind::Rapid, Point3::new(xy.x, xy.y, hz), None);
     }
+    let ap = &lvl.p.links.approach;
+    plunge_law::guard(b, ap.center_cutting, lvl.p.tool_diameter * 0.5, xy, z_tip, top, "a plunge");
     b.push(MoveKind::Plunge, Point3::new(xy.x, xy.y, z_tip), Some(feed));
 }
 
@@ -285,7 +288,7 @@ fn push_zig3(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, pre: &[Point2], n: us
 /// failed helix rides the zig along the first pass; a tool that is not
 /// centre-cutting takes the helix, then the zig, or the op is refused by
 /// name; otherwise M8.1's substituted dive.
-fn fallback(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, why: &str, tried_helix: bool) -> Option<Point2> {
+pub(super) fn fallback(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, why: &str, tried_helix: bool) -> Option<Point2> {
     let cc = lvl.p.links.approach.center_cutting;
     if !cc
         && !tried_helix
@@ -341,7 +344,10 @@ pub(super) fn descend(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask) -> Option<Po
                 // a subset of every corridor above it - one chord test
                 // covers the whole interpolated move (M8.1); the leg limit
                 // takes the chord's last stretch.
-                if chord_clears(lvl.cen, leg, entry) {
+                let run = (leg.x - entry.x).hypot(leg.y - entry.y);
+                if !ap.center_cutting && run <= 1e-6 {
+                    fallback(b, lvl, a, "the ramp has no run - it is a plunge", false)
+                } else if chord_clears(lvl.cen, leg, entry) {
                     let s = ap.ramp_start(leg, entry);
                     let s = if chord_clears(lvl.cen, s, entry) { s } else { leg };
                     if s.x != leg.x || s.y != leg.y {
@@ -380,6 +386,11 @@ pub(super) fn descend(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask) -> Option<Po
         // The circular ramp (M11.1): the ramp's chord law on the lead
         // chord behind the entry, the fan posted by `entry_arc`.
         Entry3D::Arc => match arc(lvl, a) {
+            // A sweep-capped arc under the material's top ends in an
+            // axial drop: not for a tool that may not plunge.
+            Ok(l) if !ap.center_cutting && l.top < from(lvl, a, false) - 1e-6 && l.top < mat_top(lvl, a) - 1e-6 => {
+                fallback(b, lvl, a, "the arc's capped sweep ends in an axial drop", false)
+            }
             Ok(l) => {
                 if lvl.kept && (leg.x != l.start.x || leg.y != l.start.y) {
                     traverse(b, lvl, l.start);

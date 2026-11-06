@@ -9,6 +9,7 @@
 //! proven ring or the room the lead law proved). RS-274 / ISO 6983
 //! linear interpolation for the ramp's 3-axis feeds. No vendor material.
 
+use crate::approach::NOT_CENTER_CUTTING;
 use crate::cl::{MoveKind, PathBuilder};
 use crate::entry::Entry3D;
 use crate::entry_arc::{arc_lead_swept, push_vertical_arc, seg_dir};
@@ -63,6 +64,13 @@ fn helix_laps(dz: f64, pitch: f64) -> Option<usize> {
     (laps.is_finite() && laps <= MAX_RAMP_LAPS as f64).then_some(laps as usize)
 }
 
+/// The one plunge law (`plunge_law`) at a contour plunge onto `(xy, z)`
+/// under the material top `mat_top`.
+pub(super) fn guard(b: &mut PathBuilder, p: &ContourParams, xy: Point2, z: f64, mat_top: f64, site: &str) {
+    let cc = p.links.approach.center_cutting;
+    crate::plunge_law::guard(b, cc, p.tool_diameter * 0.5, xy, z, mat_top, site);
+}
+
 /// Push the ramp: from the ring's seam `poly[0]` at `z_from`, `laps`
 /// times around the closed polyline `poly`, descending linearly in arc
 /// length to `z_to` exactly at the seam. Every feed point lies on the
@@ -109,7 +117,10 @@ pub(super) fn push_stay(
     };
     match stay {
         Stay::Laps(laps) => push_ramp(b, poly, laps, zp, z, p.feed),
-        Stay::Plunge => b.push(MoveKind::Plunge, Point3::new(seam.x, seam.y, z), Some(p.plunge_feed)),
+        Stay::Plunge => {
+            guard(b, p, seam, z, zp, "the stay-down plunge at the seam");
+            b.push(MoveKind::Plunge, Point3::new(seam.x, seam.y, z), Some(p.plunge_feed));
+        }
         Stay::Arc => {
             let tol = slack(p);
             let holds = |a: Point2, q: Point2| segs_hold(legal, a, &[Seg::Line(vec![q])], tol);
@@ -127,9 +138,20 @@ pub(super) fn push_stay(
                     // Back along the proved lead chord at the level just
                     // cut, then the arc down onto the seam.
                     b.push(MoveKind::Feed, Point3::new(a.start.x, a.start.y, zp), Some(p.feed));
+                    guard(b, p, a.start, a.top, zp, "the stay-down arc's capped drop");
                     push_vertical_arc(b, &a, p.links.approach.descent_feed(p.feed), p.plunge_feed);
                 }
                 Err(why) => {
+                    let len: f64 = poly.windows(2).map(|w| dist(w[0], w[1])).sum();
+                    if !p.links.approach.center_cutting
+                        && let Some(n) = ramp_laps(len, zp - z, p.links.ramp_angle)
+                    {
+                        // M11.3: no plunge for a tool that may not plunge.
+                        say(notes, format!("{NOT_CENTER_CUTTING} - no stay-down arc at the seam ({why}); ramped along the ring instead"));
+                        push_ramp(b, poly, n, zp, z, p.feed);
+                        return;
+                    }
+                    guard(b, p, seam, z, zp, "the stay-down plunge at the seam");
                     say(
                         notes,
                         format!(
@@ -222,6 +244,19 @@ pub(super) fn plan_links(
                     None
                 }
             },
+            // M11.3: a tool that is not centre-cutting never plunges at
+            // the seam - it ramps along the ring at the links' angle, or
+            // re-enters from above (where the one plunge law reads it).
+            Entry3D::Plunge if !p.links.approach.center_cutting => match ramp_laps(len, zp - z, p.links.ramp_angle) {
+                Some(n) => {
+                    say(notes, format!("{NOT_CENTER_CUTTING} - the stay-down plunge ramps along the ring instead"));
+                    Some(Stay::Laps(n))
+                }
+                None => {
+                    refuse(notes, "the tool is not centre-cutting and the ring is too short to ramp".into());
+                    None
+                }
+            },
             Entry3D::Plunge => Some(Stay::Plunge),
             Entry3D::Arc => Some(Stay::Arc),
         };
@@ -267,6 +302,7 @@ pub(super) fn ring_link(
         b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, p.clearance_z), None);
     }
     b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop_z), None);
+    guard(b, p, e2, z, p.top_z, "the ring-to-ring dive at the lead-in");
     b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, z), Some(p.plunge_feed));
 }
 

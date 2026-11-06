@@ -110,6 +110,10 @@ pub(super) fn bore_entry(b: &mut PathBuilder, eng: &Engage, s: &BoreStep, lead: 
                     b.push(MoveKind::Rapid, Point3::new(st.x, st.y, cur.z), None);
                 }
                 b.push(MoveKind::Rapid, Point3::new(st.x, st.y, zf), None);
+                if st.x == e2.x && st.y == e2.y {
+                    // A ramp with no run is a plunge: the one plunge law.
+                    super::contour_link::guard(b, p, e2, z, mat_top, "the ramp with no run");
+                }
                 b.push(MoveKind::Feed, Point3::new(e2.x, e2.y, z), Some(fd));
                 None
             } else {
@@ -130,6 +134,10 @@ pub(super) fn bore_entry(b: &mut PathBuilder, eng: &Engage, s: &BoreStep, lead: 
                 });
             match lead_arc {
                 Ok(l) => {
+                    if l.top < from {
+                        // The sweep cap's axial drop: the one plunge law.
+                        super::contour_link::guard(b, p, l.start, l.top, mat_top, "the arc entry's axial drop");
+                    }
                     push_arc_lead(b, &l, tz, from, fd, pf);
                     None
                 }

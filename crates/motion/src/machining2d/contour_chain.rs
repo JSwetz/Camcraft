@@ -10,6 +10,7 @@ use crate::entry::Entry3D;
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
 use crate::links::Link;
+use crate::plunge_law;
 
 use super::arcs::{fit_arcs, lead_in, lead_out, push_segs, walk_tangent};
 use super::contour::{ContourParams, air_side};
@@ -100,6 +101,10 @@ pub fn contour_along_chain(
         }
         let cur = b.at();
         b.push(MoveKind::Rapid, Point3::new(entry.x, entry.y, cur.z), None);
+        // The stock beside the run is not proved cleared: the one plunge
+        // law refuses a tool that is not centre-cutting by name.
+        let cc = p.links.approach.center_cutting;
+        plunge_law::guard(&mut b, cc, p.tool_diameter * 0.5, entry, z, p.top_z, "the dive at the lead-in");
         b.push(MoveKind::Plunge, Point3::new(entry.x, entry.y, z), Some(p.plunge_feed));
         push_segs(&mut b, &lead, z, p.feed);
         push_segs(&mut b, &walk, z, p.feed);
@@ -109,6 +114,9 @@ pub fn contour_along_chain(
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
 
     let path = b.finish();
+    if let Some(why) = crate::approach::refusal(&path) {
+        return Err(GenError::Invalid(why));
+    }
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
     }

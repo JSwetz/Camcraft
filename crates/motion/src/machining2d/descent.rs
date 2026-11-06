@@ -31,7 +31,8 @@ use crate::links::{helix_turns, plan_zig_capped, push_zig};
 use super::arcs::{ARC_FIT_TOL, Seg};
 use super::levels::{Cert, Motion};
 
-pub(super) use super::descent_dive::{dive_link, feed_down, substituted_dive};
+use super::descent_dive::axial_why;
+pub(super) use super::descent_dive::{dive_link, feed_down, restart, substituted_dive};
 
 /// One helix: the near-side start (the pass start where it fits there),
 /// the orbit's center, the turns, the radius, the plane it starts on.
@@ -180,12 +181,8 @@ pub(super) fn plan(arm: Entry3D, zig: bool, l: &Lvl, leg: Point2, z: f64, prev_z
     {
         return Descent::Named(Box::new(r), format!("entry: {why} - the helix stands down to a ramp along the first cut"));
     }
-    if m.links.approach.center_cutting || !matches!(d, Descent::Plunge(_) | Descent::Sub(_)) {
+    let Some(why) = axial_why(&d, l).filter(|_| !m.links.approach.center_cutting) else {
         return d;
-    }
-    let why = match &d {
-        Descent::Sub(why) => *why,
-        _ => "the plunge arm",
     };
     if arm != Entry3D::Helix
         && let h @ Descent::Helix(..) = plan_arm(Entry3D::Helix, false, l, leg, z, prev_z, m)
@@ -201,7 +198,7 @@ pub(super) fn plan(arm: Entry3D, zig: bool, l: &Lvl, leg: Point2, z: f64, prev_z
 /// The ramp fallback: the zig-zag along the first cut at the entry's
 /// ramp angle (the transition's when the entry sets none) - every point
 /// on the proved cut.
-fn ramp_fallback(l: &Lvl, z: f64, prev_z: f64, m: &Motion) -> Option<Descent> {
+pub(super) fn ramp_fallback(l: &Lvl, z: f64, prev_z: f64, m: &Motion) -> Option<Descent> {
     let a = &m.links.approach;
     let angle = if a.ramp_zigs() { a.ramp_angle } else { m.links.ramp_angle };
     let zf = descent_from(m, prev_z, true);
@@ -251,7 +248,7 @@ fn plan_helix(
     Err(why)
 }
 
-fn plan_arm(arm: Entry3D, zig: bool, l: &Lvl, leg: Point2, z: f64, prev_z: f64, m: &Motion) -> Descent {
+pub(super) fn plan_arm(arm: Entry3D, zig: bool, l: &Lvl, leg: Point2, z: f64, prev_z: f64, m: &Motion) -> Descent {
     let Some(&e) = l.pass.first() else {
         return Descent::Sub("the pass has no start");
     };

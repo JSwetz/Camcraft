@@ -9799,3 +9799,30 @@ pixel-identical.
 
 (2) **Height-relationship notes resolve Selection heights** through the
 op's source, and an unresolved one says why instead of staying silent.
+
+## M11.3 owed: the centre-cutting law on every plunge: five decisions (2026-11-06)
+
+(1) **One check, `plunge_law`.** A column counts as cleared only if an
+earlier cut in the same path, entirely at or below the plunge depth,
+passed within half a tool radius of the axis (the core left errs to
+solid); unseen stock counts as solid. Dropped: plane-section and
+stock-model readings, which need data the generators don't have.
+
+(2) **A solid pass start inside a level** falls back exactly like the
+level entry: helix, then ramp along the pass, then refusal by name.
+Contour stay-downs ramp along the ring; a sweep-capped arc below the
+material top and a ramp with no run count as plunges for a
+non-centre-cutting tool. A non-centre-cutting slot with Plunge entry
+certifies the stadium so the fallbacks can work.
+
+(3) **Second dives on wall-start zigzag/slot rows: none exist** (the
+M11.3 land-along-the-pass already removed them); pinned by a test. The
+3-D ladder's and the contour bore side's named second dives stay owed.
+
+(4) **Engagement limit:** each level's first tool diameter of cut runs
+at the scaled feed on planar ladders; 3-D first-stretch slowing owed.
+
+(5) **Owed:** plunge checks in finishing3d, drilling and face. Gate
+note: two gate agents stalled waiting on notifications; the main
+session ran this gate itself (debug 1455 passed, clippy, both heavy
+lanes), excluding ui (no ui change).

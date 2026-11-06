@@ -329,6 +329,7 @@ fn contour_impl(
                 let cur = b.at();
                 b.push(MoveKind::Feed, Point3::new(cur.x, cur.y, hop_z), Some(p.feed));
                 b.push(MoveKind::Rapid, Point3::new(e2.x, e2.y, hop_z), None);
+                super::contour_link::guard(&mut b, p, e2, lead_top, p.top_z, "the dive past a tab");
                 b.push(MoveKind::Plunge, Point3::new(e2.x, e2.y, lead_top), Some(p.plunge_feed));
             }
             first_entry = false;

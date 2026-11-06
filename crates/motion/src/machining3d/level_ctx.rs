@@ -12,6 +12,7 @@ use crate::entry::{chord_hits_plan, dive_room};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 use crate::machining2d::chord_clears;
+use crate::plunge_law;
 
 /// The level a dive lands on, bundled once per iteration for the link
 /// and substitute arms: the cutter-center region, the level's planned
@@ -139,6 +140,10 @@ pub(super) fn plunge_from_top(b: &mut PathBuilder, lvl: &LevelCtx, xy: Point2, f
     if h > 0.0 && hz.is_finite() && hz < b.at().z && hz > z {
         b.push(MoveKind::Rapid, Point3::new(xy.x, xy.y, hz), None);
     }
+    // The centre-cutting law (`plunge_law`): the top of the cut is the
+    // highest the material can stand, so the check errs to solid.
+    let cc = lvl.p.links.approach.center_cutting;
+    plunge_law::guard(b, cc, lvl.p.tool_diameter * 0.5, xy, z, top, "a plunge");
     b.push(MoveKind::Plunge, Point3::new(xy.x, xy.y, z), Some(feed));
 }
 
