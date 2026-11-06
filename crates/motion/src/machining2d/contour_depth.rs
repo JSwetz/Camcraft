@@ -4,15 +4,17 @@
 //! floor (plus the stock to leave), a through feature and an outer wall
 //! keep every level. Specced from the 2.5D profiling rule of published
 //! machining practice (a profile pass never descends below the floor of
-//! the feature it finishes) read against planar sections of the model
-//! (the same `material_above` reading the verifier's model law uses).
+//! the feature it finishes) read against ALL the part material standing
+//! above each plane - its section plus the shadow of what hangs over it
+//! (`slice::material_overhead`'s law, read in its two halves), so a ring
+//! under an overhang or a part's underside is never walked through it.
 //! No vendor material consulted.
 
 use std::collections::HashMap;
 
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Triangle;
-use crate::geometry::slice::material_above;
+use crate::geometry::slice::{material_above, shadow_above};
 
 /// Radial slack of the ring-legality test, mm: the offset ring's round
 /// joins sit a chord sag inside the exact offset; anything nearer the
@@ -75,33 +77,57 @@ fn samples(ring: &[Point2]) -> Vec<Point2> {
     v
 }
 
-/// Sections of the part, cached by plane; `None` = the slice failed,
+/// The part material standing above a plane, in its two halves: the
+/// cross-section and the shadow of the down-facing faces above it.
+/// Kept apart (not united) so a ring clear of a part solid down to the
+/// plane reads exactly as before - the shadow only ever adds a veto.
+struct Above {
+    section: Region,
+    shadow: Region,
+}
+
+/// Material above each plane, cached by plane; `None` = a slice failed,
 /// which every reader treats as "not legal" (fail closed).
 struct Sections<'a> {
     facets: &'a [Triangle],
-    cache: HashMap<u64, Option<Region>>,
+    cache: HashMap<u64, Option<Above>>,
+}
+
+/// Every sample keeps `need2` (squared) off the region and out of it.
+fn clear_of(s: &Region, pts: &[Point2], need2: f64) -> bool {
+    if s.is_empty() {
+        return true;
+    }
+    pts.iter().all(|&p| {
+        !s.contains(p)
+            && s.loops().iter().all(|l| {
+                let q = l.points();
+                (0..q.len()).all(|k| dist2_seg(p, q[k], q[(k + 1) % q.len()]) >= need2)
+            })
+    })
 }
 
 impl Sections<'_> {
-    fn at(&mut self, z: f64) -> Option<&Region> {
+    fn at(&mut self, z: f64) -> Option<&Above> {
         let f = self.facets;
-        self.cache.entry(z.to_bits()).or_insert_with(|| material_above(f, z).ok()).as_ref()
+        self.cache
+            .entry(z.to_bits())
+            .or_insert_with(|| {
+                let section = material_above(f, z).ok()?;
+                let shadow = shadow_above(f, z).ok()?;
+                Some(Above { section, shadow })
+            })
+            .as_ref()
     }
 
-    /// The ring keeps `need` off the part's material strictly above `z`.
+    /// The ring keeps `need` off the part's material strictly above `z`:
+    /// out of its section and out of the shadow of what hangs above.
+    /// (Clear of both halves is clear of their union: outside each, the
+    /// union's boundary distance is the nearer of the two.)
     fn clear(&mut self, pts: &[Point2], z: f64, need: f64) -> bool {
-        let Some(s) = self.at(z) else { return false };
-        if s.is_empty() {
-            return true;
-        }
+        let Some(a) = self.at(z) else { return false };
         let need2 = need.max(0.0) * need.max(0.0);
-        pts.iter().all(|&p| {
-            !s.contains(p)
-                && s.loops().iter().all(|l| {
-                    let q = l.points();
-                    (0..q.len()).all(|k| dist2_seg(p, q[k], q[(k + 1) % q.len()]) >= need2)
-                })
-        })
+        clear_of(&a.section, pts, need2) && clear_of(&a.shadow, pts, need2)
     }
 }
 

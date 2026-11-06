@@ -135,8 +135,16 @@ pub(super) fn descend(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask) -> Option<Po
                     if t > 0.0 {
                         let q1 = Point2::new(leg.x + dx * t, leg.y + dy * t);
                         b.push(MoveKind::Feed, Point3::new(q1.x, q1.y, z), Some(p.feed));
+                        // The tail rides the plane - the depth this
+                        // level's passes are cut at - so it answers the
+                        // dive link's law: fed only when it crosses none
+                        // of them (a tail a radius long reaches across
+                        // the zig-zag rows next to the pass start),
+                        // flown over to the pass start when it would.
+                        dive_link(b, lvl, q1, entry);
+                    } else {
+                        feed_leg(b, lvl, entry, 0.0);
                     }
-                    feed_leg(b, lvl, entry, 0.0);
                 }
                 None
             } else {

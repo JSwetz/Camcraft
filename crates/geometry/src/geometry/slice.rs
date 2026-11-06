@@ -240,10 +240,11 @@ fn beyond_horizon(p: Point3) -> bool {
 /// plane grazes a tessellated shelf (reading an errored slice as
 /// "no material" would be the silent wrong answer; the retry lands
 /// above the shelf instead, failing safe). Three probes, one
-/// millionth-of-a-millimetre apart, first survivor wins. Home of the
-/// islands law since M4.1 R4 - `machining3d::material_above` wraps
-/// this, the verifier's island cache calls it directly: one law,
-/// three readers, at the layer that owns the mesh (M2.1a).
+/// millionth-of-a-millimetre apart, first survivor wins. The plain
+/// section: the verifier's island cache reads it at each move's plane,
+/// and it is the first half of the generators' islands law,
+/// [`material_overhead`] (section plus [`shadow_above`]) - one law at
+/// the layer that owns the mesh (M2.1a, M4.1 R4).
 pub fn material_above(facets: &[Triangle], z: f64) -> Result<Region, SliceError> {
     const EPS: f64 = 1e-6;
     let mut err = None;
@@ -255,4 +256,81 @@ pub fn material_above(facets: &[Triangle], z: f64) -> Result<Region, SliceError>
         }
     }
     Err(err.unwrap_or(SliceError::Invalid("cannot section the model".into())))
+}
+
+/// The XY shadow of the model's down-facing faces strictly above `z`
+/// (each clipped to the half-space over the plane). Together with the
+/// cross-section it is the projection of all material standing above
+/// the plane: a column the plane finds in air but material crosses
+/// higher up meets that material first at a face whose outward normal
+/// points down (a blind floor's underside seen from below, an overhang,
+/// an undercut lip). Facet winding is the outward right-hand rule every
+/// importer and primitive keeps (`Triangle::normal`). Provenance: the
+/// projection identity of a closed solid's boundary (computational
+/// geometry textbook material); no vendor source.
+pub fn shadow_above(facets: &[Triangle], z: f64) -> Result<Region, SliceError> {
+    const EPS: f64 = 1e-6;
+    if !z.is_finite() {
+        return Err(SliceError::Invalid("non-finite level plane".into()));
+    }
+    let c = z + EPS;
+    let mut loops = Vec::new();
+    for t in facets {
+        if t.a.z.max(t.b.z).max(t.c.z) <= c {
+            continue; // wholly at or under the plane
+        }
+        let n = (t.b - t.a).cross(t.c - t.a);
+        if n.z.is_nan() || n.z >= 0.0 {
+            continue; // up-facing, vertical, degenerate or non-finite
+        }
+        let poly = clip_above([t.a, t.b, t.c], c);
+        // Down-facing projects clockwise; the union wants material CCW.
+        let pts: Vec<Point2> = poly.iter().rev().map(|p| Point2::new(p.x, p.y)).collect();
+        if pts.len() < 3 {
+            continue;
+        }
+        if let Ok(l) = Loop::new(pts)
+            && l.area() > 0.0
+        {
+            loops.push(l);
+        }
+    }
+    if loops.is_empty() {
+        return Ok(Region::empty());
+    }
+    Ok(Region::union_all(loops)?)
+}
+
+/// ALL the part material standing above `z`, projected to XY: the
+/// cross-section strictly above the plane ([`material_above`]) united
+/// with the shadow of what hangs over it ([`shadow_above`]) - what a
+/// vertical cutter standing at `z` must stay out of, shank included.
+/// The generators' islands law. [`material_above`] keeps its plain
+/// section meaning (the verifier's per-plane reading); the two agree
+/// only for a part solid all the way down to the plane.
+pub fn material_overhead(facets: &[Triangle], z: f64) -> Result<Region, SliceError> {
+    let cut = material_above(facets, z)?;
+    let hang = shadow_above(facets, z)?;
+    if hang.is_empty() {
+        return Ok(cut);
+    }
+    Ok(cut.union(&hang)?)
+}
+
+/// The part of a triangle at or above the plane `c` (Sutherland-Hodgman
+/// against one half-space): 0, 3 or 4 vertices, in the input's order.
+fn clip_above(v: [Point3; 3], c: f64) -> Vec<Point3> {
+    let mut out = Vec::with_capacity(4);
+    for i in 0..3 {
+        let (p, q) = (v[i], v[(i + 1) % 3]);
+        let (pin, qin) = (p.z >= c, q.z >= c);
+        if pin {
+            out.push(p);
+        }
+        if pin != qin {
+            let t = (c - p.z) / (q.z - p.z);
+            out.push(Point3::new(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t, c));
+        }
+    }
+    out
 }

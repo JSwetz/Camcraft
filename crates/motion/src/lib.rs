@@ -6,8 +6,10 @@
 //! it is remachining ORCHESTRATION (who counts as prior, by setup
 //! traversal), not a generator; the design table's "rest in motion"
 //! entry was wrong and R4 records it. The islands law itself sank to
-//! `geometry::slice::material_above`, so generator and verifier read
-//! one function, not each other.
+//! `geometry::slice`, so generator and verifier read one module, not
+//! each other: the generators `material_overhead` (section plus the
+//! shadow of what hangs above), the verifier `material_above` (the
+//! plain section at a move's plane).
 //!
 //! Provenance: offset/contour pocketing (clipper-backed island
 //! logic), zigzag and waterline slicing, drill-cycle families

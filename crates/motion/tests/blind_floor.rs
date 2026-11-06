@@ -206,16 +206,12 @@ fn a_blind_pocket_never_enters_solid_under_any_ladder() {
                                 }
                                 let below = t.moves.iter().any(|m| m.from.z.min(m.to.z) < -d - 1e-6);
                                 assert!(!below, "{tag}: a move below the floor at {}", -d);
+                                // Verify silent, every arm: the shell Ramp's planar
+                                // tail once crossed the zig-zag rows beside the pass
+                                // start (a Crossing at the level's own depth); it now
+                                // answers the dive link's plan law.
                                 let w = silent(&f, &region, &t);
-                                // Pre-existing and separate (found by this fuzz, not
-                                // a solid entry - the analytic check above passed,
-                                // and the same runs without the shell are silent):
-                                // the offset shell under the Ramp arm posts feeds
-                                // the verifier names as a Crossing. Pinned as
-                                // exactly that, so anything else fails.
-                                let known = shell && entry == Entry3D::Ramp;
-                                let ok = w.iter().all(|w| known && matches!(w, Warning::Crossing { .. }));
-                                assert!(ok, "{tag}: {w:?} / {:?}", t.notes);
+                                assert_eq!(w, Vec::<Warning>::new(), "{tag}: {:?}", t.notes);
                                 runs += 1;
                             }
                         }

@@ -19,7 +19,7 @@
 //!
 //! `slice(model, z+ε)` = columns whose solid reaches above the plane -
 //! the per-level islands, computed, not picked - united with the XY
-//! shadow of every down-facing face above the plane (`rest::hanging_above`):
+//! shadow of every down-facing face above the plane (`geometry::slice::shadow_above`):
 //! a plane under the part's underside or an overhang sections nothing
 //! there, yet the material above shadows those columns all the same (the
 //! blind-floor gouge: a level run to the stock bottom under a blind

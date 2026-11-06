@@ -9,8 +9,10 @@
 //! the part material standing in it: the enclosed area is the union of
 //! the picked rings' interiors (a face's hole loops are not trusted as
 //! the island list - its edge loop has none), and the islands are read
-//! from the part itself at every plane the ladder cuts, the verifier's
-//! own section law (`slice::material_above`). A floor face, its rim
+//! from the part itself at every plane the ladder cuts: ALL the part
+//! material standing above the plane - its section plus the shadow of
+//! what hangs over it (`slice::material_overhead`'s law), so a plane
+//! under a closed floor or an overhang never reads as open air. A floor face, its rim
 //! chain, the rim at the top of the wall and the wall patch therefore
 //! resolve to one region, byte for byte, and the strategy the user chose
 //! runs on it - nothing here looks at the region's shape.
@@ -95,8 +97,7 @@ pub(super) fn pocket_region_on_part(
     }
     let mut standing = Region::empty();
     for &z in planes {
-        let at = slice::material_above(part, z).map_err(from_slice)?;
-        let inside = enclosed.intersect(&at)?;
+        let inside = standing_inside(&enclosed, part, z)?;
         if inside.area().abs() < ISLAND_AREA_MIN {
             continue;
         }
@@ -112,6 +113,30 @@ pub(super) fn pocket_region_on_part(
     }
     Ok(enclosed.difference(&standing)?)
 }
+
+/// The part material standing above `z` inside `enclosed`: the plane's
+/// section, plus - only where it adds area - the shadow of what hangs
+/// over the plane (a closed floor's underside, an overhang). Read in two
+/// steps so a part solid down to the plane keeps its region byte for
+/// byte; the shadow is united only when it reaches past the section by
+/// more than tessellation noise.
+fn standing_inside(enclosed: &Region, part: &[Triangle], z: f64) -> Result<Region, GenError> {
+    let at = slice::material_above(part, z).map_err(from_slice)?;
+    let inside = enclosed.intersect(&at)?;
+    let hang = slice::shadow_above(part, z).map_err(from_slice)?;
+    if hang.is_empty() {
+        return Ok(inside);
+    }
+    let hang = enclosed.intersect(&hang)?;
+    if hang.difference(&inside)?.area().abs() <= SHADOW_AREA_MIN {
+        return Ok(inside);
+    }
+    Ok(inside.union(&hang)?)
+}
+
+/// A hanging shadow adding less than this (mm^2) past the section changes
+/// nothing a cutter can reach (the 3-D ladder's own gate).
+const SHADOW_AREA_MIN: f64 = 1e-6;
 
 /// The planes a pocket ladder cuts at, top down, the last one `bottom`
 /// exactly - the `machining2d` level law, restated here because the
@@ -160,6 +185,52 @@ mod law {
         .expect("region");
         let out = apply_area_controls(r.clone(), None).expect("identity");
         assert_eq!(out.loops(), r.loops());
+    }
+
+    fn boxf(min: [f64; 3], max: [f64; 3]) -> Vec<Triangle> {
+        let v = |i: usize| {
+            crate::geometry::Point3::new(
+                [min[0], max[0]][i & 1],
+                [min[1], max[1]][(i >> 1) & 1],
+                [min[2], max[2]][(i >> 2) & 1],
+            )
+        };
+        let quad = |a: usize, b: usize, c: usize, d: usize| [Triangle::new(v(a), v(b), v(c)), Triangle::new(v(a), v(c), v(d))];
+        [quad(4, 5, 7, 6), quad(0, 2, 3, 1), quad(0, 1, 5, 4), quad(2, 6, 7, 3), quad(1, 3, 7, 5), quad(2, 0, 4, 6)]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    #[test]
+    fn an_undercut_lip_no_plane_sections_is_an_island_of_every_plane_under_it() {
+        // A [-10, 10]^2 pocket in a frame to Z 20, an undercut lip
+        // x in [6, 10.5] at Z [17, 19] jutting in from the +x wall. The
+        // planes 20, 15.4, ..., 0 never section the lip: pre-fix the
+        // region was the whole square and a cutter at 15.4 stood under
+        // the lip, shank through it. The shadow makes it an island.
+        let mut part = boxf([-20.0, -20.0, 0.0], [-10.0, 20.0, 20.0]);
+        part.extend(boxf([10.0, -20.0, 0.0], [20.0, 20.0, 20.0]));
+        part.extend(boxf([-10.5, -20.0, 0.0], [10.5, -10.0, 20.0]));
+        part.extend(boxf([-10.5, 10.0, 0.0], [10.5, 20.0, 20.0]));
+        part.extend(boxf([6.0, -10.5, 17.0], [10.5, 10.5, 19.0]));
+        let ring = Loop::new(vec![
+            Point2::new(-10.0, -10.0),
+            Point2::new(10.0, -10.0),
+            Point2::new(10.0, 10.0),
+            Point2::new(-10.0, 10.0),
+        ])
+        .expect("ring");
+        let planes = ladder_planes(20.0, 0.0, 4.6);
+        assert!(planes.iter().all(|&z| !(17.0..19.0).contains(&z)), "{planes:?}");
+        let r = pocket_region_on_part(vec![ring.clone()], &part, &planes).expect("region");
+        assert!(!r.contains(Point2::new(8.0, 0.0)), "under the lip is part material");
+        assert!(r.contains(Point2::new(0.0, 0.0)) && r.contains(Point2::new(5.5, 0.0)), "the open pocket stays");
+        assert!((r.area() - 16.0 * 20.0).abs() < 1e-3, "the square less the lip: {}", r.area());
+        // No lip, no shadow inside: today's region, byte for byte.
+        part.truncate(part.len() - 12);
+        let plain = pocket_region_on_part(vec![ring.clone()], &part, &planes).expect("region");
+        assert_eq!(plain.loops(), Region::new(vec![ring]).expect("region").loops());
     }
 
     #[test]

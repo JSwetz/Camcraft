@@ -9570,3 +9570,36 @@ their flute count; drills, taps and turning tools don't.
 are additive keys, skipped when unset, so no version bump; an unknown
 material word refuses the file by name. They're edited from a "Cutting
 data" group on the Feeds tab, so the tool editor's snapshot holds.
+
+## The shadow law for 2D pockets and contours: five decisions (2026-11-06)
+
+(1) **The shadow law lives in `geometry::slice`** as `shadow_above` /
+`material_overhead` (section union the down-facing shadow), shared by
+the 3D ladder, 2D pocket regions and contour rings.
+`slice::material_above` keeps its plain-section meaning for the
+verifier. Dropped: a motion-only API, since app and contour both need
+it from the layer that owns the mesh.
+
+(2) **Both 2D sites were real and silent.** A pocket with Bottom below
+a 1 mm blind floor that no plane slices plunged through the floor
+(analytic check hit, verify silent). A contour shank passed through a
+sloped overhang slab whose vertex-height sections missed the ring.
+Pocket regions add the shadow only where it covers more than 1e-6 mm^2
+beyond the section; contour checks section and shadow separately.
+Untouched regions stay byte-identical.
+
+(3) **A Bottom below a closed floor that no plane slices refuses by
+name**, consistent with the existing refusal; clamping to the floor
+was dropped.
+
+(4) **The shell + Ramp `Crossing` was a real self-crossing.** The
+ramp's flat tail at level depth cut across the next zigzag row. It now
+goes through `dive_link` (fed when it crosses nothing, else hop and
+plunge at the pass start); 72/1152 fuzz warnings -> 0, and the fuzz
+now requires a silent verify. Re-anchoring the ramp was dropped (it
+would change every shell + Ramp path).
+
+(5) **The verifier itself still reads plain sections**, so it can't see
+a cut under an overhang or the part's underside. It is the backstop
+every generator relies on: the shadow-aware verifier is in flight as
+top priority, with boundary_ctx.rs's two plain-section reads.
