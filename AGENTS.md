@@ -15,43 +15,70 @@ knowledge, nothing else.
 The user trusts the recommendations made in their absence and reviews them
 afterwards - the work must not bother them.
 
-- **Autonomous always.** Run the ROADMAP without asking for decisions. When
+- **Autonomous always.** Work the open GitHub issues (Issue Law, below) without asking for decisions. When
   a choice appears, take the recommended option and keep moving; occasional
   one-line status feedback is fine, a blocking question is not.
 - **Every recommendation is recorded.** Each decision taken unattended gets
   an entry in `RECOMMENDED.md` - what was chosen, why, what was considered
   and dropped - as the discussion ledger for after the roadmap is cleared.
 - **Never stop, never recap mid-roadmap.** There is no "wrap up and check
-  in" state: the next ROADMAP item starts when the current gate is green.
+  in" state: the next issue is claimed when the current gate is green.
   Session summaries are for compaction, not for the user.
 - **Counter-measure against stalling.** If the work risks stopping before
   the roadmap is done (idle after a gate, waiting on nothing, end-of-turn
   with open items), spawn a continuation nudge subagent to remind the
-  session to pick up the next ROADMAP item. A stall is a bug.
+  session to claim the next issue. A stall is a bug.
 - **Side work rides subagents.** All testing, documentation, and knowledge
   graphing (the graphify updates) are done by subagents dispatched as
   subtasks, never inline: their completion notification is what triggers
-  the progression to the next ROADMAP item. This keeps the main agent
+  the progression to the next issue. This keeps the main agent
   running continuously, as "Never stop" above mandates - the main session
   plans, codes, and decides; the subagents verify, record, and graph.
 
-## Done ledger (ROADMAP.md → DONE.md)
+## Issue Law - work is tracked as GitHub issues
 
-- **A phase moves out when it is all green.** When every milestone of a
-  phase reads ✅ in the ROADMAP registry table - i.e. its features are
-  done, their gates (including the heavy lane) passed, and the milestone's
-  provenance review is in - the phase's prose is CUT from `ROADMAP.md`
-  into `DONE.md` verbatim. The registry table and a pointer line stay in
-  `ROADMAP.md`; deferred/⏸ items ride along only in a still-open
-  milestone - the table decides, not memory.
-- **DONE.md is not read by choice.** It is the archive: sessions never
-  load it unless checking that something was done - a refactor crossing
-  old ground, a regression hunt, a "how did we do this" question. It is
-  append-only; corrections are made by amending the entry in place, with
-  the law's RECOMMENDED.md entry as the authority.
-- **The move is a documentation edit, not a milestone.** It rides the
-  close-out docs commit of the phase's final green gate, never its own
-  build lane.
+Since 2026-11-07 (user: "move off the roadmap and track work as ISSUES") the
+work list is the repo's open GitHub issues, read and written with `gh`.
+`ROADMAP.md` and `DONE.md` are frozen archives: read them for history and
+design context, never add work to them. Decisions still go to
+`RECOMMENDED.md`; shipped changes go to `CHANGELOG.md`.
+
+- **Pick.** `gh issue list --state open --search "-label:claimed -label:blocked"`
+  and take the highest priority first: `P0` (wrong output, gouge, crash,
+  data loss) before `P1` (wrong behaviour a user hits) before `P2` (owed
+  polish), then the oldest. User-reported bugs outrank owed work.
+- **Claim before any code.** One command, so every agent sees it at once:
+  `gh issue edit N --add-label claimed --add-assignee @me` plus a comment
+  `gh issue comment N --body "claimed: <session or agent name> · <UTC time> ·
+  worktree/branch <name> · plan: <one line>"`. Never work an issue that
+  carries `claimed` unless its last claim comment is older than 4 hours with
+  no newer comment from the claimant - then it is stale: comment "reclaimed
+  from <old claimant> (stale)" and take it.
+- **Report on the issue, not in prose files.** A finding, a held patch, a
+  blocker or a decision taken goes into an issue comment. If the work is
+  blocked, swap `claimed` for `blocked` and say on what. If a fix shows new
+  work, open a new issue for it (labels: one `P*`, one or more `area:*`)
+  rather than burying it.
+- **Close only when the fix is on GitHub.** The fixing commit ends its body
+  with `Fixes #N` (`Refs #N` for partial work, which never closes). The
+  issue closes when that commit is pushed to `origin/main` - GitHub closes
+  it from the keyword; a local commit closes nothing. Then, in the same
+  step: remove `claimed`, and comment `fixed in <commit> · pinned by <test
+  name(s)> · ships in the next release (Unreleased)`.
+- **Never close by hand without a commit**, except: a duplicate (link the
+  original), already done (name the commit that did it), or a decided
+  won't-do (label `wontfix`, give the reason). Each needs that comment.
+- **User-reported bugs reopen, never re-file.** If the user still sees the
+  bug in a build that carries the fix, reopen the same issue with what they
+  saw; the claim starts again.
+- **At a release cut**, comment `shipped in vX.Y.Z` on every issue closed
+  since the previous cut (the `Unreleased` rows of `CHANGELOG.md` name them).
+- **Giving up without a fix:** remove `claimed`, comment what was learned,
+  leave it open.
+- **Changelog.** Every commit that changes behaviour adds one row to the
+  table in `CHANGELOG.md`: `| <short commit> | <YYYY-MM-DD> | <change, one
+  line> (#N) | Unreleased |`; a release cut replaces `Unreleased` with the
+  version it ships in. Docs-only and release-mechanics commits need no row.
 
 ## Clean-Room Protocol
 
@@ -193,6 +220,29 @@ which spawn the real app via `test_harness.rs`; helpers in `ui::test_harness`,
 app-level fixtures in `crates/app/tests/common/mod.rs`). Each future subcrate
 carries its own tests inside its crate (M4.1).
 
+**Three gate tiers - never hours per change** (user, 2026-11-07: "break up
+those test suites so we don't have to run hours on hours of tests"):
+
+1. **quick** (per patch, by the agent or gate-runner, target ≤ 5 min): only
+   the test binaries the diff touches, picked from the gate maps and the
+   touched crates (`scripts/gate.ps1 -Tier quick`); debug; no heavy lanes.
+2. **batch** (main session, before committing a batch, target ≤ 20 min):
+   every debug suite except those tagged slow, the ui suites from
+   `crates/ui`, clippy (`-Tier batch`). No release-mode heavy lanes.
+3. **release** (only at a cut, and nightly in CI): everything - all debug
+   suites, the `--ignored` heavy lanes in release (`-Tier release`).
+
+**Test the change, not everything.** A fix is proved by the test(s) that pin
+it, run one by one: `scripts/gate.ps1 -Test <name>` (or plain `cargo test -p
+<crate> --test <binary> -- <name> --exact`). A whole suite runs only when the
+change touches what that suite covers; the full set runs only at a release
+cut (user, 2026-11-07: "tests should also be possible to run one by one …
+so we are testing changes rather than everything every time").
+
+A test that takes more than ~60 s in debug moves to the heavy lane (with
+its lane named in the ignore reason) or gets a slimmer fixture; the batch
+tier stays fast by law, not by hope.
+
 Gate yourself narrowly, not by re-running everything: build once with
 `cargo test -p camcraft-app -p camcraft-ui --no-run`, then run the individual
 test binaries the diff touches (`target\debug\deps\<name>-<hash>.exe`, in
@@ -241,7 +291,7 @@ Keep it current as we work:
 
 - Code-only changes → `graphify update` (re-extracts changed files via AST,
   free and no LLM; run it as part of wrapping up a task)
-- ROADMAP.md / AGENTS.md / icon changes → `/graphify . --update` instead, so
+- AGENTS.md / icon changes → `/graphify . --update` instead, so
   the semantic side is re-extracted too
 - After renames or refactors that move many files → full `/graphify .` rebuild;
   the shrink guard refuses a smaller graph unless `--force` is passed
