@@ -33,7 +33,8 @@ jobs:
           if (-not $ver) { throw "cannot read the version from post.exe" }
           $stage = "dist/camcraft-$ver-win-x64"
           New-Item -ItemType Directory -Force `
-              "$stage/assets/posts", "$stage/assets/machines", "$stage/assets/ui" | Out-Null
+              "$stage/assets/posts", "$stage/assets/machines", "$stage/assets/ui", `
+              "$stage/assets/scripts", "$stage/assets/themes" | Out-Null
           Copy-Item target/release/camcraft-ui.exe $stage
           Copy-Item target/release/camcraft-cli.exe $stage
           Copy-Item target/release/post.exe $stage
@@ -41,7 +42,8 @@ jobs:
           Copy-Item assets/machines/* "$stage/assets/machines"
           Copy-Item assets/ui/* "$stage/assets/ui"
           Copy-Item assets/scripts/* "$stage/assets/scripts"
-          Copy-Item RELEASE_NOTES.md $stage
+          Copy-Item assets/themes/* "$stage/assets/themes"
+          Copy-Item RELEASE_NOTES.md, TESTING.md $stage
           Compress-Archive -Path $stage -DestinationPath "dist/camcraft-$ver-win-x64.zip" -Force
           Get-ChildItem dist
       - uses: actions/upload-artifact@v4

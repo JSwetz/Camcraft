@@ -1685,6 +1685,13 @@ would.** — 📋
       produce a standalone executable that can be headless tested"):
       today only app (`camcraft-cli`), post and ui carry binaries
 
+- **Themes resolve from the build machine's source tree**: `state.rs` finds
+      `assets/themes` through `CARGO_MANIFEST_DIR`, a compile-time path, so a
+      shipped exe only sees themes on the machine that built it (found packaging
+      0.7.0). Resolve beside the exe (and fall back to the built-ins), the way
+      posts, machines and icons already embed. Until then the zip ships
+      `assets/themes` for reference only.
+
 ### M13.4 - Small owed polish
 **Goal: the named cheap follow-ons stop being named and get done.** — ✅ (vertex picking, Set origin on a vertex or face, dialog polish - all done 2026-11-06)
 
