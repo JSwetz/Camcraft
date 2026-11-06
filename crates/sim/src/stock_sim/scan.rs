@@ -175,7 +175,7 @@ fn envelope_scan_lift(
     // G2 arc never cut. This budget only ever tightens the yardstick:
     // the machine follows the true arc, chord or not.
     let chord_tol = (tol * 0.25).max(1e-9);
-    let segs = center_segments(moves, center_lift, chord_tol);
+    let (segs, rings) = center_segments_tagged(moves, center_lift, chord_tol);
     let part = part_surface(facets, x0, y0, cell, nx, ny);
     let floor = cell * cell / (2.0 * r); // the sagitta one cell can hide
     let mut rep = EnvelopeReport {
@@ -218,10 +218,12 @@ fn envelope_scan_lift(
     // The flank window is the reach itself: both feet of a flanked
     // column stand within it, which caps what the law can read at
     // `4·tol` past the ball and asks the lattice to hold a column
-    // within reach of BOTH passes (M13.9: a window of `reach + cell`
-    // was tried - it read the cone's apex and the hill's crown, a
-    // closed ring's own inside, as scallop; the ceiling and the far
-    // foot's lattice slack are the named owed item).
+    // within reach of BOTH passes. A closed ring's own inside - the
+    // cone's apex, the hill's crown under a ring smaller than the
+    // reach - is one pass's graze, not a cusp: the feet must come
+    // from two distinct passes (`ridge::closed_ring_ids`, M13.9).
+    // The `4·tol` ceiling and the far foot's lattice slack stay the
+    // named owed item.
     let window = reach;
     // A far segment's 3D distance cannot stand inside the window, so
     // its XY window rejects it before the distance is paid. A
@@ -244,7 +246,7 @@ fn envelope_scan_lift(
             let n = super::ridge::column_normal(&part, nx, ny, ix, iy, cell);
             let mut flank = super::ridge::Flank::new(n);
             let (mut dmin, mut near) = (f64::INFINITY, 0u8);
-            for ((a, b), (x0, x1, y0, y1)) in segs.iter().zip(&boxes) {
+            for (((a, b), (x0, x1, y0, y1)), ring) in segs.iter().zip(&boxes).zip(&rings) {
                 if q.x < x0 - window
                     || q.x > x1 + window
                     || q.y < y0 - window
@@ -257,7 +259,7 @@ fn envelope_scan_lift(
                     near = near.saturating_add(1);
                 }
                 if d <= window {
-                    flank.add(q3, super::ridge::foot(q3, *a, *b));
+                    flank.add(q3, super::ridge::foot(q3, *a, *b), *ring);
                 }
                 if d < dmin {
                     dmin = d;
@@ -326,11 +328,16 @@ fn envelope_scan_lift(
 /// the tilt modal), its end the pose it states. A prismatic move - no
 /// axis, or the exact Z column - lifts by `+center_lift` in Z, bit for
 /// bit the law every 3-axis verdict and golden was measured with.
-pub(super) fn center_segments(
+/// Each segment comes with the closed iso-Z ring its move rides
+/// (`ridge::closed_ring_ids`; 0 for none) - the flank law's "two
+/// distinct passes" (M13.9).
+pub(super) fn center_segments_tagged(
     moves: &[Move],
     center_lift: f64,
     chord_tol: f64,
-) -> Vec<(Point3, Point3)> {
+) -> (Vec<(Point3, Point3)>, Vec<u32>) {
+    let ring_of = super::ridge::closed_ring_ids(moves);
+    let mut rings: Vec<u32> = Vec::new();
     let lift = |p: Point3, axis: Option<[f64; 3]>| -> Point3 {
         match axis {
             Some(a) if !crate::cl::is_vertical(&a) && center_lift != 0.0 => Point3::new(
@@ -343,7 +350,12 @@ pub(super) fn center_segments(
     };
     let mut segs = Vec::new();
     let mut held: Option<[f64; 3]> = None;
-    for m in moves {
+    let mut last_ring = 0u32;
+    for (i, m) in moves.iter().enumerate() {
+        // The segments the previous move added carry ITS ring; this
+        // move's are tagged by the next iteration (or the tail below).
+        rings.resize(segs.len(), last_ring);
+        last_ring = ring_of.get(i).copied().unwrap_or(0);
         let was = held;
         if m.axis.is_some() {
             held = m.axis;
@@ -396,7 +408,8 @@ pub(super) fn center_segments(
             }
         }
     }
-    segs
+    rings.resize(segs.len(), last_ring);
+    (segs, rings)
 }
 
 /// 3D point-to-segment distance - the honest "did any ball of the

@@ -240,22 +240,26 @@ fn envelope(facets: &[Triangle], t: &Toolpath) -> camcraft_motion::stock_sim::En
 /// pattern as `KINK_RATCHET` in `adaptive_hsm.rs`. The dome waterline
 /// left the table with the slope-aware ladder (`finishing3d::ladder`):
 /// 0.183 at the 27° crown band became 0 - it answers to the gate. The
-/// readings still listed are the shallow families' own (cos-law
-/// stepover over-reads on the hill and the tilted shelf), not the
-/// ring ladder's.
+/// march's skip-phase stride ladder (M13.9, `march.rs`) took the
+/// cos-law rasters' over-reads with it: the blind 4·delta0 probe had
+/// dropped whole runs between the tessellation's fold gaps (dome
+/// multidirection 0.349 → 0.125, dome scallop and the geodesic to the
+/// gate, hill project to 0 with the ring's-own-inside law in
+/// `stock_sim::ridge`). What is still listed is the strict tangency's
+/// fold annulus on the coarse hill (`r·Δm`, 0.47 mm between its 9°
+/// bands) and the tilted shelf's edge - ground the march refuses by
+/// its own law, not spacing.
 const SCALLOP_RATCHET: &[(&str, f64)] = &[
-    ("open dome geodesic", 0.226),
-    ("dome multidirection", 0.349),
-    ("dome scallop", 0.156),
-    ("hill contour", 0.231),
-    ("hill project", 0.127),
-    ("hill radial", 0.127),
+    // Covers the single Parallel path too (`multidirection_rasters_cross`
+    // judges both); the multi path itself reads 0.
+    ("dome multidirection", 0.126),
+    ("hill contour", 0.143),
+    ("hill radial", 0.126),
     ("hill spiral", 0.144),
-    ("hill radial with ramp", 0.127),
+    ("hill radial with ramp", 0.126),
     ("hill spiral with ramp", 0.144),
-    ("hill contour with ramp", 0.231),
-    ("hill project with ramp", 0.127),
-    ("ramp hill", 0.297),
+    ("hill contour with ramp", 0.143),
+    ("ramp hill", 0.154),
     ("tilted ramp", 0.170),
 ];
 
@@ -2399,18 +2403,26 @@ fn the_closed_dome_rides_the_split_and_refuses_the_floors() {
         .expect("closed-dome split");
     assert!(!ss.moves.is_empty(), "the split said nothing on the dome");
     // The disc floor REFUSES - unreachable, every rim center buries
-    // 0.14 mm into the cap. The pole's answer is the march's OWN
-    // kernel law: the plane-tangent ground is strict (the crease gap
-    // that floors the minimum-step staircase is specced against it,
-    // and no family gets a different kernel to be green), so the
-    // apex's star is a fold-rest - real for a ball, invisible to a
-    // per-facet plane law - and it belongs to M7.1's brick-SDF, the
-    // same jurisdiction the dome march's hole note names. Flat's
-    // honest answer today is the Empty refusal, not a path that lies.
-    let e = flat(&f, &ppattern(18.0, RIM_Z, FinishPattern::Flat))
-        .expect_err("the dome has no CUTTABLE floor");
-    assert!(matches!(e, GenError::Empty(_)), "{e:?}");
-    assert!(e.to_string().contains("no floor"), "{e}");
+    // 0.14 mm into the cap. The pole's fan IS floor by `is_floor`'s
+    // own law (its tangent-sheet rise, 0.04 mm across a wedge, fits
+    // the tolerance), and the plane-tangent ground is strict: each
+    // wedge's footprint translated by `r·m_xy` is a sliver a few
+    // tenths long, the fold gaps between them the march's own breaks.
+    // Until M13.9 the skip phase's blind 4·delta0 probe never landed
+    // on those slivers and Flat answered Empty - a refusal that was
+    // the march's miss, not the floor's absence. Now the star is
+    // ridden where a ball can rest on it: every cut stands at the
+    // apex, tangent-high, and nothing touches the disc plane.
+    let fl = flat(&f, &ppattern(18.0, RIM_Z, FinishPattern::Flat)).expect("the apex star is floor");
+    let cuts: Vec<&camcraft_motion::cl::Move> = fl.moves.iter().filter(|m| m.kind == MoveKind::Feed && (m.to.z - m.from.z).abs() < 1e-6).collect();
+    assert!(!cuts.is_empty(), "the apex star went unridden");
+    for m in &cuts {
+        assert!(m.to.x.hypot(m.to.y) < 1.5 && m.to.z > 19.9, "a flat cut left the apex star: {m:?}");
+    }
+    assert!(
+        fl.moves.iter().all(|m| m.kind == MoveKind::Rapid || (m.to.z - RIM_Z).abs() > 1e-6),
+        "the unreachable disc floor was ridden"
+    );
     // The app's own heights, straight through both twins.
     let fp = parallel(&f, &ppattern(20.0, RIM_Z, FinishPattern::Parallel))
         .expect("closed-dome parallel");

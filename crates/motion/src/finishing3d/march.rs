@@ -53,6 +53,46 @@ pub(super) fn march_curve(
     eps_chord: f64,
     floor_mm: f64,
 ) -> Vec<Vec<(Point2, f64)>> {
+    march_curve_seek(t0, t1, pos, dist, unit, sup, delta0, tol, eps_chord, floor_mm, tol)
+}
+
+/// [`march_curve`] with the skip phase's first stride at the cruise
+/// `4·delta0` - the blind probe every family ran before M13.9. The
+/// spiral family keeps it (pattern-gated, as the slope ladder is
+/// scoped to Waterline/Morph): on the hill the stride ladder found an
+/// inner-turn piece the blind probe had dropped, and the column it
+/// exposed reads 0.156 against the spiral's 0.144 pin - the ratchet
+/// never rises, so the spiral waits for the fold-annulus law.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn march_curve_blind(
+    t0: f64,
+    t1: f64,
+    pos: &impl Fn(f64) -> Point2,
+    dist: &impl Fn(f64, f64) -> f64,
+    unit: &impl Fn(f64) -> f64,
+    sup: &impl Fn(Point2) -> Option<f64>,
+    delta0: f64,
+    tol: f64,
+    eps_chord: f64,
+    floor_mm: f64,
+) -> Vec<Vec<(Point2, f64)>> {
+    march_curve_seek(t0, t1, pos, dist, unit, sup, delta0, tol, eps_chord, floor_mm, 4.0 * delta0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn march_curve_seek(
+    t0: f64,
+    t1: f64,
+    pos: &impl Fn(f64) -> Point2,
+    dist: &impl Fn(f64, f64) -> f64,
+    unit: &impl Fn(f64) -> f64,
+    sup: &impl Fn(Point2) -> Option<f64>,
+    delta0: f64,
+    tol: f64,
+    eps_chord: f64,
+    floor_mm: f64,
+    seek: f64,
+) -> Vec<Vec<(Point2, f64)>> {
     const MAX_BISECT: usize = 24;
     // The refinement floor (M2.2e): the march's own right to stop
     // bisecting, raised by an explicit minimum step. This floors
@@ -71,6 +111,22 @@ pub(super) fn march_curve(
     // everywhere. Nothing reported changes: round-onto-the-lattice
     // is a fixpoint of the µm rounding the golden writer applies.
     let ask = |q: Point2| sup(Point2::new(lattice(q.x), lattice(q.y)));
+    // The skip phase's stride ladder (M13.9): the search for the next
+    // ground starts one tolerance past where ground ended and doubles
+    // per empty sample up to the cruise `4·delta0`. A flat cruise
+    // stride was the cos-law rasters' over-read: on tessellated ground
+    // the strict tangency leaves a fold gap of `r·|Δm|` (0.2 mm on the
+    // r20 dome) between every pair of facets, so a line is runs of a
+    // facet's width with hairline gaps between - and a blind 4·delta0
+    // probe landing in the next gap, or a bisection converging to a
+    // LATER transition, dropped whole runs, leaving neighbouring lines
+    // three stepovers apart at the crown (0.349 mm read as scallop).
+    // Resetting to `tol` after every run end finds the gap's far edge
+    // with a sample or two; open air still reaches cruise in a
+    // handful of doublings, so an air stretch costs what it did.
+    let cruise = 4.0 * delta0;
+    let seek0 = seek.clamp(delta_min, cruise);
+    let mut stride = seek0;
     let mut line: Vec<(Point2, f64)> = Vec::new();
     let mut pieces: Vec<Vec<(Point2, f64)>> = Vec::new();
     let mut t = t0;
@@ -80,14 +136,17 @@ pub(super) fn march_curve(
     }
     'march: while t <= t1 {
         if cz.is_none() {
-            // Skip phase: coarse search for the next edge of
-            // material, then bisect the start of the run.
-            let tn = (t + 4.0 * delta0 * unit(t)).min(t1);
+            // Skip phase: search for the next edge of material at the
+            // stride ladder, then bisect the start of the run.
+            let tn = (t + stride * unit(t)).min(t1);
             if tn <= t {
                 break;
             }
             match ask(pos(tn)) {
-                None => t = tn,
+                None => {
+                    t = tn;
+                    stride = (stride * 2.0).min(cruise);
+                }
                 Some(c) => {
                     // The stretch between was not cuttable ground -
                     // air or occlusion. Whatever stands here is a
@@ -149,6 +208,7 @@ pub(super) fn march_curve(
                         push_run_pt(&mut line, pos(lo), loc);
                         t = lo;
                         cz = None;
+                        stride = seek0; // ground just ended: look close first
                         break;
                     }
                     Some(c) if (c - cz.unwrap_or(c)).abs() > dist(t, tn) + tol => {

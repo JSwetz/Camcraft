@@ -16,6 +16,15 @@
 //! reach it, it is pencil/rest machining's jurisdiction, and it is
 //! excused by the accessibility test below.
 //!
+//! The feet must come from two DISTINCT passes (M13.9): a closed ring
+//! smaller than the reach surrounds its own inside, and the crown nub
+//! it leaves standing there is the crown above the top ring - one
+//! pass's graze, rest machining's jurisdiction by the scan's own law,
+//! never the spacing's cusp. The slope-aware ladder's first crown ring
+//! on the hill made the scan read exactly that nub as scallop (0.127 →
+//! 0.189 on hill project); `closed_ring_ids` names each closed iso-Z
+//! ring in the stream so `Flank` refuses a pair of feet from one ring.
+//!
 //! Provenance: the cusp between adjacent ball-end passes is the
 //! scallop-height geometry of machining handbooks; the accessibility
 //! criterion (a surface point is ball-machinable iff the ball tangent
@@ -25,6 +34,7 @@
 //! `gouge::dist_pt_tri`). Our own law; no vendor material consulted.
 
 use super::gouge::dist_pt_tri;
+use crate::cl::{Move, MoveKind};
 use crate::geometry::{Point3, Triangle};
 
 type V3 = [f64; 3];
@@ -83,18 +93,81 @@ pub(super) fn foot(q: Point3, a: Point3, b: Point3) -> Point3 {
     Point3::new(a.x + e[0] * t, a.y + e[1] * t, a.z + e[2] * t)
 }
 
+/// The closed iso-Z rings of a move stream, one id per move: a maximal
+/// run of consecutive cutting moves (no rapid, no plunge) at one tip
+/// height that comes back to its own start is a ring, numbered from 1;
+/// every other move reads 0 - no ring, every foot its own pass. A
+/// raster's serpentine never closes, a contour's loops do (and a
+/// contour's innermost loop is under a stepover wide by construction,
+/// so excusing its inside excuses nothing over tolerance).
+pub(super) fn closed_ring_ids(moves: &[Move]) -> Vec<u32> {
+    let mut ids = vec![0u32; moves.len()];
+    let mut next = 1u32;
+    let mut start = 0usize;
+    while start < moves.len() {
+        let z = moves[start].from.z;
+        let iso = |m: &Move| {
+            !matches!(m.kind, MoveKind::Rapid | MoveKind::Plunge)
+                && m.is_finite()
+                && (m.from.z - z).abs() <= 1e-9
+                && (m.to.z - z).abs() <= 1e-9
+        };
+        if !iso(&moves[start]) {
+            start += 1;
+            continue;
+        }
+        let mut end = start;
+        while end + 1 < moves.len()
+            && iso(&moves[end + 1])
+            && (moves[end + 1].from.x - moves[end].to.x).abs() <= 1e-9
+            && (moves[end + 1].from.y - moves[end].to.y).abs() <= 1e-9
+        {
+            end += 1;
+        }
+        let (a, b) = (moves[start].from, moves[end].to);
+        if end > start && (a.x - b.x).abs() <= 1e-6 && (a.y - b.y).abs() <= 1e-6 {
+            for id in ids.iter_mut().take(end + 1).skip(start) {
+                *id = next;
+            }
+            // The ring's own vertical entry and exit - the plunge onto
+            // its start, the retract off its end - have no side of
+            // their own: their feet ARE ring points, so they ride the
+            // ring's id rather than stand as a second pass beside it.
+            let vertical = |m: &Move, q: Point3| {
+                (m.from.x - m.to.x).abs() <= 1e-9
+                    && (m.from.y - m.to.y).abs() <= 1e-9
+                    && (m.from.x - q.x).abs() <= 1e-9
+                    && (m.from.y - q.y).abs() <= 1e-9
+            };
+            if start > 0 && vertical(&moves[start - 1], a) {
+                ids[start - 1] = next;
+            }
+            if end + 1 < moves.len() && vertical(&moves[end + 1], b) {
+                ids[end + 1] = next;
+            }
+            next = next.saturating_add(1);
+        }
+        start = end + 1;
+    }
+    ids
+}
+
 /// The tangent-plane directions from one surface point to the feet
 /// within reach; flanked once two of them stand more than 120 degrees
 /// apart (a cusp's two feet are opposite, a pass's edge has all its
-/// feet on one side).
+/// feet on one side) AND come from distinct passes: two feet of one
+/// closed ring (`closed_ring_ids`) surround the ring's inside, they
+/// never flank it.
 pub(super) struct Flank {
     n: V3,
-    dirs: Vec<V3>,
+    dirs: Vec<(V3, u32)>,
     flanked: bool,
 }
 
 impl Flank {
-    const MAX_DIRS: usize = 16;
+    // Room for one direction per ring in reach: a crown column sees
+    // every ring of the ladder above the reach line, each its own.
+    const MAX_DIRS: usize = 64;
 
     pub(super) fn new(n: V3) -> Self {
         Flank {
@@ -104,7 +177,9 @@ impl Flank {
         }
     }
 
-    pub(super) fn add(&mut self, q: Point3, f: Point3) {
+    /// A foot `f` of the surface point `q`, from the pass `ring` (0
+    /// for a move on no closed ring: every such foot is its own pass).
+    pub(super) fn add(&mut self, q: Point3, f: Point3, ring: u32) {
         if self.flanked {
             return;
         }
@@ -117,16 +192,20 @@ impl Flank {
         }
         let u = [t[0] / l, t[1] / l, t[2] / l];
         let mut dup = false;
-        for d in &self.dirs {
+        for (d, p) in &self.dirs {
+            let same_ring = ring != 0 && *p == ring;
             let c = dot(*d, u);
-            if c < -0.5 {
+            if c < -0.5 && !same_ring {
                 self.flanked = true;
                 return;
             }
-            dup |= c > 0.95;
+            // A direction is only redundant within its own pass: the
+            // same side seen from another ring is the other ring's
+            // word, and it must stay on the record for ITS opposite.
+            dup |= c > 0.95 && *p == ring;
         }
         if !dup && self.dirs.len() < Self::MAX_DIRS {
-            self.dirs.push(u);
+            self.dirs.push((u, ring));
         }
     }
 

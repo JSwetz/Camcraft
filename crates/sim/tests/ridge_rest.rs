@@ -132,3 +132,87 @@ fn a_crease_no_ball_reaches_is_excused_not_scallop() {
     assert!(rep.scallop_mm > gate(rep.cell), "the flank's own scallop must convict: {}", rep.scallop_mm);
     assert!(rep.scallop_at.x.abs() > R / 2f64.sqrt(), "convicted inside the crease at {:?}", rep.scallop_at);
 }
+
+/// The finish3d hill: a sphere of radius 8 at the origin, cut at
+/// polar 45° and closed with a disc - 5 bands of 24.
+fn hill() -> Vec<Triangle> {
+    let (radius, polar_max, n_lat, n_lon) = (8.0f64, std::f64::consts::FRAC_PI_4, 5usize, 24usize);
+    let ring = |k: usize| -> Vec<Point3> {
+        let ph = polar_max * k as f64 / n_lat as f64;
+        let (z, rr) = (radius * ph.cos(), radius * ph.sin());
+        (0..n_lon)
+            .map(|j| {
+                let th = std::f64::consts::TAU * j as f64 / n_lon as f64;
+                p(rr * th.cos(), rr * th.sin(), z)
+            })
+            .collect()
+    };
+    let mut facets = Vec::new();
+    let apex = p(0.0, 0.0, radius);
+    let first = ring(1);
+    for j in 0..n_lon {
+        facets.push(Triangle::new(apex, first[j], first[(j + 1) % n_lon]));
+    }
+    for k in 1..n_lat {
+        let (ra, rb) = (ring(k), ring(k + 1));
+        for j in 0..n_lon {
+            let j2 = (j + 1) % n_lon;
+            facets.push(Triangle::new(ra[j], rb[j], rb[j2]));
+            facets.push(Triangle::new(ra[j], rb[j2], ra[j2]));
+        }
+    }
+    let rim = ring(n_lat);
+    let center = p(0.0, 0.0, radius * polar_max.cos());
+    for j in 0..n_lon {
+        facets.push(Triangle::new(center, rim[j], rim[(j + 1) % n_lon]));
+    }
+    facets
+}
+
+/// One closed waterline ring of the hill at tip height `z_tip`: the
+/// tangent centres of an r3 ball sit on the sphere of radius 11, so
+/// the ring's radius is `sqrt(11² − (z_tip + 3)²)`; a plunge enters it
+/// and 96 chords walk it back to its start.
+fn crown_ring(z_tip: f64) -> Vec<Move> {
+    let rc = (121.0f64 - (z_tip + R).powi(2)).max(0.0).sqrt();
+    let at = |k: usize| {
+        let th = std::f64::consts::TAU * k as f64 / 96.0;
+        p(rc * th.cos(), rc * th.sin(), z_tip)
+    };
+    let mut out = vec![Move { kind: MoveKind::Plunge, feed: Some(100.0), ..feed(p(rc, 0.0, 25.0), at(0)) }];
+    for k in 0..96 {
+        out.push(feed(at(k), at(k + 1)));
+    }
+    out
+}
+
+#[test]
+fn a_closed_ring_never_flanks_its_own_inside() {
+    // The slope-aware ladder's first crown ring on the hill: tip 7.88,
+    // a ring of radius 1.62 - smaller than the flank reach - leaving
+    // the apex 0.30 mm outside its balls. Opposite sides of ONE ring
+    // are one pass's graze: the crown above the top ring is rest
+    // machining's jurisdiction, never the spacing's cusp (the scan
+    // read 0.189 here before M13.9's distinct-passes law).
+    let rep = stock_sim::envelope_scan(&hill(), &crown_ring(7.88), R, TOL).expect("scan");
+    assert!(rep.gouge_mm <= gate(rep.cell), "a tangent ring bites nothing: {}", rep.gouge_mm);
+    assert!(
+        rep.scallop_mm <= gate(rep.cell),
+        "the ring's own inside read as scallop: {} at {:?}",
+        rep.scallop_mm,
+        rep.scallop_at
+    );
+    // Two rings at the 45° ceiling's spacing on 20° ground DO flank
+    // the band between them, and that cusp is the spacing's own.
+    let mut two = crown_ring(7.88);
+    two.extend(crown_ring(7.88 - 1.095));
+    let rep = stock_sim::envelope_scan(&hill(), &two, R, TOL).expect("scan");
+    assert!(
+        rep.scallop_mm > gate(rep.cell),
+        "the cusp between two rings must still convict: {} at {:?}",
+        rep.scallop_mm,
+        rep.scallop_at
+    );
+    let rho = rep.scallop_at.x.hypot(rep.scallop_at.y);
+    assert!(rho > 1.0 && rho < 4.0, "convicted off the band between the rings at {:?}", rep.scallop_at);
+}

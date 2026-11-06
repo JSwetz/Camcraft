@@ -333,9 +333,6 @@ fn two_runs_of_the_field_speak_the_same_path() {
     }
 }
 
-/// The dome flow fixtures' scallop reading when the ridge flank law went live (M13.9).
-const SCALLOP_RATCHET_DOME_FLOW: f64 = 0.156;
-
 fn lattice_bits(v: f64) -> i64 {
     camcraft_motion::cl::lattice(v).to_bits() as i64
 }
@@ -351,10 +348,10 @@ fn dome_flow_is_envelope_clean() {
     let gate = 0.05 + rep.cell * rep.cell / (2.0 * R) + 1e-9;
     assert!(rep.gouge_mm <= gate, "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
     assert!(rep.rest_mm <= gate, "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
-    // M13.9 scallop ratchet: the ridge flank law reads the dome flow's
-    // spacing scallop over the gate (a quality defect, the generator
-    // fix owed - see SCALLOP_RATCHET in finish3d.rs); pinned, a rise fails.
-    assert!(rep.scallop_mm <= SCALLOP_RATCHET_DOME_FLOW + 1e-3, "scallop {} mm at {:?} rose past its ratchet", rep.scallop_mm, rep.scallop_at);
+    // M13.9: the ridge flank law's spacing scallop answers to the gate
+    // itself - the 0.156 it read before the march's skip-phase stride
+    // ladder was runs the flow lines dropped between fold gaps.
+    assert!(rep.scallop_mm <= gate, "scallop {} mm at {:?} over the gate {gate}", rep.scallop_mm, rep.scallop_at);
 }
 
 /// The spherical cap of the stage-B finishing tests, restated here
@@ -521,8 +518,8 @@ fn dome_flow3d_is_envelope_clean() {
     let gate = 0.05 + rep.cell * rep.cell / (2.0 * R) + 1e-9;
     assert!(rep.gouge_mm <= gate, "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
     assert!(rep.rest_mm <= gate, "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
-    // M13.9 scallop ratchet: the ridge flank law reads the dome flow's
-    // spacing scallop over the gate (a quality defect, the generator
-    // fix owed - see SCALLOP_RATCHET in finish3d.rs); pinned, a rise fails.
-    assert!(rep.scallop_mm <= SCALLOP_RATCHET_DOME_FLOW + 1e-3, "scallop {} mm at {:?} rose past its ratchet", rep.scallop_mm, rep.scallop_at);
+    // M13.9: the ridge flank law's spacing scallop answers to the gate
+    // itself - the 0.156 it read before the march's skip-phase stride
+    // ladder was runs the flow lines dropped between fold gaps.
+    assert!(rep.scallop_mm <= gate, "scallop {} mm at {:?} over the gate {gate}", rep.scallop_mm, rep.scallop_at);
 }

@@ -7,7 +7,7 @@ use crate::machining2d::GenError;
 
 use super::params::{Finish3DParams, refinement_floor, scallop_stepdown, scallop_stepover, validate};
 use super::support::{build_sups, plunge_support, plunge_support_grad};
-use super::march::{emit_runs, march_curve};
+use super::march::{emit_runs, march_curve, march_curve_blind};
 use super::raster::{placement_guard, rings_and_tail, shallow_footprint};
 /// Radial finishing (M2.2d): `N = ceil(PI·R/s)` CHORDS through the
 /// shallow terrain's footprint center, each rotated `PI/N` from the
@@ -131,7 +131,7 @@ pub fn spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenEr
             (pb.x - pa.x).hypot(pb.y - pa.y)
         };
         let unit = |th: f64| 1.0 / r_of(th).max(4.0 * delta0);
-        let pieces = march_curve(
+        let pieces = march_curve_blind(
             0.0,
             th_end,
             &pos,
@@ -277,7 +277,7 @@ pub fn morphed_spiral(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpat
             (pb.x - pa.x).hypot(pb.y - pa.y)
         };
         let unit = |t: f64| 1.0 / r_of(t).max(4.0 * delta0);
-        let pieces = march_curve(
+        let pieces = march_curve_blind(
             0.0,
             th_end,
             &pos,
