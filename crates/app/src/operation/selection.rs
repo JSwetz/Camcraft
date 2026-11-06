@@ -245,7 +245,10 @@ pub(super) fn selection_geometry_in(
     let mut chains: Vec<Vec<Point2>> = Vec::new();
     let mut strips: Vec<Loop> = Vec::new();
     let mut rims: Vec<Vec<(i64, i64)>> = Vec::new();
-    let (rings, stitched) = stitch_open_runs(world, items, frame);
+    // Per entity first, then across entities (M13.11); the cross walk's
+    // refusals - a three-way junction, runs on different planes - are
+    // the Prime Directive's kind and come back by name.
+    let (rings, stitched) = stitch_open_runs(world, items, frame)?;
     let mut stitched_runs = 0usize;
     let mut stitched_rings = 0usize;
     for (label, pts, runs) in rings {

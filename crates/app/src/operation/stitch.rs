@@ -1,169 +1,13 @@
-
+//! Open-run stitching: the picked open runs of a selection, welded end to
+//! end into the rings they spell (M1.5.1 issue C), the rim dedupe every
+//! boundary passes, and the toolpath joint. The per-entity walk lives
+//! here; the walk across model entities is `stitch_cross` (M13.11), the
+//! run-out of an unclosed run to the stock is `run_out`.
+//!
+//! Provenance: our own design notes; the weld is the feature extractor's
+//! own lattice. No vendor material consulted.
 
 use super::*;
-
-/// Close one open run into a boundary by casting each free end straight
-/// out to the envelope's outer ring and walking that ring between the
-/// hits (M1.5.1 issue C: "an open loop should just let us generate to
-/// the outside of the stock box - the open loop selected should act as
-/// a limit"). The run is first oriented so the chord-closing shoelace is
-/// positive, which pins the outward normal (a 90° clockwise turn of the
-/// travel direction) to the material-free side at each end; the walk
-/// direction that keeps the strip on that side is chosen by material
-/// overlap when a footprint is known, shortest boundary otherwise, with
-/// the forward walk winning ties - and candidates that cross into the
-/// run's own chord lens are out of the race, because the run is a limit.
-/// Every failure mode - no stock ahead of an end, a self-crossing strip,
-/// a zero-area strip - is the named ambiguity, never a silent skip.
-pub(super) fn extend_run_to_footprint(
-    label: &str,
-    run: &[Point2],
-    envelope: &Region,
-    material: Option<&Region>,
-) -> Result<Loop, GenError> {
-    let ambiguous = || {
-        GenError::Invalid(format!(
-            "{label} and the selection geometry is ambiguous; use a closed chain or a Face pick"
-        ))
-    };
-    let Some(outer) = envelope
-        .loops()
-        .iter()
-        .max_by(|a, b| total_cmp_signed(a.area(), b.area()))
-    else {
-        return Err(ambiguous());
-    };
-    let ring = outer.points();
-    if ring.len() < 3 || run.len() < 2 {
-        return Err(ambiguous());
-    }
-    // Orient: shoelace over run + chord. A straight run shoelaces to ~0
-    // and keeps its order; the normal choice is still deterministic.
-    let mut twice = 0.0f64;
-    let m = run.len();
-    for i in 0..m {
-        let a = run[i];
-        let b = run[(i + 1) % m];
-        twice += a.x * b.y - b.x * a.y;
-    }
-    let pts: Vec<Point2> = if twice < 0.0 {
-        run.iter().rev().copied().collect()
-    } else {
-        run.to_vec()
-    };
-    // Outward = clockwise turn of travel at each free end: (d.y, -d.x).
-    let d0 = Point2::new(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-    let d1 = Point2::new(pts[m - 1].x - pts[m - 2].x, pts[m - 1].y - pts[m - 2].y);
-    let n0 = Point2::new(d0.y, -d0.x);
-    let n1 = Point2::new(d1.y, -d1.x);
-    // A straight run laces to nothing, so "away from the bulge" names
-    // no side - both normals are tried and the overlap score picks the
-    // material side. A curved run's chord-CCW orientation already fixed
-    // one honest outward direction; trying the other would let a run
-    // that rings material (a bore rim) claim the far half of itself.
-    let straight = twice.abs() < DEGENERATE_AREA;
-    // The lens the run closes against its own chord: material or air on
-    // the run's concave side. A strip that reaches into it crosses the
-    // run - and "the open loop acts as a limit" forbids crossing. One
-    // probe per segment, a hair left of travel (the chord-CCW
-    // orientation above puts lens interior on the left); any candidate
-    // containing one is out of the race, so overlap can no longer be
-    // gamed by wrapping the whole envelope behind the run's back. A
-    // straight run closes no lens: pure overlap decides, as scribbled.
-    let mut probes: Vec<Point2> = Vec::new();
-    if !straight {
-        for i in 0..m - 1 {
-            let (a, b) = (pts[i], pts[i + 1]);
-            let (dx, dy) = (b.x - a.x, b.y - a.y);
-            let len = (dx * dx + dy * dy).sqrt();
-            if len <= f64::EPSILON {
-                continue;
-            }
-            let eps = len * 1e-3;
-            probes.push(Point2::new(
-                (a.x + b.x) * 0.5 - dy / len * eps,
-                (a.y + b.y) * 0.5 + dx / len * eps,
-            ));
-        }
-    }
-    let mut candidates: Vec<(f64, f64, usize, Loop)> = Vec::new();
-    let sides: &[f64] = if straight { &[1.0, -1.0] } else { &[1.0] };
-    for (si, &sgn) in sides.iter().enumerate() {
-        let Some(hit_start) = ray_hit(ring, pts[0], Point2::new(n0.x * sgn, n0.y * sgn)) else {
-            continue;
-        };
-        let Some(hit_end) = ray_hit(ring, pts[m - 1], Point2::new(n1.x * sgn, n1.y * sgn)) else {
-            continue;
-        };
-        for &forward in [true, false].iter() {
-            let Some(between) = boundary_path(
-                ring,
-                (hit_end.1, hit_end.0),
-                (hit_start.1, hit_start.0),
-                forward,
-            ) else {
-                continue;
-            };
-            let mut closed = pts.clone();
-            closed.push(hit_end.0);
-            closed.extend(between.iter().copied());
-            let Ok(loop_) = Loop::new(closed) else {
-                continue;
-            };
-            if loop_.area().abs() < DEGENERATE_AREA {
-                continue;
-            }
-            // Self-crossing is the ambiguity guard: a crossing loop is
-            // no boundary, and `Region::new` is the one that says so.
-            let Ok(region) = Region::new(vec![loop_.clone()]) else {
-                continue;
-            };
-            if probes.iter().any(|p| region.contains(*p)) {
-                continue;
-            }
-            // More material inside the strip than less - the side that
-            // machines metal, not air.
-            let overlap = match material {
-                Some(mat) => match region.intersect(mat) {
-                    Ok(r) => r.area().abs(),
-                    Err(_) => continue,
-                },
-                None => 0.0,
-            };
-            // Then the shorter boundary walk: the corridor hugging the
-            // run's normal side beats the candidate that wraps the
-            // whole envelope, and with no footprint to consult this is
-            // the whole decision.
-            let mut walk = 0.0;
-            let mut prev = hit_end.0;
-            for &p in &between {
-                walk += ((p.x - prev.x).powi(2) + (p.y - prev.y).powi(2)).sqrt();
-                prev = p;
-            }
-            candidates.push((overlap, -walk, si, loop_));
-        }
-    }
-    // Highest score wins; ties break to the shorter walk, then to the
-    // first side tried, so the answer is a pure function of the pick.
-    match candidates
-        .into_iter()
-        .max_by(|a, b| {
-            a.0.total_cmp(&b.0)
-                .then(a.1.total_cmp(&b.1))
-                .then(a.2.cmp(&b.2))
-        })
-    {
-        Some((_, _, _, loop_)) => Ok(loop_),
-        None => Err(ambiguous()),
-    }
-}
-
-/// Order two signed areas by magnitude - the outer loops of a region
-/// are the big positive ones; a stray negative inside an `outer` pick
-/// should never win.
-pub(super) fn total_cmp_signed(a: f64, b: f64) -> std::cmp::Ordering {
-    a.abs().total_cmp(&b.abs())
-}
 
 /// The 1e6 lattice `push_loop` keys rims on, in one place so the
 /// stitcher's endpoint matches and the dedupe agree to the nanometre.
@@ -174,52 +18,50 @@ pub(super) fn qkey(p: &Point2) -> (i64, i64) {
     )
 }
 
+/// One step of the [`qkey`] lattice: the weld tolerance every endpoint
+/// match in this module uses, and the plane tolerance the cross-entity
+/// law (`stitch_cross`) holds a composed ring to - one number, so "the
+/// ends meet" and "the ring lies on one plane" are the same nanometre.
+pub(super) const WELD_TOL: f64 = 1e-6;
+
+/// A world point in the walk's frame, all three axes: [`plane_xy`]'s
+/// door with the height kept (the cross-entity plane law reads it).
+fn plane_local(w: Point3, frame: Option<&crate::cl::TiltedFrame>) -> Point3 {
+    match frame {
+        None => w,
+        Some(f) => f.to_local(w),
+    }
+}
+
 /// One distinct picked open run in the shape the stitcher works in:
 /// world XY points with the entity's transform applied (where
 /// `push_loop` expects every boundary to live), its quantized endpoints,
 /// and every item index that picked it - the same chain twice is one
 /// run picked twice.
 pub(super) struct Run {
-    items: Vec<usize>,
-    entity: String,
+    pub(super) items: Vec<usize>,
+    pub(super) entity: String,
     cid: u64,
-    pts: Vec<Point2>,
-    start: (i64, i64),
-    end: (i64, i64),
+    pub(super) pts: Vec<Point2>,
+    pub(super) start: (i64, i64),
+    pub(super) end: (i64, i64),
+    /// The height of every point in the walk's frame. Only the
+    /// cross-entity law reads it: one entity's ring is a ring however
+    /// it stands, exactly as it always was.
+    pub(super) zs: Vec<f64>,
 }
 
-/// What the stitcher hands back: rings composed from picked runs (label,
-/// points, run count), and for every item the rings consumed, which ring
-/// (index into that vec) consumed it - the set form answers "was this
-/// stitched?", the map form lets the UI's chips say "→ ring k" from the
-/// very walk the region takes.
-type Stitched = (Vec<(String, Vec<Point2>, usize)>, HashMap<usize, usize>);
+/// Rings composed from picked runs: label, points, run count.
+pub(super) type Rings = Vec<(String, Vec<Point2>, usize)>;
 
-/// M1.5.1 issue C: tessellation - STEP adaptive chords especially - can
-/// break a geometrically closed rim into several chains, each stopping
-/// where a chord's turn exceeds the merge angle. The user picks them
-/// all, and to them it is obviously one loop. So before routing, stitch
-/// the picked open runs of each entity end to end and return every walk
-/// that closes back onto its start as one ring, with its contributing
-/// picks marked consumed so routing treats them as the closed chain
-/// they describe.
-///
-/// Junctions match either endpoint of a candidate because a loop's runs
-/// are stored with whatever direction their edge orientations allow -
-/// across the rim of a split circle the two halves meet end-to-end on
-/// one side and start-to-start on the other, so a flipped continuation
-/// IS the ring, not a corruption of it. Committed rings are shoelace-
-/// canonicalized to CCW so pick order can never flip the winding. A
-/// doubled pick is deduped by chain id - the same segments twice close
-/// no ring, they close a zero-area spike.
-///
-/// Deliberately conservative: only picked runs take part (nothing
-/// unpicked is pulled in), cross-entity rings are not attempted (a
-/// recorded limit), a greedy fork that dead-ends commits nothing, and
-/// runs that do not close route exactly as they always did. Failed
-/// lookups are not errors here; the routing loop owns those refusals
-/// and will name them.
-pub(super) fn stitch_open_runs(world: &World, items: &[GeoSel], frame: Option<&crate::cl::TiltedFrame>) -> Stitched {
+/// What the stitcher hands back: the rings, and for every item the rings
+/// consumed, which ring (index into that vec) consumed it - the set form
+/// answers "was this stitched?", the map form lets the UI's chips say
+/// "→ ring k" from the very walk the region takes.
+type Stitched = (Rings, HashMap<usize, usize>);
+
+/// Every distinct picked open run, in the walk's frame.
+fn gather_runs(world: &World, items: &[GeoSel], frame: Option<&crate::cl::TiltedFrame>) -> Vec<Run> {
     let mut runs: Vec<Run> = Vec::new();
     for (i, g) in items.iter().enumerate() {
         let FeatureSel::Chain(cid) = g.feature else {
@@ -242,10 +84,11 @@ pub(super) fn stitch_open_runs(world: &World, items: &[GeoSel], frame: Option<&c
             continue;
         }
         let loc = model::transform_of(world, &entity).unwrap_or_default();
-        let pts: Vec<Point2> = feature::chain_points(&features, &c)
+        let local: Vec<Point3> = feature::chain_points(&features, &c)
             .iter()
-            .map(|p| plane_xy(transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot), frame))
+            .map(|p| plane_local(transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot), frame))
             .collect();
+        let pts: Vec<Point2> = local.iter().map(|l| Point2::new(l.x, l.y)).collect();
         let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied()) else {
             continue;
         };
@@ -256,84 +99,170 @@ pub(super) fn stitch_open_runs(world: &World, items: &[GeoSel], frame: Option<&c
             pts,
             start: qkey(&first),
             end: qkey(&last),
+            zs: local.iter().map(|l| l.z).collect(),
         });
     }
-    let used = |r: &Run, consumed: &HashMap<usize, usize>| {
-        r.items.iter().any(|it| consumed.contains_key(it))
-    };
+    runs
+}
+
+/// Whether any pick of `r` already went into a ring.
+pub(super) fn run_used(r: &Run, consumed: &HashMap<usize, usize>) -> bool {
+    r.items.iter().any(|it| consumed.contains_key(it))
+}
+
+/// M1.5.1 issue C: tessellation - STEP adaptive chords especially - can
+/// break a geometrically closed rim into several chains, each stopping
+/// where a chord's turn exceeds the merge angle. The user picks them
+/// all, and to them it is obviously one loop. So before routing, stitch
+/// the picked open runs of each entity end to end and return every walk
+/// that closes back onto its start as one ring, with its contributing
+/// picks marked consumed so routing treats them as the closed chain
+/// they describe.
+///
+/// Junctions match either endpoint of a candidate because a loop's runs
+/// are stored with whatever direction their edge orientations allow -
+/// across the rim of a split circle the two halves meet end-to-end on
+/// one side and start-to-start on the other, so a flipped continuation
+/// IS the ring, not a corruption of it. Committed rings are shoelace-
+/// canonicalized to CCW so pick order can never flip the winding. A
+/// doubled pick is deduped by chain id - the same segments twice close
+/// no ring, they close a zero-area spike.
+///
+/// Deliberately conservative: only picked runs take part (nothing
+/// unpicked is pulled in), a greedy fork that dead-ends commits nothing,
+/// and runs that do not close route exactly as they always did. Runs
+/// left over by this per-entity pass go to the cross-entity walk
+/// ([`stitch_across`], M13.11) when the picks span more than one model -
+/// the one place this walk refuses, by name. Other failed lookups are
+/// not errors here; the routing loop owns those refusals and will name
+/// them.
+pub(super) fn stitch_open_runs(
+    world: &World,
+    items: &[GeoSel],
+    frame: Option<&crate::cl::TiltedFrame>,
+) -> Result<Stitched, GenError> {
+    let runs = gather_runs(world, items, frame);
     // Each committed ring carries the count of runs that spelled it, so
     // `selection_notes` can say what the stitching did.
-    let mut rings: Vec<(String, Vec<Point2>, usize)> = Vec::new();
+    let mut rings: Rings = Vec::new();
     let mut consumed: HashMap<usize, usize> = HashMap::new();
     for s in 0..runs.len() {
-        if used(&runs[s], &consumed) {
+        if run_used(&runs[s], &consumed) {
             continue;
         }
-        // Walk the cycle through run `s` forward: `anchor` is where we
-        // started, `far` the junction to extend from. `in_seq` is why a
-        // walk can never loop.
-        let anchor = runs[s].start;
-        let mut far = runs[s].end;
-        let mut seq: Vec<(usize, bool)> = vec![(s, false)];
-        let mut in_seq = vec![false; runs.len()];
-        in_seq[s] = true;
-        let closed = loop {
-            if far == anchor {
-                break true;
-            }
-            let mut next: Option<(usize, bool)> = None;
-            for (j, r) in runs.iter().enumerate() {
-                if in_seq[j] || used(r, &consumed) || r.entity != runs[s].entity {
-                    continue;
-                }
-                if r.start == far {
-                    next = Some((j, false));
-                    break;
-                }
-                if r.end == far {
-                    next = Some((j, true));
-                    break;
-                }
-            }
-            let Some((j, rev)) = next else { break false };
-            in_seq[j] = true;
-            seq.push((j, rev));
-            far = if rev { runs[j].start } else { runs[j].end };
+        let Some(seq) = walk_ring(&runs, s, &consumed, false)? else {
+            continue;
         };
-        if !closed {
-            continue;
-        }
-        // Concatenate the walk, flipping what the junctions asked for.
-        // Shared seam vertices arrive as consecutive repeats and
-        // closing wraps - `push_loop` and `Loop::new` drop exactly
-        // those, so the ring needs no special handling here.
-        let mut pts: Vec<Point2> = Vec::new();
-        for (j, rev) in &seq {
-            for &it in &runs[*j].items {
-                consumed.insert(it, rings.len());
-            }
-            if *rev {
-                pts.extend(runs[*j].pts.iter().rev().copied());
-            } else {
-                pts.extend(runs[*j].pts.iter().copied());
-            }
-        }
-        let mut twice = 0.0;
-        let n = pts.len();
-        for i in 0..n.saturating_sub(1) {
-            let (a, b) = (pts[i], pts[i + 1]);
-            twice += a.x * b.y - a.y * b.x;
-        }
-        if twice < 0.0 {
-            pts.reverse();
-        }
-        rings.push((
-            format!("the stitched rim of '{}'", runs[s].entity),
-            pts,
-            seq.len(),
-        ));
+        let pts = compose_ring(&runs, &seq, rings.len(), &mut consumed);
+        rings.push((format!("the stitched rim of '{}'", runs[s].entity), pts, seq.len()));
     }
-    (rings, consumed)
+    stitch_across(&runs, &mut rings, &mut consumed)?;
+    Ok((rings, consumed))
+}
+
+/// One ring walk from run `s`: the `(run, reversed)` sequence that
+/// closes back onto `s`'s start, or `None` when it dead-ends. `anchor`
+/// is where the walk started, `far` the junction it extends from, and
+/// `in_seq` is why a walk can never loop.
+///
+/// Per entity (`cross` false) the walk is the greedy first-match law it
+/// always was, confined to `s`'s own entity. Across entities (`cross`
+/// true, M13.11) every unconsumed run of every model is a candidate, and
+/// a junction with more than one way on - or a closing point a third
+/// run also leaves from - is the named ambiguity, never a guess: the
+/// picks spell two rings, and a wrong one gouges.
+pub(super) fn walk_ring(
+    runs: &[Run],
+    s: usize,
+    consumed: &HashMap<usize, usize>,
+    cross: bool,
+) -> Result<Option<Vec<(usize, bool)>>, GenError> {
+    let anchor = runs[s].start;
+    let mut far = runs[s].end;
+    let mut seq: Vec<(usize, bool)> = vec![(s, false)];
+    let mut in_seq = vec![false; runs.len()];
+    in_seq[s] = true;
+    loop {
+        let closes = far == anchor;
+        if closes && !cross {
+            return Ok(Some(seq));
+        }
+        let mut next: Option<(usize, bool)> = None;
+        let mut at_junction: Vec<usize> = Vec::new();
+        for (j, r) in runs.iter().enumerate() {
+            if in_seq[j] || run_used(r, consumed) || (!cross && r.entity != runs[s].entity) {
+                continue;
+            }
+            let hit = if r.start == far {
+                Some((j, false))
+            } else if r.end == far {
+                Some((j, true))
+            } else {
+                None
+            };
+            let Some(h) = hit else { continue };
+            if next.is_none() {
+                next = Some(h);
+            }
+            at_junction.push(j);
+            if !cross {
+                break;
+            }
+        }
+        if cross && (at_junction.len() > 1 || (closes && !at_junction.is_empty())) {
+            let Some(&(last, _)) = seq.last() else {
+                return Ok(None);
+            };
+            at_junction.push(last);
+            if closes {
+                at_junction.push(s);
+            }
+            return Err(fork_refusal(runs, &at_junction, far));
+        }
+        if closes {
+            return Ok(Some(seq));
+        }
+        let Some((j, rev)) = next else {
+            return Ok(None);
+        };
+        in_seq[j] = true;
+        seq.push((j, rev));
+        far = if rev { runs[j].start } else { runs[j].end };
+    }
+}
+
+/// Concatenate a closed walk into one CCW ring, marking every pick of
+/// its runs as consumed by ring `ring_ix`. Shared seam vertices arrive as
+/// consecutive repeats and closing wraps - `push_loop` and `Loop::new`
+/// drop exactly those, so the ring needs no special handling here.
+pub(super) fn compose_ring(
+    runs: &[Run],
+    seq: &[(usize, bool)],
+    ring_ix: usize,
+    consumed: &mut HashMap<usize, usize>,
+) -> Vec<Point2> {
+    let mut pts: Vec<Point2> = Vec::new();
+    for (j, rev) in seq {
+        let Some(run) = runs.get(*j) else { continue };
+        for &it in &run.items {
+            consumed.insert(it, ring_ix);
+        }
+        if *rev {
+            pts.extend(run.pts.iter().rev().copied());
+        } else {
+            pts.extend(run.pts.iter().copied());
+        }
+    }
+    let mut twice = 0.0;
+    let n = pts.len();
+    for i in 0..n.saturating_sub(1) {
+        let (a, b) = (pts[i], pts[i + 1]);
+        twice += a.x * b.y - a.y * b.x;
+    }
+    if twice < 0.0 {
+        pts.reverse();
+    }
+    pts
 }
 
 /// Accept one selected boundary: refuse what collapses to a line seen

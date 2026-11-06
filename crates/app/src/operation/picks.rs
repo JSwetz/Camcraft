@@ -11,7 +11,12 @@ use super::*;
 pub fn stitched_rings(world: &World, items: &[GeoSel]) -> Vec<Option<usize>> {
     // The source selection's own walk is world XY (a picked source
     // under a tilt is refused upstream), so the chips read it there.
-    let (_, consumed) = stitch_open_runs(world, items, None);
+    // A walk that refuses (a cross-entity fork or plane mismatch,
+    // M13.11) owns no ring: every chip reads "stitched nothing", and
+    // the refusal itself is the account's to quote.
+    let Ok((_, consumed)) = stitch_open_runs(world, items, None) else {
+        return vec![None; items.len()];
+    };
     let mut out: Vec<Option<usize>> = vec![None; items.len()];
     for (it, k) in consumed {
         if let Some(slot) = out.get_mut(it) {
