@@ -40,6 +40,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         mut drive_chains,
         mut prior,
         is_mill,
+        machine_kind,
+        machine_rotaries,
         spindle,
         fixtures,
         workholding,
@@ -72,10 +74,17 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // the vertical-axis laws down for exactly that geometry (the
     // sim-side comment is the doctrine; the registry row stays the
     // Z-hole truth).
+    // The lathe's axial hole (M13.5 A) is the second seam-side
+    // override: a Z drill on a turned bar is a meridian cut no
+    // height field can judge, so `Mode::Revolve` stands the column
+    // laws down and `drilling::axial_warnings` judges it below.
+    let lathe_axial =
+        matches!(&params, OpParams::Drill { .. }) && machine_kind == crate::machine::Kind::Lathe;
     let mode = match &params {
         OpParams::Drill { cross, .. } if !cross.is_empty() => {
             crate::verify::Mode::Radial
         }
+        OpParams::Drill { .. } if lathe_axial => crate::verify::Mode::Revolve,
         _ => params.kind().info().mode,
     };
 
@@ -1063,6 +1072,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 crate::multiaxis::rotary_parallel(&material.facets, q, &axis)
             };
             let kind = if is_contour { "Rotary Contour" } else { "Rotary Parallel" };
+            // M13.5 B: the letter is the machine's. The fitted line
+            // the kernel will turn about must be a rotary the mounted
+            // machine states (A/B on a table; C is pinned by name).
+            rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, kind)?;
             let path = super::plunge_solid::guard_posed(
                 kind, tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
             )?;
@@ -1136,6 +1149,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // stated here so the field's double life is on record:
             // the kernel chords by its own arc-fit tolerance.
             let _ = tolerance;
+            // M13.5 B: the machine's letter for the line the ladder
+            // wraps about, or the refusal by name.
+            rotary_letter_gate(machine_rotaries.as_ref(), &material.facets, "Rotary Offset")?;
             // M13.8: the ladder peels from the setup STOCK's outer
             // radius about the fitted axis (the part's skin when no
             // separate stock is set, or when the stock sits inside it).
@@ -1723,6 +1739,14 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     holes: cross,
                 })?
             } else {
+                // M13.5 A: on a plain lathe the Drill kind is the
+                // turret's axial hole - the doors refuse by name a
+                // hole off the spindle axis, one past the bar's far
+                // end, and a drill wider than the modeled bore,
+                // before the mill's cycle kernel makes the chain.
+                if lathe_axial {
+                    drilling::axial_doors(&material.facets, holes, d, hl.bottom)?;
+                }
                 drilling::drill(&drilling::CycleParams {
                     clearance_z: hl.clearance,
                     r_z: req_z(hl.top, "Top of Part Z")?,
@@ -2659,6 +2683,14 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     *tolerance,
                 ));
             }
+            // The axial-hole verdict (M13.5 A): `Mode::Revolve` stood
+            // the column laws down for a drill that runs down the
+            // spindle, so the chain is judged here against the part's
+            // own recognized bore - width, floor and existence, by
+            // name at the cycle's first move.
+            if lathe_axial {
+                warns.extend(drilling::axial_warnings(&material.facets, &path, d, GOUGE_TOL));
+            }
             // The containment kinds' solid law (their verify runs without
             // the model - exact rims): the tool's own tip and stack swept
             // along every move against the part solid. The Section kinds
@@ -2777,6 +2809,22 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             Ok((path_world, warns))
         }
     }
+}
+
+/// The rotary kinds' letter door (M13.5 B): the line the kernel will
+/// turn the part about, fitted from the same facets it reads, held
+/// against the mounted machine's rotary inventory. A fit that fails
+/// here is left to the kernel, which refuses it by its own name; a
+/// line no stated rotary holds, or the spindle's C, refuses here.
+fn rotary_letter_gate(
+    machine: Option<&(String, Vec<crate::machine::AxisLimits>)>,
+    facets: &[Triangle],
+    kind: &str,
+) -> Result<(), GenError> {
+    let Ok(ax) = crate::multiaxis::axis::fit(facets) else {
+        return Ok(());
+    };
+    super::rotary_gate::rotary_letter(machine, [ax.dir.x, ax.dir.y, ax.dir.z], kind).map(|_| ())
 }
 
 /// The fixture laws (c2)/(d2) at generation, exactly as the post gate

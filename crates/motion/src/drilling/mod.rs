@@ -25,8 +25,11 @@
 //! and `cross_drill` plunges them as pose-tagged chains from the
 //! turret's X or Y station. The Z code is untouched by the
 //! generalization - the candidate passes are independent readings
-//! of one weld law.
+//! of one weld law. M13.5 A added the lathe's own Z hole: `axial`
+//! wraps the same Z kernel in the doors and the meridian verdict an
+//! on-axis drill from the turret answers to.
 
+mod axial;
 mod cylinder;
 mod cross;
 mod cycle;
@@ -41,6 +44,7 @@ mod tests;
 #[cfg(test)]
 mod tests_cross;
 
+pub use axial::{axial_doors, axial_warnings, AXIAL_TOL};
 pub use cross::{cross_drill, CrossParams};
 pub use cycle::drill;
 pub use hole::{

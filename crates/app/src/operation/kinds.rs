@@ -2148,6 +2148,20 @@ impl KindInfo {
     pub fn family(&self) -> Family {
         self.section.family()
     }
+
+    /// Whether this kind may enter a document mounted on `machine`:
+    /// the family pairing, plus the one per-kind exception the lathe
+    /// owns (M13.5 A) - the Drill kind is admitted on a plain lathe,
+    /// because a hole down the spindle axis is the turret's simplest
+    /// hole and the mill's cycle vocabulary is its vocabulary. The
+    /// generator's axial doors then refuse by name every hole that
+    /// is not on the axis. The ribbon keeps reading the section law
+    /// (`shown_for`); this is the command door's word.
+    #[must_use]
+    pub fn admits(&self, machine: crate::machine::Kind) -> bool {
+        self.family().admits(machine)
+            || (self.ty == OpType::Drill && machine == crate::machine::Kind::Lathe)
+    }
 }
 
 /// The kinds, in product order (combo, ribbon, digest tags).

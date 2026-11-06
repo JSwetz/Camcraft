@@ -93,9 +93,12 @@ pub(super) fn check_tool(world: &World, tool: &str) -> Result<(), CommandError> 
 /// and the refusal names both sides by name.
 pub(super) fn family_gate(world: &World, params: &OpParams) -> Result<(), CommandError> {
     use crate::operation::Family;
-    let family = params.kind().info().family();
+    let info = params.kind().info();
+    let family = info.family();
     let machine = crate::machine::kind_of(world);
-    if family.admits(machine) {
+    // The per-kind word (M13.5 A): the family table, plus the Drill
+    // kind's admission on a plain lathe for the axial hole.
+    if info.admits(machine) {
         return Ok(());
     }
     Err(CommandError::Invalid(format!(

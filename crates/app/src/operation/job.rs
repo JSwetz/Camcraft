@@ -43,6 +43,14 @@ pub struct GenJob {
     pub(super) drive_chains: Option<Result<Vec<Vec<Point3>>, GenError>>,
     pub(super) prior: Option<Result<Arc<crate::rest::PriorState>, GenError>>,
     pub(super) is_mill: bool,
+    /// The document's machine kind (M13.5): the lathe routes the Drill
+    /// kind down the spindle axis, and the rotary kinds read their
+    /// letter off the machine's rotary inventory.
+    pub(super) machine_kind: crate::machine::Kind,
+    /// The mounted machine's rotary inventory, `(model, axes)` - None
+    /// when no machine is mounted, which checks nothing (the
+    /// unstated-limit law).
+    pub(super) machine_rotaries: Option<(String, Vec<crate::machine::AxisLimits>)>,
     pub(super) spindle: Option<(f64, f64)>,
     pub(super) fixtures: Vec<crate::fixture::FixtureBox>,
     /// `fixtures` split by whether the steel turns with the part
@@ -172,14 +180,20 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         _ => None,
     };
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
-    let is_mill = crate::machine::kind_of(world) == crate::machine::Kind::Mill;
+    let machine_kind = crate::machine::kind_of(world);
+    let is_mill = machine_kind == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
     let workholding = crate::fixture::workholding_for(world, setup);
     let rotary_axis = crate::fixture::rotary_axis_of(world, op);
-    let spindle = crate::machine::of(world)
-        .1
+    let mounted = crate::machine::of(world).1;
+    let spindle = mounted
+        .as_ref()
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
         .map(|(d, l)| (d * 0.5, l));
+    let machine_rotaries = mounted.map(|m| {
+        let rot: Vec<_> = m.axes.iter().filter(|a| a.rotary).cloned().collect();
+        (m.model, rot)
+    });
 
     Ok(GenJob {
         tool,
@@ -197,6 +211,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         drive_chains,
         prior,
         is_mill,
+        machine_kind,
+        machine_rotaries,
         spindle,
         fixtures,
         workholding,
