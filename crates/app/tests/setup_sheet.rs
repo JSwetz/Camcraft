@@ -13,9 +13,11 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::commands::{
     ActivateSetup, AddTool, CommandError, CreateOperation, CreateSetup, GenerateOperation, History,
-    SetStock, SetWcsOrigin,
+    SetFixtureFixed, SetStock, SetWcsOrigin, TagFixture,
 };
-use camcraft_app::geometry::{IDENTITY_Q, Point3};
+use camcraft_app::geometry::{IDENTITY_Q, Point3, Triangle};
+use camcraft_app::machine::{self, AxisLimits, Machine};
+use camcraft_app::model;
 use camcraft_app::operation::{Height, HeightReference, OpParams, SrcRef};
 use camcraft_app::schema::Location;
 use camcraft_app::setup_sheet;
@@ -240,6 +242,88 @@ fn empty_world_renders_header_only_not_error() {
         setup_sheet::render(&world, Some("Nope")).is_err(),
         "a declared setup that does not exist is refused"
     );
+}
+
+/// A plain model with one facet spanning `min..max`, the way an import
+/// leaves it - the solid a fixture tag rides on (from `tests/fixtures.rs`).
+fn add_block(world: &World, name: &str, min: Point3, max: Point3) {
+    let entity = model::spawn(world, name);
+    let tri = Triangle::new(min, Point3::new(max.x, max.y, max.z), Point3::new(min.x, max.y, max.z));
+    model::set_facets(world, &entity, vec![tri].into());
+    model::set_rev(world, &entity, 1);
+}
+
+#[test]
+fn sheet_prints_each_fixtures_workholding_frame() {
+    // M13.8's workholding law, printed: the sheet must say which frame
+    // the verifier judged every piece of steel in - a fixed fixture
+    // stays in the machine frame while the table turns, the default
+    // turns with the part, and the machine table never turns.
+    let world = new_world();
+    let mut history = History::default();
+    box_stock(&world, &mut history, 60.0, 60.0, 20.0);
+    add_block(&world, "Chuck1", Point3::new(-10.0, -10.0, -30.0), Point3::new(10.0, 10.0, 0.0));
+    add_block(&world, "Tailstock1", Point3::new(80.0, -5.0, -5.0), Point3::new(100.0, 5.0, 5.0));
+    run(&world, &mut history, TagFixture::new(&world, "Chuck1", None), "tag the chuck");
+    run(&world, &mut history, TagFixture::new(&world, "Tailstock1", None), "tag the tailstock");
+    run(
+        &world,
+        &mut history,
+        SetFixtureFixed::new(&world, "Tailstock1", true),
+        "the tailstock stands still",
+    );
+    let axis = |n: &str| AxisLimits {
+        name: n.to_string(),
+        travel: Some((-100.0, 100.0)),
+        ..Default::default()
+    };
+    machine::set(
+        &world,
+        "vmc.mch",
+        Some(&Machine {
+            model: "TestBench VMC".to_string(),
+            axes: vec![axis("X"), axis("Y"), axis("Z")],
+            ..Default::default()
+        }),
+    );
+
+    let sheet = setup_sheet::render(&world, None).expect("sheet");
+    let line_of = |name: &str| {
+        sheet
+            .lines()
+            .find(|l| l.trim_start().starts_with(name))
+            .unwrap_or_else(|| panic!("{name} has a fixture line:\n{sheet}"))
+            .to_string()
+    };
+    let chuck = line_of("Chuck1");
+    let tail = line_of("Tailstock1");
+    let table = line_of(camcraft_app::fixture::MACHINE_TABLE);
+    assert!(
+        chuck.ends_with(setup_sheet::TURNING_WORDING) && chuck.contains("footprint 20.000 x 20.000"),
+        "the default fixture turns with the part:\n{chuck}"
+    );
+    assert!(
+        tail.ends_with(setup_sheet::FIXED_WORDING) && tail.contains("footprint 20.000 x 10.000"),
+        "a fixed fixture says so, after its footprint:\n{tail}"
+    );
+    assert!(
+        table.ends_with(setup_sheet::FIXED_WORDING),
+        "the machine table never turns:\n{table}"
+    );
+    assert!(
+        !chuck.contains(setup_sheet::FIXED_WORDING) && !tail.contains(setup_sheet::TURNING_WORDING),
+        "each line carries exactly its own frame:\n{sheet}"
+    );
+
+    // Flipping the flag flips the words - and undo restores them.
+    run(&world, &mut history, SetFixtureFixed::new(&world, "Chuck1", true), "fix the chuck");
+    let flipped = setup_sheet::render(&world, None).expect("sheet");
+    assert!(
+        flipped.lines().any(|l| l.trim_start().starts_with("Chuck1") && l.ends_with(setup_sheet::FIXED_WORDING)),
+        "the flag is read live:\n{flipped}"
+    );
+    assert!(history.undo(&world), "the flag write is one undo unit");
+    assert_eq!(setup_sheet::render(&world, None).expect("sheet"), sheet, "undo restores the wording");
 }
 
 #[test]
