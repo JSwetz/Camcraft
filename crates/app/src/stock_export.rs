@@ -68,11 +68,14 @@ pub fn write_stl(fv: &FieldView, path: &Path) -> Result<usize, String> {
 
 /// The mesh cache: one extraction per field view, rebuilt when the view
 /// changes (identity of the `Arc` the viewport holds - the toolpath
-/// cache's keyed law, applied to the field).
+/// cache's keyed law, applied to the field). A refusal is remembered
+/// for its view exactly like a mesh: a frame that asks again gets the
+/// same answer, never a second extraction (M13.1 owed: the viewer reads
+/// this cache every frame).
 #[derive(Default)]
 pub struct MeshCache {
     key: Option<Arc<FieldView>>,
-    mesh: Option<Arc<Vec<Triangle>>>,
+    mesh: Option<Result<Arc<Vec<Triangle>>, String>>,
 }
 
 impl MeshCache {
@@ -81,14 +84,26 @@ impl MeshCache {
         if let (Some(k), Some(m)) = (&self.key, &self.mesh)
             && Arc::ptr_eq(k, fv)
         {
-            return Ok(Arc::clone(m));
+            return m.clone();
         }
         self.key = None;
         self.mesh = None;
-        let m = Arc::new(machined_mesh(fv)?);
+        let m = machined_mesh(fv).map(Arc::new);
         self.key = Some(Arc::clone(fv));
-        self.mesh = Some(Arc::clone(&m));
-        Ok(m)
+        self.mesh = Some(m.clone());
+        m
+    }
+
+    /// The viewer's read (M13.1 owed): the mesh already extracted for
+    /// this very view, or `None` - another view, a refusal, nothing
+    /// asked yet. Never extracts: the viewport collects its scene every
+    /// frame, and an extraction is `get`'s, once per view.
+    #[must_use]
+    pub fn viewed(&self, fv: &Arc<FieldView>) -> Option<Arc<Vec<Triangle>>> {
+        match (&self.key, &self.mesh) {
+            (Some(k), Some(Ok(m))) if Arc::ptr_eq(k, fv) => Some(Arc::clone(m)),
+            _ => None,
+        }
     }
 
     /// Drop the cached view and mesh.

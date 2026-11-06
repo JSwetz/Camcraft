@@ -1626,9 +1626,12 @@ every consumer Phase 7 promised it to.** — ⚠️ partial (owed: lathe/rotary 
 - **The eikonal band re-normalization** (M7.1, "re-normalize the band
       with one eikonal sweep before the render pass (fast, local)"):
       handed to M7.2 for the render, not built there
-- **The extracted mesh for the viewer and picking** (M7.2, "regenerates
+- ~~**The extracted mesh for the viewer and picking**~~ (M7.2, "regenerates
       triangles for the G-code viewer's stock display, picking, and STL
-      export"): the `MeshCache` serves STL export only
+      export") - done 2026-11-06 (RECOMMENDED "M13.1: the machined mesh
+      reaches the viewport and the pick"): the viewport's stock slot draws
+      the mesh when the whole-program view exists, the pick asks it second;
+      owed: the hovered mesh facet's highlight, deviation classes on the mesh
 - **Dual contouring** (M7.2, "dual contouring where sharp interior
       corners must survive"): only the marching-tetrahedra extraction
       shipped
@@ -1739,7 +1742,7 @@ would.** — 📋
 ### M13.7 - Verifier completeness
 **Goal: the exact solid-law verifier judges every move with the real
 tool, against the real stock, in the real pose - the backstop every
-generator relies on has no known blind spot.** — ⚠️ partial (owed: mid-move pose - the law is written and green; it lands with the swarf pose laws it exposed once the heavy envelope scan agrees: the first in-air link lifted a lying tool in Z and dragged its flank through the blade, 2.59 mm gouge)
+generator relies on has no known blind spot.** — ✅ done 2026-11-06 (the mid-move pose law landed with the swarf pose laws; the three findings it took are in RECOMMENDED "M13.7: the swarf pose never falls to upright under the equator")
 
 The 2026-11-06 solid-law verifier (0e18091) replaced plane sections for
 the tool-vs-part check; its own entry names what it still does not
@@ -1753,17 +1756,17 @@ None of these may stay open behind a ✅.
 - ~~**Uncut stock under overhangs**~~ - done 2026-11-06 (RECOMMENDED "M13.7: stock
       under overhangs"); owed from it: judge each move against the cuts BEFORE it
       (the column model ignores cut order and can under-report) - DONE 2026-11-06 (cut_index.rs).
-- **Mid-move pose changes**: the law is written and green (verify/midpose.rs,
-      held patch) and exposed the swarf stamp's hemisphere flips; it lands with the
-      swarf pose laws (RECOMMENDED "M13.7 and the swarf pose laws") once the
-      full-tool envelope scan agrees - the first in-air link lifted the lying tool
-      in world Z and dragged its 60 mm flank through the curved blade (2.59 mm
-      gouge, caught by pivot5d's heavy envelope test). The retract now follows
-      the contact normal (RECOMMENDED "The swarf link retracts along the contact
-      normal"): posed envelope == plan on both blades; what remains is the
-      verifier's column rapid law (d), which cannot see the air under an
-      overhang and convicts the normal retracts - a solid-aware second reading
-      for posed rapids is in flight, with tests that keep the law sharp.
+- ~~**Mid-move pose changes**~~ - done 2026-11-06: the law (verify/midpose.rs)
+      landed with the swarf pose laws after three findings in a row - the stamp's
+      hemisphere flips (RECOMMENDED "M13.7 and the swarf pose laws"), the Z-lift
+      link dragging the lying flank through the blade (2.59 mm, caught by
+      pivot5d's envelope scan; the link now retracts along the contact normal,
+      RECOMMENDED "The swarf link retracts along the contact normal", with the
+      verifier's law (d) given a solid-aware second reading for leaning rapids),
+      and the stamp's 10 µm contact band reading the cap rows as air and
+      stating upright inside the wall (RECOMMENDED "M13.7: the swarf pose never
+      falls to upright under the equator"). Posed envelope == plan on both
+      blades; the full band verifies with an empty warning list.
 - ~~**Rotary ops can't post**~~ - resolved 2026-11-06: a pivot bug
       (posed ball tools posted the centre, not the tip) plus vertical
       judgement of wrapped paths; fixed by the pivot law, posed rapids
@@ -1857,13 +1860,13 @@ visible and pinned while the generator fix is owed.
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); every fixture at 0 kinks past 5° (done, ratchet empty); owed: island legal late returns (round 6 finding: the 9 hops are the west-wall corner pieces k=585..631 whose leads read 16.5-18 deg vs the 15 deg bite on the RE-ORDERED stock - next: re-mark late pieces' leads with out.ras.walk_marks at schedule time and trim them to where they read <= bite, so the graze joins the cut and high() takes them), arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; open-boundary Contour band/extensions done; owed: boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
-| **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; the lathe revolved-stadium sweep landed with meridian parity (RECOMMENDED "M13.1: the lathe sweep on the field"); the rotary chord pre-pass landed with bar parity (RECOMMENDED "M13.1: the rotary chord pre-pass"); owed: the rotary lift (app-fixture parity, both consumers routed, a flute-rotation bound, cost on the Offset ladder), lifting plan_program's lathe refusal (nose + lathe frame in the plan), a blade-profile variant for groove/part/thread/form, eikonal, viewer/picking mesh, dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
+| **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; the lathe revolved-stadium sweep landed with meridian parity (RECOMMENDED "M13.1: the lathe sweep on the field"); the rotary chord pre-pass landed with bar parity (RECOMMENDED "M13.1: the rotary chord pre-pass"); owed: the rotary lift (app-fixture parity, both consumers routed, a flute-rotation bound, cost on the Offset ladder), lifting plan_program's lathe refusal (nose + lathe frame in the plan), a blade-profile variant for groove/part/thread/form, eikonal, the viewer/picking mesh (done 2026-11-06), dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
 | **M13.2** | Machine limits and cutting data | Spindle speed/power checks against a per-material speeds & feeds library (M3.3 C); the homegrown materials database (Open question "Cutting data"); done 2026-11-06 (fixed 0.8 spindle efficiency is a follow-on, not owed) | ✅ |
 | **M13.3** | Builds and distribution | Code signing + installer-vs-zip (M1.7); Docker builds for every target, app/UI on wasm (M4.2); a headless binary per crate (Phase 4 intro) | 📋 |
 | **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); all done: remaps, catalog hint, text colours, dialog polish, vertex picking, Set origin on a vertex or face | ✅ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
-| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); cut-order clearing (done); owed: mid-move pose (law green; lands with the swarf link fix) | ⚠️ |
+| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); cut-order clearing (done); mid-move pose law + the swarf pose laws (normal retract, law (d) solid reading, no upright under the equator) (done 2026-11-06) | ✅ |
 | **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; spindle on posed rapids, fixed fixtures in the machine frame; generate-time check on the workholding laws, Fixed toggle; the setup sheet naming each fixture's frame (RECOMMENDED "M13.8: the setup sheet names each fixture's frame"); owed: continuous pose | ⚠️ |
 | **M13.9** | Scallop law and finish stepovers | The ridge/scallop law is live as a non-blocking ratcheted verdict (16 fixtures pinned 0.127-0.349 over 0.123; RECOMMENDED "M13.9: the scallop law lives"); the slope-aware waterline ladder landed (dome waterline 0.183 → 0; RECOMMENDED "M13.9: the waterline ladder reads the slope"); owed: the cos-law rasters' over-reads (multidirection 0.349), the closed ring's own-inside scan read (hill crown), the reach ceiling and the two-pass flank predicate | ⚠️ |
 

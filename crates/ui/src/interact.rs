@@ -125,10 +125,13 @@ fn pick_model(state: &mut State, p: [f32; 2]) {
     // A browser-eye hidden model is display-off, not gone: it still
     // feeds stock and paths, but it is transparent to the ray here -
     // a click selects what the user can SEE, and geometry behind a
-    // hidden model is honestly pickable (filtered `first_hit_f`).
+    // hidden model is honestly pickable (filtered `first_hit_f`). A
+    // stock hit is read against the machined mesh when one is drawn
+    // (M13.1 owed): the click lands on what the viewer shows.
     let hit = pick::first_hit_f(&state.world, origin, dir, |name| {
         state.hidden_models.iter().any(|h| h == name)
     });
+    let hit = crate::machined::filter_hit(state, origin, dir, hit);
     // The click also tells us the exact facet under the pointer;
     // keeping it alive so the highlight matches the selection.
     state.hover = hit
@@ -305,6 +308,9 @@ pub(crate) fn update_hover(state: &mut State, p: [f32; 2], held: bool) {
     let hit = pick::first_hit_f(&state.world, origin, dir, |name| {
         state.hidden_models.iter().any(|h| h == name)
     });
+    // The machined mesh, when drawn, is what a stock hover reports
+    // (M13.1 owed) - never the uncut box the ray crossed.
+    let hit = crate::machined::filter_hit(state, origin, dir, hit);
     state.hover = hit.map(|(entity, facet, _)| {
         let feature = match mode {
             // The triangle highlight is exactly what the feature modes

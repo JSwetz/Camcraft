@@ -178,6 +178,9 @@ fn walk_whole_program(state: &mut State) {
                 state.status += &format!(" | traced stock unjudged: {note}");
             }
             state.field_view = Some(Ok(std::sync::Arc::new(fv)));
+            // The viewer's mesh rides the same view (M13.1 owed): one
+            // extraction here, read every frame after.
+            crate::machined::prime(state);
         }
         Err(err) => {
             state.status += &format!(" | traced stock refused: {err} - the sheet stands");

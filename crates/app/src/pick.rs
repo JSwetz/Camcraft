@@ -138,6 +138,29 @@ pub fn sight_blocked(tris: &[Triangle], eye: [f64; 3], p: [f64; 3], tol: f64) ->
     tris.iter().any(|t| ray_triangle(*t, o, d).is_some_and(|hit| hit < cut))
 }
 
+/// Nearest facet of a world-space triangle soup along `origin + t*dir`,
+/// `t > 0`: its index and the hit point. The machined stock's extracted
+/// mesh (M13.1 owed) is no entity - it sits in world space already, so
+/// the viewer's hover reads it here with the same crossing test the
+/// entity pick uses. Double-sided; non-finite input is a miss.
+#[must_use]
+pub fn soup_hit(tris: &[Triangle], origin: [f64; 3], dir: [f64; 3]) -> Option<(usize, [f64; 3])> {
+    if !origin.iter().all(|v| v.is_finite()) || !dir.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let o = Point3::new(origin[0], origin[1], origin[2]);
+    let d = Point3::new(dir[0], dir[1], dir[2]);
+    let mut best: Option<(f64, usize)> = None;
+    for (idx, t) in tris.iter().enumerate() {
+        if let Some(hit_t) = ray_triangle(*t, o, d)
+            && best.is_none_or(|(b, _)| hit_t < b)
+        {
+            best = Some((hit_t, idx));
+        }
+    }
+    best.map(|(t, idx)| (idx, [o.x + d.x * t, o.y + d.y * t, o.z + d.z * t]))
+}
+
 /// Ray/triangle crossing in the entity's local frame; the ray direction need
 /// not be normalized. Returns t along the ray.
 fn ray_triangle(facet: Triangle, origin: Point3, dir: Point3) -> Option<f64> {

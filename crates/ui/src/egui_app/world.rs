@@ -211,11 +211,23 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             classes: Vec::new(),
         })
         .collect();
-    match &state.program_sim {
+    match (&state.program_sim, crate::machined::mesh(state)) {
+        // The machined stock's extracted mesh (M13.1 owed) takes the
+        // slot when the whole-program field view has one: the closed
+        // shell the program leaves, through the stock pipeline like the
+        // box it replaces. Unjudged (no classes): it paints as material,
+        // and the GPU eye, when it traces, still paints over the slot.
+        (_, Some(mesh)) => parts.push(GpuPart {
+            verts: mesh.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [ftoz(p.x), ftoz(p.y), ftoz(p.z)])).collect(),
+            selected: false,
+            stock: true,
+            fill: false,
+            classes: Vec::new(),
+        }),
         // The Deviate sheet takes the stock's slot in the draw order:
         // it IS the stock's surface after the program, judged - same
         // blend law, and the solid it replaces would only veil it.
-        Some(ps) => parts.push(GpuPart {
+        (Some(ps), None) => parts.push(GpuPart {
             verts: ps
                 .surface
                 .verts
@@ -227,7 +239,7 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
             fill: false,
             classes: ps.surface.vcls.clone(),
         }),
-        None => {
+        (None, None) => {
             // The drawn block is the ACTIVE setup's stock, resolved by the
             // same law the tree row and the pick use; a setup-free document
             // resolves to the legacy "Stock" name and draws exactly as before.

@@ -10923,3 +10923,62 @@ by-default law needs no parameter), and a global α_v,max (coarser everywhere
 the dome is not steep). Side effect pinned: center_cut_posed's convicted 5-axis
 descent starts its band one rung lower (the first crown ring now sits 5.6° off
 the apex). Multidirection's 0.349 still unexplained.
+
+## M13.1: the machined mesh reaches the viewport and the pick (2026-11-06)
+
+**The viewport's stock slot draws the marching-tetrahedra mesh of the
+whole-program field view** when that view exists (Deviate armed, transport
+down - the same `Arc<FieldView>` the STL export keys on), as a shaded stock
+part through the existing pipeline; the GPU eye still paints over it when it
+traces, the mesh is what stands when it does not (no eye, refused march,
+headless). With no view, or the transport up (a playback view changes per
+frame - never extracted), the slot draws what it drew before. The accessor is
+`MeshCache::viewed(&view)` - read-only, never extracts; `MeshCache::get`
+remembers a refusal per view so a per-frame reader never re-extracts a failing
+one. `ui::machined` primes once when the whole-program walk lands and says a
+refusal once on the status line. Dropped: a world-level `machined_mesh(world)`
+accessor (the field view is UI-held state, not in the world) and a second
+renderer for the mesh.
+
+**Picking asks the mesh second**: a stock-bucket hit is re-asked of the
+machined soup (`app::pick::soup_hit`, Möller-Trumbore in world space) - a ray
+through machined-away air reports nothing, a ray onto remaining material
+reports the stock with no facet (the mesh is no entity). Model hits keep
+winning. Owed: lighting the hovered mesh facet (the highlight path reads
+entity facets only) and deviation classes on the mesh (it paints as plain
+material; the eye and the sheet keep the verdict colours).
+
+## M13.7: the swarf pose never falls to upright under the equator (2026-11-06)
+
+**Root cause of the 18 cap-row convictions - not the ruling and not the lean
+law, but the stamp's contact band.** The ring rows that turn off the tube's end
+columns onto the caps under the equator (ball centres z −4.6…−8.0) stand 12-31
+µm past tangency (d = 3.012-3.031 for r = 3): inside the plan's 0.1 tolerance,
+outside the stamp's 10 µm contact band, so `pose_law` read air, returned None,
+and the modal rule `lean.or(Some(UP))` stated upright - a 60 mm flute 0.8 mm
+inside the wall. Behind it a second defect: once those rows read as contact,
+the lean law at rim edges and end columns leaned the overhang's normal 20-30°
+UNDER the horizon.
+
+**Three decisions (swarf kinds only; every other 5-axis kind byte-identical):**
+(1) the swarf stamp reads contact to `max(10 µm, tol)` - the plan's own
+tolerance, not a fixed band; (2) a lean-law pose is kept only if it is above
+the horizon AND its flank proves in air (`stamp_link::flank_clear`, the link
+law's own sweep reader walking the pose to the shell's exit at r − tol);
+otherwise the station carries the RULING, level, signed toward the air side
+where |dir·n| > sin 10° (cap face, rim edge) and by `ruled_sign` continuity at
+the end columns, trying the other ruling end before giving up (`stamp_pose.rs`,
+the law moved out of stamp.rs for the 400-line seam); (3) where no pose clears,
+`GenError::Invalid("swarf pose at move N … refused")` - named, never upright in
+the wall. Dropped: standing `UP` down only under the equator (the defect is the
+band, the equator is where it showed), and widening the band to a fixed 50 µm
+(a tolerance-blind number that would read air as contact on a tight plan).
+
+Result: posed envelope == plan (0.0963 / 0.0957) on both blades, the full band
+verifies with an EMPTY warning list, no refusal fires on the blade fixture,
+and full-band links fell 247 → 86 (moves 3576 → 3093) because near-surface
+hops no longer flip upright and back. The mid-move pose law (verify/midpose.rs)
+lands with it: M13.7's owed item closes. Pinned: no swarf cut under the equator
+is upright, no pose below −0.1737, every cutting flank ≥ r − tol from the exact
+prism; a ceiling fixture's fallback states the level ruling; walls across both
+ruling ends refuse by name.

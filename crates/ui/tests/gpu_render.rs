@@ -224,6 +224,52 @@ fn model_reads_through_translucent_stock() {
     assert!(hues >= 3, "want >=3 color clusters, got {hues}");
 }
 
+/// M13.1 owed: the machined stock's extracted mesh (the STL export's
+/// triangles) draws through the stock pipeline like the box it stands
+/// in for - a 12x12x20 box faced to 18, at the app suite's coarse cell.
+#[test]
+fn machined_mesh_paints_as_stock() {
+    use camcraft_app::commands::{AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock};
+    use camcraft_app::geometry::{cube, IDENTITY_Q, Point3};
+    use camcraft_app::operation::{Height, OpParams, SrcRef};
+    use camcraft_app::schema::Location;
+    let world = camcraft_app::world::new_world();
+    let mut history = History::default();
+    let loc = Location { pos: Point3::ZERO, rot: IDENTITY_Q };
+    let shape = StockShape::Box { dx: 12.0, dy: 12.0, dz: 20.0 };
+    history.execute(&world, SetStock::new(&world, shape, loc).expect("box stock"));
+    let tool = camcraft_app::tools::catalog().into_iter().find(|(n, _)| *n == "EM-0400-2FL").map(|(_, t)| t);
+    history.execute(&world, AddTool::new(&world, "EM-0400-2FL", tool.expect("catalog entry")).expect("tool"));
+    let part = cube(Point3::new(-6.0, -6.0, 0.0), Point3::new(6.0, 6.0, 18.0));
+    history.execute(&world, ImportModel::from_mesh("part", part));
+    let params = OpParams::Face {
+        tilt: None,
+        stepover: 3.0,
+        clearance_z: Height::fixed(25.0),
+        cut_z: Height::fixed(18.0),
+        top_z: None,
+        stepdown: None,
+        feed: 1200.0,
+        plunge_feed: 300.0,
+        climb: true,
+        blend_turns: false,
+    };
+    history.execute(&world, CreateOperation::new(&world, "Face1", "EM-0400-2FL", SrcRef::Stock, params).expect("create"));
+    history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate"));
+    let fv = camcraft_app::stock_view::field_view_with(&world, 12.0 * 12.0 * 20.0 / 3.6).expect("field view");
+    let tris = camcraft_app::stock_export::machined_mesh(&fv).expect("a closed shell");
+    let verts = tris.iter().flat_map(|t| [t.a, t.b, t.c].map(|p| [p.x as f32, p.y as f32, p.z as f32])).collect();
+    let part = GpuPart { verts, selected: false, stock: true, fill: false, classes: Vec::new() };
+    let cam = Camera { target: [0.0, 0.0, 10.0], yaw: 0.9, pitch: 0.5, dist: 50.0 };
+    let Some((img, w, h)) = render(&[part], &cam) else {
+        eprintln!("gpu test skipped: no usable adapter");
+        return;
+    };
+    let changed = changed_pixels(&img);
+    let total = (w * h) as usize;
+    assert!(changed > total / 20 && changed < total - total / 20, "the machined shell paints a band: {changed}/{total}");
+}
+
 #[test]
 fn empty_document_clears_to_background_only() {
     let Some((img, w, h)) = render(&[], &test_cam()) else {

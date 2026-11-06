@@ -12,6 +12,7 @@ pub mod boundary_summary;
 pub mod egui_app;
 pub mod feedback;
 pub mod interact;
+pub mod machined;
 pub mod operations;
 pub mod state;
 pub mod theme_dir;
@@ -25,6 +26,8 @@ mod law_tests;
 mod helix_view_tests;
 #[cfg(test)]
 mod field_view_tests;
+#[cfg(test)]
+mod machined_tests;
 #[cfg(test)]
 mod play_bench_tests;
 #[cfg(test)]
