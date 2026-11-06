@@ -230,8 +230,16 @@ those test suites so we don't have to run hours on hours of tests"):
 2. **batch** (main session, before committing a batch, target ≤ 20 min):
    every debug suite except those tagged slow, the ui suites from
    `crates/ui`, clippy (`-Tier batch`). No release-mode heavy lanes.
-3. **release** (only at a cut, and nightly in CI): everything - all debug
+3. **release** (only at a cut, run locally): everything - all debug
    suites, the `--ignored` heavy lanes in release (`-Tier release`).
+
+**GitHub Actions minutes are budgeted** (3000/month; Windows bills 2x,
+macOS 10x). Nothing runs on push or PR: every gate tier runs locally
+through `scripts/gate.ps1`. GitHub runs only `release.yml` on a pushed tag
+(the build that publishes the artifact). `ci.yml` and `nightly.yml` are
+manual (`workflow_dispatch`) for the rare case a clean-machine run is
+wanted. Never add a `push`, `pull_request` or `schedule` trigger without
+the user's say-so.
 
 **Test the change, not everything.** A fix is proved by the test(s) that pin
 it, run one by one: `scripts/gate.ps1 -Test <name>` (or plain `cargo test -p
@@ -239,6 +247,15 @@ it, run one by one: `scripts/gate.ps1 -Test <name>` (or plain `cargo test -p
 change touches what that suite covers; the full set runs only at a release
 cut (user, 2026-11-07: "tests should also be possible to run one by one …
 so we are testing changes rather than everything every time").
+
+Batch skips the debug binaries in `SLOW_BINARIES` at the top of
+`scripts/gate.ps1` (motion finish3d, pivot5d, flow; app
+center_cut_multiaxis - each ~40-50 s); release runs them. camcraft-kernel
+runs in release, and in quick only when kernel itself is touched. Quick
+prints what it chose before running: the changed `#[test]` fns of a changed
+suite (`--exact`), and the gate-mapped suites of a changed src module; a
+change to shared test code (tests/common, goldens, snapshots) runs that
+crate's suites; geometry/cl/Cargo changes fall back to batch.
 
 A test that takes more than ~60 s in debug moves to the heavy lane (with
 its lane named in the ignore reason) or gets a slimmer fixture; the batch

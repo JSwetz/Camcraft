@@ -1,13 +1,16 @@
-# CI: the same gate ladder the project runs by hand (M1.7e).
-# Golden regression suite first (named for the ROADMAP bullet), then the
-# full suites, the release-lane verdicts the debug run #[ignore]s (M4.4),
-# clippy with warnings denied, and the headless app run.
+# CI: the batch gate tier, run BY HAND only (Actions tab -> CI -> Run
+# workflow). The repo has a 3000-minute monthly Actions budget (Windows bills
+# 2x, macOS 10x), so nothing runs on push or PR: gates run locally
+# (scripts/gate.ps1), and GitHub runs only the tag-driven release build.
+# The Windows job runs scripts/gate.ps1 -Tier batch - every debug suite
+# minus the script's SLOW_BINARIES (golden_cl and the regression suites
+# included), the ui suites from crates/ui, clippy with warnings denied -
+# then the headless app run. The release tier (slow binaries and the
+# --ignored heavy lanes in release) is nightly.yml's.
 # Provenance: our own build law; mirrors the AGENTS.md testing layout.
 name: CI
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,36 +29,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - name: Golden regression suite
-        shell: bash
-        # M5.3 G: regression_models is the numerical arm of this lane -
-        # the import door, a real generation, the gate, and measured
-        # lengths/counts where the suites above judge bytes.
-        run: >-
-          cargo test -p camcraft-app
-          --test golden_cl --test posting --test fanuc_post
-          --test project_roundtrip --test regression_models -- --test-threads=4
-      - name: Split crate tests (M4.1 R1-R2)
-        shell: bash
-        run: >-
-          cargo test -p camcraft-geometry -p camcraft-cl
-          -p camcraft-tools -p camcraft-post -p camcraft-sim -p camcraft-motion
-          -- --test-threads=4
-      - name: App tests
-        shell: bash
-        run: cargo test -p camcraft-app -- --test-threads=4
-      - name: Heavy verdicts (release lane, M4.4)
-        shell: bash
-        run: cargo test --release -p camcraft-app -p camcraft-motion -- --ignored
-      - name: UI tests
-        shell: bash
-        run: cargo test -p camcraft-ui -- --test-threads=4
-      - name: Clippy
-        shell: bash
-        run: >-
-          cargo clippy -p camcraft-geometry -p camcraft-cl
-          -p camcraft-tools -p camcraft-post -p camcraft-sim -p camcraft-motion
-          -p camcraft-app -p camcraft-ui --all-targets -- -D warnings
+      - name: Batch gate tier (debug suites minus slow, ui, clippy)
+        shell: pwsh
+        run: ./scripts/gate.ps1 -Tier batch
+      - name: Gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-logs-batch
+          path: gate-logs/
+          if-no-files-found: ignore
       - name: Headless app run
         shell: bash
         run: cargo run -q -p camcraft-ui -- --headless
