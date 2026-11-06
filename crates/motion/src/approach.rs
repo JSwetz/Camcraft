@@ -18,6 +18,22 @@
 
 use crate::machining2d::Lead;
 
+/// Where the cutter radius is taken off the contour (M13.11). In the
+/// computer, the generator walks the cutter-centre path and the control
+/// runs it verbatim (every file before the option). In the control, the
+/// post writes the PART contour under G41/G42 with the tool's offset
+/// register, the control offsets by the radius it holds, and the
+/// operator can shim a worn cutter at the pendant. The engage and cancel
+/// must ride straight leads at least a radius long (RS-274 / ISO 6983
+/// startup and cancel block behaviour); the generator refuses control
+/// compensation by name where the leads cannot carry it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Compensation {
+    #[default]
+    Computer,
+    Control,
+}
+
 /// The parameter set. `Approach::DEFAULT` is the identity.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Approach {
@@ -95,6 +111,9 @@ pub struct Approach {
     pub axis_start: bool,
     /// The axis-alignment tolerance (degrees).
     pub axis_tol: f64,
+    /// Where the cutter radius is compensated (M13.11, the contour's
+    /// choice; every other ladder reads it as `Computer`).
+    pub compensation: Compensation,
     /// Can the tool plunge axially into solid (M11.3, the user's safety
     /// call)? Not a saved parameter: the application lays the tool's own
     /// `center_cutting` over it for each generation, so a stored op
@@ -160,6 +179,7 @@ impl Approach {
         overlap: 0.0,
         axis_start: false,
         axis_tol: DEFAULT_AXIS_TOL,
+        compensation: Compensation::Computer,
         center_cutting: true,
     };
 

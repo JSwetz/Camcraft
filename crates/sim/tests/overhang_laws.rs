@@ -46,7 +46,7 @@ fn mv(kind: MoveKind, from: Point3, to: Point3) -> Move {
 }
 
 fn path(moves: Vec<Move>) -> Toolpath {
-    Toolpath { moves, cycles: Vec::new(), notes: Vec::new() }
+    Toolpath { moves, cycles: Vec::new(), notes: Vec::new(), comps: Vec::new() }
 }
 
 /// A post X/Y [-5, 5], Z [0, 10] carrying a ledge X [-5, 15], Y [-5, 5],

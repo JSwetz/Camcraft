@@ -32,6 +32,9 @@ var sectionOpen = false;   // preamble written (a legacy .cl carries no SECTION)
 var tcpmOn = false;        // G43.4 armed (stage D RTCP): re-armed at tool change
 var lastA = 0, lastB = 0, lastC = 0; // angle words the last block commanded (deg)
 var tiltRefused = false;   // a refusal the gate counts once, not per line
+var compG = "";            // G41/G42/G40 pending for the next straight block (M13.11)
+var compD = "";            // the D word riding the engage block
+var compOn = false;        // compensation is engaged (G41/G42 written, no G40 yet)
 var orgX = 0, orgY = 0, orgZ = 0; // the WCS slot origin (OriginX/Y/Z PARAMs):
 // the stream speaks world coordinates; the machine measures its program
 // from the work offset. A legacy .cl carries no PARAMs, so these stay 0.
@@ -88,6 +91,36 @@ function tilt(p) {  // words to append, [] if none, null if refused
   if (p.B !== lastB) { words.push("B" + fu(p.B)); lastB = p.B; }
   if (p.C !== lastC) { words.push("C" + fu(p.C)); lastC = p.C; }
   return words;
+}
+
+// Cutter radius compensation in the control (M13.11, RS-274 / ISO
+// 6983 G41 left / G42 right / G40 cancel). The stream's COMP record
+// says which side and the radius the register holds; the NEXT motion
+// record is the engage (or cancel) block - the generator's law makes
+// it a straight lead at least a radius long, so the control builds
+// (or withdraws) the offset over it. The D word is the tool's offset
+// register: the tool library states none, so it is the tool number,
+// the same slot the H word reads. A comp word that would land on a
+// rapid or an arc is refused by name (counted, gate-blocked) - never
+// written where the control would misread it.
+function onRadiusCompensation(side) {
+  var s = String(side || properties.Compensation || "off");
+  if (s === "off") {
+    compG = compOn ? "G40" : "";
+    compD = "";
+    compOn = false;
+    return;
+  }
+  if (inCycle) { msg("cutter compensation inside a canned-cycle group"); return; }
+  compG = (s === "left") ? "G41" : "G42";
+  compD = "D" + pad2(tNo);
+  compOn = true;
+}
+function compRefuse(what) {
+  if (compG) {
+    msg("cutter compensation must engage or cancel on a straight G01 move, not " + what);
+    compG = ""; compD = ""; compOn = false;
+  }
 }
 
 // The .mch tool-station coolant list carries names + M-codes; the
@@ -196,6 +229,10 @@ function endPreamble() {
   sectionOpen = false;
   if (inCycle) block(["G80"]);
   inCycle = false;
+  if (compOn || compG) {
+    msg("cutter compensation still engaged at section end - no cancel block");
+    compG = ""; compD = ""; compOn = false;
+  }
   if (coolant) block(["M9"]);
   block(["M5"]);
   // The next preamble carries G49, which cancels TCPM too - so the
@@ -214,6 +251,7 @@ function onSectionEnd() { endPreamble(); }
 // chain is the generator's truth, not a second copy of output.
 function onRapid() {
   startPreamble();
+  compRefuse("a rapid");
   var tw = tilt(properties);
   if (tw === null || inCycle) return;
   block(["G00"].concat(xyz(properties), tw));
@@ -222,10 +260,14 @@ function onLinear() {
   startPreamble();
   var tw = tilt(properties);
   if (tw === null || inCycle) return;
-  block(["G01"].concat(xyz(properties), tw, [fw(properties.FeedRate)]));
+  // The pending comp word rides this straight block (M13.11).
+  var cg = compG, cd = compD;
+  compG = ""; compD = "";
+  block(["G01", cg].concat(xyz(properties), [cd], tw, [fw(properties.FeedRate)]));
 }
 function onCircular() {
   startPreamble();
+  compRefuse("an arc");
   var tw = tilt(properties);
   if (tw === null || inCycle) return;
   var p = properties;

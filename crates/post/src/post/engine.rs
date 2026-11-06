@@ -192,6 +192,34 @@ pub fn run(cps: &str, mch: &Value, stream: &str) -> Result<PostOutput, PostError
                 s.set_properties(&merged(&base, &p, pos))?;
                 s.call("onPartTransfer", "")?;
             }
+            Record::Comp { side, radius_mm } => {
+                // Cutter compensation (M13.11): a lifecycle record like
+                // its siblings - no motion, `onCommand` never sees it -
+                // but NOT comment-only by default: the records after it
+                // are the part contour, and a script that cannot say
+                // G41/G42 would post them as the centre path - an
+                // undersize part. So a script without the hook is
+                // refused here, by name, as a counted warning.
+                if !s.hook_exists("onRadiusCompensation") {
+                    warnings.push(
+                        "control cutter compensation: this post script does not define \
+                         onRadiusCompensation - it cannot write G41/G42, so the program is refused"
+                            .into(),
+                    );
+                } else {
+                    let mut p = BTreeMap::new();
+                    p.insert("command".into(), json!("RadiusCompensation"));
+                    let word = match side {
+                        Some(crate::cl::CompSide::Left) => "left",
+                        Some(crate::cl::CompSide::Right) => "right",
+                        None => "off",
+                    };
+                    p.insert("Compensation".into(), json!(word));
+                    p.insert("CompensationRadius".into(), json!(radius_mm));
+                    s.set_properties(&merged(&base, &p, pos))?;
+                    s.call("onRadiusCompensation", &json!(word).to_string())?;
+                }
+            }
             Record::Probe { tol_mm } => {
                 // The fourth lifecycle name (M5.3 D): the measurement
                 // ask rides as a property, the same law as its

@@ -96,6 +96,60 @@ pub struct PathDto {
     /// generated quiet (the cycles-v10/rev-v20 additive law).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// The control-compensated spans (M13.11, `crate::cl::CompSpan`):
+    /// absent is none - every path cut in computer, and every cache
+    /// before the option. The same additive law as the notes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub comps: Vec<CompSpanDto>,
+}
+
+/// One cached control-compensated span: the engage / cancel move
+/// indices, the side, the register's radius, and the programmed
+/// moves the post writes in place of the centre ones - the same
+/// lattice snap `MoveDto` gives every coordinate, so a span
+/// round-trips byte-identically with its moves.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CompSpanDto {
+    pub side: CompSideDto,
+    pub radius: f64,
+    pub first: u64,
+    pub last: u64,
+    pub programmed: Vec<MoveDto>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CompSideDto {
+    Left,
+    Right,
+}
+
+impl CompSpanDto {
+    fn from_span(c: &crate::cl::CompSpan) -> Self {
+        CompSpanDto {
+            side: match c.side {
+                crate::cl::CompSide::Left => CompSideDto::Left,
+                crate::cl::CompSide::Right => CompSideDto::Right,
+            },
+            radius: crate::cl::lattice(c.radius),
+            first: c.first as u64,
+            last: c.last as u64,
+            programmed: c.programmed.iter().map(MoveDto::from_move).collect(),
+        }
+    }
+
+    fn to_span(&self) -> crate::cl::CompSpan {
+        crate::cl::CompSpan {
+            side: match self.side {
+                CompSideDto::Left => crate::cl::CompSide::Left,
+                CompSideDto::Right => crate::cl::CompSide::Right,
+            },
+            radius: self.radius,
+            first: usize::try_from(self.first).unwrap_or(usize::MAX),
+            last: usize::try_from(self.last).unwrap_or(usize::MAX),
+            programmed: self.programmed.iter().map(|m| m.to_move()).collect(),
+        }
+    }
 }
 
 /// One cached cycle: the post's source of truth for a hole, stored beside
@@ -301,6 +355,7 @@ impl PathDto {
             warnings: t.warnings.clone(),
             cycles: t.path.cycles.iter().map(CycleDto::from_cycle).collect(),
             notes: t.path.notes.clone(),
+            comps: t.path.comps.iter().map(CompSpanDto::from_span).collect(),
         }
     }
 
@@ -313,6 +368,15 @@ impl PathDto {
             .map(CycleDto::to_cycle)
             .collect();
         path.notes = self.notes.clone();
+        // A span that does not chain onto the loaded moves is not
+        // trusted (the dump refuses it by name too): the file's bytes
+        // are the law, the sanity door is the reader's.
+        path.comps = self
+            .comps
+            .iter()
+            .map(CompSpanDto::to_span)
+            .filter(|c| c.is_sane(&path.moves))
+            .collect();
         ToolpathCache {
             path,
             warnings: self.warnings.clone(),

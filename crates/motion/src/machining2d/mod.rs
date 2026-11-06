@@ -31,6 +31,7 @@ mod thread_mill;
 mod contour;
 mod contour_bore;
 mod contour_chain;
+mod contour_comp;
 mod contour_depth;
 mod contour_entry;
 mod contour_link;

@@ -283,11 +283,45 @@ impl TiltedFrame {
                 }
             }
         }
-        Toolpath {
-            moves,
-            cycles: local.cycles.clone(),
-            notes: local.notes.clone(),
-        }
+        // The control-compensated spans (M13.11) ride the same map
+        // upright - their programmed moves are straight or XY arcs,
+        // the translation case above. A tilted frame drops them and
+        // says so: the centre moves then post as a centre path, a
+        // correct program with the compensation taken in computer.
+        let mut notes = local.notes.clone();
+        let comps = if self.is_upright() {
+            local
+                .comps
+                .iter()
+                .map(|c| super::CompSpan {
+                    programmed: c
+                        .programmed
+                        .iter()
+                        .map(|m| Move {
+                            kind: m.kind,
+                            from: self.to_world(m.from),
+                            to: self.to_world(m.to),
+                            feed: m.feed,
+                            arc: m.arc.map(|arc| {
+                                let c3 = self.to_world(arc.plane.point(arc.center.x, arc.center.y, 0.0));
+                                super::ArcMove { center: arc.plane.words(c3), ..arc }
+                            }),
+                            axis: stamp,
+                        })
+                        .collect(),
+                    ..c.clone()
+                })
+                .collect()
+        } else {
+            if !local.comps.is_empty() {
+                notes.push(
+                    "compensation: control compensation does not ride a tilted frame - this path posts its cutter-centre moves (in computer)"
+                        .into(),
+                );
+            }
+            Vec::new()
+        };
+        Toolpath { moves, cycles: local.cycles.clone(), notes, comps }
     }
 
     /// A local planar region (the cut's footprint at local height

@@ -22,6 +22,7 @@
 //! path is a chain, no gaps); generators build through [`PathBuilder`],
 //! which maintains it by construction.
 
+mod comp;
 mod cycle;
 mod frame;
 mod moves;
@@ -29,6 +30,7 @@ mod path;
 mod plane;
 mod pose;
 
+pub use comp::{CompSide, CompSpan};
 pub use cycle::{Cycle, CycleKind};
 pub use frame::TiltedFrame;
 pub use moves::{arc_chords, lattice, ArcMove, Move, MoveKind, MAX_ARC_CHORDS};

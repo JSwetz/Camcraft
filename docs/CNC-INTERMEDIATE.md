@@ -33,6 +33,7 @@ committed golden is a legal post input.
 | `CYCLE <TYPE> X.. Y.. Z.. [R.. ENTRY.. Q.. P.. F.. AT..]` | one canned cycle |
 | `PART LOAD [ADVANCE <µm>]` / `PART UNLOAD` | a part lifecycle event: `dump` brackets each section with them; ADVANCE rides the LOAD alone (the bar's next bite, µm) |
 | `PART TRANSFER <from> <to>` | the handoff step of the same family: station `from` (1-based, the order the machine file states its spindles) hands the part to station `to`; both operands required, a missing or zero-station number refuses by name |
+| `COMP LEFT <µm>` / `COMP RIGHT <µm>` / `COMP OFF` | cutter radius compensation in the control (M13.11): engage (G41 / G42, the register holding this radius) on the next motion record, or cancel (G40) on it. The motion records between an engage and its cancel are the PART contour the control offsets, not the cutter centre - a script that cannot say the words refuses by name |
 | `PROBE <µm>` | the measurement ask (M5.3 D): the deviation budget, in µm, that the finished part is to be probed to after this section's last cut. The number is the switch - no word when no ask - and the verdict it deserves (whether the program's own cuts can measure to it, and which pass owes a re-run) is the app post gate's, never the streams |
 | `START X <i> Y <i> Z <i>` / `END` | legacy `.cl` position lines: consumed silently (END ends the record span) |
 
@@ -134,8 +135,12 @@ else the kind hook: `onRapid`, `onLinear`, `onCircular`, or
 cycles fire `onCycle`, `onCyclePoint`, `onDwell(seconds)` when the
 dwell is positive, then `onCycleEnd`. Part events are lifecycle, like
 `SECTION`: `onCommand` never sees them — `onPartLoading` /
-`onPartUnloading` / `onPartTransfer` is the whole contract. `onRadiusCompensation` is
-reserved (never called in 0.1.0 — the Fanuc post runs G40). `onClose`
+`onPartUnloading` / `onPartTransfer` is the whole contract. `onRadiusCompensation(side)`
+fires per `COMP` record (M13.11; `side` is `"left"`, `"right"` or
+`"off"`, `properties.CompensationRadius` the register's radius in mm)
+— and a script that does not define it is REFUSED (counted warning)
+the moment a `COMP` record arrives, since the records after it are a
+part contour no centre-path post may write. `onClose`
 ends the run; its lines belong to no record.
 
 A parsed stream is normalized to program order before the hooks

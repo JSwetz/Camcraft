@@ -181,10 +181,10 @@ recognition and the canned-cycle representation. What's left of the
 early phase is the first post (M1.7).
 
 ### M1.1 - Core Foundation & File I/O
-**Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ⚠️ partial
+**Goal: a workspace that opens models and saves projects, and never crashes on bad input.** — ✅ (closed 2026-11-06: mesh repair landed under M13.11; IGES decided - waits for M12.1)
 
 - ✅ **Mesh import**: STL (binary + ASCII, sniffed) / OBJ, validated at command
-      creation; repair (weld, holes) -> tracked in M13.11 (audit 2026-11-06), for toolpath-supporting surfaces
+      creation; repair (weld, holes) done under M13.11 (2026-11-06, `geometry::repair` + RepairModel), for toolpath-supporting surfaces
 - ✅ **Robustness**: degenerate and corrupt models produce clean errors, never
       crashes (Prime Directive) - corrupt-input corpus tests enforce this
 - ✅ **Project save/load**: versioned single-file project (`.hsmproj` JSON, at
@@ -260,7 +260,7 @@ early phase is the first post (M1.7).
       Models-pane "Show all toolpaths" toggle (view state, like the camera)
 
 ### M1.3 - 2D Machining
-**Goal: a machinist can face, pocket, and contour a simple plate.** — ⚠️ partial
+**Goal: a machinist can face, pocket, and contour a simple plate.** — ✅ (closed 2026-11-06: G41/G42 output landed under M13.11; the pocket entries landed M5.1 H / M11.3)
 
 Operation geometry comes from slicing meshes at Z (the same construction the
 feature-edge wireframe uses): STL, OBJ and STEP-derived models all take the
@@ -282,16 +282,16 @@ undoes and redoes exactly, replaying byte-identical paths.
       staged down from an optional Top Z by a Stepdown through the cut levels
       (M1.5.2; the default stays the single level of M1.3, so pre-stepdown
       paths are byte-stable), with rapids only at the ends
-- ⚠️ **2D Contour**: islands (even-odd region sets), climb vs conventional,
+- ✅ **2D Contour**: islands (even-odd region sets), climb vs conventional,
       linear, arc and tangential lead in/out, tabs as skipped segments, per-level
       stepdowns with same-level hops to the retract plane between loops
       (M1.5.2), tolerance-driven arc tessellation - and since M1.5.2 the arc
       leads (the tangential half-arc since M1.3: it plunges 2*radius off the
       wall and lands moving parallel to it) and fitted rims travel as single
       arc moves, not chord fans (G2/G3 text emission waits for the post,
-      M2.3). Owed under M13.11 (audit 2026-11-06): G41/G42 output - the compensation side is recorded in the
+      M2.3). G41/G42 output landed under M13.11 (2026-11-06) - before it the compensation side is recorded in the
       parameters but the path is cutter-center until the post emits it (M1.7)
-- ⚠️ **2D Pocket**: zigzag (scanline parity walk; islands fall out of the
+- ✅ **2D Pocket**: zigzag (scanline parity walk; islands fall out of the
       even-odd set) and waterline (inward buffers), with an Auto choice
       between them from the region's circularity - decided through `fit_arcs`
       and reported in the status, never silent (M1.5.2; rectangular fixtures
@@ -515,7 +515,7 @@ M6.2 in Phase 6 - the home law below was overtaken by events, see there)
 
 ### M1.5 - Feature Selection
 **Goal: pick a face or an edge chain and machine that - not just whole
-models.** — ⚠️ partial
+models.** — ✅ (closed 2026-11-06: cross-entity stitching and facing rows honouring holes landed under M13.11)
 
 The first customer of M1.4's `first_hit_f` facet indices shipped:
 planar-face clustering and tangent-continuous edge chains run off the
@@ -713,7 +713,7 @@ degrades by rule, none guesses silently:
       part deterministically
 - Trace refuses open runs by name (close the pick or use Contour);
       Pocket always refused them, also by name
-- (-> M13.11) stitching is per-entity - two runs meeting across two model
+- ~~stitching is per-entity~~ (done 2026-11-06, M13.11) - two runs meeting across two model
       entities do not yet compose into one ring
 - chain, face and patch ids are geometry digests: the smoother chaining
       rules re-key picks on affected meshes, so old v4 projects show
@@ -721,7 +721,7 @@ degrades by rule, none guesses silently:
       refuse safely); patch ids live in their own namespace, so a weld
       never claims a flat face's id, and re-welding a mesh re-keys
       patches the same way
-- (-> M13.11) facing rows are still the M1.3 bbox serpentine, staged down since
+- ~~facing rows are still the M1.3 bbox serpentine~~ (done 2026-11-06, M13.11: Face.holes), staged down since
       M1.5.2: the region's holes bound contour and pocket passes, not
       facing rows
 
@@ -1843,14 +1843,14 @@ visible and pinned while the generator fix is owed.
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
-| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units; owed under M13.11: mesh repair (weld, holes); IGES decided (waits for M12.1) | ⚠️ |
+| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units; mesh repair landed under M13.11 (weld + planar hole fill, RepairModel); IGES decided (waits for M12.1) | ✅ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
-| **M1.3** | Cut a 2.5D plate | Face, contour, pocket (ramp/helix/arc entries done M5.1 H / M11.3), slot, trace, tool library, parameters, verification warnings, tangential leads; G41/G42 output owed under M13.11, B-rep ops under M12.1 | ⚠️ |
+| **M1.3** | Cut a 2.5D plate | Face, contour, pocket (ramp/helix/arc entries done M5.1 H / M11.3), slot, trace, tool library, parameters, verification warnings, tangential leads; G41/G42 output landed under M13.11 (2026-11-06; its wear variant and other dialects owed there); B-rep ops under M12.1 | ✅ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview, display modes, tabbed panels, graphical tool editor window - all done, riding the graduated egui stack (audit 2026-11-06) | ✅ |
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.4.3** | A home for every operation | Family-sectioned ribbon per the Operation Catalog, overflow dropdowns, user pinning (a document setting); the home law was overtaken by M5.1's ten ribbon-less kinds - the promise moved to M6.2, which landed it | ✅ |
-| **M1.5** | Pick a face, not just a model | Face/edge/vertex and welded-patch picks, selection-driven contour and facing, arc moves, staged facing, height references, bore-aware contour side, translucent fills, v5->v7 persistence, view cube + nav bar, WCS Set origin (M13.4); owed under M13.11: cross-entity ring stitching, facing rows honouring holes | ⚠️ |
+| **M1.5** | Pick a face, not just a model | Face/edge/vertex and welded-patch picks, selection-driven contour and facing, arc moves, staged facing, height references, bore-aware contour side, translucent fills, v5->v7 persistence, view cube + nav bar, WCS Set origin (M13.4); cross-entity ring stitching and facing rows honouring holes landed under M13.11 (2026-11-06) | ✅ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open (done since: thread milling M2.4 thread_mill.rs, the post M1.7) | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) - REOPENED 2026-11-05 (user review): trochoidal slot paths and the corner-contact/trochoidal fallbacks were left "open" in the prose while the row read done; owed under M11.4 C | ⚠️ |
@@ -1894,9 +1894,9 @@ visible and pinned while the generator fix is owed.
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); cut-order clearing (done); mid-move pose law + the swarf pose laws (normal retract, law (d) solid reading, no upright under the equator) (done 2026-11-06) | ✅ |
 | **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; spindle on posed rapids, fixed fixtures in the machine frame; generate-time check on the workholding laws, Fixed toggle; the setup sheet naming each fixture's frame (RECOMMENDED "M13.8: the setup sheet names each fixture's frame"); continuous pose - the fixture sweep walks the mid-move pose law with a proven swing (RECOMMENDED "M13.8: the fixture sweep walks the mid-move pose law") | ✅ |
-| **M13.9** | Scallop law and finish stepovers | The ridge/scallop law is live as a non-blocking ratcheted verdict (16 fixtures pinned 0.127-0.349 over 0.123; RECOMMENDED "M13.9: the scallop law lives"); the slope-aware waterline ladder landed (dome waterline 0.183 → 0; RECOMMENDED "M13.9: the waterline ladder reads the slope"); owed: the cos-law rasters' over-reads (multidirection 0.349), the closed ring's own-inside scan read (hill crown), the reach ceiling and the two-pass flank predicate | ⚠️ |
+| **M13.9** | Scallop law and finish stepovers | The ridge/scallop law is live as a non-blocking ratcheted verdict (16 fixtures pinned 0.127-0.349 over 0.123; RECOMMENDED "M13.9: the scallop law lives"); the slope-aware waterline ladder landed (dome waterline 0.183 → 0; RECOMMENDED "M13.9: the waterline ladder reads the slope"); the rasters' over-read was the march's blind skip probe (dome Parallel 0.349 → 0.125, multi → 0, flows → 0; RECOMMENDED "M13.9: the rasters' over-read") and a closed ring never flanks its own inside (two-pass flank law); owed: the strict tangency's fold annulus on coarse meshes (hill 0.126-0.154, tilted shelf 0.170 - a kernel decision), the reach ceiling | ⚠️ |
 | **M13.10** | Area-control leftovers | From M11.5: the clipped finish's re-entry ramps along the kept chain under the guard's entry_ramp retry (a piece too small keeps the named refusal); Trace/Engrave take the group through Native::ToolOn (containment, offset, includes/excludes; open boundary and extension refuse by name); the tilted Face band preview is built in the tilt frame (RECOMMENDED "M13.10: the area-control leftovers close") | ✅ |
-| **M13.11** | Phase 1 leftovers | From the 2026-11-06 audit (RECOMMENDED "The Phase 1 leftovers audit"): G41/G42 cutter-compensation output (M1.3: a comp record in the CL stream, the post hook wired, the lead-in law, a post gate); mesh repair - weld and fill holes (M1.1; cross-ref M12.1 healing); IGES import decided - waits for M12.1 (RECOMMENDED "M13.11: IGES import waits for the M12.1 kernel"); cross-entity open-run stitching and facing rows that honour holes (M1.5) | 📋 |
+| **M13.11** | Phase 1 leftovers | From the 2026-11-06 audit (RECOMMENDED "The Phase 1 leftovers audit"): G41/G42 cutter compensation done (Control comp on the contour's approach, Fanuc G41/G42/G40, refusals elsewhere; owed: wear variant, other dialects, concave-corner check); mesh repair - weld and fill holes (M1.1; cross-ref M12.1 healing); IGES import decided - waits for M12.1 (RECOMMENDED "M13.11: IGES import waits for the M12.1 kernel"); cross-entity open-run stitching and facing rows honouring holes done (M1.5); mesh repair done (weld + planar hole fill, RepairModel command); contour depth on touching bodies done (per-body slices united); owed: the G41/G42 wear variant, other mill dialects, a concave-corner check (RECOMMENDED "M13.11: G41/G42") | ⚠️ |
 
 ## Release train
 
@@ -1938,24 +1938,39 @@ never runs out of dates.
 built or decided here.** — 📋 (audit 2026-11-06, RECOMMENDED "The Phase 1
 leftovers audit")
 
-- **G41/G42 cutter compensation** (M1.3): the compensation side is recorded
-      in the parameters but every post emits cutter-centre paths and
-      `onRadiusCompensation` is never called. Needs a comp record in the CL
-      stream, the post hook wired in every shipped script, the lead-in law
-      (the comp must engage on a straight lead), and a post gate that refuses
-      comp on a path with no lead. The one Phase 1 leftover that touches the
-      G-code itself.
-- **Mesh repair** (M1.1): weld and fill holes for toolpath-supporting
-      surfaces; today only `open_edges` counts them. Cross-ref M12.1's kernel
-      healing - decide whether repair waits for the kernel or lands on the mesh.
+- ~~**G41/G42 cutter compensation**~~ (M1.3) - done 2026-11-06 (RECOMMENDED
+      "M13.11: G41/G42 cutter compensation"): `Compensation { Computer,
+      Control }` on the contour's approach, a `CompSpan` in the CL beside the
+      centre moves, the straight-lead law with a mid-run seam, `COMP` records
+      and `onRadiusCompensation` in the engine, Fanuc writes G41/G42/G40, the
+      other posts refuse by name, every refusal blocks the gate. Owed: the
+      wear variant, the other mill dialects, a concave-corner-vs-tool check.
+- ~~**Mesh repair**~~ (M1.1) - done 2026-11-06 on the mesh, not the kernel
+      (RECOMMENDED "M13.11: mesh repair"): `geometry::repair` welds by spatial
+      hash within a stated tolerance and closes boundary loops by ear clipping
+      in each loop's Newell plane (Liepa 2003, planar case); non-manifold,
+      non-planar, self-crossing and over-budget loops refuse by name;
+      `RepairModel` is the only door (one undo unit, never on import), the
+      Model page carries the verb and the report.
 - ~~**IGES import**~~ (M1.1/M1.3) - decided 2026-11-06 (RECOMMENDED "M13.11:
       IGES import waits for the M12.1 kernel"): refused by name until M12.1
       reads B-rep through its own kernel; not a debt, a decision.
-- **Cross-entity open-run stitching** (M1.5): two runs meeting across two
-      model entities do not compose into one ring (`stitch.rs` refuses by
-      name).
-- **Facing rows honouring holes** (M1.5): facing is the bbox serpentine;
-      holes bound contour and pocket passes but not facing rows.
+- ~~**Cross-entity open-run stitching**~~ (M1.5) - done 2026-11-06
+      (RECOMMENDED "M13.11: cross-entity open-run stitching"): a second walk
+      across every picked model on the same weld lattice; forks and
+      non-planar rings refuse by name; single-entity output byte-identical.
+- ~~**Contour depth on touching bodies**~~ - done 2026-11-06 (RECOMMENDED
+      "M13.11: contour depth on touching bodies"): a multi-model selection is
+      sliced per body and united by the 2D boolean law in the depth ladder and
+      the verify; one body byte-identical; a self-touching single shell still
+      fails closed at its seam.
+- ~~**Facing rows honouring holes**~~ (M1.5) - done 2026-11-06 (RECOMMENDED
+      "M13.11: facing rows honour holes"): rows clipped a tool radius out of
+      every bridged hole and crossed through the clearance plane; `Face.holes`
+      = Lift (default) / CutAir (islands lifted) / Through (the M1.3 band,
+      byte-identical); two holes closer than the tool refuse by name; tangent-
+      only leftovers noted. Follow-up if wanted: a cleanup ring around bridged
+      holes.
 
 ## Open questions & deferred
 

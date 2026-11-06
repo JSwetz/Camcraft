@@ -139,6 +139,7 @@ pub fn pocket3d_air_split(
         moves,
         cycles: Vec::new(),
         notes,
+        comps: Vec::new(),
     };
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));
@@ -252,6 +253,7 @@ fn run_rest(
         moves,
         cycles: Vec::new(),
         notes,
+        comps: Vec::new(),
     };
     if !path.all_finite() {
         return Err(GenError::Invalid("path left the finite horizon".into()));

@@ -143,6 +143,14 @@ function onOpen() {
   block(["G21", "G18", "G40", "G80", "G99"]);   // mm, ZX plane, no nose comp, feed/rev
 }
 
+// Cutter compensation in the control (M13.11): on a lathe G41/G42 is
+// tool NOSE-RADIUS compensation (the insert's ground tip, G41/G42 with
+// the tip-direction number) - a different law, out of scope; refused by
+// name, never a centre path posted as the part.
+function onRadiusCompensation() {
+  msg("control cutter compensation on a lathe is nose-radius compensation - not supported; choose In computer");
+}
+
 function onParameter(name, value) {
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);

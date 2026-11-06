@@ -11469,3 +11469,162 @@ importer (IGES mesh entities are rare in the wild; it would read almost
 nothing real) and silently accepting the file (never). Revisit the day M12.1
 reads STEP through its own kernel - IGES is one more entity table on the same
 topology.
+
+## M13.9: the rasters' over-read was the march's blind skip probe; a closed ring never flanks its own inside (2026-11-06)
+
+**Not a partition, not a join row - the march's skip phase.** `ParallelMulti`
+has no partition (both directions cover the whole shallow bounds). After a
+run ends the march probed blindly at 4·δ₀ (4.38 mm); the strict tangency
+leaves a fold gap of r·|Δm| between every pair of tessellated facets (0.2 mm
+on the r20 dome, 0.47 mm between the hill's 9° bands), so a line is ~1 mm
+runs with hairline gaps, and a probe landing in the next gap - or a
+bisection converging on a later transition - dropped whole runs: the dome
+Parallel's worst column had its nearest rows 3.39 mm = three stepovers
+apart. The 0.349 "multidirection" reading was the single-Parallel path (that
+test judges both). The skip phase now seeks from `tol` on a doubling ladder
+up to the old cruise (open-air cost unchanged); the spiral family keeps the
+blind probe, pattern-gated, because the ladder found an inner-turn piece on
+the hill spiral and its newly flanked column read 0.156 against the 0.144
+pin - a ratchet never rises. Readings (gate 0.1234): dome Parallel 0.349 →
+0.125, dome multi 0.182 → 0, dome scallop 0.156 → 0.104, hill contour 0.231
+→ 0.143, hill project 0.127 → 0, hill radial 0.127 → 0.126, ramp hill 0.297
+→ 0.153, tilted ramp 0.170 → 0.170, dome flow 0.156 → 0. Ratchets lowered
+or removed accordingly (dome scallop, hill project, the caller-less "open
+dome geodesic" entry, the flow table); `finish3d_radial_dome.cl` re-blessed
+(1958 → 1736 moves: one-transition brackets stop fragmenting runs).
+
+**The ridge flank law needs feet from two distinct passes.** `ridge::
+closed_ring_ids` names each closed iso-Z ring (its plunge and retract ride
+the ring's id); `Flank::add` refuses an opposite pair from one ring - a
+closed ring's own inside is one graze, rest's jurisdiction, not a cusp.
+Pinned on the hill's crown ring (radius 1.62 < reach: 0.194 → ≤ gate) while
+two rings at the ceiling spacing still convict. What remains over the gate
+(hill 0.126-0.154, tilted shelf 0.170) is the strict tangency's fold annulus
+r·Δm on coarse meshes - ground the march refuses by law, not spacing; the
+next owed item is a kernel decision (edge-resting centres vs the belt's gap
+law).
+
+## M13.11: G41/G42 cutter compensation - the part contour under control comp (2026-11-06)
+
+**`Compensation { Computer, Control }` lives on the contour's `Approach`**
+(default Computer: every golden byte-identical), not a new OpParams field -
+it rides links, undo, the project file (additive key) and the digest (a byte
+only when Control) with no construction-site churn. **Control emits the PART
+contour** (the region at stock-to-leave) under `G41/G42 D<tool>` on the
+lead-in and `G40` on the lead-out - the variant G41/G42 exists for; the
+"wear" variant (centre path, near-zero register) needs a register convention
+per shop and is owed. The CL carries a `CompSpan` per ring (`cl/comp.rs`:
+side, radius, first/last, the programmed moves) beside the cutter-centre
+moves, which stay the sim/verify truth. **The lead law**: Control needs a
+linear or perpendicular lead-in AND lead-out ≥ r, a closed ring, and the
+seam re-seated mid-run on the longest edge so the control's engage offset
+equals its cancel offset - the tool then runs exactly the proved centre
+moves. Refused by name: arc/tangential/no lead, a short lead, tabs, corner
+blends, overlap, keep-down links, open contours and runs, a 3+2 tilt. The
+stream carries `COMP LEFT|RIGHT <µm>` / `COMP OFF`, the engine fires
+`onRadiusCompensation` and refuses a script that lacks the hook the moment a
+COMP record arrives; Fanuc writes the words, Haas/Mazak/Sinumerik/Heidenhain
+and the lathe post refuse by name; every refusal blocks the gate. D = the
+tool number (the library carries no offset register). Owed: the wear
+variant, the other mill dialects, a generator-side concave-corner-vs-tool
+check (today only the control's interference alarm catches it); contour.rs
+stands at 415 lines (split owed).
+
+## M13.11: cross-entity open-run stitching (2026-11-06)
+
+**A second walk after the per-entity one, entered only for multi-entity
+picks.** The runs the per-entity walk leaves are walked again across every
+picked model (`stitch_cross::stitch_across`), welded on the same 1e-6
+lattice in the op's frame (world XY, or the M11.5 tilt frame) with either
+endpoint of a candidate matching (the flipped-continuation law), and
+oriented by the same shoelace canon - so a rim split across bodies is one
+ring (or, under an open boundary, one open chain), labelled "the stitched rim
+of 'a' and 'b'", its picks consumed so the routing, chips and notes read as
+the single-entity case does. A selection on one entity never enters the
+second pass: single-entity output is byte-identical, goldens untouched.
+Refused by name: a junction three runs meet at ("meet 3 ways at (x, y) - a
+ring across models must meet end to end, one way on"; the picks spell two
+rings and a guess gouges) and a composed ring whose Z span exceeds one weld
+step ("lie on different planes"). Dropped: a looser plane tolerance (nothing
+in the pick law names one) and resolving forks by the shortest ring (a silent
+choice). Pinned: two half blocks butted at x = 0 with six rim picks → one
+40×40 ring whose top-level cut equals the one-block cut move for move; the
+fork and plane refusals; the open chain; create/set-geometry/undo/redo.
+stitch.rs split (gather_runs / walk_ring / compose_ring; run_out.rs a pure
+move). Found, not fixed: `contour_depth` fails closed below the top level on
+two touching bodies (coincident seam walls) and says so in the notes -
+tracked as its own row.
+
+## M13.11: facing rows honour holes - Lift by default, Through as the explicit legacy (2026-11-06)
+
+**The rows never change; the holes clip them.** The facer still clears the
+bounding band (full-span rows, X overrun - `face_band_sane`'s doctrine); the
+region's voids (holes less any island nested in them) are grown by the tool
+radius - the pocket's cutter-centre construction - and each row is clipped
+against that set by a half-open parity walk; the pieces are cut in row order
+and a bridged hole is crossed by the facer's own level link (rapid up to
+clearance, across, plunge at plunge feed). A row-end reversal or blend rides
+only when both ends are whole. **`Face.holes` = Lift (default) / CutAir /
+Through**: Lift is the only law safe without knowing whether a void is a bore
+or a boss; CutAir cuts across air holes and lifts over islands (an island is
+a void under material standing above the cut plane, `material_source::
+standing_above`; with no outline to read, every hole is lifted and a note
+says so); Through is the M1.3 band serpentine, byte-identical. Default Lift
+costs nothing: no golden carries a hole and a hole-free region is byte-
+identical under every law (tested). Refused by name: two bridged holes
+closer than the tool ("the strip between them would stay standing").
+Perpendicular leftovers beside a hole that only a tangent row could reach are
+NOTED, not refused - the wide-stepover precedent; refusing would make the
+default refuse every square hole. Dropped: snapping extra tangent rows into
+the band (changes the row set, helps only rectangular holes); a tangent
+cleanup ring around bridged holes is the follow-up if users want them faced.
+Staged facing repeats pieces and links per level. The project file writes
+`holes` only away from Lift; the digest likewise, so cached legacy faces keep
+their digest.
+
+## M13.11: mesh repair - weld by spatial hash, planar hole filling, one command (2026-11-06)
+
+**`geometry::repair::weld` merges vertices by spatial hash within a stated
+tolerance** (Teschner et al. 2003; pipeline per Botsch et al. 2010 ch. 8):
+cell = tol, 27-cell probe, the FIRST occurrence is the representative so
+nothing moves farther than tol; tol = 0 is a bit-exact merge. Collapsed,
+zero-area and duplicate (either winding) triangles are dropped, vertices
+compacted. **`fill_holes` is Liepa 2003's planar case only**: boundary loops
+from odd-count edges walked as reversed half-edges (consistent fill winding),
+a Newell best-fit plane, simplicity proven, ear clipping in the plane. A
+non-planar loop (> 5 % of its bbox diagonal), a self-crossing or degenerate
+loop, a non-manifold edge or vertex, an unclosed chain and a loop over the
+budget refuse by name - a non-planar hole is NOT bridged with surface the
+user never drew (Prime Directive); Liepa's full minimum-weight triangulation
+was dropped for that reason. `open_edge_count` is the diagnostic, now in
+geometry (the sim's twin). **`RepairModel` is the only door** (weld then
+fill at construction, one undo unit over `UpdateModel` restoring the exact
+previous facets and revision; `FromModel` stock copies follow); it refuses a
+closed model ("nothing to repair") so no no-op history entry exists, and it
+never runs on import. The Model page carries the verb (tolerance, largest
+hole, the last report). Pinned: a split-seam cube welds 9 → 8 vertices;
+a missing face returns as 2 triangles with signed volume +1; a 1000-edge
+hole over a 256 budget refuses and fills at 1000 (cone volume π/3); NaN/
+inf/collapsed soups never panic. Dropped: the sim's lattice-1e-9 weld as the
+repair's law (bit-exact indexing after an explicit weld is honest about
+what moved).
+
+## M13.11: contour depth on touching bodies - the union of the picked bodies (2026-11-06)
+
+**The depth ladder and the verify read a multi-model selection as the union
+of its bodies**: each body is sliced on its own and the sections are united
+by the 2D boolean law (`slice::material_above_of`, the same union the region
+builders apply to picks across entities), so two models butted face to face
+cut every level the one block they stand for cuts, move for move. One body
+keeps the plain slice byte for byte (`bodies.len() < 2` short-circuits in
+geometry, motion and sim), and a self-touching single shell still fails
+closed at its seam with the floor note - fail-closed stays for genuine
+non-manifold input. Two decisions: body identity comes from the pick's
+ENTITIES (facet index ranges on the flat material list), never from shell
+connectivity - two welded bodies share rim edges and cannot be told apart in
+the soup; and the verify learned the ranges through a `verify_bodies` entry
+rather than a new `VerifyContext` field, leaving its 35 construction sites
+and every one-body verdict untouched. Pinned: the two-body ring cuts Z 10 and
+Z 0 exactly as the one block (same moves, lengths, extents, warning count,
+no "levels below skipped" note); the merged single mesh still stops at its
+top level with the note.

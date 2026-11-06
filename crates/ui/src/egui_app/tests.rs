@@ -766,7 +766,7 @@ fn every_field_lives_on_exactly_one_section() {
                     ],
                 ),
                 ("Passes", vec!["Stock to leave"]),
-                ("Lead in / Lead out", vec!["Lead in/out", "Entry", "Level to level", "Between levels", "Between passes", "Plunge", "Ramp / helix / arc feed", "Entry plunge feed", "Lead-in feed", "Engagement", "Lead out", "Before lead-in", "After lead-out", "Vertical lead-in height", "Overlap past the start", "Tab count", "Tab width", "Tab height"]),
+                ("Lead in / Lead out", vec!["Lead in/out", "Entry", "Level to level", "Between levels", "Between passes", "Plunge", "Ramp / helix / arc feed", "Entry plunge feed", "Lead-in feed", "Engagement", "Lead out", "Before lead-in", "After lead-out", "Vertical lead-in height", "Overlap past the start", "Compensation", "Tab count", "Tab width", "Tab height"]),
                 ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),

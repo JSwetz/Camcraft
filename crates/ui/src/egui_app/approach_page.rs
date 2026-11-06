@@ -13,7 +13,7 @@
 
 use egui::Ui;
 
-use camcraft_app::links::Approach;
+use camcraft_app::links::{Approach, Compensation};
 use camcraft_app::machining2d::Lead;
 use camcraft_app::machining3d::Entry3D;
 use camcraft_app::units::Unit;
@@ -22,6 +22,7 @@ use super::fields::{combo, num, num_feed, num_unit};
 use super::layout::{auto_value, check_row, consequence, group, hint, prop_row, prop_row_hint};
 
 const LEAD_OUTS: [&str; 6] = ["Same as lead-in", "None", "Linear", "Arc", "Tangential", "Perpendicular"];
+const COMPS: [&str; 2] = ["In computer", "In control (G41/G42)"];
 
 /// The entry arm's own numbers (`arm` - the first entry, or the level
 /// descent a kind without a first entry uses), inside the caller's group.
@@ -169,6 +170,25 @@ pub(super) fn contour_leads_editor(ui: &mut Ui, u: Unit, a: &mut Approach) {
             "starts each ring on an X- or Y-aligned run, so an Arc entry posts as one G18/G19 arc",
             |ui| num_unit(ui, &mut a.axis_tol, "°"),
         );
+    });
+    // M13.11: where the cutter radius comes off - the computer walks
+    // the centre (the simulation and every file before the option), the
+    // control offsets the part contour by its register.
+    group(ui, "Cutter compensation", None, |ui| {
+        let mut i = usize::from(a.compensation == Compensation::Control);
+        let before = i;
+        prop_row_hint(
+            ui,
+            "Compensation",
+            "In computer: the cutter-centre path is posted. In control: the part contour is posted under G41/G42 with the tool's offset register (D = tool number), so a worn cutter is shimmed at the pendant",
+            |ui| combo(ui, "c_comp", &mut i, &COMPS),
+        );
+        if i != before {
+            a.compensation = if i == 1 { Compensation::Control } else { Compensation::Computer };
+        }
+        if a.compensation == Compensation::Control {
+            consequence(ui, "needs straight Linear or Perpendicular leads at least a tool radius long; tabs, corner blends, overlap, keep-down links and non-Fanuc posts are refused by name");
+        }
     });
 }
 

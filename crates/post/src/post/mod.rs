@@ -17,16 +17,20 @@
 //! silent), the cycle family for `CYCLE` points, and `onComment` for
 //! every `WARN` (the default echoes; a script may restyle it - and
 //! only refused outputs ever carry an echo, since warnings block the
-//! write upstream). `onRadiusCompensation` is the one contract kept
-//! silent for a real reason: no record in the intermediate carries
-//! compensation data until G41/G42 path support lands (M1.3's open
-//! flag), and inventing a call site from an empty one is how posts
-//! start lying.
+//! write upstream). `onRadiusCompensation` (M13.11) fires for every
+//! `COMP` record - the engage (left / right, with the register's
+//! radius) before the lead-in of a control-compensated span and the
+//! cancel before its lead-out; the motion records between are the
+//! PART contour the span carries (`cl::CompSpan`), never the cutter
+//! centre. A script without the hook is refused by the engine when a
+//! `COMP` record arrives - the one way a compensated stream could post
+//! as an undersize part.
 
 pub mod cnc;
 pub mod engine;
 pub mod js;
 pub mod machine;
+mod program;
 
 pub use engine::{LineInfo, PostOutput, TraceBlock};
 
@@ -207,10 +211,13 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     // after a lean must be COMMANDED (explicit zero angles), or the
     // machine runs the "upright" move under the old lean.
     let mut tilted = false;
-    for (mi, m) in t.moves.iter().enumerate() {
+    for (mi, m, pre) in program::program_order(t, &mut out) {
         while ci < cycles.len() && cycles[ci].first_move <= mi {
             out.push(Record::Cycle(cycles[ci].clone()));
             ci += 1;
+        }
+        if let Some(r) = pre {
+            out.push(r);
         }
         let abc = match m.axis {
             Some(a) if !crate::cl::is_vertical(&a) => {

@@ -618,7 +618,10 @@ pub fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
                 }
             }
         }
-        moved += cache.path.moves.len();
+        // The emitted motion records, not the path's moves: a
+        // control-compensated span (M13.11) writes its programmed
+        // contour in place of its centre moves.
+        moved += recs.iter().filter(|r| matches!(r, cnc::Record::Move(_))).count();
         records.extend(recs);
     }
     Ok(records)

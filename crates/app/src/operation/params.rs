@@ -1418,6 +1418,12 @@ impl OpParams {
                 if a.arc_xy {
                     h.write_u8(0xC4);
                 }
+                // M13.11: control compensation moves what the post
+                // writes - a byte only when on, so every earlier
+                // approach keeps its digest.
+                if a.compensation == crate::links::Compensation::Control {
+                    h.write_u8(0xC5);
+                }
                 match a.lead_out {
                     None => h.write_u8(0xFF),
                     Some(Lead::None) => h.write_u8(0),

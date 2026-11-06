@@ -8,7 +8,7 @@
 
 use super::*;
 
-use crate::links::Approach;
+use crate::links::{Approach, Compensation};
 use crate::machining2d::Lead;
 
 /// The changed fields of an op's [`Approach`]; every field absent is
@@ -60,6 +60,10 @@ pub struct ApproachDto {
     /// The pocket's horizontal (G17) arc entry (M11.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc_xy: Option<bool>,
+    /// Cutter compensation in the control (M13.11): written only when
+    /// on; absent is in computer, every earlier file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_comp: Option<bool>,
 }
 
 fn lead_dto(l: Lead) -> LeadDto {
@@ -111,6 +115,7 @@ pub fn approach_to_dto(a: &Approach) -> Option<ApproachDto> {
         axis_start: flag(a.axis_start, d.axis_start),
         axis_tol: num(a.axis_tol, d.axis_tol),
         arc_xy: flag(a.arc_xy, d.arc_xy),
+        control_comp: (a.compensation == Compensation::Control).then_some(true),
     };
     (dto != ApproachDto::default()).then_some(dto)
 }
@@ -146,6 +151,7 @@ pub fn approach_from_dto(d: Option<&ApproachDto>) -> Approach {
         axis_start: d.axis_start.unwrap_or(a.axis_start),
         axis_tol: d.axis_tol.unwrap_or(a.axis_tol),
         arc_xy: d.arc_xy.unwrap_or(a.arc_xy),
+        compensation: if d.control_comp == Some(true) { Compensation::Control } else { Compensation::Computer },
         center_cutting: true,
     }
 }

@@ -12,6 +12,7 @@ use crate::links::{Link, LinkTally};
 use super::arcs::{fit_arcs, push_segs};
 use super::contour_depth::{Ladder, ladder};
 use super::contour_entry::{Engage, crosses, say, seam_leads, wall_arc, wall_arc_top};
+use super::contour_comp::{self, SpanCtx};
 use super::contour_link::{plan_links, push_stay, ring_link};
 use super::contour_step::{Said, Step, engage_level};
 use super::levels::{Cert, Motion};
@@ -74,6 +75,8 @@ fn contour_impl(
     part: Option<&[Triangle]>,
 ) -> Result<Toolpath, GenError> {
     p.validate()?;
+    // Control-side compensation (M13.11): its parameter door first.
+    contour_comp::door(p)?;
     if region.is_empty() {
         return Err(GenError::Empty("empty footprint".into()));
     }
@@ -89,6 +92,9 @@ fn contour_impl(
             "offset boundary collapsed".into()
         }));
     }
+    // The contour the post programs under G41/G42 (M13.11): the part
+    // at the stock to leave; `None` for every path cut in computer.
+    let prog = contour_comp::programmed_region(region, p)?;
     let flat = p.levels();
     let mut loops: Vec<&Loop> = center.loops().iter().collect();
     loops.sort_by(|a, b| b.area().abs().total_cmp(&a.area().abs()));
@@ -196,6 +202,8 @@ fn contour_impl(
         // it posts as a true G18/G19), then the lead room's own reseat.
         let ap = &p.links.approach;
         let pts = if !tabbed && ap.axis_start { axis_reseat(&pts, ap.axis_tol).unwrap_or(pts) } else { pts };
+        // A control-compensated ring seams mid-run (contour_comp).
+        let pts = if prog.is_some() && !tabbed { contour_comp::seam_mid_run(&pts) } else { pts };
         let pts = if tabbed { pts } else { reseat(&pts, p, &legal, &mut lead_notes).unwrap_or(pts) };
         let ring = Ring::new(pts);
         // The overlap past the start on closed rings (M11.3 C): not on
@@ -334,6 +342,7 @@ fn contour_impl(
             }
             first_entry = false;
             let at = b.at();
+            let lead_at = b.moves_len();
             if at.x == e2.x && at.y == e2.y && at.z > z {
                 push_lead_down(&mut b, &lead, at.z, z, lf);
             } else {
@@ -342,9 +351,26 @@ fn contour_impl(
                 }
                 push_segs(&mut b, &lead, z, lf);
             }
+            let walk_at = b.moves_len();
             push_segs(&mut b, &walk, z, p.feed);
+            let out_at = b.moves_len();
             if !stay_out {
                 push_segs(&mut b, &lead_off, z, p.feed);
+            }
+            // The control's span (M13.11): the lead-in move that lands
+            // on the wall engages, the lead-out move that leaves it
+            // cancels; a lead the room law refused is a refusal here
+            // too, by name - never a centre path under a Control op.
+            if let Some(prog) = &prog {
+                if walk_at == lead_at || b.moves_len() == out_at {
+                    return Err(contour_comp::refused(format!(
+                        "needs a lead-in and a lead-out at ({:.3}, {:.3}) - the room law refused one ({})",
+                        e2.x,
+                        e2.y,
+                        lead_notes.join("; ")
+                    )));
+                }
+                contour_comp::push_span(&mut b, &SpanCtx { prog, p }, walk_at - 1, out_at)?;
             }
         }
     }

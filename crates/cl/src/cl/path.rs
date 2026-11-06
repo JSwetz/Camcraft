@@ -5,6 +5,7 @@ use crate::geo2d::Point2;
 use crate::geometry::Point3;
 use crate::geometry::units::Unit;
 
+use super::comp::CompSpan;
 use super::moves::{lattice, Move, MoveKind};
 use super::plane::{z_extrema, ArcPlane};
 use super::cycle::Cycle;
@@ -25,6 +26,11 @@ pub struct Toolpath {
     /// line says them verbatim, so a silent fallback cannot exist.
     /// Carried by the cache as an additive key (absent = none).
     pub notes: Vec<String>,
+    /// The stretches a control compensates itself (M13.11,
+    /// [`CompSpan`]): empty for every path cut "in computer" - the
+    /// default, and every path before the option. The moves stay the
+    /// cutter-centre truth; the spans say what the post writes instead.
+    pub comps: Vec<CompSpan>,
 }
 
 impl Toolpath {
@@ -33,6 +39,7 @@ impl Toolpath {
             moves,
             cycles: Vec::new(),
             notes: Vec::new(),
+            comps: Vec::new(),
         }
     }
 
@@ -154,6 +161,7 @@ pub struct PathBuilder {
     moves: Vec<Move>,
     cycles: Vec<Cycle>,
     notes: Vec<String>,
+    comps: Vec<CompSpan>,
 }
 
 impl PathBuilder {
@@ -165,6 +173,18 @@ impl PathBuilder {
             moves: Vec::new(),
             cycles: Vec::new(),
             notes: Vec::new(),
+            comps: Vec::new(),
+        }
+    }
+
+    /// Record a control-compensated span over moves already laid down
+    /// (M13.11): refused - and said in the notes, never silent - when
+    /// it does not chain onto the moves it claims to replace.
+    pub fn push_comp(&mut self, span: CompSpan) {
+        if span.is_sane(&self.moves) {
+            self.comps.push(span);
+        } else {
+            self.note("compensation: a control-compensated span did not chain onto its moves - dropped");
         }
     }
 
@@ -344,6 +364,7 @@ impl PathBuilder {
             moves: self.moves,
             cycles: self.cycles,
             notes: self.notes,
+            comps: self.comps,
         }
     }
 }

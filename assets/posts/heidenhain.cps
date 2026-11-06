@@ -95,6 +95,13 @@ function onOpen() {
   block(["(" + nm + ")"]);
 }
 
+// Cutter compensation in the control (M13.11): this dialect does not
+// state it yet - refused by name, never a centre path under a
+// Control op (the stream's contour is the PART contour).
+function onRadiusCompensation() {
+  msg("control cutter compensation (G41/G42) is not supported by this post - choose In computer, or the Fanuc post");
+}
+
 function onParameter(name, value) {
   if (name === "WorkOffset" && value) wcsWord = String(value);
   else if (name === "OriginX" && has(value)) orgX = Number(value);

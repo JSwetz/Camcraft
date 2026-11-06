@@ -10,7 +10,7 @@
 //! Deterministic text in, deterministic record stream out - no
 //! timestamps, no ordering luck.
 
-use crate::cl::{ArcPlane, CycleKind, MoveKind};
+use crate::cl::{ArcPlane, CompSide, CycleKind, MoveKind};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -63,6 +63,16 @@ pub enum Record {
     /// under this budget - and it is what decides whether the part
     /// gets a re-run. The stream only says what to measure.
     Probe { tol_mm: f64 },
+    /// Cutter radius compensation (M13.11): `Some(side)` engages it on
+    /// the NEXT motion record - a straight one, carrying G41 (left) or
+    /// G42 (right) with the tool's offset register, the control holding
+    /// `radius_mm` there - and `None` cancels it on the next motion
+    /// record (G40). The motion records between are the PART contour,
+    /// not the cutter centre: a script that cannot voice this record
+    /// must refuse by name, and the engine refuses for a script that
+    /// does not define the hook at all - a centre-less contour posted
+    /// without its G41 is an undersize part, the silent wrong answer.
+    Comp { side: Option<CompSide>, radius_mm: f64 },
 }
 
 /// One feed/rapid/plunge/arc record. Coordinates are millimeters
@@ -246,6 +256,9 @@ impl Record {
             Record::Part { loading: false, .. } => "part unload".into(),
             Record::Transfer { from, to } => format!("part transfer {from}→{to}"),
             Record::Probe { tol_mm } => format!("probe · tol {tol_mm:.3} mm"),
+            Record::Comp { side: Some(CompSide::Left), radius_mm } => format!("comp left · r {radius_mm:.3} mm"),
+            Record::Comp { side: Some(CompSide::Right), radius_mm } => format!("comp right · r {radius_mm:.3} mm"),
+            Record::Comp { side: None, .. } => "comp off".into(),
         }
     }
 
@@ -374,6 +387,14 @@ pub fn serialize(records: &[Record]) -> String {
                 // A length like the loader's ADVANCE: the µm integer,
                 // the lattice law - not a parameter real.
                 s.push_str(&format!("PROBE {}\n", q(*tol_mm)));
+            }
+            Record::Comp { side, radius_mm } => {
+                // The radius rides as microns like every length here.
+                s.push_str(&match side {
+                    Some(CompSide::Left) => format!("COMP LEFT {}\n", q(*radius_mm)),
+                    Some(CompSide::Right) => format!("COMP RIGHT {}\n", q(*radius_mm)),
+                    None => "COMP OFF\n".to_string(),
+                });
             }
         }
     }
@@ -815,6 +836,37 @@ pub fn parse(text: &str) -> Result<Vec<Record>, CncError> {
                     }
                     out.push(Record::Part { loading, advance });
                 }
+            }
+            "COMP" => {
+                // Cutter compensation (M13.11): LEFT / RIGHT carry the
+                // register's radius in microns; OFF carries nothing. A
+                // side without a radius, or a radius that is not
+                // positive, is refused by name - a register the parser
+                // guessed is the undersize part.
+                let dir = it.next().unwrap_or("");
+                let side = match dir {
+                    "LEFT" => Some(CompSide::Left),
+                    "RIGHT" => Some(CompSide::Right),
+                    "OFF" => None,
+                    other => {
+                        return Err(fail(format!("COMP needs LEFT, RIGHT or OFF, found {other:?}")))
+                    }
+                };
+                let radius_mm = match side {
+                    None => 0.0,
+                    Some(_) => {
+                        let w = it
+                            .next()
+                            .ok_or_else(|| fail(format!("COMP {dir} needs a radius in microns")))?;
+                        let v = num(w).map_err(|_| fail(format!("COMP radius {w:?}")))? / 1000.0;
+                        if v.is_nan() || v <= 0.0 {
+                            return Err(fail(format!("COMP radius {w:?} is not positive")));
+                        }
+                        v
+                    }
+                };
+                out.push(Record::Comp { side, radius_mm });
+                in_section = true;
             }
             "PROBE" => {
                 // The measurement ask (M5.3 D): one micron integer,
