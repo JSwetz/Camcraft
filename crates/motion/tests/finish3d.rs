@@ -231,6 +231,50 @@ fn envelope(facets: &[Triangle], t: &Toolpath) -> camcraft_motion::stock_sim::En
     envelope_scan(facets, &t.moves, R, TOL).expect("fixture-sized grid")
 }
 
+/// The scallop ratchet (M13.9): the ridge flank law (`stock_sim::ridge`)
+/// reads these fixtures' spacing scallop OVER the gate - a quality
+/// defect, not a gouge (RECOMMENDED "M13.8 B" (3)) - and the
+/// generator fix is the owed item. Until it lands, every fixture pins
+/// the reading it had when the law went live: a rise fails, a fall is
+/// free. Fixtures not listed answer to the gate itself. The same
+/// pattern as `KINK_RATCHET` in `adaptive_hsm.rs`.
+const SCALLOP_RATCHET: &[(&str, f64)] = &[
+    ("dome waterline", 0.183),
+    ("open dome geodesic", 0.226),
+    ("dome multidirection", 0.349),
+    ("dome scallop", 0.156),
+    ("hill contour", 0.231),
+    ("hill project", 0.127),
+    ("hill radial", 0.127),
+    ("hill spiral", 0.144),
+    ("hill radial with ramp", 0.127),
+    ("hill spiral with ramp", 0.144),
+    ("hill contour with ramp", 0.231),
+    ("hill project with ramp", 0.127),
+    ("ramp hill", 0.297),
+    ("tilted ramp", 0.170),
+];
+
+fn scallop_ratchet(fixture: &str, rep: &camcraft_motion::stock_sim::EnvelopeReport) {
+    let cap = SCALLOP_RATCHET
+        .iter()
+        .find(|(f, _)| *f == fixture)
+        .map_or(gate(rep.cell), |&(_, c)| c + 1e-3);
+    assert!(
+        rep.scallop_mm <= cap,
+        "{fixture}: scallop {} mm at {:?} rose past its ratchet {cap:.4} (gate {:.4})",
+        rep.scallop_mm,
+        rep.scallop_at,
+        gate(rep.cell)
+    );
+}
+
+/// The verifier's list without the scallop note (M13.9): the ratchet
+/// above judges that reading; every blocking kind must still be absent.
+fn sans_scallop(w: Vec<camcraft_motion::verify::Warning>) -> Vec<camcraft_motion::verify::Warning> {
+    w.into_iter().filter(|w| w.blocks_post()).collect()
+}
+
 /// The full verifier with the envelope law switched on - the shape the
 /// operation layer assembles for a Finish3D op. `stock_top` is the
 /// fixture's own top height: laws (c)/(d) measure the path against
@@ -302,8 +346,9 @@ fn dome_waterline_is_envelope_clean() {
         rep.at,
         gate(rep.cell)
     );
+    scallop_ratchet("dome waterline", &rep);
     assert_eq!(
-        verify_finish(&f, &t, 20.0),
+        sans_scallop(verify_finish(&f, &t, 20.0)),
         Vec::new(),
         "the verifier agrees"
     );
@@ -1236,6 +1281,7 @@ fn multidirection_rasters_cross() {
         let rep = envelope(&f, t);
         assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
         assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
+        scallop_ratchet("dome multidirection", &rep);
     }
 }
 
@@ -1354,7 +1400,8 @@ fn scallop_crosses_the_diagonals_and_measures_clean() {
     let rep = envelope(&f, &t);
     assert!(rep.gouge_mm <= gate(rep.cell), "gouged {} mm at {:?}", rep.gouge_mm, rep.at);
     assert!(rep.rest_mm <= gate(rep.cell), "left {} mm of rest at {:?}", rep.rest_mm, rep.at);
-    assert_eq!(verify_finish(&f, &t, 18.0), Vec::new(), "the verifier agrees");
+    scallop_ratchet("dome scallop", &rep);
+    assert_eq!(sans_scallop(verify_finish(&f, &t, 18.0)), Vec::new(), "the verifier agrees");
 }
 
 #[test]
@@ -1518,7 +1565,8 @@ fn the_hill_under_radial_and_spiral_is_envelope_clean() {
         let rep = envelope(&f, &t);
         assert!(rep.gouge_mm <= gate(rep.cell), "{name}: gouged {} at {:?}", rep.gouge_mm, rep.at);
         assert!(rep.rest_mm <= gate(rep.cell), "{name}: left {} of rest at {:?}", rep.rest_mm, rep.at);
-        assert_eq!(verify_finish(&f, &t, HILL_TOP), Vec::new(), "{name}: the verifier agrees");
+        scallop_ratchet(&format!("hill {name}"), &rep);
+        assert_eq!(sans_scallop(verify_finish(&f, &t, HILL_TOP)), Vec::new(), "{name}: the verifier agrees");
     }
 }
 
@@ -1595,7 +1643,8 @@ fn the_hill_under_contour_and_project_is_envelope_clean() {
         let rep = envelope(&f, &t);
         assert!(rep.gouge_mm <= gate(rep.cell), "{name}: gouged {} at {:?}", rep.gouge_mm, rep.at);
         assert!(rep.rest_mm <= gate(rep.cell), "{name}: left {} of rest at {:?}", rep.rest_mm, rep.at);
-        assert_eq!(verify_finish(&f, &t, HILL_TOP), Vec::new(), "{name}: the verifier agrees");
+        scallop_ratchet(&format!("hill {name}"), &rep);
+        assert_eq!(sans_scallop(verify_finish(&f, &t, HILL_TOP)), Vec::new(), "{name}: the verifier agrees");
     }
 }
 
@@ -1741,7 +1790,8 @@ fn ramp_never_gouges_the_ground_it_certs() {
         rep.at
     );
     assert!(rep.rest_mm <= gate(rep.cell), "ramp hill left {} of rest", rep.rest_mm);
-    assert_eq!(verify_finish(&f, &r, HILL_TOP), Vec::new(), "the verifier agrees");
+    scallop_ratchet("ramp hill", &rep);
+    assert_eq!(sans_scallop(verify_finish(&f, &r, HILL_TOP)), Vec::new(), "the verifier agrees");
 }
 
 #[test]
@@ -1811,6 +1861,7 @@ fn the_ring_families_ignore_the_chain() {
             rep.gouge_mm,
             rep.rest_mm
         );
+        scallop_ratchet(&format!("hill {} with ramp", format!("{pat:?}").to_lowercase()), &rep);
     }
     // Degenerate scatter under ramp: no panic, no hang, no promise.
     let scatter: Vec<Triangle> = (-8..8)
@@ -1873,7 +1924,8 @@ fn the_ramp_angle_default_certifies_what_v17_certified() {
         rep.gouge_mm,
         rep.rest_mm
     );
-    assert_eq!(verify_finish(&f, &ramp, 14.0), Vec::new(), "the verifier agrees");
+    scallop_ratchet("tilted ramp", &rep);
+    assert_eq!(sans_scallop(verify_finish(&f, &ramp, 14.0)), Vec::new(), "the verifier agrees");
 }
 
 #[test]

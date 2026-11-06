@@ -10667,3 +10667,259 @@ and lock sync (asserting the lock diff is version lines only), the two
 It prints the zip path and the push command and never pushes. `-DryRun` walks
 every phase without changing state; `-SkipGate` / `-SkipBuild` exist for a
 re-cut after a docs-only fix. PowerShell 5.1 syntax throughout.
+
+## M13.7 and the swarf pose laws: four decisions, and a gate finding (2026-11-06, Prime Directive)
+
+(1) **The mid-move pose law lands as written** (`verify/midpose.rs`): a move
+whose pose changes along it is judged at interpolated poses - b2 sweeps each
+interval under its mid-pose, f2 samples the ball centre along a leaning Feed.
+Only pose-changing moves pay; constant-pose and upright moves are byte-identical.
+A Plunge is excused by f2 (an entry claims contact at its end only; the first
+draft convicted the correct contour5d bar at a plunge, which was the design
+error, not a finding). This closes M13.7.
+
+(2) **The swarf stamp keeps its hemisphere** (`stamp_link::ruled_sign`): a
+ruling is a line, so the ruled pose takes the sign continuous with the pose
+held coming in, else with the last leaning pose stated, and the old
+deterministic rule only for the program's first posed move. A "ruled" contact
+whose normal leans along the ruling by more than sin 10° is an edge, not the
+flank, and falls to the lean law. Lying-to-lying turns: 180° -> 5.7°.
+
+(3) **A pose turn past 30° happens in air, never on a cut** (`stamp_link::
+link_swings`): a Rapid lift under the OUTGOING pose to the raster's retract
+plane, then a Plunge under the INCOMING pose back onto the ball centre the cut
+finished on (sphere invariance about the centre). `guard_turns` refuses by name
+any cut pair past 30°. Blade: max cut turn 180° -> 18.7°, cuts past 90°
+74 -> 0, at the cost of 172 air links (263 on the ladder). Dropped:
+`radial_relink` (a radial-frame law - a lying tool's axial retract slides along
+the flank and never reaches clearance), and a 90° guard (the cap-ring passage
+is 120° by the 60° clamp).
+
+(4) **Two test laws were edited, named**: `pivot5d::posted_centres` no longer
+measures a Plunge's start station after a Rapid as a ball of the plan (links
+and entries start in air); `ruling::swarf5d_balls...` skips a Rapid whose ball
+rises to clearance + R. Every other posted ball, link plunges included, must
+still lie on the plan.
+
+**Gate finding (5):** the heavy envelope scan (pivot5d, full-tool sweep)
+rejected this landing: the in-air link lifted the lying tool in world Z, and a
+swarf tool's 60 mm flank, in contact along the curved blade, was dragged through
+the curvature - posed gouge 2.59 mm against the plan's 0.096. The tip- and
+ball-centre laws cannot see a flank sweep; the full-tool scan can. The retract
+must follow the contact normal away from the part, swing in air, and re-enter
+along the incoming normal. Nothing lands until that scan agrees.
+
+Owed (M11.3 / M13.8): a retract-height lift or lead-out blend to cut the air
+time; the plunge audit reading a near-vertical re-entry by tip column rather
+than by the already-cut sphere (a non-centre-cutting tool could be refused
+there); one ruled pose dips 4.9° under level at a rim column.
+
+## material.rs split: one decision (2026-11-06)
+
+**A pure move along two seams**: `material_region.rs` (`region_of`,
+`region_turn_of`, the chain helpers) and `material_source.rs` (the per-kind
+source-built region and hole rims), re-exported from `material.rs` so no caller
+changed. 749 lines became 216 + 262 + 300. Proven by recombining the module
+bodies (byte-identical to the original), `golden_cl`, the full app suite and
+the UI suite.
+
+## M13.9: the scallop law lives as a non-blocking, ratcheted verdict: three decisions (2026-11-06)
+
+(1) **The ridge flank law is live** (`stock_sim/ridge.rs`, reach `band + 3·tol`):
+a model point flanked by the pass on both sides within reach, covered by no band
+contact and reachable by a tangent ball, is a scallop reading. Creases narrower
+than the ball are excused. Its reading travels as `EnvelopeReport.scallop_mm /
+scallop_at`, separate from `rest_mm`, so the Envelope verdict is bit-for-bit
+the old law. The reach cannot see a stepover-4 cusp on r3 (feet at 3.606 vs
+3.423 reach); the equivalence test runs at 2.8 and the ceiling is documented.
+Widening the window admitted closed rings flanking a point by themselves (cone
+apex, hill crown); the flank predicate needs "feet from two distinct passes"
+before the reach can grow - owed.
+
+(2) **A scallop over tolerance is `Warning::Scallop { at, mm, gate_mm }`, and it
+does not hold the post** (`blocks_post` is false only for it). It is a surface-
+quality defect, not a gouge or a collision (RECOMMENDED "M13.8 B" (3)); it is
+shown on the op page and in the status line by its reading. Every other
+warning kind blocks exactly as before. Dropped: ignoring the convicted heavy
+tests (they already run under `--ignored`, so that would have redded the lane),
+and loosening the gate.
+
+(3) **Sixteen finish fixtures pin their readings as a ratchet**
+(`SCALLOP_RATCHET` in finish3d.rs and flow.rs: 0.127-0.349 mm over the 0.123
+gate; the dome flows 0.156 over theirs). Any rise fails. Two caps (hill contour
+and project with ramp) were pinned by analogy to their hop twins and held, so
+they are valid upper bounds, not measured readings. The four 5-axis ops in
+`operations` at stepover 2.0 on an r3 ball read a 0.162 cusp and now carry the
+note; `verifies_clean` there asserts no BLOCKING warning.
+
+Owed (M13.9, the generator half): the waterline stepdown is the 45°-from-
+vertical law (`2·sqrt(r·tol)`) and reads 2.6·tol on the dome's 64° ground - the
+slope-aware ladder `Δz = sqrt(8·r·tol)·cos α_v,max` equals today's law at 45°
+and changes ring counts on every dome fixture (re-golden them); the cos-law
+rasters' over-reads (multidirection 0.349) are unexplained - look at
+`scallop_at` on the partition border and the second pass's join rows.
+
+## M11.4: growth revolutions land on their ring tangentially: two decisions (2026-11-06)
+
+(1) **`rings::morph_rev` eases the last 15% of each growth revolution onto its
+ring** (`LAND = 0.15`, a value- and slope-continuous cubic ease, monotone,
+never outside the linear blend) so every revolution reaches its ring on the
+ring's tangent, not on the spiral's pitch. The slot's two 5.01° breaks were one
+vertex per level at the seam where the last concentric growth revolution hands
+over to the first band revolution: the ring's 3.75° chord angle plus the 1.3°
+pitch drop. Every fixture now holds zero breaks past 5°; `KINK_RATCHET` is empty.
+Dropped: post-hoc `smooth_walk` over the growth (invisible to the walk's own
+readings but one cell worse to the lift's re-walk, which refused the plan), and
+a per-seam tangent arc (no room: the band's first step is microns).
+
+(2) **A one-point plunge landing must clear the full rim** (`lift_link::
+legal_xy`): two microlift returns ended in a 0.3 mm plunge onto the slot's corner
+scallop (23° on the dexel), read as descents 4. The landing now requires
+`stock_clear(t, rim + h)`, the same law the retract hops use. Descents back to 2.
+
+## M13.1: the lathe sweep on the field, and what rotary still needs: three decisions (2026-11-06)
+
+(1) **A lathe move is a revolved stadium, closed form** (`Sweep::Lathe`): for a
+query at (rho, z), the distance is the point-to-chord distance in the (r, z)
+half-plane to the nose-centre chord (r0,z0)-(r1,z1), minus the nose radius,
+taking the minimum with the mirrored point (-rho, z) so a parting chord that
+crosses the axis reads the whole kerf disc exactly. No sampling; it enters the
+running-max cut layer like every other sweep. Convention: moves are the nose-
+CENTRE path (M5.2 E) on a spindle along +Z; pose stamps are ignored because the
+part spins.
+
+(2) **Parity is against the meridian law, because the column engine has no
+lathe reading.** `plan_program` refuses lathe and rotary on BOTH engines; the
+turning branch is judged by `turning::revolve`'s meridian scan. So the oracle
+is that closed-form law in the seam's height vocabulary: 67,440 cell centres
+with 0 sign misses, 1,104 column tops within 4.2e-13 of the cap/end-face
+formula (gate 1e-5). The column arm refuses by name (`LATHE_COLUMN_REFUSAL`).
+The `plan_program` refusal is NOT lifted yet: routing the Turn family's document
+verdict through the field eye needs the nose radius and the lathe frame carried
+in the plan. Owed, with a blade-profile variant for groove/part/thread/form
+(the nose-stadium under-claims those - ghost rest, never a hidden gouge).
+
+(3) **Rotary stays refused by name until it has parity.** It needs: the rotary
+axis in `SimOp` (the moves carry pose stamps only); a chord pre-pass that cuts
+each station-to-station turn into sub-moves with the pose interpolated, at the
+chord law `n = ceil(dtheta / (2·acos(1 − chord_tol / R_far)))`, each cut by the
+posed `Sweep::Shanked` (one axis per chord: a chord law at chord_tol, not a
+conservative closed form); and parity against `verify::posed_steel`'s radial
+law, since the column arm refuses every posed move. Round 2 is on it.
+
+## The swarf link retracts along the contact normal, and the column rapid law cannot see it: two decisions and a finding (2026-11-06)
+
+(1) **A posed in-air link leaves and re-enters along the contact normal, never
+on a Z lift** (`stamp_link::link_swings`, now reading the facets). The Z-lift
+link was rejected by the envelope scan (RECOMMENDED "M13.7 and the swarf pose
+laws"): under a lying pose the lift dragged the flank through the blade, a
+2.59 mm posed gouge where the plan read 0.096. The link now reads the surface
+normal `n` at the exit ball centre `c`, rapids under the outgoing pose to
+`c + h·n` (`h` the plunge height the Z lift used to climb, walked out along the
+normal in r/2 samples and stopping at the first that stands nearer the part than
+the exit; of h, 2h, 4h the first whose flank clears by r), swings the pose at
+that centre, and plunges back down the same normal onto the SAME ball centre -
+centre invariance kept, `guard_turns` unchanged at 30°. In a bore (no plunge
+height reachable) the farthest-standing air is taken; a named refusal only when
+the normal finds no air at all. Posed envelope now equals plan exactly on both
+swarf blades (0.0963 / 0.0957), 153 and 234 links at zero cut turns past the
+guard. Dropped: retracting to the clearance plane along the tool axis (the axis
+lies in the blade's plane on a lying pose - the same drag), and a world-Z lift
+with a pose-first swing (the swing itself sweeps the flank through the part).
+
+(2) **The verifier's column rapid law (d) convicts the fix, and the law is what
+yields.** Every under-equator link retracts down-and-outward, so its start
+column reads a surface top above it: a height field has no word for the air
+under an overhang, and `rapids_in_stock` convicts by construction (RapidInStock
+at 361, 388 in the debug band, ~14 more in the full band) on a flank the solid
+scan reads clean. The law gets a second, solid-aware reading for POSED rapids
+before conviction (the same samplers `hidden`/`probe::solid` already use for
+overhangs), with two pinned tests so it is not weakened: a posed rapid through a
+ledge's underside solid still convicts; a posed rapid in the air under the ledge
+reads clean. Unposed rapids keep the column law verbatim - 3-axis verdicts must
+not move. Dropped: standing law (d) down for multiaxis kinds (that is the
+Revolve/Radial stand-down, taken only where the kernel asserts its own rapids'
+safety; swarf's links are new geometry with no such promise yet), and skipping
+rapids whose direction leaves along the normal (the direction is the path's
+word, not the stock's - a law must read the stock).
+
+Finding: a column model is the wrong eye for any posed retract. The overhang
+backstop (M13.7 B) only ADDS convictions to the column law; this is the first
+place it must also be able to ACQUIT one, and the acquittal must come from a
+solid reading, never from the path's own description of itself.
+
+## M13.1: the rotary chord pre-pass on the field, and why the refusal still stands (2026-11-06)
+
+**`Stock::simulate_rotary` chords every turning move at the pose tolerance and
+rides the posed sweeps** (`stock_sim/field_rotary.rs`): modal pose (the first
+move's own; unstamped moves inherit the held pose, since the field reads `None`
+as upright), a turning move split into `n = ceil(dθ / (2·acos(1 − tol/R_far)))`
+sub-moves with `R_far` the spanning flank's farthest reach, tip on the straight
+chord, pose the letter lerp at the sub-chord midpoint, one axis per chord; a
+ball tool's tip shifted so the sphere centre is exact at both ends. Refusals by
+name: degenerate axis, non-finite input, a turning arc, more than 2^16
+sub-chords - never coarsened. Parity on a laid d20 bar with a half-ring groove
+(690 sub-chords, 17 s debug): sphere-cut floor 272 tops within 1.48e-5 of a
+dense independent sweep (bound 1.54e-5), zero sign misses outside the flute's
+own displacement band - but the flute-cut flank is chord-law class (7.9e-4 at
+tol 1e-4), not the 1e-5 class, because the flute above the ball stands on the
+mid pose and is off by L·α up the axis.
+
+**`plan_program`'s rotary refusal is NOT lifted** - the lift needs the app
+fixtures' parity (never run), both consumers (`simulate_document`, `stock_view`)
+routed through `simulate_rotary` (else the field eye cuts posed moves
+un-chorded - the silent approximation the refusal exists to stop), a flute-
+rotation bound (`α ≤ tol/L`) if the flank must reach the field's verdict class,
+and the per-sub-chord cost measured on the 2,064-move Offset ladder. The rotary
+axis on `Planned` was not plumbed either: dead code under a refusal. Dropped:
+lifting with the chord-class flank (a two-signed error the verdict would
+swallow), and a conservative closed form (no such form exists for a flank
+sweeping a cone of poses). Patch held as tmp/fieldsweeps.patch with the lathe
+half; M13.1 stays ⚠️ on the rotary side.
+
+## M13.8: the setup sheet names each fixture's frame (2026-11-06)
+
+**Every FIXTURES line ends with the workholding frame the verifier assumed**:
+`fixed (machine frame)` for a fixture with `fixed == true` and always for the
+machine table (a table never turns - `fixture::workholding_for`'s own reading),
+`turns with the part` for the default. The two strings live once as
+`setup_sheet::FIXED_WORDING` / `TURNING_WORDING`, read live through
+`fixture::def_of`, so an undo of `SetFixtureFixed` flips the sheet back - the
+test asserts the byte-identical sheet after undo. Dropped: a separate
+WORKHOLDING section (the operator reads the fixture line once; a second table
+restating it is the kind of crowding the sheet avoids), and a symbol column
+(✓/–: not self-explaining on a shop print).
+
+setup_sheet.rs (875 lines) was split first as a pure move - mod (164) /
+sections (171) / operations (186) / heights (359: the per-kind height-field
+match alone) / tools (66) - every `pub` path unchanged. No sheet goldens
+exist, nothing re-blessed.
+
+## M13.9: the waterline ladder reads the slope, with the 45° law as its ceiling (2026-11-06)
+
+**The stepdown is per band, from the part's facet normals** (`finishing3d/
+ladder.rs`, `levels()` moved out of params.rs): walking down from the top,
+each level asks which facets a ring in the band `[z − Δz₄₅, z]` touches (a
+facet with upward normal m is touched at tip-Z z when `z + r·(1 − m_z)` lies in
+its Z range) and the shallowest writes `Δz = √(8·r·tol)·√(1 − m_z²)`. Asking the
+widest band and taking its smallest answer is conservative. The 45° law
+`2√(r·tol)` stays the CEILING: walls and 45° ground keep today's ladder byte for
+byte (cone golden unchanged), the slope law only tightens. A facet whose own
+step falls under tol/4 is a floor (one ring at most, leaves rest not a cusp)
+and does not drive the walk. Dome waterline: 0.183 → 0 against the 0.123 gate
+(levels 5 → 6); its ratchet entry is removed - it answers to the gate itself.
+
+**Scoped to Waterline and Morph only** - the ladders that are the sole
+finisher of shallow ground. Measured, not guessed: with the law on every
+pattern the hill-project fixture ROSE 0.127 → 0.189, because the first crown
+ring became smaller than the flank reach and the scan read the ring's own
+inside as scallop (scan.rs's named owed item, now with a concrete
+reproduction), while the denser rings only double-cut ground the raster had
+already promised. SteepShallow, Blend and every raster/polar/shadow family keep
+the split line. `steep_stepover` stated still outranks; MAX_LEVELS 8192 stays a
+named refusal (a second one if the slope law would exceed it). Dropped: a
+"scallop-exact stepdown" toggle (nobody wants a 1.5·tol cusp back; a correct-
+by-default law needs no parameter), and a global α_v,max (coarser everywhere
+the dome is not steep). Side effect pinned: center_cut_posed's convicted 5-axis
+descent starts its band one rung lower (the first crown ring now sits 5.6° off
+the apex). Multidirection's 0.349 still unexplained.

@@ -234,6 +234,8 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             // The envelope's unjudged hidden half (M13.1) reads apart from
             // its measured numbers: "not judged" is not a deviation.
             Warning::RestUnjudged { .. } => (210, false),
+            // The scallop reading (M13.9): a quality note, its own line.
+            Warning::Scallop { .. } => (211, false),
         }
     }
     fn last_move(w: &Warning) -> usize {
@@ -246,7 +248,8 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             | Warning::FixtureHit { at, .. }
             | Warning::NonFinite { at }
             | Warning::Envelope { at, .. }
-            | Warning::RestUnjudged { at, .. } => *at,
+            | Warning::RestUnjudged { at, .. }
+            | Warning::Scallop { at, .. } => *at,
         }
     }
     let mut lines: Vec<String> = Vec::new();

@@ -68,7 +68,9 @@ pub(super) fn finish_envelope(
                     // pass as the whole verdict.
                     warns.extend(Warning::hidden_unjudged(&rep, first_cut));
                     let gate = tol + rep.cell * rep.cell / (2.0 * r) + 1e-9;
-                    if rep.gouge_mm > gate || rep.rest_mm > gate {
+                    // The cutting move nearest a deviation's XY: where
+                    // a verdict is reported.
+                    let nearest = |q: crate::geo2d::Point2| {
                         let mut at = 0usize;
                         let mut best = f64::INFINITY;
                         for (i, m) in path.moves.iter().enumerate() {
@@ -76,15 +78,27 @@ pub(super) fn finish_envelope(
                                 continue;
                             }
                             for (a, b) in m.chords(chord_tol) {
-                                let d = dist2_seg(rep.at, a, b);
+                                let d = dist2_seg(q, a, b);
                                 if d < best {
                                     best = d;
                                     at = i;
                                 }
                             }
                         }
+                        at
+                    };
+                    // The spacing's scallop (M13.9): its own non-blocking
+                    // kind, beside the envelope verdict, never in it.
+                    if rep.scallop_mm > gate {
+                        warns.push(Warning::Scallop {
+                            at: nearest(rep.scallop_at),
+                            mm: rep.scallop_mm.clamp(0.0, 1e9),
+                            gate_mm: gate,
+                        });
+                    }
+                    if rep.gouge_mm > gate || rep.rest_mm > gate {
                         Some(Warning::Envelope {
-                            at,
+                            at: nearest(rep.at),
                             gouge_mm: rep.gouge_mm.clamp(0.0, 1e9),
                             rest_mm: rep.rest_mm.clamp(0.0, 1e9),
                         })

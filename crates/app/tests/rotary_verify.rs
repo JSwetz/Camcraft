@@ -160,6 +160,12 @@ fn cache(world: &World) -> camcraft_app::schema::Toolpath {
     model::find_by_name(world, "OP").and_then(|e| model::toolpath_of(world, &e)).expect("cached")
 }
 
+/// The verdicts that stop the post: the non-blocking notes (M13.9's
+/// scallop reading) ride along and are judged by their own tests.
+fn blocking(c: &camcraft_app::schema::Toolpath) -> Vec<&Warning> {
+    c.warnings.iter().filter(|w| w.blocks_post()).collect()
+}
+
 fn status(world: &World) -> OpStatus {
     let e = model::find_by_name(world, "OP").expect("op");
     operation::status_of(world, &e)
@@ -228,7 +234,7 @@ fn posts_clean(kind: Kind, tag: &str) {
     let world = world_for(kind, 12.4, 25.0);
     assert_eq!(status(&world), OpStatus::Ok, "{tag}: fresh");
     let c = cache(&world);
-    assert!(c.warnings.is_empty(), "{tag}: a sensible rotary setup verifies silent: {:?}", &c.warnings[..c.warnings.len().min(6)]);
+    assert!(blocking(&c).is_empty(), "{tag}: a sensible rotary setup verifies silent: {:?}", blocking(&c));
     let rapids_posed = c.path.moves.iter().filter(|m| m.kind == MoveKind::Rapid).all(|m| m.axis.is_some());
     assert!(rapids_posed, "{tag}: every rapid states the pose the machine holds (the tilt is modal)");
     let report = posting::verification_report(&world);
@@ -299,7 +305,7 @@ fn a_rough_over_an_oversized_bar_peels_from_the_stock_radius() {
     // the rapids ride outside it, and the program verifies silent.
     let world = world_for(Kind::Offset, 20.0, 25.0);
     let c = cache(&world);
-    assert!(c.warnings.is_empty(), "the rough over its own bar verifies silent: {:?}", &c.warnings[..c.warnings.len().min(6)]);
+    assert!(blocking(&c).is_empty(), "the rough over its own bar verifies silent: {:?}", blocking(&c));
     let rho = |p: Point3| (p.x * p.x + p.y * p.y).sqrt();
     let top = c.path.moves.iter().filter(|m| m.kind != MoveKind::Rapid).map(|m| rho(m.to)).fold(0.0f64, f64::max);
     assert!(top >= 10.0 - 0.5 - 1e-6, "the ladder still starts inside the bar's skin: top level {top:.3}");
@@ -337,7 +343,7 @@ fn every_rotary_program_opens_on_the_clearance_pose() {
     // planning frame's home column; and the verdict stays silent.
     for (kind, lying, tag) in [(Kind::Contour, false, "rc"), (Kind::Parallel, true, "rp"), (Kind::Offset, false, "ro")] {
         let c = cache(&world_for(kind, 12.4, 25.0));
-        assert!(c.warnings.is_empty(), "{tag}: {:?}", &c.warnings[..c.warnings.len().min(6)]);
+        assert!(blocking(&c).is_empty(), "{tag}: {:?}", blocking(&c));
         let m0 = &c.path.moves[0];
         assert_eq!(m0.kind, MoveKind::Rapid, "{tag}: the program opens at rapid");
         assert_eq!(m0.from, m0.to, "{tag}: the opening record stands at its pose, sweeping nothing");
@@ -366,7 +372,7 @@ fn rotary_parallel_retracts_along_the_radius_and_verifies_clean() {
     // cylinder (25 above the laid axis), indexes on it, and comes back
     // in along the next pass's radius - no world-Z lift.
     let c = cache(&world_for(Kind::Parallel, 12.4, 25.0));
-    assert!(c.warnings.is_empty(), "{:?}", &c.warnings[..c.warnings.len().min(6)]);
+    assert!(blocking(&c).is_empty(), "{:?}", blocking(&c));
     let radial = |m: &camcraft_app::cl::Move| {
         let (a, b) = (cyl(m.from, true), cyl(m.to, true));
         (a.0 - b.0).abs() < 1e-6 && dang(a.2, b.2).abs() < 1e-6

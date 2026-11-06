@@ -529,9 +529,13 @@ fn stream_records(world: &World) -> Result<Vec<cnc::Record>, String> {
             origin,
             stock,
             stock_top_z,
+            // The scallop reading (M13.9) is a quality note: shown on
+            // the op, never a WARN record - a WARN record holds the
+            // post, and a scallop is neither a gouge nor a collision.
             warnings: cache
                 .warnings
                 .iter()
+                .filter(|w| w.blocks_post())
                 .map(|w| format!("{name}: {w}"))
                 .collect(),
         };

@@ -73,6 +73,7 @@ mod march;
 mod march_verdicts;
 pub mod iso;
 pub mod preview;
+mod ridge;
 mod scan;
 mod scan_hidden;
 mod tiles;

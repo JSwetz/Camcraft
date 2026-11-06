@@ -17,10 +17,14 @@ use crate::geometry::{Point3, Triangle};
 /// Rest is distance truth at RIDGES: a
 /// model surface point that stands within the pass's promise band
 /// (`r + tol + floor` of at least two chords the center path ran
-/// over), and how far outside every ball it stood. Two band contacts
-/// is exactly what "this op rolled a stepdown ladder over you"
-/// promises, so what stands outside both is scallop left on the
-/// pass's own word. A point with one graze (a lone ring's annulus,
+/// over) or that the pass FLANKS (centre-path feet on opposite sides
+/// of it within one ball diameter, a ball able to touch it - M13.8,
+/// `ridge`), and how far outside every ball it stood. Two band
+/// contacts is exactly what "this op rolled a stepdown ladder over
+/// you" promises, so what stands outside both is scallop left on the
+/// pass's own word; the band alone caps that word at `tol` (a point
+/// inside it is within `tol` of a ball), so the flank is what lets
+/// a too-wide spacing convict. A point with one graze (a lone ring's annulus,
 /// the box's footprint square) or none (a flat shelf, the crown
 /// above the top ring, untouched walls) was never promised anything
 /// by this pass: its leftover is rest machining's jurisdiction
@@ -47,6 +51,16 @@ pub struct EnvelopeReport {
     /// measured by the same distance law. The union is in the FIELD
     /// only; the ridge predicate above is untouched by it.
     pub rest_mm: f64,
+    /// Worst distance the model surface stood outside every ball at a
+    /// point the pass FLANKED (M13.8 B / M13.9, `ridge`): centre-path
+    /// feet on opposite sides within the flank reach, a tangent ball
+    /// able to touch it, no band contact. The spacing's own scallop -
+    /// a quality reading, kept apart from `rest_mm` (which `Envelope`
+    /// convicts on) so it can be reported without blocking. 0.0 when
+    /// no flanked point stood outside the band.
+    pub scallop_mm: f64,
+    /// XY of the worst flanked point, `scallop_mm`'s place.
+    pub scallop_at: Point2,
     /// The lattice's cell size, so a caller can state the
     /// quantization floor of these numbers honestly.
     pub cell: f64,
@@ -188,20 +202,37 @@ fn envelope_scan_lift(
         rep.at = gouge_at;
     }
     // Rest: the distance truth at ridges - surface points the center
-    // path passed by twice inside the promise band. The band is what
-    // the stepdown law swore, so a point outside every ball there is
-    // this path's own failure, while a once-grazed or never-touched
-    // point is another op's job (the law above).
+    // path passed by twice inside the promise band, or FLANKED within
+    // one ball diameter (M13.8, `ridge`). The band is what the
+    // stepdown law swore, so a point outside every ball there is this
+    // path's own failure, while a once-grazed or never-touched point
+    // is another op's job (the law above). The band alone could never
+    // report above tolerance (a point inside it is within `tol` of a
+    // ball by construction - the same proof as the dead column gate);
+    // the flank reads past it: a point with feet on opposite sides is
+    // between two passes, and what stands outside every ball there is
+    // the spacing's own scallop - unless no ball could touch the point
+    // at all (a crease narrower than the ball), which is excused.
     let band = r + tol + floor;
-    // A far segment's 3D distance cannot stand inside the band, so
+    let reach = super::ridge::reach(band, tol);
+    // The flank window is the reach itself: both feet of a flanked
+    // column stand within it, which caps what the law can read at
+    // `4·tol` past the ball and asks the lattice to hold a column
+    // within reach of BOTH passes (M13.9: a window of `reach + cell`
+    // was tried - it read the cone's apex and the hill's crown, a
+    // closed ring's own inside, as scallop; the ceiling and the far
+    // foot's lattice slack are the named owed item).
+    let window = reach;
+    // A far segment's 3D distance cannot stand inside the window, so
     // its XY window rejects it before the distance is paid. A
-    // column's dmin only feeds a report when two segments proved
-    // near, and those are never the skipped ones - the filter is
-    // exact, not an approximation.
+    // column's dmin only feeds a report when a segment proved near,
+    // and those are never the skipped ones - the filter is exact, not
+    // an approximation.
     let boxes: Vec<(f64, f64, f64, f64)> = segs
         .iter()
         .map(|(a, b)| (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y)))
         .collect();
+    let mut flanked: Vec<(f64, Point3, [f64; 3])> = Vec::new();
     for iy in 0..ny {
         for ix in 0..nx {
             let t = part[ix + iy * nx];
@@ -209,12 +240,15 @@ fn envelope_scan_lift(
                 continue; // no model surface at this column
             }
             let q = Point2::new(x0 + (ix as f64 + 0.5) * cell, y0 + (iy as f64 + 0.5) * cell);
+            let q3 = Point3::new(q.x, q.y, t);
+            let n = super::ridge::column_normal(&part, nx, ny, ix, iy, cell);
+            let mut flank = super::ridge::Flank::new(n);
             let (mut dmin, mut near) = (f64::INFINITY, 0u8);
             for ((a, b), (x0, x1, y0, y1)) in segs.iter().zip(&boxes) {
-                if q.x < x0 - band
-                    || q.x > x1 + band
-                    || q.y < y0 - band
-                    || q.y > y1 + band
+                if q.x < x0 - window
+                    || q.x > x1 + window
+                    || q.y < y0 - window
+                    || q.y > y1 + window
                 {
                     continue;
                 }
@@ -222,14 +256,20 @@ fn envelope_scan_lift(
                 if d <= band {
                     near = near.saturating_add(1);
                 }
+                if d <= window {
+                    flank.add(q3, super::ridge::foot(q3, *a, *b));
+                }
                 if d < dmin {
                     dmin = d;
                 }
             }
+            let rest = dmin - r - floor;
             if near < 2 {
+                if dmin > band && dmin <= reach && flank.flanked() {
+                    flanked.push((rest, q3, n)); // judged below, worst first
+                }
                 continue; // one graze or none: no promise kept or broken here
             }
-            let rest = dmin - r - floor;
             if rest > rep.rest_mm {
                 rep.rest_mm = rest;
                 if rest > worst {
@@ -237,6 +277,24 @@ fn envelope_scan_lift(
                     rep.at = q;
                 }
             }
+        }
+    }
+    // The flanked points over the band, worst first: the first one a
+    // tangent ball can reach is the ridge verdict; the unreachable
+    // ones before it are creases, excused by name in `ridge`.
+    if !flanked.is_empty() {
+        flanked.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let access = super::ridge::Access::new(facets, r);
+        if let Some((rest, q3, _)) = flanked
+            .iter()
+            .find(|(_, q3, n)| access.reachable(*q3, *n, r, tol))
+            && *rest > rep.scallop_mm
+        {
+            // Its own reading, never `rest_mm` (M13.9): scallop over
+            // tolerance is a quality defect, reported beside the
+            // envelope verdict, not folded into what blocks the post.
+            rep.scallop_mm = *rest;
+            rep.scallop_at = Point2::new(q3.x, q3.y);
         }
     }
     // Solid truth behind the height field (M2.2d): material tops the

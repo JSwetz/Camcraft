@@ -4831,10 +4831,15 @@ fn pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
 }
 
 /// The verdict half of "verifies clean": the cached path carries NO
-/// warning at all (the op being fresh says nothing about the verdict).
+/// blocking warning (the op being fresh says nothing about the
+/// verdict). The scallop note (M13.9) is the one kind allowed through:
+/// these ops state a 2.0 mm stepover on an r3 ball, a 0.16 mm cusp the
+/// ridge flank law now reads over the 0.1 tolerance - a surface-quality
+/// reading, shown on the op and never holding the post.
 fn verifies_clean(world: &World, op: &str) {
     let t = cache(world, op).expect("cached");
-    assert!(t.warnings.is_empty(), "{op} must verify with zero warnings: {:?}", t.warnings);
+    let blocking: Vec<_> = t.warnings.iter().filter(|w| w.blocks_post()).collect();
+    assert!(blocking.is_empty(), "{op} must verify with zero blocking warnings: {blocking:?}");
 }
 
 fn flow5d_params(top_z: f64, bottom_z: f64) -> OpParams {

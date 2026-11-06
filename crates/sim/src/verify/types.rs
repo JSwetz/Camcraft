@@ -209,9 +209,24 @@ pub enum Warning {
     /// reported at the first cutting move, and like every cached
     /// warning it holds the post.
     RestUnjudged { at: usize, cells: usize, claims: usize },
+    /// A 3-D finish's spacing left a scallop past tolerance (M13.9,
+    /// the ridge flank law): `mm` standing outside every ball at a
+    /// point the pass flanked, against the `gate_mm` the scan holds
+    /// (tolerance plus its lattice floor), at the cutting move nearest
+    /// it. A quality defect, not a gouge or a collision (RECOMMENDED
+    /// "M13.8 B" (3)): shown and named everywhere a warning is, and
+    /// the one kind that never blocks the post.
+    Scallop { at: usize, mm: f64, gate_mm: f64 },
 }
 
 impl Warning {
+    /// Whether this warning holds the post: every kind but the scallop
+    /// reading (M13.9), which is a quality note - shown, never binding.
+    #[must_use]
+    pub fn blocks_post(&self) -> bool {
+        !matches!(self, Warning::Scallop { .. })
+    }
+
     /// The envelope report's unjudged hidden half, as the warning that
     /// says so (M13.1): `Some(RestUnjudged)` exactly when the scan ran
     /// out of budget, located at `at` (the path's first cut).
@@ -273,6 +288,10 @@ impl core::fmt::Display for Warning {
             Warning::RestUnjudged { at, cells, claims } => write!(
                 f,
                 "finish envelope from move {at}: hidden rest NOT JUDGED - the scan's budget ran out ({cells} cells, {claims} plane claims); material under an overhang may stand unreported"
+            ),
+            Warning::Scallop { at, mm, gate_mm } => write!(
+                f,
+                "scallop {mm:.3} mm over the {gate_mm:.3} mm tolerance at move {at} (surface quality - the post is not held)"
             ),
         }
     }

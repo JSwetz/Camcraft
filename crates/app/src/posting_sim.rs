@@ -20,7 +20,9 @@
 //! pass (the depth-aware laws, the envelope scan, the revolved and
 //! rotary verdicts) judges each path against the part and caches its
 //! convictions as warnings - and any cached warning already blocks the
-//! post. So a fresh, stamped op with a silent cache HAS a clean
+//! post (all but the scallop note, M13.9: a spacing's surface-quality
+//! reading, shown and never binding - `Warning::blocks_post`). So a
+//! fresh, stamped op with a silent cache HAS a clean
 //! generator-time verdict (a convicted one blocks on its own WARN
 //! records, by name), and the sim's silence alone is "unjudged at
 //! program level", not "unsafe": it posts, loudly labelled. An op that
