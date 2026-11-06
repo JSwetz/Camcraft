@@ -4,10 +4,12 @@
 //! law, the shell tips, M8.1's dive room and plan law; no vendor
 //! material consulted.
 
+use std::cell::Cell;
+
 use super::params::Pocket3DParams;
 use super::shell::Field;
 
-use crate::cl::{MoveKind, PathBuilder};
+use crate::cl::{MoveKind, PathBuilder, lattice};
 use crate::entry::{chord_hits_plan, dive_room};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
@@ -36,6 +38,11 @@ pub(super) struct LevelCtx<'a> {
     /// traverse that still has XY to cover then hops over it instead of
     /// rapiding at depth.
     pub(super) kept: bool,
+    /// The engagement limit's settling stretch (M11.3 D): the XY length
+    /// of level-plane cut still owed the scaled feed after this level's
+    /// entry - one tool diameter when the limit is on, consumed by
+    /// `feed_leg`; `0` (every pre-limit path) feeds at the cutting feed.
+    pub(super) settle: Cell<f64>,
 }
 
 /// Traverse to `to` at the level's plane: a rapid at `tz` - or, after a
@@ -82,10 +89,9 @@ impl LevelCtx<'_> {
 /// interpolation between them (`machining3d::shell`'s rising-leg
 /// gouge). `extra` widens only the LAST vertex's decision disc.
 pub(super) fn feed_leg(b: &mut PathBuilder, lvl: &LevelCtx, to: Point2, extra: f64) {
-    let feed = lvl.p.feed;
     let z = lvl.z;
     if lvl.field.is_none() {
-        b.push(MoveKind::Feed, Point3::new(to.x, to.y, z), Some(feed));
+        cut(b, lvl, to, z, true);
         return;
     }
     let at = b.at();
@@ -96,7 +102,7 @@ pub(super) fn feed_leg(b: &mut PathBuilder, lvl: &LevelCtx, to: Point2, extra: f
     // the plain ladder's leg would - and the plane is safe by the
     // level law. (The comparison also routes a NaN distance here.)
     if n > 1024.0 || !n.is_finite() {
-        b.push(MoveKind::Feed, Point3::new(to.x, to.y, z), Some(feed));
+        cut(b, lvl, to, z, false);
         return;
     }
     let n = (n as usize).max(1);
@@ -104,8 +110,45 @@ pub(super) fn feed_leg(b: &mut PathBuilder, lvl: &LevelCtx, to: Point2, extra: f
         let t = i as f64 / n as f64;
         let q = Point2::new(at.x + (to.x - at.x) * t, at.y + (to.y - at.y) * t);
         let zq = lvl.tip(q, if i == n { extra } else { 0.0 });
-        b.push(MoveKind::Feed, Point3::new(q.x, q.y, zq), Some(feed));
+        cut(b, lvl, q, zq, false);
     }
+}
+
+/// One cutting feed onto `(q, zq)`, the engagement limit's settling
+/// stretch read first (M11.3 D): while `lvl.settle` is owed, the move
+/// runs at the scaled feed. A plane move (`split`) that crosses the
+/// stretch's end is split there - lattice-snapped, the planar ladder's
+/// law - and its rest runs at the cutting feed; a shell chord (no
+/// split: a new vertex would need its own tip) is slowed whole, never
+/// faster than asked (a chord is at most the tool radius long).
+fn cut(b: &mut PathBuilder, lvl: &LevelCtx, q: Point2, zq: f64, split: bool) {
+    let feed = lvl.p.feed;
+    let left = lvl.settle.get();
+    if left.is_nan() || left <= 0.0 {
+        b.push(MoveKind::Feed, Point3::new(q.x, q.y, zq), Some(feed));
+        return;
+    }
+    let slow = feed * lvl.p.links.approach.engagement_scale();
+    let at = b.at();
+    let d = (q.x - at.x).hypot(q.y - at.y);
+    let level = (at.z - zq).abs() <= 1e-9;
+    if split && level && d.is_finite() && d - left > 1e-6 && left > 1e-6 {
+        let f = left / d;
+        let s = Point2::new(lattice(at.x + (q.x - at.x) * f), lattice(at.y + (q.y - at.y) * f));
+        b.push(MoveKind::Feed, Point3::new(s.x, s.y, zq), Some(slow));
+        b.push(MoveKind::Feed, Point3::new(q.x, q.y, zq), Some(feed));
+        lvl.settle.set(0.0);
+        return;
+    }
+    b.push(MoveKind::Feed, Point3::new(q.x, q.y, zq), Some(slow));
+    if zq < at.z - 1e-9 {
+        // Still descending (the shell ramp's tail onto its tip, a chord
+        // following the surface down): slowed, but the stretch counts
+        // from the cut that settles at depth - never less slowing.
+        return;
+    }
+    let rest = if d.is_finite() { (left - d).max(0.0) } else { 0.0 };
+    lvl.settle.set(if rest > 1e-6 { rest } else { 0.0 });
 }
 
 /// The link from a dive that just finished at `d` up on plane `z` to
@@ -126,6 +169,11 @@ pub(super) fn dive_link(b: &mut PathBuilder, lvl: &LevelCtx, d: Point2, e: Point
         b.push(MoveKind::Rapid, Point3::new(d.x, d.y, lvl.hop_z), None);
         b.push(MoveKind::Rapid, Point3::new(e.x, e.y, lvl.hop_z), None);
         plunge_from_top(b, lvl, e, lvl.p.plunge_feed);
+        // The second dive bores full width again: the engagement
+        // limit's stretch, while still owed, starts over from it.
+        if lvl.settle.get() > 0.0 {
+            lvl.settle.set(lvl.p.tool_diameter);
+        }
     }
 }
 

@@ -171,6 +171,7 @@ pub(super) fn ladder(
             field: field.as_ref(),
             tz: p.clearance_z,
             kept: false,
+            settle: std::cell::Cell::new(0.0),
         };
         // The level link (M11.2 D). Before the first cut, and always on
         // a rest pass (its planes sit inside floors the coarse run owns,
@@ -225,10 +226,18 @@ pub(super) fn ladder(
                 }
             }
         }
+        // The engagement limit (M11.3 D, the planar ladder's law): the
+        // level's first tool diameter of plane cut out of its descent -
+        // the dive link and the first pass - runs at the scaled feed,
+        // the rest of the level at the cutting feed. Off, nothing owed.
+        if p.links.approach.engagement_scale() < 1.0 {
+            lvl.settle.set(p.tool_diameter);
+        }
         let dove = descend(&mut b, &lvl, &ask);
         lvl.tz = p.clearance_z;
         lvl.kept = false;
         walk_pass(&mut b, first_pass, &lvl, /*skip_first=*/ true);
+        lvl.settle.set(0.0);
         // Remaining passes: connect as far as the floor allows - and no
         // further than the level's own planned paths allow (the boss
         // bug: a chord can clear the cutter-center area yet cross every
@@ -310,6 +319,11 @@ pub(super) fn ladder(
         prev_state = Some((z, center));
     }
     lifted.say(&mut b, "level/pass");
+    if let Some(n) = p.links.approach.engagement_note()
+        && prev_state.is_some()
+    {
+        b.note_once(&n);
+    }
     let cur = b.at();
     b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
     let path = b.finish();
