@@ -38,6 +38,7 @@ use crate::fixture::{FixtureBox, FIXTURE_HIT_TOL};
 use crate::geometry::Point3;
 use crate::tools::ToolGeom;
 
+use super::rotary::RotaryAxis;
 use super::types::FixturePart;
 
 /// Interval travel cap at the stack's far end, mm.
@@ -62,7 +63,49 @@ pub(super) fn posed_hits(
     chord_tol: f64,
     rapids: bool,
 ) -> Vec<Option<FixturePart>> {
-    let mut out = vec![None; path.moves.len()];
+    sweep(path, tool, fixtures, spindle, chord_tol, rapids, None)
+        .into_iter()
+        .map(|v| match v {
+            Verdict::Hit(p) => Some(p),
+            // Unreachable without a frame; were it reached it fails
+            // closed - never silent.
+            Verdict::Unjudged => Some(if rapids { FixturePart::Rapid } else { FixturePart::Flute }),
+            Verdict::NotPosed | Verdict::Clear => None,
+        })
+        .collect()
+}
+
+/// One posed sweep's verdict on one move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Verdict {
+    /// Upright (or the other law's move kind): not this law's.
+    NotPosed,
+    /// Posed, but some sample's machine frame cannot be stated (the
+    /// pose leaves the rotary's plane, or the rotary is not
+    /// horizontal): the caller keeps its own path-frame verdict.
+    Unjudged,
+    /// Posed and swept: no box met.
+    Clear,
+    /// Posed and swept: this element met a box first.
+    Hit(FixturePart),
+}
+
+/// The posed sweep, in the path frame (`frame` None: the boxes ride
+/// the part, a chuck) or in the MACHINE frame of a rotary turning the
+/// part about `frame` (M13.8 (2), a table or tailstock that does not
+/// turn): each interval's stack is carried through the rotation that
+/// stands its pose upright - the turn the machine itself must make -
+/// and judged against boxes stated at rotary zero.
+pub(super) fn sweep(
+    path: &Toolpath,
+    tool: &ToolGeom,
+    fixtures: &[FixtureBox],
+    spindle: Option<(f64, f64)>,
+    chord_tol: f64,
+    rapids: bool,
+    frame: Option<&RotaryAxis>,
+) -> Vec<Verdict> {
+    let mut out = vec![Verdict::NotPosed; path.moves.len()];
     if fixtures.is_empty() {
         return out;
     }
@@ -94,7 +137,7 @@ pub(super) fn posed_hits(
         let pieces = m.segments3(tol);
         let total: f64 = pieces.iter().map(|(a, b)| dist(*a, *b)).sum();
         let mut done = 0.0f64;
-        let mut struck: Option<FixturePart> = None;
+        let mut struck = Verdict::Clear;
         'pieces: for (pa, pb) in &pieces {
             let len = dist(*pa, *pb);
             let frac = |s: f64| if total > 0.0 { (done + len * s) / total } else { s };
@@ -108,12 +151,37 @@ pub(super) fn posed_hits(
                 let (a0, a1, am) = (pose(la, lb, frac(t0)), pose(la, lb, frac(t1)), pose(la, lb, frac(tm)));
                 let travel = dist(pm, p0).max(dist(pm, p1));
                 let swing = angle(am, a0).max(angle(am, a1));
+                // The machine frame: the turn standing `am` upright, and
+                // the most the rotary turns off it within the interval.
+                let turn = match frame {
+                    None => None,
+                    Some(ax) => match (upright_turn(ax, am), upright_turn(ax, a0), upright_turn(ax, a1)) {
+                        (Some(m), Some(t0), Some(t1)) => {
+                            Some((ax, m, wrap(m - t0).abs().max(wrap(m - t1).abs())))
+                        }
+                        _ => {
+                            struck = Verdict::Unjudged;
+                            break 'pieces;
+                        }
+                    },
+                };
                 for &(part, lo, hi, r) in &stack {
                     let grow = travel + hi.abs() * swing;
-                    let c0 = add(pm, am, lo);
-                    let c1 = add(pm, am, hi);
-                    if fixtures.iter().any(|b| capsule_hits(c0, c1, r + grow, b)) {
-                        struck = Some(if rapids { FixturePart::Rapid } else { part });
+                    let mut c0 = add(pm, am, lo);
+                    let mut c1 = add(pm, am, hi);
+                    let mut rad = r + grow;
+                    if let Some((ax, th, dth)) = turn {
+                        // Every point the path-frame capsule holds sits no
+                        // farther than `rho` off the axis (distance to a
+                        // line is convex along a segment); a turn of up to
+                        // `dth` moves it at most `rho * dth` (arc >= chord).
+                        let rho = off_axis(ax, c0).max(off_axis(ax, c1)) + rad;
+                        rad += rho * dth;
+                        c0 = turn_about(ax, c0, th);
+                        c1 = turn_about(ax, c1, th);
+                    }
+                    if fixtures.iter().any(|b| capsule_hits(c0, c1, rad, b)) {
+                        struck = Verdict::Hit(if rapids { FixturePart::Rapid } else { part });
                         break 'pieces;
                     }
                 }
@@ -178,6 +246,69 @@ fn angle(a: [f64; 3], b: [f64; 3]) -> f64 {
     let d = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]).clamp(-1.0, 1.0);
     let t = d.acos();
     if t.is_finite() { t } else { std::f64::consts::PI }
+}
+
+/// Pose and rotary within this of the rotary's plane / of horizontal:
+/// the rotary alone stands the pose upright.
+const PLANE_TOL: f64 = 1e-6;
+
+/// The signed turn about `ax` carrying the unit pose `a` onto machine
+/// +Z - unique, both lying in the plane normal to the axis, so it is
+/// the turn any controller makes whatever its sign convention. None
+/// when the rotary alone cannot stand the pose upright (the pose out
+/// of the plane, a non-horizontal or degenerate axis): the sample's
+/// machine frame is unknown.
+fn upright_turn(ax: &RotaryAxis, a: [f64; 3]) -> Option<f64> {
+    let d = unit3(ax.dir)?;
+    if d[2].abs() > PLANE_TOL || dot3(a, d).abs() > PLANE_TOL {
+        return None;
+    }
+    let z = [0.0, 0.0, 1.0];
+    let t = dot3(d, cross3(a, z)).atan2(dot3(a, z));
+    t.is_finite().then_some(t)
+}
+
+/// `t` folded into (-pi, pi].
+fn wrap(t: f64) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    let w = t.rem_euclid(TAU);
+    if w > PI { w - TAU } else { w }
+}
+
+/// Distance of `p` from the axis line; a degenerate axis reads as
+/// unbounded, which the capsule test fails closed on.
+fn off_axis(ax: &RotaryAxis, p: Point3) -> f64 {
+    let Some(d) = unit3(ax.dir) else { return f64::INFINITY };
+    let w = [p.x - ax.origin.x, p.y - ax.origin.y, p.z - ax.origin.z];
+    let c = cross3(w, d);
+    dot3(c, c).sqrt()
+}
+
+/// `p` turned by `t` about the axis line (Rodrigues' formula).
+fn turn_about(ax: &RotaryAxis, p: Point3, t: f64) -> Point3 {
+    let Some(d) = unit3(ax.dir) else { return Point3::new(f64::NAN, f64::NAN, f64::NAN) };
+    let w = [p.x - ax.origin.x, p.y - ax.origin.y, p.z - ax.origin.z];
+    let (s, c) = t.sin_cos();
+    let k = cross3(d, w);
+    let e = dot3(d, w) * (1.0 - c);
+    Point3::new(
+        ax.origin.x + w[0] * c + k[0] * s + d[0] * e,
+        ax.origin.y + w[1] * c + k[1] * s + d[1] * e,
+        ax.origin.z + w[2] * c + k[2] * s + d[2] * e,
+    )
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+fn unit3(a: [f64; 3]) -> Option<[f64; 3]> {
+    let l = dot3(a, a).sqrt();
+    (l.is_finite() && l > 1e-12).then(|| [a[0] / l, a[1] / l, a[2] / l])
 }
 
 fn add(p: Point3, a: [f64; 3], s: f64) -> Point3 {

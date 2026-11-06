@@ -76,6 +76,7 @@ pub fn collect(world: &World) -> ProjectFile {
                 .entity_view(world)
                 .try_get::<&FixtureDef>(|d| FixtureDto {
                     setup: d.setup.clone(),
+                    fixed: d.fixed,
                 });
             let operation = model::operation_of(world, &entity).map(|op| OperationDto {
                 tool: op.tool,

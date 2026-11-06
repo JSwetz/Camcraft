@@ -94,13 +94,50 @@ impl TagFixture {
         {
             return Err(CommandError::NotFound(s.to_string()));
         }
+        let prev = fixture::def_of(world, &entity);
         Ok(TagFixture {
             name: name.to_string(),
-            prev: fixture::def_of(world, &entity),
+            // A re-bind keeps whether the steel turns: that is
+            // [`SetFixtureFixed`]'s write, not the binding's.
             next: FixtureDef {
                 setup: setup_name.map(str::to_string),
+                fixed: prev.as_ref().is_some_and(|d| d.fixed),
             },
+            prev,
         })
+    }
+}
+
+/// Declare whether a fixture stands still while a rotary turns the part
+/// (a table, a tailstock: judged in the machine frame) or turns with it
+/// (a chuck: judged in the path's own frame - the default) - M13.8 (2).
+pub struct SetFixtureFixed {
+    name: String,
+    prev: FixtureDef,
+    next: FixtureDef,
+}
+
+impl SetFixtureFixed {
+    pub fn new(world: &World, name: &str, fixed: bool) -> Result<Self, CommandError> {
+        let entity = require_writable(world, name)?;
+        let prev = fixture::def_of(world, &entity)
+            .ok_or_else(|| CommandError::Invalid(format!("'{name}' is not a fixture")))?;
+        let next = FixtureDef { fixed, ..prev.clone() };
+        Ok(SetFixtureFixed { name: name.to_string(), prev, next })
+    }
+}
+
+impl Command for SetFixtureFixed {
+    fn apply(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            entity.entity_view(world).set(self.next.clone());
+        }
+    }
+
+    fn invert(&self, world: &World) {
+        if let Some(entity) = model::find_by_name(world, &self.name) {
+            entity.entity_view(world).set(self.prev.clone());
+        }
     }
 }
 

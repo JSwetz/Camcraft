@@ -278,11 +278,26 @@ pub fn bands_vs_fixtures(
 /// retract lifting off exactly the mounting surface stays silent (mating
 /// surfaces contact by design); anything deeper than float dust reports.
 /// First hit per move, once. Region-free - see [`bands_vs_fixtures`] for
-/// why that matters.
+/// why that matters. No spindle housing: see
+/// [`rapids_vs_fixtures_spindle`] for the stack with it.
 pub fn rapids_vs_fixtures(
     path: &Toolpath,
     tool: &ToolGeom,
     fixtures: &[crate::fixture::FixtureBox],
+) -> Vec<Warning> {
+    rapids_vs_fixtures_spindle(path, tool, fixtures, None)
+}
+
+/// [`rapids_vs_fixtures`] with the machine's spindle housing band
+/// (radius, length - the bands law's own `spindle`) riding on the
+/// holder's top: a posed rapid sweeps the whole stack, the housing
+/// nose included (M13.8 (1)). The upright laws read the flute only,
+/// as before - their verdicts are unchanged.
+pub fn rapids_vs_fixtures_spindle(
+    path: &Toolpath,
+    tool: &ToolGeom,
+    fixtures: &[crate::fixture::FixtureBox],
+    spindle: Option<(f64, f64)>,
 ) -> Vec<Warning> {
     let mut warns = Vec::new();
     if fixtures.is_empty() {
@@ -290,7 +305,7 @@ pub fn rapids_vs_fixtures(
     }
     // The posed sweep (M13.8): a leaning rapid's whole stack - not
     // only its flute - along its real pose ([`super::posed_steel`]).
-    let posed = super::posed_steel::posed_hits(path, tool, fixtures, None, 0.01, true);
+    let posed = super::posed_steel::posed_hits(path, tool, fixtures, spindle, 0.01, true);
     for (i, m) in path.moves.iter().enumerate() {
         if m.kind != MoveKind::Rapid {
             continue;

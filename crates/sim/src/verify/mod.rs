@@ -165,13 +165,15 @@ mod solid_index;
 mod sweep;
 mod swept;
 mod types;
+mod workholding;
 
 pub use types::{FixturePart, Mode, VerifyContext, Warning};
 #[doc(hidden)]
 pub use crossing::{crossed_pairs, crossed_pairs_all};
 pub use engine::verify;
 pub use air::cuts_no_material;
-pub use laws::{bands_vs_fixtures, rapids_vs_fixtures};
+pub use laws::{bands_vs_fixtures, rapids_vs_fixtures, rapids_vs_fixtures_spindle};
+pub use workholding::{bands_vs_workholding, rapids_vs_workholding, Workholding};
 pub use probe::Cutter;
 pub use rotary::{rotary_hits, RotaryAxis, RotaryLaw};
 pub use solid::{SolidLaw, solid_hits};

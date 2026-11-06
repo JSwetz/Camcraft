@@ -669,6 +669,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
         if let Some(f) = &dto.fixture {
             entity.entity_view(world).set(FixtureDef {
                 setup: f.setup.clone(),
+                fixed: f.fixed,
             });
         }
     }

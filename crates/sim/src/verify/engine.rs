@@ -1,7 +1,7 @@
 //! The `verify` dispatcher: runs the verifier's laws (a)-(f2) in their fixed order, each specced from the public sources named in `verify`'s module law (split from `verify.rs` by M5.0.1 and into law modules by M13.7; structure only).
 
 use super::types::{VerifyContext, Warning};
-use super::laws::{bands_vs_fixtures, rapids_vs_fixtures};
+use super::laws::{bands_vs_fixtures, rapids_vs_fixtures_spindle};
 use super::rest::Rest;
 use super::{crossing, finish, rapids, reach, section};
 
@@ -62,7 +62,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // [`rapids_vs_fixtures`] so the post gate can run it without a
     // region.
     if !cx.fixtures.is_empty() {
-        warns.extend(rapids_vs_fixtures(path, cx.tool, cx.fixtures));
+        warns.extend(rapids_vs_fixtures_spindle(path, cx.tool, cx.fixtures, cx.spindle));
     }
 
     // (e) Cycle reach - [`reach::cycle_reach`].

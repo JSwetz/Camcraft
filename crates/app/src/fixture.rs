@@ -133,6 +133,51 @@ pub fn boxes_for(world: &World, declared: Option<&str>) -> Vec<FixtureBox> {
     out
 }
 
+/// [`boxes_for`] split by whether the steel turns with the part (M13.8
+/// (2)): `.0` the tagged models riding the rotary (the default), `.1`
+/// those declared fixed, then the machine table - a table never turns.
+/// Both lists together are exactly [`boxes_for`]'s boxes.
+#[must_use]
+pub fn workholding_for(world: &World, declared: Option<&str>) -> (Vec<FixtureBox>, Vec<FixtureBox>) {
+    let (mut turning, mut fixed) = (Vec::new(), Vec::new());
+    for (_, e) in tagged(world, declared) {
+        let Some(b) = model::entity_world_aabb(world, &e) else { continue };
+        let b = FixtureBox { min: b.min, max: b.max };
+        if def_of(world, &e).is_some_and(|d| d.fixed) {
+            fixed.push(b);
+        } else {
+            turning.push(b);
+        }
+    }
+    fixed.extend(table_box(world));
+    (turning, fixed)
+}
+
+/// The rotary axis line a rotary kind turns its part about, in the
+/// world frame its cached path is written in: re-fitted from the source
+/// model's world facets (the fit is a pure function of the facets, the
+/// generator's own). None for a non-rotary kind, a stock or selection
+/// source, or a refused fit: no machine frame is stated, and fixed
+/// steel keeps the path-frame verdict - the conservative one.
+#[must_use]
+pub fn rotary_axis_of(
+    world: &World,
+    op: &crate::schema::Operation,
+) -> Option<camcraft_sim::verify::RotaryAxis> {
+    use crate::operation::{OpParams, SrcRef};
+    if !matches!(
+        op.params,
+        OpParams::RotaryContour { .. } | OpParams::RotaryParallel { .. } | OpParams::RotaryOffset { .. }
+    ) {
+        return None;
+    }
+    let SrcRef::Entity(name) = &op.src else { return None };
+    let e = model::find_by_name(world, name)?;
+    let facets = model::world_facets(world, &e)?;
+    let ax = crate::multiaxis::axis::fit(&facets).ok()?;
+    Some(camcraft_sim::verify::RotaryAxis { origin: ax.origin, dir: [ax.dir.x, ax.dir.y, ax.dir.z] })
+}
+
 /// Every name that occupies the context: the tagged models, then the
 /// table's virtual name when the machine states one. The fixtures page
 /// and the setup sheet draw this list; the commands treat the table row

@@ -417,23 +417,28 @@ fn fixture_problems(world: &World) -> Vec<String> {
         // `boxes_for` already folds in the machine-derived table, so an
         // empty list means no steel this op could strike at all (the
         // spindle band is tested against that list, never on its own).
-        let fixtures = crate::fixture::boxes_for(world, op.setup.as_deref());
-        if fixtures.is_empty() {
+        // Split by whether the steel turns with the part (M13.8 (2)):
+        // fixed boxes are judged in the machine frame where the op's
+        // rotary axis is known, in the path frame otherwise.
+        let (turning, fixed) = crate::fixture::workholding_for(world, op.setup.as_deref());
+        if turning.is_empty() && fixed.is_empty() {
             continue;
         }
+        let wh = crate::verify::Workholding {
+            turning: &turning,
+            fixed: &fixed,
+            axis: crate::fixture::rotary_axis_of(world, &op),
+        };
         let geom = tool.geom();
-        let mut hits = crate::verify::bands_vs_fixtures(
+        let mut hits = crate::verify::bands_vs_workholding(
             &cache.path,
             &geom,
-            &fixtures,
+            &wh,
             spindle,
             operation::GOUGE_TOL,
         );
-        hits.extend(crate::verify::rapids_vs_fixtures(
-            &cache.path,
-            &geom,
-            &fixtures,
-        ));
+        // The spindle housing rides posed rapids too (M13.8 (1)).
+        hits.extend(crate::verify::rapids_vs_workholding(&cache.path, &geom, &wh, spindle));
         for hit in hits {
             out.push(format!("{name}: {hit}"));
         }

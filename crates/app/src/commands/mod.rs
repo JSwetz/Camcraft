@@ -29,7 +29,7 @@ use flecs_ecs::prelude::World;
 pub use cutting_data::{ApplyCuttingData, SetWorkMaterial};
 pub use delete_entity::DeleteEntity;
 pub use fixture::{
-    AddFixtureModel, DeleteFixture, MoveFixture, TagFixture, UntagFixture,
+    AddFixtureModel, DeleteFixture, MoveFixture, SetFixtureFixed, TagFixture, UntagFixture,
 };
 pub use import_model::ImportModel;
 pub use load_machine::LoadMachine;

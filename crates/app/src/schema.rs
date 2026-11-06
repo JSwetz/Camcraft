@@ -136,6 +136,11 @@ pub struct SetupDef {
 #[derive(Component, Debug, Clone, Default, PartialEq)]
 pub struct FixtureDef {
     pub setup: Option<String>,
+    /// The workholding stands still while a rotary turns the part (a
+    /// table, a tailstock) and is judged in the machine frame; false -
+    /// the default, every pre-M13.8 file - turns with it (a chuck) and
+    /// is judged in the path's own frame.
+    pub fixed: bool,
 }
 
 /// The document's active setup, stored as a flecs singleton like `Units`:

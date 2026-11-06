@@ -197,6 +197,11 @@ pub struct SetupDto {
 pub struct FixtureDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<String>,
+    /// Stands still while a rotary turns the part (M13.8 (2)); absent
+    /// reads false - it turns with the part, every older file's law -
+    /// and false saves as no key, so such files round-trip unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixed: bool,
 }
 
 /// An operation as files hold it: definition, the stamp the last generate
