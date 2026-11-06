@@ -1,7 +1,8 @@
 //! Collision-aware orientation (M5.1 stage F): the spindle dodges the
-//! part WITHOUT moving the path. The whole kind rides law (f) - a
+//! part WITHOUT moving the ball. The whole kind rides law (f) - a
 //! sphere's envelope is rotation-invariant about its center - so the
-//! axis at a CL point is free while the cut it makes is fixed: leaning
+//! axis at a ball centre is free while the cut it makes is fixed (the
+//! posted tip follows the pose, `c - r·a`, the pivot law): leaning
 //! the spindle cannot gouge a micron the vertical pose did not already
 //! own. What stage F adds to stage C's pose law is the second opinion:
 //! where the commanded pose would drive the SHANK into material, the
@@ -72,11 +73,27 @@ impl Shank {
     }
 }
 
-/// Does the shank at `p` posing `a` (unit, tip-to-spindle) touch
+/// Does the shank of the ball CENTRED at `c` posing `a` touch
+/// material? The pivot law ([`super::retip`]): the tool turns about
+/// the ball's centre, so the band stack - which law (c) measures up
+/// from the TIP - stands on the tip `c - r·a` this pose puts the
+/// stream at. Every pose-search caller asks through here.
+pub(crate) fn shank_hits_at(
+    c: Point3,
+    a: [f64; 3],
+    r: f64,
+    s: &Shank,
+    facets: &[Triangle],
+    boxes: &[[f64; 6]],
+) -> bool {
+    shank_hits(super::retip::tip_of(c, Some(a), r), a, r, s, facets, boxes)
+}
+
+/// Does the shank at tip `p` posing `a` (unit, tip-to-spindle) touch
 /// material? Facets come with their AABB shells; the box gate carries
 /// both bands' worst-case reach, so the exact test only runs where a
 /// box says the column could even stand.
-pub(crate) fn shank_hits(
+fn shank_hits(
     p: Point3,
     a: [f64; 3],
     r: f64,
@@ -187,10 +204,11 @@ fn ang(a: [f64; 3], b: [f64; 3]) -> f64 {
 /// `command_axis` clamps into: half-angle around the contact normal.
 /// Returns `None` when nothing inside the cone clears - the caller
 /// refuses by name, never posts a path whose shank is already known
-/// to touch.
+/// to touch. `c` is the BALL CENTRE: every candidate turns about it
+/// and stands its bands on its own tip (the pivot law).
 #[allow(clippy::too_many_arguments)] // flat geometry args, like shank_hits
 pub(crate) fn escape_axis(
-    p: Point3,
+    c: Point3,
     a0: [f64; 3],
     n: Point3,
     prev: [f64; 3],
@@ -251,5 +269,5 @@ pub(crate) fn escape_axis(
     cands
         .into_iter()
         .map(|(a, _, _)| a)
-        .find(|&a| !shank_hits(p, a, r, s, facets, boxes))
+        .find(|&a| !shank_hits_at(c, a, r, s, facets, boxes))
 }

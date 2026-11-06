@@ -103,6 +103,27 @@ fn slot_params() -> OpParams {
     }
 }
 
+/// Stock bought from the model itself: the finishing world, where the
+/// rough already took the box away and nothing but the part stands
+/// for a leaning holder to meet.
+fn model_stock(world: &World, history: &mut History, source: &str) {
+    let cmd = SetStock::new(world, StockShape::FromModel { source: source.into() }, Location::default());
+    history.execute(world, cmd.expect("from-model stock"));
+}
+
+/// The swarf tool: the catalog's 6 mm ball under the same name, but
+/// with a flute longer than the blade and a shank no wider than the
+/// ball - a tool that LIES along a ruling must be all flute where it
+/// lies (the catalog stub's 8 mm shank, lying a radius off the flank,
+/// sinks a millimetre into it: the verifier's honest ShankHit).
+fn add_swarf_ball(world: &World, history: &mut History) {
+    let mut t = catalog_tool("BN-0600");
+    t.flute_len = 60.0;
+    t.shank_d = t.diameter;
+    let cmd = AddTool::new(world, "BN-0600", t);
+    history.execute(world, cmd.expect("swarf ball"));
+}
+
 fn box_stock(world: &World, history: &mut History, dx: f64, dy: f64, dz: f64) {
     let cmd = SetStock::new(world, StockShape::Box { dx, dy, dz }, Location::default());
     history.execute(world, cmd.expect("box stock"));
@@ -4750,6 +4771,7 @@ fn finish3d_refuses_bad_tolerance_at_creation() {
 /// path must show a leaning spindle where the finish's never does.
 fn pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
     let mut leaned = 0usize;
+    let mut held: Option<[f64; 3]> = None;
     for m in &path.moves {
         if let Some(a) = m.axis {
             assert!(
@@ -4762,11 +4784,23 @@ fn pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
                 leaned += 1;
             }
         }
+        // The pivot law's rapid contract: a rapid travels under the
+        // pose it inherits (the post keeps the tilt modal), so it may
+        // STATE a pose, but never a new one - nothing leaned before
+        // the first lean, the held pose after it.
         if m.kind == MoveKind::Rapid {
-            assert!(m.axis.is_none(), "{name}: a rapid states a pose");
+            assert_eq!(m.axis, held, "{name}: a rapid changed the pose it inherited");
         }
+        held = m.axis.or(held);
     }
     assert!(leaned > 0, "{name}: no move holds a leaning axis");
+}
+
+/// The verdict half of "verifies clean": the cached path carries NO
+/// warning at all (the op being fresh says nothing about the verdict).
+fn verifies_clean(world: &World, op: &str) {
+    let t = cache(world, op).expect("cached");
+    assert!(t.warnings.is_empty(), "{op} must verify with zero warnings: {:?}", t.warnings);
 }
 
 fn flow5d_params(top_z: f64, bottom_z: f64) -> OpParams {
@@ -4872,9 +4906,9 @@ fn parallel5d_params(top_z: f64, bottom_z: f64) -> OpParams {
 fn contour5d_generates_leaning_axes_and_verifies_clean() {
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
     add_tool(&world, &mut history, "BN-0600");
     history.execute(&world, ImportModel::from_mesh("dome", dome_mesh()));
+    model_stock(&world, &mut history, "dome");
     history.execute(
         &world,
         CreateOperation::new(
@@ -4895,16 +4929,21 @@ fn contour5d_generates_leaning_axes_and_verifies_clean() {
         OpStatus::Ok,
         "the envelope verdict came back inside the gate"
     );
+    verifies_clean(&world, "C5A");
     let t = cache(&world, "C5A").expect("cached").path;
     pose_law("contour5d", &t);
+    // Read at the BALL: a posed plunge states its tip r back down the
+    // pose (the pivot law), so the ring's level is its centre's, r
+    // over the Bottom plane the upright ladder's tip stood on.
+    let r = 3.0;
     let plunges: Vec<f64> = t
         .moves
         .iter()
         .filter(|m| m.kind == MoveKind::Plunge)
-        .map(|m| m.to.z)
+        .map(|m| m.to.z + r * m.axis.map_or(1.0, |a| a[2]))
         .collect();
     assert!(
-        plunges.last() == Some(&DOME_RIM_Z),
+        plunges.last().is_some_and(|z| (z - (DOME_RIM_Z + r)).abs() < 1e-9),
         "the bottom ring snaps to the bottom: {plunges:?}"
     );
 }
@@ -4913,9 +4952,9 @@ fn contour5d_generates_leaning_axes_and_verifies_clean() {
 fn parallel5d_generates_leaning_axes_and_verifies_clean() {
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 40.0, 40.0, 15.0);
     add_tool(&world, &mut history, "BN-0600");
     history.execute(&world, ImportModel::from_mesh("hill", hill_mesh()));
+    model_stock(&world, &mut history, "hill");
     history.execute(
         &world,
         CreateOperation::new(
@@ -4932,6 +4971,7 @@ fn parallel5d_generates_leaning_axes_and_verifies_clean() {
         GenerateOperation::new(&world, "P5A").expect("generate"),
     );
     assert_eq!(status(&world, "P5A"), OpStatus::Ok);
+    verifies_clean(&world, "P5A");
     let t = cache(&world, "P5A").expect("cached").path;
     pose_law("parallel5d", &t);
     // The raster reads Top/Bottom as the first and last line's planes,
@@ -4963,9 +5003,9 @@ fn flow5d_generates_following_axes_and_verifies_clean() {
     // sink below Bottom) is unchanged - that is the point of the kind.
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 40.0, 40.0, 15.0);
     add_tool(&world, &mut history, "BN-0600");
     history.execute(&world, ImportModel::from_mesh("hill", hill_mesh()));
+    model_stock(&world, &mut history, "hill");
     history.execute(
         &world,
         CreateOperation::new(
@@ -4986,6 +5026,7 @@ fn flow5d_generates_following_axes_and_verifies_clean() {
         OpStatus::Ok,
         "the envelope verdict came back inside the gate"
     );
+    verifies_clean(&world, "F5A");
     let t = cache(&world, "F5A").expect("cached").path;
     pose_law("flow5d", &t);
     let lowest = t
@@ -5202,10 +5243,8 @@ fn blade_pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
                 body += 1;
             }
         }
-        if m.kind == MoveKind::Rapid {
-            assert!(m.axis.is_none(), "{name}: a rapid states a pose");
-        }
     }
+    rapids_inherit(path);
     assert!(
         body >= 8,
         "{name}: only {body} blade-lying body poses over a whole tube"
@@ -5217,9 +5256,9 @@ fn blade_pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
 fn swarf_generates_blade_lying_axes_and_verifies_clean() {
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
-    add_tool(&world, &mut history, "BN-0600");
+    add_swarf_ball(&world, &mut history);
     history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
+    model_stock(&world, &mut history, "blade");
     history.execute(
         &world,
         CreateOperation::new(
@@ -5240,6 +5279,7 @@ fn swarf_generates_blade_lying_axes_and_verifies_clean() {
         OpStatus::Ok,
         "the envelope verdict came back inside the gate"
     );
+    verifies_clean(&world, "SWA");
     let t = cache(&world, "SWA").expect("cached").path;
     pose_law("swarf", &t);
     blade_pose_law("swarf", &t);
@@ -5253,9 +5293,9 @@ fn advanced_swarf_adds_the_coarse_rungs() {
     // motion-side swarf_multi tests' claim.)
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 60.0, 60.0, 25.0);
-    add_tool(&world, &mut history, "BN-0600");
+    add_swarf_ball(&world, &mut history);
     history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
+    model_stock(&world, &mut history, "blade");
     for (name, params) in [
         ("SW1", swarf_params(11.0, -11.0)),
         ("SW2", advanced_swarf_params(11.0, -11.0, 2)),
@@ -5277,6 +5317,27 @@ fn advanced_swarf_adds_the_coarse_rungs() {
         );
         assert_eq!(status(&world, name), OpStatus::Ok);
     }
+    verifies_clean(&world, "SW1");
+    // SW2's coarse rung is convicted, and must stay convicted until its
+    // generator is fixed: the UPRIGHT swarf_multi plan itself sinks
+    // 0.39 mm into this blade (motion's pivot5d verdict-lane test reads
+    // plan and posed path alike - the pose adds nothing), and the
+    // verifier names it, which holds the post. Pinned here so neither
+    // the defect nor its verdict can go quiet.
+    let sw2 = cache(&world, "SW2").expect("cached").warnings;
+    assert!(
+        matches!(sw2.as_slice(), [camcraft_app::verify::Warning::Envelope { gouge_mm, .. }] if *gouge_mm > 0.3),
+        "SW2's coarse-rung gouge verdict changed: {sw2:?}"
+    );
+    // ... and the conviction BLOCKS: the post refuses the document.
+    let out = std::env::temp_dir().join(format!("camcraft-sw2-blocked-{}.nc", std::process::id()));
+    let posted = camcraft_app::posting::post_setup(&world, &out);
+    let _ = std::fs::remove_file(&out);
+    assert!(
+        posted.as_ref().is_err_and(|e| e.contains("blocked")),
+        "a convicted posed program reached the post: {:?}",
+        posted.map(|p| p.lines)
+    );
     let one = cache(&world, "SW1").expect("cached").path;
     let two = cache(&world, "SW2").expect("cached").path;
     assert!(
@@ -5581,10 +5642,7 @@ fn rotary_offset_params(top_z: f64, bottom_z: f64) -> OpParams {
 fn radial_pose_law(name: &str, path: &camcraft_app::cl::Toolpath, axial: usize) {
     let mut body = 0usize;
     for m in &path.moves {
-        if m.kind == MoveKind::Rapid {
-            assert!(m.axis.is_none(), "{name}: a rapid states a pose");
-            continue;
-        }
+        let rapid = m.kind == MoveKind::Rapid;
         let Some(a) = m.axis else { continue };
         assert!(
             a.iter().all(|v| v.is_finite()),
@@ -5592,7 +5650,12 @@ fn radial_pose_law(name: &str, path: &camcraft_app::cl::Toolpath, axial: usize) 
         );
         let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
         assert!((l - 1.0).abs() < 1e-6, "{name}: a pose of length {l}");
-        let mut d = [m.to.x, m.to.y, m.to.z];
+        // M13 pivot law: the stream locates the TIP; the radial is the
+        // ball CENTER's, `r` up the pose (the BN-0600's 3 mm). Rapids
+        // state it too - the post keeps the tilt modal, so a rapid
+        // stating nothing would hold the last cut's direction while it
+        // laps the bar.
+        let mut d = [m.to.x + 3.0 * a[0], m.to.y + 3.0 * a[1], m.to.z + 3.0 * a[2]];
         d[axial] = 0.0;
         let dn = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         if dn < 0.5 {
@@ -5605,7 +5668,9 @@ fn radial_pose_law(name: &str, path: &camcraft_app::cl::Toolpath, axial: usize) 
             "{name}: a pose off the radial at {:?}: {a:?} vs {want:?}",
             m.to
         );
-        body += 1;
+        if !rapid {
+            body += 1;
+        }
     }
     assert!(
         body >= 8,
@@ -5617,9 +5682,9 @@ fn radial_pose_law(name: &str, path: &camcraft_app::cl::Toolpath, axial: usize) 
 fn rotary_contour_generates_radial_axes_and_verifies_clean() {
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 40.0, 40.0, 40.0);
     add_tool(&world, &mut history, "BN-0600");
     history.execute(&world, ImportModel::from_mesh("lathe", lathe_mesh()));
+    model_stock(&world, &mut history, "lathe");
     history.execute(
         &world,
         CreateOperation::new(
@@ -5640,20 +5705,24 @@ fn rotary_contour_generates_radial_axes_and_verifies_clean() {
         OpStatus::Ok,
         "the envelope verdict came back inside the gate"
     );
+    verifies_clean(&world, "RC1");
     let t = cache(&world, "RC1").expect("cached").path;
     radial_pose_law("rotary contour", &t, 2);
     // M13.1: the stock sim has no annular-sector sweep, so the rotary
     // op is refused by name there - never cut as a chord.
     let err = camcraft_app::stock_sim::simulate_document(&world).expect_err("a rotary cut is not judged by the stock sim");
     assert!(err.contains("RC1") && err.contains("rotary cut"), "{err}");
+    // The bottom ring's BALL snaps to the bottom (M13 pivot law: the
+    // tip of a lying ball stands at its center's height, so the plane
+    // the ladder named is met by the ball's lowest point, center - r).
     let plunges: Vec<f64> = t
         .moves
         .iter()
         .filter(|m| m.kind == MoveKind::Plunge)
-        .map(|m| m.to.z)
+        .map(|m| m.to.z + 3.0 * m.axis.map_or(1.0, |a| a[2]) - 3.0)
         .collect();
     assert!(
-        plunges.last() == Some(&-14.0),
+        plunges.last().is_some_and(|z| (z + 14.0).abs() < 1e-9),
         "the bottom ring snaps to the bottom: {plunges:?}"
     );
 }
@@ -5662,9 +5731,9 @@ fn rotary_contour_generates_radial_axes_and_verifies_clean() {
 fn rotary_parallel_generates_radial_axes_and_verifies_clean() {
     let world = new_world();
     let mut history = History::default();
-    box_stock(&world, &mut history, 40.0, 40.0, 40.0);
     add_tool(&world, &mut history, "BN-0600");
     history.execute(&world, ImportModel::from_mesh("laid", laid_mesh()));
+    model_stock(&world, &mut history, "laid");
     history.execute(
         &world,
         CreateOperation::new(
@@ -5681,16 +5750,20 @@ fn rotary_parallel_generates_radial_axes_and_verifies_clean() {
         GenerateOperation::new(&world, "RP1").expect("generate"),
     );
     assert_eq!(status(&world, "RP1"), OpStatus::Ok);
+    verifies_clean(&world, "RP1");
     let t = cache(&world, "RP1").expect("cached").path;
     radial_pose_law("rotary parallel", &t, 0);
     // The raster's heights are world z in the laid frame (an exact
-    // reading for a flat-lying bar): the ladder never sinks below its
-    // Bottom, and its last line IS the Bottom.
+    // reading for a flat-lying bar), read off the BALL a vertical tip
+    // there would carry - its center r up the pose from the posted
+    // tip, its lowest point r under that (M13 pivot law): the ladder
+    // never sinks below its Bottom, and its last line IS the Bottom.
+    let low = |m: &camcraft_app::cl::Move| m.to.z + 3.0 * m.axis.map_or(1.0, |a| a[2]) - 3.0;
     let lowest = t
         .moves
         .iter()
         .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
-        .map(|m| m.to.z)
+        .map(low)
         .fold(f64::INFINITY, f64::min);
     assert!(
         lowest >= -4.0 - 1e-9,
@@ -5699,7 +5772,7 @@ fn rotary_parallel_generates_radial_axes_and_verifies_clean() {
     let on_bottom = t
         .moves
         .iter()
-        .any(|m| m.kind == MoveKind::Feed && (m.to.z + 4.0).abs() < 1e-9);
+        .any(|m| m.kind == MoveKind::Feed && (low(m) + 4.0).abs() < 1e-9);
     assert!(
         on_bottom,
         "nothing reached the Bottom plane - the flank went uncut"
@@ -5867,10 +5940,13 @@ fn rotary_offset_peels_the_wrap_ladder_and_verifies_clean() {
     // wrap space, posed radially like its finish twins (law (f): the
     // swept sphere is pose-invariant about its own axis, so Envelope
     // verify tells the truth for a rough). The stock is deliberately
-    // a ROUND bar (d30 about the lathe's r6): the kernel's hop rides
-    // one infeed and one radius OUTSIDE the skin - about rho 16 -
-    // and a box's flat corner would honestly call that air a plunge
-    // into material. On a turned bar it is what it is: clear.
+    // a ROUND bar turned to the part's OD (d12.4 about the lathe's
+    // r6): the kernel peels from the PART's skin inward and its hops
+    // ride one infeed and one radius outside that skin (ball center
+    // rho 9.5). M13: on the d30 bar this test once used, those hops
+    // run through 9 mm of skin the ladder never peels - the radial
+    // field law convicts them (rotary_verify's oversized-bar case),
+    // where the old vertical column read them as cleared air.
     // The infeed is sub-step: the lathe's peel band is the 6.0 skin
     // down to the 5.0 neck, one millimetre of it, so a 4 mm radial
     // stepdown (the helper's) skips the window and the staircase law
@@ -5887,7 +5963,7 @@ fn rotary_offset_peels_the_wrap_ladder_and_verifies_clean() {
     let cmd = SetStock::new(
         &world,
         StockShape::Cylinder {
-            diameter: 30.0,
+            diameter: 12.4,
             height: 32.0,
         },
         Location {
@@ -5918,13 +5994,15 @@ fn rotary_offset_peels_the_wrap_ladder_and_verifies_clean() {
         OpStatus::Ok,
         "the wrap ladder verifies inside its budget"
     );
-    let t = cache(&world, "RO1").expect("cached").path;
+    let c = cache(&world, "RO1").expect("cached");
+    assert!(c.warnings.is_empty(), "the wrap ladder on its bar verifies silent: {:?}", c.warnings);
+    let t = c.path;
     radial_pose_law("RO1", &t, 2);
-    // The ladder really DESCENDED: the skim ring stands one tool
-    // radius outside the 6.0 skin (CL rho 9.0), the 5.5 level peels
-    // the neck column's band one infeed under it, and the floor
-    // ring - one step above the 5.0 neck surface - rides at CL rho
-    // 8.0. One plane's spread is not a rough.
+    // The ladder really DESCENDED: the skim ring's TIP stands on the
+    // 6.0 skin (its ball center one radius out - the M13 pivot law),
+    // the 5.5 level peels the neck column's band one infeed under it,
+    // and the floor ring - one step above the 5.0 neck surface - rides
+    // at tip rho 5.0. One plane's spread is not a rough.
     let (lo, hi) = t.moves.iter().filter(|m| m.kind != MoveKind::Rapid).fold(
         (f64::MAX, 0.0f64),
         |(lo, hi), m| {
@@ -5932,8 +6010,8 @@ fn rotary_offset_peels_the_wrap_ladder_and_verifies_clean() {
             (lo.min(rho), hi.max(rho))
         },
     );
-    assert!(hi > 8.9, "no ring at the skin (max rho {hi})");
-    assert!(lo < 8.6, "the ladder never left the skin: {lo}..{hi}");
+    assert!(hi > 5.9, "no ring at the skin (max rho {hi})");
+    assert!(lo < 5.6, "the ladder never left the skin: {lo}..{hi}");
     assert!(
         hi - lo > 0.5,
         "one plane of cut is not a ladder: {lo}..{hi}"
@@ -6189,21 +6267,18 @@ fn multiaxis_rough_peels_the_same_ladder_and_poses_its_walls() {
     );
     let mut posed = 0usize;
     let mut floor_air = 0usize;
+    // The pivot law: the BALLS are the plain ladder's (the tips follow
+    // the lean), and rapids state no new pose.
+    same_balls(&plain, &rough, 3.0);
+    rapids_inherit(&rough);
     for (a, b) in plain.moves.iter().zip(&rough.moves) {
         assert!(a.axis.is_none(), "the plain ladder speaks an angle");
-        assert!(
-            a.to.x == b.to.x && a.to.y == b.to.y && a.to.z == b.to.z,
-            "the stamp moved a position: {:?} vs {:?}",
-            a.to,
-            b.to
-        );
         if b.kind == MoveKind::Rapid {
-            assert!(b.axis.is_none(), "a rapid states an angle");
             continue;
         }
-        match b.axis {
+        match b.axis.filter(|v| leans(Some(*v))) {
             None => {
-                if b.to.z == -10.0 {
+                if a.to.z == -10.0 {
                     floor_air += 1;
                 }
             }
@@ -6337,6 +6412,44 @@ fn multiaxis_rough_refuses_nonsense_at_creation() {
 /// cone can clear (the rim stays off the pocket floor around 21 deg),
 /// and its holder is narrower than the catalog's 44 so the ladder's
 /// walls are the only voice the shank gets.
+/// Every move's BALL CENTRE: the tip lifted `r` along the pose the
+/// machine holds there (the last stated - the post keeps it modal;
+/// upright before any). The pivot law's invariant reads on these.
+fn balls_of(path: &camcraft_app::cl::Toolpath, r: f64) -> Vec<camcraft_app::geometry::Point3> {
+    let mut held = [0.0, 0.0, 1.0];
+    path.moves
+        .iter()
+        .map(|m| {
+            if let Some(a) = m.axis {
+                held = a;
+            }
+            camcraft_app::geometry::Point3::new(m.to.x + r * held[0], m.to.y + r * held[1], m.to.z + r * held[2])
+        })
+        .collect()
+}
+
+fn leans(a: Option<[f64; 3]>) -> bool {
+    a.is_some_and(|a| !camcraft_app::cl::is_vertical(&a))
+}
+
+/// The rapid contract of the pivot law: a rapid states no NEW pose.
+fn rapids_inherit(path: &camcraft_app::cl::Toolpath) {
+    let mut held: Option<[f64; 3]> = None;
+    for m in &path.moves {
+        if m.kind == MoveKind::Rapid {
+            assert_eq!(m.axis, held, "a rapid changed the pose it inherited");
+        }
+        held = m.axis.or(held);
+    }
+}
+
+fn same_balls(a: &camcraft_app::cl::Toolpath, b: &camcraft_app::cl::Toolpath, r: f64) {
+    for (i, (x, y)) in balls_of(a, r).iter().zip(balls_of(b, r)).enumerate() {
+        let d = *x - y;
+        assert!(d.dot(d).sqrt() < 1e-9, "the ball moved at {i}: {x:?} vs {y:?}");
+    }
+}
+
 fn stub_tool() -> Tool {
     Tool {
         kind: camcraft_app::tools::ToolKind::BallNose,
@@ -6397,23 +6510,29 @@ fn multiaxis_rough_poses_around_the_shank_and_moves_nothing() {
     assert_eq!(off.moves.len(), on.moves.len(), "the dodge added a move");
     let mut escaped = 0usize;
     let mut plus: Vec<[f64; 3]> = Vec::new();
+    // The pivot law: F spends the free axis and nothing else - the
+    // BALLS are the flag-off ladder's (the tips follow each pose), and
+    // rapids state no new pose. Rows are read off the flag-off path,
+    // whose floors stand upright (tip = plan).
+    same_balls(&off, &on, 4.0);
+    rapids_inherit(&on);
     for (i, (a, b)) in off.moves.iter().zip(&on.moves).enumerate() {
-        assert!(
-            a.axis.is_none() || b.axis == a.axis,
-            "F overrode the surface law at {i}"
-        );
-        assert_eq!(
-            (a.to.x, a.to.y, a.to.z),
-            (b.to.x, b.to.y, b.to.z),
-            "the ladder moved at {i}"
-        );
+        if leans(a.axis) && b.axis != a.axis {
+            // F re-answered a wall lean: only where the real tip's
+            // shank touched (the stub's 5-radius shank under a lean
+            // dead on a wall dips under its 4-radius ball), and inside
+            // the cone about that same normal.
+            let (x, n) = (b.axis.unwrap_or([0.0, 0.0, 1.0]), a.axis.unwrap_or([0.0, 0.0, 1.0]));
+            let d = (x[0] * n[0] + x[1] * n[1] + x[2] * n[2]).clamp(-1.0, 1.0).acos().to_degrees();
+            assert!(d <= 85.0001, "F's re-answer left the cone at {i}: {x:?} about {n:?}");
+        }
         if b.kind == MoveKind::Rapid {
-            assert!(b.axis.is_none(), "a rapid states an angle");
             continue;
         }
-        if b.to.z == -10.0 && 8.0 < b.to.x.abs() && b.to.x.abs() < 10.0 {
+        if a.to.z == -10.0 && 8.0 < a.to.x.abs() && a.to.x.abs() < 10.0 {
             let v = b
                 .axis
+                .filter(|v| leans(Some(*v)))
                 .unwrap_or_else(|| panic!("floor row {i} lets the shank rub: {:?}", b.to));
             let tilt = v[2].clamp(-1.0, 1.0).acos().to_degrees();
             assert!(
@@ -6421,17 +6540,17 @@ fn multiaxis_rough_poses_around_the_shank_and_moves_nothing() {
                 "an escape outside the posed cone: {v:?}"
             );
             assert!(
-                v[0] * b.to.x + v[1] * b.to.y > 0.0,
+                v[0] * a.to.x + v[1] * a.to.y > 0.0,
                 "an escape leaned INTO the boss: {v:?}"
             );
-            if b.to.x > 8.4 && b.to.y.abs() <= 4.0 {
+            if a.to.x > 8.4 && a.to.y.abs() <= 4.0 {
                 plus.push(v);
             }
             escaped += 1;
         }
-        if b.to.z == -10.0 && b.to.x.abs() >= 12.0 {
+        if a.to.z == -10.0 && a.to.x.abs() >= 12.0 {
             assert!(
-                b.axis.is_none(),
+                !leans(b.axis),
                 "a clean floor row got posed anyway at {i}"
             );
         }
@@ -6491,7 +6610,7 @@ fn flipping_shank_avoid_ages_the_path() {
         plain
             .moves
             .iter()
-            .all(|m| m.to.z != -10.0 || m.to.x.abs() <= 8.0 || m.axis.is_none())
+            .all(|m| m.to.z != -10.0 || m.to.x.abs() <= 8.0 || !leans(m.axis))
     );
 
     let mut dodging = multiaxis_rough_params();
@@ -6513,11 +6632,14 @@ fn flipping_shank_avoid_ages_the_path() {
     );
     assert_eq!(status(&world, "MAH"), OpStatus::Ok);
     let posed = cache(&world, "MAH").expect("cached").path;
+    // Read at the BALL (a posed tip follows its lean): a floor row's
+    // centre stands the stub's 4 mm radius over the -10 floor.
+    let balls = balls_of(&posed, 4.0);
     assert!(
-        posed.moves.iter().any(|m| m.kind != MoveKind::Rapid
-            && m.to.z == -10.0
-            && (8.0 < m.to.x.abs() && m.to.x.abs() < 10.0)
-            && m.axis.is_some()),
+        posed.moves.iter().zip(&balls).any(|(m, c)| m.kind != MoveKind::Rapid
+            && (c.z - (-10.0 + 4.0)).abs() < 1e-9
+            && (8.0 < c.x.abs() && c.x.abs() < 10.0)
+            && leans(m.axis)),
         "the regenerated ladder never dodged"
     );
 }
@@ -6752,8 +6874,16 @@ fn multiaxis_contour_walks_the_picked_edges_and_leans_at_the_fold() {
         OpStatus::Ok,
         "the envelope verdict came back inside the gate"
     );
+    verifies_clean(&world, "MAC");
     let t = cache(&world, "MAC").expect("cached").path;
     pose_law("multiaxis_contour", &t);
+    // The edges are CONVEX: the ball rides each edge line itself -
+    // centre a radius out along the fold's bisector, touching it (the
+    // old plane law stood it r off both PLANES, (z, reach) = (8, 8),
+    // r·(√2 - 1) of air off the edge it was picked to cut) - and the
+    // stream states the TIP, the centre backed off r along the pose
+    // (the pivot law): with no lead, the edge point itself.
+    let r = 3.0;
     let mut cut = 0usize;
     for m in t
         .moves
@@ -6761,17 +6891,19 @@ fn multiaxis_contour_walks_the_picked_edges_and_leans_at_the_fold() {
         .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
     {
         cut += 1;
-        assert!(
-            (m.to.z - 8.0).abs() < 1e-6,
-            "a ball riding the z = 5 plane stands at 8.0, not {:?}",
-            m.to
-        );
-        let reach = (m.to.x - 5.0).abs().max((m.to.y - 5.0).abs());
-        assert!(
-            reach >= 8.0 - 1e-6,
-            "a cut point fell inside the footprint: {:?}",
-            m.to
-        );
+        let a = m.axis.expect("a station poses");
+        let c = camcraft_app::geometry::Point3::new(m.to.x + r * a[0], m.to.y + r * a[1], m.to.z + r * a[2]);
+        // Distance from the centre to the 10x10x5 box (a convex solid:
+        // the clamp to its extent is the nearest point).
+        let q = camcraft_app::geometry::Point3::new(c.x.clamp(0.0, 10.0), c.y.clamp(0.0, 10.0), c.z.clamp(0.0, 5.0));
+        let d = c - q;
+        let d = d.dot(d).sqrt();
+        assert!((d - r).abs() < 1e-6, "a station's ball stands {d} off the box, not r: {c:?}");
+        if m.kind == MoveKind::Feed {
+            assert!((m.to.z - 5.0).abs() < 1e-6, "a feed tip left the rim's plane: {:?}", m.to);
+            let reach = (m.to.x - 5.0).abs().max((m.to.y - 5.0).abs());
+            assert!((reach - 5.0).abs() < 1e-6, "a feed tip left the rim: {:?}", m.to);
+        }
     }
     assert!(
         cut >= 4,

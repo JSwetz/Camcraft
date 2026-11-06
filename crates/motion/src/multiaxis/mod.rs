@@ -28,6 +28,7 @@
 
 mod avoid;
 mod curv;
+mod curve_walk;
 mod linalg;
 mod stamp;
 #[cfg(test)]
@@ -41,6 +42,7 @@ pub mod rough;
 pub mod rotary;
 pub mod rotary_offset;
 mod wrap_exit;
+mod retip;
 pub mod ruling;
 pub mod swarf;
 pub mod tilt;

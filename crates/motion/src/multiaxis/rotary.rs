@@ -30,12 +30,14 @@
 //!
 //! The world exit is spelled here, not through `world_path`: that
 //! stamps the frame's CONSTANT pose where these paths carry a
-//! per-move radial one. Arcs survive verbatim only in an upright
-//! frame (the bit-exact golden law, with the center carried through
-//! the frame's own translation); a tilted frame's XY circle is no
-//! world XY circle, so its chords ride at `ARC_FIT_TOL` with the
-//! pose computed fresh at every chord end - never interpolated,
-//! always the law's own answer at the point the move ends.
+//! per-move radial one - and it turns that pose about the BALL
+//! CENTER the ladder planned, emitting the tip the stream's contract
+//! locates (the M13 pivot law, [`super::retip`]; turning about the
+//! tip stood every ring one ball radius off its wall). Arcs ride as
+//! chords at `ARC_FIT_TOL` with the pose computed fresh at every
+//! chord end - a pose turning along the circle moves the tip off any
+//! circle G2/G3 could state - never interpolated, always the law's
+//! own answer at the point the move ends.
 //!
 //! Provenance: axis-of-revolution detection and the radial tool-axis
 //! convention of 4/5-axis rotary machining from public CAM
@@ -45,11 +47,11 @@
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::cl::TiltedFrame;
 use crate::finishing3d::{self, Finish3DParams};
-use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{GenError, ARC_FIT_TOL};
 
 use super::axis::{self, Axis};
+use super::retip::{along, radial_at, tip_of};
 use super::tilt::{command_axis, AxisControl};
 
 /// The axis' tilt below which "standing" and "laid" trade places:
@@ -83,7 +85,7 @@ pub fn rotary_contour(
     let uz = if ax.dir.dot(UP) < 0.0 { -lean } else { lean };
     let q = stations(&local, p, &f, &|h| (h - ax.origin.z) / uz);
     let base = finishing3d::waterline(&local, &q)?;
-    posed(&f, &base, &ax, c)
+    posed(&f, &base, &ax, c, p.tool_diameter * 0.5)
 }
 
 /// The rotary parallel: generatrix passes along the axis, stepping
@@ -124,7 +126,7 @@ pub fn rotary_parallel(
     let local = f.local_facets(facets);
     let q = stations(&local, p, &f, &|h| h - ax.origin.z);
     let base = finishing3d::swarf(&local, &q, 1.0, 0.0)?;
-    posed(&f, &base, &ax, c)
+    posed(&f, &base, &ax, c, p.tool_diameter * 0.5)
 }
 
 /// The contour frame: the axis as local z, the canonical foot as
@@ -158,108 +160,63 @@ fn stations(
     q
 }
 
-/// The pose stamp and the world exit in one pass: every cutting
-/// move ends with the radial pose the lean law commands about the
-/// fitted axis (computed in world coordinates straight off the
-/// axis line, so both frames pose identically), rapids hold nothing,
-/// and positions ride the frame. A cycle would ask the spindle to
-/// stand still inside a moving-axis path: refused upstream, named
-/// here.
+/// The pose stamp and the world exit in one pass. The base ladder is
+/// a vertical ball's (finishing3d's tip convention, in the planning
+/// frame), so its BALL CENTERS are the points `r` up the frame's own
+/// axis - that sphere is what the ladder's tangency law placed, and
+/// it is what every pose must keep. Each emitted point is that center
+/// carried to the world and backed off `r` along the pose it holds
+/// ([`super::retip`]): cutting moves the radial the lean law commands
+/// about the fitted axis, rapids the pure radial at their center
+/// (held where none exists), so the post's modal tilt and the path
+/// agree on every record. Arcs ride as their own 3-D chords: a pose
+/// turning along the circle moves the tip off any circle the G2/G3
+/// contract could state, so every chord end is computed fresh by the
+/// law, never interpolated. A cycle would ask the spindle to stand
+/// still inside a moving-axis path: refused upstream, named here.
 fn posed(
     f: &TiltedFrame,
     base: &Toolpath,
     ax: &Axis,
     c: &AxisControl,
+    r: f64,
 ) -> Result<Toolpath, GenError> {
     if !base.cycles.is_empty() {
         return Err(GenError::Invalid(
             "rotary cannot pose drill cycles - the spindle never stands still here".into(),
         ));
     }
-    let upright = f.is_upright();
-    let mut b = PathBuilder::new(f.to_world(base.start().unwrap_or(Point3::ZERO)));
+    let center = |q: Point3| along(f.to_world(q), f.axis, r);
+    let c0 = center(base.start().unwrap_or(Point3::ZERO));
+    let mut b = PathBuilder::new(tip_of(c0, None, r));
+    let mut held: Option<[f64; 3]> = None;
+    let mut prev = c0;
     for mv in &base.moves {
         let air = mv.kind == MoveKind::Rapid;
-        let pose = |q: Point3, t: Point3, b: &mut PathBuilder| {
-            if air {
-                b.set_axis(None);
+        let mut ends: Vec<Point3> = match mv.arc {
+            None => Vec::new(),
+            Some(_) => mv.segments3(ARC_FIT_TOL).into_iter().map(|(_, e)| e).collect(),
+        };
+        if ends.is_empty() {
+            ends.push(mv.to);
+        }
+        for q in ends {
+            let w = center(q);
+            let pose = if air {
+                radial_at(ax, w).or(held)
             } else {
-                match radial_pose(f, ax, c, q, t) {
-                    Some(a) => b.set_axis(Some(a)),
+                match cut_pose(ax, c, w, w - prev) {
+                    Some(a) => Some(a),
                     None => {
-                        eprintln!(
-                            "multiaxis: no radial exists at {:?}; the move holds vertical",
-                            f.to_world(q)
-                        );
-                        b.set_axis(Some([0.0, 0.0, 1.0]));
+                        eprintln!("multiaxis: no radial exists at {w:?}; the move holds vertical");
+                        Some([0.0, 0.0, 1.0])
                     }
                 }
-            }
-        };
-        match &mv.arc {
-            // Upright frame: the local XY circle IS a world XY
-            // circle - its center rides the frame's translation and
-            // the arc intent survives to the post verbatim.
-            // XZ / YZ (M11.2 A), upright: the identity basis keeps the
-            // plane; the center rides the translation in its own pair.
-            Some(arc) if upright && !arc.plane.is_xy() => {
-                let (cu, cv) = arc.plane.center_uv(arc.center);
-                let c3 = f.to_world(arc.plane.point(cu, cv, 0.0));
-                pose(mv.to, mv.to - mv.from, &mut b);
-                b.push_arc_in(
-                    mv.kind,
-                    f.to_world(mv.to),
-                    mv.feed,
-                    arc.plane.words(c3),
-                    arc.ccw,
-                    arc.plane,
-                );
-            }
-            // XZ / YZ, tilted: the arc's own 3-D chords, posed per chord.
-            Some(arc) if !arc.plane.is_xy() => {
-                let mut from = mv.from;
-                for (_a, to) in mv.segments3(ARC_FIT_TOL) {
-                    pose(to, to - from, &mut b);
-                    b.push(mv.kind, f.to_world(to), mv.feed);
-                    from = to;
-                }
-            }
-            Some(arc) if upright => {
-                let center = f.to_world(Point3::new(arc.center.x, arc.center.y, mv.to.z));
-                pose(mv.to, mv.to - mv.from, &mut b);
-                b.push_arc(
-                    mv.kind,
-                    f.to_world(mv.to),
-                    mv.feed,
-                    Point2::new(center.x, center.y),
-                    arc.ccw,
-                );
-            }
-            // Tilted: the circle is no world XY arc the G2/G3
-            // contract can state; its chords replace it, motion for
-            // motion, Z linear between the endpoints (endpoints
-            // exact, their bits kept), the pose computed at each
-            // chord's own end.
-            Some(_) => {
-                let ch = mv.chords(ARC_FIT_TOL);
-                let n = ch.len().max(1) as f64;
-                let mut from = mv.from;
-                for (i, (_a, e)) in ch.iter().enumerate() {
-                    let zb = mv.from.z + (mv.to.z - mv.from.z) * ((i + 1) as f64 / n);
-                    let to = Point3::new(e.x, e.y, zb);
-                    pose(to, to - from, &mut b);
-                    b.push(mv.kind, f.to_world(to), mv.feed);
-                    from = to;
-                }
-                if ch.is_empty() {
-                    pose(mv.to, mv.to - mv.from, &mut b);
-                    b.push(mv.kind, f.to_world(mv.to), mv.feed);
-                }
-            }
-            None => {
-                pose(mv.to, mv.to - mv.from, &mut b);
-                b.push(mv.kind, f.to_world(mv.to), mv.feed);
-            }
+            };
+            b.set_axis(pose);
+            held = pose;
+            b.push(mv.kind, tip_of(w, pose, r), mv.feed);
+            prev = w;
         }
     }
     let out = b.finish();
@@ -269,26 +226,14 @@ fn posed(
     Ok(out)
 }
 
-/// The radial pose at a world-carried endpoint `q` (a LOCAL point
-/// of the planning path, mapped here): out of the axis line to the
-/// tool, along the move's travel through the lean law, and the
-/// whole answer turned into the world. Where the point lies ON the
-/// axis no radial exists - the vertical stands in and says so,
-/// never silently.
-fn radial_pose(
-    f: &TiltedFrame,
-    ax: &Axis,
-    c: &AxisControl,
-    q: Point3,
-    t_local: Point3,
-) -> Option<[f64; 3]> {
-    let w = f.to_world(q);
-    let d = w - ax.origin;
-    let s = d.dot(ax.dir);
-    let n = Point3::new(d.x - ax.dir.x * s, d.y - ax.dir.y * s, d.z - ax.dir.z * s);
-    let n = normalize(&n)?;
-    let tw = f.to_world(Point3::new(q.x + t_local.x, q.y + t_local.y, q.z + t_local.z)) - w;
-    let a = match normalize(&tw) {
+/// The cutting pose at a world ball center `w`: out of the axis line
+/// to the center, along the travel `t` through the lean law. Where the
+/// center lies ON the axis no radial exists - None, and the caller
+/// says so, never silently.
+fn cut_pose(ax: &Axis, c: &AxisControl, w: Point3, t: Point3) -> Option<[f64; 3]> {
+    let n = radial_at(ax, w)?;
+    let n = Point3::new(n[0], n[1], n[2]);
+    let a = match normalize(&t) {
         Some(t) => command_axis(n, t, c)?,
         None => n, // nowhere to lead: hold the radial
     };
@@ -302,3 +247,4 @@ fn normalize(v: &Point3) -> Option<Point3> {
     }
     Some(Point3::new(v.x / l, v.y / l, v.z / l))
 }
+

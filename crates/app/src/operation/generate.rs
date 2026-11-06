@@ -2564,6 +2564,19 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             if depth_law == DepthLaw::Contain {
                 contain_into(&mut warns, &path, &material.facets, &tool, depth_law, stl);
             }
+            // The rotary kinds' bands and rapids (M13): `Mode::Rotary`
+            // stood the vertical-column laws down; the radial field
+            // reads rest material in the frame the work turns in.
+            if let Some(tol) = super::rotary_law::rotary_tolerance(&params) {
+                super::rotary_law::rotary_into(
+                    &mut warns,
+                    &path,
+                    &material.facets,
+                    stock_facets.as_deref(),
+                    &tool,
+                    tol,
+                );
+            }
             Ok((path, warns))
         }
         Some(f) => {

@@ -1871,7 +1871,10 @@ impl KindInfo {
             // The rings are the finish's, posed radially (M5.1 stage
             // E): the ball's path decides the verdict, the fitted
             // axis and the lean answer only where the spindle points.
-            mode: Mode::Envelope,
+            // Rotary (M13): the envelope measures the posed ball; the
+            // bands and rapids answer to the radial field, not to a
+            // vertical column a lying tool never stands in.
+            mode: Mode::Rotary,
             section: Section::MultiAxis,
             seed: seed_rotary_contour,
             tool_kinds: tk::BALL,
@@ -1881,7 +1884,7 @@ impl KindInfo {
             label: "Rotary Parallel",
             caption: "Rotary Parallel",
             tag: 21,
-            mode: Mode::Envelope,
+            mode: Mode::Rotary,
             section: Section::MultiAxis,
             seed: seed_rotary_parallel,
             tool_kinds: tk::BALL,
@@ -1894,8 +1897,10 @@ impl KindInfo {
             // The rough ladder's verdict is the measured envelope too
             // (M5.1 stage E2): law (f) sweeps a sphere, so the pose
             // cannot lie to it on a bar lying or standing, and the
-            // kind's tolerance is exactly that law's budget.
-            mode: Mode::Envelope,
+            // kind's tolerance is exactly that law's budget. Rotary
+            // (M13): the wrap hops lap the bar radially - the radial
+            // field judges them, the vertical column never could.
+            mode: Mode::Rotary,
             section: Section::MultiAxis,
             seed: seed_rotary_offset,
             tool_kinds: tk::BALL,

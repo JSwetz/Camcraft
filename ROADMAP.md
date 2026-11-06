@@ -1732,14 +1732,30 @@ None of these may stay open behind a ✅.
       an overhang is invisible to them - move them onto the solid law.
 - **Mid-move pose changes**: a move whose pose changes along it is
       judged at its end pose only; judge the swept pose.
-- **Rotary ops can't post**: verify convicts hundreds of shank/sweep
-      hits on box/cylinder stock for rotary ops (found 2026-11-06,
-      investigation in flight) - either real collisions to refuse by
-      name or a verifier false positive to fix; never a silent pass.
+- ~~**Rotary ops can't post**~~ - resolved 2026-11-06: a pivot bug
+      (posed ball tools posted the centre, not the tip) plus vertical
+      judgement of wrapped paths; fixed by the pivot law, posed rapids
+      and `Mode::Rotary` radial verify (RECOMMENDED "Rotary and 5-axis:
+      the pivot law"). Leftovers live in M13.8.
 - **Posed moves through motion's direct `Dexel::subtract`**: the column
       engine refuses posed moves by name at the stock-sim door, but
       motion's direct `Dexel::subtract` calls are not gated for posed
       moves - gate them (refuse by name) or route them through the door.
+
+
+### M13.8 - Multi-axis leftovers after the pivot law
+**Goal: every rotary and 5-axis kind starts, links and judges like the
+3-axis ones - nothing found by the pivot fix stays as prose.** — 📋
+
+- **swarf_multi coarse rung** gouges 0.39 mm. The verifier convicts it,
+      so it isn't silent; the fix is to refine the rung.
+- **The rotary first move** is a rapid from the world origin; it should
+      start from the clearance pose.
+- **An upright all-air finish** is reported unjudged; judge it.
+- **The ridge rest law** can never fire; make it reachable, or remove it
+      by decision.
+- **Rotary Offset** should measure from the stock radius;
+      **Rotary Parallel** should use radial retracts.
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
@@ -1793,6 +1809,7 @@ None of these may stay open behind a ✅.
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops; shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops unpostable (shank/sweep convictions, under investigation); motion's direct `Dexel::subtract` gated for posed moves | 📋 |
+| **M13.8** | Multi-axis leftovers | swarf_multi coarse rung, rotary first move from origin, upright all-air finish unjudged, ridge rest law unreachable, Rotary Offset/Parallel radial heights | 📋 |
 
 ## Open questions & deferred
 

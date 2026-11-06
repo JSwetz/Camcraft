@@ -1,7 +1,8 @@
 //! M5.1 stage F law tests: the spindle dodges the part without moving
 //! the path. The kernel (`multiaxis::avoid`) mirrors `verify`'s law
-//! (c) enclosure, so what rides here is the COMPOSITION: positions
-//! bit-for-bit the flag-off ladder, floors posed only where the
+//! (c) enclosure, so what rides here is the COMPOSITION: balls
+//! bit-for-bit the flag-off ladder's (tips follow the pose, the
+//! pivot law), floors posed only where the
 //! shank speaks, the escape inside the cone and calm across
 //! neighbors, and a slot no cone angle clears refusing by name.
 //!
@@ -125,12 +126,37 @@ fn angle_deg(a: [f64; 3], b: [f64; 3]) -> f64 {
     d.acos().to_degrees()
 }
 
+/// The ball radius of `params()`.
+const BALL_R: f64 = 4.0;
+
+/// Every move as (kind, BALL CENTRE, held pose): the stream's tip
+/// lifted `BALL_R` along the pose the machine holds there (the last
+/// stated - the post keeps it modal; upright before any).
+fn balls(path: &camcraft_motion::cl::Toolpath) -> Vec<(MoveKind, Point3, [f64; 3])> {
+    let mut held = [0.0, 0.0, 1.0];
+    path.moves
+        .iter()
+        .map(|m| {
+            if let Some(a) = m.axis {
+                held = a;
+            }
+            let c = p(m.to.x + BALL_R * held[0], m.to.y + BALL_R * held[1], m.to.z + BALL_R * held[2]);
+            (m.kind, c, held)
+        })
+        .collect()
+}
+
+fn leaning(a: [f64; 3]) -> bool {
+    !camcraft_motion::cl::is_vertical(&a)
+}
+
 #[test]
-fn dodging_never_moves_the_path() {
+fn dodging_never_moves_the_ball() {
     // Law (f) is the whole contract: a sphere's envelope is
     // rotation-invariant about its center, so the dodge may spend
-    // the free axis and NOTHING else. Every position and every move
-    // kind stands bit-for-bit the flag-off ladder's.
+    // the free axis and NOTHING else. Every BALL and every move kind
+    // stands the flag-off ladder's (the tips move with the pose: the
+    // pivot law backs each one off its centre along the axis).
     let f = slab_with_boss();
     let region = silhouette(&f);
     let off = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0)), None).unwrap();
@@ -138,19 +164,33 @@ fn dodging_never_moves_the_path() {
         multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0)), Some(&shank()))
             .unwrap();
     assert_eq!(off.moves.len(), on.moves.len(), "the dodge added a move");
-    for (i, (a, b)) in off.moves.iter().zip(&on.moves).enumerate() {
-        assert_eq!(a.kind, b.kind, "kind changed at move {i}");
-        assert_eq!((a.to.x, a.to.y, a.to.z), (b.to.x, b.to.y, b.to.z), "the path moved at {i}");
-        if a.kind == MoveKind::Rapid {
-            assert_eq!(b.axis, None, "a rapid states an angle");
-        }
+    let (bo, bn) = (balls(&off), balls(&on));
+    for (i, (a, b)) in bo.iter().zip(&bn).enumerate() {
+        assert_eq!(a.0, b.0, "kind changed at move {i}");
+        let d = a.1 - b.1;
+        assert!(d.dot(d).sqrt() < 1e-9, "the ball moved at {i}: {:?} vs {:?}", a.1, b.1);
     }
-    // The contact law stands untouched: every pose E3 stated from
-    // surface truth, F keeps bit-for-bit (it only ADDS poses where
-    // the shank speaks, and never re-answers a tangency).
+    let mut held: Option<[f64; 3]> = None;
+    for m in &on.moves {
+        if m.kind == MoveKind::Rapid {
+            assert_eq!(m.axis, held, "a rapid changed the pose it inherited");
+        }
+        held = m.axis.or(held);
+    }
+    // Where F re-answers a pose, it answers inside the cone. (Before
+    // the pivot law F kept every wall lean E3 stated: it measured the
+    // shank from the UPRIGHT tip, r up the wrong column. On the real
+    // tip - the contact point, for a lean dead on a wall's normal -
+    // the 5-radius shank of a horizontal lean dips a millimetre under
+    // the 4-radius ball into the pocket floor, and the escape is the
+    // honest answer there.)
     for (a, b) in off.moves.iter().zip(&on.moves) {
-        if a.axis.is_some() {
-            assert_eq!(a.axis, b.axis, "F overrode a pose the surface law stated");
+        if a.kind != MoveKind::Rapid && a.axis != b.axis {
+            // Zero lead: E3's pose IS the cone's axis (the contact
+            // normal, or upright on a floor).
+            let x = b.axis.unwrap_or([0.0, 0.0, 1.0]);
+            let n = a.axis.unwrap_or([0.0, 0.0, 1.0]);
+            assert!(angle_deg(x, n) <= 60.0 + 1e-6, "an escape left the cone: {x:?} about {n:?}");
         }
     }
     // And the dodge actually spoke somewhere, or this test proves
@@ -175,17 +215,23 @@ fn floors_are_posed_only_where_the_shank_speaks() {
         multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0)), Some(&shank()))
             .unwrap();
     let mut grazed = 0;
+    let upright = |a: Option<[f64; 3]>| a.is_none_or(|a| !leaning(a));
     for (i, (a, b)) in off.moves.iter().zip(&on.moves).enumerate() {
+        // The flag-off ladder's floors stand upright, so their tips
+        // are the plan's: the floor rows are read off them.
         if a.kind == MoveKind::Rapid || a.to.z != -10.0 {
             continue;
         }
         let near_wall = 8.0 < a.to.x.abs() && a.to.x.abs() < 10.0;
         if a.to.x.abs() >= 12.0 {
-            assert_eq!(b.axis, None, "move {i} posed a floor the shank clears: {:?}", a.to);
+            assert!(upright(b.axis), "move {i} posed a floor the shank clears: {:?}", a.to);
         }
         if near_wall {
-            assert_eq!(a.axis, None, "E3's law posed a floor: {i}");
-            let x = b.axis.unwrap_or_else(|| panic!("move {i} let the shank rub the wall: {:?}", b.to));
+            assert!(upright(a.axis), "E3's law posed a floor: {i}");
+            let x = b
+                .axis
+                .filter(|x| leaning(*x))
+                .unwrap_or_else(|| panic!("move {i} let the shank rub the wall: {:?}", b.to));
             let tilt = tilt_from_up(p(x[0], x[1], x[2]));
             assert!(
                 tilt > 1e-6 && tilt <= 60.0001,
@@ -210,27 +256,27 @@ fn the_escape_is_inside_the_cone_and_calm_down_the_wall() {
             .unwrap();
     let mut plus: Vec<[f64; 3]> = Vec::new();
     let mut minus: Vec<[f64; 3]> = Vec::new();
-    for m in on.moves.iter() {
-        let Some(a) = m.axis else { continue };
-        if m.kind == MoveKind::Rapid || m.to.z != -10.0 {
+    for (m, (_, c, _)) in on.moves.iter().zip(balls(&on)) {
+        // Read at the BALL CENTRE: a floor row's centre stands r over
+        // the floor whatever the pose (the tip follows the lean).
+        let Some(a) = m.axis.filter(|a| leaning(*a)) else { continue };
+        if m.kind == MoveKind::Rapid || (c.z - (-10.0 + BALL_R)).abs() > 1e-9 {
             continue;
         }
-        if m.to.x > 8.4 && m.to.y.abs() <= 4.0 {
+        if c.x > 8.4 && c.y.abs() <= 4.0 {
             plus.push(a);
-        } else if m.to.x < -8.4 && m.to.y.abs() <= 4.0 {
+        } else if c.x < -8.4 && c.y.abs() <= 4.0 {
             minus.push(a);
         }
         assert!(
             angle_deg(a, [0.0, 0.0, 1.0]) <= 60.0 + 1e-6,
-            "an escape leaned past the cone: {:?}",
-            m.to
+            "an escape leaned past the cone: {c:?}"
         );
         // The lean points AWAY from the boss: dodging INTO the wall
         // it dodges is not a dodge.
         assert!(
-            a[0] * m.to.x + a[1] * m.to.y > 0.0,
-            "an escape leaned toward the material: {a:?} at {:?}",
-            m.to
+            a[0] * c.x + a[1] * c.y > 0.0,
+            "an escape leaned toward the material: {a:?} at {c:?}"
         );
     }
     for (name, set, outward) in [("+x wall", &plus, 1.0), ("-x wall", &minus, -1.0)] {

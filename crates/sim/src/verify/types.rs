@@ -60,6 +60,20 @@ pub enum Mode {
     /// stay: they are 3-D boxes, no height field in them, and steel
     /// keeps no tangency courtesies.
     Radial,
+    /// The rotary kinds (M13): a ball-nose ladder posed RADIALLY about
+    /// a fitted axis - the tool lies down beside a standing bar, or
+    /// hangs under a laid one, and every height-field law below reads
+    /// that through a vertical column: rest material "cleared" above a
+    /// horizontal ball (it clears the RADIAL column, not the vertical
+    /// one), a horizontal shank band enclosed as a column standing up
+    /// through the part, a lateral rapid round the bar read as travel
+    /// under stock it never enters. Laws (a)-(d) and (c3) stand down;
+    /// the envelope (f) measures the ball exactly as `Envelope` does
+    /// (posed centers, never a +Z lift), and the band and rapid
+    /// questions belong to the radial field law of [`super::rotary`],
+    /// which reads rest material in the frame the work turns in. The
+    /// fixture laws stay: boxes, no height field.
+    Rotary,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -41,14 +41,15 @@ fn plane_normal() -> Point3 {
     unit(p(-PITCH.tan(), 0.0, 1.0))
 }
 
-/// The tangent centers of the line y = 0 on the offset surface,
-/// five steps ten millimeters apart.
+/// The tangent ladder of the line y = 0 on the offset surface, five
+/// steps ten millimeters apart, stated as the stamp reads its input:
+/// upright-ball TIPS, the tangent centres `r` down Z.
 fn ladder_centers(r: f64) -> Vec<Point3> {
     let n = plane_normal();
     (0..5)
         .map(|i| {
             let q = p(10.0 * i as f64 - 20.0, 0.0, 5.0 + PITCH.tan() * (10.0 * i as f64 - 20.0));
-            p(q.x + n.x * r, q.y + n.y * r, q.z + n.z * r)
+            p(q.x + n.x * r, q.y + n.y * r, q.z + n.z * r - r)
         })
         .collect()
 }
@@ -86,6 +87,13 @@ fn the_stamp_poses_every_cut_move_at_the_exact_lead() {
     )
     .unwrap();
     assert_eq!(out.moves.len(), 4);
+    // The pivot law: the posed tip backed up r along its pose is the
+    // planned ball centre (the input tip r up Z), to float dust.
+    for (mv, want) in out.moves.iter().zip(&centers[1..]) {
+        let a = axis_of(mv.axis.expect("posed"));
+        let c = p(mv.to.x + r * a.x, mv.to.y + r * a.y, mv.to.z + r * a.z);
+        assert!(len(c - p(want.x, want.y, want.z + r)) < 1e-9, "ball moved: {c:?} vs {want:?}");
+    }
     for mv in &out.moves {
         let a = axis_of(mv.axis.expect("a tangent ladder must pose every cut move"));
         assert!(

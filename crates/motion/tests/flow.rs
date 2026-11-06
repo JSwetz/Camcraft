@@ -403,26 +403,43 @@ fn ball(p: &mut Finish3DParams, q: FinishPattern) -> Finish3DParams {
 #[test]
 fn the_flow_pattern_walks_the_same_ground_as_the_five_axis_kind() {
     // Two truths, one code: same field, same kernel - the stamp is
-    // the only difference, so the cut positions are the same lattice
-    // points and the 3-axis path states no axis anywhere.
+    // the only difference, so the cut BALLS are the same (the pivot
+    // law: each posed tip is its upright twin's centre backed off r
+    // along the pose; leaning arcs ride as chords ON the same arc)
+    // and the 3-axis path states no axis anywhere.
     let blade = tube_about(16, 6, 12.0, 30.0);
     let p = ball(&mut finish(11.0, -11.0), FinishPattern::Flow);
+    let r = p.tool_diameter * 0.5;
     let three = flow3d(&blade, &p).expect("a tube flows in XYZ");
     let five = flow5d(&blade, &p, &AxisControl::default(), None).expect("and posed");
-    let cut = |t: &camcraft_motion::cl::Toolpath| -> Vec<(i64, i64, i64)> {
-        t.moves
+    let plan: Vec<(Point3, Point3)> = three
+        .moves
+        .iter()
+        .filter(|m| m.kind != MoveKind::Rapid)
+        .flat_map(|m| m.segments3(1e-4))
+        .map(|(a, b)| (Point3::new(a.x, a.y, a.z + r), Point3::new(b.x, b.y, b.z + r)))
+        .collect();
+    let mut held = [0.0, 0.0, 1.0];
+    for m in &five.moves {
+        if let Some(a) = m.axis {
+            held = a;
+        }
+        if m.kind == MoveKind::Rapid {
+            continue;
+        }
+        let c = Point3::new(m.to.x + r * held[0], m.to.y + r * held[1], m.to.z + r * held[2]);
+        let off = plan
             .iter()
-            .filter(|m| m.kind != MoveKind::Rapid)
-            .map(|m| {
-                (
-                    lattice_bits(m.to.x),
-                    lattice_bits(m.to.y),
-                    lattice_bits(m.to.z),
-                )
+            .map(|(a, b)| {
+                let d = *b - *a;
+                let l2 = d.dot(d);
+                let t = if l2 > 0.0 { ((c - *a).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                let e = c - Point3::new(a.x + d.x * t, a.y + d.y * t, a.z + d.z * t);
+                e.dot(e).sqrt()
             })
-            .collect()
-    };
-    assert_eq!(cut(&three), cut(&five), "the two doors walked different metal");
+            .fold(f64::INFINITY, f64::min);
+        assert!(off < 1e-3, "the two doors walked different metal: {c:?} is {off} off");
+    }
     assert!(
         three.moves.iter().all(|m| m.axis.is_none()),
         "flow3d posed an axis on a 3-axis path"

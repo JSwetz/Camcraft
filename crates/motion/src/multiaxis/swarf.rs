@@ -92,8 +92,10 @@ mod tests {
         }
         let q0 = p((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0, (a.z + b.z + c.z) / 3.0);
         let facets = vec![Triangle::new(a, b, c)];
+        // The stamp reads upright-ball TIPS: the tangent centres r
+        // down Z (the pivot law re-derives each posed tip from them).
         let centers = [-2.0, 0.0, 2.0]
-            .map(|t| p(q0.x + t + r * n.x, q0.y + r * n.y, q0.z + r * n.z));
+            .map(|t| p(q0.x + t + r * n.x, q0.y + r * n.y, q0.z + r * n.z - r));
         let path = Toolpath::new(
             centers
                 .windows(2)

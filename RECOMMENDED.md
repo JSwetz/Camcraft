@@ -9826,3 +9826,36 @@ at the scaled feed on planar ladders; 3-D first-stretch slowing owed.
 note: two gate agents stalled waiting on notifications; the main
 session ran this gate itself (debug 1455 passed, clippy, both heavy
 lanes), excluding ui (no ui change).
+
+## Rotary and 5-axis: the pivot law: six decisions (2026-11-06)
+
+(1) **Posed ball tools post the tip, not the centre.** The posted tip
+is the ball centre minus r·axis, on every multi-axis generator.
+Before this, the stamp kinds sat 2–4.5 mm off their plan (Contour5D
+on a bar was 4.20 mm off, Swarf 4.54 mm); after, they are 0.001 mm
+off. Dropped: correcting this in the post, which would leave the
+CLFile and the verifier disagreeing with the G-code.
+
+(2) **Rapids carry their pose.** A rapid between posed moves keeps the
+tool axis it travels with, so the scan, the verifier and the post all
+see the same orientation. Dropped: snapping to vertical on every
+rapid (a hidden rotary move).
+
+(3) **Rotary ops are judged radially (`Mode::Rotary`).** For wrapped
+toolpaths the verifier measures depth along the radius from the
+rotary axis, not as Z (`app::operation::rotary_law`, `sim::verify::rotary`).
+
+(4) **Posed-contact law f2** (`sim::verify::contact`): a posed tool's
+contact point comes from its axis and tip shape, never from the
+vertical-tool shortcut.
+
+(5) **A0B0C0 after a lean.** The post returns the rotaries to zero
+before the next upright section, rather than relying on the next
+op's first move.
+
+(6) **The stock scan lifts posed moves** instead of dropping them, so
+`dome_flow_is_envelope_clean` holds. Owed, tracked in Phase 13 / task
+follow-ups: the swarf_multi coarse rung (a convicted 0.39 mm gouge,
+reported, not silent), the rotary first move being a rapid from the
+world origin, the upright all-air finish being unjudged, Rotary Offset
+from the stock radius, and Rotary Parallel radial retracts.

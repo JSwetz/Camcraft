@@ -51,7 +51,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // drilled at one height across one another ARE the cross-drilled
     // intersection the part asks for - the crossing point is kerf in
     // both bores, not a collision.
-    if !matches!(cx.mode, Mode::Envelope | Mode::Revolve | Mode::Radial) {
+    if !matches!(cx.mode, Mode::Envelope | Mode::Revolve | Mode::Radial | Mode::Rotary) {
         let mut feeds: Vec<(usize, Point2, Point2, f64, f64)> = Vec::new();
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind != MoveKind::Feed {
@@ -173,7 +173,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // the cone and the wall beside the edge is steel.
     if !matches!(
         cx.mode,
-        Mode::Engrave | Mode::Envelope | Mode::Revolve | Mode::Radial | Mode::Cone
+        Mode::Engrave | Mode::Envelope | Mode::Revolve | Mode::Radial | Mode::Cone | Mode::Rotary
     ) {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind == MoveKind::Rapid {
@@ -320,7 +320,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // door law already measured as the hole. (c3)'s sweeps ride the
     // same column and stand with it; the kernel's chain self-check
     // and door margins are the band law here.
-    if !matches!(cx.mode, Mode::Engrave | Mode::Radial) {
+    if !matches!(cx.mode, Mode::Engrave | Mode::Radial | Mode::Rotary) {
         // Both boundaries matter: the region's loops carry the part
         // islands (holes in the region), the stock's carry its outer
         // walls wherever they stand beyond the region. A model-driven
@@ -490,7 +490,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // solid stock; the exit-the-hole-along-its-axis and outside-
     // stock_r traverse promises are the kernel's, asserted in
     // drilling's cross tests.
-    if !matches!(cx.mode, Mode::Revolve | Mode::Radial) {
+    if !matches!(cx.mode, Mode::Revolve | Mode::Radial | Mode::Rotary) {
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind != MoveKind::Rapid {
                 continue;
@@ -564,7 +564,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // model, no tolerance, an unscanable lattice - has proven
     // nothing, and proves-not reports as a gouge at the first cut,
     // never as silence (the law (b) slice-proof precedent).
-    if cx.mode == Mode::Envelope {
+    if matches!(cx.mode, Mode::Envelope | Mode::Rotary) {
         // The envelope ball is the CUT CIRCLE the path rolls: a
         // ground ball's great circle - the tool radius - or a turning
         // insert's smaller nose circle when the tool states one
@@ -628,6 +628,21 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
             None => Some(Warning::Gouge { at: first_cut }),
         };
         warns.extend(verdict);
+        // (f2) The posed-contact law: a LEANING cut claims its ball
+        // rests on the part (the lean laws are functions of the
+        // contact normal), so a leaning ball standing off the skin is
+        // a pose and a position that disagree - the pivot-law failure
+        // the ridge rest law cannot see (it judges only points two
+        // passes came near; an all-air pass is near nothing). Mill
+        // balls in Envelope only: the rotary kinds pose radially in
+        // air by design (their radial field law owns them), and a
+        // nose-centre turning path never leans.
+        if cx.mode == Mode::Envelope
+            && !nose_centers
+            && let Some((facets, tol)) = cx.model.zip(cx.finish_tol)
+        {
+            warns.extend(super::contact::posed_contact(path, facets, cx.tool, r, tol, cx.stock_to_leave));
+        }
     }
 
     warns

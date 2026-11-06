@@ -3,8 +3,10 @@
 //! (a sphere's envelope is rotation-invariant) and add the pose.
 //! The exact angle identities of the pose law are settled at the
 //! stamp (`multiaxis::stamp`'s unit tests, one clean facet); what is
-//! tested HERE is the composition: positions bit-for-bit unchanged,
-//! rapids upright, every stated pose inside its cone (with the dome
+//! tested HERE is the composition: the BALLS unchanged (the pivot
+//! law - every posted tip is its planned centre backed off `R` along
+//! the pose, so the tips move and the spheres do not), rapids under
+//! the pose they inherit, every stated pose inside its cone (with the dome
 //! mesh's own angular discretization budgeted), and the refusals.
 //!
 //! Gate map (M4.4): covers camcraft_motion::cl, camcraft_motion::finishing3d,
@@ -101,13 +103,50 @@ fn control(lead: f64, lag: f64, clamp: Option<f64>) -> AxisControl {
     }
 }
 
-/// Every axis a cut move states, with its move's END position.
+/// Every LEANING axis a cut move states, with its move's BALL CENTRE
+/// (the stream's tip backed up `R` along the pose - the pivot law).
 fn cut_axes(path: &camcraft_motion::cl::Toolpath) -> Vec<(Point3, Point3)> {
     path.moves
         .iter()
         .filter(|m| m.kind != MoveKind::Rapid)
-        .filter_map(|m| m.axis.map(|a| (m.to, p3(a[0], a[1], a[2]))))
+        .filter_map(|m| m.axis.filter(|a| !camcraft_motion::cl::is_vertical(a)).map(|a| (centre_of(m.to, a), p3(a[0], a[1], a[2]))))
         .collect()
+}
+
+fn centre_of(tip: Point3, a: [f64; 3]) -> Point3 {
+    p3(tip.x + R * a[0], tip.y + R * a[1], tip.z + R * a[2])
+}
+
+/// Distance from `c` to the nearest ball-centre chord of an upright
+/// ball's ladder (its tips lifted by `R`).
+fn off_ladder(plan: &camcraft_motion::cl::Toolpath, c: Point3) -> f64 {
+    let mut best = f64::INFINITY;
+    for m in &plan.moves {
+        for (a, b) in m.segments3(1e-4) {
+            let (a, b) = (p3(a.x, a.y, a.z + R), p3(b.x, b.y, b.z + R));
+            let d = b - a;
+            let l2 = d.dot(d);
+            let t = if l2 > 0.0 { ((c - a).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+            let e = c - p3(a.x + d.x * t, a.y + d.y * t, a.z + d.z * t);
+            best = best.min(e.dot(e).sqrt());
+        }
+    }
+    best
+}
+
+/// The pivot law at generator scale: every posted move's ball - its
+/// tip lifted `R` along the pose the machine holds there (the last
+/// stated; the post keeps it modal) - is a ball of the upright plan.
+fn balls_are_the_plan(plan: &camcraft_motion::cl::Toolpath, got: &camcraft_motion::cl::Toolpath) {
+    let mut held = [0.0, 0.0, 1.0];
+    for m in &got.moves {
+        if let Some(a) = m.axis {
+            held = a;
+        }
+        let c = centre_of(m.to, held);
+        let d = off_ladder(plan, c);
+        assert!(d < 2e-3, "a posted ball stands {d} mm off the plan at {c:?} ({m:?})");
+    }
 }
 
 /// The angular slack a coarse cap mesh buys: a facet's normal stands
@@ -115,30 +154,32 @@ fn cut_axes(path: &camcraft_motion::cl::Toolpath) -> Vec<(Point3, Point3)> {
 const MESH_BAND: f64 = 0.22; // rad, generous for 16 longitudes at this cap
 
 #[test]
-fn contour5d_positions_are_the_waterlines_bit_for_bit() {
+fn contour5d_balls_are_the_waterlines_balls() {
+    // The pivot law: the posed rings cut with the waterline's own
+    // BALLS (the tips move - each is its centre backed off R along
+    // the pose - the spheres do not).
     let facets = dome(15.0, 0.9, 8, 16);
     let base = waterline(&facets, &finish(12.0, 9.8)).unwrap();
     let got = contour5d(&facets, &finish(12.0, 9.8), &control(20.0, 0.0, Some(45.0)), None).unwrap();
-    assert_eq!(got.moves.len(), base.moves.len());
-    for (g, b) in got.moves.iter().zip(&base.moves) {
-        assert_eq!((g.from.x, g.from.y, g.from.z), (b.from.x, b.from.y, b.from.z));
-        assert_eq!((g.to.x, g.to.y, g.to.z), (b.to.x, b.to.y, b.to.z));
-        assert_eq!(g.kind, b.kind);
-        assert_eq!(g.feed, b.feed);
-        assert_eq!(g.arc.is_some(), b.arc.is_some());
-    }
+    balls_are_the_plan(&base, &got);
     assert!(!got.is_prismatic(), "a dome's rings must lean somewhere");
     assert!(got.is_chained());
 }
 
 #[test]
-fn rapids_hold_no_angle() {
+fn rapids_hold_the_pose_they_inherit() {
+    // The post keeps the tilt modal: a rapid travels under the pose
+    // it inherits (none before the first lean), never a new one - the
+    // ball lifts off its last contact along the axis it cut with.
     let facets = dome(15.0, 0.9, 8, 16);
     let got = contour5d(&facets, &finish(12.0, 9.8), &control(30.0, 0.0, None), None).unwrap();
-    assert!(
-        got.moves.iter().all(|m| m.kind != MoveKind::Rapid || m.axis.is_none()),
-        "a rapid stated a tool angle"
-    );
+    let mut held: Option<[f64; 3]> = None;
+    for m in &got.moves {
+        if m.kind == MoveKind::Rapid {
+            assert_eq!(m.axis, held, "a rapid changed the pose it inherited: {m:?}");
+        }
+        held = m.axis.or(held);
+    }
     assert!(
         !cut_axes(&got).is_empty(),
         "a ring ladder stated no pose anywhere"
@@ -189,17 +230,13 @@ fn the_cone_holds_at_generator_scale() {
 
 #[test]
 fn parallel5d_poses_a_followed_raster() {
-    // The raster's choreography through the same stamp: positions
-    // equal the plain parallel path, and the lines lean.
+    // The raster's choreography through the same stamp: the balls
+    // are the plain parallel path's, and the lines lean.
     let facets = dome(15.0, 1.1, 8, 16);
     let p = finish(12.0, 6.0);
     let base = camcraft_motion::finishing3d::parallel(&facets, &p).unwrap();
     let got = parallel5d(&facets, &p, &control(15.0, 10.0, Some(60.0)), None).unwrap();
-    assert_eq!(got.moves.len(), base.moves.len());
-    for (g, b) in got.moves.iter().zip(&base.moves) {
-        assert_eq!(g.to, b.to);
-        assert_eq!(g.kind, b.kind);
-    }
+    balls_are_the_plan(&base, &got);
     let axes = cut_axes(&got);
     assert!(!axes.is_empty(), "a raster over a dome stated no pose");
     for (c, a) in axes {

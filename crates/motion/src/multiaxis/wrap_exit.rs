@@ -3,15 +3,21 @@
 //! around the fitted axis of [`super::axis`], posed by the same lean
 //! law the rotary finishing kinds use.
 //!
-//! Positions map back at the plan's own ρ plus one tool radius (a
-//! radial tool's CL stands r outside its tangent cylinder - one law
-//! whether the profile is a ball or a flat), every wrap arc is
-//! chorded (no wrap circle is a world circle), and - the law this
-//! exit adds to the twins' - no s-sweep is a world LINE either: a
-//! wrap straight laps the axis, so each resampled chord spans at
-//! most ARC_FIT_TOL of sagitta on the position circle. Rapids hold
-//! no pose; cut moves stand RADIAL, computed in world coordinates
-//! straight off the axis line from the very position being emitted
+//! Ball centers map back at the plan's own ρ plus one tool radius (a
+//! radial ball's CENTER stands r outside its tangent cylinder), and
+//! the emitted point is the TIP under that center along the pose it
+//! holds - on the cylinder itself for a pure radial (the M13 pivot
+//! law, [`super::retip`]: the stream locates the tip, and a center
+//! posted as a tip stood every level one radius off its skin). Every
+//! wrap arc is chorded (no wrap circle is a world circle), and - the
+//! law this exit adds to the twins' - no s-sweep is a world LINE
+//! either: a wrap straight laps the axis, so each resampled chord
+//! spans at most ARC_FIT_TOL of sagitta on the position circle.
+//! Rapids state the pure radial (the post's tilt is modal, and a hop
+//! lapping the bar with the last cut's fixed direction would swing
+//! the tool through it); cut moves stand RADIAL with the lean, both
+//! computed in world coordinates straight off the axis line from the
+//! very center being emitted
 //! (so the stamped axis and the developed point share bits and the
 //! two frames pose identically), with [`super::tilt`]'s lean applied
 //! about it. A radial feed - a dive leg running straight at the axis
@@ -29,7 +35,9 @@ use crate::geometry::Point3;
 use crate::machining2d::{GenError, ARC_FIT_TOL};
 
 use super::axis::Axis;
+use super::retip::tip_of;
 use super::tilt::{command_axis, AxisControl};
+use crate::cl::normalize_axis;
 
 /// The world exit: `base` is the ladder's plan in wrap coordinates
 /// (x = s, y = v, z = ρ), mapped and posed about `ax`; `rho_ref` is
@@ -66,18 +74,19 @@ pub(super) fn wrap_exit(
             ax.origin.z + pt.y * ax.dir.z + rc * n.z,
         )
     };
-    let mut b = PathBuilder::new(map(base.start().unwrap_or(Point3::ZERO)));
+    // `map` names the BALL CENTER (the plan's level plus one radius,
+    // out along the radial); the emitted point is the tip that center
+    // stands on under the pose it holds ([`super::retip`]).
+    let c0 = map(base.start().unwrap_or(Point3::ZERO));
+    let mut b = PathBuilder::new(tip_of(c0, None, r));
+    let mut held: Option<[f64; 3]> = None;
     for mv in &base.moves {
         let air = mv.kind == MoveKind::Rapid;
-        let pose = |w: Point3, t: Point3, b: &mut PathBuilder| {
-            if air {
-                b.set_axis(None);
-                return;
-            }
+        let pose = |w: Point3, t: Point3, held: Option<[f64; 3]>| -> Option<[f64; 3]> {
             // The radial computed in world coordinates straight off
-            // the axis line, from the very position being emitted -
-            // so the stamped axis and the developed point share bits
-            // and agree to the last ulp (the twins' pose law).
+            // the axis line, from the very center being emitted - so
+            // the stamped axis and the developed point share bits and
+            // agree to the last ulp (the twins' pose law).
             let d = w - ax.origin;
             let s = d.dot(ax.dir);
             let foot = Point3::new(d.x - ax.dir.x * s, d.y - ax.dir.y * s, d.z - ax.dir.z * s);
@@ -85,26 +94,28 @@ pub(super) fn wrap_exit(
             // the 1e-24 squared bound is set_axis's own refusal
             // threshold, so a held pose is always a direction.
             if !foot.is_finite() || foot.dot(foot) <= 1e-24 {
+                if air {
+                    return held; // a rapid keeps the tilt it has
+                }
                 eprintln!(
                     "multiaxis: a rotary offset cut stands ON the axis at {w:?}; the move holds vertical"
                 );
-                b.set_axis(Some([0.0, 0.0, 1.0]));
-                return;
+                return Some([0.0, 0.0, 1.0]);
             }
-            if c.lead_deg == 0.0 && c.lag_deg == 0.0 && c.max_tilt_deg.is_none() {
+            // A rapid laps the work with the head turning WITH it: the
+            // post keeps the tilt modal, so a rapid that stated nothing
+            // would sweep the last cut's fixed direction round the
+            // bar. It states the pure radial - no travel to lead in.
+            if air || (c.lead_deg == 0.0 && c.lag_deg == 0.0 && c.max_tilt_deg.is_none()) {
                 // No lean asked: the radial stands, and it is stamped
-                // from the RAW foot so set_axis's one normalization is
-                // the vector's only division - the pose then matches
-                // the position's own radial to the bit, not the ulp.
-                b.set_axis(Some([foot.x, foot.y, foot.z]));
-                return;
+                // from the RAW foot so the one normalization is the
+                // vector's only division - the pose then matches the
+                // position's own radial to the bit, not the ulp.
+                return normalize_axis([foot.x, foot.y, foot.z]);
             }
             let n = match normalize(&foot) {
                 Some(n) => n,
-                None => {
-                    b.set_axis(Some([0.0, 0.0, 1.0]));
-                    return;
-                }
+                None => return Some([0.0, 0.0, 1.0]),
             };
             // A radial feed (a dive leg runs straight at the axis) has
             // no tangent plane to lead in: the law would hold the
@@ -121,12 +132,12 @@ pub(super) fn wrap_exit(
                 t
             };
             match command_axis(n, t, c) {
-                Some(a) => b.set_axis(Some([a.x, a.y, a.z])),
+                Some(a) => Some([a.x, a.y, a.z]),
                 None => {
                     eprintln!(
                         "multiaxis: no lean exists at world point {w:?}; the move holds radial"
                     );
-                    b.set_axis(Some([n.x, n.y, n.z]));
+                    Some([n.x, n.y, n.z])
                 }
             }
         };
@@ -183,8 +194,10 @@ pub(super) fn wrap_exit(
                 };
                 let (qa, qb) = (at(i as f64 / n as f64), at((i + 1) as f64 / n as f64));
                 let (wf, wt) = (map(qa), map(qb));
-                pose(wt, wt - wf, &mut b);
-                b.push(mv.kind, wt, mv.feed);
+                let a = pose(wt, wt - wf, held);
+                b.set_axis(a);
+                held = a;
+                b.push(mv.kind, tip_of(wt, a, r), mv.feed);
             }
         }
     }

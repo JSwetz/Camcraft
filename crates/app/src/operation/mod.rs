@@ -104,6 +104,7 @@ use boundary_ctx::*;
 mod job;
 pub use job::*;
 mod generate;
+mod rotary_law;
 pub use generate::*;
 #[cfg(test)]
 mod tests;

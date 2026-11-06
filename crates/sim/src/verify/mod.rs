@@ -92,7 +92,17 @@
 //!   below, or leaves above, the model surface by more than
 //!   `finish_tol` plus the scan's quantization floor. It replaces
 //!   [`Warning::Gouge`] for ball paths, whose tangency the distance
-//!   law would misjudge.
+//!   law would misjudge. Its posed half, law (f2) in [`contact`]:
+//!   in `Mode::Envelope` every cutting move holding a LEANING pose
+//!   claims contact (the lean is a function of the contact normal),
+//!   so its ball centre - tip plus `r` along the pose - must stand
+//!   within `r + finish_tol + leave` (plus the stamp's 0.01 contact
+//!   lattice) of the mesh, or the verdict reports the gap as rest.
+//!   Shank escapes in air are excused exactly where the upright band
+//!   stack at the same centre would enter the solid. This is what
+//!   convicts a pose turned about the tip instead of the ball centre
+//!   (the ridge rest law only judges points two passes came near, so
+//!   an all-air pass never reaches it).
 //!
 //! With [`VerifyContext::model`] set (the 3-D pocket, M2.1a) the
 //! boundary is depth-dependent: the gouge law adds the model's
@@ -122,9 +132,12 @@
 pub use crate::tools::ToolGeom;
 
 
+mod contact;
 mod engine;
 mod laws;
 mod probe;
+mod rotary;
+mod rotary_geom;
 mod solid;
 mod solid_index;
 mod sweep;
@@ -135,4 +148,5 @@ pub use types::{FixturePart, Mode, VerifyContext, Warning};
 pub use engine::verify;
 pub use laws::{bands_vs_fixtures, rapids_vs_fixtures};
 pub use probe::Cutter;
+pub use rotary::{rotary_hits, RotaryAxis, RotaryLaw};
 pub use solid::{SolidLaw, solid_hits};

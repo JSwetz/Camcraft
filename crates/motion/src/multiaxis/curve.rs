@@ -9,10 +9,14 @@
 //!
 //! The station law is the contact geometry, winding-honest. At a
 //! chain vertex the incident facets group into planes (smooth fans
-//! merge; an edge stays two planes, a corner three); the ball that
-//! touches every plane at once stands on their bisector at the
-//! height `h = r / max_i |cos(c, n_i)|` that puts it exactly a
-//! radius off each. Which side of the bisector line is resolved by
+//! merge; an edge stays two planes, a corner three); the ball stands
+//! on their bisector at the smallest height that keeps it exactly a
+//! radius off the vertex's own facets - `r / cos` in a groove, where
+//! the faces run on toward the ball, and `r` on a convex edge or
+//! corner, where they fall away and the ball rides the edge line
+//! itself. Every station is that BALL CENTRE; the stream states the
+//! tip `r` back down the pose (the pivot law, `super::retip`), and
+//! rapids travel under the pose they inherit. Which side of the bisector line is resolved by
 //! the mesh itself: a closed, consistently wound shell (edge-
 //! pairing closure, signed-volume outwardness) points its normals
 //! away from the material and settles it exactly; anything else -
@@ -37,7 +41,8 @@ use crate::finishing3d::closest_pt_tri;
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
-use super::avoid::{escape_axis, shank_hits, Shank};
+use super::avoid::{escape_axis, shank_hits_at, Shank};
+use super::retip::tip_of;
 use super::stamp::ESCAPE_CAP;
 use super::tilt::{command_axis, AxisControl};
 
@@ -284,6 +289,49 @@ fn group_planes(facets: &[Triangle], incident: &[usize]) -> Fan {
     Fan { planes, incident: incident.to_vec() }
 }
 
+/// The stand-off along `c` at which the ball first stands clear of the
+/// vertex's own facets - TOUCHING them, never floating: the smallest
+/// `h` whose centre `q + h·c` keeps distance `r` from every incident
+/// facet. In a groove (the faces run on toward the ball) that is the
+/// plane law `r / cos`; on a CONVEX edge or corner the faces fall away
+/// behind the ball and it is `r` exactly - the ball rides the edge
+/// itself. (The plane law alone stood a convex-edge ball `r·(√2 - 1)`
+/// off a right-angle edge: a pass that touched nothing.) Bisection on
+/// the distance, which grows along the ray for a fan the ball sits
+/// outside of; `None` when no stand-off within five radii clears,
+/// and the caller's plane law speaks instead.
+fn touch_height(q: Point3, c: Point3, fan: &Fan, facets: &[Triangle], r: f64) -> Option<f64> {
+    let gap = |h: f64| -> f64 {
+        let p = add(q, scale(c, h));
+        fan.incident
+            .iter()
+            .filter_map(|&fi| facets.get(fi))
+            .map(|f| {
+                let d = sub(p, closest_pt_tri(p, &[f.a, f.b, f.c]));
+                dot(d, d).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min)
+            - r
+    };
+    if gap(r) >= -1e-9 * r.max(1.0) {
+        return Some(r);
+    }
+    let (mut lo, mut hi) = (r, 5.0 * r);
+    let g = gap(hi);
+    if g.is_nan() || g < 0.0 {
+        return None;
+    }
+    for _ in 0..64 {
+        let mid = 0.5 * (lo + hi);
+        if gap(mid) >= 0.0 {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
+}
+
 /// The ball's resting direction at a fan, with its stand-off height
 /// `h`: `CL = q + h * dir`. The winding-verdict mesh answers once;
 /// every other mesh is asked of every quadrant, best-air first.
@@ -300,7 +348,7 @@ fn rest_at(
 ) -> Result<(Point3, f64), GenError> {
     let height = |c: Point3| -> Option<f64> {
         let maxd = fan.planes.iter().fold(0.0f64, |m, p| dot(c, p.n).abs().max(m));
-        (maxd >= 0.2).then(|| r / maxd)
+        (maxd >= 0.2).then(|| touch_height(q, c, fan, facets, r).unwrap_or(r / maxd))
     };
     let cands: Vec<Point3> = match flip {
         // A shell the winding law vouches for: the oriented fan sum
@@ -417,8 +465,10 @@ fn rest_at(
 
 /// The multi-axis contour: the drive chains walked with the ball
 /// tangent to the model, every cut move posed by stage C's lean law
-/// (and, with a `shank`, stage F's dodge within the cone). Rapids
-/// state no pose; a ring chain closes itself.
+/// (and, with a `shank`, stage F's dodge within the cone). Moves
+/// state TIPS (each ball centre backed off `r` along its pose);
+/// rapids travel under the pose they inherit; a ring chain closes
+/// itself.
 pub fn contour_curve(
     chains: &[Vec<Point3>],
     facets: &[Triangle],
@@ -512,14 +562,21 @@ pub fn contour_curve(
     let band = 0.01 + 1e-6 * r;
     let hop_z = p.retract_z.unwrap_or(p.clearance_z);
 
-    let mut b = PathBuilder::new(Point3::ZERO);
+    // The builder wakes at the first chain's hop point, not at the
+    // world origin: a path whose first rapid starts at (0, 0, 0) - a
+    // part corner as often as not - reads as a rapid out of solid.
+    let mut builder: Option<PathBuilder> = None;
     let mut held = [0.0f64, 0.0, 1.0];
+    // The pose the machine holds after the last chain (None before
+    // any chain has stated one): what every rapid travels under.
+    let mut last_pose: Option<[f64; 3]> = None;
     for (ci, (pts, ring)) in live.iter().enumerate() {
         let k = if *ring { pts.len() - 1 } else { pts.len() };
+        // The dense walk (`curve_walk`): every chain point's rest, the
+        // segments subdivided until their centre chords keep the
+        // skin, and the ball rolled round every convex vertex.
         let mut prev: Option<Point3> = None;
-        let mut stations: Vec<(Point3, [f64; 3])> = Vec::with_capacity(k);
-        for i in 0..k {
-            let q = pts[i];
+        let mut law = |q: Point3, i: usize| -> Result<(Point3, f64), GenError> {
             let fan = fan_at(q, facets, &map, cell, eps2).ok_or_else(|| {
                 GenError::Invalid(format!(
                     "drive curve {} point {} stands off the model surface - re-pick it, or \
@@ -528,25 +585,30 @@ pub fn contour_curve(
                     i + 1
                 ))
             })?;
-            let (a, z) = (
-                pts[if *ring { (i + k - 1) % k } else if i == 0 { 0 } else { i - 1 }],
-                pts[if *ring { (i + 1) % k } else { (i + 1).min(k - 1) }],
-            );
-            let t = unit(sub(z, a)).or_else(|| unit(sub(*pts.last()?, pts[0]))).unwrap_or(Point3::new(1.0, 0.0, 0.0));
             let (cdir, h) = rest_at(q, &fan, facets, &boxes, r, band, flip, prev)?;
             prev = Some(cdir);
+            Ok((cdir, h))
+        };
+        let rests = super::curve_walk::walk(&pts[..k], *ring, r, &mut law)?;
+        let n = rests.len();
+        let mut stations: Vec<(Point3, [f64; 3])> = Vec::with_capacity(n);
+        for (j, rs) in rests.iter().enumerate() {
+            let (a, z) = (rests[j.saturating_sub(1)].centre, rests[(j + 1).min(n - 1)].centre);
+            let t = unit(sub(z, a)).or_else(|| unit(sub(*pts.last()?, pts[0]))).unwrap_or(Point3::new(1.0, 0.0, 0.0));
+            let cdir = rs.dir;
             let axis = command_axis(cdir, t, c)
                 .map(|v| [v.x, v.y, v.z])
                 .ok_or_else(|| {
                     GenError::Invalid(format!(
-                        "the lean law cannot frame a pose at drive curve {} point {}",
+                        "the lean law cannot frame a pose at drive curve {} station {}",
                         ci + 1,
-                        i + 1
+                        j + 1
                     ))
                 })?;
-            let cl = add(q, scale(cdir, h));
+            let cl = rs.centre;
+            let i = j;
             let pose = match shank {
-                Some(s) if shank_hits(cl, axis, r, s, facets, &boxes) => {
+                Some(s) if shank_hits_at(cl, axis, r, s, facets, &boxes) => {
                     let cone = c.max_tilt_deg.unwrap_or(ESCAPE_CAP).min(ESCAPE_CAP);
                     escape_axis(cl, axis, cdir, held, cone, r, s, facets, &boxes).ok_or_else(|| {
                         GenError::Invalid(format!(
@@ -564,27 +626,40 @@ pub fn contour_curve(
             held = pose;
             stations.push((cl, pose));
         }
+        // The pivot law ([`super::retip`]): a station IS a ball
+        // centre, and the stream locates the tip - `r` back down the
+        // pose the station holds. A rapid states the pose it travels
+        // under once anything has been posed - the last station's,
+        // which the post holds modally anyway - so the ball rises off
+        // its last contact along the axis it cut with, never swinging
+        // upright through the surface it just left.
+        let Some(&(cl0, _)) = stations.first() else { continue };
+        let t0 = tip_of(cl0, Some(stations[0].1), r);
+        let b = builder.get_or_insert_with(|| PathBuilder::new(Point3::new(t0.x, t0.y, hop_z)));
         if let Some((cl0, pose0)) = stations.first() {
-            b.set_axis(None);
-            b.push(MoveKind::Rapid, Point3::new(cl0.x, cl0.y, hop_z), None);
+            let t0 = tip_of(*cl0, Some(*pose0), r);
+            b.set_axis(last_pose);
+            // Off the last chain straight up first (the ball leaves
+            // its contact along +Z, never sideways through the rim
+            // it rode), then across at the hop plane.
+            let at = b.at();
+            b.push(MoveKind::Rapid, Point3::new(at.x, at.y, hop_z), None);
+            b.push(MoveKind::Rapid, Point3::new(t0.x, t0.y, hop_z), None);
             b.set_axis(Some(*pose0));
-            b.push(MoveKind::Plunge, *cl0, Some(p.plunge_feed));
+            b.push(MoveKind::Plunge, t0, Some(p.plunge_feed));
         }
+        // A ring's walk already ends where it began (home at the seam).
         for (cl, pose) in stations.iter().skip(1) {
             b.set_axis(Some(*pose));
-            b.push(MoveKind::Feed, *cl, Some(p.feed));
+            b.push(MoveKind::Feed, tip_of(*cl, Some(*pose), r), Some(p.feed));
         }
-        if *ring {
-            // Home at the seam: the ring's closing move ends where
-            // it started, under the first vertex's pose again.
-            if let Some((cl0, pose0)) = stations.first() {
-                b.set_axis(Some(*pose0));
-                b.push(MoveKind::Feed, *cl0, Some(p.feed));
-            }
-        }
+        last_pose = stations.last().map(|s| s.1).or(last_pose);
     }
+    let Some(mut b) = builder else {
+        return Err(GenError::Empty("multi-axis contour walked no station on any chain".into()));
+    };
     let last = b.at();
-    b.set_axis(None);
+    b.set_axis(last_pose);
     b.push(MoveKind::Rapid, Point3::new(last.x, last.y, hop_z), None);
     Ok(b.finish())
 }
@@ -611,10 +686,14 @@ mod tests {
 
     #[test]
     fn a_top_edge_chain_rests_on_the_bisector() {
-        // The box's top-front edge (y = 0, z = 15): the ball that
-        // touches BOTH planes stands a radius off each - centre
-        // (y, z) = (-r, 15 + r) on the 45-degree bisector, its axis
-        // leaning off the fold.
+        // The box's top-front edge (y = 0, z = 15) is CONVEX: both
+        // faces fall away behind the ball, so the ball rides the edge
+        // itself - centre a radius out along the 45-degree bisector,
+        // (y, z) = (-r/√2, 15 + r/√2), touching the edge line (the
+        // old plane law stood it at (-r, 15 + r), r·(√2 - 1) of air
+        // off everything). Its axis leans off the fold, and the
+        // stream locates the TIP: the centre backed off r along the
+        // pose - with no lead, the edge point itself (the pivot law).
         let facets = boxy();
         let chain = vec![vec![
             Point3::new(5.0, 0.0, 15.0),
@@ -622,17 +701,46 @@ mod tests {
             Point3::new(35.0, 0.0, 15.0),
         ]];
         let path = contour_curve(&chain, &facets, &cp(), &AxisControl::default(), None).unwrap();
-        let mids: Vec<_> = path.moves.iter().filter(|m| m.kind == MoveKind::Feed).collect();
-        assert_eq!(mids.len(), 2);
-        let mid = mids[0].to;
+        let mids: Vec<_> = path.moves.iter().filter(|m| m.kind != MoveKind::Rapid).collect();
+        assert!(mids.len() >= 2, "the edge walk stated {} stations", mids.len());
         let r = 3.0;
-        let want = Point3::new(20.0, -r, 15.0 + r);
-        assert!(
-            dot(sub(mid, want), sub(mid, want)).sqrt() < 1e-6,
-            "centre {mid:?} not the bisector rest {want:?}"
-        );
-        let ax = mids[0].axis.expect("a cut move poses");
-        assert!(ax[1] < -0.6 && ax[2] > 0.6, "pose {ax:?} should lean off the fold");
+        let h = r * std::f64::consts::FRAC_1_SQRT_2;
+        let mut reached = (f64::INFINITY, f64::NEG_INFINITY);
+        for m in &mids {
+            let a = m.axis.expect("a cut move poses");
+            let c = add(m.to, scale(Point3::new(a[0], a[1], a[2]), r));
+            assert!(
+                (c.y + h).abs() < 1e-6 && (c.z - 15.0 - h).abs() < 1e-6,
+                "centre {c:?} not on the edge rest (y, z) = ({}, {})",
+                -h,
+                15.0 + h
+            );
+            assert!(
+                m.to.y.abs() < 1e-6 && (m.to.z - 15.0).abs() < 1e-6,
+                "tip {:?} should stand on the edge it rides",
+                m.to
+            );
+            assert!(a[1] < -0.6 && a[2] > 0.6, "pose {a:?} should lean off the fold");
+            reached = (reached.0.min(c.x), reached.1.max(c.x));
+        }
+        assert!(reached.0 < 5.1 && reached.1 > 34.9, "the walk did not span the chain: {reached:?}");
+    }
+
+    /// Every cut station's ball touches the box: its centre (tip + r
+    /// along the pose) stands exactly r off the nearest facet.
+    fn all_touch(path: &Toolpath, facets: &[Triangle], r: f64) {
+        for m in path.moves.iter().filter(|m| m.kind != MoveKind::Rapid && m.kind != MoveKind::Plunge) {
+            let a = m.axis.expect("a station poses");
+            let c = add(m.to, scale(Point3::new(a[0], a[1], a[2]), r));
+            let d = facets
+                .iter()
+                .map(|f| {
+                    let e = sub(c, closest_pt_tri(c, &[f.a, f.b, f.c]));
+                    dot(e, e).sqrt()
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!((d - r).abs() < 1e-6, "a station's ball stands {d} off the part, not r: {c:?}");
+        }
     }
 
     #[test]
@@ -649,7 +757,9 @@ mod tests {
             .rev()
             .find(|m| m.kind == MoveKind::Feed)
             .unwrap();
-        assert!((last_feed.to.z - (15.0 + 3.0)).abs() < 1e-6);
+        // The ball centre stands a radius over the top (15 + r); the
+        // upright stream states its TIP, on the face itself.
+        assert!((last_feed.to.z - 15.0).abs() < 1e-6, "tip {:?}", last_feed.to);
         let ax = last_feed.axis.unwrap();
         assert!((ax[2] - 1.0).abs() < 1e-9, "a floor curve holds vertical, got {ax:?}");
     }
@@ -666,7 +776,7 @@ mod tests {
     }
 
     #[test]
-    fn a_ring_closes_and_rapids_hold_no_pose() {
+    fn a_ring_closes_and_rapids_hold_the_pose_they_inherit() {
         let facets = boxy();
         let z = 7.5;
         let mut ring = Vec::new();
@@ -685,37 +795,42 @@ mod tests {
             let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
             (l - 1.0).abs() < 1e-9
         })));
+        // The first hop states nothing (nothing is posed yet); every
+        // later rapid travels under the pose the machine already
+        // holds - the post keeps it modal, the stream says so.
+        let mut held: Option<[f64; 3]> = None;
         for m in &path.moves {
             if m.kind == MoveKind::Rapid {
-                assert!(m.axis.is_none(), "a rapid stated a pose: {m:?}");
+                assert_eq!(m.axis, held, "a rapid changed the pose it inherited: {m:?}");
             }
+            held = m.axis.or(held);
         }
-        // Four vertical corner edges: the ball rests OUTSIDE each,
-        // a radius off both walls, its axis the horizontal bisector
-        // - and the ring's last chord brings it home to station 0.
-        let feeds: Vec<_> = path.moves.iter().filter(|m| m.kind == MoveKind::Feed).collect();
-        assert_eq!(feeds.len(), 4);
-        let plunge = path
+        // Four vertical CONVEX corner edges: the ball rides each wall
+        // a radius off it and ROLLS round each corner edge on the
+        // radius-r cylinder about it, touching the edge line all the
+        // way (no straight chord cuts the corner, no station floats
+        // off it) - and the walk brings it home to station 0.
+        all_touch(&path, &facets, 3.0);
+        let centres: Vec<(Point3, [f64; 3])> = path
             .moves
             .iter()
-            .find(|m| m.kind == MoveKind::Plunge)
-            .expect("a first station");
+            .filter(|m| m.kind != MoveKind::Rapid)
+            .map(|m| {
+                let a = m.axis.expect("posed");
+                (add(m.to, scale(Point3::new(a[0], a[1], a[2]), 3.0)), a)
+            })
+            .collect();
+        let (first, last) = (centres[0].0, centres[centres.len() - 1].0);
+        assert!(dot(sub(first, last), sub(first, last)).sqrt() < 1e-9, "the ring did not come home");
+        // Round the (+,-) corner the roll passes the horizontal
+        // bisector out of the corner edge.
+        let h = 3.0 * std::f64::consts::FRAC_1_SQRT_2;
         assert!(
-            dot(sub(plunge.to, Point3::new(-3.0, -3.0, 7.5)), sub(plunge.to, Point3::new(-3.0, -3.0, 7.5))).sqrt()
-                < 1e-6,
-            "station 0 rests at {:?}, not outside the (-,-) corner",
-            plunge.to
-        );
-        let ax = feeds[0].axis.unwrap();
-        assert!(
-            (ax[0] - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9
-                && (ax[1] + std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9
-                && ax[2].abs() < 1e-9,
-            "corner-groove bisector should be horizontal-out at (+,-): {ax:?}"
-        );
-        assert!(
-            dot(sub(feeds[3].to, plunge.to), sub(feeds[3].to, plunge.to)).sqrt() < 1e-9,
-            "the ring did not come home"
+            centres.iter().any(|(c, a)| {
+                let e = sub(*c, Point3::new(40.0 + h, -h, 7.5));
+                dot(e, e).sqrt() < 0.2 && a[2].abs() < 1e-9 && a[0] > 0.6 && a[1] < -0.6
+            }),
+            "the roll never passed the (+,-) corner's bisector"
         );
     }
 }

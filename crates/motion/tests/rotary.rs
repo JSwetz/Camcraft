@@ -199,26 +199,68 @@ fn a_mesh_too_coarse_to_read_is_refused() {
 
 // ---- the contour law ---------------------------------------------
 
-#[test]
-fn the_rotary_contour_is_the_waterline_posed_radially() {
-    let facets = lathe_bar(16);
-    let p = finish(28.0, 0.0);
-    let want = finishing3d::waterline(&facets, &p).expect("the plain rings run");
-    let got = rotary_contour(&facets, &p, &control(0.0, 0.0, None)).expect("the same rings, turned");
-    assert_eq!(got.moves.len(), want.moves.len(), "the exit kept every move");
-    for (a, w) in got.moves.iter().zip(want.moves.iter()) {
-        assert_eq!(a.kind, w.kind);
-        assert_eq!((a.to.x, a.to.y, a.to.z), (w.to.x, w.to.y, w.to.z), "positions ride bit-exact");
-        match a.kind {
-            MoveKind::Rapid => assert!(a.axis.is_none(), "a rapid states no pose"),
-            _ => {
-                let ax = a.axis.expect("a cut move about the axis poses");
-                let av = p3(ax[0], ax[1], ax[2]);
-                assert!((av.z).abs() < 1e-9, "the pose left the radial plane: {av:?}");
-                assert!((unit_angle(av, p3(a.to.x, a.to.y, 0.0)) ).abs() < 1e-9, "the pose is not the radial");
-            }
+/// The ball center a posed tip stands under: `r` up the pose (the
+/// stream's tip contract), upright where the move states none.
+fn center(m: &camcraft_motion::cl::Move, r: f64) -> Point3 {
+    let a = m.axis.unwrap_or([0.0, 0.0, 1.0]);
+    p3(m.to.x + r * a[0], m.to.y + r * a[1], m.to.z + r * a[2])
+}
+
+/// Distance from `c` to the nearest ball-center chord of a vertical
+/// ball's ladder (its tips lifted by `r`).
+fn off_ladder(want: &camcraft_motion::cl::Toolpath, c: Point3, r: f64) -> f64 {
+    let mut best = f64::INFINITY;
+    for m in &want.moves {
+        for (a, b) in m.segments3(1e-4) {
+            let (a, b) = (p3(a.x, a.y, a.z + r), p3(b.x, b.y, b.z + r));
+            let (ex, ey, ez) = (b.x - a.x, b.y - a.y, b.z - a.z);
+            let l2 = ex * ex + ey * ey + ez * ez;
+            let t = if l2 > 0.0 {
+                (((c.x - a.x) * ex + (c.y - a.y) * ey + (c.z - a.z) * ez) / l2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let d = ((c.x - a.x - t * ex).powi(2) + (c.y - a.y - t * ey).powi(2) + (c.z - a.z - t * ez).powi(2)).sqrt();
+            best = best.min(d);
         }
     }
+    best
+}
+
+#[test]
+fn the_rotary_contour_is_the_waterline_posed_radially() {
+    // M13 pivot law: the rings' BALLS are the waterline's balls - the
+    // pose turns about the ball center, never about the tip (which
+    // would carry the ball one radius off every wall) - so every
+    // emitted tip, lifted r along its own pose, lands on the plain
+    // ladder's center path, and the pose is the radial OF THAT CENTER.
+    let facets = lathe_bar(16);
+    let p = finish(28.0, 0.0);
+    let r = p.tool_diameter * 0.5;
+    let want = finishing3d::waterline(&facets, &p).expect("the plain rings run");
+    let got = rotary_contour(&facets, &p, &control(0.0, 0.0, None)).expect("the same rings, turned");
+    assert!(got.moves.len() >= want.moves.len(), "the exit dropped moves");
+    let mut cuts = 0usize;
+    for a in &got.moves {
+        let c = center(a, r);
+        // Chord ends sit ON the plain ladder's arcs; the yardstick chords
+        // them at 1e-4 of sagitta.
+        assert!(off_ladder(&want, c, r) < 2e-4, "the ball left the planned ladder at {:?}", a.to);
+        let rho = (c.x * c.x + c.y * c.y).sqrt();
+        match a.axis {
+            Some(ax) if rho > 1e-6 => {
+                let av = p3(ax[0], ax[1], ax[2]);
+                assert!((av.z).abs() < 1e-9, "the pose left the radial plane: {av:?}");
+                assert!(unit_angle(av, p3(c.x, c.y, 0.0)) < 1e-9, "the pose is not the center's radial");
+                if a.kind != MoveKind::Rapid {
+                    cuts += 1;
+                }
+            }
+            Some(_) => {}
+            None => assert_eq!(a.kind, MoveKind::Rapid, "a cut move about the axis poses"),
+        }
+    }
+    assert!(cuts > 20, "rings of posed cuts, got {cuts}");
 }
 
 #[test]
@@ -231,13 +273,16 @@ fn the_contour_lean_tilts_off_the_radial_by_the_stated_angle() {
         if m.kind == MoveKind::Rapid {
             continue;
         }
-        let l = (m.to.x * m.to.x + m.to.y * m.to.y).sqrt();
+        // The lean is measured off the radial of the BALL CENTER the
+        // tip stands under (the M13 pivot law).
+        let c = center(m, p.tool_diameter * 0.5);
+        let l = (c.x * c.x + c.y * c.y).sqrt();
         if l < 0.5 {
             continue; // near the axis the ring's radial is the travel itself
         }
         let a = m.axis.expect("a cut move poses");
         let av = p3(a[0], a[1], a[2]);
-        let n = p3(m.to.x / l, m.to.y / l, 0.0);
+        let n = p3(c.x / l, c.y / l, 0.0);
         assert!((unit_angle(av, n) - 15f64.to_radians()).abs() < 1e-9, "the lead law broke at {:?}", m.to);
         body += 1;
     }
@@ -257,7 +302,11 @@ fn the_rotary_parallel_runs_the_laid_bar_axially() {
     let mut body = 0usize;
     for m in &got.moves {
         if m.kind == MoveKind::Rapid {
-            assert!(m.axis.is_none());
+            // Rapids state the radial the head holds (the post's tilt
+            // is modal - M13): never a lean along the bar.
+            if let Some(a) = m.axis {
+                assert!(a[0].abs() < 1e-9, "a rapid leaned along the axis: {a:?}");
+            }
             continue;
         }
         let a = m.axis.expect("every pass move stands radial to the bar");

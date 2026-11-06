@@ -260,14 +260,49 @@ fn envelope_scan_lift(
 /// lifted by `center_lift` - `r` for a tip-stored ball-mill path (the
 /// exact discretization `subtract_ball` cuts with), 0.0 for a turning
 /// path whose positions are already nose centers (M5.2 E).
+///
+/// A POSED move lifts along its pose, not along Z (M13 rotary): the
+/// stream locates the tool tip, and a leaning ball's center stands
+/// `r` up the tool axis from it - the probe frame's own reading. The
+/// move's start rides the pose the previous move held (the post keeps
+/// the tilt modal), its end the pose it states. A prismatic move - no
+/// axis, or the exact Z column - lifts by `+center_lift` in Z, bit for
+/// bit the law every 3-axis verdict and golden was measured with.
 pub(super) fn center_segments(
     moves: &[Move],
     center_lift: f64,
     chord_tol: f64,
 ) -> Vec<(Point3, Point3)> {
+    let lift = |p: Point3, axis: Option<[f64; 3]>| -> Point3 {
+        match axis {
+            Some(a) if !crate::cl::is_vertical(&a) && center_lift != 0.0 => Point3::new(
+                p.x + a[0] * center_lift,
+                p.y + a[1] * center_lift,
+                p.z + a[2] * center_lift,
+            ),
+            _ => Point3::new(p.x, p.y, p.z + center_lift),
+        }
+    };
     let mut segs = Vec::new();
+    let mut held: Option<[f64; 3]> = None;
     for m in moves {
+        let was = held;
+        if m.axis.is_some() {
+            held = m.axis;
+        }
         if m.kind == MoveKind::Rapid || !m.is_finite() {
+            continue;
+        }
+        let tilted = |a: Option<[f64; 3]>| a.is_some_and(|a| !crate::cl::is_vertical(&a));
+        if tilted(held) || tilted(was) {
+            // Posed: its own 3-D pieces, each end lifted along the pose
+            // it stands in - the move's start on the one held coming
+            // in, everything after on the one it holds (a move stating
+            // nothing keeps the modal tilt, as the post does).
+            for (j, (a, b)) in m.segments3(chord_tol).into_iter().enumerate() {
+                let pa = if j == 0 { was } else { held };
+                segs.push((lift(a, pa), lift(b, held)));
+            }
             continue;
         }
         match m.arc {

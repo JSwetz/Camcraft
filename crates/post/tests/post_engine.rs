@@ -475,7 +475,10 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         a.abs() < 1e-9 && (b - 20.0).abs() < 1e-9 && c.abs() < 1e-9,
         "20 deg toward +x is the canonical B 20: {angles:?}"
     );
-    assert_eq!(angles[2], None, "the exact vertical states nothing");
+    // The letters are modal on the control: the stated Z column after
+    // a lean must COMMAND the zero angles, or the machine would cut the
+    // "upright" move under the old lean (the pivot law's post half).
+    assert_eq!(angles[2], Some([0.0, 0.0, 0.0]), "the return to vertical states its zeros");
     // The text carries the letters on the millidegree lattice, and the
     // reader takes them back exactly as the stream law defines them.
     let text = cnc::serialize(&recs);
@@ -490,7 +493,15 @@ fn a_leaning_move_dumps_the_angles_a_stream_carries() {
         .collect();
     assert_eq!(got[1], Some([0.0, 20.0, 0.0]), "{got:?}");
     assert_eq!(got[0], None);
-    assert_eq!(got[2], None);
+    assert_eq!(got[2], Some([0.0, 0.0, 0.0]));
+    // A Z column stated with nothing leaning before it still states
+    // nothing: prismatic streams stay byte-identical.
+    let upright = Toolpath::new(vec![feed(1.0).with_axis([0.0, 0.0, 1.0]), feed(2.0)]);
+    let recs = camcraft_post::post::dump(&upright, &d);
+    assert!(
+        recs.iter().all(|r| !matches!(r, Record::Move(m) if m.abc.is_some())),
+        "an upright-only stream commands no angles"
+    );
 }
 
 #[test]

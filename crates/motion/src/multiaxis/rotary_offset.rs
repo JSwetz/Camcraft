@@ -38,8 +38,9 @@
 //! stands at the cap's station between the axis and the rim, a real
 //! chord closing every slice it spans.
 //!
-//! The world exit is [`wrap_exit`]: positions back at ρ plus one
-//! tool radius, arcs chorded, s-sweeps resampled, cut moves standing
+//! The world exit is [`wrap_exit`]: ball centers back at ρ plus one
+//! tool radius with the tip posted under them (M13 pivot law), arcs
+//! chorded, s-sweeps resampled, rapids and cut moves standing
 //! RADIAL with the lean of [`super::tilt`], as in [`super::rotary`].
 //! Unlike the twins there is no LEAN refusal: the developed cylinder
 //! is neutral to which way the axis points - a bar may stand or lie

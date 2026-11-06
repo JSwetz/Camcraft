@@ -195,18 +195,41 @@ fn an_empty_model_refuses_never_crashes() {
 }
 
 #[test]
-fn swarf5d_positions_are_the_plain_swarf_bit_for_bit() {
+fn swarf5d_balls_are_the_plain_swarf_balls() {
     let blade = tube_about(32, 8, 12.0, 30.0);
     let p = finish(11.0, -11.0);
     let f = ruling::analyze(&blade).unwrap();
     let base = finishing3d::swarf(&blade, &p, f.ux, f.uy).unwrap();
     let got = swarf5d(&blade, &p, &control(15.0, 0.0, None)).unwrap();
-    assert_eq!(got.moves.len(), base.moves.len());
-    for (g, b) in got.moves.iter().zip(&base.moves) {
-        assert_eq!((g.to.x, g.to.y, g.to.z), (b.to.x, b.to.y, b.to.z));
-        assert_eq!(g.kind, b.kind);
-        assert_eq!(g.feed, b.feed);
-        assert_eq!(g.arc.is_some(), b.arc.is_some());
+    // The pivot law: the BALLS are the plain swarf's - each posted
+    // tip lifted R along the pose the machine holds (modal) lies on
+    // the upright ladder lifted R up Z; the tip follows the lean, and
+    // a leaning arc rides as its chords ON the planned arc.
+    let plan: Vec<(Point3, Point3)> = base
+        .moves
+        .iter()
+        .flat_map(|m| m.segments3(1e-4))
+        .map(|(a, b)| (p3(a.x, a.y, a.z + R), p3(b.x, b.y, b.z + R)))
+        .collect();
+    let mut held = [0.0, 0.0, 1.0];
+    for g in &got.moves {
+        if let Some(a) = g.axis {
+            held = a;
+        }
+        let c = p3(g.to.x + R * held[0], g.to.y + R * held[1], g.to.z + R * held[2]);
+        let off = plan
+            .iter()
+            .map(|(a, b)| {
+                let d = *b - *a;
+                let l2 = d.dot(d);
+                let t = if l2 > 0.0 { ((c - *a).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                let e = c - p3(a.x + d.x * t, a.y + d.y * t, a.z + d.z * t);
+                e.dot(e).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(off < 1e-3, "a posted ball left the plan: {c:?} is {off} off");
+        let posed = !camcraft_motion::cl::is_vertical(&held);
+        assert!(!posed || g.arc.is_none(), "a leaning arc must ride as chords");
     }
     assert!(!got.is_prismatic(), "swarf over a blade stated no pose anywhere");
 }

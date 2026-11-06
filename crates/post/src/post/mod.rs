@@ -202,11 +202,27 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
     let cycles: Vec<&CycleRec> = owned.iter().collect();
 
     let mut ci = 0usize;
+    // Whether the machine stands tilted entering this move: the
+    // letters are modal on the control, so a return to the Z column
+    // after a lean must be COMMANDED (explicit zero angles), or the
+    // machine runs the "upright" move under the old lean.
+    let mut tilted = false;
     for (mi, m) in t.moves.iter().enumerate() {
         while ci < cycles.len() && cycles[ci].first_move <= mi {
             out.push(Record::Cycle(cycles[ci].clone()));
             ci += 1;
         }
+        let abc = match m.axis {
+            Some(a) if !crate::cl::is_vertical(&a) => {
+                tilted = true;
+                Some(crate::cl::axis_to_angles(a))
+            }
+            Some(_) if tilted => {
+                tilted = false;
+                Some([0.0, 0.0, 0.0])
+            }
+            _ => None,
+        };
         out.push(Record::Move(MoveRec {
             kind: m.kind,
             x: m.to.x,
@@ -220,13 +236,14 @@ pub fn dump(t: &Toolpath, d: &Dump) -> Vec<Record> {
             // commands its canonical letter angles (the cl::pose law,
             // converted here once); a prismatic move - no axis, or
             // the Z column itself - commands nothing, byte for byte
-            // as the stream always did. Generators earn the `Some`
-            // side by set_axis; external `.cnc` producers own the
-            // letters directly.
-            abc: m
-                .axis
-                .filter(|a| !crate::cl::is_vertical(a))
-                .map(crate::cl::axis_to_angles),
+            // as the stream always did - EXCEPT the first stated Z
+            // column after a lean, which commands the zero angles
+            // that take the machine back upright (the letters are
+            // modal; silence would keep the lean). A move stating no
+            // axis at all keeps the modal pose, as it always did.
+            // Generators earn the `Some` side by set_axis; external
+            // `.cnc` producers own the letters directly.
+            abc,
         }));
     }
     for c in &cycles[ci..] {

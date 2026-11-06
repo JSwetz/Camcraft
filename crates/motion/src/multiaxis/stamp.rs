@@ -1,27 +1,50 @@
-//! The STAMP: the pass that reads a finished ball-center path back
+//! The STAMP: the pass that reads a finished upright-ball path back
 //! into an oriented one (M5.1 stage C). A sphere's envelope is
-//! rotation-invariant, so the CL ladder a 5-axis finish cuts is
-//! exactly the waterline/raster path of stage A/B - and what makes it
-//! 5-axis is the pose each move holds: at every move that ends in
-//! contact, the nearest surface point gives the normal
-//! (`d = |c - q| = r` is tangency), the move's own travel gives the
-//! tangent, and [`super::tilt::command_axis`] folds lead, lag and the
-//! clamp into the direction the spindle must point. Moves that end in
-//! air - the hops, the clearances - hold no angle, and a pose change
-//! where the tip stands still is a position intent the post commands
-//! on its own axis words (M5.1 A's law).
+//! rotation-invariant about its own CENTRE, so the ball ladder a
+//! 5-axis finish cuts is exactly the waterline/raster ladder of stage
+//! A/B - and what makes it 5-axis is the pose each move holds: at
+//! every move whose ball rests on the part, the nearest surface point
+//! gives the normal (`d = |c - q| = r` is tangency, read at the BALL
+//! CENTRE), the move's own travel gives the tangent, and
+//! [`super::tilt::command_axis`] folds lead, lag and the clamp into
+//! the direction the spindle must point. Moves whose ball is in air
+//! (the hops, the clearances) and level floors hold no lean.
 //!
-//! Provenance: the ball-center/axis-pose split is standard multi-axis
-//! CL practice (tool-axis vectors ride the location words,
-//! RS-274/ISO 10791 tradition); written from those published
-//! descriptions and our own design notes only.
+//! The pivot law ([`super::retip`]): the base ladder stores TIPS of an
+//! upright ball (finishing3d's convention, and the stream's - the post
+//! locates the tool tip), so its centres stand `r` up Z from every
+//! point. A pose turns the tool about that centre, never about the
+//! tip, so every emitted point is the centre minus `r` along the pose
+//! it holds. Keeping the tip and swapping the axis (what this pass did
+//! before M13's follow-up) carried every posed ball `r·(a - up)` off
+//! the skin it was planned on: most of a radius of air off a wall,
+//! and a bite wherever a later upright move inherited the tilt.
+//! Two consequences ride along:
+//!
+//! - **The post keeps the tilt modal.** A move stating nothing runs
+//!   under the last pose on the machine, so once a lean has been
+//!   stated every later move states its own: a cut the lean the law
+//!   gives, or upright `Z` (which the post commands as explicit zero
+//!   angles); a rapid the pose it inherits, so a retract lifts the
+//!   ball straight off its last contact - the plan's own air path -
+//!   instead of swinging the tool upright through that surface.
+//! - **Posed arcs are chords.** A tip backed off a turning pose leaves
+//!   any circle a G2/G3 could state, so an arc that leans anywhere is
+//!   emitted as its chords at `ARC_FIT_TOL`, each end posed fresh; an
+//!   arc that stays upright end to end keeps its exact intent.
+//!
+//! Provenance: the ball-center/axis-pose split and tool-tip (RTCP)
+//! programming are standard multi-axis CL practice (tool-axis vectors
+//! ride the location words, RS-274/ISO 10791 tradition); written from
+//! those published descriptions and our own design notes only.
 
-use crate::cl::{Move, MoveKind, PathBuilder, Toolpath};
+use crate::cl::{is_vertical, MoveKind, PathBuilder, Toolpath};
 use crate::finishing3d::closest_pt_tri;
 use crate::geometry::{Point3, Triangle};
-use crate::machining2d::GenError;
+use crate::machining2d::{GenError, ARC_FIT_TOL};
 
-use super::avoid::{Shank, escape_axis, shank_hits};
+use super::avoid::{escape_axis, shank_hits_at, Shank};
+use super::retip::{along, tip_of, UP};
 use super::tilt::{command_axis, AxisControl};
 
 /// The search ceiling shank avoidance tilts within when the control
@@ -30,18 +53,17 @@ use super::tilt::{command_axis, AxisControl};
 /// the cone's own law is a cone, not a plane.
 pub(super) const ESCAPE_CAP: f64 = 85.0;
 
-/// Read a ball-center path back as an oriented one: same positions,
-/// same order, same arc intents - only the pose each move holds is
-/// new. `r` is the ball radius the path was generated with; contact
-/// is decided by the tangent law `|c - q| = r`, with a band that
-/// forgives the project's micron lattice and the arc fit, never a
-/// whole radius of slack. Facets are scanned with an AABB shell
-/// reject; these paths have thousands of moves and models have tens
-/// of thousands of facets, so the cheap box answer must gate the
-/// Voronoi solve. `shank` (M5.1 stage F) is the tool above the ball:
-/// where `Some`, a pose whose shank column touches the part tilts to
-/// the nearest clear angle inside the cone, and a move no cone angle
-/// clears refuses the path by name.
+/// Read an upright ball's tip path back as an oriented one: the same
+/// BALLS in the same order, each tip re-derived from its centre and
+/// the pose it holds. `r` is the ball radius the path was generated
+/// with; contact is decided at the centre by the tangent law
+/// `|c - q| = r`, with a band that forgives the project's micron
+/// lattice and the arc fit, never a whole radius of slack. Facets are
+/// scanned with an AABB shell reject. `shank` (M5.1 stage F) is the
+/// tool above the ball: where `Some`, a pose whose shank column
+/// touches the part tilts to the nearest clear angle inside the cone
+/// (about the same centre), and a move no cone angle clears refuses
+/// the path by name.
 pub(super) fn stamp_axes(
     path: &Toolpath,
     facets: &[Triangle],
@@ -73,6 +95,17 @@ pub(super) fn stamp_axes_ruled(
     stamp_inner(path, facets, r, c, Some((dir, ruled)), None)
 }
 
+/// One station of the expanded ladder: a move's end (an arc's chord
+/// ends) as the BALL CENTRE the plan put there.
+struct Station {
+    kind: MoveKind,
+    feed: Option<f64>,
+    from: Point3,
+    to: Point3,
+    /// The base move this station belongs to.
+    mv: usize,
+}
+
 fn stamp_inner(
     path: &Toolpath,
     facets: &[Triangle],
@@ -85,6 +118,11 @@ fn stamp_inner(
         return Err(GenError::Invalid(
             "a 5-axis stamp cannot re-pose drill cycles".into(),
         ));
+    }
+    if !(r.is_finite() && r > 0.0) {
+        return Err(GenError::Invalid(format!(
+            "a 5-axis stamp needs a finite positive ball radius, got {r}"
+        )));
     }
     let band = 0.01 + 1e-6 * r; // micron lattice + float dust, not a radius
     let boxes: Vec<[f64; 6]> = facets
@@ -101,26 +139,75 @@ fn stamp_inner(
         })
         .collect();
     let mesh = Mesh { facets, boxes: &boxes };
-    let mut b = PathBuilder::new(path.start().unwrap_or(Point3::ZERO));
-    // The smoothing memory (stage F): the axis the machine actually
-    // holds entering a move. It starts vertical (the home the post
-    // wakes at), keeps the last pose stated through rapids (air moves
-    // command no angle), and drops back to vertical on a cut that
-    // states none - which is what verify's law (c) already reads an
-    // unposed move as.
-    let mut held = [0.0, 0.0, 1.0];
+    // The plan's balls: every tip lifted r up Z; arcs at their chords.
+    let mut st: Vec<Station> = Vec::with_capacity(path.moves.len());
     for (i, mv) in path.moves.iter().enumerate() {
-        let axis = match mv.kind {
-            MoveKind::Rapid => None,
-            _ => cut_axis(mv, &mesh, r, band, &path.moves[i + 1..], c, ruling, shank, held, i)?,
+        let mut ends: Vec<Point3> = match mv.arc {
+            Some(_) => mv.segments3(ARC_FIT_TOL).into_iter().map(|(_, e)| e).collect(),
+            None => Vec::new(),
         };
-        if axis.is_some() || mv.kind != MoveKind::Rapid {
-            held = axis.unwrap_or([0.0, 0.0, 1.0]);
+        if ends.is_empty() {
+            ends.push(mv.to);
         }
-        b.set_axis(axis);
-        match &mv.arc {
-            Some(a) => b.push_arc_in(mv.kind, mv.to, mv.feed, a.center, a.ccw, a.plane),
-            None => b.push(mv.kind, mv.to, mv.feed),
+        let mut from = along(mv.from, UP, r);
+        for e in ends {
+            let to = along(e, UP, r);
+            st.push(Station { kind: mv.kind, feed: mv.feed, from, to, mv: i });
+            from = to;
+        }
+    }
+    // The pose every station holds. `held` is the smoothing memory
+    // (stage F): the axis the machine holds entering a station,
+    // upright at the home the post wakes at. `leaned` turns true at
+    // the first lean and never back: from there on every station
+    // states its pose (the modal-tilt law above).
+    let mut poses: Vec<Option<[f64; 3]>> = Vec::with_capacity(st.len());
+    let mut held = UP;
+    let mut leaned = false;
+    for (k, s) in st.iter().enumerate() {
+        let lean = match s.kind {
+            MoveKind::Rapid => None,
+            _ => cut_axis(s, &mesh, r, band, &st[k + 1..], c, ruling, shank, held)?,
+        };
+        leaned |= lean.is_some_and(|a| !is_vertical(&a));
+        let pose = match (s.kind, leaned) {
+            (_, false) => lean,
+            // A rapid travels under the pose it inherits: the ball
+            // leaves its last contact along the axis it cut with and
+            // follows the plan's own air path, never swinging upright
+            // through the surface it just left.
+            (MoveKind::Rapid, true) => Some(held),
+            (_, true) => lean.or(Some(UP)),
+        };
+        held = pose.unwrap_or(UP);
+        poses.push(pose);
+    }
+    let mut b = PathBuilder::new(path.start().unwrap_or(Point3::ZERO));
+    let mut k = 0usize;
+    for (i, mv) in path.moves.iter().enumerate() {
+        let k0 = k;
+        while k < st.len() && st[k].mv == i {
+            k += 1;
+        }
+        let group = &poses[k0..k];
+        let upright = group.iter().all(|p| p.is_none_or(|a| is_vertical(&a)));
+        match (mv.arc, upright, group.last()) {
+            // A move that never leans keeps its exact intent: its
+            // upright tips are the plan's own, bit for bit.
+            (Some(a), true, Some(pose)) => {
+                b.set_axis(*pose);
+                b.push_arc_in(mv.kind, mv.to, mv.feed, a.center, a.ccw, a.plane);
+            }
+            (None, true, Some(pose)) => {
+                b.set_axis(*pose);
+                b.push(mv.kind, mv.to, mv.feed);
+            }
+            _ => {
+                for (s, pose) in st[k0..k].iter().zip(group) {
+                    b.set_axis(*pose);
+                    b.push(s.kind, tip_of(s.to, *pose, r), s.feed);
+                }
+            }
         }
     }
     let stamped = b.finish();
@@ -136,66 +223,67 @@ struct Mesh<'a> {
     boxes: &'a [[f64; 6]],
 }
 
-/// The pose one cutting move holds, before and after the shank speaks:
-/// None in air, the surface normal with lead/lag/clamp folded in
-/// wherever the move's endpoint rests on a facet at the ball's tangent
-/// distance. With a `shank` (stage F) a pose that touches is re-aimed
-/// by the escape search; a move nothing inside the cone clears
-/// refuses the whole path by name. `seed` is the cone's axis the
-/// search tilts around: the contact normal where there is one,
-/// vertical wherever the pose is an answer to air or a level floor.
-#[allow(clippy::too_many_arguments)] // the stamp's flat read of one move
+/// The pose one cutting station holds, before and after the shank
+/// speaks: None in air and on level floors, the surface normal with
+/// lead/lag/clamp folded in wherever the station's ball rests on a
+/// facet at its tangent distance. With a `shank` (stage F) a pose that
+/// touches is re-aimed by the escape search about the same ball
+/// centre; a station nothing inside the cone clears refuses the whole
+/// path by name. `seed` is the cone's axis the search tilts around:
+/// the contact normal where there is one, vertical wherever the pose
+/// is an answer to air or a level floor.
+#[allow(clippy::too_many_arguments)] // the stamp's flat read of one station
 fn cut_axis(
-    mv: &Move,
+    s: &Station,
     mesh: &Mesh,
     r: f64,
     band: f64,
-    rest: &[Move],
+    rest: &[Station],
     c: &AxisControl,
     ruling: Option<(Point3, &[bool])>,
     shank: Option<&Shank>,
     held: [f64; 3],
-    i: usize,
 ) -> Result<Option<[f64; 3]>, GenError> {
-    let (a0, seed, skip) = pose_law(mv, mesh, r, band, rest, c, ruling);
-    let Some(s) = shank.filter(|_| !skip) else {
+    let (a0, seed, skip) = pose_law(s, mesh, r, band, rest, c, ruling);
+    let Some(sh) = shank.filter(|_| !skip) else {
         return Ok(a0);
     };
-    let p = mv.to;
-    let a = a0.unwrap_or([0.0, 0.0, 1.0]);
-    if !shank_hits(p, a, r, s, mesh.facets, mesh.boxes) {
+    let a = a0.unwrap_or(UP);
+    if !shank_hits_at(s.to, a, r, sh, mesh.facets, mesh.boxes) {
         return Ok(a0);
     }
     let cone = c.max_tilt_deg.unwrap_or(ESCAPE_CAP).min(ESCAPE_CAP);
-    match escape_axis(p, a, seed, held, cone, r, s, mesh.facets, mesh.boxes) {
+    match escape_axis(s.to, a, seed, held, cone, r, sh, mesh.facets, mesh.boxes) {
         Some(b) => Ok(Some(b)),
         None => Err(GenError::Invalid(format!(
-            "the shank of the tool touches the part at move {i} of the posed path, and no \
+            "the shank of the tool touches the part at move {} of the posed path, and no \
              pose inside the max-tilt cone ({cone:.0} deg) clears it - widen the cone, \
-             shorten the tool, or turn shank avoidance off"
+             shorten the tool, or turn shank avoidance off",
+            s.mv
         ))),
     }
 }
 
 /// Stage C's pose law alone - the angle the surface commands before
-/// the shank has an opinion. The `bool` says the law refused to state
-/// a direction (garbage in a sane door's shadow): vertical it stays,
-/// and no escape invents an angle the law itself would not compute.
+/// the shank has an opinion, read at the station's BALL CENTRE. The
+/// `bool` says the law refused to state a direction (garbage in a
+/// sane door's shadow): vertical it stays, and no escape invents an
+/// angle the law itself would not compute.
 fn pose_law(
-    mv: &Move,
+    s: &Station,
     mesh: &Mesh,
     r: f64,
     band: f64,
-    rest: &[Move],
+    rest: &[Station],
     c: &AxisControl,
     ruling: Option<(Point3, &[bool])>,
 ) -> (Option<[f64; 3]>, Point3, bool) {
-    let up = Point3::new(0.0, 0.0, 1.0);
-    let p = mv.to;
+    let up = Point3::new(UP[0], UP[1], UP[2]);
+    let p = s.to;
     let mut best: Option<(f64, Point3, usize)> = None;
     for (fi, (f, bx)) in mesh.facets.iter().zip(mesh.boxes.iter()).enumerate() {
-        // Chebyshev-ish box distance: if the nearest corner-axis gap
-        // already exceeds r + band, no point of the box is in contact.
+        // Box distance: if the nearest gap already exceeds r + band,
+        // no point of the box is in contact with the ball.
         let gx = (bx[0] - p.x).max(0.0).max(p.x - bx[3]);
         let gy = (bx[1] - p.y).max(0.0).max(p.y - bx[4]);
         let gz = (bx[2] - p.z).max(0.0).max(p.z - bx[5]);
@@ -217,13 +305,17 @@ fn pose_law(
     let d = d2.sqrt();
     // Contact (or a bite - verify is the law that judges a bite, the
     // normal here is still the honest direction out of the surface).
-    // A floor reads d = 0: the ball's contact stands under the center
-    // itself, there is no direction out of the surface to lean off,
-    // and the honest pose for a floor is the one it always had.
+    // A centre ON the surface has no direction out of it at all.
     if d > r + band || d <= 1e-9 {
         return (None, up, false);
     }
     let n = Point3::new((p.x - q.x) / d, (p.y - q.y) / d, (p.z - q.z) / d);
+    // A level floor: the contact stands straight under the centre,
+    // there is no flank to lean off, and the honest pose for a floor
+    // is the one it always had (upright).
+    if 1.0 - n.z <= 1e-12 {
+        return (None, up, false);
+    }
     // The swarf law (M5.1 D): on a facet the ruling analysis marked
     // ruled, the tool lies WITH the blade - the pass direction
     // projected into the surface, tangent to the flank and normal to
@@ -252,18 +344,15 @@ fn pose_law(
             return (Some([a.x, a.y, a.z]), n, false);
         }
     }
-    // The feed direction: this move's travel; a vertical entry has
-    // none of its own, so the next move's states where the cut goes.
-    // M8.3 made the sentence true the comment always claimed: a dive
-    // DEAD DOWN onto a flank has travel, but none ALONG a cut that
-    // has not started - its own vector would lean the lead inside
-    // the plunge plane. The cut the dive lands into is the next
-    // move's, which is what the drive-curve family already stamps
-    // its first station with (curve.rs); both answers now read
-    // "lead along the cut". A dive that lands on nothing (the path
-    // ends here) keeps its own vector: there is no cut to lead by,
-    // and the law says so at the end of this fn.
-    let mut t = p - mv.from;
+    // The feed direction: this station's travel; a vertical entry has
+    // none of its own, so the next station's states where the cut
+    // goes. M8.3: a dive DEAD DOWN onto a flank has travel, but none
+    // ALONG a cut that has not started - its own vector would lean the
+    // lead inside the plunge plane. The cut the dive lands into is the
+    // next station's, which is what the drive-curve family stamps its
+    // first station with (curve.rs). A dive that lands on nothing (the
+    // path ends here) keeps its own vector.
+    let mut t = p - s.from;
     if tl(t) <= 1e-9 || (t.x * t.x + t.y * t.y <= 1e-18 && 1.0 - n.z * n.z > 1e-18) {
         t = rest
             .iter()

@@ -1,6 +1,7 @@
 //! M5.1 stage E2 rotary offset law tests: the pocket ladder run in
-//! wrap space. What "right" means here: every cut position stands
-//! one tool radius outside a cylinder the plan named, the ladder
+//! wrap space. What "right" means here: every cut tip stands ON a
+//! cylinder the plan named (its ball center one tool radius outside
+//! it - the M13 pivot law), the ladder
 //! peels from the skin inward and never past the floor a column
 //! legally allows, a bar roughs the same lying as standing, the
 //! world heights window the STATIONS (and refuse when they window
@@ -134,15 +135,29 @@ fn grooved(n_circ: usize) -> Vec<Triangle> {
     )
 }
 
-/// Distance of a world point from the standing Z axis, minus the
-/// one tool radius a radial ball's CL always stands out: the
-/// tangent cylinder the move actually turned to.
+/// Distance of a world TIP from the standing Z axis: the tangent
+/// cylinder the move actually turned to. M13 pivot law: the stream
+/// locates the tip, and a radial ball's tip stands ON the level's
+/// cylinder - its center one radius further out, never the tip.
 fn tangent(p: Point3) -> f64 {
-    (p.x * p.x + p.y * p.y).sqrt() - R
+    (p.x * p.x + p.y * p.y).sqrt()
 }
 
 fn tangent_xz(p: Point3) -> f64 {
-    (p.y * p.y + p.z * p.z).sqrt() - R
+    (p.y * p.y + p.z * p.z).sqrt()
+}
+
+/// A rapid states the pure radial the head holds while it laps the
+/// bar (the post's tilt is modal - M13), measured off its own ball
+/// center; on the axis it may hold what it held.
+fn rapid_radial(m: &camcraft_motion::cl::Move) {
+    let Some(a) = m.axis else { return };
+    let c = p3(m.to.x + R * a[0], m.to.y + R * a[1], m.to.z + R * a[2]);
+    let l = (c.x * c.x + c.y * c.y).sqrt();
+    if l > 1e-6 {
+        let av = p3(a[0], a[1], a[2]);
+        assert!(unit_angle(av, p3(c.x / l, c.y / l, 0.0)) < 1e-6, "a rapid off the radial at {:?}", m.to);
+    }
 }
 
 fn unit_angle(a: Point3, b: Point3) -> f64 {
@@ -161,7 +176,7 @@ fn a_standing_bar_peels_from_the_skin_inward() {
     let mut deepest = f64::INFINITY;
     for m in &got.moves {
         match m.kind {
-            MoveKind::Rapid => assert!(m.axis.is_none(), "a rapid states no pose"),
+            MoveKind::Rapid => rapid_radial(m),
             _ => {
                 cuts += 1;
                 let t = tangent(m.to);
@@ -172,9 +187,12 @@ fn a_standing_bar_peels_from_the_skin_inward() {
                 let a = m.axis.expect("a radial cut move poses");
                 let av = p3(a[0], a[1], a[2]);
                 assert!(av.z.abs() < 1e-9, "the pose leaned off the radial plane: {av:?}");
-                let l = (m.to.x * m.to.x + m.to.y * m.to.y).sqrt();
+                // The radial of the ball CENTER (r out along the pose):
+                // a cap's tip may stand on the axis itself (M13).
+                let c = p3(m.to.x + R * a[0], m.to.y + R * a[1], m.to.z + R * a[2]);
+                let l = (c.x * c.x + c.y * c.y).sqrt();
                 assert!(
-                    unit_angle(av, p3(m.to.x / l, m.to.y / l, 0.0)) < 1e-9,
+                    unit_angle(av, p3(c.x / l, c.y / l, 0.0)) < 1e-6, // acos near 0 amplifies the center's rebuild dust
                     "the pose is not the radial at {:?}",
                     m.to
                 );
@@ -215,7 +233,9 @@ fn the_groove_floor_is_turned_to_its_radius_and_no_deeper() {
 fn the_rapids_stand_clear_of_the_whirl() {
     let got = rotary_offset(&lathe_bar(16), &params(28.0, 0.0), &control(0.0, 0.0, None)).unwrap();
     // Wrap clearance = rho_max + stepdown + r = 4.5 of plan height,
-    // so rapid positions sit at radius 5.5 and cut positions below.
+    // so rapid TIPS sit at radius 4.5 (M13 pivot law: the plan's
+    // height is the tip's, the ball center one radius out) and cut
+    // tips at the 2.5 skim and below.
     let max_cut = got
         .moves
         .iter()
@@ -228,7 +248,7 @@ fn the_rapids_stand_clear_of_the_whirl() {
         .filter(|m| m.kind == MoveKind::Rapid)
         .map(|m| (m.to.x * m.to.x + m.to.y * m.to.y).sqrt())
         .fold(f64::INFINITY, f64::min);
-    assert!(max_cut <= 3.5 + 1e-6, "cut CL above skim+tool r: {max_cut}");
+    assert!(max_cut <= 2.5 + 1e-6, "cut tip above the skim: {max_cut}");
     assert!(
         min_rapid > max_cut,
         "the rapids clear the cut: {min_rapid} vs {max_cut}"
@@ -371,10 +391,13 @@ fn a_lean_poses_off_the_radial_by_the_stated_angle() {
         .expect("a leaning radial rough");
     let mut body = 0usize;
     for m in got.moves.iter().filter(|m| m.kind != MoveKind::Rapid) {
-        let l = (m.to.x * m.to.x + m.to.y * m.to.y).sqrt();
         let a = m.axis.expect("cut moves pose");
+        // The lean is measured off the radial of the ball center the
+        // tip stands under (M13 pivot law).
+        let c = p3(m.to.x + R * a[0], m.to.y + R * a[1], m.to.z + R * a[2]);
+        let l = (c.x * c.x + c.y * c.y).sqrt();
         let av = p3(a[0], a[1], a[2]);
-        let n = p3(m.to.x / l, m.to.y / l, 0.0);
+        let n = p3(c.x / l, c.y / l, 0.0);
         assert!(
             (unit_angle(av, n) - 15f64.to_radians()).abs() < 1e-6,
             "the lead law broke at {:?}",

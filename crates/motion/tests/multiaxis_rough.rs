@@ -1,7 +1,7 @@
 //! M5.1 stage E3 generator law tests: multi-axis roughing is the
 //! stage-A pocket ladder with the stage-C stamp read over it - so
-//! the positions must be BIT-identical to `pocket3d`'s (the sphere
-//! envelope law, testable here because the stamp only writes poses),
+//! the BALLS must be identical to `pocket3d`'s (the sphere envelope
+//! law; the tips follow the pose, the pivot law),
 //! the rapids and floors pose nothing, and flanks stand inside the
 //! cone.
 //! The angle identities themselves are the stamp's own unit tests;
@@ -110,8 +110,20 @@ fn positions_are_the_prismatic_ladders_bit_for_bit() {
     let base = pocket3d(&f, &region, &params()).unwrap();
     let rough = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0)), None).unwrap();
     assert_eq!(base.moves.len(), rough.moves.len());
-    for (b, r) in base.moves.iter().zip(&rough.moves) {
-        assert_eq!((b.kind, b.to), (r.kind, r.to), "the stamp moved a position");
+    // The pivot law: the BALL is the ladder's - the posted tip lifted
+    // r along the pose the machine holds (modal) is the upright tip
+    // lifted r up Z. The tip itself moves with the lean.
+    let r = params().tool_diameter * 0.5;
+    let mut held = [0.0, 0.0, 1.0];
+    for (b, m) in base.moves.iter().zip(&rough.moves) {
+        if let Some(a) = m.axis {
+            held = a;
+        }
+        let c = p(m.to.x + r * held[0], m.to.y + r * held[1], m.to.z + r * held[2]);
+        let want = p(b.to.x, b.to.y, b.to.z + r);
+        let d = c - want;
+        assert_eq!(b.kind, m.kind);
+        assert!(d.dot(d).sqrt() < 1e-9, "the stamp moved a ball: {c:?} vs {want:?}");
     }
     // And it DID pose something: an all-None stamp is a no-op, not a
     // rough - at least one cut move must state an axis.
@@ -141,15 +153,21 @@ fn rapids_and_floors_hold_no_pose_and_flanks_do() {
     let f = slab_with_boss();
     let region = silhouette(&f);
     let rough = multiaxis_rough(&f, &region, &params(), &control(0.0, 0.0, Some(60.0)), None).unwrap();
+    // Rapids travel under the pose they inherit (the post keeps the
+    // tilt modal): they state no NEW angle.
+    let mut held: Option<[f64; 3]> = None;
     for m in &rough.moves {
         if m.kind == MoveKind::Rapid {
-            assert_eq!(m.axis, None, "a rapid states an angle");
+            assert_eq!(m.axis, held, "a rapid changed the pose it inherited");
         }
+        held = m.axis.or(held);
     }
     let seeds = [p(1.0, 0.0, 0.0), p(-1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), p(0.0, -1.0, 0.0)];
     let (mut flanks, mut corners) = (0, 0);
     for m in rough.moves.iter().filter(|m| m.kind != MoveKind::Rapid) {
-        let Some(a) = m.axis else { continue };
+        // An upright statement after a lean is the floor's own pose,
+        // commanded (the post zeroes the letters): not a lean.
+        let Some(a) = m.axis.filter(|a| !camcraft_motion::cl::is_vertical(a)) else { continue };
         let a = p(a[0], a[1], a[2]);
         let off = seeds.iter().map(|s| tilt_between(a, *s)).fold(f64::MAX, f64::min);
         if off < 0.1 {
