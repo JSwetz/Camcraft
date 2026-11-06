@@ -14,38 +14,40 @@
 //! pose held coming in (the tilt is modal - a move stating nothing
 //! keeps it) and ends on the one it states, the letters lerped
 //! between ([`crate::cl::pose`]), the tip on its straight line (an
-//! arc on its own 3-D chords). Each move is cut into intervals no
-//! longer than [`STEP`] of travel at the stack's far end; per interval
-//! the stack is placed at the midpoint and every capsule's radius
-//! grows by the farthest any of its points travels to either interval
-//! end (tip travel plus reach times the pose's turn) - so the capsules
-//! ENCLOSE the swept volume: an over-report of a graze, never a hidden
-//! crash. A capsule encloses its cylinder (its caps reach one radius
-//! past each end), the same err-toward-HIT direction. The segment-box
-//! distance is exact: the distance to a convex box along a segment is
-//! convex in the segment parameter, minimized by ternary search.
+//! arc on its own 3-D chords). The walk is the mid-move pose law's
+//! ([`super::midpose`], the one law the part's solid and contact
+//! readings walk too): each move cut into intervals no longer than a
+//! half millimetre of travel at the stack's far end; per interval the
+//! stack is placed at the midpoint and every capsule's radius grows by
+//! the farthest any of its points can travel within the interval - the
+//! tip's travel plus reach times the interval's proven swing, which
+//! bounds EVERY pose inside the interval, not only its two ends - so
+//! the capsules ENCLOSE the swept volume continuously: an over-report
+//! of a graze, never a hidden crash between two samples. A capsule
+//! encloses its cylinder (its caps reach one radius past each end),
+//! the same err-toward-HIT direction. The segment-box distance is
+//! exact: the distance to a convex box along a segment is convex in
+//! the segment parameter, minimized by ternary search.
 //!
 //! Upright moves (held and stated pose both upright, or unstated) are
-//! not this law's: the prismatic laws keep them byte-identical.
+//! not this law's: the prismatic laws keep them byte-identical. A
+//! posed move whose pose does not change walks the same intervals with
+//! no swing - its reading is the one it had.
 //!
 //! Provenance: swept-volume enclosure by bounded sampling and
 //! capsule/AABB distance are textbook computational geometry (Ericson,
 //! "Real-Time Collision Detection", public material); the modal pose
 //! law is RS-274's. Our own design; no vendor source consulted.
 
-use crate::cl::{angles_to_axis, axis_to_angles, is_vertical, MoveKind, Toolpath};
+use crate::cl::{is_vertical, MoveKind, Toolpath};
 use crate::fixture::{FixtureBox, FIXTURE_HIT_TOL};
 use crate::geometry::Point3;
 use crate::tools::ToolGeom;
 
+use super::midpose;
 use super::rotary::RotaryAxis;
 use super::types::FixturePart;
 
-/// Interval travel cap at the stack's far end, mm.
-const STEP: f64 = 0.5;
-/// Intervals per piece cap (a longer piece is cut coarser - the
-/// growth term still encloses it - never an unbounded loop).
-const MAX_STEPS: usize = 4096;
 /// Ternary-search rounds for the segment-box distance: (2/3)^90 of
 /// the segment, far below the hit tolerance on any real move.
 const ROUNDS: usize = 90;
@@ -132,61 +134,54 @@ pub(super) fn sweep(
         if (m.kind == MoveKind::Rapid) != rapids || (upright(from_pose) && upright(to_pose)) {
             continue;
         }
-        let la = axis_to_angles(from_pose.unwrap_or([0.0, 0.0, 1.0]));
-        let lb = axis_to_angles(to_pose.unwrap_or([0.0, 0.0, 1.0]));
-        let pieces = m.segments3(tol);
-        let total: f64 = pieces.iter().map(|(a, b)| dist(*a, *b)).sum();
-        let mut done = 0.0f64;
+        let a = from_pose.unwrap_or([0.0, 0.0, 1.0]);
+        let b = to_pose.unwrap_or([0.0, 0.0, 1.0]);
+        let hit = |part: FixturePart| Verdict::Hit(if rapids { FixturePart::Rapid } else { part });
+        // A move that is nowhere has no intervals: it fails closed on
+        // the first band, as the NaN capsule did (no band: no steel).
+        if !(m.from.is_finite() && m.to.is_finite()) {
+            out[i] = stack.first().map_or(Verdict::Clear, |e| hit(e.0));
+            continue;
+        }
         let mut struck = Verdict::Clear;
-        'pieces: for (pa, pb) in &pieces {
-            let len = dist(*pa, *pb);
-            let frac = |s: f64| if total > 0.0 { (done + len * s) / total } else { s };
-            let turn = angle(pose(la, lb, frac(0.0)), pose(la, lb, frac(1.0)));
-            let span = len + reach * turn;
-            let n = if span.is_finite() { ((span / STEP).ceil() as usize).clamp(1, MAX_STEPS) } else { 1 };
-            for j in 0..n {
-                let (t0, t1) = (j as f64 / n as f64, (j + 1) as f64 / n as f64);
-                let tm = 0.5 * (t0 + t1);
-                let (p0, p1, pm) = (lerp(*pa, *pb, t0), lerp(*pa, *pb, t1), lerp(*pa, *pb, tm));
-                let (a0, a1, am) = (pose(la, lb, frac(t0)), pose(la, lb, frac(t1)), pose(la, lb, frac(tm)));
-                let travel = dist(pm, p0).max(dist(pm, p1));
-                let swing = angle(am, a0).max(angle(am, a1));
-                // The machine frame: the turn standing `am` upright, and
-                // the most the rotary turns off it within the interval.
-                let turn = match frame {
-                    None => None,
-                    Some(ax) => match (upright_turn(ax, am), upright_turn(ax, a0), upright_turn(ax, a1)) {
-                        (Some(m), Some(t0), Some(t1)) => {
-                            Some((ax, m, wrap(m - t0).abs().max(wrap(m - t1).abs())))
-                        }
-                        _ => {
-                            struck = Verdict::Unjudged;
-                            break 'pieces;
-                        }
-                    },
-                };
-                for &(part, lo, hi, r) in &stack {
-                    let grow = travel + hi.abs() * swing;
-                    let mut c0 = add(pm, am, lo);
-                    let mut c1 = add(pm, am, hi);
-                    let mut rad = r + grow;
-                    if let Some((ax, th, dth)) = turn {
-                        // Every point the path-frame capsule holds sits no
-                        // farther than `rho` off the axis (distance to a
-                        // line is convex along a segment); a turn of up to
-                        // `dth` moves it at most `rho * dth` (arc >= chord).
-                        let rho = off_axis(ax, c0).max(off_axis(ax, c1)) + rad;
-                        rad += rho * dth;
-                        c0 = turn_about(ax, c0, th);
-                        c1 = turn_about(ax, c1, th);
+        'walk: for iv in midpose::intervals(m, a, b, reach, tol) {
+            let travel = dist(iv.pm, iv.p0).max(dist(iv.pm, iv.p1));
+            // The machine frame: the turn standing `am` upright, and
+            // the most the rotary turns off it within the interval -
+            // the end poses' turns, and never under the proven swing
+            // (an in-plane pose turns the rotary as fast as itself).
+            let turn = match frame {
+                None => None,
+                Some(ax) => match (upright_turn(ax, iv.am), upright_turn(ax, iv.a0), upright_turn(ax, iv.a1)) {
+                    (Some(m), Some(t0), Some(t1)) => {
+                        Some((ax, m, wrap(m - t0).abs().max(wrap(m - t1).abs()).max(iv.swing)))
                     }
-                    if fixtures.iter().any(|b| capsule_hits(c0, c1, rad, b)) {
-                        struck = Verdict::Hit(if rapids { FixturePart::Rapid } else { part });
-                        break 'pieces;
+                    _ => {
+                        struck = Verdict::Unjudged;
+                        break 'walk;
                     }
+                },
+            };
+            for &(part, lo, hi, r) in &stack {
+                let grow = travel + hi.abs() * iv.swing;
+                let mut c0 = add(iv.pm, iv.am, lo);
+                let mut c1 = add(iv.pm, iv.am, hi);
+                let mut rad = r + grow;
+                if let Some((ax, th, dth)) = turn {
+                    // Every point the path-frame capsule holds sits no
+                    // farther than `rho` off the axis (distance to a
+                    // line is convex along a segment); a turn of up to
+                    // `dth` moves it at most `rho * dth` (arc >= chord).
+                    let rho = off_axis(ax, c0).max(off_axis(ax, c1)) + rad;
+                    rad += rho * dth;
+                    c0 = turn_about(ax, c0, th);
+                    c1 = turn_about(ax, c1, th);
+                }
+                if fixtures.iter().any(|b| capsule_hits(c0, c1, rad, b)) {
+                    struck = hit(part);
+                    break 'walk;
                 }
             }
-            done += len;
         }
         out[i] = struck;
     }
@@ -231,21 +226,6 @@ fn capsule_hits(c0: Point3, c1: Point3, r: f64, b: &FixtureBox) -> bool {
     }
     let best = d2(0.0).min(d2(1.0)).min(d2(0.5 * (a + z)));
     best <= lim * lim
-}
-
-/// The axis the letters hold `s` of the way from `a` to `b` (each
-/// letter on its own straight line); upright when no vector holds them.
-fn pose(a: [f64; 3], b: [f64; 3], s: f64) -> [f64; 3] {
-    let l = [a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s, a[2] + (b[2] - a[2]) * s];
-    angles_to_axis(l).unwrap_or([0.0, 0.0, 1.0])
-}
-
-/// The angle between two unit axes, radians (the chord bound of a
-/// point's travel at unit reach).
-fn angle(a: [f64; 3], b: [f64; 3]) -> f64 {
-    let d = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]).clamp(-1.0, 1.0);
-    let t = d.acos();
-    if t.is_finite() { t } else { std::f64::consts::PI }
 }
 
 /// Pose and rotary within this of the rotary's plane / of horizontal:
@@ -313,10 +293,6 @@ fn unit3(a: [f64; 3]) -> Option<[f64; 3]> {
 
 fn add(p: Point3, a: [f64; 3], s: f64) -> Point3 {
     Point3::new(p.x + a[0] * s, p.y + a[1] * s, p.z + a[2] * s)
-}
-
-fn lerp(a: Point3, b: Point3, s: f64) -> Point3 {
-    Point3::new(a.x + (b.x - a.x) * s, a.y + (b.y - a.y) * s, a.z + (b.z - a.z) * s)
 }
 
 fn dist(a: Point3, b: Point3) -> f64 {

@@ -1655,17 +1655,15 @@ every consumer Phase 7 promised it to.** — ⚠️ partial (owed: lathe/rotary 
       JUDGED") and blocks the post instead of the stated zero.
 - **Owed** (RECOMMENDED "Merge batch 2026-11-06", M13.1 (3)): the
       lathe sweep landed (revolved stadium, meridian parity), the rotary
-      chord pre-pass landed with bar parity, and the rotary LIFT is written
-      but HELD (RECOMMENDED "M13.1: the rotary lift": Parallel's parity is in
-      hand - 1.47e-5 / 0 sign misses / 12 s release - but the heavy lane read
-      the Offset ladder's field cut MISSING at a floor column (field 16.0 vs
-      law 3.31) and the eye would route it, so the patch waits in
-      tmp/rotarylift.patch until the Offset pass is explained and the eye
-      routes only kinds with parity in hand); still owed: Contour (92,727
-      sub-chords / 179 s at the verdict class; the standing bar has no
-      sphere-cut column from above), a flute-rotation bound, the parity
-      fixture into tests/common, and the lathe lift (nose + frame in the
-      plan) and a
+      chord pre-pass landed with bar parity, and the rotary LIFT landed for
+      all three kinds (RECOMMENDED "M13.1: the rotary lift": the eye routes
+      through `simulate_rotary` at cell/4, the column verdict refuses rotary
+      by name, parity per kind on its own program - the first "Offset cut
+      missing" reading was the parity test comparing the sweep's lowest reach
+      with the standing cap; the law now marches the column top from the
+      uncut stock; 17 / 204 / 171 s release at the verdict class); still owed:
+      a flute-rotation bound and the lathe lift (nose + frame in the plan)
+      and a
       blade-profile variant for groove/part/thread/form; the eikonal band
       re-normalization; the extracted mesh for the viewer's stock display
       and picking; dual contouring; the field answering past the
@@ -1845,7 +1843,7 @@ visible and pinned while the generator fix is owed.
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
-| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units; owed under M13.11: mesh repair (weld, holes) and IGES import (or a recorded won't-do) | ⚠️ |
+| **M1.1** | Model in, project saved, never crash | Mesh import, save/load, undo/redo, robustness, document units; owed under M13.11: mesh repair (weld, holes); IGES decided (waits for M12.1) | ⚠️ |
 | **M1.2** | Define a job | Shell, dockable viewport, STEP import, stock + WCS setup, toolpath display | ✅ |
 | **M1.3** | Cut a 2.5D plate | Face, contour, pocket (ramp/helix/arc entries done M5.1 H / M11.3), slot, trace, tool library, parameters, verification warnings, tangential leads; G41/G42 output owed under M13.11, B-rep ops under M12.1 | ⚠️ |
 | **M1.4** | The workflow on the surface | Ribbon with icons, browser tree, contextual Operations pane, no silent refusals, what-gets-cut preview, display modes, tabbed panels, graphical tool editor window - all done, riding the graduated egui stack (audit 2026-11-06) | ✅ |
@@ -1888,7 +1886,7 @@ visible and pinned while the generator fix is owed.
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); every fixture at 0 kinks past 5° (done, ratchet empty); owed: island legal late returns (round 6: late leads re-marked on the re-ordered stock and trailing grazes join the cut - LinkLaw::late, held in tmp/island-r6b.patch; the island's 9 hops are the SW-corner piece of every lap whose 24.7 mm lead grazes 20 deg for 22 mm with stock inside the disc on the last 3 mm - a LEADING graze; cause: depends reads 3 mm of a lead, high() descends along all of it; whole-lead reading drops hops to 1 but breaks the air budget 3.9x - next: a lead-scoped dependency or a corner landing off the lead; RECOMMENDED "M11.4 C round 6"), the Pocket3D port written (RECOMMENDED "M11.4: the Pocket3D port of the HSM planner": each level's region through the 2D planner, PocketStrategy reused, Offset rings by name where a level refuses - gating), the rotary wrap ladder under Adaptive, the chord-heading lag in the load reader on chord plans (~1 deg, out of scope of the arc fix), a curvature-reading arc fit for the morph-spiral chords the kink law refuses (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; open-boundary Contour band/extensions done; boundaries on 3+2-indexed ops read in the tilted plane and the group on the whole 3D finish family via a clip law (done 2026-11-06); kinds without an area refuse from one list by reason; leftovers tracked in M13.10 | ✅ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
-| **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; the lathe revolved-stadium sweep landed with meridian parity (RECOMMENDED "M13.1: the lathe sweep on the field"); the rotary chord pre-pass landed with bar parity; the rotary lift is written but HELD (Offset's field cut missing at a floor column on the heavy lane; RECOMMENDED "M13.1: the rotary lift"); owed: the Offset pass explained, Contour parity, a flute-rotation bound, lifting plan_program's lathe refusal (nose + lathe frame in the plan), a blade-profile variant for groove/part/thread/form, eikonal, the viewer/picking mesh (done 2026-11-06), dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
+| **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; the lathe revolved-stadium sweep landed with meridian parity (RECOMMENDED "M13.1: the lathe sweep on the field"); the rotary chord pre-pass landed with bar parity and the rotary lift for all three kinds (RECOMMENDED "M13.1: the rotary lift"; the "Offset cut missing" reading was the parity test's own height law); owed: a flute-rotation bound, lifting plan_program's lathe refusal (nose + lathe frame in the plan), a blade-profile variant for groove/part/thread/form, eikonal, the viewer/picking mesh (done 2026-11-06), dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
 | **M13.2** | Machine limits and cutting data | Spindle speed/power checks against a per-material speeds & feeds library (M3.3 C); the homegrown materials database (Open question "Cutting data"); done 2026-11-06 (fixed 0.8 spindle efficiency is a follow-on, not owed) | ✅ |
 | **M13.3** | Builds and distribution | Code signing + installer-vs-zip decided and built (Inno installer additive to the zip, env-gated signtool path; RECOMMENDED "M13.3: code signing and the installer-vs-zip decision"); themes beside the exe (done); owed: the .iss compile proven on the runner, uninstaller signing, Docker builds for every target, app/UI on wasm (M4.2), a headless binary per crate (Phase 4 intro) | ⚠️ |
 | **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); all done: remaps, catalog hint, text colours, dialog polish, vertex picking, Set origin on a vertex or face | ✅ |
@@ -1897,8 +1895,8 @@ visible and pinned while the generator fix is owed.
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); cut-order clearing (done); mid-move pose law + the swarf pose laws (normal retract, law (d) solid reading, no upright under the equator) (done 2026-11-06) | ✅ |
 | **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; spindle on posed rapids, fixed fixtures in the machine frame; generate-time check on the workholding laws, Fixed toggle; the setup sheet naming each fixture's frame (RECOMMENDED "M13.8: the setup sheet names each fixture's frame"); continuous pose - the fixture sweep walks the mid-move pose law with a proven swing (RECOMMENDED "M13.8: the fixture sweep walks the mid-move pose law") | ✅ |
 | **M13.9** | Scallop law and finish stepovers | The ridge/scallop law is live as a non-blocking ratcheted verdict (16 fixtures pinned 0.127-0.349 over 0.123; RECOMMENDED "M13.9: the scallop law lives"); the slope-aware waterline ladder landed (dome waterline 0.183 → 0; RECOMMENDED "M13.9: the waterline ladder reads the slope"); owed: the cos-law rasters' over-reads (multidirection 0.349), the closed ring's own-inside scan read (hill crown), the reach ceiling and the two-pass flank predicate | ⚠️ |
-| **M13.10** | Area-control leftovers | From M11.5 (RECOMMENDED "M11.5: boundaries read in the tilted plane"): a clipped-entry ramp law for a non-centre-cutting ball on a clipped finish (today `center_cut_guard` refuses by name rather than ramps); Trace/Engrave containment through a `ToolOn` native; Face's open-boundary band preview under a tilt drawn exactly (today the local turn on the world shadow - approximate drawing, exact cut) | 📋 |
-| **M13.11** | Phase 1 leftovers | From the 2026-11-06 audit (RECOMMENDED "The Phase 1 leftovers audit"): G41/G42 cutter-compensation output (M1.3: a comp record in the CL stream, the post hook wired, the lead-in law, a post gate); mesh repair - weld and fill holes (M1.1; cross-ref M12.1 healing); IGES import or a recorded won't-do (M1.1/M1.3); cross-entity open-run stitching and facing rows that honour holes (M1.5) | 📋 |
+| **M13.10** | Area-control leftovers | From M11.5: the clipped finish's re-entry ramps along the kept chain under the guard's entry_ramp retry (a piece too small keeps the named refusal); Trace/Engrave take the group through Native::ToolOn (containment, offset, includes/excludes; open boundary and extension refuse by name); the tilted Face band preview is built in the tilt frame (RECOMMENDED "M13.10: the area-control leftovers close") | ✅ |
+| **M13.11** | Phase 1 leftovers | From the 2026-11-06 audit (RECOMMENDED "The Phase 1 leftovers audit"): G41/G42 cutter-compensation output (M1.3: a comp record in the CL stream, the post hook wired, the lead-in law, a post gate); mesh repair - weld and fill holes (M1.1; cross-ref M12.1 healing); IGES import decided - waits for M12.1 (RECOMMENDED "M13.11: IGES import waits for the M12.1 kernel"); cross-entity open-run stitching and facing rows that honour holes (M1.5) | 📋 |
 
 ## Release train
 
@@ -1922,7 +1920,7 @@ commit, and the next three rows are planned at the same time, so the train
 never runs out of dates.
 
 ### M13.10 - Area-control leftovers
-**Goal: the last three M11.5 gaps close without a control withheld.** — 📋
+**Goal: the last three M11.5 gaps close without a control withheld.** — ✅ done 2026-11-06 (RECOMMENDED "M13.10: the area-control leftovers close"; gating)
 
 - **Clipped-entry ramp**: a finish clipped by a boundary re-enters with a
       vertical plunge; a non-centre-cutting ball is refused by name by
@@ -1950,9 +1948,9 @@ leftovers audit")
 - **Mesh repair** (M1.1): weld and fill holes for toolpath-supporting
       surfaces; today only `open_edges` counts them. Cross-ref M12.1's kernel
       healing - decide whether repair waits for the kernel or lands on the mesh.
-- **IGES import** (M1.1/M1.3): refused by name with a clean diagnostic since
-      M1.1; no milestone owns it. Decide: build it (B-rep via the M12.1 kernel)
-      or record a won't-do and strip it from the rows.
+- ~~**IGES import**~~ (M1.1/M1.3) - decided 2026-11-06 (RECOMMENDED "M13.11:
+      IGES import waits for the M12.1 kernel"): refused by name until M12.1
+      reads B-rep through its own kernel; not a debt, a decision.
 - **Cross-entity open-run stitching** (M1.5): two runs meeting across two
       model entities do not compose into one ring (`stitch.rs` refuses by
       name).

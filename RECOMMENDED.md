@@ -11025,19 +11025,30 @@ take containment through a `ToolOn` native later.
 
 ## M13.1: the rotary lift - the eye routes, the verdict refuses (2026-11-06)
 
-**Gate finding (main session, same day): HELD.** The heavy parity test's
-Offset arm (`rotary_field_parity::every_rotary_kind_reads_the_radial_law_and_
-its_cost_is_measured`, 427 s release) read the FIELD at the uncut top (16.0)
-on a floor column where the radial law reads the cut floor (3.31): the Offset
-ladder's chord pass never cut that column. Offset is refused by name in
-`plan_program`, but the EYE routes every rotary kind through
-`simulate_rotary_slice` - so the viewport would show uncut stock where the
-program cuts: a wrong picture, which the Prime Directive forbids as much as a
-wrong verdict. Until the Offset pass is explained (the ladder's station moves
-may not read as "turning" to `rotary_chords`, or the held pose is wrong for a
-standing bar), the lift stays out of main (tmp/rotarylift.patch); the three
-decisions below stand for the re-landing, and the eye must route only the
-kinds whose parity is in hand.
+**Gate finding (main session, same day), resolved: the parity TEST's height
+law, not the field pass.** The heavy test's Offset arm read "field 16.0 vs law
+3.31" at column (−1.75, −5.25): along that column the field and the radial law
+agree in SIGN at all 68 probes (steel −16..3.2, air 3.3-6.2, steel 6.3-7.0,
+air 7.3-10.2, steel 10.5-10.9, air 11-13.8, steel 14-16) - the ring at
+ρ = 5.2 bores a TUNNEL under the standing cap, and the old `law_top` returned
+the sweep's lowest reach (3.314, the tunnel floor) while the field's `top` is
+the top of remaining steel (16.0, the cap). Unlike quantities; the eye's
+picture (cap standing) was right. The law's column top is now MARCHED from
+the stock's own uncut top through the swept union to the first steel
+(sphere-traced with a 1e-3 floor - pure inside-tracing stalled beside a
+grazing side wall - and a bisected exit to 1e-7; a floor thinner than a cell
+is a sliver and skipped); a column the sweep never reaches must stand at its
+uncut top within the same bound. Bound unchanged. With that: Parallel 1,196
+sphere-cut tops worst 1.57e-5 / 0 of 7,023 sign misses, Contour 276 standing
+tops exact / 0 of 6,940, Offset 440 standing tops exact / 0 of 7,020 - all
+three kinds lifted (`rotary_kind_lift`), `ROTARY_KIND_UNMEASURED` kept as the
+landing refusal for a future kind. The eye already routed only lifted kinds
+(an unlifted kind fails `plan_program` and the pre-existing "traced playback
+refused - the sheet stands" fallback draws), now pinned. Cost at the verdict
+class: 17 / 204 / 171 s release for Parallel / Contour / Offset; at the eye's
+class (cell/4) 2.5 / 8.7 / 6.4 s. The heavy lane's budget is ~14 min now,
+stated in its ignore reason. The parity fixture moved to
+tests/common/rotary_bar.rs (pure move).
 
 **Three decisions.** (1) The field EYE (`stock_view::field_view_with`,
 `stock_play::cut`) routes every rotary op through `simulate_rotary_slice` at
@@ -11416,3 +11427,45 @@ done: the 2D pocket's spiral/ramp/helical entries (the Entry3D family since
 M5.1 H, helix the default since M11.3, the arc entry in M11.3). Dropped:
 declaring the two M1.5 limits won't-do (facing rows that ignore holes is a
 machining gap, not a design choice).
+
+## M13.10: the area-control leftovers close (2026-11-06)
+
+**The clipped finish's re-entry ramps along the kept chain** under the
+guard's `entry_ramp` retry (`finish_entry::ramp_into`): the ramp starts on
+the solid's top plane at `drop/tan(ramp_angle)` along the kept run and
+descends vertex for vertex over the chain, so every ramp point stands
+vertically over a kernel-certified centre - air by the 3-axis tangent law,
+inside the centre area because the chain is; ramp feed = plunge feed (the
+ring ladder's own choice). A chain shorter than the ramp, or rising above its
+line, keeps the plunge and `center_cut_guard`'s named refusal ("even with
+ramped entries"). A centre-cutting tool keeps its plunge, byte-identical.
+Dropped: the 2D helix/`dive_room` law (it certifies against a level plane,
+not a surface) and re-generating the finish inside the piece.
+
+**Trace and Engrave take the group through `Native::ToolOn` / `Family::
+Ride`**: containment and offset move the ride about its own chain
+(inside/on/outside = 15/20/25 on the block, On move-identical to native),
+includes and excludes shape the ring before containment as Contour's do; an
+open boundary and an extension refuse by name (no ride edge to bound).
+Defaults byte-identical (goldens 23/23). **Face's band under a 3+2 index is
+built in the tilt frame and projected out** (`region_turn_of` returns the
+local region + plane; `machined_footprint` projects through `world_region`),
+so the preview is the cut - the overrun lands along the frame's u in world,
+not 2r along world X. finish_clip.rs split for the 400-line law
+(finish_entry.rs). M13.10 closes; M11.5's pointer stands.
+
+## M13.11: IGES import waits for the M12.1 kernel - a decision, not a debt (2026-11-06)
+
+**IGES is refused by name until the B-rep kernel lands (M12.1), and the
+decision is recorded so no row carries it as an open debt.** IGES carries
+trimmed NURBS B-rep (entities 128/144) exactly as STEP does; today's STEP path
+rides truck's tessellation and every toolpath still reads a mesh, so an IGES
+reader would have to be either a second tessellating B-rep reader (a third
+crate's robustness and licence to audit, for a format the user base has not
+asked for since M1.1) or a port of the M12.1 kernel's own reader before that
+kernel exists. The clean diagnostic stays ("IGES is not supported yet - export
+STEP or STL"); the M1.1/M1.3 rows point here. Dropped: a mesh-only IGES
+importer (IGES mesh entities are rare in the wild; it would read almost
+nothing real) and silently accepting the file (never). Revisit the day M12.1
+reads STEP through its own kernel - IGES is one more entity table on the same
+topology.
