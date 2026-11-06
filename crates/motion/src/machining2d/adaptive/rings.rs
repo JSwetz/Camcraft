@@ -85,11 +85,36 @@ pub(super) fn piece(y: &Region, seed: Point2, climb: bool) -> Result<Option<(Reg
     Ok(Some((Region::new(vec![Loop::new(body)?])?, ring)))
 }
 
+/// The share of a growth revolution over which its blend lands on the
+/// ring ([`morph_rev`]'s `ease`): the pitch of the spiral - a degree or
+/// two off the ring's tangent out of a small orbit - tapers to zero over
+/// the last seventh of the turn, so the revolution meets its seam on the
+/// tangent the next one leaves on. Without it the seam turns by the
+/// ring's chord angle plus the pitch wherever the next step is smaller
+/// (the concentric revolutions handing over to the band's, where the
+/// step collapses): past the 5-degree in-cut break law.
+pub(super) const LAND: f64 = 0.15;
+
+/// The blend share at walk share `t`: `t` itself up to `1 - ease`, then
+/// `1 - ease (2u^2 - u^3)` with `u = (1 - t) / ease` - continuous in
+/// value and slope at the join, zero slope at the ring, monotone, and
+/// never past the linear blend by more than `0.15 ease` of the step
+/// (so the revolution stays between the linear one and the ring: no
+/// crossing either way).
+fn eased(t: f64, ease: f64) -> f64 {
+    if ease <= 0.0 || t < 1.0 - ease {
+        return t;
+    }
+    let u = ((1.0 - t) / ease).clamp(0.0, 1.0);
+    1.0 - ease * (2.0 * u * u - u * u * u)
+}
+
 /// One revolution from ring `a` (starting where the walk stands) onto
 /// ring `b`: every point of `a` blended toward its nearest point on `b`
-/// by the share of `a` walked, ending on `b`'s seam; returns it and `b`
-/// rotated to that seam.
-pub(super) fn morph_rev(a: &[Point2], b: &[Point2]) -> (Vec<Point2>, Vec<Point2>) {
+/// by the share of `a` walked (eased onto the ring over the last `ease`
+/// of the turn, [`eased`]; `0.0`: linear), ending on `b`'s seam;
+/// returns it and `b` rotated to that seam.
+pub(super) fn morph_rev(a: &[Point2], b: &[Point2], ease: f64) -> (Vec<Point2>, Vec<Point2>) {
     // Densified: the seam's drop-out stays a fraction of a chord, never a
     // wall run's length.
     let a = densify(a, SEG, false);
@@ -107,7 +132,7 @@ pub(super) fn morph_rev(a: &[Point2], b: &[Point2]) -> (Vec<Point2>, Vec<Point2>
         if j > 0 {
             acc += dist(a[j - 1], a[j]);
         }
-        let t = if total > 1e-12 { acc / total } else { 1.0 };
+        let t = eased(if total > 1e-12 { acc / total } else { 1.0 }, ease);
         let q = ix.nearest(a[j]);
         let p = Point2::new(a[j].x + (q.x - a[j].x) * t, a[j].y + (q.y - a[j].y) * t);
         if j > n / 2 && dist(p, seam) < near {

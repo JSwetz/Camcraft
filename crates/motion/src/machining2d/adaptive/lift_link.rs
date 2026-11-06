@@ -141,7 +141,12 @@ impl LinkLaw<'_> {
         let (climb, lead) = (ret.up.len(), ret.down.len().saturating_sub(1));
         let traverse = &lg[climb.min(lg.len())..lg.len().saturating_sub(lead).max(climb.min(lg.len()))];
         let down: Vec<Point2> = if lead > 0 { ret.down.clone() } else { lg.last().map_or(vec![t], |l| vec![l.0, l.1]) };
-        lg.iter().all(|l| self.off_orbit(l.0, l.1))
+        // A descent down the chord ends in a plunge onto the piece's
+        // first point: the whole rim there must read nothing (the hop's
+        // landing law, `landing`), not only the half facing the traverse.
+        let plunge_clear = lead > 0 || self.ras.stock_clear(t, self.rim + self.ras.h);
+        plunge_clear
+            && lg.iter().all(|l| self.off_orbit(l.0, l.1))
             && self.ras.peek(&down, self.rim, self.step) <= self.bite
             && traverse.iter().all(|l| self.leg_ok(l.0, l.1))
     }

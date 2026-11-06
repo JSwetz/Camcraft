@@ -31,7 +31,7 @@
 use crate::geo2d::{Loop, Point2, Region};
 
 use super::raster::Raster;
-use super::rings::{ARC_TOL, NARROW, morph_rev, one_loop, open, pick, piece, widest_opening};
+use super::rings::{ARC_TOL, LAND, NARROW, morph_rev, one_loop, open, pick, piece, widest_opening};
 use super::{CORNER_PER_R, GenError, Planner, Worst, orbit_radius, slit};
 
 /// The wall margin the rings start at (mm).
@@ -165,7 +165,10 @@ impl Planner<'_> {
                 };
                 let Some((yr, b)) = piece(&y, s.seed, s.climb)? else { return Ok(None) };
                 let done = !disc && whole - yr.area() < 1e-4 * whole.max(1.0);
-                let (rev, b) = morph_rev(&ring, &b);
+                // Landed on the ring tangentially (`LAND`): the seam
+                // turns by the ring's chord angle, whatever the next
+                // revolution's step.
+                let (rev, b) = morph_rev(&ring, &b, LAND);
                 let mut ras = p.ras.clone();
                 let w = ras.walk_until(&rev, (s.r, p.rim, p.step), limit);
                 Ok(Some((g, yr, b, rev, ras, w, done)))
@@ -202,7 +205,7 @@ impl Planner<'_> {
             eps -= de;
             let y = open(&d0.offset_fine(-eps, ARC_TOL)?, rho)?;
             let Some((_, b)) = piece(&y, s.seed, s.climb)? else { break };
-            let (rev, b) = morph_rev(&ring, &b);
+            let (rev, b) = morph_rev(&ring, &b, 0.0);
             self.cut_run(&rev);
             ring = b;
         }
@@ -210,7 +213,7 @@ impl Planner<'_> {
         let Some((_, fin)) = piece(&open(&d0.offset_fine(-FINAL.min(0.5 * eps), ARC_TOL)?, rho_c)?, s.seed, s.climb)? else {
             return Ok(Grown::Unfit);
         };
-        let (rev, fin) = morph_rev(&ring, &fin);
+        let (rev, fin) = morph_rev(&ring, &fin, 0.0);
         self.fin_from = self.walk.len();
         self.cut_run(&rev);
         // Grown whole and eased, the last ring is microns off the final
