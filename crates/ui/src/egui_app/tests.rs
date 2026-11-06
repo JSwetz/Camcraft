@@ -543,9 +543,9 @@ fn click_apply_edits_operation_through_commands() {
     harness.get_by_label("Climb milling").click();
     harness.run();
     assert!(!staged_climb(&harness), "checkbox did not reach the staged params");
-    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.get_by_label("Apply").scroll_to_me();
     harness.run();
-    harness.get_by_label("Apply Parameters").click();
+    harness.get_by_label("Apply").click();
     harness.run();
     let st = &harness.state().state;
     let live = model::find_by_name(&st.world, "Contour1")
@@ -616,9 +616,9 @@ fn stock_to_leave_rect(h: &Harness<'static, ShellUi>) -> egui::Rect {
     let lab = h.get_by_label("Stock to leave").rect();
     h.get_all_by_role(egui::accesskit::Role::SpinButton)
         .map(|n| n.rect())
-        .filter(|r| r.top() >= lab.bottom() - 1.0)
+        .filter(|r| (r.center().y - lab.center().y).abs() < 12.0)
         .min_by(|a, b| a.top().total_cmp(&b.top()))
-        .expect("the Stock to leave field draws its DragValue below its label")
+        .expect("the Stock to leave field draws its DragValue on its label's row")
 }
 
 fn stock_to_leave_center(h: &Harness<'static, ShellUi>) -> egui::Pos2 {
@@ -747,7 +747,7 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Geometry", vec!["Click selects:"]),
                 ("Heights", vec!["Clearance Z", "Cut Z", "Depth staging"]),
                 ("Passes", vec!["Stepover (Y spacing)"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -765,8 +765,8 @@ fn every_field_lives_on_exactly_one_section() {
                     ],
                 ),
                 ("Passes", vec!["Stock to leave"]),
-                ("Lead in / Lead out", vec!["Lead in/out", "Entry", "Level to level descent", "Between levels", "Between passes", "Plunge height above material (0 = feed from the traverse plane)", "Ramp / helix / arc feed (0 = cutting feed)", "Entry plunge feed (0 = plunge feed)", "Lead-in feed (% of cutting feed)", "Entry engagement limit (% of D, 0 = off)", "Lead out", "Extension before lead-in", "Extension after lead-out", "Vertical lead-in height", "Overlap past the start", "Tab count", "Tab width", "Tab height"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Lead in / Lead out", vec!["Lead in/out", "Entry", "Level to level", "Between levels", "Between passes", "Plunge", "Ramp / helix / arc feed", "Entry plunge feed", "Lead-in feed", "Engagement", "Lead out", "Before lead-in", "After lead-out", "Vertical lead-in height", "Overlap past the start", "Tab count", "Tab width", "Tab height"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -775,8 +775,8 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Geometry", vec!["Click selects:"]),
                 ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
                 ("Passes", vec!["Stepover", "Stock to leave", "Strategy"]),
-                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes", "Plunge height above material (0 = feed from the traverse plane)", "Ramp / helix / arc feed (0 = cutting feed)", "Entry plunge feed (0 = plunge feed)", "Lead-in feed (% of cutting feed)", "Entry engagement limit (% of D, 0 = off)", "Helix minimum radius (0 = only the set radius)", "Entry helix pitch (0 = one turn per helix diameter)"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes", "Plunge", "Ramp / helix / arc feed", "Entry plunge feed", "Lead-in feed", "Engagement", "Minimum radius", "Helix pitch"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -785,8 +785,8 @@ fn every_field_lives_on_exactly_one_section() {
                 ("Geometry", vec!["Click selects:", "A X", "A Y", "B X", "B Y", "Slot width"]),
                 ("Heights", vec!["Clearance Z", "Top Z", "Bottom Z", "Stepdown"]),
                 ("Passes", vec!["Stock to leave", "Stepover"]),
-                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -794,7 +794,7 @@ fn every_field_lives_on_exactly_one_section() {
             vec![
                 ("Geometry", vec!["Click selects:"]),
                 ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -805,7 +805,7 @@ fn every_field_lives_on_exactly_one_section() {
             // default, picks may bound it (the rim law's closed-chain
             // refusal is proved over a Selection src). Adaptive shows
             // the engagement door the name pins open; Offset has no
-            // such field. "Retract Z" and "Helix lead radius" are
+            // such field. "Retract Z" and "Helix radius" are
             // guard-rendered (the draft has them off), so they are not
             // in these rows.
             "2D Adaptive",
@@ -816,8 +816,8 @@ fn every_field_lives_on_exactly_one_section() {
                     vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
                 ),
                 ("Passes", vec!["Stepover", "Stock to leave", "Optimal load (% of D)"]),
-                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -829,8 +829,8 @@ fn every_field_lives_on_exactly_one_section() {
                     vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
                 ),
                 ("Passes", vec!["Stepover", "Stock to leave"]),
-                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -842,7 +842,7 @@ fn every_field_lives_on_exactly_one_section() {
             vec![
                 ("Geometry", vec!["Click selects:"]),
                 ("Heights", vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -857,10 +857,10 @@ fn every_field_lives_on_exactly_one_section() {
             vec![
                 (
                     "Geometry",
-                    vec!["Click selects:", "Chamfer width", "Chamfer angle (deg)", "Side", "Tolerance"],
+                    vec!["Click selects:", "Chamfer width", "Chamfer angle", "Side", "Tolerance"],
                 ),
                 ("Heights", vec!["Clearance Z", "Retract plane", "Top Z"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -882,8 +882,8 @@ fn every_field_lives_on_exactly_one_section() {
                     vec!["Clearance Z", "Retract plane", "Top Z", "Bottom Z", "Stepdown"],
                 ),
                 ("Passes", vec!["Stock to leave", "Stepover"]),
-                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -907,7 +907,7 @@ fn every_field_lives_on_exactly_one_section() {
                     ],
                 ),
                 ("Passes", vec!["Radial infeed per pass"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -928,8 +928,8 @@ fn every_field_lives_on_exactly_one_section() {
                         "Override the hole floors",
                     ],
                 ),
-                ("Passes", vec!["Cycle", "Peck depth", "Dwell at bottom (s)"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)"]),
+                ("Passes", vec!["Cycle", "Peck depth", "Dwell at bottom"]),
+                ("Feeds", vec!["Feed", "Plunge feed"]),
             ],
         ),
         (
@@ -953,8 +953,8 @@ fn every_field_lives_on_exactly_one_section() {
                     ],
                 ),
                 ("Passes", vec!["Stock to leave", "Tolerance"]),
-                ("Lead in / Lead out", vec!["Level to level descent", "Between levels", "Between passes"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Lead in / Lead out", vec!["Level to level", "Between levels", "Between passes"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -987,8 +987,8 @@ fn every_field_lives_on_exactly_one_section() {
                     "Rest roughing",
                     "Feed optimization",
                 ]),
-                ("Lead in / Lead out", vec!["Entry", "Level to level descent", "Between levels", "Between passes"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Lead in / Lead out", vec!["Entry", "Level to level", "Between levels", "Between passes"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -1020,7 +1020,7 @@ fn every_field_lives_on_exactly_one_section() {
                     "Ramp between lines",
                     "Tolerance",
                 ]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)", "Climb milling"]),
+                ("Feeds", vec!["Feed", "Plunge feed", "Climb milling"]),
             ],
         ),
         (
@@ -1038,7 +1038,7 @@ fn every_field_lives_on_exactly_one_section() {
             vec![
                 ("Geometry", vec!["Break width"]),
                 ("Heights", vec!["Clearance Z", "Window Top Z", "Window Bottom Z"]),
-                ("Feeds", vec!["Feed (mm/min)", "Plunge feed (mm/min)"]),
+                ("Feeds", vec!["Feed", "Plunge feed"]),
             ],
         ),
     ];
@@ -1144,6 +1144,9 @@ fn pane_texts(h: &Harness<'static, ShellUi>) -> Vec<String> {
             let a = n.accesskit_node();
             if a.role() == Role::Label { a.value() } else { a.label() }
         })
+        // The property grid's checkboxes carry their caption as the row's
+        // label; the box itself has no text.
+        .filter(|t| !t.is_empty())
         .collect()
 }
 
@@ -1155,7 +1158,7 @@ fn section_draws(state: &mut State, sec: usize) -> bool {
     let mut drew = false;
     let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
         let before = ui.cursor().min;
-        super::pages::params_fields(ui, state, sec);
+        super::params_page::params_fields(ui, state, sec);
         drew = ui.cursor().min != before;
     });
     // Nothing paints this throwaway pass: the font atlas upload is dropped
@@ -3286,9 +3289,9 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
             "staging must not queue - only Apply speaks"
         );
     }
-    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.get_by_label("Apply").scroll_to_me();
     harness.run();
-    harness.get_by_label("Apply Parameters").click();
+    harness.get_by_label("Apply").click();
     harness.run();
     let st = &harness.state().state;
     let op = model::find_by_name(&st.world, "3D Finish1")
@@ -3342,9 +3345,9 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         }
     }
     harness.run();
-    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.get_by_label("Apply").scroll_to_me();
     harness.run();
-    harness.get_by_label("Apply Parameters").click();
+    harness.get_by_label("Apply").click();
     harness.run();
     let st = &harness.state().state;
     let op = model::find_by_name(&st.world, "3D Finish1")
@@ -3391,9 +3394,9 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
     harness.run();
     harness.get_by_label("Ramp between lines").click();
     harness.run();
-    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.get_by_label("Apply").scroll_to_me();
     harness.run();
-    harness.get_by_label("Apply Parameters").click();
+    harness.get_by_label("Apply").click();
     harness.run();
     let st = &harness.state().state;
     let ramped = model::find_by_name(&st.world, "3D Finish1")
@@ -3439,9 +3442,9 @@ fn finish3d_pattern_and_stepover_apply_through_commands() {
         _ => panic!("kind drift"),
     };
     assert!(staged.is_some(), "the floor checkbox staged no number");
-    harness.get_by_label("Apply Parameters").scroll_to_me();
+    harness.get_by_label("Apply").scroll_to_me();
     harness.run();
-    harness.get_by_label("Apply Parameters").click();
+    harness.get_by_label("Apply").click();
     harness.run();
     let st = &harness.state().state;
     let floored = model::find_by_name(&st.world, "3D Finish1")
@@ -4253,7 +4256,7 @@ fn a_deleted_tool_marks_the_row_and_the_page_blocked() {
     harness.run();
     let suffix = row_suffix(&harness.state().state);
     assert!(suffix.contains("BLOCKED") && suffix.contains(why), "{suffix}");
-    let page = format!("Status: BLOCKED - {why}");
+    let page = format!("Blocked · {why}");
     assert!(harness.query_by_label_contains(&page).is_some(), "the page names the block");
 
     harness.state_mut().state.pending.push_back(CommandKind::Undo);

@@ -75,7 +75,7 @@ fn heights_tab(state: State) -> Harness<'static, State> {
     Harness::builder()
         .with_size(Vec2::new(600.0, 900.0))
         .build_ui_state(
-            |ui, st: &mut State| super::pages::params_fields(ui, st, super::op_tabs::SEC_HEIGHTS),
+            |ui, st: &mut State| super::params_page::params_fields(ui, st, super::op_tabs::SEC_HEIGHTS),
             state,
         )
 }

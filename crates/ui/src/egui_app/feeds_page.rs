@@ -17,7 +17,8 @@ use camcraft_app::model;
 use camcraft_app::tools::{ToolMaterial, WorkMaterial};
 use camcraft_app::units;
 
-use super::pages::{combo, field};
+use super::fields::combo;
+use super::layout::{group, hint, prop_row, prop_row_hint};
 use crate::state::{CommandKind, State};
 
 /// The flute counts the combo offers (a stated odd count outside it is
@@ -31,33 +32,35 @@ pub(super) fn cutting_group(ui: &mut Ui, state: &mut State, name: &str) {
     else {
         return;
     };
-    let u = state.units();
-    ui.separator();
-    ui.strong("Cutting data");
+    group(ui, "Cutting data", None, |ui| body(ui, state, name, &op));
+}
 
+fn body(ui: &mut Ui, state: &mut State, name: &str, op: &camcraft_app::schema::Operation) {
+    let u = state.units();
     // The document's material: index 0 is "not stated".
     let mut names: Vec<&str> = vec!["Not stated"];
     names.extend(WorkMaterial::ALL.iter().map(|m| m.label()));
     let now = cutting::material_of(&state.world);
     let mut idx = now.map_or(0, |m| m as usize + 1);
-    field(ui, "Workpiece material (document)");
-    combo(ui, "cut.material", &mut idx, &names);
+    prop_row_hint(ui, "Workpiece material", "the document's material - every operation reads it", |ui| {
+        combo(ui, "cut.material", &mut idx, &names)
+    });
     let picked = idx.checked_sub(1).and_then(|i| WorkMaterial::ALL.get(i).copied());
     if picked != now {
         state.pending.push_back(CommandKind::SetWorkMaterial(picked));
     }
 
     // The op's tool: edge material and flutes, edited through ChangeTool
-    // (the tool is shared by every op that names it - the label says so).
+    // (the tool is shared by every op that names it - the hover says so).
     let tool_name = op.tool.clone();
     if let Some(tool) = model::find_by_name(&state.world, &tool_name).and_then(|t| model::tool_of(&state.world, &t)) {
         let tm_names = ["Not stated", ToolMaterial::Hss.label(), ToolMaterial::Carbide.label()];
         let mut tm_idx = tool.tool_material.map_or(0, |m| m as usize + 1);
-        field(ui, &format!("Tool material ({tool_name}, every op using it)"));
-        combo(ui, "cut.tool_material", &mut tm_idx, &tm_names);
+        prop_row_hint(ui, "Tool material", &format!("edits tool '{tool_name}' - every operation using it"), |ui| {
+            combo(ui, "cut.tool_material", &mut tm_idx, &tm_names)
+        });
         let tm = tm_idx.checked_sub(1).and_then(|i| ToolMaterial::ALL.get(i).copied());
         // A combo, not a drag: one discrete pick is one command.
-        field(ui, "Flutes");
         let mut z_idx = tool.flutes.and_then(|z| FLUTES.iter().position(|f| *f == z)).map_or(0, |i| i + 1);
         let z_names: Vec<String> = std::iter::once("Not stated".to_owned())
             .chain(FLUTES.iter().map(u32::to_string))
@@ -67,7 +70,7 @@ pub(super) fn cutting_group(ui: &mut Ui, state: &mut State, name: &str) {
             z_idx = z_names.len() - 1;
         }
         let z_refs: Vec<&str> = z_names.iter().map(String::as_str).collect();
-        combo(ui, "cut.flutes", &mut z_idx, &z_refs);
+        prop_row(ui, "Flutes", |ui| combo(ui, "cut.flutes", &mut z_idx, &z_refs));
         let flutes = match z_idx {
             0 => None,
             i => z_names.get(i).and_then(|n| n.parse::<u32>().ok()),
@@ -83,42 +86,44 @@ pub(super) fn cutting_group(ui: &mut Ui, state: &mut State, name: &str) {
     // The suggestion readout, then the one explicit Apply.
     match cutting::suggest(&state.world, name) {
         Err(why) => {
-            ui.label(format!("No suggestion: {why}"));
+            ui.label(egui::RichText::new(format!("No suggestion: {why}")).weak());
         }
         Ok(s) => {
             let thin = s.thinning.map_or(String::new(), |f| {
                 format!(", feed raised x{:.2} for radial chip thinning (hex = fz sin phi)", 1.0 / f)
             });
-            ui.label(format!(
-                "Suggest feeds & speeds: Vc {:.0} m/min, fz {:.3} mm on {} ({}){thin}",
-                s.vc,
-                s.fz,
-                s.material.label(),
-                s.tool_material.label()
-            ));
+            prop_row_hint(
+                ui,
+                "Suggested",
+                &format!("{} ({}){thin}", s.material.label(), s.tool_material.label()),
+                |ui| ui.label(format!("Vc {:.0} m/min · fz {:.3} mm", s.vc, s.fz)),
+            );
             let feed_now = cutting::feed_of(&op.params).unwrap_or(0.0);
             let rpm_now = model::find_by_name(&state.world, &tool_name)
                 .and_then(|t| model::tool_of(&state.world, &t))
                 .map_or(0.0, |t| t.rpm);
-            ui.label(format!(
-                "spindle {rpm_now:.0} -> {:.0} rpm, feed {} -> {}",
-                s.rpm,
-                units::feed(feed_now, u),
-                units::feed(s.feed, u)
-            ));
+            prop_row(ui, "Spindle", |ui| ui.label(format!("{rpm_now:.0} -> {:.0} rpm", s.rpm)));
+            prop_row(ui, "Feed", |ui| ui.label(format!("{} -> {}", units::feed(feed_now, u), units::feed(s.feed, u))));
             for n in &s.notes {
-                ui.label(n);
+                hint(ui, n);
             }
             let dirty = op.params != state.op_ui.params || op.area != state.op_ui.area;
             let same = (feed_now - s.feed).abs() < 1e-9 && (rpm_now - s.rpm).abs() < 1e-9;
-            let ok = ui.add_enabled(!dirty && !same, egui::Button::new("Apply suggestion"));
+            let why = if dirty {
+                Some("apply or revert the page's own edits first - a suggestion never overwrites typing")
+            } else if same {
+                Some("the operation already runs the suggestion")
+            } else {
+                None
+            };
+            let mut ok = ui
+                .add_enabled(!dirty && !same, egui::Button::new("Apply suggestion"))
+                .on_hover_text("write the suggested spindle and feed (one undoable command)");
+            if let Some(w) = why {
+                ok = ok.on_disabled_hover_text(w);
+            }
             if ok.clicked() {
                 state.pending.push_back(CommandKind::ApplyCuttingData(name.to_owned()));
-            }
-            if dirty {
-                ui.label("apply or revert the page's own edits first - a suggestion never overwrites typing");
-            } else if same {
-                ui.label("the operation already runs the suggestion");
             }
         }
     }

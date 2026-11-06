@@ -1,0 +1,153 @@
+//! The property pages' value widgets (graduated from `pages.rs` with the
+//! property grid, user review 2026-11-06) and the shared prelude every
+//! kind-family page module glob-imports: the unit-lens numbers (unit as
+//! the value's suffix, never in the label), the combos, the 3+2 index
+//! group, and the form helpers re-exported from `layout`.
+//!
+//! Provenance: our own port of the M-c page widgets (egui DragValue /
+//! ComboBox, the vendored egui 0.36 docs); no vendor material involved.
+
+pub(super) use egui::{ComboBox, DragValue, Ui};
+pub(super) use flecs_ecs::prelude::World;
+
+pub(super) use camcraft_app::machining2d::{ARC_FIT_TOL, Lead, PocketStrategy, Side};
+pub(super) use camcraft_app::model;
+pub(super) use camcraft_app::operation::{self, Height, OpParams, Tilt};
+pub(super) use camcraft_app::units::{self, Unit};
+
+pub(super) use crate::operations::{
+    cycle_index, cycle_names, side_names, strategy_names, strategy3d_names,
+};
+pub(super) use crate::state::State;
+
+pub(super) use super::heights_page::{HEIGHT_SRC_ID, corner_note, height_editor, retract_note};
+pub(super) use super::kind_editors::*;
+pub(super) use super::layout::{CTRL_W, check_row, group, hint, prop_row};
+pub(super) use super::lead_page;
+pub(super) use super::op_tabs::{SEC_FEEDS, SEC_GEO, SEC_HEIGHTS, SEC_LEADS, SEC_MACHINE, SEC_PASSES};
+pub(super) use super::params_page::Cx;
+
+/// Lead in/out combo items - the whole `Lead` vocabulary, index order
+/// matching the combo-arm mapping in the contour page.
+pub(super) const LEADS: [&str; 5] = ["None", "Linear", "Arc", "Tangential", "Perpendicular"];
+/// The 3-D finish kinematics, in the order the combo maps them.
+pub(super) const FINISH_PATTERNS: [&str; 18] = [
+    "Waterline",
+    "Parallel",
+    "Parallel - multi",
+    "Scallop",
+    "Radial",
+    "Spiral",
+    "Contour",
+    "Project",
+    "Steep and shallow",
+    "Flat",
+    "Pencil",
+    "Corner",
+    "Ramp",
+    "Morphed spiral",
+    "Geodesic",
+    "Blend",
+    "Morph",
+    "Flow",
+];
+
+/// A caption over the control below it - the setup pages' and the tool
+/// editor's stacked form; the operation dialog's rows use `prop_row`.
+pub(crate) fn field(ui: &mut Ui, label: &str) {
+    ui.add_space(3.0);
+    ui.label(label);
+}
+
+pub(crate) fn num(ui: &mut Ui, u: Unit, v: &mut f64) {
+    num_prec(ui, u, v, 4, u.suffix());
+}
+
+/// The unit-lens widget law (M1.1): in mm mode the historical
+/// `DragValue` (speed 0.1, default format), now with the unit as its
+/// suffix. In inch mode the widget works on a display copy -
+/// `units::from_display` puts the world value back on the micron
+/// lattice, so a typed `0.5` stores exactly `12.7`. The drag speed
+/// divides by 25.4 so one pixel moves the same *millimeter* distance
+/// either way - the unit is a lens, not a gearbox. egui's smart aim
+/// rounds a drag toward the nicest number of the SHOWN unit within a
+/// one-pixel radius; because of that speed law the radius is the same
+/// ±0.1 mm in both modes, so the assist is unit-fair.
+fn num_prec(ui: &mut Ui, u: Unit, v: &mut f64, prec: usize, unit: &str) {
+    let h = ui.spacing().interact_size.y;
+    let suffix = format!(" {unit}");
+    if u == Unit::Millimeters {
+        ui.add_sized([CTRL_W, h], DragValue::new(v).speed(0.1).suffix(suffix));
+    } else {
+        let mut d = units::to_display(*v, u);
+        let resp = ui.add_sized(
+            [CTRL_W, h],
+            DragValue::new(&mut d)
+                .speed(0.1 / 25.4)
+                .custom_formatter(move |n, _| format!("{n:.prec$}"))
+                .suffix(suffix),
+        );
+        if resp.changed() {
+            *v = units::from_display(d, u);
+        }
+    }
+}
+
+/// Feed rates (mm/min stored, in/min shown): same lens, coarser text.
+pub(crate) fn num_feed(ui: &mut Ui, u: Unit, v: &mut f64) {
+    num_prec(ui, u, v, 2, u.feed_suffix());
+}
+
+/// Rpm, counts, ratios: no lens - these were never millimeters.
+pub(crate) fn num_plain(ui: &mut Ui, v: &mut f64) {
+    let h = ui.spacing().interact_size.y;
+    ui.add_sized([CTRL_W, h], DragValue::new(v).speed(0.1));
+}
+
+/// A lens-free number with its unit as the suffix ("°", "s", "%").
+pub(crate) fn num_unit(ui: &mut Ui, v: &mut f64, unit: &str) {
+    super::layout::value_with_unit(ui, v, unit, 0.1);
+}
+
+/// The 3+2 index editor (M5.1 stage B): the group's header checkbox arms
+/// or disarms a tilt, and the rows edit the two RS-274 letters (degrees -
+/// the A/B of [`camcraft_app::cl`]'s pose convention, C left to the
+/// table) and the plane anchor. It writes the draft, like every other
+/// field here, so the existing EditOperationParams commit path makes the
+/// edit undoable. The panel never normalizes and never refuses: the door
+/// in [`Tilt::is_sane`] owns the bounds.
+pub(super) fn orientation_editor(ui: &mut Ui, u: Unit, tilt: &mut Option<Tilt>) {
+    let mut armed = tilt.is_some();
+    let g = group(ui, "Tilted plane (3+2)", Some(&mut armed), |ui| {
+        if let Some(t) = tilt.as_mut() {
+            prop_row(ui, "Tool axis A", |ui| num_unit(ui, &mut t.a_deg, "°"));
+            prop_row(ui, "Tool axis B", |ui| num_unit(ui, &mut t.b_deg, "°"));
+            prop_row(ui, "Plane origin X", |ui| num(ui, u, &mut t.origin[0]));
+            prop_row(ui, "Plane origin Y", |ui| num(ui, u, &mut t.origin[1]));
+            prop_row(ui, "Plane origin Z", |ui| num(ui, u, &mut t.origin[2]));
+        }
+    });
+    if g.toggled {
+        *tilt = if armed { Some(Tilt { a_deg: 0.0, b_deg: 0.0, origin: [0.0; 3] }) } else { None };
+    }
+}
+
+/// Combo over `&[&str]` with a usize model (imgui's combo idiom).
+pub(crate) fn combo(ui: &mut Ui, id: &str, idx: &mut usize, names: &[&str]) {
+    let cur = names.get((*idx).min(names.len().saturating_sub(1))).copied().unwrap_or("");
+    ComboBox::from_id_salt(id).width(CTRL_W).selected_text(cur).show_ui(ui, |ui| {
+        for (i, n) in names.iter().enumerate() {
+            ui.selectable_value(idx, i, *n);
+        }
+    });
+}
+
+/// Same, for owned name lists (tool/source lists built per frame).
+pub(crate) fn combo_owned(ui: &mut Ui, id: &str, idx: &mut usize, names: &[String]) {
+    let cur: String = names.get((*idx).min(names.len().saturating_sub(1))).cloned().unwrap_or_default();
+    ComboBox::from_id_salt(id).width(CTRL_W).selected_text(cur).show_ui(ui, |ui| {
+        for (i, n) in names.iter().enumerate() {
+            ui.selectable_value(idx, i, n.as_str());
+        }
+    });
+}

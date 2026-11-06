@@ -45,6 +45,23 @@ mod lead_page;
 mod op_tabs;
 mod painted;
 mod pages;
+// The operation dialog, split out of `pages` with the property grid
+// (user review 2026-11-06): the frame, the Geometry pick block, the
+// params dispatcher and its kind-family pages, the shared widgets.
+mod fields;
+mod geo_page;
+mod heights_page;
+mod holes_page;
+mod kind_editors;
+mod mill2d_more_page;
+mod mill2d_page;
+mod mill3d_page;
+mod multiaxis_page;
+mod op_page;
+mod params_page;
+mod rotary_page;
+mod turning_more_page;
+mod turning_page;
 mod panes;
 pub(crate) mod shell;
 // pub past egui_app from M6.1 C: the switcher's resolution seam
@@ -67,6 +84,8 @@ mod tests;
 mod heights_tests;
 #[cfg(test)]
 mod footer_tests;
+#[cfg(test)]
+mod dialog_tests;
 #[cfg(test)]
 mod colorvision_tests;
 

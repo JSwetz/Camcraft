@@ -7,6 +7,12 @@
 //! command, never written to the project file.
 //! Provenance: our own code, specced from the egui_dock 0.21 docs and
 //! vendored sources; no HSMWorks material involved.
+//! The property-page form helpers (`prop_row`, `group`, `auto_value`,
+//! `status_banner`, `action_bar`, ...) live in `form` and are re-exported
+//! here: one layout module for the dock and the pages alike.
+
+mod form;
+pub(crate) use form::*;
 
 use egui::{Rect, Sense, Ui, Vec2};
 use egui_dock::{DockState, Node, NodePath, Split, SurfaceIndex};

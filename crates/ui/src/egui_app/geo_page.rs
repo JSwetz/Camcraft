@@ -1,0 +1,114 @@
+//! The Geometry tab's pick block (split out of `pages.rs` with the
+//! property grid, user review 2026-11-06): what a viewport click selects,
+//! the picked features as chips (hover lights one, x removes it), what the
+//! selection spells, and the pick's own refusal under the picks it is
+//! about. Pick mode is view state; every selection change is a command.
+//!
+//! Provenance: our own port of the M-c / M-e geometry block; no vendor
+//! material involved.
+
+use egui::{RichText, Ui};
+
+use camcraft_app::operation::{self, GeoSel, SrcRef};
+
+use crate::state::{CommandKind, ErrorScope, GeoPick, State};
+
+use super::colorvision::text_inks;
+use super::layout::group;
+
+pub(super) fn pick_block(ui: &mut Ui, state: &mut State, target: &str, live_setup: Option<&str>) {
+    group(ui, "Selection", None, |ui| body(ui, state, target, live_setup));
+}
+
+fn body(ui: &mut Ui, state: &mut State, target: &str, live_setup: Option<&str>) {
+    // Viewport pick mode - transient view state: the mode itself is not
+    // undoable; what a Face/Edge click changes is.
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Click selects:").on_hover_text("Click in the viewport - Ctrl adds; Alt in Edge mode takes one edge.");
+        let mut pick_mode = match state.geo_pick {
+            GeoPick::Model => 0,
+            GeoPick::Face => 1,
+            GeoPick::Edge => 2,
+        };
+        ui.radio_value(&mut pick_mode, 0, "Models");
+        ui.radio_value(&mut pick_mode, 1, "Faces");
+        ui.radio_value(&mut pick_mode, 2, "Edges");
+        state.geo_pick = match pick_mode {
+            1 => GeoPick::Face,
+            2 => GeoPick::Edge,
+            _ => GeoPick::Model,
+        };
+    });
+    if state.op_ui.src_kind == 2 {
+        chips(ui, state, target);
+    }
+    let (notes, refusal) =
+        operation::selection_account(&state.world, live_setup, &state.op_ui.geo.clone(), &state.op_ui.params.clone());
+    for note in notes {
+        ui.label(RichText::new(note).weak());
+    }
+    // The pick's own refusal, under the picks it is about: the stored
+    // selection's (the walk Generate would refuse), else the pick door's
+    // when the last pick was turned away.
+    let door = state
+        .error_for(ErrorScope::Operation)
+        .filter(|m| m.starts_with("geometry selection not updated") || m.starts_with("links not updated"))
+        .map(str::to_owned);
+    if let Some(msg) = refusal.or(door) {
+        ui.colored_label(text_inks(ui, &state.world).error, msg);
+    }
+    if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
+        let n = state.op_ui.src_name.clone();
+        ui.label(format!("Whole of '{n}' - the first pick replaces this."));
+    } else if state.op_ui.src_kind != 2 {
+        ui.label("Whole stock contour (default) - picks bound the operation.");
+    }
+}
+
+/// The picked features, one chip each: hovering lights the feature in
+/// the viewport (the shared interact law), x removes it - the last one
+/// falls back to the stock source.
+fn chips(ui: &mut Ui, state: &mut State, target: &str) {
+    let chips: Vec<(String, bool, GeoSel)> =
+        state.geo_chips().into_iter().map(|c| (c.label, c.missing, c.sel)).collect();
+    for (i, (label, missing, sel)) in chips.into_iter().enumerate() {
+        let remove = ui
+            .horizontal(|ui| {
+                let resp = if missing {
+                    ui.colored_label(text_inks(ui, &state.world).missing, &label)
+                } else {
+                    ui.label(&label)
+                };
+                if resp.hovered() {
+                    state.geo_hover = Some(sel);
+                }
+                ui.small_button("×").on_hover_text("remove this pick").clicked()
+            })
+            .inner;
+        if remove {
+            let mut rest: Vec<GeoSel> = state.op_ui.geo.clone();
+            if i < rest.len() {
+                rest.remove(i);
+                if rest.is_empty() {
+                    state.op_ui.geo.clear();
+                    state.op_ui.src_kind = 0;
+                    state.pending.push_back(CommandKind::EditOperationLinks {
+                        name: target.to_owned(),
+                        tool: None,
+                        src: Some(SrcRef::Stock),
+                    });
+                } else {
+                    state.op_ui.geo = rest.clone();
+                    state.pending.push_back(CommandKind::SetOperationGeometry { name: target.to_owned(), items: rest });
+                }
+            }
+        }
+    }
+    if ui.small_button("Clear").on_hover_text("drop every pick - the stock bounds the operation again").clicked() {
+        state.pending.push_back(CommandKind::EditOperationLinks {
+            name: target.to_owned(),
+            tool: None,
+            src: Some(SrcRef::Stock),
+        });
+    }
+}

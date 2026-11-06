@@ -1,11 +1,11 @@
-//! The rest of the "Lead in / Lead out" tab (M11.3 B/C/D, user review
-//! 2026-11-05: "Entry - Arc should have an option of setting radius and
-//! length of the arc. Entry - Ramp lacks all usual settings ... All entry
-//! methods are missing extension values ... plunge data ... engagement"):
-//! the entry's own shape numbers, the entry feeds and the engagement
-//! limit, and - on the contour - the lead-out shape, extensions, vertical
-//! lead-in, overlap and the axis-aligned start. Draws into the draft
-//! params; the page's Apply rides the command history like every field.
+//! The rest of the "Lead in / Lead out" tab (M11.3 B/C/D; regrouped on
+//! the user's 2026-11-06 review): the entry type's own numbers - only
+//! the chosen type's, never another's - the Plunge, Entry feeds and
+//! Engagement groups, and on the contour the Lead out, Extensions and
+//! Axis-aligned start groups. Every "0 means derived / off" number is an
+//! explicit toggle (Auto / No limit) or a group-header switch that writes
+//! the model's 0, so the params and the commands are unchanged. Draws
+//! into the draft params; the page's Apply rides the command history.
 //!
 //! Provenance: our own UI over the standard entry/lead parameter
 //! vocabulary of published CAM practice (the motion crate's
@@ -18,59 +18,88 @@ use camcraft_app::machining2d::Lead;
 use camcraft_app::machining3d::Entry3D;
 use camcraft_app::units::Unit;
 
-use super::pages::{combo, field, num, num_feed, num_plain};
+use super::fields::{combo, num, num_feed, num_unit};
+use super::layout::{auto_value, check_row, consequence, group, hint, prop_row, prop_row_hint};
 
 const LEAD_OUTS: [&str; 6] = ["Same as lead-in", "None", "Linear", "Arc", "Tangential", "Perpendicular"];
 
 /// The entry arm's own numbers (`arm` - the first entry, or the level
-/// descent the user set), then the plunge height, the entry feeds and the
-/// engagement limit every ladder reads.
-pub(super) fn entry_shape_editor(ui: &mut Ui, u: Unit, arm: Option<Entry3D>, a: &mut Approach) {
+/// descent a kind without a first entry uses), inside the caller's group.
+pub(super) fn arm_fields(ui: &mut Ui, u: Unit, arm: Entry3D, a: &mut Approach) {
     match arm {
-        Some(Entry3D::Ramp) => {
-            field(ui, "Entry ramp angle (deg, 0 = one straight chord)");
-            num_plain(ui, &mut a.ramp_angle);
-            field(ui, "Max ramp leg length (0 = no limit)");
-            num(ui, u, &mut a.ramp_max_len);
-            ui.checkbox(&mut a.ramp_to_depth, "Ramp from the top of the cut every level");
-            ui.label("set an angle and the ramp zig-zags along the first cut, never steeper");
+        Entry3D::Ramp => {
+            auto_value(ui, "Ramp angle", "Auto", &mut a.ramp_angle, "one straight chord", 3.0, |ui, v| {
+                num_unit(ui, v, "°");
+            });
+            hint(ui, "set an angle and the ramp zig-zags along the first cut, never steeper");
+            auto_value(ui, "Max ramp leg", "No limit", &mut a.ramp_max_len, "no limit", 10.0, |ui, v| num(ui, u, v));
+            check_row(ui, "Ramp from the top every level", &mut a.ramp_to_depth);
         }
-        Some(Entry3D::Helix) => {
-            field(ui, "Helix minimum radius (0 = only the set radius)");
-            num(ui, u, &mut a.helix_min_radius);
-            field(ui, "Entry helix pitch (0 = one turn per helix diameter)");
-            num(ui, u, &mut a.helix_pitch);
-            field(ui, "Entry helix angle (deg, 0 = by pitch)");
-            num_plain(ui, &mut a.helix_angle);
-            ui.checkbox(&mut a.helix_cw, "Helix clockwise (G2)");
-            ui.label("the helix closes on the first cut's start where it fits there; a ramp, then a plunge, stand in");
+        Entry3D::Helix => {
+            auto_value(ui, "Minimum radius", "Auto", &mut a.helix_min_radius, "set radius only", 0.5, |ui, v| {
+                num(ui, u, v);
+            });
+            auto_value(ui, "Helix pitch", "Auto", &mut a.helix_pitch, "1 turn / helix Ø", 1.0, |ui, v| num(ui, u, v));
+            auto_value(ui, "Helix angle", "Auto", &mut a.helix_angle, "by pitch", 2.0, |ui, v| num_unit(ui, v, "°"));
+            check_row(ui, "Clockwise (G2)", &mut a.helix_cw);
+            consequence(ui, "where the helix cannot fit, a ramp and then a plunge stand in");
         }
-        Some(Entry3D::Arc) => {
-            field(ui, "Arc entry radius (0 = tool diameter)");
-            num(ui, u, &mut a.arc_radius);
-            field(ui, "Arc sweep (deg, 0 = cover the drop)");
-            num_plain(ui, &mut a.arc_sweep);
-            ui.label("a shorter sweep covers less of the drop; the rest feeds straight down at the arc's start");
+        Entry3D::Arc => {
+            auto_value(ui, "Arc radius", "Auto", &mut a.arc_radius, "tool Ø", 3.0, |ui, v| num(ui, u, v));
+            auto_value(ui, "Arc sweep", "Auto", &mut a.arc_sweep, "covers the drop", 90.0, |ui, v| num_unit(ui, v, "°"));
+            hint(ui, "a shorter sweep covers less of the drop; the rest feeds straight down at the arc's start");
+            consequence(ui, "where the arc cannot fit, a plunge stands in");
         }
-        Some(Entry3D::Plunge) | None => {}
+        Entry3D::Plunge => {}
     }
-    field(ui, "Plunge height above material (0 = feed from the traverse plane)");
-    num(ui, u, &mut a.plunge_height);
-    ui.label("rapid down to this height over the material, feed only the rest");
-    field(ui, "Ramp / helix / arc feed (0 = cutting feed)");
-    num_feed(ui, u, &mut a.ramp_feed);
-    field(ui, "Entry plunge feed (0 = plunge feed)");
-    num_feed(ui, u, &mut a.plunge_feed);
-    field(ui, "Lead-in feed (% of cutting feed)");
-    num_plain(ui, &mut a.lead_feed_pct);
-    field(ui, "Entry engagement limit (% of D, 0 = off)");
-    let mut pct = a.max_engagement * 100.0;
-    let before = pct;
-    num_plain(ui, &mut pct);
-    if pct != before {
-        a.max_engagement = pct / 100.0;
+}
+
+/// Rapid down to a height over the material, feed only the rest - an
+/// optional feature, switched in the group header (off writes 0).
+pub(super) fn plunge_group(ui: &mut Ui, u: Unit, a: &mut Approach) {
+    let mut on = a.plunge_height > 0.0;
+    let g = group(ui, "Plunge", Some(&mut on), |ui| {
+        prop_row_hint(ui, "Height above material", "rapid down to this height over the material, feed only the rest", |ui| {
+            num(ui, u, &mut a.plunge_height)
+        });
+    });
+    if g.toggled {
+        a.plunge_height = if on { 2.0 } else { 0.0 };
     }
-    ui.label("a descent cuts the full diameter: over the limit its feeds scale down to it, named in the status");
+}
+
+/// The entry moves' own feeds.
+pub(super) fn feeds_group(ui: &mut Ui, u: Unit, a: &mut Approach) {
+    group(ui, "Entry feeds", None, |ui| {
+        auto_value(ui, "Ramp / helix / arc feed", "Auto", &mut a.ramp_feed, "cutting feed", 300.0, |ui, v| {
+            num_feed(ui, u, v);
+        });
+        auto_value(ui, "Entry plunge feed", "Auto", &mut a.plunge_feed, "plunge feed", 150.0, |ui, v| num_feed(ui, u, v));
+        prop_row(ui, "Lead-in feed", |ui| num_unit(ui, &mut a.lead_feed_pct, "%"));
+        hint(ui, "a share of the cutting feed");
+    });
+}
+
+/// The descent engagement limit - optional (off writes 0): over it the
+/// descent's feeds scale down to it, named in the status.
+pub(super) fn engagement_group(ui: &mut Ui, a: &mut Approach) {
+    let mut on = a.max_engagement > 0.0;
+    let g = group(ui, "Engagement", Some(&mut on), |ui| {
+        let mut pct = a.max_engagement * 100.0;
+        let before = pct;
+        prop_row_hint(
+            ui,
+            "Limit (of tool Ø)",
+            "a descent cuts the full diameter: over the limit its feeds scale down to it, named in the status",
+            |ui| num_unit(ui, &mut pct, "%"),
+        );
+        if pct != before {
+            a.max_engagement = pct / 100.0;
+        }
+    });
+    if g.toggled {
+        a.max_engagement = if on { 0.5 } else { 0.0 };
+    }
 }
 
 fn lead_idx(l: Option<Lead>) -> usize {
@@ -86,50 +115,50 @@ fn lead_idx(l: Option<Lead>) -> usize {
 
 /// The contour's lead geometry beyond the lead-in's shape.
 pub(super) fn contour_leads_editor(ui: &mut Ui, u: Unit, a: &mut Approach) {
-    field(ui, "Lead out");
-    let mut i = lead_idx(a.lead_out);
-    let before = i;
-    combo(ui, "c_lead_out", &mut i, &LEAD_OUTS);
-    if i != before {
-        a.lead_out = match i {
-            1 => Some(Lead::None),
-            2 => Some(Lead::Linear { length: 8.0 }),
-            3 => Some(Lead::Arc { radius: 5.0 }),
-            4 => Some(Lead::Tangential { radius: 5.0 }),
-            5 => Some(Lead::Perpendicular { length: 5.0 }),
-            _ => None,
-        };
-    }
-    match &mut a.lead_out {
-        Some(Lead::Linear { length } | Lead::Perpendicular { length }) => {
-            field(ui, "Lead-out length");
-            num(ui, u, length);
+    group(ui, "Lead out", None, |ui| {
+        let mut i = lead_idx(a.lead_out);
+        let before = i;
+        prop_row_hint(ui, "Type", "every lead and extension stays in the legal room - shrunk, then refused by name", |ui| {
+            combo(ui, "c_lead_out", &mut i, &LEAD_OUTS)
+        });
+        if i != before {
+            a.lead_out = match i {
+                1 => Some(Lead::None),
+                2 => Some(Lead::Linear { length: 8.0 }),
+                3 => Some(Lead::Arc { radius: 5.0 }),
+                4 => Some(Lead::Tangential { radius: 5.0 }),
+                5 => Some(Lead::Perpendicular { length: 5.0 }),
+                _ => None,
+            };
         }
-        Some(Lead::Arc { radius } | Lead::Tangential { radius }) => {
-            field(ui, "Lead-out arc radius");
-            num(ui, u, radius);
+        match &mut a.lead_out {
+            Some(Lead::Linear { length } | Lead::Perpendicular { length }) => {
+                prop_row(ui, "Lead-out length", |ui| num(ui, u, length));
+            }
+            Some(Lead::Arc { radius } | Lead::Tangential { radius }) => {
+                prop_row(ui, "Lead-out arc radius", |ui| num(ui, u, radius));
+            }
+            Some(Lead::None) | None => {}
         }
-        Some(Lead::None) | None => {}
-    }
-    field(ui, "Extension before lead-in");
-    num(ui, u, &mut a.ext_in);
-    field(ui, "Extension after lead-out");
-    num(ui, u, &mut a.ext_out);
-    field(ui, "Vertical lead-in height");
-    num(ui, u, &mut a.lead_height);
-    field(ui, "Overlap past the start");
-    num(ui, u, &mut a.overlap);
-    ui.checkbox(&mut a.axis_start, "Axis-aligned lead start");
-    if a.axis_start {
-        field(ui, "Axis tolerance (deg)");
-        num_plain(ui, &mut a.axis_tol);
-        ui.label("starts each ring on an X- or Y-aligned run, so an Arc entry posts as one G18/G19 arc");
-    }
-    ui.label("every lead and extension stays in the legal room - shrunk, then refused by name");
+    });
+    group(ui, "Extensions", None, |ui| {
+        prop_row(ui, "Before lead-in", |ui| num(ui, u, &mut a.ext_in));
+        prop_row(ui, "After lead-out", |ui| num(ui, u, &mut a.ext_out));
+        prop_row(ui, "Vertical lead-in height", |ui| num(ui, u, &mut a.lead_height));
+        prop_row(ui, "Overlap past the start", |ui| num(ui, u, &mut a.overlap));
+    });
+    group(ui, "Axis-aligned start", Some(&mut a.axis_start), |ui| {
+        prop_row_hint(
+            ui,
+            "Axis tolerance",
+            "starts each ring on an X- or Y-aligned run, so an Arc entry posts as one G18/G19 arc",
+            |ui| num_unit(ui, &mut a.axis_tol, "°"),
+        );
+    });
 }
 
 /// The entry fallbacks of a generated path, as lines for the op page's
-/// status block (M11.3, the user's "say it on the op page"): every entry
+/// status banner (M11.3, the user's "say it on the op page"): every entry
 /// substitution, second dive, centre-cutting fallback and lifted link the
 /// generator named, each with the fix a user can make.
 #[must_use]

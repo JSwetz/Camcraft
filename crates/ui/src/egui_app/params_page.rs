@@ -1,0 +1,170 @@
+//! The operation page's params block (split out of `pages.rs` with the
+//! property grid, user review 2026-11-06): the per-kind notes the arms
+//! quote (Auto's verdicts), then one call per kind family module - each
+//! draws only its own kinds' arms, for the open tab only. The placement
+//! law is unchanged: a field renders when, and only when, its section's
+//! guard is the tab being asked (`op_tabs::SECTIONS`).
+//!
+//! Provenance: our own port of the M-c page code; no vendor material.
+
+use super::fields::*;
+
+/// What every family's arms read besides the draft: the unit lens, the
+/// open tab, the op's setup context, the Auto notes, and the one
+/// deferred action (Detect holes) the arms may ask for.
+pub(super) struct Cx<'a> {
+    pub u: Unit,
+    pub tab: usize,
+    pub op_ctx: &'a Option<String>,
+    pub side_note: &'a Option<String>,
+    pub auto_note: &'a Option<String>,
+    pub cycle_note: &'a Option<String>,
+    pub engrave: bool,
+    pub detect_holes: bool,
+}
+
+pub(super) fn params_fields(ui: &mut Ui, state: &mut State, tab: usize) {
+    let u = state.units();
+    let mut side_note: Option<String> = None;
+    let mut auto_note: Option<String> = None;
+    let mut cycle_note: Option<String> = None;
+    let nm = state.op_ui.name.clone();
+    // Height echoes resolve in the editing operation's declared setup
+    // context (M3.2 A); an operation that does not exist yet - a draft
+    // name - resolves `None`, the first setup, what CreateOperation will
+    // declare for it if the cursor is untouched.
+    let op_ctx: Option<String> = model::find_by_name(&state.world, &nm)
+        .and_then(|e| model::operation_of(&state.world, &e))
+        .and_then(|o| o.setup);
+    // ...and against the operation's own source, which a From: Selection
+    // height reads (M11.3 A): handed to every height editor of this
+    // pass through the frame's temp data, so no row signature moves.
+    ui.data_mut(|d| d.insert_temp(egui::Id::new(HEIGHT_SRC_ID), state.op_ui.src()));
+    if let OpParams::Drill {
+        cycle: camcraft_app::drilling::CycleChoice::Auto,
+        holes,
+        cross,
+        ..
+    } = &state.op_ui.params
+    {
+        // What Auto answers for, in the tool's and first hole's own
+        // numbers - the same call generation makes (`auto_kind`), never
+        // a panel-side guess that could drift from it. A radial list
+        // keeps its note to generation (M5.2 F2): the kernel's depth
+        // starts at the R standoff, which the panel would only guess.
+        let radial = !cross.is_empty();
+        cycle_note = match (
+            model::find_by_name(&state.world, &state.op_ui.tool)
+                .as_ref()
+                .and_then(|t| model::tool_of(&state.world, t)),
+            if radial { None } else { holes.first() },
+        ) {
+            (Some(t), Some(h)) => {
+                let depth = h.entry_z - h.floor_z;
+                let pick = camcraft_app::drilling::auto_kind(t.kind, depth, t.diameter);
+                let name = match pick {
+                    camcraft_app::cl::CycleKind::Spot => "Spot",
+                    camcraft_app::cl::CycleKind::Drill => "Drill",
+                    camcraft_app::cl::CycleKind::Peck => "Peck",
+                    camcraft_app::cl::CycleKind::Deep => "Deep (G83)",
+                    camcraft_app::cl::CycleKind::Tap => "Tap",
+                    camcraft_app::cl::CycleKind::Bore => "Bore",
+                    camcraft_app::cl::CycleKind::BackBore => "Back bore",
+                };
+                Some(format!(
+                    "Auto -> {name} for this tool and a depth of {}",
+                    units::len(depth, units::of(&state.world), 3)
+                ))
+            }
+            _ => Some("Auto picks the cycle from the tool and each hole's depth.".into()),
+        };
+    }
+    let op = model::find_by_name(&state.world, &nm)
+        .as_ref()
+        .and_then(|e| model::operation_of(&state.world, e));
+    if let OpParams::Contour {
+        side: Side::Auto, ..
+    } = &state.op_ui.params
+    {
+        let resolved = op.as_ref().and_then(|o| {
+            operation::contour_auto_side(
+                &state.world,
+                o.setup.as_deref(),
+                &o.src,
+                &state.op_ui.params.clone(),
+            )
+        });
+        side_note = Some(match resolved {
+            Some(true) => {
+                "Auto -> Inside: the picked rings bound air, so the metal is outside them.".into()
+            }
+            Some(false) => "Auto -> Outside: the picked rings bound material.".into(),
+            None => "Auto picks the side from the selection at generate.".into(),
+        });
+    }
+    if let OpParams::Pocket {
+        strategy: PocketStrategy::Auto,
+        stepover,
+        ..
+    } = &state.op_ui.params
+    {
+        let pick = "Auto picks the shape from the pocket's outline at generate.".to_owned();
+        auto_note = Some(match op.as_ref() {
+            Some(o) => {
+                let region = operation::region_of(&state.world, o).unwrap_or_default();
+                let diameter = model::find_by_name(&state.world, &o.tool)
+                    .as_ref()
+                    .and_then(|t| model::tool_of(&state.world, t))
+                    .map_or(6.0, |t| t.diameter);
+                let outer: Vec<camcraft_app::geo2d::Point2> = region
+                    .loops()
+                    .iter()
+                    .max_by(|a, b| a.area().abs().total_cmp(&b.area().abs()))
+                    .map(|l| l.points().to_vec())
+                    .unwrap_or_default();
+                if outer.is_empty() {
+                    pick
+                } else {
+                    match PocketStrategy::Auto.resolve(&outer, *stepover, diameter, ARC_FIT_TOL) {
+                        PocketStrategy::Waterline => {
+                            "Auto -> Waterline: the outline is round and the rings reach every band.".into()
+                        }
+                        _ => "Auto -> Zigzag: rings would not suit this outline.".into(),
+                    }
+                }
+            }
+            None => pick,
+        });
+    }
+
+    // Which Trace-shape name the arm below renders: the engrave twin
+    // IS Trace's field shape (M2.4 B), so they share one arm and only
+    // the height-editor ids switch. Read before the match's borrow.
+    let engrave = matches!(&state.op_ui.params, OpParams::Engrave { .. });
+
+    let mut cx = Cx {
+        u,
+        tab,
+        op_ctx: &op_ctx,
+        side_note: &side_note,
+        auto_note: &auto_note,
+        cycle_note: &cycle_note,
+        engrave,
+        detect_holes: false,
+    };
+    let world = &state.world;
+    let params = &mut state.op_ui.params;
+    super::mill2d_page::fields(ui, world, params, &mut cx);
+    super::mill2d_more_page::fields(ui, world, params, &mut cx);
+    super::holes_page::fields(ui, world, params, &mut cx);
+    super::mill3d_page::fields(ui, world, params, &mut cx);
+    super::multiaxis_page::fields(ui, world, params, &mut cx);
+    super::rotary_page::fields(ui, world, params, &mut cx);
+    super::turning_page::fields(ui, world, params, &mut cx);
+    super::turning_more_page::fields(ui, world, params, &mut cx);
+    let detect_holes = cx.detect_holes;
+    if detect_holes {
+        state.detect_holes(&nm);
+    }
+}
+

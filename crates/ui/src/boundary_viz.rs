@@ -7,7 +7,9 @@
 //! arrows pointing into the side that will be machined - read off the
 //! draft's own machined-area preview, so an arrow can never promise a
 //! side the region law does not cut - and that preview area is filled
-//! translucent (`preview_fill`, drawn with the region fills).
+//! translucent (`preview_fill`, drawn with the region fills) - the
+//! area the tool really sweeps, so Face's fill is its bounding band.
+//! Open-boundary edges draw dashed, closed loops solid.
 //! Screen-space marks (egui strokes, so they can be thick) projected
 //! through the same camera math as the hover outline.
 //!
@@ -102,7 +104,15 @@ pub fn boundary_marks(state: &State, aspect: f64) -> Vec<Mark> {
         for g in &e.picks {
             let mut segs = Vec::new();
             feature_segments(state, &g.entity, g.feature, aspect, &mut segs);
-            out.extend(segs.into_iter().map(|(a, b)| Mark { a, b, rgb, width, kind: MarkKind::Edge(e.role) }));
+            // An open boundary's edges draw dashed - told apart from a
+            // closed loop by shape, not by colour alone.
+            for (a, b) in segs {
+                if e.role.is_open() {
+                    out.extend(dashes(a, b).into_iter().map(|(a, b)| Mark { a, b, rgb, width, kind: MarkKind::Edge(e.role) }));
+                } else {
+                    out.push(Mark { a, b, rgb, width, kind: MarkKind::Edge(e.role) });
+                }
+            }
         }
         let (Some(PickShape::Open { chain, .. }), Some(z)) = (&e.shape, z) else {
             continue;
@@ -139,6 +149,33 @@ pub fn boundary_marks(state: &State, aspect: f64) -> Vec<Mark> {
         let mut segs = Vec::new();
         feature_segments(state, &h.entity, f, aspect, &mut segs);
         out.extend(segs.into_iter().map(|(a, b)| Mark { a, b, rgb: HOVER_RGB, width: 2.5, kind: MarkKind::Hover }));
+    }
+    out
+}
+
+/// Dash length and gap, viewport uv.
+const DASH: f32 = 0.014;
+const GAP: f32 = 0.008;
+/// Dashes per segment, at most (a huge segment stays a bounded draw).
+const MAX_DASHES: usize = 400;
+
+/// One screen segment as dashes (the segment itself when it is shorter
+/// than a dash).
+fn dashes(a: [f32; 2], b: [f32; 2]) -> Vec<([f32; 2], [f32; 2])> {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let l = dx.hypot(dy);
+    if !(l.is_finite() && l > DASH) {
+        return vec![(a, b)];
+    }
+    let step = DASH + GAP;
+    let n = ((l / step).ceil() as usize).clamp(1, MAX_DASHES);
+    let mut out = Vec::with_capacity(n);
+    for k in 0..n {
+        let t0 = (k as f32 * step / l).min(1.0);
+        let t1 = ((k as f32 * step + DASH) / l).min(1.0);
+        if t1 > t0 {
+            out.push(([a[0] + dx * t0, a[1] + dy * t0], [a[0] + dx * t1, a[1] + dy * t1]));
+        }
     }
     out
 }
@@ -194,5 +231,5 @@ pub fn preview_fill(state: &State) -> Option<(f64, &Region)> {
         return None;
     }
     let p = state.boundary_view.preview.as_ref()?;
-    Some((p.z, p.region.as_ref()?))
+    Some((p.z, p.footprint.as_ref().or(p.region.as_ref())?))
 }

@@ -1,0 +1,386 @@
+//! The operation page: the 2D milling kinds' fields: Face, Contour, Pocket and the roughing twins - one module per kind family, split out
+//! of `pages.rs` (the 400-line law) when the property grid landed (user
+//! review 2026-11-06). Each arm draws its kind's fields for the open tab
+//! through the `layout` form helpers; every value edits the page draft,
+//! and Apply rides the command history.
+//!
+//! Provenance: our own UI over the operation parameter model (each
+//! kind's own module names its sources); no vendor material or text.
+
+use super::fields::*;
+
+pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut Cx<'_>) {
+    let (u, tab, op_ctx) = (cx.u, cx.tab, cx.op_ctx);
+    let _ = (u, tab, op_ctx);
+    #[allow(unused_variables)]
+    let (side_note, auto_note, cycle_note, engrave) = (cx.side_note, cx.auto_note, cx.cycle_note, cx.engrave);
+    match params {
+        OpParams::Face {
+            stepover,
+            clearance_z,
+            cut_z,
+            top_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            blend_turns,
+            tilt,
+        } => {
+            if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
+                height_editor(
+                    ui,
+                    "Clearance Z",
+                    world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "face.clearance",
+                );
+                height_editor(ui, "Cut Z", world, op_ctx.as_deref(), cut_z, "face.cut");
+                field(ui, "Depth staging");
+                let mut staged = top_z.is_some();
+                if check_row(ui, "Stage down to Cut Z", &mut staged).changed() {
+                    if staged {
+                        let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
+                        *top_z = Some(seed);
+                        *stepdown = Some(1.0);
+                    } else {
+                        *top_z = None;
+                        *stepdown = None;
+                    }
+                }
+                if staged {
+                    field(ui, "Top Z (first cut level)");
+                    let seed = Height::of(cut_z.reference, cut_z.offset + 1.0);
+                    height_editor(
+                        ui,
+                        "Top Z",
+                        world,
+                        op_ctx.as_deref(),
+                        top_z.get_or_insert(seed),
+                        "face.top",
+                    );
+                    prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown.get_or_insert(1.0)));
+                }
+            }
+            if tab == SEC_PASSES {
+                prop_row(ui, "Stepover (Y spacing)", |ui| num(ui, u, stepover));
+                // M11.1 A: row ends turn on one arc where it is legal;
+                // the status line names every turn left sharp.
+                check_row(ui, "Arc turns at row ends", blend_turns);
+            }
+            if tab == SEC_FEEDS {
+                prop_row(ui, "Feed", |ui| num_feed(ui, u, feed));
+                prop_row(ui, "Plunge feed", |ui| num_feed(ui, u, plunge_feed));
+                check_row(ui, "Climb milling", climb);
+            }
+        }
+        OpParams::Contour {
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            side,
+            lead,
+            tolerance,
+            tab_count,
+            tab_width,
+            tab_height,
+            entry,
+            helix_radius,
+            blend_turns,
+            links,
+            tilt,
+        } => {
+            if tab == SEC_GEO {
+                field(ui, "Side");
+                let mut s_idx = match side {
+                    Side::Auto => 0,
+                    Side::Inside => 1,
+                    Side::Outside => 2,
+                };
+                combo(ui, "c_side", &mut s_idx, side_names());
+                *side = match s_idx {
+                    1 => Side::Inside,
+                    2 => Side::Outside,
+                    _ => Side::Auto,
+                };
+                if let Some(note) = &side_note {
+                    ui.label(note.clone());
+                }
+                prop_row(ui, "Tolerance", |ui| num(ui, u, tolerance));
+            }
+            if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
+                height_editor(
+                    ui,
+                    "Clearance Z",
+                    world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "contour.clearance",
+                );
+                height_editor(
+                    ui,
+                    "Retract Z (between passes)",
+                    world,
+                    op_ctx.as_deref(),
+                    retract_z,
+                    "contour.retract",
+                );
+                retract_note(ui, world, op_ctx.as_deref(), retract_z, clearance_z);
+                height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "contour.top");
+                height_editor(
+                    ui,
+                    "Bottom Z",
+                    world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "contour.bottom",
+                );
+                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+            }
+            if tab == SEC_PASSES {
+                prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
+                // M11.1 B: air-side corners round on one arc where it
+                // is legal; the status line names every corner left
+                // sharp and the corner rest the rounding leaves.
+                check_row(ui, "Arc turns at corners", blend_turns);
+            }
+            if tab == SEC_LEADS {
+                field(ui, "Lead in/out");
+                let mut l_idx = match lead {
+                    Lead::None => 0,
+                    Lead::Linear { .. } => 1,
+                    Lead::Arc { .. } => 2,
+                    Lead::Tangential { .. } => 3,
+                    Lead::Perpendicular { .. } => 4,
+                };
+                let before = l_idx;
+                combo(ui, "c_lead", &mut l_idx, &LEADS);
+                if l_idx != before {
+                    *lead = match l_idx {
+                        1 => Lead::Linear { length: 8.0 },
+                        2 => Lead::Arc { radius: 5.0 },
+                        3 => Lead::Tangential { radius: 5.0 },
+                        4 => Lead::Perpendicular { length: 5.0 },
+                        _ => Lead::None,
+                    };
+                }
+                match lead {
+                    Lead::Linear { length } | Lead::Perpendicular { length } => {
+                        prop_row(ui, "Lead length", |ui| num(ui, u, length));
+                    }
+                    Lead::Arc { radius } | Lead::Tangential { radius } => {
+                        // One label for both arc radii: the widgets can
+                        // never coexist (the draft holds one lead), and
+                        // the number is the same thing - the arc's
+                        // radius.
+                        prop_row(ui, "Lead arc radius", |ui| num(ui, u, radius));
+                    }
+                    Lead::None => {}
+                }
+                lead_page::leads_tab(ui, u, "c", Some((entry, helix_radius)), links);
+                hint(ui, "keep down between levels cuts each ring all the way down, descending on the ring itself");
+                super::approach_page::contour_leads_editor(ui, u, &mut links.approach);
+                let mut tabs = f64::from(*tab_count);
+                prop_row(ui, "Tab count", |ui| num_plain(ui, &mut tabs));
+                *tab_count = tabs.clamp(0.0, 99.0).round().max(0.0) as u32;
+                prop_row(ui, "Tab width", |ui| num(ui, u, tab_width));
+                prop_row(ui, "Tab height", |ui| num(ui, u, tab_height));
+            }
+            if tab == SEC_FEEDS {
+                prop_row(ui, "Feed", |ui| num_feed(ui, u, feed));
+                prop_row(ui, "Plunge feed", |ui| num_feed(ui, u, plunge_feed));
+                check_row(ui, "Climb milling", climb);
+            }
+        }
+        OpParams::Pocket {
+            links,
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            strategy,
+            entry,
+            helix_radius,
+            optimal_load,
+            blend_turns,
+            tilt,
+        } => {
+            if tab == SEC_LEADS {
+                lead_page::leads_tab(ui, u, "p", Some((entry, helix_radius)), links);
+            }
+            if tab == SEC_HEIGHTS {
+                orientation_editor(ui, u, tilt);
+                height_editor(
+                    ui,
+                    "Clearance Z",
+                    world,
+                    op_ctx.as_deref(),
+                    clearance_z,
+                    "pocket.clearance",
+                );
+                field(ui, "Retract plane");
+                let mut hop = retract_z.is_some();
+                if check_row(ui, "Hop below clearance", &mut hop).changed() {
+                    *retract_z = if hop {
+                        Some(Height::of(top_z.reference, top_z.offset + 1.0))
+                    } else {
+                        None
+                    };
+                }
+                if let Some(r) = retract_z {
+                    height_editor(ui, "Retract Z", world, op_ctx.as_deref(), r, "pocket.retract");
+                    retract_note(ui, world, op_ctx.as_deref(), r, clearance_z);
+                }
+                height_editor(ui, "Top Z", world, op_ctx.as_deref(), top_z, "pocket.top");
+                height_editor(
+                    ui,
+                    "Bottom Z",
+                    world,
+                    op_ctx.as_deref(),
+                    bottom_z,
+                    "pocket.bottom",
+                );
+                prop_row(ui, "Stepdown", |ui| num(ui, u, stepdown));
+            }
+            if tab == SEC_PASSES {
+                prop_row(ui, "Stepover", |ui| num(ui, u, stepover));
+                prop_row(ui, "Stock to leave", |ui| num(ui, u, stock_to_leave));
+                // M11.1 C: pass corners and row-to-row links round on
+                // one arc inside the cleared area where it is legal.
+                check_row(ui, "Arc turns at corners and links", blend_turns);
+                field(ui, "Strategy");
+                // M5.1 H: the 2-D combo offers Adaptive beside the 3-D
+                // one's - the law runs on the plane now, so hiding the
+                // choice would make a file that carries it display a
+                // strategy it is not cutting.
+                let mut st_idx = match strategy {
+                    PocketStrategy::Zigzag => 0,
+                    PocketStrategy::Waterline => 1,
+                    PocketStrategy::Adaptive => 2,
+                    PocketStrategy::Auto => 3,
+                    PocketStrategy::OffsetRings => 4,
+                };
+                let names = strategy_names();
+                let before = st_idx;
+                combo(ui, "p_strat", &mut st_idx, names);
+                if st_idx != before {
+                    *strategy = match st_idx {
+                        1 => PocketStrategy::Waterline,
+                        2 => PocketStrategy::Adaptive,
+                        3 => PocketStrategy::Auto,
+                        4 => PocketStrategy::OffsetRings,
+                        _ => PocketStrategy::Zigzag,
+                    };
+                }
+                if matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings) {
+                    super::load_field::optimal_load_field(ui, optimal_load);
+                }
+                if let Some(note) = &auto_note {
+                    ui.label(note.clone());
+                }
+            }
+            if tab == SEC_FEEDS {
+                prop_row(ui, "Feed", |ui| num_feed(ui, u, feed));
+                prop_row(ui, "Plunge feed", |ui| num_feed(ui, u, plunge_feed));
+                check_row(ui, "Climb milling", climb);
+            }
+        }
+        // The roughing twins (M2.4 A): the pocket's pane with the
+        // Strategy combo retired - the kind IS the strategy, so the
+        // choice that would undo the name is not offered. Adaptive
+        // shows the engagement door; Offset has none to show.
+        OpParams::Adaptive2D {
+            links,
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            optimal_load,
+            tilt,
+        } => roughing2d_pane(
+            ui,
+            world,
+            op_ctx.as_deref(),
+            u,
+            tab,
+            "adaptive",
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            Some(optimal_load),
+            links,
+            tilt,
+        ),
+        OpParams::Offset2D {
+            links,
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            tilt,
+        } => roughing2d_pane(
+            ui,
+            world,
+            op_ctx.as_deref(),
+            u,
+            tab,
+            "offset",
+            stepover,
+            stock_to_leave,
+            clearance_z,
+            retract_z,
+            top_z,
+            bottom_z,
+            stepdown,
+            feed,
+            plunge_feed,
+            climb,
+            entry,
+            helix_radius,
+            None,
+            links,
+            tilt,
+        ),
+        _ => {}
+    }
+}

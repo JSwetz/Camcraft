@@ -18,20 +18,21 @@ pub(super) const OPTIMAL_LOAD_LABEL: &str = "Optimal load (% of D)";
 /// No clamp: the panel never normalizes, the parameter door refuses an
 /// out-of-range load by name (0 < ae/D <= 50%).
 pub(super) fn optimal_load_field(ui: &mut Ui, load: &mut f64) {
-    super::pages::field(ui, OPTIMAL_LOAD_LABEL);
     let mut pct = *load * 100.0;
-    let resp = ui.add(
-        DragValue::new(&mut pct)
-            .speed(0.1)
-            .max_decimals(2)
-            .suffix(" %"),
-    );
-    if resp.changed() {
+    let changed = super::layout::prop_row(ui, OPTIMAL_LOAD_LABEL, |ui| {
+        let h = ui.spacing().interact_size.y;
+        ui.add_sized([super::layout::CTRL_W, h], DragValue::new(&mut pct).speed(0.1).max_decimals(2).suffix(" %"))
+            .changed()
+    });
+    if changed {
         *load = pct / 100.0;
     }
-    ui.label(format!(
-        "radial width ae = {:.2}% of the tool diameter - about {:.1} deg of cutter contact (acos(1 - 2 ae/D)); rings step by ae",
-        *load * 100.0,
-        degrees_of_load(*load)
-    ));
+    super::layout::hint(
+        ui,
+        &format!(
+            "radial width ae = {:.2}% of the tool diameter - about {:.1}° of cutter contact (acos(1 - 2 ae/D)); rings step by ae",
+            *load * 100.0,
+            degrees_of_load(*load)
+        ),
+    );
 }

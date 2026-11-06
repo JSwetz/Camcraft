@@ -131,9 +131,13 @@ fn clear_toolpath_sits_beside_generate_and_keeps_the_operation() {
 fn apply_says_why_it_is_dark() {
     let mut harness = page(opened());
     harness.run();
+    // The reason is the disabled button's hover, not an extra sentence.
+    assert_eq!(labels_containing(&harness, "no parameter differs from the operation"), 0, "no sentence under the bar");
+    harness.get_by_label("Apply").hover();
+    harness.run_steps(8);
     assert!(
         labels_containing(&harness, "no parameter differs from the operation") > 0,
-        "a dark Apply names its reason"
+        "a dark Apply names its reason on hover"
     );
 }
 

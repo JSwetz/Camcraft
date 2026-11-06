@@ -1,15 +1,20 @@
-//! The operation page's Boundary group (M11.5; its pick UX reworked on
-//! the user's hand-test): tool containment, the grow / shrink offset with
-//! its corner style, the extension past the exterior edges, and ONE list
-//! of boundary entries - each with a role dropdown (Include / Exclude /
-//! Open - machine side A / B), what its picks spell, and pick / close /
-//! remove buttons; roles the shape cannot take are greyed with the
-//! reason. It sits on the Geometry tab, under the picks, because it
-//! answers the same question the selection does - where the tool may go.
-//! Every field edits the page's draft (`OpUi::area`, the law in
-//! `boundary_draft`); Apply commits it with the parameters as one
-//! undoable edit. Viewport picks for an entry are routed there by
-//! `State::boundary_pick` - transient view state, never a command.
+//! The operation page's Boundary group (M11.5; reworked on the user's
+//! hand-tests - "unclear what open boundary affects .. unclear what
+//! boundary actually does"): a plain-language summary of what the draft
+//! does (`crate::boundary_summary`), the notices for settings this kind
+//! ignores, then the Tool group (containment, offset, corner style, the
+//! extension past exterior edges - each with its hover hint) and the
+//! Boundaries group: ONE list of entries, each with a role dropdown
+//! (Include / Exclude / Open - machine side A / B), what its picks spell,
+//! which side an open boundary machines (in viewport words, with a one-
+//! click flip) and pick / close / remove buttons; roles the shape cannot
+//! take are greyed with the reason. It sits on the Geometry tab, under
+//! the picks, because it answers the same question the selection does -
+//! where the tool may go. Every field edits the page's draft
+//! (`OpUi::area`, the law in `boundary_draft`); Apply commits it with the
+//! parameters as one undoable edit. Viewport picks for an entry are
+//! routed there by `State::boundary_pick` - transient view state, never
+//! a command.
 //!
 //! Provenance: our own UI; no vendor material consulted.
 
@@ -20,13 +25,16 @@ use camcraft_app::operation::{
 };
 
 use crate::boundary_draft::{self, Entry, EntryRef, Role};
+use crate::boundary_summary;
 use crate::state::{BoundaryPick, GeoPick, State};
 
-use super::colorvision::{ink, palette_of};
-use super::pages::{combo, field, num};
+use super::colorvision::{ink, palette_of, text_inks};
+use super::fields::{combo, num};
+use super::layout::{auto_value, consequence, group, group_open, hint, prop_row, prop_row_hint};
 
 /// One line each: what the roles do and how to pick (the user's "very
-/// unclear how the open boundary selection works").
+/// unclear how the open boundary selection works") - the hover of the
+/// Boundaries group's rows.
 pub const HINTS: [&str; 4] = [
     "Include adds the area a closed boundary encloses; Exclude keeps the whole tool out of it.",
     "Open: an open edge chain runs on straight to the stock and splits it - side A holds more of the selection's area, side B is the rest; arrows in the viewport point into the side machined.",
@@ -34,21 +42,24 @@ pub const HINTS: [&str; 4] = [
     "The filled area in the viewport is what the operation will machine after Apply.",
 ];
 
-/// Draw the group for the open operation's draft; nothing for a kind
-/// without a machining area.
+const CONTAINMENT_HINT: &str = "Inside: the tool's edge touches the boundary from inside (its centre a tool radius in). On: the tool centre rides the boundary. Outside: the tool's edge touches it from outside (its centre a tool radius out). As the kind cuts: the kind's own law.";
+const OFFSET_HINT: &str = "+ grows the area outward, - shrinks it inward, before the tool containment applies.";
+const CORNER_HINT: &str = "How the offset treats convex corners: Round arcs them, Sharp keeps them square.";
+const EXTEND_HINT: &str = "Carries the area past its exterior edges - edges with no part material beyond them - by this distance. An open boundary is never crossed.";
+
+/// Draw the group for the open operation's draft; a kind without a
+/// machining area says so instead of drawing controls it would ignore.
 pub(super) fn boundary_group(ui: &mut Ui, state: &mut State) {
-    if !area_applies(state.op_ui.params.kind()) {
+    let kind = state.op_ui.params.kind();
+    if !area_applies(kind) {
         state.boundary_pick = None;
+        ui.label(RichText::new(format!("{kind} has no machining area - Boundary settings do not apply to it.")).weak());
         return;
     }
     let u = state.units();
     let set = !state.op_ui.area.is_default();
-    ui.separator();
-    let r = egui::CollapsingHeader::new("Boundary")
-        .id_salt("op_boundary")
-        .default_open(set)
-        .show(ui, |ui| body(ui, state, u));
-    let open = r.body_returned.is_some();
+    let r = group_open(ui, "Boundary", None, set, |ui| body(ui, state, u));
+    let open = r.inner.is_some();
     state.boundary_view.shown = open;
     if !open {
         state.boundary_pick = None;
@@ -58,52 +69,67 @@ pub(super) fn boundary_group(ui: &mut Ui, state: &mut State) {
 fn body(ui: &mut Ui, state: &mut State, u: camcraft_app::units::Unit) {
     boundary_draft::warm(state);
     boundary_draft::refresh_preview(state);
-    let a = &mut state.op_ui.area;
-    field(ui, "Tool containment");
-    let mut c = match a.containment {
-        None => 0,
-        Some(Containment::Inside) => 1,
-        Some(Containment::On) => 2,
-        Some(Containment::Outside) => 3,
-    };
-    combo(ui, "area_containment", &mut c, &["As the kind cuts", "Inside", "Centre on", "Outside"]);
-    a.containment = match c {
-        1 => Some(Containment::Inside),
-        2 => Some(Containment::On),
-        3 => Some(Containment::Outside),
-        _ => None,
-    };
-    field(ui, "Boundary offset (+ grows)");
-    num(ui, u, &mut a.offset);
-    let mut corner = usize::from(a.corner == CornerStyle::Sharp);
-    combo(ui, "area_corner", &mut corner, &["Round corners", "Sharp corners"]);
-    a.corner = if corner == 1 { CornerStyle::Sharp } else { CornerStyle::Round };
-    field(ui, "Extend past open edges");
-    num(ui, u, &mut a.extension);
-    if a.extension < 0.0 {
-        a.extension = 0.0;
+    let s = boundary_summary::summarize(state);
+    let inks = text_inks(ui, &state.world);
+    for (k, line) in s.lines.iter().enumerate() {
+        let t = RichText::new(line);
+        ui.add(egui::Label::new(if k == 0 { t.strong() } else { t }).wrap());
     }
-
-    field(ui, "Boundaries");
-    for h in HINTS {
-        ui.label(RichText::new(h).small().weak());
+    for n in &s.notices {
+        ui.colored_label(inks.warn, n);
     }
-    let mut acts: Vec<Act> = Vec::new();
-    let entries = boundary_draft::entries(state);
-    if entries.is_empty() {
-        ui.label("None - the selection bounds the area.");
-    }
-    for (n, e) in entries.iter().enumerate() {
-        entry_row(ui, state, n, e, &mut acts);
-    }
-    add_row(ui, state, &mut acts);
-    collecting_line(ui, state, &mut acts);
     if let Some(p) = &state.boundary_view.preview
         && let Some(why) = &p.refusal
     {
-        ui.colored_label(super::colorvision::text_inks(ui, &state.world).warn, why);
+        ui.colored_label(inks.warn, why);
     }
-    if ui.small_button("Reset boundary").clicked() {
+    ui.add_space(4.0);
+    let a = &mut state.op_ui.area;
+    group(ui, "Tool", None, |ui| {
+        let mut c = match a.containment {
+            None => 0,
+            Some(Containment::Inside) => 1,
+            Some(Containment::On) => 2,
+            Some(Containment::Outside) => 3,
+        };
+        prop_row_hint(ui, "Containment", CONTAINMENT_HINT, |ui| {
+            combo(ui, "area_containment", &mut c, &["As the kind cuts", "Inside", "Centre on", "Outside"])
+        });
+        a.containment = match c {
+            1 => Some(Containment::Inside),
+            2 => Some(Containment::On),
+            3 => Some(Containment::Outside),
+            _ => None,
+        };
+        prop_row_hint(ui, "Boundary offset", OFFSET_HINT, |ui| num(ui, u, &mut a.offset));
+        let mut corner = usize::from(a.corner == CornerStyle::Sharp);
+        prop_row_hint(ui, "Offset corners", CORNER_HINT, |ui| combo(ui, "area_corner", &mut corner, &["Round", "Sharp"]));
+        a.corner = if corner == 1 { CornerStyle::Sharp } else { CornerStyle::Round };
+        auto_value(ui, "Extend past open edges", "Off", &mut a.extension, "off", 2.0, |ui, v| num(ui, u, v));
+        hint(ui, EXTEND_HINT);
+        if a.extension < 0.0 {
+            a.extension = 0.0;
+        }
+    });
+
+    let mut acts: Vec<Act> = Vec::new();
+    group(ui, "Boundaries", None, |ui| {
+        let entries = boundary_draft::entries(state);
+        if entries.is_empty() {
+            ui.label("None - the selection bounds the area.");
+            hint(ui, HINTS[0]);
+        }
+        for (n, e) in entries.iter().enumerate() {
+            entry_row(ui, state, n, e, &mut acts);
+        }
+        add_row(ui, state, &mut acts);
+        collecting_line(ui, state, &mut acts);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("(i) roles, picking and the fill").small().weak())
+                .on_hover_text(HINTS.join("\n\n"));
+        });
+    });
+    if ui.small_button("Reset boundary").on_hover_text("every Boundary setting back to the kind's own law (Apply commits it)").clicked() {
         acts.push(Act::Reset);
     }
     for act in acts {
@@ -179,6 +205,18 @@ fn entry_row(ui: &mut Ui, state: &State, n: usize, e: &Entry, acts: &mut Vec<Act
         });
         ui.label(&e.summary);
     });
+    if e.role.is_open() {
+        // The side is the user's choice: said in viewport words, with the
+        // one-click flip beside it.
+        consequence(ui, &boundary_summary::side_caption(state, e.role));
+        let other = if e.role == Role::OpenA { Role::OpenB } else { Role::OpenA };
+        prop_row(ui, "Machined side", |ui| {
+            if ui.small_button("Machine the other side").on_hover_text(format!("switch to {}", other.label())).clicked() {
+                acts.push(Act::Role(e.at, other));
+            }
+            ui.label(if e.role == Role::OpenA { "A" } else { "B" });
+        });
+    }
     ui.horizontal_wrapped(|ui| {
         if !e.picks.is_empty() {
             let target = boundary_draft::target_of(e.at);
@@ -204,7 +242,7 @@ fn entry_row(ui: &mut Ui, state: &State, n: usize, e: &Entry, acts: &mut Vec<Act
         }
     });
     if let Some(issue) = &e.issue {
-        ui.colored_label(super::colorvision::text_inks(ui, &state.world).warn, issue);
+        ui.colored_label(text_inks(ui, &state.world).warn, issue);
     }
 }
 
@@ -217,13 +255,13 @@ fn add_row(ui: &mut Ui, state: &State, acts: &mut Vec<Act>) {
         let r = ui.add_enabled(!has_open, egui::Button::new("+ Pick an open boundary").small());
         if has_open {
             r.on_disabled_hover_text("an operation has one open boundary - use its Pick button to re-pick it");
-        } else if r.clicked() {
+        } else if r.on_hover_text("pick the edge chain the operation machines up to").clicked() {
             acts.push(Act::Pick(Some(BoundaryPick::Open)));
         }
-        if ui.small_button("+ Stock outline").clicked() {
+        if ui.small_button("+ Stock outline").on_hover_text("include the setup stock's outline").clicked() {
             acts.push(Act::Add(ExtraBoundary { mode: BoundaryMode::Include, shape: BoundaryShape::Stock }));
         }
-        if ui.small_button("+ Part silhouette").clicked() {
+        if ui.small_button("+ Part silhouette").on_hover_text("keep the tool out of the part's silhouette").clicked() {
             acts.push(Act::Add(ExtraBoundary { mode: BoundaryMode::Exclude, shape: BoundaryShape::Silhouette }));
         }
     });
@@ -316,7 +354,8 @@ mod frame {
         assert!(harness.query_by_label("1 edge, open chain").is_some());
         assert!(harness.query_by_label("stock outline, closed").is_some());
         assert!(harness.query_by_label("Extend to loop").is_some());
-        assert!(harness.query_by_label(HINTS[0]).is_some(), "the hints show");
+        assert!(harness.query_by_label("(i) roles, picking and the fill").is_some(), "the hints ride the (i) hover");
+        assert!(harness.query_by_label_contains("Faces the stock top").is_some(), "the summary heads the group");
         harness.get_by_label("Use as open boundary").click();
         harness.run();
         let a = &harness.state().op_ui.area;

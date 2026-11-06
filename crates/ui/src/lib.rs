@@ -8,6 +8,7 @@
 pub mod actions;
 pub mod boundary_draft;
 pub mod boundary_viz;
+pub mod boundary_summary;
 pub mod egui_app;
 pub mod feedback;
 pub mod interact;

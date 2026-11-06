@@ -175,6 +175,13 @@ pub(super) fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> 
 /// (Prime Directive: a wrong preview is as bad as a wrong toolpath).
 #[must_use]
 pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
+    region_turn_of(world, op).map(|(r, _)| r)
+}
+
+/// [`region_of`] plus the turn the area controls lay Face's rows at
+/// (0 without an open chain) - what `footprint` needs to draw the band
+/// Face really clears.
+pub(super) fn region_turn_of(world: &World, op: &Operation) -> Option<(Region, f64)> {
     // The 3+2 index (M5.1 B): a tilted planar op draws the cutting
     // plane's own shadow - the local region through the frame's door,
     // at the plane its `region_height` names. A tilt that commands no
@@ -207,7 +214,8 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
         }
         Some(Err(_)) => return None,
     };
-    let controlled = |r: Option<Region>| r.and_then(|r| apply_area_controls(r, ctx.as_ref()).ok());
+    let controlled =
+        |r: Option<Region>| r.and_then(|r| apply_area_full(r, ctx.as_ref()).ok()).map(|a| (a.region, a.turn));
     if let SrcRef::Selection(items) = &op.src
         && !matches!(
             op.params,
@@ -256,7 +264,7 @@ pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
             let zl =
                 resolve_height(world, op.setup.as_deref(), Some(&op.src), op.params.region_height())?
                     - f.origin.z;
-            f.world_region(&local, zl).ok()
+            f.world_region(&local, zl).ok().map(|r| (r, 0.0))
         }
     }
 }

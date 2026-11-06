@@ -10077,3 +10077,28 @@ and non-finite chords are tested against all chords.
 - The all-pairs version is kept as the reference, and 3 equivalence tests
   assert identical pair sets.
 - On a 50k-move path: 30.6 ms vs 3.33 s (109x).
+
+## The operation dialog, Fusion-style: five decisions (2026-11-06, user review)
+
+User: "unclear what open boundary affects.. Unclear what boundary actually does. Interface is hard to read, badly organised" and "the UX is very very bad and is not reflecting the fusion360 experience that was requested". Only the general layout conventions are followed, clean-room: no Autodesk text, icons or layouts.
+
+(1) **One set of form helpers** in `egui_app/layout/form.rs`, re-exported from `layout`. Every page uses them:
+- `prop_row` / `prop_grid`: label in a fixed 120 px column, the control right-aligned on the same row;
+- `check_row`, `hint` (help as a hover tooltip) and `consequence` (the one dimmed safety line kept);
+- `group` / `group_open`: collapsible groups, with an optional on/off checkbox in the header;
+- `value_with_unit`, `auto_value`, `status_banner`, `action_bar`.
+
+The 120/96 px label columns fit the default ~280 px properties pane.
+
+(2) **"0 = auto" becomes an explicit Auto toggle in the UI only.** Turning Auto on writes the model's 0, so params, commands and files are unchanged. Turning it off seeds a sensible value: ramp angle 3°, plunge height 2 mm, engagement limit 50%, and so on.
+
+(3) **Show only what applies.** Lead in / Lead out shows only the chosen entry type's fields. Feeds and plunge sit in their own groups.
+
+(4) **The boundary says what it does** (`boundary_summary.rs`).
+- One plain sentence per setting, e.g. "Faces the stock top on the −Y side (side A) of the picked open edge, up to that edge…". The side is computed from the same calculation that places the viewport arrows, so words and arrows cannot disagree.
+- "Machine the other side" flips side A and side B.
+- A setting that has no effect on this kind says so in the warning colour, instead of being ignored silently.
+
+(5) **The viewport fills the area actually swept** (`operation::machined_footprint`). For Face this is the band the passes sweep, laid along the open edge and widened by the tool overrun. Every other kind shows its existing machined region. Open edges are drawn dashed.
+
+pages.rs went from 5,556 to 1,707 lines, split into page modules of about 390 lines or fewer. The tab bar stays.

@@ -94,6 +94,11 @@ pub struct Preview {
     key: u64,
     pub z: f64,
     pub region: Option<Region>,
+    /// What the tool really sweeps (`operation::machined_footprint`):
+    /// the region for most kinds, Face's laid bounding band for Face -
+    /// the viewport fills this, so it never promises a shape the kind's
+    /// law does not follow.
+    pub footprint: Option<Region>,
     pub refusal: Option<String>,
 }
 
@@ -401,9 +406,10 @@ pub fn refresh_preview(state: &mut State) {
     let refusal = operation::area_pick_issue(&state.world, op.setup.as_deref(), &op.area, &op.params)
         .or_else(|| operation::area_refusal(&state.world, &op));
     let region = if refusal.is_some() { None } else { operation::region_of(&state.world, &op) };
+    let footprint = if region.is_some() { operation::machined_footprint(&state.world, &op) } else { None };
     let refusal = refusal.or_else(|| {
         (region.is_none() && !op.area.is_default())
             .then(|| "the Boundary settings leave nothing to preview - Generate names the step".to_owned())
     });
-    state.boundary_view.preview = z.map(|z| Preview { key, z, region, refusal });
+    state.boundary_view.preview = z.map(|z| Preview { key, z, region, footprint, refusal });
 }

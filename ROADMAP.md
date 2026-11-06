@@ -1680,7 +1680,7 @@ would.** — 📋
       today only app (`camcraft-cli`), post and ui carry binaries
 
 ### M13.4 - Small owed polish
-**Goal: the named cheap follow-ons stop being named and get done.** — ⚠️ partial (owed: vertex picking + WCS snapping)
+**Goal: the named cheap follow-ons stop being named and get done.** — ⚠️ partial (owed: vertex picking + WCS snapping, operation dialog polish)
 
 - **ColorVision remaps** (M6.1, "Their `ColorVision` layer
       (protan/deutan/tritan remaps applied on top of any theme) is a
@@ -1699,6 +1699,12 @@ would.** — 📋
 - **Owed** (RECOMMENDED "M13.4" (4)): vertex picking and WCS face/vertex
       snapping (not started). Done: warning/error text colours follow the
       colour-vision setting (RECOMMENDED "Small owed UI items" (1)).
+
+- **Operation dialog polish** (RECOMMENDED "The operation dialog, Fusion-style"):
+      convert the remaining captions above a control (e.g. Contour "Side"); give the
+      Heights tab's loose rows (Stepdown, Retract plane, Depth staging) their own
+      group; audit the kind pages' remaining "0 means auto" fields onto Auto
+      toggles; `boundary_draft.rs` is near the 400-line law.
 
 ### M13.5 - Mill-turn completeness
 **Goal: mill-turn machines with the C axis, not only indexed beside it.** — 📋
@@ -1832,7 +1838,7 @@ the heavy lane green.
 | **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; owed: lathe/rotary annular-sector sweeps (refused by name meanwhile), eikonal, viewer/picking mesh, dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
 | **M13.2** | Machine limits and cutting data | Spindle speed/power checks against a per-material speeds & feeds library (M3.3 C); the homegrown materials database (Open question "Cutting data"); done 2026-11-06 (fixed 0.8 spindle efficiency is a follow-on, not owed) | ✅ |
 | **M13.3** | Builds and distribution | Code signing + installer-vs-zip (M1.7); Docker builds for every target, app/UI on wasm (M4.2); a headless binary per crate (Phase 4 intro) | 📋 |
-| **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint and text colours done; owed: vertex picking + WCS snapping (-> M13.4 Owed bullet) | ⚠️ |
+| **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint and text colours done; owed: vertex picking + WCS snapping, dialog polish (captions, Heights loose rows, 0-auto audit) (-> M13.4 Owed bullet) | ⚠️ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); owed: overhang laws, mid-move pose | ⚠️ |
