@@ -141,6 +141,7 @@ fn check(t: &Toolpath, r: &Region) {
         stock: None,
         model: None,
         tool: &tool,
+        cutter: None,
         mode: Mode::Area,
         stock_top_z: TOP,
         clearance_z: 25.0,

@@ -153,6 +153,7 @@ fn verified(path: &Toolpath, reg: &Region, tool_d: f64) -> Vec<Warning> {
         stock: None,
         model: Some(&solid),
         tool: &tool,
+        cutter: None,
         mode: Mode::Area,
         stock_top_z: 0.0,
         clearance_z: 5.0,

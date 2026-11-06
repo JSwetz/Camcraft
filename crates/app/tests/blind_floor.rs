@@ -197,6 +197,7 @@ fn depth_verify(t: &Toolpath, region: &Region, model: Option<&[Triangle]>, leave
             stock: None,
             model,
             tool: &tool,
+            cutter: None,
             mode: Mode::Boundary,
             stock_top_z: 20.0,
             clearance_z: 30.0,

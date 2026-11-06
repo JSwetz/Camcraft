@@ -9859,3 +9859,58 @@ follow-ups: the swarf_multi coarse rung (a convicted 0.39 mm gouge,
 reported, not silent), the rotary first move being a rapid from the
 world origin, the upright all-air finish being unjudged, Rotary Offset
 from the stock radius, and Rotary Parallel radial retracts.
+
+## M13.7 A: the real tip in the verifier, and posed moves at the direct subtract: four decisions (2026-11-06)
+
+(1) **`VerifyContext` carries the op's `Cutter`** (`cutter: Option<Cutter>`,
+`Some(Cutter::of(&tool))` from both verify sites in generate.rs). The
+solid law (b2) sweeps the real tip. `Cutter::judged` trusts it only
+when its stack, ignoring the tip, is exactly `Cutter::flat(geom)`;
+anything else falls back to the square stack, which can only
+over-report. Dropped: trusting any supplied cutter, since a mismatched
+one could clear a real gouge.
+
+(2) **The section law (b) reads its slice at `tip_height()` above
+the tip**, the height where the real tool first reaches full radius
+(0 for a flat end, so a flat end's verdict is byte-identical). The
+band below it is judged exactly by b2, which always runs on the same
+model. Without this lift, (b)'s square rim convicted ball and bull
+passes first and the real tip changed nothing. Wider effect: 3D Area
+kinds with ball or bull tools convict less in the tip band, and only
+where b2 clears it; the heavy lane confirmed no golden or law
+changed.
+
+(3) **Motion's direct `Dexel::subtract` is gated**
+(`machining3d/feed.rs::subtract_upright`). A posed feed move is
+refused by name with the stock-sim door's own `POSED_REFUSAL` before
+any column is lowered. Posed rapids pass, matching the door's rule.
+
+(4) **Owed:**
+- an app-level end-to-end ball-Contour test;
+- `sim/verify/engine.rs` is 658 lines against the 400-line law, which
+  predates this change; split it at the next verifier change;
+- M13.7's overhang laws and mid-move pose changes are still open.
+
+## M11.1: line-to-arc and arc-to-arc corner fillets: three decisions (2026-11-06)
+
+(1) **Built from offset curves.** The line is offset by ρ to the
+turn's inside, the arc to R∓ρ, and the fillet centre is their
+intersection; tangent points are the centre's feet. Written from
+plane geometry (`machining2d/fillet_arc.rs`). Radius rules are those
+of the line case: at most the tool radius, halved up to 4 times
+before the corner stays sharp and is counted.
+
+(2) **Never gouge, err to sharp.** A candidate is used only when:
+- both tangent points fall on the half of their element nearest the
+  corner;
+- it turns with the travel direction and sweeps less than π;
+- no edge of the legal-centre region crosses it.
+
+Turns toward the part are refused before construction. Because the
+region is a polyline while the path rides arcs, some safe fillets
+are refused near tangent points; that is accepted as conservative.
+
+(3) **A closed path's start/end corner stays sharp, by design.** It is
+the entry/exit seam, owned by the lead in / lead out (M11.3), and is
+named in the op notes. Dropped: rounding the seam, which would move
+the lead's tangent point.

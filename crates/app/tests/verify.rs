@@ -68,6 +68,7 @@ fn ctx<'a>(region: &'a Region, stock: Option<&'a Region>, tool: &'a ToolGeom, mo
         // Every fixture here is a 2.5-D op: no mesh, the static laws.
         model: None,
         tool,
+        cutter: None,
         mode,
         stock_top_z: 0.0,
         clearance_z: 5.0,
@@ -612,6 +613,7 @@ fn env_ctx<'a>(
         stock: None,
         model,
         tool,
+        cutter: None,
         mode: Mode::Envelope,
         // At the planted feeds' rapid plane: law (d)'s rest-material
         // heuristic must not invent stock above where the rapids run

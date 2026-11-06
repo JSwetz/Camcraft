@@ -56,6 +56,7 @@ fn ctx<'a>(region: &'a Region, stock: Option<&'a Region>, tool: &'a ToolGeom, mo
         stock,
         model: None,
         tool,
+        cutter: None,
         mode,
         stock_top_z: 0.0,
         clearance_z: 5.0,

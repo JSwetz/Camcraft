@@ -126,6 +126,7 @@ fn ctx<'a>(
         stock: None,
         model: None,
         tool,
+        cutter: None,
         mode: Mode::Area,
         stock_top_z: 0.0,
         clearance_z: 5.0,

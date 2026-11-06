@@ -258,6 +258,7 @@ fn verify_finish(
         stock: None,
         model: Some(facets),
         tool: &tool,
+        cutter: None,
         mode: Mode::Envelope,
         stock_top_z: stock_top,
         clearance_z: 25.0,

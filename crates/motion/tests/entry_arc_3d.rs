@@ -89,6 +89,7 @@ fn verify_against(facets: &[Triangle], region: &Region, path: &Toolpath) -> Vec<
         stock: None,
         model: Some(facets),
         tool: &tool,
+        cutter: None,
         mode: Mode::Area,
         stock_top_z: 0.0,
         clearance_z: 5.0,

@@ -1,8 +1,8 @@
 //! Split from `machining3d.rs` by M5.0.1; structure only.
 
-use super::params::{CHORD_TOL, Pocket3DParams};
+use super::params::Pocket3DParams;
 use super::rest::EPS;
-use super::feed::{guard_input, home, sim_of};
+use super::feed::{guard_input, home, sim_of, subtract_upright};
 use super::ladder::ladder;
 
 use crate::cl::Toolpath;
@@ -163,16 +163,12 @@ fn run_rest(
     let dex = match mask {
         Some(prev) => {
             let mut d = prev.clone();
-            for m in &coarse.moves {
-                d.subtract(m, r, CHORD_TOL);
-            }
+            subtract_upright(&mut d, &coarse.moves, r)?;
             d
         }
         None => {
             let (mut d, _) = sim_of(facets, footprint, p)?;
-            for m in &coarse.moves {
-                d.subtract(m, r, CHORD_TOL);
-            }
+            subtract_upright(&mut d, &coarse.moves, r)?;
             d
         }
     };
@@ -213,8 +209,6 @@ fn run_rest(
         None => sim_of(facets, footprint, p)?.0,
     };
     let part = stock_sim::part_surface(facets, dex.x0, dex.y0, dex.cell, dex.nx, dex.ny);
-    for m in &path.moves {
-        dex.subtract(m, r, CHORD_TOL);
-    }
+    subtract_upright(&mut dex, &path.moves, r)?;
     Ok((path, stock_sim::measure(&dex, &part, footprint, EPS)))
 }

@@ -173,6 +173,7 @@ fn depth_verify(t: &camcraft_motion::cl::Toolpath, region: &Region, f: &[Triangl
             stock: None,
             model: Some(f),
             tool: &tool,
+            cutter: None,
             mode: Mode::Boundary,
             stock_top_z: top,
             clearance_z: top + 10.0,

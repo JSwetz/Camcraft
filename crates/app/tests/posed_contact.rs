@@ -108,6 +108,7 @@ fn ctx<'a>(region: &'a Region, facets: &'a [Triangle], tool: &'a ToolGeom) -> Ve
         stock: None,
         model: Some(facets),
         tool,
+        cutter: None,
         mode: Mode::Envelope,
         stock_top_z: 20.0,
         clearance_z: 40.0,

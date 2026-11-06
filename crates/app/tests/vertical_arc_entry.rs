@@ -139,6 +139,7 @@ fn verify_bore(t: &Toolpath, region: &Region) -> Vec<camcraft_app::verify::Warni
         stock: None,
         model: None,
         tool: &tool,
+        cutter: None,
         mode: Mode::Boundary,
         stock_top_z: 0.0,
         clearance_z: 5.0,

@@ -55,6 +55,29 @@ impl Cutter {
         c
     }
 
+    /// The stack the model law (b2) judges with (M13.7): `real` when it
+    /// is the tip of exactly this `ToolGeom` - its square stack equals
+    /// [`Self::flat`]`(g)`, so only the tip differs and the real tip
+    /// sits inside the square one - else the square stack. A tip that
+    /// disagrees with the geometry the other laws read is never
+    /// trusted to clear a move: the fallback can only over-report.
+    #[must_use]
+    pub fn judged(g: &ToolGeom, real: Option<Self>) -> Self {
+        let flat = Self::flat(g);
+        match real {
+            Some(c) if Self { corner_r: 0.0, tip_angle: 0.0, ..c } == flat => c,
+            _ => flat,
+        }
+    }
+
+    /// Height above the tip where the cutting profile first reaches
+    /// its full radius: the tip atom's top (ball/bull corner, point
+    /// cone), 0 for a square end or a stack that describes no tool.
+    #[must_use]
+    pub fn tip_height(&self) -> f64 {
+        self.atoms().first().filter(|a| !a.is_flat()).map_or(0.0, |a| a.z1)
+    }
+
     /// The atoms bottom-up, heights above the tip. Empty when the
     /// numbers describe no tool (the caller fails closed).
     pub(super) fn atoms(&self) -> Vec<Atom> {

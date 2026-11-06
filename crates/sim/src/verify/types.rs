@@ -91,6 +91,13 @@ pub struct VerifyContext<'a> {
     /// `None` - its laws are byte-identical to what they always were.
     pub model: Option<&'a [crate::geometry::Triangle]>,
     pub tool: &'a ToolGeom,
+    /// The real tip of `tool` (M13.7): flat, ball, bull corner or point
+    /// cone, read by the solid law (b2). `None` judges with the square
+    /// stack of `tool` - never smaller than any real tip, so it can
+    /// only over-report. A cutter whose stack disagrees with `tool`
+    /// (radius, flute, shank or holder) is not trusted: the square
+    /// stack stands in ([`super::probe::Cutter::judged`]).
+    pub cutter: Option<super::probe::Cutter>,
     pub mode: Mode,
     /// Top of the stock column in Z (the surface the tool starts from).
     pub stock_top_z: f64,

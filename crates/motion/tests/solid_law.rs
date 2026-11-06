@@ -174,6 +174,7 @@ fn law_verify(t: &Toolpath, region: &Region, f: &[Triangle], mode: Mode, top: f6
             stock: None,
             model: Some(f),
             tool: &g,
+            cutter: None,
             mode,
             stock_top_z: top,
             clearance_z: top + 10.0,

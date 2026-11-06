@@ -1362,7 +1362,7 @@ of a straight plunge. Specced from the public G-code standard and general
 machining knowledge (path filleting, circular-ramp entry), clean-room.
 
 ### M11.1 - Arc blends and arc entries
-**Goal: the tool changes direction and enters material continuously - turns ride G2/G3, not G1 stops.** — ⚠️ (owed: line-to-arc corner fillets)
+**Goal: the tool changes direction and enters material continuously - turns ride G2/G3, not G1 stops.** — ✅ (line-to-arc and arc-to-arc corner fillets landed 2026-11-06; a closed path's seam corner stays sharp by decision - RECOMMENDED "M11.1: line-to-arc" (3))
 
 - **Turning-point blends**: direction changes in feed motion - the facing
   serpentine's end reversals (the named example), contour corners,
@@ -1717,14 +1717,14 @@ would.** — 📋
 ### M13.7 - Verifier completeness
 **Goal: the exact solid-law verifier judges every move with the real
 tool, against the real stock, in the real pose - the backstop every
-generator relies on has no known blind spot.** — 📋
+generator relies on has no known blind spot.** — ⚠️ partial (owed: overhang laws, mid-move pose, engine.rs split)
 
 The 2026-11-06 solid-law verifier (0e18091) replaced plane sections for
 the tool-vs-part check; its own entry names what it still does not
 judge exactly (RECOMMENDED "The exact solid-law verifier" (4)/(8)).
 None of these may stay open behind a ✅.
 
-- **The tip shape for 2D ops**: `VerifyContext` carries no `Cutter`, so
+- ~~**The tip shape for 2D ops**~~ - done 2026-11-06 (RECOMMENDED "M13.7 A"): `VerifyContext` carried no `Cutter`, so
       2D ops are checked with the square stack (may over-report a ball or
       bull, never hide); drill, bore and thread already use their real
       tips. Carry `Cutter` into `VerifyContext`.
@@ -1738,11 +1738,14 @@ None of these may stay open behind a ✅.
       judgement of wrapped paths; fixed by the pivot law, posed rapids
       and `Mode::Rotary` radial verify (RECOMMENDED "Rotary and 5-axis:
       the pivot law"). Leftovers live in M13.8.
-- **Posed moves through motion's direct `Dexel::subtract`**: the column
+- ~~**Posed moves through motion's direct `Dexel::subtract`**~~ - done 2026-11-06 (`subtract_upright` refuses by name): the column
       engine refuses posed moves by name at the stock-sim door, but
       motion's direct `Dexel::subtract` calls are not gated for posed
       moves - gate them (refuse by name) or route them through the door.
-
+- **`sim/verify/engine.rs` over the 400-line law** (658 lines): split
+      along the law seams (section, solid, reach) at the next verifier change.
+- **An app-level ball-Contour verify test**: the real tip is tested at
+      the verifier; drive one real ball Contour op through generate.rs too.
 
 ### M13.8 - Multi-axis leftovers after the pivot law
 **Goal: every rotary and 5-axis kind starts, links and judges like the
@@ -1797,7 +1800,7 @@ None of these may stay open behind a ✅.
 | **M8.3** | Canned/posed/revolved order | Done: drilling - R-plane law kept per cycle, the bore's fit door refuses an oversize tool and a stepped (counterbore-folded) hole by name, Spot dims off the mouth, FIT_TOL unified as one trust wearing three laws; helical bore entries declined as a verdict (a wide slide is contour's verb); multi-axis - a dive's lead now rides the cut it lands into (the stamp matches curve.rs's first station; ALONG→AT corrected in the archived prose), cone-dodge-at-entry, wrap radial dives and tilt-posed rapids recorded as verdicts with their backstop chains; turning - order law stated in the catalog rows, the verifier's stands-downs documented, no entry-defect analog (ridge, kerf-slide and rho_clear laws refuse or prevent by name); whole registry annotated, heavy lane green on every family | ✅ |
 | **M9.1** | The operation opens its own page | Done: the retype dropdown and its dialog retired - the ribbon creates or opens by kind, the tree selection opens the same pane in place (A); the six tabs folded into one stacked pane of collapsing sections per the Blender verdict, `op_tab` retired, the drift guard restated exact (B); the pane law walks all 30 registry kinds - one header per group, fields exactly once, catching the Passes header/field collision, renamed Pass count (C); toolpath goldens byte-identical, snapshots re-blessed; heavy lane green; ledger in RECOMMENDED.md | ✅ |
 | **M10.1** | A tool that can cut the operation | Done: the tool law - `KindInfo.tool_kinds` one table (A), `CreateOperation` / tool reassignment / op retype / tool retype refuse the mismatch at command construction by name and the ribbon darkens with the reason (B), an op whose tool is gone or wrong reads BLOCKED - generation and the post refuse, nothing stored, old files load untouched (C), the law tests (D); generator shape refusals stand as the backstop | ✅ |
-| **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); owed: line-to-arc corner fillets (corners next to an arc stay sharp, counted) | ⚠️ |
+| **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); line-to-arc and arc-to-arc corner fillets (M11.1 RECOMMENDED); a closed path's seam corner stays sharp by decision | ✅ |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
 | **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, plunge checks in finishing3d/drilling/face (-> M11.3 Owed bullet) | ⚠️ |
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; owed: C - HSM adaptive round 2 (round 1 held back: self-crossing, extra descents, load/air targets unmet, island/slot fall back to rings, Pocket3D port) (-> M11.4 Owed bullet) | ⚠️ |
@@ -1809,7 +1812,7 @@ None of these may stay open behind a ✅.
 | **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint and text colours done; owed: vertex picking + WCS snapping (-> M13.4 Owed bullet) | ⚠️ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
-| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops; shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves | 📋 |
+| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); owed: overhang laws, mid-move pose, engine.rs split | ⚠️ |
 | **M13.8** | Multi-axis leftovers | swarf_multi coarse rung, rotary first move from origin, upright all-air finish unjudged, ridge rest law unreachable, Rotary Offset/Parallel radial heights | 📋 |
 
 ## Open questions & deferred

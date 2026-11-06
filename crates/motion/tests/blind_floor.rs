@@ -134,6 +134,7 @@ fn silent(facets: &[Triangle], region: &Region, t: &camcraft_motion::cl::Toolpat
         stock: None,
         model: Some(facets),
         tool: &tool,
+        cutter: None,
         mode: Mode::Area,
         stock_top_z: 0.0,
         clearance_z: 5.0,

@@ -2427,6 +2427,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     .then_some(&material.facets[..])
                     .or((depth_law == DepthLaw::Section).then_some(&material.facets[..])),
                     tool: &geom,
+                    // The op's real tip for the solid law (M13.7).
+                    cutter: Some(verify::Cutter::of(&tool)),
                     mode,
                     stock_top_z,
                     clearance_z: hl.clearance,
@@ -2560,7 +2562,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // The containment kinds' solid law (their verify runs without
             // the model - exact rims): the tool's own tip and stack swept
             // along every move against the part solid. The Section kinds
-            // answer the same law inside `verify` (b2), square stack.
+            // answer the same law inside `verify` (b2), real tip (M13.7).
             if depth_law == DepthLaw::Contain {
                 contain_into(&mut warns, &path, &material.facets, &tool, depth_law, stl);
             }
@@ -2640,6 +2642,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     // the depth law reads the part in the same frame.
                     model: (depth_law == DepthLaw::Section).then_some(&m_gen.facets[..]),
                     tool: &geom,
+                    // The op's real tip for the solid law (M13.7).
+                    cutter: Some(verify::Cutter::of(&tool)),
                     mode,
                     stock_top_z: st_local,
                     clearance_z: hl.clearance,
@@ -2655,7 +2659,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // The containment kinds' solid law (their verify runs without
             // the model - exact rims): the tool's own tip and stack swept
             // along every move against the part solid. The Section kinds
-            // answer the same law inside `verify` (b2), square stack.
+            // answer the same law inside `verify` (b2), real tip (M13.7).
             if depth_law == DepthLaw::Contain {
                 contain_into(&mut warns, &path, &m_gen.facets, &tool, depth_law, stl);
             }

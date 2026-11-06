@@ -85,6 +85,7 @@ fn check(path: &Toolpath, region: &Region, model: Option<&[Triangle]>, mode: Mod
         stock: None,
         model,
         tool: &t,
+        cutter: None,
         mode,
         stock_top_z: 0.0,
         clearance_z: CLEAR,

@@ -171,6 +171,14 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     // both facts are the generatrix law, not near misses. The reach
     // laws stay, unlike Engrave's: the cone's shank is wider than
     // the cone and the wall beside the edge is steel.
+    //
+    // The section is read where the cutter is a full-radius cylinder
+    // (M13.7): `lift` above the tip, the height the real tip reaches
+    // `r` (0 for a square end, so its verdict is unchanged). Material
+    // in the tip band below it is the solid law's (b2, run below with
+    // the same tip) - judged exactly instead of as a square rim.
+    let cutter = super::Cutter::judged(cx.tool, cx.cutter);
+    let lift = cutter.tip_height();
     if !matches!(
         cx.mode,
         Mode::Engrave | Mode::Envelope | Mode::Revolve | Mode::Radial | Mode::Cone | Mode::Rotary
@@ -179,7 +187,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
             if m.kind == MoveKind::Rapid {
                 continue;
             }
-            let section = cx.model.map(|f| islands_at(f, m.from.z.min(m.to.z)));
+            let section = cx.model.map(|f| islands_at(f, m.from.z.min(m.to.z) + lift));
             if let Some(None) = section {
                 warns.push(Warning::Gouge { at: i }); // cannot prove the slice
                 continue;
@@ -219,15 +227,16 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
         // no level slices - a blind floor between two planes, an
         // overhang above the ring, an undercut lip - so a model-driven
         // path also answers to the mesh's solid at every sampled tip,
-        // the square stack of `cx.tool` standing in for the cutter
-        // (never smaller than the real tip, so it can only over-report).
+        // with the op's real tip (M13.7) when the context carries one
+        // that agrees with `cx.tool`, else the square stack (never
+        // smaller than the real tip, so it can only over-report).
         if let Some(f) = cx.model {
             let law = super::SolidLaw {
                 step: SOLID_STEP,
                 allow: cx.gouge_tol + (-cx.stock_to_leave).max(0.0),
                 hole_walls: false,
             };
-            for w in super::solid_hits(path, f, &super::Cutter::flat(cx.tool), &law) {
+            for w in super::solid_hits(path, f, &cutter, &law) {
                 if !warns.contains(&w) {
                     warns.push(w);
                 }

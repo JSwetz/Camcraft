@@ -3,7 +3,7 @@
 use super::params::{CHORD_TOL, Pocket3DParams};
 use super::rest::EPS;
 
-use crate::cl::{MoveKind, Toolpath};
+use crate::cl::{Move, MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
@@ -107,6 +107,7 @@ pub fn optimize_feed(
     p: &Pocket3DParams,
 ) -> Result<Toolpath, GenError> {
     p.validate()?;
+    refuse_posed(&path.moves)?;
     let r = p.tool_diameter * 0.5;
     let (mut dex, _) = sim_of(facets, footprint, p)?;
     let mut moves = path.moves.clone();
@@ -204,4 +205,26 @@ pub(super) fn sim_of(
         }
     }
     Ok((dex, part))
+}
+
+/// The column engine's door, kept at motion's direct `Dexel::subtract`
+/// calls too (M13.7): the dexel atom stands upright on +Z, so a posed
+/// cutting move lowered through it is a tilted tool cut vertically - a
+/// silent wrong stock. Refused by name with the engine's own text
+/// ([`stock_sim::POSED_REFUSAL`]) before a single column is touched.
+pub(super) fn refuse_posed(moves: &[Move]) -> Result<(), GenError> {
+    match stock_sim::first_posed(moves) {
+        Some(k) => Err(GenError::Invalid(format!("move {k}: {}", stock_sim::POSED_REFUSAL))),
+        None => Ok(()),
+    }
+}
+
+/// Lower `dex` by every move of `moves` with the upright flat tool of
+/// radius `r`, after [`refuse_posed`] - the only way motion subtracts.
+pub(super) fn subtract_upright(dex: &mut Dexel, moves: &[Move], r: f64) -> Result<(), GenError> {
+    refuse_posed(moves)?;
+    for m in moves {
+        dex.subtract(m, r, CHORD_TOL);
+    }
+    Ok(())
 }

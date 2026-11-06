@@ -272,6 +272,7 @@ fn the_solid_law_on_the_users_part_is_silent_and_cheap() {
             stock: None,
             model: Some(&m.facets),
             tool: &g,
+            cutter: None,
             mode: Mode::Boundary,
             stock_top_z: hi,
             clearance_z: hi + 10.0,

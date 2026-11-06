@@ -287,6 +287,7 @@ fn verify_wall(t: &Toolpath, region: &Region) -> Vec<camcraft_app::verify::Warni
         stock: None,
         model: None,
         tool: &tool,
+        cutter: None,
         mode: Mode::Boundary,
         stock_top_z: 20.0,
         clearance_z: 40.0,
