@@ -306,6 +306,17 @@ fn a_rough_over_an_oversized_bar_peels_from_the_stock_radius() {
     let path = tmp_nc("ro-big");
     assert!(posting::post_setup(&world, &path).is_ok(), "a clean rough posts");
     let _ = std::fs::remove_file(&path);
+    // M13.8 air laps: the levels above the part's skin clear one lap,
+    // not the developed strip's two (the seam copy is for planes that
+    // meet the part). Before: 11,967 moves here vs 2,064 on the
+    // matching bar; after: 7,082 - the seven air levels each sweep
+    // half what they did. The matching bar has no air level, so its
+    // program is the unsplit ladder's, move for move.
+    let snug = cache(&world_for(Kind::Offset, 12.4, 25.0)).path.moves.len();
+    let big = c.path.moves.len();
+    eprintln!("ROTARY OFFSET | d20 bar {big} moves | d12.4 bar {snug} moves");
+    assert_eq!(snug, 2064, "the matching bar has no air level - its ladder must not move");
+    assert!(big < 9000, "air levels still clear both laps: {big} moves (11,967 when they did)");
 }
 
 /// (station, radius, azimuth) about the bar's axis (z standing, x laid).

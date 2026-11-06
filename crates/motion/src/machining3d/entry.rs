@@ -89,6 +89,57 @@ fn run_plain(
     ladder(facets, footprint, p, &zs, None, mask, home(p), shell)
 }
 
+/// The plain ladder with a second, smaller footprint for its AIR
+/// levels (M13.8, the rotary wrap's seam law): every plane strictly
+/// above `air_above` - where no part material can stand, so the
+/// level's target is its whole footprint - is cleared over
+/// `air_footprint`; every plane at or below it over `footprint`, exactly
+/// as [`pocket3d`] would. The planes are the one `cut_levels` ladder
+/// either way, and the second leg starts where the first ended (the
+/// rest ladder's chaining law), so the program differs from
+/// [`pocket3d`]'s only in what the air levels sweep. With no plane
+/// above `air_above` it IS [`pocket3d`], move for move.
+pub fn pocket3d_air_split(
+    facets: &[Triangle],
+    air_footprint: &Region,
+    footprint: &Region,
+    air_above: f64,
+    p: &Pocket3DParams,
+) -> Result<Toolpath, GenError> {
+    guard_input(facets, footprint, p)?;
+    let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
+    let k = zs.iter().take_while(|z| **z > air_above).count();
+    if k == 0 || air_footprint.is_empty() {
+        return ladder(facets, footprint, p, &zs, None, None, home(p), false);
+    }
+    let air = ladder(facets, air_footprint, p, &zs[..k], None, None, home(p), false)?;
+    if k == zs.len() {
+        return Ok(air);
+    }
+    let start = air.moves.last().map_or_else(|| home(p), |m| m.to);
+    let mut moves = air.moves;
+    let mut notes = air.notes;
+    match ladder(facets, footprint, p, &zs[k..], None, None, start, false) {
+        Ok(rest) => {
+            moves.extend(rest.moves);
+            notes.extend(rest.notes);
+        }
+        // The material planes found nothing to cut: the air leg is the
+        // whole job (the single ladder would have said the same).
+        Err(GenError::Empty(_)) => {}
+        Err(e) => return Err(e),
+    }
+    let path = Toolpath {
+        moves,
+        cycles: Vec::new(),
+        notes,
+    };
+    if !path.all_finite() {
+        return Err(GenError::Invalid("path left the finite horizon".into()));
+    }
+    Ok(path)
+}
+
 /// The rest-material sibling (M2.1b): the same level ladder, then a
 /// second, half-stepdown pass aimed at what the simulation says is
 /// still standing. The coarse ladder's staircase is the acknowledged

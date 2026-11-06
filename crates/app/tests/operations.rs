@@ -5318,26 +5318,13 @@ fn advanced_swarf_adds_the_coarse_rungs() {
         assert_eq!(status(&world, name), OpStatus::Ok);
     }
     verifies_clean(&world, "SW1");
-    // SW2's coarse rung is convicted, and must stay convicted until its
-    // generator is fixed: the UPRIGHT swarf_multi plan itself sinks
-    // 0.39 mm into this blade (motion's pivot5d verdict-lane test reads
-    // plan and posed path alike - the pose adds nothing), and the
-    // verifier names it, which holds the post. Pinned here so neither
-    // the defect nor its verdict can go quiet.
-    let sw2 = cache(&world, "SW2").expect("cached").warnings;
-    assert!(
-        matches!(sw2.as_slice(), [camcraft_app::verify::Warning::Envelope { gouge_mm, .. }] if *gouge_mm > 0.3),
-        "SW2's coarse-rung gouge verdict changed: {sw2:?}"
-    );
-    // ... and the conviction BLOCKS: the post refuses the document.
-    let out = std::env::temp_dir().join(format!("camcraft-sw2-blocked-{}.nc", std::process::id()));
-    let posted = camcraft_app::posting::post_setup(&world, &out);
-    let _ = std::fs::remove_file(&out);
-    assert!(
-        posted.as_ref().is_err_and(|e| e.contains("blocked")),
-        "a convicted posed program reached the post: {:?}",
-        posted.map(|p| p.lines)
-    );
+    // M13.8: SW2's coarse rung used to sink 0.39 mm into this blade
+    // (the rung relaxed its gouge budget with its scallop - the
+    // verifier convicted it). The rung now relaxes only its spacing,
+    // so the ladder verifies clean. (This world mounts no tilting
+    // machine, so the post refuses both programs on kinematics alone
+    // - which is why the post is not the witness here.)
+    verifies_clean(&world, "SW2");
     let one = cache(&world, "SW1").expect("cached").path;
     let two = cache(&world, "SW2").expect("cached").path;
     assert!(

@@ -9978,3 +9978,40 @@ with 0.02 mm of slack where the verifier allows 0.01 mm. A flat-end
 pass can therefore end where the square reading reports a gouge.
 That errs safe, but can block a post for no real gouge; align the two
 tolerances.
+
+## M13.8 B: swarf rungs, Offset air laps, and the dead ridge law: three decisions (2026-11-06)
+
+(1) **A coarse swarf rung relaxes only its spacing.** Each rung
+multiplied the whole tolerance by 4^i: the march deviation, chord
+budget, first sample step, ring chords, scan directions and the
+`r - tol` contact limits. So at tol 0.4 the plan itself dug 0.39 mm.
+Now only the raster step and ring stepdown scale (`raster_pass_spaced`);
+every gouge-side limit stays nominal. The capped-blade adv swarf
+deviation went 0.3924 -> 0.0963 mm, the same as single-pass swarf.
+
+(2) **Rotary Offset clears one lap at air levels**
+(`machining3d::pocket3d_air_split`). Levels above the part's max
+radius plus leave sweep one lap plus seam pads; every level that can
+touch the part keeps both laps and the seam copy. A d20 bar went from
+11,967 to 7,082 moves, and rotary verify still gives zero warnings.
+With no air level, the output is identical move for move.
+
+(3) **The ridge rest law stays as a reading; making it convict is a
+tracked milestone, not a silent change.** Proof that it is dead: it
+judges a point only when two segments come within `band = r + tol +
+floor`, so its rest `dmin - r - floor <= tol`, always under its gate
+`tol + floor`. It can never convict, so a finish with too wide a
+stepover verifies silently.
+- A reachable version (opposite-side segments within a reach;
+  ball-unreachable creases excused) convicted 9-12 shipped finish
+  fixtures at 0.13-0.35 mm against a 0.12 gate, including
+  `dome_flow_is_envelope_clean`. That is real excess scallop the dead
+  law hid.
+- This is quality (scallop over tolerance), not a gouge or a
+  collision, so the Prime Directive does not force it ahead of the
+  generator fixes.
+- Landing it alone would red the heavy lane; removing it would drop
+  the sub-tolerance rest numbers tests read, for no gain.
+- Kept as a reading. The reachable law (patch saved in the job tmp as
+  ridge-flank-law.patch) lands together with the finish-generator
+  stepover fixes as M13.9.

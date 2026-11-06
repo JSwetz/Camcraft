@@ -1754,23 +1754,35 @@ None of these may stay open behind a ✅.
 
 ### M13.8 - Multi-axis leftovers after the pivot law
 **Goal: every rotary and 5-axis kind starts, links and judges like the
-3-axis ones - nothing found by the pivot fix stays as prose.** — ⚠️ partial (owed: swarf_multi rung, all-air finish, ridge rest law, Offset air laps)
+3-axis ones - nothing found by the pivot fix stays as prose.** — ⚠️ partial (owed: all-air finish, radial retracts vs fixtures)
 
-- **swarf_multi coarse rung** gouges 0.39 mm. The verifier convicts it,
-      so it isn't silent; the fix is to refine the rung.
+- ~~**swarf_multi coarse rung**~~ - fixed 2026-11-06: rungs relax only
+      their spacing (RECOMMENDED "M13.8 B" (1)).
 - ~~**The rotary first move**~~ - done 2026-11-06 (RECOMMENDED "M13.8 A"
       (1)): opens on the clearance pose above the first cut.
 - **An upright all-air finish** is reported unjudged; judge it.
-- **The ridge rest law** can never fire; make it reachable, or remove it
-      by decision.
+- ~~**The ridge rest law**~~ - decided 2026-11-06: proven dead, kept as a
+      reading; the reachable law moves to M13.9 with the generator fixes.
 - ~~**Rotary Offset** from the stock radius; **Rotary Parallel** radial
       retracts~~ - done 2026-11-06 (RECOMMENDED "M13.8 A" (2)/(3)).
-- **Rotary Offset air laps**: air levels clear both laps of the
-      developed strip (11,967 moves vs ~2,064 on a d20 bar) - trim the
-      seam copy at air levels.
+- ~~**Rotary Offset air laps**~~ - fixed 2026-11-06: 11,967 -> 7,082 moves
+      on a d20 bar (RECOMMENDED "M13.8 B" (2)).
 - **Radial retracts vs fixtures**: Parallel passes below the equator
       retract downward to the clearance cylinder; the machine/fixture
       check must cover anything inside that cylinder (a table, a chuck).
+
+
+### M13.9 - The scallop law and finish stepovers
+**Goal: a finish whose scallop exceeds its tolerance is named, never
+verified silently - and the shipped finish generators meet their own
+tolerance.** — 📋
+
+The ridge rest law can never convict (RECOMMENDED "M13.8 B" (3)). A
+reachable version (saved as ridge-flank-law.patch) convicts 9-12
+shipped finish fixtures at 0.13-0.35 mm on shallow ground (dome
+waterline, geodesic dome, multidirection raster, dome flow). Fix
+those generators' stepover/scallop control, then land the law, with
+the heavy lane green.
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
@@ -1824,7 +1836,8 @@ None of these may stay open behind a ✅.
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); owed: overhang laws, mid-move pose, ladder/verifier tolerance | ⚠️ |
-| **M13.8** | Multi-axis leftovers | Done: rotary first move on the clearance pose, Rotary Offset from the stock radius, Rotary Parallel radial links; owed: swarf_multi coarse rung, upright all-air finish unjudged, ridge rest law unreachable, Offset air laps | ⚠️ |
+| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); owed: upright all-air finish unjudged, radial retracts vs fixtures | ⚠️ |
+| **M13.9** | Scallop law and finish stepovers | Make the ridge/scallop law reachable and fix the finish generators it convicts (0.13-0.35 mm over a 0.12 gate) | 📋 |
 
 ## Open questions & deferred
 

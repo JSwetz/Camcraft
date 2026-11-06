@@ -25,6 +25,24 @@ pub(super) fn raster_pass(
     uy: f64,
     continuing: bool,
 ) -> Result<bool, GenError> {
+    raster_pass_spaced(b, p, r, sups, (ux, uy), continuing, p.tolerance)
+}
+
+/// [`raster_pass`] with the line SPACING authored by `spacing_tol`
+/// (the scallop the pass may leave) while every gouge-side law - the
+/// march's deviation, its chord budget, its first sample step - keeps
+/// `p.tolerance`. The multi-pass swarf's coarse rungs relax only the
+/// former (M13.8): a coarse scallop is a promise to the next rung, a
+/// coarse chord is a bite into the part no later rung can give back.
+pub(super) fn raster_pass_spaced(
+    b: &mut PathBuilder,
+    p: &Finish3DParams,
+    r: f64,
+    sups: &[Sup],
+    (ux, uy): (f64, f64),
+    continuing: bool,
+    spacing_tol: f64,
+) -> Result<bool, GenError> {
     let (mut umin, mut umax, mut vmin, mut vmax) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
     let mut mz_min = 1.0f64;
     for s in sups.iter().filter(|s| s.shallow) {
@@ -46,7 +64,7 @@ pub(super) fn raster_pass(
         return Ok(false); // all-steep model: the rings alone carry it
     }
     let (vx, vy) = (-uy, ux);
-    let step = p.stepover.unwrap_or(scallop_stepover(r, p.tolerance) * mz_min);
+    let step = p.stepover.unwrap_or(scallop_stepover(r, spacing_tol) * mz_min);
     const MAX_LINES: f64 = 8192.0;
     // Spelled through a binding so the NaN case reads what it is:
     // `step > 0.0` is false when step is not a number at all, and a
@@ -224,10 +242,11 @@ pub fn swarf(
 }
 
 /// The tolerance-aware multi-pass swarf (advanced swarf, M5.1 D):
-/// the SAME path family run coarse-first. Pass i from the top runs
-/// at `tol·4^i` - every scallop law in the kernel is tolerance-
+/// the SAME path family run coarse-first. Pass i from the top is
+/// SPACED at `tol·4^i` - every scallop law in the kernel is tolerance-
 /// authored, so the rough pass lands at DOUBLE the step and DOUBLE
-/// the level stepdown, fourfold the cusp; the finishing pass then
+/// the level stepdown, fourfold the cusp - while its gouge budget
+/// stays the nominal `tol` (M13.8); the finishing pass then
 /// rides the nominal ladder. Each pass's centers stand tangent to
 /// the MODEL (never to the previous pass), so the finishing pass's
 /// promise does not depend on the rough pass having helped: the
@@ -252,17 +271,26 @@ pub fn swarf_multi(
     let (ux, uy) = norm_dir(ux, uy)?;
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let mut emitted = false;
+    // The gouge budget never relaxes (M13.8): the march, the ring
+    // chords and the convex scan run at the nominal tolerance on
+    // every rung, so no rung bites past it; only the SPACING - the
+    // raster's step and the ring ladder's stepdown, both scallop
+    // laws - is authored by the rung's `tol·4^i`. Relaxing the whole
+    // tolerance let the coarse rung's chords sink ~4·tol (0.39 mm at
+    // tol 0.1 on the capped blade), a conviction the finish rung,
+    // tangent to the model, can never cut back.
+    let ds = dirs(r, p.tolerance);
     for i in (0..passes).rev() {
         let mut q = *p;
+        let mut spacing = *p;
         if i > 0 {
-            q.tolerance = p.tolerance * (4.0f64).powi(i as i32);
+            spacing.tolerance = p.tolerance * (4.0f64).powi(i as i32);
             // An explicit stepover rides the same 2x-per-pass ladder
             // (scallop grows with the square of the spacing).
             q.stepover = p.stepover.map(|s| s * (2.0f64).powi(i as i32));
         }
-        emitted |= raster_pass(&mut b, &q, r, &sups, ux, uy, emitted)?;
-        let zs = levels(&q, r)?;
-        let ds = dirs(r, q.tolerance);
+        emitted |= raster_pass_spaced(&mut b, &q, r, &sups, (ux, uy), emitted, spacing.tolerance)?;
+        let zs = levels(&spacing, r)?;
         let mut last = Some(q.clearance_z);
         emitted |= emit_rings(&mut b, &q, r, facets, &zs, &ds, &mut last)?;
     }

@@ -26,7 +26,9 @@
 //! closed solid exactly when the model was: a revolve's ring slices
 //! to a closed contour at every level the way block work expects,
 //! and a pass running most of a lap rewraps to a closed ring
-//! instead of leaving a rest ridge at the seam.
+//! instead of leaving a rest ridge at the seam. Levels in AIR - above
+//! the part's skin, over a fatter bar - meet no facet and need no
+//! copy: they clear one lap plus the seam pad (M13.8).
 //!
 //! With ρ as height, `pocket3d`'s island law reads exactly right:
 //! part material stands above the current radius wherever the skin
@@ -325,7 +327,16 @@ pub fn rotary_offset_in(
     // phantom air-cut bands where the slice sees no material.
     let pad = r + q.stock_to_leave;
     let rect = wrap_rect(s_lo - pad, s_hi + pad, v_lo, v_hi);
-    let base = machining3d::pocket3d(&wrap, &rect, &q)?;
+    // Air levels (M13.8): a plane above the part's skin plus its
+    // leave meets no wrapped facet, so its target is the whole cover -
+    // and the cover is two laps, the seam copy included. One lap plus
+    // the seam pad each side clears every azimuth once (the eroded
+    // centres reach both pads, the tool edge one radius past them),
+    // so those planes sweep one lap; every plane that can meet the
+    // part keeps both, the seam copy closing its rings.
+    let one_lap = wrap_rect(s_lo - pad, (s_lo + period + pad).min(s_hi + pad), v_lo, v_hi);
+    let air_above = rho_max + q.stock_to_leave.max(0.0);
+    let base = machining3d::pocket3d_air_split(&wrap, &one_lap, &rect, air_above, &q)?;
     wrap_exit::wrap_exit(&base, &ax, &e1, &e2, rho_ref, r, c)
 }
 

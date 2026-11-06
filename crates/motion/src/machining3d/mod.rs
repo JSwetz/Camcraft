@@ -104,7 +104,7 @@ use {entry::*, feed::*, ladder::*, params::*, rest::*};
 mod tests;
 
 pub use entry::{
-    pocket3d, pocket3d_offset, pocket3d_offset_prev, pocket3d_offset_with_rest,
+    pocket3d, pocket3d_air_split, pocket3d_offset, pocket3d_offset_prev, pocket3d_offset_with_rest,
     pocket3d_offset_with_rest_prev, pocket3d_prev, pocket3d_with_rest,
     pocket3d_with_rest_prev,
 };
