@@ -10546,3 +10546,52 @@ next, a local `v0.7.0` tag, the portable zip under `dist/` (gitignored).
 session builds and packages but does not push; the user gets the zip path
 and the exact push command. A `TESTING.md` hand-test list ships in the zip
 and at the repo root, aimed at the day's reports.
+
+## M11.5: the open Contour's band, extensions and sentence: two decisions (2026-11-06)
+
+(1) **The viewport fills the band the open pass sweeps**, built from the SAME
+`open_run` the generator uses (lengthened by the approach's `ext_in`/`ext_out`,
+then swept by the tool radius), so fill and path cannot disagree. A refused pass
+shades nothing. The leads are not in the band, as a closed ring's region also
+leaves its leads out.
+
+(2) **The approach extensions apply to open runs** (`lead_ext::extend_open`):
+the same straight pieces `extend_leads` lays, without the room law, since an open
+run's ends are air. Both at 0 is byte-identical. The summary now says the pass
+"runs {len} past each end of the picked edge's chain".
+
+Owed: `material.rs` was 694 lines before this and is 720 now; split `region_of` /
+`region_turn_of` out. The preview computes `open_run` twice (cheap; noted).
+
+## M13.8: the generate-time fixture check on the workholding laws: two decisions (2026-11-06)
+
+(1) **Generate runs the post gate's exact sequence** (`bands_vs_workholding` +
+`rapids_vs_workholding` with the spindle, from `GenJob`'s new `workholding` and
+`rotary_axis` reads collected on the caller's thread). The 2D arm was switched in
+place. The rotary kinds verify through the 3D arm, so that arm's `VerifyContext`
+now carries no fixtures/spindle and the same helper runs after `verify` - the
+only visible effect is that fixture warnings append at the end of the list
+there, as the 2D arm already did. Generate and post-gate verdicts are asserted
+equal hit for hit.
+
+(2) **A "Fixed (does not turn with the part)" check row on every fixture**,
+through the undoable `SetFixtureFixed` command via the pending queue; the UI
+writes nothing to the world. No snapshot changed.
+
+Owed: the setup sheet does not print the flag.
+
+## The release train: three decisions (2026-11-06)
+
+(1) **Fixed cut dates, floating scope.** Two trains a week (Mon/Thu 12:00
+local); a must that is not green 4 h before the cut slips to the next train,
+never the date. Dropped: milestone-triggered releases, which is how 0.6.0 ->
+0.7.0 took 108 commits.
+
+(2) **At most three musts per train**, each a ROADMAP row flip or a tester-
+visible fix, so the release notes write themselves and the gate stays
+small. Nice-to-haves ride if green.
+
+(3) **The cut is mechanical.** The 0.7.0 recipe is the procedure; a
+`scripts/release.ps1` that runs gate -> bump -> lock -> tag -> zip in one
+command is a 0.8.0 nice-to-have so the freeze window shrinks further. The
+session never pushes; the push command is handed to the user with the zip.

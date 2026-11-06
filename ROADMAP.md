@@ -1692,6 +1692,9 @@ would.** — 📋
       posts, machines and icons already embed. Until then the zip ships
       `assets/themes` for reference only.
 
+- **`crates/app/src/operation/material.rs` over the 400-line law** (720 lines):
+      split `region_of` / `region_turn_of` into their own module.
+
 ### M13.4 - Small owed polish
 **Goal: the named cheap follow-ons stop being named and get done.** — ✅ (vertex picking, Set origin on a vertex or face, dialog polish - all done 2026-11-06)
 
@@ -1837,7 +1840,7 @@ the heavy lane green.
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
 | **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; pocket G17 arc entry and 3D first-stretch slowing done 2026-11-06; owed: 3D ladder / contour bore second dives, Rotary Parallel infeed / Swarf first-entry ramps (-> M11.3 Owed bullet) | ⚠️ |
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); star-plan seams at 0 kinks past 5° (done); owed: the slot's entry-orbit 2 breaks, island legal late returns, arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
-| **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; owed: open-boundary Contour polish (viewport footprint, approach extensions), boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
+| **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; open-boundary Contour band/extensions done; owed: boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
 | **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; owed: lathe/rotary annular-sector sweeps (refused by name meanwhile), eikonal, viewer/picking mesh, dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
 | **M13.2** | Machine limits and cutting data | Spindle speed/power checks against a per-material speeds & feeds library (M3.3 C); the homegrown materials database (Open question "Cutting data"); done 2026-11-06 (fixed 0.8 spindle efficiency is a follow-on, not owed) | ✅ |
@@ -1846,8 +1849,29 @@ the heavy lane green.
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); cut-order clearing (done); owed: mid-move pose | ⚠️ |
-| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; spindle on posed rapids, fixed fixtures in the machine frame; owed: continuous pose, generate-time check wiring, fixed-flag UI toggle | ⚠️ |
+| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; spindle on posed rapids, fixed fixtures in the machine frame; generate-time check on the workholding laws, Fixed toggle; owed: continuous pose, the setup sheet printing the flag | ⚠️ |
 | **M13.9** | Scallop law and finish stepovers | Make the ridge/scallop law reachable and fix the finish generators it convicts (0.13-0.35 mm over a 0.12 gate) | 📋 |
+
+## Release train
+
+A release is a cut, not a goal (user, 2026-11-06: "make sure to hit the marks
+so we don't spend ages between stable test releases"). Two trains a week on
+fixed dates; the scope is what is green at the cut. Each train carries at most
+three MUSTS; a must that is not green 4 h before the cut slips to the next
+train, never the date. The last 4 h are the freeze: no new agents, the full
+gate (every crate, ui from crates/ui, clippy, all heavy lanes), bump, lock
+sync, tag, zip - the 0.7.0 recipe in RECOMMENDED "Release 0.7.0". Nothing is
+pushed by the session; the user pushes the tag.
+
+| Train | Cut (local) | Theme | Musts | Nice-to-have |
+|---|---|---|---|---|
+| **0.8.0** | Mon 2026-11-10 12:00 | Every 0.7.0 known limit closed; the zip runs on any machine | themes resolved beside the exe (M13.3); M11.3 ✅; M13.7 ✅ (mid-move pose decided) | M11.4 island on HSM + slot entry kinks; M13.8 ✅; material.rs split; `scripts/release.ps1` (one command: gate → bump → zip) |
+| **0.9.0** | Thu 2026-11-13 12:00 | Area control and stock everywhere | M11.5 ✅ (3+2 boundaries, group on every kind); M13.1 lathe/rotary swept solids; M13.9 scallop law live | viewer/picking mesh, jump throughput, CPU-fallback eye (M13.1); M7.3 retirement if unblocked |
+| **0.10.0** | Mon 2026-11-17 12:00 | Install it, turn it | M13.3 installer-vs-zip decision + signed build path; M13.5 C-axis live tooling; M11.4 arc output + Pocket3D port | M1.x ⚠️ leftovers audit; M13.6 feature-recognition spike |
+
+The table is the authority: when a train cuts, its row gets the tag and the
+commit, and the next three rows are planned at the same time, so the train
+never runs out of dates.
 
 ## Open questions & deferred
 
