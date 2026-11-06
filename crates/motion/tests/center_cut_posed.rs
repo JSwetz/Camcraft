@@ -218,9 +218,13 @@ fn the_5_axis_kinds_ramp_or_refuse_a_tool_that_is_not_centre_cutting() {
 #[test]
 fn the_convicted_5_axis_descent_is_a_posed_one() {
     // The ring entry over the dome holds a lean (off vertical): the
-    // vertical-only reading would have missed it entirely.
+    // vertical-only reading would have missed it entirely. The ladder
+    // starts one rung under the apex: M13.9's slope-aware ladder puts
+    // the first ring of a crown that begins AT the apex within a few
+    // degrees of it (a near-vertical pose, 0.998), and the lean this
+    // test reads is the one a rung further down the flank.
     let f = dome();
-    let t = run(&f, true, &fparams(FinishPattern::Waterline)).expect("posed path");
+    let t = run(&f, true, &Finish3DParams { top_z: 14.0, ..fparams(FinishPattern::Waterline) }).expect("posed path");
     let (xy, z) = first_solid_plunge(&t, 3.0, &Solid { top: 15.0, footprint: None }).expect("a plunge");
     let m = t
         .moves

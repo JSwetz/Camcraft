@@ -5,7 +5,8 @@ use crate::geo2d::Point2;
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
-use super::params::{Finish3DParams, FinishPattern, dirs, levels, refinement_floor, scallop_stepdown, scallop_stepover, validate};
+use super::ladder::levels;
+use super::params::{Finish3DParams, FinishPattern, dirs, refinement_floor, scallop_stepdown, scallop_stepover, validate};
 use super::support::{Sup, build_sups, plunge_support};
 use super::march::{emit_runs, march_curve};
 use super::rings::emit_rings;
@@ -197,7 +198,7 @@ pub(super) fn rings_and_tail(
     facets: &[Triangle],
     emitted: bool,
 ) -> Result<Toolpath, GenError> {
-    let zs = levels(p, r)?;
+    let zs = levels(p, r, facets)?;
     let ds = dirs(r, p.tolerance);
     let mut last = Some(p.clearance_z);
     let mut emitted = emitted;
@@ -290,7 +291,7 @@ pub fn swarf_multi(
             q.stepover = p.stepover.map(|s| s * (2.0f64).powi(i as i32));
         }
         emitted |= raster_pass_spaced(&mut b, &q, r, &sups, (ux, uy), emitted, spacing.tolerance)?;
-        let zs = levels(&spacing, r)?;
+        let zs = levels(&spacing, r, facets)?;
         let mut last = Some(q.clearance_z);
         emitted |= emit_rings(&mut b, &q, r, facets, &zs, &ds, &mut last)?;
     }

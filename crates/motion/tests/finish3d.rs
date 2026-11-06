@@ -237,9 +237,13 @@ fn envelope(facets: &[Triangle], t: &Toolpath) -> camcraft_motion::stock_sim::En
 /// generator fix is the owed item. Until it lands, every fixture pins
 /// the reading it had when the law went live: a rise fails, a fall is
 /// free. Fixtures not listed answer to the gate itself. The same
-/// pattern as `KINK_RATCHET` in `adaptive_hsm.rs`.
+/// pattern as `KINK_RATCHET` in `adaptive_hsm.rs`. The dome waterline
+/// left the table with the slope-aware ladder (`finishing3d::ladder`):
+/// 0.183 at the 27° crown band became 0 - it answers to the gate. The
+/// readings still listed are the shallow families' own (cos-law
+/// stepover over-reads on the hill and the tilted shelf), not the
+/// ring ladder's.
 const SCALLOP_RATCHET: &[(&str, f64)] = &[
-    ("dome waterline", 0.183),
     ("open dome geodesic", 0.226),
     ("dome multidirection", 0.349),
     ("dome scallop", 0.156),
@@ -950,6 +954,74 @@ fn degenerate_meshes_never_panic() {
         })
         .collect();
     let _ = waterline(&scatter, &params(1.0, 0.0));
+}
+
+/// Distinct ring tip-Z levels of a path, top down.
+fn ring_levels(t: &Toolpath) -> Vec<f64> {
+    let mut v: Vec<f64> = t.moves.iter().filter(|m| m.kind == MoveKind::Plunge).map(|m| m.to.z).collect();
+    v.sort_by(|a, b| b.total_cmp(a));
+    v.dedup_by(|a, b| (*a - *b).abs() <= 1e-9);
+    v
+}
+
+#[test]
+fn the_ladder_reads_the_slope_and_keeps_the_45_degree_law_as_its_ceiling() {
+    // M13.9: on the wedge's 20° top (70° from vertical) the waterline's
+    // rungs tighten to `√(8·r·tol)·sin 20°` wherever a band touches
+    // that face; the 45° law `2√(r·tol)` is the ceiling everywhere.
+    let dz45 = scallop_stepdown(R, TOL);
+    let dz20 = scallop_stepover(R, TOL) * 20f64.to_radians().sin();
+    assert!(dz20 < dz45);
+    let f = tilted(20f64.to_radians(), 8.0);
+    let (top, bottom) = (12.0, 5.0);
+    let wl = ring_levels(&waterline(&f, &params(top, bottom)).expect("wedge waterline"));
+    assert_eq!(wl.first(), Some(&top));
+    assert!(wl.last().is_some_and(|z| (z - bottom).abs() <= 1e-9), "{wl:?}");
+    let old = ((top - bottom) / dz45).ceil() as usize + 1;
+    assert!(wl.len() > old, "the slope law did not tighten the ladder: {wl:?}");
+    for w in wl.windows(2) {
+        let gap = w[0] - w[1];
+        assert!(gap > 0.0 && gap <= dz45 + 1e-9, "gap {gap} past the ceiling: {wl:?}");
+        // Above the tilted face's lowest tip height the band always
+        // touches it and the rung is the 20° law's or tighter.
+        if w[1] > 7.0 {
+            assert!(gap <= dz20 + 1e-9, "gap {gap} past the 20° law at {}: {wl:?}", w[1]);
+        }
+    }
+    // A pattern with a shallow family keeps the 45° ladder: its raster
+    // owns the top, the rings the walls (M13.9 scoping). The raster's
+    // own plunges land at surface heights, so the ladder is read by
+    // its rungs' presence: every 45° rung is there, none was moved.
+    let has = |zs: &[f64], z: f64| zs.iter().any(|q| (q - z).abs() <= 1e-9);
+    let walk = |dz: f64| -> Vec<f64> {
+        let mut v = Vec::new();
+        let mut z = top;
+        while z > bottom + 1e-9 {
+            v.push(z);
+            z -= dz;
+        }
+        v
+    };
+    let par = ring_levels(&parallel(&f, &ppattern(top, bottom, FinishPattern::Parallel)).expect("wedge parallel"));
+    for z in walk(dz45) {
+        assert!(has(&par, z), "the raster's ladder lost its 45° rung {z}: {par:?}");
+    }
+    assert!(!has(&par, top - dz20), "the raster's ladder tightened: {par:?}");
+    // And ground at the 45° line is the ceiling's own: the cone's
+    // ladder is the fixed 2√(r·tol) walk, rung for rung.
+    let cone_l = ring_levels(&waterline(&cone(96), &params(16.0, 0.5)).expect("cone waterline"));
+    for (k, z) in cone_l.iter().enumerate().take(cone_l.len() - 1) {
+        assert!((z - (16.0 - k as f64 * dz45)).abs() <= 1e-9, "cone rung {k} moved: {cone_l:?}");
+    }
+    // A stated flank spacing is never changed by the slope law.
+    let ss = ring_levels(
+        &parallel(&f, &Finish3DParams { steep_stepover: Some(2.0), ..ppattern(top, bottom, FinishPattern::SteepShallow) })
+            .expect("wedge split"),
+    );
+    for z in walk(2.0) {
+        assert!(has(&ss, z), "the stated ladder lost its rung {z}: {ss:?}");
+    }
+    assert!(!has(&ss, top - dz20) && !has(&ss, top - dz45), "a stated 2.0 was tightened: {ss:?}");
 }
 
 #[test]

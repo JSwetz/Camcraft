@@ -1,7 +1,7 @@
 //! Split from `finishing3d.rs` by M5.0.1; structure only.
 
 use crate::geometry::Triangle;
-use crate::machining2d::{cut_levels, GenError};
+use crate::machining2d::GenError;
 
 /// Which finishing kinematic produces the path. Waterline is the
 /// Z-level ring ladder; Parallel adds the Z-following shallow raster
@@ -217,8 +217,10 @@ pub struct Finish3DParams {
 
 /// The stepdown the scallop law prescribes: cusp height
 /// `Δz²/(8 r cos²α) ≤ tol` for `α ≤ 45°` gives `Δz = 2√(r·tol)`.
-/// Non-finite or non-positive inputs collapse to 0.0, which the
-/// caller's level law turns into a clean refusal.
+/// This is the ladder's CEILING (M13.9): `ladder::levels` reads the
+/// part's own slopes and tightens below it on ground shallower than
+/// 45°, never above it. Non-finite or non-positive inputs collapse to
+/// 0.0, which the caller's level law turns into a clean refusal.
 #[must_use]
 pub fn scallop_stepdown(r: f64, tol: f64) -> f64 {
     if !(r.is_finite() && tol.is_finite()) || r <= 0.0 || tol <= 0.0 {
@@ -279,36 +281,6 @@ pub(super) const BLEND_MZ: f64 = 0.866_025_403_784_438_7;
 /// at distance exactly `r` from it, and float says `r ± 1e-9·r`.
 /// Accept contact within this much bite.
 pub(super) const TOUCH_EPS: f64 = 1e-7;
-
-/// Tip-Z levels for the pass, top down, ending exactly at `bottom_z`
-/// (the shared snap law). The scallop stepdown carries a hard level
-/// cap: a tolerance so fine that the rings would number in the
-/// hundreds of thousands is REFUSED, not quietly coarsened - silent
-/// coarsening would make the stated tolerance a lie.
-pub(super) fn levels(p: &Finish3DParams, r: f64) -> Result<Vec<f64>, GenError> {
-    let span = p.top_z - p.bottom_z;
-    if span < 0.0 {
-        return Err(GenError::Invalid("waterline bottom is above its top".into()));
-    }
-    // The ladder's author: the scallop law, unless the partition's
-    // own operation states a flank spacing (M2.5 A) - the same
-    // "a stated number outranks a derived one, the verdict keeps
-    // the promise" grammar the raster's stepover speaks.
-    let dz = match p.pattern {
-        FinishPattern::SteepShallow => p.steep_stepover.unwrap_or_else(|| scallop_stepdown(r, p.tolerance)),
-        _ => scallop_stepdown(r, p.tolerance),
-    };
-    const MAX_LEVELS: f64 = 8192.0;
-    if span > 0.0 && dz <= span / MAX_LEVELS {
-        return Err(GenError::Invalid(format!(
-            "stepdown {:.6} with this span needs {} levels (cap {}): refine the spacing or the tolerance",
-            dz,
-            (span / dz.max(1e-12)).min(i64::MAX as f64) as i64,
-            MAX_LEVELS as i64,
-        )));
-    }
-    Ok(cut_levels(p.top_z, p.bottom_z, dz.max(1e-9)))
-}
 
 /// Unit directions of the convex scan. The count follows the
 /// disk-chord law: the scan's worst miss is a disk sagitta at most

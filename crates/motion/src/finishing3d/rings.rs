@@ -5,7 +5,8 @@ use crate::geo2d::{Loop, Point2};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{fit_arcs, GenError};
 
-use super::params::{BLEND_MZ, Finish3DParams, FinishPattern, SPLIT_MZ, TOUCH_EPS, dirs, levels, validate};
+use super::ladder::levels;
+use super::params::{BLEND_MZ, Finish3DParams, FinishPattern, SPLIT_MZ, TOUCH_EPS, dirs, validate};
 use super::scan::{level_region, push_walk};
 use super::support::{Sup, build_sups, closest_pt_tri, column_clear, dist2_pt_tri};
 
@@ -449,7 +450,7 @@ pub(super) fn emit_rings(
 pub fn waterline(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenError> {
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
-    let zs = levels(p, r)?;
+    let zs = levels(p, r, facets)?;
     let ds = dirs(r, p.tolerance);
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let mut last: Option<f64> = None;

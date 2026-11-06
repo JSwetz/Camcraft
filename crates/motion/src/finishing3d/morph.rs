@@ -50,9 +50,10 @@ use crate::geo2d::{Loop, Point2};
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::GenError;
 
+use super::ladder::levels;
 use super::march::emit_runs;
 use super::params::{
-    Finish3DParams, dirs, levels, refinement_floor, scallop_stepdown, validate,
+    Finish3DParams, dirs, refinement_floor, scallop_stepdown, validate,
 };
 use super::rings::emit_rings;
 use super::scan::level_region;
@@ -172,7 +173,7 @@ pub fn morph(facets: &[Triangle], p: &Finish3DParams) -> Result<Toolpath, GenErr
     validate(p, facets)?;
     let r = p.tool_diameter * 0.5;
     let sups = build_sups(facets, r);
-    let zs = levels(p, r)?;
+    let zs = levels(p, r, facets)?;
     let ds = dirs(r, p.tolerance);
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     let mut last = Some(p.clearance_z);

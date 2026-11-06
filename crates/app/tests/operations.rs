@@ -4030,7 +4030,9 @@ fn finish3d_waterline_generates_and_verifies_clean() {
         .map(|m| m.to.z)
         .collect();
     // One ring per level from 18 down, snapped at the rim - the scallop
-    // stepdown's ladder, 2*sqrt(3*0.1) = 1.0954 per rung.
+    // stepdown's ladder: 2*sqrt(3*0.1) = 1.0954 per rung at most, and
+    // tighter where the dome's crown band tilts past 45° from vertical
+    // (M13.9's slope-aware ladder: six rungs on this band, not five).
     assert!((4..=6).contains(&plunges.len()), "ladder: {plunges:?}");
     assert!(
         plunges.last() == Some(&DOME_RIM_Z),
