@@ -4,6 +4,14 @@
 //! never stored.
 //!
 //! Gate map (M4.4): covers app::cl, app::commands, app::drilling, app::finishing3d, app::geo2d, app::geometry, app::machining2d, app::model, app::operation, app::schema, app::stock, app::tools, app::verify, app::world.
+//!
+//! Lane shape (M13.8): the debug ladder runs every test here in seconds.
+//! The six slow generate-and-verify laws (swarf, the swarf ladder,
+//! contour5d, the shank-flag twins, the ramp and ladder stamps) run over
+//! a narrower Z band of the same fixture in debug, and their full-band
+//! twins (`*_full_band`) carry the identical assertions in the heavy lane
+//! (`#[ignore]`, `cargo test --release -p camcraft-app --test operations
+//! -- --ignored`).
 
 mod common;
 
@@ -4036,8 +4044,24 @@ fn finish3d_waterline_generates_and_verifies_clean() {
     );
 }
 
+/// The dome's debug-lane band: 18 down to 16 instead of the rim (14.14).
+/// Same solid, same tool, same laws - two rungs of the waterline ladder
+/// instead of four, so the stamp/undo trips cost half. The full band
+/// rides the heavy lane in each split test's `_full_band` twin.
+const DOME_FAST_BOTTOM_Z: f64 = 16.0;
+
 #[test]
 fn the_ramp_flag_stamps_the_digest_and_clears_on_undo() {
+    ramp_flag_case(DOME_FAST_BOTTOM_Z);
+}
+
+#[test]
+#[ignore = "heavy lane: the ramp-flag stamp over the dome's whole 18-to-rim band, ~25 s debug"]
+fn the_ramp_flag_stamps_the_digest_and_clears_on_undo_full_band() {
+    ramp_flag_case(DOME_RIM_Z);
+}
+
+fn ramp_flag_case(bottom_z: f64) {
     // v0.5 (M8.2 B): entry_ramp rewrites a ring's entry legs, so it
     // stamps the digest like every other move-changing word - the ask
     // changed, so the op says Stale until the regen applies it. On this
@@ -4055,7 +4079,7 @@ fn the_ramp_flag_stamps_the_digest_and_clears_on_undo() {
             "Ramp1",
             "BN-0600",
             SrcRef::Entity("dome".into()),
-            finish_params(18.0, DOME_RIM_Z, 0.1),
+            finish_params(18.0, bottom_z, 0.1),
         )
         .expect("create"),
     );
@@ -4066,7 +4090,7 @@ fn the_ramp_flag_stamps_the_digest_and_clears_on_undo() {
     assert_eq!(status(&world, "Ramp1"), OpStatus::Ok);
     let base = cache(&world, "Ramp1").expect("cached").path;
 
-    let mut ask = finish_params(18.0, DOME_RIM_Z, 0.1);
+    let mut ask = finish_params(18.0, bottom_z, 0.1);
     let OpParams::Finish3D { entry_ramp, .. } = &mut ask else {
         panic!("finish3d params expected");
     };
@@ -4099,6 +4123,16 @@ fn the_ramp_flag_stamps_the_digest_and_clears_on_undo() {
 
 #[test]
 fn the_ladder_number_stamps_the_digest_even_where_it_is_inert() {
+    ladder_number_case(DOME_FAST_BOTTOM_Z);
+}
+
+#[test]
+#[ignore = "heavy lane: the inert ladder stamp over the dome's whole 18-to-rim band, ~25 s debug"]
+fn the_ladder_number_stamps_the_digest_even_where_it_is_inert_full_band() {
+    ladder_number_case(DOME_RIM_Z);
+}
+
+fn ladder_number_case(bottom_z: f64) {
     // M2.5 A, same grammar as the ramp flag above: `steep_stepover`
     // feeds the stamp for every pattern, but `levels()` reads it only
     // under SteepShallow - so under Waterline the word is inert, not
@@ -4116,7 +4150,7 @@ fn the_ladder_number_stamps_the_digest_even_where_it_is_inert() {
             "L1",
             "BN-0600",
             SrcRef::Entity("dome".into()),
-            finish_params(18.0, DOME_RIM_Z, 0.1),
+            finish_params(18.0, bottom_z, 0.1),
         )
         .expect("create"),
     );
@@ -4127,7 +4161,7 @@ fn the_ladder_number_stamps_the_digest_even_where_it_is_inert() {
     assert_eq!(status(&world, "L1"), OpStatus::Ok);
     let base = cache(&world, "L1").expect("cached").path;
 
-    let mut ask = finish_params(18.0, DOME_RIM_Z, 0.1);
+    let mut ask = finish_params(18.0, bottom_z, 0.1);
     let OpParams::Finish3D { steep_stepover, .. } = &mut ask else {
         panic!("finish3d params expected");
     };
@@ -4904,6 +4938,16 @@ fn parallel5d_params(top_z: f64, bottom_z: f64) -> OpParams {
 
 #[test]
 fn contour5d_generates_leaning_axes_and_verifies_clean() {
+    contour5d_case(DOME_FAST_BOTTOM_Z);
+}
+
+#[test]
+#[ignore = "heavy lane: contour5d over the dome's whole 18-to-rim band against its model stock, ~28 s debug"]
+fn contour5d_generates_leaning_axes_and_verifies_clean_full_band() {
+    contour5d_case(DOME_RIM_Z);
+}
+
+fn contour5d_case(bottom_z: f64) {
     let world = new_world();
     let mut history = History::default();
     add_tool(&world, &mut history, "BN-0600");
@@ -4916,7 +4960,7 @@ fn contour5d_generates_leaning_axes_and_verifies_clean() {
             "C5A",
             "BN-0600",
             SrcRef::Entity("dome".into()),
-            contour5d_params(18.0, DOME_RIM_Z),
+            contour5d_params(18.0, bottom_z),
         )
         .expect("create"),
     );
@@ -4943,7 +4987,7 @@ fn contour5d_generates_leaning_axes_and_verifies_clean() {
         .map(|m| m.to.z + r * m.axis.map_or(1.0, |a| a[2]))
         .collect();
     assert!(
-        plunges.last().is_some_and(|z| (z - (DOME_RIM_Z + r)).abs() < 1e-9),
+        plunges.last().is_some_and(|z| (z - (bottom_z + r)).abs() < 1e-9),
         "the bottom ring snaps to the bottom: {plunges:?}"
     );
 }
@@ -5252,8 +5296,24 @@ fn blade_pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
     assert!(posed >= body, "{name}: uncounted poses cannot be");
 }
 
+/// The blade's debug-lane band: 11 down to 1 instead of -11. Same
+/// tube, same tool, same rulings - the upper half of the flank, so the
+/// generate-and-verify trips cost about half. The full band rides the
+/// heavy lane in each split test's `_full_band` twin.
+const BLADE_FAST_BOTTOM_Z: f64 = 1.0;
+
 #[test]
 fn swarf_generates_blade_lying_axes_and_verifies_clean() {
+    swarf_case(BLADE_FAST_BOTTOM_Z);
+}
+
+#[test]
+#[ignore = "heavy lane: swarf over the blade's whole 11-to--11 band against its model stock, ~21 s debug"]
+fn swarf_generates_blade_lying_axes_and_verifies_clean_full_band() {
+    swarf_case(-11.0);
+}
+
+fn swarf_case(bottom_z: f64) {
     let world = new_world();
     let mut history = History::default();
     add_swarf_ball(&world, &mut history);
@@ -5266,7 +5326,7 @@ fn swarf_generates_blade_lying_axes_and_verifies_clean() {
             "SWA",
             "BN-0600",
             SrcRef::Entity("blade".into()),
-            swarf_params(11.0, -11.0),
+            swarf_params(11.0, bottom_z),
         )
         .expect("create"),
     );
@@ -5287,6 +5347,16 @@ fn swarf_generates_blade_lying_axes_and_verifies_clean() {
 
 #[test]
 fn advanced_swarf_adds_the_coarse_rungs() {
+    advanced_swarf_case(BLADE_FAST_BOTTOM_Z);
+}
+
+#[test]
+#[ignore = "heavy lane: the two-rung swarf ladder over the blade's whole 11-to--11 band, both ops verified against model stock, ~65 s debug"]
+fn advanced_swarf_adds_the_coarse_rungs_full_band() {
+    advanced_swarf_case(-11.0);
+}
+
+fn advanced_swarf_case(bottom_z: f64) {
     // The ladder's contract in one line: more passes, more cut, and
     // the SAME blade-lying law on every rung. (rung-by-rung geometry -
     // the 4x tolerance relaxation, the doubled spacing - is the
@@ -5297,8 +5367,8 @@ fn advanced_swarf_adds_the_coarse_rungs() {
     history.execute(&world, ImportModel::from_mesh("blade", blade_mesh()));
     model_stock(&world, &mut history, "blade");
     for (name, params) in [
-        ("SW1", swarf_params(11.0, -11.0)),
-        ("SW2", advanced_swarf_params(11.0, -11.0, 2)),
+        ("SW1", swarf_params(11.0, bottom_z)),
+        ("SW2", advanced_swarf_params(11.0, bottom_z, 2)),
     ] {
         history.execute(
             &world,
@@ -6709,14 +6779,27 @@ fn multiaxis_rough_refuses_a_slot_the_cone_cannot_clear() {
     assert_eq!(status(&world, "SLOT"), OpStatus::Ok);
 }
 
+/// The hill's debug-lane band: 18 down to 9 instead of the rim (6).
+const HILL_FAST_BOTTOM_Z: f64 = 9.0;
+
 #[test]
 fn a_quiet_shank_leaves_the_contour_twin_alone() {
+    quiet_shank_case(HILL_FAST_BOTTOM_Z);
+}
+
+#[test]
+#[ignore = "heavy lane: the shank-flag twins over the hill's whole 18-to-rim band, two generations, ~26 s debug"]
+fn a_quiet_shank_leaves_the_contour_twin_alone_full_band() {
+    quiet_shank_case(HILL_RIM_Z);
+}
+
+fn quiet_shank_case(bottom_z: f64) {
     // Opt-in means EXACTLY opt-in at the twins' seam too: the catalog
     // ball's shank stands a long flute clear of the hill, so posing
     // with the flag on must reproduce the flag-off path move for move,
     // axes included.
-    let off = contour5d_params(18.0, HILL_RIM_Z);
-    let mut on = contour5d_params(18.0, HILL_RIM_Z);
+    let off = contour5d_params(18.0, bottom_z);
+    let mut on = contour5d_params(18.0, bottom_z);
     if let OpParams::Contour5D { shank_avoid, .. } = &mut on {
         *shank_avoid = true;
     }
