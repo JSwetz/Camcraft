@@ -80,6 +80,8 @@ mod stamp;
 pub use stamp::*;
 mod material;
 pub use material::*;
+mod material_region;
+mod material_source;
 mod footprint;
 pub use footprint::machined_footprint;
 mod probe;
