@@ -29,6 +29,16 @@ pub(super) fn valid_src(world: &World, setup: Option<&str>, src: &SrcRef) -> Res
                 Some(e) if model::is_wcs(world, &e) => Err(CommandError::Invalid(format!(
                     "'{name}' is a work offset, not a solid"
                 ))),
+                // A source is stock or one of the user's parts - never a
+                // tool, an operation, a setup, the stock entity by name,
+                // or workholding (a fixture is a model the collision
+                // checker guards, not geometry to machine).
+                Some(e) if model::is_fixture(world, &e) => Err(CommandError::Invalid(format!(
+                    "'{name}' is a fixture - workholding is checked for collisions, not machined"
+                ))),
+                Some(e) if !model::is_model(world, &e) => Err(CommandError::Invalid(format!(
+                    "'{name}' is not a model - an operation's source is the stock or a part"
+                ))),
                 Some(_) => Ok(()),
                 None => Err(CommandError::NotFound(name.clone())),
             }

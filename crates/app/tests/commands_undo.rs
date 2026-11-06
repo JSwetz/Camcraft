@@ -461,6 +461,29 @@ fn geometry_pick_undo_redo_is_byte_exact() {
 }
 
 #[test]
+fn an_operation_source_is_stock_or_a_part_only() {
+    // User review 2026-11-06: G54 showed up as a Source. The command
+    // door refuses every named entity that is not one of the user's
+    // parts - tool, operation, the stock entity by name, a work offset.
+    let (world, _history, _top) = selection_fixture();
+    let to = |name: &str| EditOperationLinks::new(&world, "G1", None, Some(SrcRef::Entity(name.into())));
+    assert!(to("part").is_ok(), "a part is a source");
+    for bad in ["EM-0600-4FL", "G1", STOCK_NAME] {
+        assert!(
+            matches!(to(bad), Err(CommandError::Invalid(_))),
+            "'{bad}' must be refused as a source"
+        );
+    }
+    if let Some(wcs) = model::named_entities(&world)
+        .into_iter()
+        .find(|(_, e)| model::is_wcs(&world, e))
+        .map(|(n, _)| n)
+    {
+        assert!(matches!(to(&wcs), Err(CommandError::Invalid(_))), "work offset '{wcs}' is no source");
+    }
+}
+
+#[test]
 fn duplicate_picks_collapse_at_construction() {
     let (world, mut history, top) = selection_fixture();
     let a = GeoSel { entity: "part".into(), feature: top };

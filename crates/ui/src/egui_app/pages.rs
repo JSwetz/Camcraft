@@ -249,14 +249,11 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
         }
     }
 
-    // Source.
-    let models: Vec<String> = model::named_entities(&state.world)
+    // Source: the stock or one of the user's parts - never a work
+    // offset (G54...), a setup or a fixture (user review 2026-11-06).
+    let models: Vec<String> = model::model_entities(&state.world)
         .into_iter()
-        .filter(|(_, e)| {
-            !model::is_stock(&state.world, e)
-                && !model::is_tool(&state.world, e)
-                && !model::is_operation(&state.world, e)
-        })
+        .filter(|(_, e)| !model::is_fixture(&state.world, e))
         .map(|(n, _)| n)
         .collect();
     ui.label("Source");
@@ -3990,13 +3987,10 @@ fn stock_page(ui: &mut Ui, state: &mut State) {
         field(ui, "Height");
         num(ui, u, &mut state.stock_ui.height);
     } else if shape == 2 {
-        let models: Vec<String> = model::named_entities(&state.world)
+        // Stock from a model: parts only, as the op Source picker.
+        let models: Vec<String> = model::model_entities(&state.world)
             .into_iter()
-            .filter(|(_, e)| {
-                !model::is_stock(&state.world, e)
-                    && !model::is_tool(&state.world, e)
-                    && !model::is_operation(&state.world, e)
-            })
+            .filter(|(_, e)| !model::is_fixture(&state.world, e))
             .map(|(n, _)| n)
             .collect();
         field(ui, "Source");
