@@ -22,6 +22,13 @@
 //! within `r + tol + leave + band` of the mesh, `band` the stamp's
 //! micron contact lattice.
 //!
+//! A feed whose pose CHANGES between two leans (M13.7's mid-move
+//! reading, [`super::midpose`]) claims contact all along it: its
+//! ball is also judged at the poses the controller lerps between the
+//! ends, interval by interval, at the worst gap of the move. A plunge
+//! is an entry: only its end claims (the law judged it there before,
+//! and still does).
+//!
 //! Upright moves are not judged here: an upright cut claims nothing
 //! (rasters cross open floor, links and roughing levels clear air by
 //! design), and "every path point must touch" would convict all of
@@ -34,6 +41,7 @@
 //! Detection" 5.1 (via `stock_sim::dist_seg_tri`). Our own law; no
 //! vendor material consulted.
 
+use super::midpose;
 use super::probe::{Cutter, Frame};
 use super::solid_index::SolidIndex;
 use super::types::Warning;
@@ -50,7 +58,7 @@ const CONTACT_BAND: f64 = 0.01;
 /// stands off the part beyond the gate, `None` when every lean is a
 /// contact (or an excused shank escape). `r` is the ball radius,
 /// `tol` the finish budget, `leave` the stock the op leaves.
-pub(super) fn posed_contact(
+pub fn posed_contact(
     path: &Toolpath,
     facets: &[Triangle],
     tool: &ToolGeom,
@@ -65,19 +73,17 @@ pub(super) fn posed_contact(
     let grid = Grid::build(facets, r + gate);
     let atoms = Cutter::flat(tool).atoms();
     let body: Vec<_> = atoms.iter().copied().filter(|a| a.z0 >= tool.flute_len).collect();
+    let reach = atoms.iter().map(|a| a.z1).fold(0.0, f64::max);
+    let poses = midpose::poses(path);
     let mut index: Option<Option<SolidIndex>> = None;
     let mut worst: Option<(usize, f64)> = None;
-    for (i, m) in path.moves.iter().enumerate() {
-        if m.kind == MoveKind::Rapid || !m.to.is_finite() {
-            continue;
-        }
-        let Some(a) = m.axis.and_then(normalize_axis).filter(|a| !is_vertical(a)) else {
-            continue;
-        };
-        let c = Point3::new(m.to.x + r * a[0], m.to.y + r * a[1], m.to.z + r * a[2]);
+    // The gap a leaning ball at `tip` under unit pose `a` stands off
+    // the part beyond the gate; None when it touches or is excused.
+    let mut judge = |tip: Point3, a: [f64; 3]| -> Option<f64> {
+        let c = Point3::new(tip.x + r * a[0], tip.y + r * a[1], tip.z + r * a[2]);
         let gap = grid.dist_within(c, facets) - r;
         if gap <= gate {
-            continue;
+            return None;
         }
         // The shank escape: an upright tool at this same centre would
         // put a band into the part, so the lean answers the shank,
@@ -89,11 +95,46 @@ pub(super) fn posed_contact(
         {
             let fr = Frame::new(Point3::new(c.x, c.y, c.z - r), None);
             if ix.hits(&fr, [0.0, 0.0, 0.0], &body, 0.0, 0.0, false) {
-                continue;
+                return None;
             }
         }
-        let gap = if gap.is_finite() { gap } else { brute(c, facets) - r };
-        if worst.is_none_or(|(_, g)| gap > g) {
+        Some(if gap.is_finite() { gap } else { brute(c, facets) - r })
+    };
+    for (i, m) in path.moves.iter().enumerate() {
+        if m.kind == MoveKind::Rapid || !m.to.is_finite() {
+            continue;
+        }
+        let Some(a) = m.axis.and_then(normalize_axis).filter(|a| !is_vertical(a)) else {
+            continue;
+        };
+        let mut gap = judge(m.to, a);
+        // Mid-move (M13.7): a FEED that leans at BOTH ends claims
+        // contact all along - the lerped poses between are contact
+        // claims too, so each interval's ball is judged where the
+        // controller puts it. A move leaning out of (or into) the
+        // upright is an approach: its upright end claims nothing, and
+        // neither do the poses on the way; a plunge is the entry from
+        // the clearance down to its first contact - only its end
+        // claims, its travel is air by design (a ring's plunge-in
+        // turns from the last ring's pose to the new one's while it
+        // descends 20 mm, and the end-pose reading rightly passes
+        // it). Constant poses pay nothing.
+        if m.kind == MoveKind::Feed
+            && let Some((fa, fb)) = poses.get(i).and_then(|&(f, t)| midpose::change(f, t))
+            && !is_vertical(&fa)
+            && !is_vertical(&fb)
+        {
+            for iv in midpose::intervals(m, fa, fb, reach, CONTACT_BAND) {
+                if let Some(g) = judge(iv.pm, iv.am)
+                    && gap.is_none_or(|w| g > w)
+                {
+                    gap = Some(g);
+                }
+            }
+        }
+        if let Some(gap) = gap
+            && worst.is_none_or(|(_, g)| gap > g)
+        {
             worst = Some((i, gap));
         }
     }

@@ -217,6 +217,14 @@ fn swarf5d_balls_are_the_plain_swarf_balls() {
             held = a;
         }
         let c = p3(g.to.x + R * held[0], g.to.y + R * held[1], g.to.z + R * held[2]);
+        // The link law (stamp_link): its rapids - the retract along the
+        // contact normal and the swing in the air it found - are air by
+        // the law's own sweep check, not balls of the plan, as the
+        // plan's own rapids to clearance are; the plunge back lands ON
+        // the plan and is judged.
+        if g.kind == MoveKind::Rapid {
+            continue;
+        }
         let off = plan
             .iter()
             .map(|(a, b)| {

@@ -4820,16 +4820,36 @@ fn pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
                 leaned += 1;
             }
         }
-        // The pivot law's rapid contract: a rapid travels under the
-        // pose it inherits (the post keeps the tilt modal), so it may
-        // STATE a pose, but never a new one - nothing leaned before
-        // the first lean, the held pose after it.
-        if m.kind == MoveKind::Rapid {
-            assert_eq!(m.axis, held, "{name}: a rapid changed the pose it inherited");
-        }
+        // The pivot law's rapid contract (every stamped twin here
+        // rides the catalog's 6 mm ball).
+        rapid_pose_contract(name, m, held, 3.0);
         held = m.axis.or(held);
     }
     assert!(leaned > 0, "{name}: no move holds a leaning axis");
+}
+
+/// The pivot law's rapid contract: a rapid travels under the pose it
+/// inherits (the post keeps the tilt modal), so it may STATE a pose,
+/// but a NEW one only as the swarf link's swing - a turn IN AIR about
+/// the ball centre, which the sphere's rotation invariance keeps
+/// where it was: `from + r·held == to + r·new`. Nothing leaned before
+/// the first lean, the held pose after it, and never a pose turn that
+/// drags the ball.
+fn rapid_pose_contract(name: &str, m: &camcraft_app::cl::Move, held: Option<[f64; 3]>, r: f64) {
+    if m.kind != MoveKind::Rapid || m.axis == held {
+        return;
+    }
+    let up = [0.0, 0.0, 1.0];
+    let (p, q) = (held.unwrap_or(up), m.axis.unwrap_or(up));
+    let c0 = [m.from.x + r * p[0], m.from.y + r * p[1], m.from.z + r * p[2]];
+    let c1 = [m.to.x + r * q[0], m.to.y + r * q[1], m.to.z + r * q[2]];
+    let d = ((c0[0] - c1[0]).powi(2) + (c0[1] - c1[1]).powi(2) + (c0[2] - c1[2]).powi(2)).sqrt();
+    assert!(
+        d <= 1e-6,
+        "{name}: a rapid changed the pose it inherited off its ball centre ({d:.3e} mm): {:?} -> {:?}",
+        held,
+        m.axis
+    );
 }
 
 /// The verdict half of "verifies clean": the cached path carries NO
@@ -5295,7 +5315,7 @@ fn blade_pose_law(name: &str, path: &camcraft_app::cl::Toolpath) {
             }
         }
     }
-    rapids_inherit(path);
+    rapids_inherit(path, 3.0);
     assert!(
         body >= 8,
         "{name}: only {body} blade-lying body poses over a whole tube"
@@ -6341,7 +6361,7 @@ fn multiaxis_rough_peels_the_same_ladder_and_poses_its_walls() {
     // The pivot law: the BALLS are the plain ladder's (the tips follow
     // the lean), and rapids state no new pose.
     same_balls(&plain, &rough, 3.0);
-    rapids_inherit(&rough);
+    rapids_inherit(&rough, 3.0);
     for (a, b) in plain.moves.iter().zip(&rough.moves) {
         assert!(a.axis.is_none(), "the plain ladder speaks an angle");
         if b.kind == MoveKind::Rapid {
@@ -6503,13 +6523,13 @@ fn leans(a: Option<[f64; 3]>) -> bool {
     a.is_some_and(|a| !camcraft_app::cl::is_vertical(&a))
 }
 
-/// The rapid contract of the pivot law: a rapid states no NEW pose.
-fn rapids_inherit(path: &camcraft_app::cl::Toolpath) {
+/// The rapid contract of the pivot law: a rapid states no NEW pose
+/// except as a swing about its ball centre of radius `r` (see
+/// [`rapid_pose_contract`]).
+fn rapids_inherit(path: &camcraft_app::cl::Toolpath, r: f64) {
     let mut held: Option<[f64; 3]> = None;
     for m in &path.moves {
-        if m.kind == MoveKind::Rapid {
-            assert_eq!(m.axis, held, "a rapid changed the pose it inherited");
-        }
+        rapid_pose_contract("rapids", m, held, r);
         held = m.axis.or(held);
     }
 }
@@ -6586,7 +6606,7 @@ fn multiaxis_rough_poses_around_the_shank_and_moves_nothing() {
     // rapids state no new pose. Rows are read off the flag-off path,
     // whose floors stand upright (tip = plan).
     same_balls(&off, &on, 4.0);
-    rapids_inherit(&on);
+    rapids_inherit(&on, 4.0);
     for (i, (a, b)) in off.moves.iter().zip(&on.moves).enumerate() {
         if leans(a.axis) && b.axis != a.axis {
             // F re-answered a wall lean: only where the real tip's

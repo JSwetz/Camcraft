@@ -29,7 +29,32 @@ use crate::machining2d::GenError;
 
 use super::ruling;
 use super::stamp::stamp_axes_ruled;
+use super::stamp_link::{guard_turns, link_swings};
 use super::tilt::AxisControl;
+
+/// The swarf close: the stamp's poses, every hand-off that turns past
+/// the link threshold taken through air ([`link_swings`]), and the
+/// guard that proves no cut turns ([`guard_turns`]) - a swing in
+/// contact refuses the program by name, never posts.
+fn pose_and_link(
+    base: &Toolpath,
+    facets: &[Triangle],
+    r: f64,
+    c: &AxisControl,
+    f: &ruling::Field,
+    p: &Finish3DParams,
+) -> Result<Toolpath, GenError> {
+    let posed = stamp_axes_ruled(base, facets, r, c, Point3::new(f.ux, f.uy, 0.0), &f.ruled, p.tolerance)?;
+    let (mut linked, links) = link_swings(&posed, facets, r, p.clearance_z, p.plunge_feed)?;
+    guard_turns(&linked, p.clearance_z)?;
+    if links > 0 {
+        linked.notes.push(format!(
+            "swarf: {links} pose hand-off(s) past {} deg linked through air along the contact normal",
+            super::stamp_link::LINK_TURN_DEG
+        ));
+    }
+    Ok(linked)
+}
 
 /// The raster along the ruling, with the tool lying with the blade.
 pub fn swarf5d(
@@ -40,7 +65,7 @@ pub fn swarf5d(
     let f = ruling::analyze(facets)?;
     let r = p.tool_diameter * 0.5;
     let base = finishing3d::swarf(facets, p, f.ux, f.uy)?;
-    stamp_axes_ruled(&base, facets, r, c, Point3::new(f.ux, f.uy, 0.0), &f.ruled)
+    pose_and_link(&base, facets, r, c, &f, p)
 }
 
 /// The same with the multi-pass ladder; `passes` is the caller's
@@ -54,7 +79,7 @@ pub fn swarf5d_advanced(
     let f = ruling::analyze(facets)?;
     let r = p.tool_diameter * 0.5;
     let base = finishing3d::swarf_multi(facets, p, f.ux, f.uy, passes)?;
-    stamp_axes_ruled(&base, facets, r, c, Point3::new(f.ux, f.uy, 0.0), &f.ruled)
+    pose_and_link(&base, facets, r, c, &f, p)
 }
 
 #[cfg(test)]
@@ -103,7 +128,7 @@ mod tests {
                 .collect(),
         );
         let xhat = p(1.0, 0.0, 0.0);
-        let posed = stamp_axes_ruled(&path, &facets, r, &AxisControl::default(), xhat, &[true])
+        let posed = stamp_axes_ruled(&path, &facets, r, &AxisControl::default(), xhat, &[true], 0.05)
             .unwrap();
         for m in &posed.moves {
             let a = m.axis.expect("a tangent ladder on a ruled facet poses");
@@ -115,7 +140,7 @@ mod tests {
             lag_deg: 0.0,
             max_tilt_deg: None,
         };
-        let leaned = stamp_axes_ruled(&path, &facets, r, &c15, xhat, &[false]).unwrap();
+        let leaned = stamp_axes_ruled(&path, &facets, r, &c15, xhat, &[false], 0.05).unwrap();
         for m in &leaned.moves {
             let a = m.axis.expect("a tangent ladder poses by the lean law too");
             let av = p(a[0], a[1], a[2]);

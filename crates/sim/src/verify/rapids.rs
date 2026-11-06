@@ -1,6 +1,9 @@
 //! Law (d), lateral rapids under the clearance plane over rest material - the shop practice of traversing only above the stock (machine-tool handbooks) on our own conservative rest model (split from `engine.rs` by M13.7; structure only).
 
 use super::laws::xy;
+use super::midpose;
+use super::probe::Cutter;
+use super::rapids_posed::{self, PartIndex};
 use super::rest::Rest;
 use super::types::{Mode, VerifyContext, Warning};
 
@@ -24,13 +27,23 @@ use crate::geo2d::Point2;
 /// solid stock; the exit-the-hole-along-its-axis and outside-
 /// stock_r traverse promises are the kernel's, asserted in
 /// drilling's cross tests.
+///
+/// A POSED rapid (held or stated pose off the upright) that the
+/// column reading convicts is re-read against the solid before the
+/// conviction stands ([`super::rapids_posed`]): the height field
+/// cannot see the air under an overhang, and a swarf link retracting
+/// down a contact normal under a tube's equator is air by the mesh.
+/// Upright rapids keep the column verdict byte-identical.
 pub(super) fn rapids_in_stock(
     path: &Toolpath,
     cx: &VerifyContext,
     rest: &Rest,
+    cutter: &Cutter,
     warns: &mut Vec<Warning>,
 ) {
     if !matches!(cx.mode, Mode::Revolve | Mode::Radial | Mode::Rotary) {
+        let poses = midpose::poses(path);
+        let mut part = PartIndex::new();
         for (i, m) in path.moves.iter().enumerate() {
             if m.kind != MoveKind::Rapid {
                 continue;
@@ -55,9 +68,14 @@ pub(super) fn rapids_in_stock(
                 .into_iter()
                 .any(|q| rest.in_stock(q) && low < rest.surface_before(q, i))
                 || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol, i);
-            if bad {
-                warns.push(Warning::RapidInStock { at: i });
+            if !bad {
+                continue;
             }
+            let pose = poses.get(i).copied().unwrap_or((m.axis, m.axis));
+            if rapids_posed::leaning(pose) && !rapids_posed::in_rest(m, i, pose, cx, rest, cutter, &mut part) {
+                continue; // the solid reading cleared what the column misread
+            }
+            warns.push(Warning::RapidInStock { at: i });
         }
     }
 }

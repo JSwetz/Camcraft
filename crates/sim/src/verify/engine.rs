@@ -56,7 +56,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
     }
 
     // (d) Rapids in stock - [`rapids`].
-    rapids::rapids_in_stock(path, cx, &rest, &mut warns);
+    rapids::rapids_in_stock(path, cx, &rest, &cutter, &mut warns);
 
     // (d2) Rapids against fixtures (M3.2 stage B) - the law lives in
     // [`rapids_vs_fixtures`] so the post gate can run it without a

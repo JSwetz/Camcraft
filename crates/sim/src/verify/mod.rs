@@ -152,9 +152,11 @@ mod engine;
 mod finish;
 mod hidden;
 mod laws;
+mod midpose;
 mod posed_steel;
 mod probe;
 mod rapids;
+mod rapids_posed;
 mod reach;
 mod rest;
 mod rotary;
@@ -177,3 +179,5 @@ pub use workholding::{bands_vs_workholding, rapids_vs_workholding, Workholding};
 pub use probe::Cutter;
 pub use rotary::{rotary_hits, RotaryAxis, RotaryLaw};
 pub use solid::{SolidLaw, solid_hits};
+#[doc(hidden)]
+pub use contact::posed_contact;

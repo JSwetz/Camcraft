@@ -10,7 +10,12 @@
 //! swept-atom distance law, both cited in [`super::swept`]). A straight
 //! move is judged as one exact sweep, an XY arc by its chords' sweeps
 //! with the cutter widened by their sagitta; only a vertical-plane arc
-//! is sampled (every `step`), its stated limit.
+//! is sampled (every `step`), its stated limit. A move whose POSE
+//! changes along it (M13.7's mid-move reading, [`super::midpose`]) is
+//! judged at the end pose as above AND, interval by interval, at the
+//! poses the controller lerps between its ends - so a lean that
+//! passes through a wall at mid-travel is convicted, not only one that
+//! ends in it. Constant-pose moves keep their verdict and cost.
 //!
 //! Two readers: [`super::verify`]'s model law (b2), with the square
 //! stack of its `ToolGeom` - never smaller than the real cutter - and
@@ -19,6 +24,7 @@
 //! a rapid that does is a [`Warning::RapidInStock`] - the part is stock
 //! too, and steel at rapid feed is a crash.
 
+use super::midpose;
 use super::probe::{Cutter, Frame};
 use super::solid_index::SolidIndex;
 use super::types::Warning;
@@ -91,18 +97,37 @@ pub fn solid_hits(path: &Toolpath, facets: &[Triangle], cutter: &Cutter, law: &S
     // part, said as such (ShankHit on the part), and said once.
     let fl = cutter.flute_len;
     let (edge, body): (Vec<_>, Vec<_>) = atoms.iter().copied().partition(|a| a.z0 < fl);
+    // The pose along each move by the modal rule (M13.7, mid-move):
+    // a move whose pose CHANGES is also judged at the poses between
+    // its ends, interval by interval; every other move pays nothing.
+    let poses = midpose::poses(path);
+    let reach = atoms.iter().map(|a| a.z1).fold(0.0, f64::max);
     let mut out = Vec::new();
     for (i, m) in path.moves.iter().enumerate() {
         if !(m.from.is_finite() && m.to.is_finite()) {
             continue; // the NonFinite law owns it
         }
         let axis = m.axis.and_then(normalize_axis).filter(|a| !is_vertical(a));
+        let mid = poses
+            .get(i)
+            .and_then(|&(f, t)| midpose::change(f, t))
+            .map(|(a, b)| midpose::intervals(m, a, b, reach, ARC_SAG))
+            .unwrap_or_default();
+        let grow_mid = if m.arc.is_some() { ARC_SAG } else { 0.0 };
         let mut hits = |set: &[super::probe::Atom]| {
             !set.is_empty()
-                && pieces(m, law.step).into_iter().any(|(a, b, grow)| {
+                && (pieces(m, law.step).into_iter().any(|(a, b, grow)| {
                     let fr = Frame::new(a, axis);
                     index.hits(&fr, fr.local(b), set, allow, grow, law.hole_walls)
-                })
+                }) || mid.iter().any(|iv| {
+                    // The interval's tip travel swept exactly under the
+                    // pose held at its midpoint: the pose's own turn
+                    // within the interval is the stated sampling limit
+                    // (STEP of far-end travel), the same as the fixture
+                    // laws' posed sweep.
+                    let fr = Frame::new(iv.p0, normalize_axis(iv.am).filter(|a| !is_vertical(a)));
+                    index.hits(&fr, fr.local(iv.p1), set, allow, grow_mid, law.hole_walls)
+                }))
         };
         if m.kind == MoveKind::Rapid {
             if hits(&atoms) {

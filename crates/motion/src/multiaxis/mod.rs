@@ -31,6 +31,7 @@ mod curv;
 mod curve_walk;
 mod linalg;
 mod stamp;
+mod stamp_pose;
 #[cfg(test)]
 mod stamp_tests;
 pub mod axis;
@@ -45,6 +46,7 @@ mod rotary_links;
 mod wrap_exit;
 mod retip;
 pub mod ruling;
+pub mod stamp_link;
 pub mod swarf;
 pub mod tilt;
 
@@ -56,5 +58,6 @@ pub use parallel5d::parallel5d;
 pub use rough::{multiaxis_rough, multiaxis_rough_prev};
 pub use rotary::{rotary_contour, rotary_parallel};
 pub use rotary_offset::{rotary_offset, rotary_offset_in};
+pub use stamp_link::{guard_turns, link_swings, LINK_TURN_DEG};
 pub use swarf::{swarf5d, swarf5d_advanced};
 pub use tilt::{command_axis, AxisControl};

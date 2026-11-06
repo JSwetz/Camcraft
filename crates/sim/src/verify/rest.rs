@@ -64,6 +64,11 @@ pub(super) struct Rest<'c, 'a> {
     /// The stock hidden under overhangs per plane (M13.7 B) - read by
     /// [`super::hidden`]; `None` is a failed slice, failing closed.
     pub(super) hidden_cache: RefCell<HashMap<u64, Option<Rc<super::hidden::Hidden>>>>,
+    /// ALL part material at or above a plane, projected (the
+    /// generators' islands law, `slice::material_overhead`), per
+    /// plane, read by the posed rapid reading ([`super::rapids_posed`]);
+    /// `None` is a failed slice, failing closed.
+    overhead_cache: RefCell<HashMap<u64, Option<Rc<Region>>>>,
 }
 
 impl<'c, 'a> Rest<'c, 'a> {
@@ -87,7 +92,29 @@ impl<'c, 'a> Rest<'c, 'a> {
             cut,
             index,
             hidden_cache: RefCell::new(HashMap::new()),
+            overhead_cache: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Whether part material stands at or above (q, `h`): the section
+    /// at `h` united with the shadow of what hangs over it. `None` is
+    /// no model or a failed slice - the caller fails closed.
+    pub(super) fn part_over(&self, q: Point2, h: f64) -> Option<bool> {
+        let f = self.cx.model?;
+        if !h.is_finite() {
+            return None;
+        }
+        let key = h.to_bits();
+        let hit = self.overhead_cache.borrow().get(&key).cloned();
+        let region = match hit {
+            Some(r) => r,
+            None => {
+                let fresh = crate::geometry::slice::material_overhead(f, h).ok().map(Rc::new);
+                self.overhead_cache.borrow_mut().entry(key).or_insert_with(|| fresh.clone());
+                fresh
+            }
+        };
+        region.map(|r| r.contains(q))
     }
 
     /// The context the laws are judged in.

@@ -253,3 +253,123 @@ fn the_stamp_leans_a_dive_with_the_cut_it_lands_into() {
         );
     }
 }
+
+/// The turn guard and the link law (the "swarf stamp flips
+/// hemispheres" finding): a posed path whose consecutive cuts turn
+/// past the link threshold is refused by name; linked, the same path
+/// passes - the swing rides the plunge from the clearance plane, the
+/// re-entry lands on the ball centre the previous cut finished on,
+/// and the plunge law reads that re-entry as no plunge into solid.
+#[test]
+fn the_turn_guard_refuses_a_swing_in_contact_and_the_link_law_takes_it_to_air() {
+    use super::stamp_link::{guard_turns, link_swings, LINK_TURN_DEG};
+    use crate::plunge_law::{first_solid_plunge, Solid};
+    let r = 3.0;
+    let cut = |from: Point3, to: Point3, a: [f64; 3]| {
+        Move::new(MoveKind::Feed, from, to, Some(500.0)).with_axis(a)
+    };
+    let (o, x1, x2) = (p(0.0, 0.0, 0.0), p(4.0, 0.0, 0.0), p(8.0, 0.0, 0.0));
+    let (px, mx) = ([1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]);
+    // The first cut enters from the clearance plane (an air entry);
+    // the second reverses the axis on the cut.
+    let flip = Toolpath::new(vec![cut(p(0.0, 0.0, 25.0), x1, px), cut(x1, x2, mx)]);
+    match guard_turns(&flip, 25.0) {
+        Err(GenError::Invalid(msg)) => assert!(
+            msg.contains("swing 180 deg at move 1"),
+            "the refusal names the swing: {msg}"
+        ),
+        other => panic!("a 180 degree swing on a cut must refuse, got {other:?}"),
+    }
+    // The blade the tool lies on: the wall y = -3, which the lying
+    // ball (centre on y = 0) touches along its whole flank. Its
+    // contact normal is +Y - the one direction the flank leaves it.
+    let wall = vec![Triangle::new(p(-50.0, -3.0, -50.0), p(50.0, -3.0, -50.0), p(0.0, -3.0, 50.0))];
+    let (linked, links) = link_swings(&flip, &wall, r, 25.0, 100.0).unwrap();
+    assert_eq!(links, 1);
+    guard_turns(&linked, 25.0).expect("linked, the swing is in air");
+    assert_eq!(linked.moves.len(), 5, "retract, swing, plunge, and the two cuts");
+    let (lift, swing, plunge, re) =
+        (&linked.moves[1], &linked.moves[2], &linked.moves[3], &linked.moves[4]);
+    assert_eq!(lift.kind, MoveKind::Rapid);
+    assert_eq!(lift.axis, Some(px), "the retract holds the outgoing pose");
+    // The retract leaves along the contact normal (+Y), by the plunge
+    // height (clearance + r above the exit centre), never up Z.
+    let c0 = p(x1.x + r, x1.y, x1.z);
+    let c_out = p(lift.to.x + r, lift.to.y, lift.to.z);
+    assert!(len(c_out - p(c0.x, c0.y + 25.0 + r, c0.z)) < 1e-9, "retracted to {c_out:?}");
+    assert_eq!(swing.kind, MoveKind::Rapid);
+    assert_eq!(swing.axis, Some(mx), "the swing turns to the incoming pose in air");
+    let c_swung = p(swing.to.x - r, swing.to.y, swing.to.z);
+    assert!(len(c_swung - c_out) < 1e-9, "the swing pivots about the retracted centre");
+    assert_eq!(plunge.kind, MoveKind::Plunge);
+    assert_eq!(plunge.axis, Some(mx), "the plunge holds the incoming pose");
+    // The same ball centre under both poses: x1 + r*px == re.from + r*mx.
+    let c1 = p(re.from.x - r, re.from.y, re.from.z);
+    assert!(len(c0 - c1) < 1e-9, "the re-entry lands on the centre the cut finished on");
+    assert_eq!(plunge.to, re.from, "chained");
+    let solid = Solid { top: 10.0, footprint: None };
+    assert!(
+        first_solid_plunge(&linked, r, &solid).is_none(),
+        "the re-entry is not a plunge into solid"
+    );
+    let t = (LINK_TURN_DEG - 1.0).to_radians();
+    let inside = Toolpath::new(vec![
+        cut(o, x1, [0.0, 0.0, 1.0]),
+        cut(x1, x2, [t.sin(), 0.0, t.cos()]),
+    ]);
+    assert!(guard_turns(&inside, 25.0).is_ok(), "a turn inside the threshold passes");
+    assert_eq!(link_swings(&inside, &wall, r, 25.0, 100.0).unwrap().1, 0, "and is not linked");
+}
+
+// The swarf fallback (stamp_pose): a station under an OVERHANG, where
+// the contact normal points down and the lean law's pose with it. The
+// world is a ceiling - one big facet at z = 6 over a ball of radius 3
+// whose centre rides z = 3, so the centre is tangent from below - and
+// the ruling runs along X. The facet is not claimed ruled, so the lean
+// law speaks first and says "point the spindle at the floor"; the
+// fallback carries the ruling instead, level, with its flank proved in
+// air. With a wall standing across BOTH ends of the ruling inside the
+// flank's proof, no pose clears, and the stamp refuses by name.
+
+fn ceiling() -> Vec<Triangle> {
+    vec![Triangle::new(p(-50.0, -50.0, 6.0), p(50.0, -50.0, 6.0), p(0.0, 50.0, 6.0))]
+}
+
+fn under_the_ceiling() -> Toolpath {
+    Toolpath::new(vec![Move::new(MoveKind::Feed, p(-1.0, 0.0, 0.0), p(1.0, 0.0, 0.0), Some(500.0))])
+}
+
+#[test]
+fn the_swarf_fallback_carries_the_ruling_where_the_lean_law_points_under_the_horizon() {
+    use super::stamp::stamp_axes_ruled;
+    let c = AxisControl { lead_deg: 15.0, lag_deg: 0.0, max_tilt_deg: Some(60.0) };
+    let posed = stamp_axes_ruled(&under_the_ceiling(), &ceiling(), 3.0, &c, p(1.0, 0.0, 0.0), &[false], 0.05)
+        .expect("a level ruling clears the ceiling");
+    let a = posed.moves[0].axis.expect("the station under the ceiling states a pose");
+    assert!(a[2].abs() < 1e-12 && a[0].abs() > 0.999, "the pose is the level ruling, got {a:?}");
+    // The lean law alone (no ruling to carry) still answers with the
+    // overhang's normal, under the horizon: the fallback is the swarf
+    // kinds' law, not a change to stage C.
+    let lean = stamp_axes(&under_the_ceiling(), &ceiling(), 3.0, &c, None).unwrap();
+    let b = lean.moves[0].axis.expect("the lean law poses the contact");
+    assert!(b[2] < -0.9, "the lean law's own answer points at the floor: {b:?}");
+}
+
+#[test]
+fn a_row_no_pose_clears_refuses_the_swarf_path_by_name() {
+    use super::stamp::stamp_axes_ruled;
+    let c = AxisControl { lead_deg: 15.0, lag_deg: 0.0, max_tilt_deg: Some(60.0) };
+    let mut world = ceiling();
+    // Walls across both ends of the ruling, 4.5 off the centre: not a
+    // contact (3.5 past the ball), but squarely in the flank's path.
+    for x in [4.5, -4.5] {
+        world.push(Triangle::new(p(x, -20.0, -10.0), p(x, 20.0, -10.0), p(x, 0.0, 20.0)));
+    }
+    let err = stamp_axes_ruled(&under_the_ceiling(), &world, 3.0, &c, p(1.0, 0.0, 0.0), &[false, false, false], 0.05)
+        .expect_err("walls across both ends of the ruling leave no pose");
+    let msg = match err {
+        GenError::Invalid(m) => m,
+        other => panic!("the refusal is a named Invalid, got {other:?}"),
+    };
+    assert!(msg.contains("swarf pose at move 0") && msg.contains("under the horizon"), "{msg}");
+}

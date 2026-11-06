@@ -244,16 +244,23 @@ fn dist_mesh(p: Point3, facets: &[Triangle]) -> f64 {
 fn posted_centres(path: &Toolpath, r: f64, keep: fn(MoveKind) -> bool) -> Vec<Point3> {
     let mut held = [0.0, 0.0, 1.0];
     let mut out = Vec::new();
+    let mut rapid = false;
     for m in &path.moves {
         let was = held;
         if let Some(a) = m.axis {
             held = a;
         }
+        let prev_rapid = std::mem::replace(&mut rapid, m.kind == MoveKind::Rapid);
         if m.kind == MoveKind::Rapid || !keep(m.kind) {
             continue;
         }
         for (j, (a, b)) in m.segments3(1e-3).into_iter().enumerate() {
-            if j == 0 {
+            // A plunge's start off a rapid (the plan's own entry from
+            // clearance, or a swarf air link's re-entry - stamp_link)
+            // is air by the clearance law, not a ball of the plan; the
+            // plunge's end is, and is measured.
+            let entry = m.kind == MoveKind::Plunge && prev_rapid;
+            if j == 0 && !entry {
                 out.push(p3(a.x + r * was[0], a.y + r * was[1], a.z + r * was[2]));
             }
             out.push(p3(b.x + r * held[0], b.y + r * held[1], b.z + r * held[2]));

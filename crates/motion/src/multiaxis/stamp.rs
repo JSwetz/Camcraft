@@ -39,13 +39,13 @@
 //! those published descriptions and our own design notes only.
 
 use crate::cl::{is_vertical, MoveKind, PathBuilder, Toolpath};
-use crate::finishing3d::closest_pt_tri;
 use crate::geometry::{Point3, Triangle};
 use crate::machining2d::{GenError, ARC_FIT_TOL};
 
 use super::avoid::{escape_axis, shank_hits_at, Shank};
 use super::retip::{along, tip_of, UP};
-use super::tilt::{command_axis, AxisControl};
+use super::stamp_pose::{pose_law, Mesh, Ruled};
+use super::tilt::AxisControl;
 
 /// The search ceiling shank avoidance tilts within when the control
 /// states no cone (`max_tilt_deg: None` = "as far as the geometry
@@ -78,9 +78,13 @@ pub(super) fn stamp_axes(
 /// analysis marked ruled, the tool lies WITH the blade - its axis is
 /// the ruling direction projected into the surface (tangent to the
 /// flank, the side-machining contact) - and everywhere else the
-/// lean law of stage C holds. `dir` is the region's unit XY
-/// direction, `ruled` is the per-facet verdict of
-/// [`super::ruling::analyze`].
+/// lean law of stage C holds, second-guessed by the swarf fallback of
+/// [`super::stamp_pose`] (a pose under the horizon or in the part
+/// carries the ruling; a row no pose clears refuses by name). `dir`
+/// is the region's unit XY direction, `ruled` the per-facet verdict
+/// of [`super::ruling::analyze`], `tol` the plan's tolerance - the
+/// band a station is read as contact to, since the plan's own chords
+/// promise nothing tighter.
 pub(super) fn stamp_axes_ruled(
     path: &Toolpath,
     facets: &[Triangle],
@@ -88,22 +92,28 @@ pub(super) fn stamp_axes_ruled(
     c: &AxisControl,
     dir: Point3,
     ruled: &[bool],
+    tol: f64,
 ) -> Result<Toolpath, GenError> {
+    if !(tol.is_finite() && tol >= 0.0) {
+        return Err(GenError::Invalid(format!(
+            "a swarf stamp needs a finite non-negative tolerance, got {tol}"
+        )));
+    }
     // The ruled reads stay out of stage F: on a ruled facet the tool
     // lies WITH the blade - that direction is surface truth, not a
     // free axis to dodge with (RECOMMENDED.md).
-    stamp_inner(path, facets, r, c, Some((dir, ruled)), None)
+    stamp_inner(path, facets, r, c, Some(Ruled { dir, ruled, tol }), None)
 }
 
 /// One station of the expanded ladder: a move's end (an arc's chord
 /// ends) as the BALL CENTRE the plan put there.
-struct Station {
-    kind: MoveKind,
-    feed: Option<f64>,
-    from: Point3,
-    to: Point3,
+pub(super) struct Station {
+    pub(super) kind: MoveKind,
+    pub(super) feed: Option<f64>,
+    pub(super) from: Point3,
+    pub(super) to: Point3,
     /// The base move this station belongs to.
-    mv: usize,
+    pub(super) mv: usize,
 }
 
 fn stamp_inner(
@@ -111,7 +121,7 @@ fn stamp_inner(
     facets: &[Triangle],
     r: f64,
     c: &AxisControl,
-    ruling: Option<(Point3, &[bool])>,
+    ruling: Option<Ruled>,
     shank: Option<&Shank>,
 ) -> Result<Toolpath, GenError> {
     if !path.cycles.is_empty() {
@@ -124,7 +134,10 @@ fn stamp_inner(
             "a 5-axis stamp needs a finite positive ball radius, got {r}"
         )));
     }
-    let band = 0.01 + 1e-6 * r; // micron lattice + float dust, not a radius
+    // Micron lattice + float dust, not a radius - or, for a swarf
+    // read, the plan's own tolerance (stamp_pose: a ring chord a few
+    // hundredths off tangent is contact to the plan, not air).
+    let band = (0.01 + 1e-6 * r).max(ruling.map_or(0.0, |rl| rl.tol));
     let boxes: Vec<[f64; 6]> = facets
         .iter()
         .map(|f| {
@@ -138,7 +151,7 @@ fn stamp_inner(
             ]
         })
         .collect();
-    let mesh = Mesh { facets, boxes: &boxes };
+    let mesh = Mesh::new(facets, &boxes);
     // The plan's balls: every tip lifted r up Z; arcs at their chords.
     let mut st: Vec<Station> = Vec::with_capacity(path.moves.len());
     for (i, mv) in path.moves.iter().enumerate() {
@@ -164,12 +177,19 @@ fn stamp_inner(
     let mut poses: Vec<Option<[f64; 3]>> = Vec::with_capacity(st.len());
     let mut held = UP;
     let mut leaned = false;
+    // The last lean stated (the ruled sign rule's second witness: a
+    // ruling is a line, and the end the spindle sits behind is the
+    // end it already sat behind - see `ruled_sign`).
+    let mut last_lean: Option<[f64; 3]> = None;
     for (k, s) in st.iter().enumerate() {
         let lean = match s.kind {
             MoveKind::Rapid => None,
-            _ => cut_axis(s, &mesh, r, band, &st[k + 1..], c, ruling, shank, held)?,
+            _ => cut_axis(s, &mesh, r, band, &st[k + 1..], c, ruling, shank, held, last_lean)?,
         };
-        leaned |= lean.is_some_and(|a| !is_vertical(&a));
+        if lean.is_some_and(|a| !is_vertical(&a)) {
+            leaned = true;
+            last_lean = lean;
+        }
         let pose = match (s.kind, leaned) {
             (_, false) => lean,
             // A rapid travels under the pose it inherits: the ball
@@ -217,12 +237,6 @@ fn stamp_inner(
     Ok(stamped)
 }
 
-/// The facet list and its AABB shell, carried as one argument.
-struct Mesh<'a> {
-    facets: &'a [Triangle],
-    boxes: &'a [[f64; 6]],
-}
-
 /// The pose one cutting station holds, before and after the shank
 /// speaks: None in air and on level floors, the surface normal with
 /// lead/lag/clamp folded in wherever the station's ball rests on a
@@ -240,11 +254,12 @@ fn cut_axis(
     band: f64,
     rest: &[Station],
     c: &AxisControl,
-    ruling: Option<(Point3, &[bool])>,
+    ruling: Option<Ruled>,
     shank: Option<&Shank>,
     held: [f64; 3],
+    last_lean: Option<[f64; 3]>,
 ) -> Result<Option<[f64; 3]>, GenError> {
-    let (a0, seed, skip) = pose_law(s, mesh, r, band, rest, c, ruling);
+    let (a0, seed, skip) = pose_law(s, mesh, r, band, rest, c, ruling, held, last_lean)?;
     let Some(sh) = shank.filter(|_| !skip) else {
         return Ok(a0);
     };
@@ -262,128 +277,6 @@ fn cut_axis(
             s.mv
         ))),
     }
-}
-
-/// Stage C's pose law alone - the angle the surface commands before
-/// the shank has an opinion, read at the station's BALL CENTRE. The
-/// `bool` says the law refused to state a direction (garbage in a
-/// sane door's shadow): vertical it stays, and no escape invents an
-/// angle the law itself would not compute.
-fn pose_law(
-    s: &Station,
-    mesh: &Mesh,
-    r: f64,
-    band: f64,
-    rest: &[Station],
-    c: &AxisControl,
-    ruling: Option<(Point3, &[bool])>,
-) -> (Option<[f64; 3]>, Point3, bool) {
-    let up = Point3::new(UP[0], UP[1], UP[2]);
-    let p = s.to;
-    let mut best: Option<(f64, Point3, usize)> = None;
-    for (fi, (f, bx)) in mesh.facets.iter().zip(mesh.boxes.iter()).enumerate() {
-        // Box distance: if the nearest gap already exceeds r + band,
-        // no point of the box is in contact with the ball.
-        let gx = (bx[0] - p.x).max(0.0).max(p.x - bx[3]);
-        let gy = (bx[1] - p.y).max(0.0).max(p.y - bx[4]);
-        let gz = (bx[2] - p.z).max(0.0).max(p.z - bx[5]);
-        if (gx * gx + gy * gy + gz * gz).sqrt() > r + band {
-            continue;
-        }
-        let q = closest_pt_tri(p, &[f.a, f.b, f.c]);
-        let d2 = {
-            let (dx, dy, dz) = (p.x - q.x, p.y - q.y, p.z - q.z);
-            dx * dx + dy * dy + dz * dz
-        };
-        if best.is_none_or(|(bd, _, _)| d2 < bd) {
-            best = Some((d2, q, fi));
-        }
-    }
-    let Some((d2, q, fi)) = best else {
-        return (None, up, false);
-    };
-    let d = d2.sqrt();
-    // Contact (or a bite - verify is the law that judges a bite, the
-    // normal here is still the honest direction out of the surface).
-    // A centre ON the surface has no direction out of it at all.
-    if d > r + band || d <= 1e-9 {
-        return (None, up, false);
-    }
-    let n = Point3::new((p.x - q.x) / d, (p.y - q.y) / d, (p.z - q.z) / d);
-    // A level floor: the contact stands straight under the centre,
-    // there is no flank to lean off, and the honest pose for a floor
-    // is the one it always had (upright).
-    if 1.0 - n.z <= 1e-12 {
-        return (None, up, false);
-    }
-    // The swarf law (M5.1 D): on a facet the ruling analysis marked
-    // ruled, the tool lies WITH the blade - the pass direction
-    // projected into the surface, tangent to the flank and normal to
-    // nothing, which is what keeps the ball touching along a ruling.
-    // A facet whose plane says almost nothing of the direction
-    // (seen nearly head-on) is no flank at all, and the lean law of
-    // stage C speaks for it instead.
-    if let Some((dir, _)) = ruling.filter(|(_, f)| f.get(fi).copied().unwrap_or(false)) {
-        let dn = dir.dot(n);
-        let d3 = Point3::new(dir.x - n.x * dn, dir.y - n.y * dn, dir.z - n.z * dn);
-        let l = tl(d3);
-        if l > SIN_MIN {
-            let mut a = Point3::new(d3.x / l, d3.y / l, d3.z / l);
-            // One deterministic hemisphere: the first component
-            // with a real opinion says which end the spindle sits
-            // behind (z first - up on a floor, never down).
-            for v in [a.z, a.x, a.y] {
-                if v < -1e-9 {
-                    a = Point3::new(-a.x, -a.y, -a.z);
-                    break;
-                }
-                if v > 1e-9 {
-                    break;
-                }
-            }
-            return (Some([a.x, a.y, a.z]), n, false);
-        }
-    }
-    // The feed direction: this station's travel; a vertical entry has
-    // none of its own, so the next station's states where the cut
-    // goes. M8.3: a dive DEAD DOWN onto a flank has travel, but none
-    // ALONG a cut that has not started - its own vector would lean the
-    // lead inside the plunge plane. The cut the dive lands into is the
-    // next station's, which is what the drive-curve family stamps its
-    // first station with (curve.rs). A dive that lands on nothing (the
-    // path ends here) keeps its own vector.
-    let mut t = p - s.from;
-    if tl(t) <= 1e-9 || (t.x * t.x + t.y * t.y <= 1e-18 && 1.0 - n.z * n.z > 1e-18) {
-        t = rest
-            .iter()
-            .map(|m| m.to - p)
-            .find(|&tt| tl(tt) > 1e-9)
-            .unwrap_or(t);
-    }
-    if tl(t) <= 1e-9 {
-        // Nowhere to lead: the path ends here; hold the normal.
-        return (Some([n.x, n.y, n.z]), n, false);
-    }
-    match command_axis(n, t, c) {
-        Some(a) => (Some([a.x, a.y, a.z]), n, false),
-        None => {
-            // A control that states no direction (a NaN the sane
-            // door somehow missed): hold vertical, say so - never
-            // invent an angle the law refused to compute, and never
-            // let the escape speak for a law that stayed silent.
-            eprintln!("multiaxis: the axis law stated no direction at {p:?}; the move holds vertical");
-            (None, up, true)
-        }
-    }
-}
-
-/// A ruled facet seen within this of head-on (sin 10 degrees) says
-/// nothing about the pass direction; the lean law takes it.
-const SIN_MIN: f64 = 0.173_648_177_666_930_33; // sin(10 deg), frozen
-
-/// The length of a difference vector, spelled once for `cut_axis`.
-fn tl(v: Point3) -> f64 {
-    (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
 }
 
 // The stamp-level law tests live in `super::stamp_tests` (the AGENTS
