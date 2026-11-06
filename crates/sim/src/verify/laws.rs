@@ -130,6 +130,9 @@ pub fn bands_vs_fixtures(
     if fixtures.is_empty() {
         return warns;
     }
+    // The posed sweep (M13.8): a leaning move's real stack along its
+    // real pose - [`super::posed_steel`]; it only ever ADDS a verdict.
+    let posed = super::posed_steel::posed_hits(path, tool, fixtures, spindle, chord_tol, false);
     // The spindle housing band rides on the holder's top: its bottom
     // offset is the holder's offset plus the holder length, so the stack
     // can never double-count a slice of air or gap over the tool. It is a
@@ -255,7 +258,7 @@ pub fn bands_vs_fixtures(
                 struck = Some(FixturePart::Flute);
             }
         }
-        if let Some(part) = struck {
+        if let Some(part) = struck.or(posed.get(i).copied().flatten()) {
             warns.push(Warning::FixtureHit {
                 at: i,
                 fixture_part: part,
@@ -285,8 +288,18 @@ pub fn rapids_vs_fixtures(
     if fixtures.is_empty() {
         return warns;
     }
+    // The posed sweep (M13.8): a leaning rapid's whole stack - not
+    // only its flute - along its real pose ([`super::posed_steel`]).
+    let posed = super::posed_steel::posed_hits(path, tool, fixtures, None, 0.01, true);
     for (i, m) in path.moves.iter().enumerate() {
         if m.kind != MoveKind::Rapid {
+            continue;
+        }
+        if posed.get(i).copied().flatten().is_some() {
+            warns.push(Warning::FixtureHit {
+                at: i,
+                fixture_part: FixturePart::Rapid,
+            });
             continue;
         }
         // Pose (M5.1 stage B, paying stage A's rapids debt): a rapid
