@@ -10199,3 +10199,72 @@ Stepdown. Retract Z therefore now reads after Top/Bottom Z.
 Option-backed fields use `auto_opt`, where Auto means None. Real zeros (Bore
 stock to leave, Dwell) stay plain numbers. Drill "Dwell at bottom" now reads
 seconds, not mm through the inch conversion (a units bug fixed in passing).
+
+## M11.3: the Face entry runs out to air: one decision (2026-11-06)
+
+**A non-centre-cutting Face whose first plunge lands over stock now runs its
+first row back out to air instead of refusing.**
+
+- **How:** `machining2d::air_lead` walks back along the row, in steps of a
+  quarter tool radius, until the tool disc clears the stock outline by 1 mm.
+  `face_led` then shifts only the first feed's start, so the move count is
+  unchanged.
+- **Safety check:** the regenerated path is audited again.
+- **Still refused by name:** an unknown stock outline, no air within reach,
+  and a run-on crossing an exclude zone, open-boundary side or part above
+  Cut Z.
+- **Centre-cutting tools:** never reach this code; output is byte-identical
+  (`face_led(.., 0.0) == face(..)`).
+- **Accepted:** the run-on cuts a channel at Cut Z through stock beside the
+  faced patch. Part gouges there are judged by the post-generation verify,
+  which blocks the post.
+
+## M11.3: the centre-cutting law along the posed axis: two decisions (2026-11-06)
+
+(1) **A posed move is a plunge when it heads tip-first within 30° of the tool
+axis** (asin of the 0.5 core fraction), not only when it is exactly axial.
+Inside that cone the leading edge is the uncut core.
+- The 5-axis stamp drops the ball in world Z while the tool leans, so an
+  exact-axial test passed the convicted Contour5D ring entry.
+- "Cleared" is judged along the axis and in world Z, within (1 − core) tool
+  radii of the axis line.
+- Unposed moves keep the 3-axis reading.
+
+(2) **Every multiaxis kind built on finish params is guarded**:
+- Contour5D, Parallel5D, Flow5D, Swarf, Advanced Swarf, Rotary Contour and
+  Rotary Parallel retry with sloped entries, then refuse by name;
+- Multi-Axis Contour refuses (it has no sloped entry);
+- a centre-cutting tool reads no stock and gets the generator's path
+  unchanged.
+
+Owed (ROADMAP M11.3):
+- the 3-axis reading still convicts only exactly-vertical descents, so a
+  non-centre-cutting 80° unposed ramp passes; make the law uniform with the
+  cone;
+- a post-stamp audit for Multi-Axis Rough and Rotary Offset;
+- confirm swarf/rotary actually honour the forced ramp;
+- an app-level 5-axis end-to-end test.
+
+## M13.7: stock under overhangs reaches the shank, sweep and rapid laws: two decisions (2026-11-06)
+
+(1) **A hidden-stock backstop beside laws (c), (c3) and (d)**
+(`sim/verify/hidden.rs`). It runs only when the plane-section law found
+nothing, so it can add convictions but never remove one. Hidden stock at
+height h is a point that:
+- is inside the stock footprint and below its top;
+- is shadowed by the part's down-facing faces above h;
+- is not in the part's own section at h;
+- is not swept by any cutting chord at or below h within a tool radius.
+
+Results:
+- shank and holder bands meeting it convict `ShankHit { part: false }`;
+- mid-turn sweeps meeting it convict `SweepHit { part: false }`;
+- a lateral rapid's swept disc meeting it convicts `RapidInStock` (the old law
+  only sampled 3 points).
+- A failed slice convicts.
+- No golden program gained a warning.
+
+(2) **Owed:** "cleared" ignores cut ORDER. A chord later in the path clears
+the column for an earlier move, the same as the existing column model. This
+can only under-report, so it is a known blind spot to close: judge each move
+against the cuts before it.

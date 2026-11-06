@@ -45,9 +45,14 @@ pub(super) fn rapids_in_stock(
                 continue;
             }
             let mid = Point2::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+            // The overhang backstop (M13.7 B, [`super::hidden`]): the
+            // tool disc swept through stock hidden under a ledge, which
+            // no column surface shows - asked only when the column law
+            // is silent, so it adds convictions, never removes one.
             let bad = [a, mid, b]
                 .into_iter()
-                .any(|q| rest.in_stock(q) && low < rest.surface(q));
+                .any(|q| rest.in_stock(q) && low < rest.surface(q))
+                || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol);
             if bad {
                 warns.push(Warning::RapidInStock { at: i });
             }

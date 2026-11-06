@@ -151,6 +151,18 @@ pub(super) fn band_reach(
                         }
                     }
                 }
+                // The overhang backstop (M13.7 B): stock hidden under a
+                // ledge stands outside every plane section, so no sample
+                // above sees it - asked only where the section law found
+                // nothing, it can add a conviction, never remove one.
+                if hit.is_none()
+                    && pts.iter().any(|p| {
+                        let pc = Point2::new(p.x + offx, p.y + offy);
+                        rest.hidden_in_annulus(pc, r + cx.gouge_tol, r_band, h0)
+                    })
+                {
+                    hit = Some(false);
+                }
                 if let Some(part) = hit {
                     shanked.push(i);
                     warns.push(Warning::ShankHit { at: i, part });
@@ -182,6 +194,7 @@ pub(super) fn band_reach(
                 &in_stock,
                 &surface,
                 &part_at,
+                &|pc, r_in, r_out, h| rest.hidden_in_annulus(pc, r_in, r_out, h),
             ));
         }
     }

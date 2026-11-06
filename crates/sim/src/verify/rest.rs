@@ -5,6 +5,7 @@ use super::types::VerifyContext;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use crate::cl::{MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Triangle;
@@ -26,6 +27,9 @@ pub(super) struct Rest<'c, 'a> {
     /// Deepest plane first, so `surface`'s first reach is its deepest
     /// reach - the min the law always asked for, found without a scan.
     cut: Vec<(Point2, Point2, f64)>,
+    /// The stock hidden under overhangs per plane (M13.7 B) - read by
+    /// [`super::hidden`]; `None` is a failed slice, failing closed.
+    pub(super) hidden_cache: RefCell<HashMap<u64, Option<Rc<super::hidden::Hidden>>>>,
 }
 
 impl<'c, 'a> Rest<'c, 'a> {
@@ -45,7 +49,13 @@ impl<'c, 'a> Rest<'c, 'a> {
             cx,
             island_cache: RefCell::new(HashMap::new()),
             cut,
+            hidden_cache: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// The context the laws are judged in.
+    pub(super) fn cx(&self) -> &VerifyContext<'a> {
+        self.cx
     }
 
     /// The cutting chords, deepest plane first.

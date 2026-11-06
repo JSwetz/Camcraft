@@ -1420,7 +1420,7 @@ we choose to? keepdown is a common strategy we should honor and make definable."
 **Goal: every entry, lead and engagement choice a CAM user expects is a
 parameter on the operation, grouped under its own "Lead in / Lead out"
 section, and every height can be measured from the operation's own
-selection.** — ⚠️ partial (owed: horizontal-plane arc entry for pockets, 3D first-stretch engagement slowing, the 3D ladder's and contour bore side's second dives, Face entry fallback, 5-axis plunge guards - see the Owed bullet below)
+selection.** — ⚠️ partial (owed: horizontal-plane arc entry for pockets, 3D first-stretch engagement slowing, the 3D ladder's and contour bore side's second dives, 3-axis plunge cone (80° ramps pass), multiaxis rough/offset post-stamp audit - see the Owed bullet below)
 
 (User review, 2026-11-05: "All heights should have the option Selection ...
 Entry - Arc should have an option of setting radius and length of the arc.
@@ -1458,8 +1458,11 @@ handle engagement.")
       done, 515525c); the 3D ladder's and the contour bore side's named
       second dives; the centre-cutting plunge check in finishing3d,
       drilling and face - DONE 2026-11-06 (RECOMMENDED "M11.3: the centre-cutting
-      law in finish, drilling and face"); still owed from it: a Face entry fallback
-      out past the stock, 5-axis Contour/Parallel plunge guards. Done and dropped from this list:
+      law in finish, drilling and face"); Face entry fallback and 5-axis posed guards also DONE
+      2026-11-06; still owed: the 3-axis law uniform with the posed 30° cone (a
+      non-centre-cutting 80° unposed ramp passes today), a post-stamp audit for
+      Multi-Axis Rough and Rotary Offset, swarf/rotary forced-ramp check, an
+      app-level 5-axis plunge test. Done and dropped from this list:
       between-pass centre-cutting checks (`plunge_law`, 515525c),
       wall-start zigzag/slot second dives (none exist, test-pinned),
       Selection heights in the clearance notes ("Small owed UI items" (2)).
@@ -1730,7 +1733,7 @@ would.** — 📋
 ### M13.7 - Verifier completeness
 **Goal: the exact solid-law verifier judges every move with the real
 tool, against the real stock, in the real pose - the backstop every
-generator relies on has no known blind spot.** — ⚠️ partial (owed: overhang laws, mid-move pose)
+generator relies on has no known blind spot.** — ⚠️ partial (owed: mid-move pose, cut-order-aware clearing)
 
 The 2026-11-06 solid-law verifier (0e18091) replaced plane sections for
 the tool-vs-part check; its own entry names what it still does not
@@ -1741,9 +1744,9 @@ None of these may stay open behind a ✅.
       2D ops are checked with the square stack (may over-report a ball or
       bull, never hide); drill, bore and thread already use their real
       tips. Carry `Cutter` into `VerifyContext`.
-- **Uncut stock under overhangs**: the shank, sweep and rapid-in-stock
-      laws still read plain sections for the uncut stock, so stock under
-      an overhang is invisible to them - move them onto the solid law.
+- ~~**Uncut stock under overhangs**~~ - done 2026-11-06 (RECOMMENDED "M13.7: stock
+      under overhangs"); owed from it: judge each move against the cuts BEFORE it
+      (the column model ignores cut order and can under-report).
 - **Mid-move pose changes**: a move whose pose changes along it is
       judged at its end pose only; judge the swept pose.
 - ~~**Rotary ops can't post**~~ - resolved 2026-11-06: a pivot bug
@@ -1833,7 +1836,7 @@ the heavy lane green.
 | **M10.1** | A tool that can cut the operation | Done: the tool law - `KindInfo.tool_kinds` one table (A), `CreateOperation` / tool reassignment / op retype / tool retype refuse the mismatch at command construction by name and the ribbon darkens with the reason (B), an op whose tool is gone or wrong reads BLOCKED - generation and the post refuse, nothing stored, old files load untouched (C), the law tests (D); generator shape refusals stand as the backstop | ✅ |
 | **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); line-to-arc and arc-to-arc corner fillets (M11.1 RECOMMENDED); a closed path's seam corner stays sharp by decision | ✅ |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
-| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, Face entry fallback, 5-axis plunge guards (-> M11.3 Owed bullet) | ⚠️ |
+| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, 3-axis plunge cone, multiaxis rough/offset post-stamp audit (-> M11.3 Owed bullet) | ⚠️ |
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); owed: star-plan morph seams to 0 kinks at 5° (ratcheted 110/202), island legal late returns, arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; owed: open boundary on Contour, boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
@@ -1843,7 +1846,7 @@ the heavy lane green.
 | **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint and text colours done; owed: vertex picking + WCS snapping, dialog polish (captions, Heights loose rows, 0-auto audit) (-> M13.4 Owed bullet) | ⚠️ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
-| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); owed: overhang laws, mid-move pose | ⚠️ |
+| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); owed: mid-move pose, cut-order-aware clearing | ⚠️ |
 | **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted; owed: radial retracts vs fixtures | ⚠️ |
 | **M13.9** | Scallop law and finish stepovers | Make the ridge/scallop law reachable and fix the finish generators it convicts (0.13-0.35 mm over a 0.12 gate) | 📋 |
 

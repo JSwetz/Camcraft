@@ -145,6 +145,7 @@ mod contact;
 mod crossing;
 mod engine;
 mod finish;
+mod hidden;
 mod laws;
 mod probe;
 mod rapids;

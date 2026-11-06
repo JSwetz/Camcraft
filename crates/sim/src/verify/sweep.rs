@@ -75,6 +75,7 @@ pub(super) fn mid_turn_sweeps(
     in_stock: &dyn Fn(Point2) -> bool,
     surface: &dyn Fn(Point2) -> f64,
     part_at: &dyn Fn(Point2) -> bool,
+    hidden: &dyn Fn(Point2, f64, f64, f64) -> bool,
 ) -> Vec<Warning> {
     let mut warns = Vec::new();
     // The column memo, one per path (see the module law above): a
@@ -101,7 +102,7 @@ pub(super) fn mid_turn_sweeps(
             && held != next
             && !shanked.contains(&i)
             && let Some(part) = swing_hit(
-                m, held, next, bands, r, gouge_tol, chord_tol, samples, &mut reach, in_stock, surface, part_at,
+                m, held, next, bands, r, gouge_tol, chord_tol, samples, &mut reach, in_stock, surface, part_at, hidden,
             )
         {
             warns.push(Warning::SweepHit { at: i, part });
@@ -140,10 +141,12 @@ fn swing_hit(
     in_stock: &dyn Fn(Point2) -> bool,
     surface: &dyn Fn(Point2) -> f64,
     part_at: &dyn Fn(Point2) -> bool,
+    hidden: &dyn Fn(Point2, f64, f64, f64) -> bool,
 ) -> Option<bool> {
     // (pc, r2, h0): the band's column, its outer reach squared, its
     // bottom. Plus the union box of every disc, for the filter.
     let mut states: Vec<(Point2, f64, f64)> = Vec::new();
+    let mut bands_at: Vec<(Point2, f64, f64)> = Vec::new();
     let (mut x0, mut y0) = (f64::INFINITY, f64::INFINITY);
     let (mut x1, mut y1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
     for &t in &PATH_FRACS {
@@ -174,6 +177,7 @@ fn swing_hit(
                 };
                 let pc = Point2::new(p.x + offx, p.y + offy);
                 states.push((pc, (r_band + 1e-9) * (r_band + 1e-9), h0));
+                bands_at.push((pc, r_band, h0));
                 x0 = x0.min(pc.x - r_band);
                 x1 = x1.max(pc.x + r_band);
                 y0 = y0.min(pc.y - r_band);
@@ -223,6 +227,12 @@ fn swing_hit(
                 worst = Some(false);
             }
         }
+    }
+    // The overhang backstop (M13.7 B, [`super::hidden`]): stock hidden
+    // under a ledge is in no column sample; asked only when the column
+    // law found nothing, so it adds convictions, never removes one.
+    if worst.is_none() && bands_at.iter().any(|&(pc, rb, h0)| hidden(pc, r + gouge_tol, rb, h0)) {
+        worst = Some(false);
     }
     worst
 }
