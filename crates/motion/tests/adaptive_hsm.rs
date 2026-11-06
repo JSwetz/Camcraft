@@ -426,7 +426,8 @@ fn hsm_one() {
         let (path, q, rest) = run(&reg, PocketStrategy::Adaptive, D / 120.0);
         let w = verified(&path, &reg, D);
         println!("{}", q.report_line(name));
-        println!("    rest {rest:.2} mm2, moves {}, verify {}, notes: {:?}", path.moves.len(), warn_kinds(&w), path.notes);
+        let arcs = path.moves.iter().filter(|m| m.arc.is_some()).count();
+        println!("    rest {rest:.2} mm2, moves {} (arcs {arcs}), verify {}, notes: {:?}", path.moves.len(), warn_kinds(&w), path.notes);
         let mut br: Vec<String> = q.break_list.iter().take(40).map(|(p, t)| format!("({:.2},{:.2},{:.1}) {t:.1}", p.x, p.y, p.z)).collect();
         br.truncate(40);
         println!("    breaks: {br:?}");

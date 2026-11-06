@@ -69,6 +69,9 @@ pub(crate) use guard::first_crossing;
 pub(crate) use lift::Travel;
 pub(crate) use lift_link::Return;
 pub(crate) use loops::boundary_dist;
+/// The plan's chord sagitta (`morph`): the finest tessellation the
+/// pocket family posts, which `quality` walks arcs at.
+pub(crate) use morph::SAG as PLAN_SAG;
 
 use super::GenError;
 use front::{dist, rotate_to, tail};

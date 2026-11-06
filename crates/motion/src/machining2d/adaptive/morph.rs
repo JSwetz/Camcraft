@@ -40,7 +40,7 @@ const FINE_DEG: f64 = 0.1;
 /// The thinned chord stays within this of the curve (mm), and is never
 /// longer than [`CHORD_MAX`]: a 1 mm curvature radius is then walked at
 /// under 4 degrees a chord, which the arc fitter's tolerance smooths.
-const SAG: f64 = 3e-4;
+pub(crate) const SAG: f64 = 3e-4;
 const CHORD_MAX: f64 = 0.5;
 
 /// The last revolution reaches the boundary within this share of its

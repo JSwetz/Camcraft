@@ -20,6 +20,8 @@
 
 
 
+mod arc_cross;
+mod arc_proof;
 mod arcs;
 mod blend;
 mod bore;
@@ -82,4 +84,13 @@ pub use ring::{on_boundary, ring_is_circular};
 pub use slots::{chord_clears, slot, trace, SlotParams, TraceParams};
 pub use thread_mill::{thread_mill, ThreadHole, ThreadParams, THREAD_DEPTH_PER_PITCH};
 pub(crate) use pocket::plan_passes;
+pub(crate) use adaptive::PLAN_SAG;
+// The HSM planner's door, its arc proofs and its microlift link, read
+// by the 3-D ladder's per-level port (`machining3d::hsm`, M11.4).
+pub(crate) use adaptive::Return;
+pub(crate) use arc_cross::crossing_free;
+pub(crate) use arc_proof::{ProofTally, fit_proved};
+pub(crate) use arcs::push_segs;
+pub(crate) use microlift::link_at as microlift_link;
+pub(crate) use pocket_hsm::adaptive_passes;
 pub(crate) use waterscan::chord_crosses_path;

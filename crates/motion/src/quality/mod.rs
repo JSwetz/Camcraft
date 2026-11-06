@@ -35,8 +35,16 @@ pub use shape::tangents;
 /// Height slack for "material stands above this cut": a micron.
 const Z_EPS: f64 = 1e-3;
 
-/// Chord tolerance the measurement walks arcs at (mm).
-const CHORD_TOL: f64 = 0.002;
+/// Chord sagitta the measurement walks arcs at (mm): the finest
+/// tessellation a plan posts (the HSM plan's own chord law,
+/// `adaptive::morph`), so an arc is read at least as finely as the
+/// chords it replaced. The reading at a sample stands on the stock
+/// around it, never on the pitch - but the max over a path is the max
+/// over its samples, and a coarser walk on an arc skips the sample the
+/// plan's chords would have read (M11.4 arc output: the bore's peak,
+/// 0.3 mm past the helix, read 17.3 % at a 2 um walk and 19.5 % at this
+/// one on the D/60 grid, the chord plan's own number).
+const CHORD_TOL: f64 = crate::machining2d::PLAN_SAG;
 
 /// Contact-angle samples around the cutter periphery.
 pub(crate) const RIM_SAMPLES: usize = 360;
@@ -157,7 +165,7 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
             for k in 1..=n {
                 let t = k as f64 / n as f64;
                 let p = Point3::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
-                let deg = contact_deg(dex, p, (p.x - prev.x, p.y - prev.y), rim, spec.wall_below);
+                let deg = contact_deg(dex, p, heading(m, p, prev), rim, spec.wall_below);
                 let piece = len / n as f64;
                 let bore = bores.iter().any(|&(c, rr)| (p.x - c.x).hypot(p.y - c.y) <= rr + 1e-6);
                 if planar && m.kind == MoveKind::Feed && !bore {
@@ -207,6 +215,28 @@ pub fn measure(path: &Toolpath, dex: &mut Dexel, spec: &QualitySpec) -> PathQual
     }
     shape::breaks(&path.moves, &ends, (spec.break_deg, cut_deg), &mut q);
     q
+}
+
+/// The tool's heading at sample `p` of `m`, the direction its contact
+/// window faces: on an XY arc (planar or helical) the circle's tangent
+/// there; on a straight, the chord walked (`prev -> p`). The chord of
+/// an arc's walk lags the tangent by half its angular step, and the
+/// window turned that far backward reads standing stock behind the
+/// perpendicular that the cutter never touches - a 0.26 mm walk at a
+/// 2.3 mm radius over-read the HSM bore by 1.7 % D (M11.4 arc output)
+/// against the same plan posted as chords. The true heading reads an
+/// arc exactly as the chords it replaced, at any walk pitch.
+fn heading(m: &Move, p: Point3, prev: Point3) -> (f64, f64) {
+    match m.arc.filter(|a| a.plane.is_xy()) {
+        Some(arc) => {
+            let (dx, dy) = (p.x - arc.center.x, p.y - arc.center.y);
+            if !(dx.is_finite() && dy.is_finite()) || dx.hypot(dy) <= 1e-12 {
+                return (p.x - prev.x, p.y - prev.y);
+            }
+            if arc.ccw { (-dy, dx) } else { (dy, -dx) }
+        }
+        None => (p.x - prev.x, p.y - prev.y),
+    }
 }
 
 /// Contact angle at `p` moving along `dir` (XY; degrees): the longest

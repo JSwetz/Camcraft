@@ -12,6 +12,8 @@ use crate::links::Links;
 use super::face::{GenError, band};
 use super::levels::{Cert, Motion, cut_levels, run_level_walks};
 use super::arcs::{ARC_FIT_TOL, Seg, fit_arcs};
+use super::arc_cross::post_crossing_free;
+use super::arc_proof::{ProofTally, fit_proved};
 use super::fillet::{Legal, fillet_corners};
 use super::fillet_tally::{FilletTally, fillet_floor};
 use super::ring::ring_is_circular;
@@ -28,8 +30,10 @@ pub enum PocketStrategy {
     /// the entry bore, then engagement fronts against the in-process
     /// stock with smooth stay-down links and trochoidal arcs in narrow
     /// channels, every cut measured to hold the `optimal_load` (ae/D,
-    /// `crate::load`). The 3-D ladder still plans this as
-    /// [`PocketStrategy::OffsetRings`] (its per-level port is owed).
+    /// `crate::load`). The 3-D ladder plans every closed level area
+    /// with the same planner (`machining3d::hsm`, M11.4's per-level
+    /// port) and falls back to [`PocketStrategy::OffsetRings`] by name
+    /// where the planner refuses a level.
     Adaptive,
     /// The pre-M11.4 C adaptive (M2.1c's law, planar since M5.1 H):
     /// the Waterline ring tiling spaced at `optimal_load` x D instead
@@ -275,7 +279,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     // The HSM plan may choose where its entry stands (`pocket_hsm`).
     let (passes, strategy, room, joins) = match strategy {
         PocketStrategy::Adaptive => {
-            let (passes, notes, s, room, joins) = adaptive_passes(&center, p)?;
+            let (passes, notes, s, room, joins) = adaptive_passes(&center, p, "this pocket")?;
             notes.into_iter().for_each(|n| b.note(n));
             (passes, s, room, joins)
         }
@@ -288,11 +292,17 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
     // Waterline rings circle around material, so they get the arc fitter
     // (rings straight enough to be lines stay exactly that); zigzag rows
     // are straight by construction and keep the plain walk.
-    // The HSM plan is walked as planned (`adaptive`: sub-micron chords;
-    // a 10 um arc fit could cross a neighbouring turn or leave a wall).
+    // The HSM plan's chords are fitted at the ring budget (a quarter of
+    // the chord tolerance: the walk is already a tessellation) and every
+    // arc is proved inside the center area or stays chords (`arc_proof`).
     let fit = match strategy {
-        PocketStrategy::Zigzag | PocketStrategy::Auto | PocketStrategy::Adaptive => None,
+        PocketStrategy::Zigzag | PocketStrategy::Auto => None,
         PocketStrategy::Waterline | PocketStrategy::OffsetRings => Some(ARC_FIT_TOL),
+        PocketStrategy::Adaptive => Some(ARC_FIT_TOL * 0.25),
+    };
+    let mut proof = ProofTally::default();
+    let mut fit_pass = |pass: &[Point2], tol: f64| -> Vec<Seg> {
+        if strategy == PocketStrategy::Adaptive { fit_proved(pass, tol, &center, &mut proof) } else { fit_arcs(pass, tol) }
     };
     // The HSM plan's entry may orbit a narrowed helix (`pocket_hsm`).
     let helix_r = room.as_ref().map_or(p.helix_radius, |e| e.helix_r);
@@ -316,7 +326,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
                     return Vec::new();
                 };
                 let walk = match fit {
-                    Some(tol) => fit_arcs(pass, tol),
+                    Some(tol) => fit_pass(pass, tol),
                     None => vec![Seg::Line(rest.to_vec())],
                 };
                 let (walk, t) = fillet_corners(&walk, *first, r, ARC_FIT_TOL, &legal);
@@ -329,7 +339,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         }
         Some(runs)
     } else {
-        fit.map(|tol| passes.iter().map(|p| fit_arcs(p, tol)).collect())
+        fit.map(|tol| passes.iter().map(|p| fit_pass(p, tol)).collect())
     };
     // The entry room: the plan's spot as a zero-length stadium (its disc
     // certifies the chords, its triangle is where `dive_room` finds it).
@@ -342,19 +352,24 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         Some(e) => Cert::Stadium { a: e.seed, b: e.seed, h: e.clear, tess: &e.tess },
         None => Cert::Region(&center),
     };
-    run_level_walks(
-        &mut b,
-        &passes,
-        &zs,
-        &motion,
-        runs.as_deref(),
-        Some(&cert),
-        Some(&Cert::Region(&center)),
-    );
-    let cur = b.at();
-    b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
-
-    let path = b.finish();
+    let post = |b: &mut PathBuilder, runs: Option<&[Vec<Seg>]>| {
+        run_level_walks(b, &passes, &zs, &motion, runs, Some(&cert), Some(&Cert::Region(&center)));
+        let cur = b.at();
+        b.push(MoveKind::Rapid, Point3::new(cur.x, cur.y, p.clearance_z), None);
+    };
+    // The HSM plan's arcs are held to the crossing law on the posted
+    // path too (`arc_proof`): an arc that would cross another feed is
+    // given up and the walks are posted again.
+    let mut path = match runs {
+        Some(runs) if strategy == PocketStrategy::Adaptive => post_crossing_free(b, &passes, runs, &mut proof, post),
+        runs => {
+            post(&mut b, runs.as_deref());
+            b.finish()
+        }
+    };
+    if let Some(n) = proof.note() {
+        path.notes.push(n);
+    }
     if let Some(why) = crate::approach::refusal(&path) {
         return Err(GenError::Invalid(why));
     }
@@ -429,9 +444,10 @@ pub(crate) fn plan_passes(
 ) -> Result<Vec<Vec<Point2>>, GenError> {
     match strategy {
         PocketStrategy::Zigzag | PocketStrategy::Auto => zigzag_passes(center, stepover, climb),
-        // Offset rings are ring tiling at the caller's step; the 3-D
-        // ladder's Adaptive still plans rings here (the planar HSM
-        // plan is `pocket`'s own, `pocket_hsm.rs`).
+        // Offset rings are ring tiling at the caller's step; the HSM
+        // plan is `pocket_hsm.rs`'s (the planar pocket's own, and the
+        // 3-D ladder's per level through `machining3d::hsm`), which
+        // hands a refused area back here as rings.
         PocketStrategy::Waterline | PocketStrategy::Adaptive | PocketStrategy::OffsetRings => {
             waterline_passes(center, stepover, climb)
         }
