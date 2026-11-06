@@ -1558,20 +1558,33 @@ impl Section {
             .map(|(i, _)| i)
             .collect()
     }
+
+    /// The kinds of this section a document mounted on `machine` may
+    /// create (M13.5 B): `kinds` filtered through [`KindInfo::admits`],
+    /// the command door's own word - so the ribbon's section lists
+    /// and the door cannot disagree about the lathe's Drill cell.
+    #[must_use]
+    pub fn kinds_for(self, machine: crate::machine::Kind) -> Vec<usize> {
+        self.kinds()
+            .into_iter()
+            .filter(|i| KindInfo::ALL.get(*i).is_some_and(|k| k.admits(machine)))
+            .collect()
+    }
 }
 
-/// The sections a machine kind can run, in catalog order: the mill
-/// document's ribbon never shows a Turning section, a lathe's shows
-/// only that one, and a mill-turn shows all five. This is the hiding
-/// law's data (M6.2) - the ribbon's darkening (M3.2 E) is retired
-/// because cells for work the steel cannot spin should not be there
-/// to darken. `KindInfo::family_gate` enforces the same pairing at
-/// the command door.
+/// The sections a machine kind can run, in catalog order: a section
+/// shows when any of its kinds is admitted by [`KindInfo::admits`] -
+/// the mill document's ribbon never shows a Turning section, a
+/// lathe's shows Drilling (the axial Drill, M13.5 A) and Turning, and
+/// a mill-turn shows all five. This is the hiding law's data (M6.2) -
+/// the ribbon's darkening (M3.2 E) is retired because cells for work
+/// the steel cannot spin should not be there to darken. The command
+/// door's `family_gate` reads the same per-kind word.
 #[must_use]
 pub fn shown_for(machine: crate::machine::Kind) -> Vec<Section> {
     Section::ORDER
         .into_iter()
-        .filter(|s| s.family().admits(machine))
+        .filter(|s| !s.kinds_for(machine).is_empty())
         .collect()
 }
 
@@ -2155,8 +2168,9 @@ impl KindInfo {
     /// because a hole down the spindle axis is the turret's simplest
     /// hole and the mill's cycle vocabulary is its vocabulary. The
     /// generator's axial doors then refuse by name every hole that
-    /// is not on the axis. The ribbon keeps reading the section law
-    /// (`shown_for`); this is the command door's word.
+    /// is not on the axis. The command door, the ribbon's hiding
+    /// (`shown_for`, `Section::kinds_for`) and the retype menu all
+    /// read this one word (M13.5 B) - never the family table alone.
     #[must_use]
     pub fn admits(&self, machine: crate::machine::Kind) -> bool {
         self.family().admits(machine)

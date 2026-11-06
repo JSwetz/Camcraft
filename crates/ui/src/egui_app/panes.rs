@@ -181,10 +181,12 @@ pub(super) struct Group {
 /// The whole ribbon as data (M6.2's home law): the anchors, the user's
 /// pinned kinds, then every catalog section the document's machine can
 /// run. Hiding, not darkening - the mill document's table carries no
-/// Turning cells to grey out; `Family::admits` is the single pairing
-/// this filter and the command door share. The registry's `section`
-/// column is the only seed, and the row order is the product order, so
-/// a section's cells list the kinds in table sequence.
+/// Turning cells to grey out; `KindInfo::admits` is the single word
+/// this filter and the command door share (M13.5 B: per kind, so the
+/// lathe's Drilling door fronts the one axial Drill cell). The
+/// registry's `section` column is the only seed, and the row order is
+/// the product order, so a section's cells list the kinds in table
+/// sequence.
 #[must_use]
 pub(super) fn ribbon_plan(
     machine: camcraft_app::machine::Kind,
@@ -208,7 +210,7 @@ pub(super) fn ribbon_plan(
         .filter(|i| {
             operation::KindInfo::ALL
                 .get(*i)
-                .is_some_and(|k| k.family().admits(machine))
+                .is_some_and(|k| k.admits(machine))
         })
         // The bar's op budget (the ribbon law): the first MAX_PINS
         // admitted pins stand inline. A document whose list outgrew
@@ -230,7 +232,7 @@ pub(super) fn ribbon_plan(
         // door holds "everything of this family not already in
         // reach", never a duplicate of what the user can see.
         let cells: Vec<Cmd> = s
-            .kinds()
+            .kinds_for(machine)
             .into_iter()
             .filter(|i| !pins.contains(i))
             .map(Cmd::Create)
@@ -356,7 +358,7 @@ pub(super) fn tip_of(c: Cmd, state: &State) -> String {
                 let machine = camcraft_app::machine::kind_of(&state.world);
                 let dark = camcraft_app::operation::KindInfo::ALL
                     .get(i)
-                    .is_some_and(|k| !k.family().admits(machine));
+                    .is_some_and(|k| !k.admits(machine));
                 if dark {
                     let (fword, mword) = match camcraft_app::operation::KindInfo::ALL[i].family() {
                         camcraft_app::operation::Family::Mill => ("milling", "mill"),
@@ -405,7 +407,7 @@ pub(super) fn enabled(c: Cmd, state: &State) -> bool {
             let machine = camcraft_app::machine::kind_of(&state.world);
             let kind_admits = camcraft_app::operation::KindInfo::ALL
                 .get(i)
-                .is_none_or(|k| k.family().admits(machine));
+                .is_none_or(|k| k.admits(machine));
             // The tool law (M10.1 B): darken, never hide - the cell
             // stays to explain itself, the fix is a library click away.
             kind_admits && !state.tool_names().is_empty() && tool_law_note(i, state).is_none()
@@ -444,7 +446,7 @@ fn gate_note(c: Cmd, state: &State) -> Option<String> {
     let machine = camcraft_app::machine::kind_of(&state.world);
     let dark = camcraft_app::operation::KindInfo::ALL
         .get(i)
-        .filter(|k| !k.family().admits(machine));
+        .filter(|k| !k.admits(machine));
     match dark {
         Some(k) => {
             let (fword, mword) = match k.family() {
@@ -1573,10 +1575,12 @@ const MENU_DELETE: usize = usize::MAX - 1;
 
 /// The operation's retype menu (M9.1): what replaced the page's Type
 /// combo. Grouping is the retired combo's law restated once -
-/// `Section::ORDER` headers, `Family::admits` hiding a section the
-/// machine cannot run, and the current kind's section staying listed
-/// even when the machine says no, so a mid-edit machine swap never
-/// erases the operation's own name. A row's click queues
+/// `Section::ORDER` headers, `KindInfo::admits` hiding a section none
+/// of whose kinds the machine can run (M13.5 B: the lathe's Drilling
+/// header fronts the axial Drill alone, every other row of it dark),
+/// and the current kind's section staying listed even when the
+/// machine says no, so a mid-edit machine swap never erases the
+/// operation's own name. A row's click queues
 /// `ChangeOperationKind` - one undo unit, the numbers carried by the
 /// one retype law below; a dark row is queued too, because the refusal
 /// belongs at the command door (`family_gate`), where it names itself
@@ -1612,14 +1616,21 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
     lines.push(("Delete operation (undoable)", true, Some(MENU_DELETE)));
     let here_section = operation::KindInfo::ALL.get(here).map(|k| k.section);
     for s in operation::Section::ORDER {
-        let runnable = s.family().admits(machine);
-        if !runnable && here_section != Some(s) {
+        // The current kind's own section keeps every row (dark where
+        // the machine says no); any other section lists only what the
+        // door admits, and leaves the menu when that is nothing.
+        let rows = if here_section == Some(s) {
+            s.kinds()
+        } else {
+            s.kinds_for(machine)
+        };
+        if rows.is_empty() {
             continue;
         }
         lines.push((s.label(), false, None));
-        for i in s.kinds() {
+        for i in rows {
             if let Some(k) = operation::KindInfo::ALL.get(i) {
-                lines.push((k.label, runnable, Some(i)));
+                lines.push((k.label, k.admits(machine), Some(i)));
             }
         }
     }

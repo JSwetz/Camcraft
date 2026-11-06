@@ -76,6 +76,36 @@ pub fn default_post_for(kind: crate::machine::Kind) -> PostRef {
     }
 }
 
+/// The registry name a post reference resolves to: the first entry
+/// for the bare built-in, the name itself for a named one, nothing
+/// for a file of the user's own (whose dialect nobody here can read).
+#[must_use]
+pub fn post_name(post: &PostRef) -> Option<&str> {
+    match post {
+        PostRef::Builtin => BUILTINS.first().map(|(n, _)| *n),
+        PostRef::Named(n) => Some(n.as_str()),
+        PostRef::File(_) => None,
+    }
+}
+
+/// A post the Setup pane may offer instead of the document's (M13.5
+/// B): when the mounted machine's kind is not served by the current
+/// registry post, this is the word for what the current one serves
+/// ("mill" / "lathe") and the registry's default for the mount. The
+/// pane offers; the user chooses - a mount never re-points the post
+/// by itself, and a `File` post is never second-guessed.
+#[must_use]
+pub fn post_offer(world: &World) -> Option<(&'static str, PostRef)> {
+    let kind = crate::machine::kind_of(world);
+    let current = post_of(world);
+    let name = post_name(&current)?;
+    if post_serves(name, kind) {
+        return None;
+    }
+    let serves = if LATHE_POSTS.contains(&name) { "lathe" } else { "mill" };
+    Some((serves, default_post_for(kind)))
+}
+
 /// The default machine as text: a plain 3-axis VMC with flood coolant.
 pub const DEFAULT_MCH: &str = include_str!("../../../assets/machines/3axis-vmc.mch");
 

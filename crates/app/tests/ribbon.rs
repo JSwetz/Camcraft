@@ -72,14 +72,38 @@ fn family_is_derived_not_forked() {
 #[test]
 fn shown_for_is_the_machine_filter() {
     // The hiding law in one table: a mill document shows the four
-    // mill sections in ORDER, a lathe only Turning, a mill-turn all
-    // five - and nothing else is ever listed, whatever else changes.
+    // mill sections in ORDER, a lathe Drilling (for the axial Drill
+    // the door admits since M13.5 A - re-blessed from `[Turning]`
+    // when the ribbon started reading `KindInfo::admits`, M13.5 B)
+    // and Turning, a mill-turn all five - and nothing else is ever
+    // listed, whatever else changes.
     assert_eq!(
         operation::shown_for(Kind::Mill),
         [Section::Mill2D, Section::Mill3D, Section::Drilling, Section::MultiAxis]
     );
-    assert_eq!(operation::shown_for(Kind::Lathe), [Section::Turning]);
+    assert_eq!(operation::shown_for(Kind::Lathe), [Section::Drilling, Section::Turning]);
     assert_eq!(operation::shown_for(Kind::MillTurn), Section::ORDER);
+    // The per-kind word behind the section list: a section shows
+    // exactly when `kinds_for` is non-empty, and the lathe's Drilling
+    // section carries the Drill kind alone.
+    for machine in [Kind::Mill, Kind::Lathe, Kind::MillTurn] {
+        for s in Section::ORDER {
+            let kinds = s.kinds_for(machine);
+            assert_eq!(
+                operation::shown_for(machine).contains(&s),
+                !kinds.is_empty(),
+                "{s:?} on a {machine:?}: shown iff a kind is admitted"
+            );
+            for i in kinds {
+                assert!(KindInfo::ALL[i].admits(machine), "row {i} listed but refused");
+            }
+        }
+    }
+    let drill = KindInfo::ALL
+        .iter()
+        .position(|k| k.ty == operation::OpType::Drill)
+        .expect("the Drill row");
+    assert_eq!(Section::Drilling.kinds_for(Kind::Lathe), vec![drill]);
 }
 
 #[test]

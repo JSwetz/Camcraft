@@ -345,6 +345,7 @@ fn post_section(ui: &mut Ui, state: &mut State) {
     let current = posting::post_of(&state.world);
     ui.label("Post");
     ui.label(posting::post_label(&state.world));
+    post_offer_banner(ui, state);
     ui.horizontal(|ui| {
         // The registry by name; the combo OFFERS only the dialects
         // that serve the mounted machine's kind (M13.5: a lathe lists
@@ -384,6 +385,40 @@ fn post_section(ui: &mut Ui, state: &mut State) {
             state.pending.push_back(CommandKind::SelectPostBuiltin);
         }
     });
+}
+
+/// The post offer (M13.5 B): when the mounted machine's kind is not
+/// served by the document's registry post, one warning line names
+/// what the current post serves and the registry's default for the
+/// mount, with the switch a button away - the SAME `SelectPost`
+/// command the combo queues, so undo puts the previous post back.
+/// Never a switch on the mount itself: the banner offers, the user
+/// chooses. The law (`posting::post_offer`) lives in app; this only
+/// draws it.
+fn post_offer_banner(ui: &mut Ui, state: &mut State) {
+    let Some((serves, offer)) = posting::post_offer(&state.world) else {
+        return;
+    };
+    let Some(name) = posting::post_name(&offer).map(str::to_owned) else {
+        return;
+    };
+    let ink = super::colorvision::text_inks(ui, &state.world).warn;
+    super::layout::status_banner(
+        ui,
+        "post_offer",
+        &format!("the current post serves a {serves}; switch to {name}?"),
+        ink,
+        &[],
+    );
+    if ui.button("Switch post").clicked() {
+        state.pending.push_back(match offer {
+            PostRef::Builtin => CommandKind::SelectPostBuiltin,
+            PostRef::Named(n) => CommandKind::SelectPostNamed(n),
+            // A file post is never the registry's default (post_offer
+            // only ever names one), so there is nothing to queue.
+            PostRef::File(_) => return,
+        });
+    }
 }
 
 /// The document's machine (M2.3 C, group completed by M3.3 stage C):

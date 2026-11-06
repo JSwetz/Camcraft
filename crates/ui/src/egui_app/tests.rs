@@ -1974,7 +1974,9 @@ fn every_kind_has_a_home_on_every_machine() {
             for (i, k) in camcraft_app::operation::KindInfo::ALL.iter().enumerate() {
                 let homes = inline.iter().filter(|j| **j == i).count()
                     + behind.iter().filter(|j| **j == i).count();
-                let want = usize::from(k.family().admits(machine));
+                // The command door's own word (M13.5 B): the lathe's
+                // Drill cell has its home behind the Drilling door.
+                let want = usize::from(k.admits(machine));
                 assert_eq!(
                     homes, want,
                     "kind {i} ({}) has {homes} homes on a {} at {w}px, wants {want}",
@@ -4337,5 +4339,76 @@ fn vertex_mode_hover_and_click_pick_a_corner() {
     assert!(
         (o.x - corner[0]).abs() + (o.y - corner[1]).abs() + (o.z - corner[2]).abs() < 1e-6,
         "G54 moved to the corner: {o:?}"
+    );
+}
+
+// ------------------------------------------------ M13.5 B: the post offer
+
+/// The Setup pane's post offer (M13.5 B): a lathe mounted over a
+/// document holding a mill post gets one warning line naming the
+/// registry's lathe post, never a switch on the mount itself; the
+/// button queues the same `SelectPost` the combo queues, so the post
+/// follows and undo puts the mill post back - at which point the
+/// offer stands again, and a document that already serves its
+/// machine shows no banner at all.
+#[test]
+fn a_lathe_over_a_mill_post_offers_the_lathe_post_and_rides_undo() {
+    use camcraft_app::posting;
+    use camcraft_app::schema::PostRef;
+    let mut harness = shell_harness();
+    harness.state_mut().state.ui_target = UiTarget::Stock;
+    harness.run();
+    assert!(
+        harness.query_by_label_contains("the current post serves").is_none(),
+        "a mill document with its mill post is served - no offer"
+    );
+    harness
+        .state_mut()
+        .state
+        .pending
+        .push_back(CommandKind::LoadBuiltinMachine("Lathe".to_owned()));
+    harness.run();
+    harness.run();
+    assert_eq!(
+        posting::post_of(&harness.state().state.world),
+        PostRef::Builtin,
+        "the mount never re-points the post by itself"
+    );
+    let line = "the current post serves a mill; switch to Fanuc Lathe?";
+    assert!(
+        harness.query_by_label_contains(line).is_some(),
+        "the offer names the lathe post (status: {})",
+        harness.state().state.status
+    );
+    // The post group sits low on the Stock page: bring the button
+    // into the scroll area's view before the press, as the pane's
+    // other deep rows are pressed.
+    harness.get_by_label("Switch post").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Switch post").click();
+    harness.run();
+    harness.run();
+    assert_eq!(
+        posting::post_of(&harness.state().state.world),
+        PostRef::Named("Fanuc Lathe".to_owned()),
+        "the action switches the post through SelectPost (status: {})",
+        harness.state().state.status
+    );
+    assert!(
+        harness.query_by_label_contains("the current post serves").is_none(),
+        "a served machine retires the offer"
+    );
+    harness.state_mut().state.pending.push_back(CommandKind::Undo);
+    harness.run();
+    harness.run();
+    assert_eq!(
+        posting::post_of(&harness.state().state.world),
+        PostRef::Builtin,
+        "undo restores the mill post (status: {})",
+        harness.state().state.status
+    );
+    assert!(
+        harness.query_by_label_contains(line).is_some(),
+        "and the offer stands again over the mounted lathe"
     );
 }
