@@ -42,6 +42,8 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         is_mill,
         spindle,
         fixtures,
+        workholding,
+        rotary_axis,
         part_solid,
         area,
     } = job;
@@ -2573,10 +2575,13 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                         | OpParams::MultiPassTurning { tolerance, .. } => Some(*tolerance),
                         _ => None,
                     },
-                    fixtures: &fixture_boxes,
-                    spindle,
+                    // Steel runs against the path below, under the
+                    // post gate's workholding laws (M13.8 owed).
+                    fixtures: &[],
+                    spindle: None,
                 },
             );
+            warns.extend(workholding_warnings(&path, &geom, &fixture_boxes, &workholding, rotary_axis, spindle));
             // The revolved-blade verdict (M5.2 C): the meridian
             // scan of what the bands leave. No sphere can speak it
             // - a grooved part is undercut BY DESIGN, material
@@ -2747,23 +2752,42 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             if depth_law == DepthLaw::Contain {
                 contain_into(&mut warns, &path, &m_gen.facets, &tool, depth_law, stl);
             }
-            if !fixture_boxes.is_empty() {
-                warns.extend(verify::bands_vs_fixtures(
-                    &path_world,
-                    &geom,
-                    &fixture_boxes,
-                    spindle,
-                    GOUGE_TOL,
-                ));
-                warns.extend(verify::rapids_vs_fixtures(
-                    &path_world,
-                    &geom,
-                    &fixture_boxes,
-                ));
-            }
+            warns.extend(workholding_warnings(
+                &path_world,
+                &geom,
+                &fixture_boxes,
+                &workholding,
+                rotary_axis,
+                spindle,
+            ));
             Ok((path_world, warns))
         }
     }
+}
+
+/// The fixture laws (c2)/(d2) at generation, exactly as the post gate
+/// runs them (`posting::fixture_problems`, M13.8 owed): the steel split
+/// by whether it turns with the part, the spindle housing riding posed
+/// rapids too. `all` is the unsplit list - empty means no steel this op
+/// could strike at all (the machine-derived table included), and the
+/// spindle band is never tested on its own. A fixed box loses a hit only
+/// where the machine frame proves the move clear; the turning boxes keep
+/// the path-frame verdict untouched.
+fn workholding_warnings(
+    path: &Toolpath,
+    geom: &crate::tools::ToolGeom,
+    all: &[crate::fixture::FixtureBox],
+    (turning, fixed): &(Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
+    axis: Option<verify::RotaryAxis>,
+    spindle: Option<(f64, f64)>,
+) -> Vec<Warning> {
+    if all.is_empty() {
+        return Vec::new();
+    }
+    let wh = verify::Workholding { turning, fixed, axis };
+    let mut warns = verify::bands_vs_workholding(path, geom, &wh, spindle, GOUGE_TOL);
+    warns.extend(verify::rapids_vs_workholding(path, geom, &wh, spindle));
+    warns
 }
 
 /// Which depth-aware law a 2D kind's path answers to beyond its flat

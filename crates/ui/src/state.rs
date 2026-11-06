@@ -19,8 +19,8 @@ use camcraft_app::commands::{
     ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
     MoveFixture, MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry,
-    SetColorVision, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin, SetWorkMaterial, TagFixture,
-    UntagFixture,
+    SetColorVision, SetFixtureFixed, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin,
+    SetWorkMaterial, TagFixture, UntagFixture,
     UpdateModel, theme_of, theme_set,
 };
 use camcraft_app::geometry::{
@@ -229,6 +229,12 @@ pub enum CommandKind {
         setup: Option<String>,
     },
     UntagFixture(String),
+    /// Whether the steel stands still while a rotary turns the part
+    /// (M13.8 (2)): the fixtures page's check row, one undo unit.
+    SetFixtureFixed {
+        name: String,
+        fixed: bool,
+    },
     MoveFixture {
         name: String,
         pos: [f64; 3],
@@ -2527,6 +2533,22 @@ impl State {
                     self.refuse(ErrorScope::Setup, format!("fixture not unmarked: {err}"));
                 }
             },
+            CommandKind::SetFixtureFixed { name, fixed } => {
+                match SetFixtureFixed::new(&self.world, &name, fixed) {
+                    Ok(command) => {
+                        self.history.execute(&self.world, command);
+                        self.doc_version += 1;
+                        self.status = if fixed {
+                            format!("{name} is fixed - it does not turn with the part")
+                        } else {
+                            format!("{name} turns with the part")
+                        };
+                    }
+                    Err(err) => {
+                        self.refuse(ErrorScope::Setup, format!("fixture not changed: {err}"));
+                    }
+                }
+            }
             CommandKind::MoveFixture { name, pos, yaw_deg } => {
                 let location = Location {
                     pos: Point3::new(pos[0], pos[1], pos[2]),

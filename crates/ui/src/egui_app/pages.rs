@@ -69,6 +69,7 @@ use crate::actions;
 use crate::interact;
 use crate::state::{CommandKind, ErrorScope, FixtureUi, ModelUi, PostView, State, UiTarget, quat_yaw_deg};
 
+use super::layout::{check_row, hint};
 use super::panes::kind_name;
 use super::theme::Tokens;
 
@@ -789,7 +790,7 @@ fn sheet_footer(ui: &mut Ui, state: &mut State) {
 /// row nobody can edit: it is derived prose, what the `.mch` says the
 /// table is, never an entity. Import rides the model worker (no parse
 /// in a command constructor) and tags on landing.
-fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
+pub(super) fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
     let u = state.units();
     let fixtures = camcraft_app::fixture::tagged(&state.world, ctx);
     let table = camcraft_app::fixture::table_box(&state.world);
@@ -838,6 +839,19 @@ fn fixtures_section(ui: &mut Ui, state: &mut State, ctx: Option<&str>) {
                 }
             });
         });
+        // Whether the steel turns with the part (M13.8 (2)): a chuck
+        // rides the rotary, a tailstock or a table stands still and is
+        // judged in the machine frame. The box edits a copy - the flag
+        // lands through `SetFixtureFixed`, one undo unit, never a poke.
+        let mut fixed = camcraft_app::fixture::def_of(&state.world, &entity).is_some_and(|d| d.fixed);
+        if check_row(ui, "Fixed (does not turn with the part)", &mut fixed).changed() {
+            state.pending.push_back(CommandKind::SetFixtureFixed { name: name.clone(), fixed });
+        }
+        hint(
+            ui,
+            "On: a table or tailstock - it stands still while a rotary turns the part, \
+             so it is collision-checked in the machine frame. Off: a chuck, turning with the part.",
+        );
         if is_draft {
             ui.horizontal(|ui| {
                 ui.label("    place");

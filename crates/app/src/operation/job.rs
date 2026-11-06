@@ -45,6 +45,16 @@ pub struct GenJob {
     pub(super) is_mill: bool,
     pub(super) spindle: Option<(f64, f64)>,
     pub(super) fixtures: Vec<crate::fixture::FixtureBox>,
+    /// `fixtures` split by whether the steel turns with the part
+    /// (M13.8 (2)): `.0` rides the rotary, `.1` stands still (the
+    /// declared-fixed models, then the machine table) - the post gate's
+    /// own split (`fixture::workholding_for`), read here so generation
+    /// and the gate speak one verdict.
+    pub(super) workholding: (Vec<crate::fixture::FixtureBox>, Vec<crate::fixture::FixtureBox>),
+    /// The rotary axis line a rotary kind turns its part about, in the
+    /// world frame; None stands the machine-frame judgement down and the
+    /// fixed steel keeps the path-frame verdict (the conservative one).
+    pub(super) rotary_axis: Option<crate::verify::RotaryAxis>,
     /// Whether `material` is a finished PART (a named model, or picks
     /// made only on models) rather than the setup's stock: the depth-
     /// aware verify judges the 2D kinds against its solid only then -
@@ -164,6 +174,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
     let area = area_ctx(world, op, tool.diameter * 0.5, &material, part_solid);
     let is_mill = crate::machine::kind_of(world) == crate::machine::Kind::Mill;
     let fixtures = crate::fixture::boxes_for(world, setup);
+    let workholding = crate::fixture::workholding_for(world, setup);
+    let rotary_axis = crate::fixture::rotary_axis_of(world, op);
     let spindle = crate::machine::of(world)
         .1
         .and_then(|m| m.spindle_d.zip(m.spindle_len))
@@ -187,6 +199,8 @@ pub fn collect_job(world: &World, op: &Operation, op_name: &str) -> Result<GenJo
         is_mill,
         spindle,
         fixtures,
+        workholding,
+        rotary_axis,
         part_solid,
         area,
     })

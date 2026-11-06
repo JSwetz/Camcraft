@@ -15,8 +15,10 @@ use flecs_ecs::prelude::World;
 
 use camcraft_app::cl::MoveKind;
 use camcraft_app::commands::{
-    AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetStock, TagFixture,
+    AddTool, CreateOperation, GenerateOperation, History, ImportModel, SetFixtureFixed, SetStock,
+    TagFixture,
 };
+use camcraft_app::verify::Warning;
 use camcraft_app::geometry::{quat_from_axis_angle, Mesh, Point3, Triangle};
 use camcraft_app::model;
 use camcraft_app::operation::{Height, OpParams, SrcRef};
@@ -153,4 +155,54 @@ fn the_same_steel_moved_clear_is_silent() {
     plant(&world, &mut h, Point3::new(c.x + dx - e, c.y - e, c.z - e), Point3::new(c.x + dx + e, c.y + e, c.z + e));
     let probs = fixture_problems(&world);
     assert!(probs.is_empty(), "steel clear of every link is silent: {:?}", &probs[..probs.len().min(4)]);
+}
+
+/// The op's own fixture verdict, in the gate's wording (`OP: <hit>`).
+fn generated_hits(world: &World) -> Vec<String> {
+    cache(world)
+        .warnings
+        .iter()
+        .filter(|w| matches!(w, Warning::FixtureHit { .. }))
+        .map(|w| format!("OP: {w}"))
+        .collect()
+}
+
+/// M13.8 owed: generation runs the post gate's workholding laws - the
+/// spindle on posed rapids, the steel split by whether it turns - so the
+/// op's warnings and the gate's problems are one verdict, hit for hit.
+#[test]
+fn the_generate_time_verdict_matches_the_post_gates() {
+    let (world, mut h) = world();
+    let c = under_holder(&world);
+    let e = 2.0;
+    plant(&world, &mut h, Point3::new(c.x - e, c.y - e, c.z - e), Point3::new(c.x + e, c.y + e, c.z + e));
+    // Workholding is a live gate input, never a stamp: the steel was
+    // planted after the path, so the op is regenerated to judge it.
+    h.execute(&world, GenerateOperation::new(&world, "OP").expect("regenerate"));
+    let generated = generated_hits(&world);
+    assert!(!generated.is_empty(), "the under-bar block convicts at generation too");
+    assert_eq!(generated, fixture_problems(&world), "generation and the gate speak one verdict");
+}
+
+/// The same block declared FIXED (a tailstock, not a chuck): the rotary
+/// turns the part so the tool only ever meets it from above - clear in
+/// the machine frame, so the generate-time hit clears with the gate's.
+#[test]
+fn a_fixed_block_clear_in_the_machine_frame_clears_the_generated_hit() {
+    let (world, mut h) = world();
+    let c = under_holder(&world);
+    let e = 2.0;
+    plant(&world, &mut h, Point3::new(c.x - e, c.y - e, c.z - e), Point3::new(c.x + e, c.y + e, c.z + e));
+    h.execute(&world, SetFixtureFixed::new(&world, "chuck", true).expect("declare it fixed"));
+    h.execute(&world, GenerateOperation::new(&world, "OP").expect("regenerate"));
+    let generated = generated_hits(&world);
+    assert!(generated.is_empty(), "a fixed block under the bar is clear on the machine: {generated:?}");
+    assert!(fixture_problems(&world).is_empty(), "and the gate agrees");
+    // Back to turning (undo the regenerate, then the declaration): the
+    // path-frame verdict returns, at generation and at the gate alike.
+    assert!(h.undo(&world) && h.undo(&world), "two units to walk back");
+    h.execute(&world, GenerateOperation::new(&world, "OP").expect("regenerate"));
+    let generated = generated_hits(&world);
+    assert!(!generated.is_empty(), "turning again, the block convicts");
+    assert_eq!(generated, fixture_problems(&world));
 }

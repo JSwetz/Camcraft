@@ -83,6 +83,8 @@ mod tests;
 #[cfg(test)]
 mod heights_tests;
 #[cfg(test)]
+mod fixture_tests;
+#[cfg(test)]
 mod footer_tests;
 #[cfg(test)]
 mod dialog_tests;
