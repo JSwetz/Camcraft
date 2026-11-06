@@ -176,6 +176,8 @@ pub fn collect(world: &World) -> ProjectFile {
         // the pin's clothes - and the default is what every pre-M6.2
         // document is).
         pinned: crate::ribbon::pinned_of(world),
+        // No stated material writes no key (the theme's law again).
+        material: crate::cutting::material_of(world).map(|m| m.word().to_owned()),
         entities,
     }
 }

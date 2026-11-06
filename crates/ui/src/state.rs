@@ -15,11 +15,12 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, Instant};
 
 use camcraft_app::commands::{
-    ActivateSetup, AddTool, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
+    ActivateSetup, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
     CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
     MoveFixture, MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry,
-    SetColorVision, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin, TagFixture, UntagFixture,
+    SetColorVision, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin, SetWorkMaterial, TagFixture,
+    UntagFixture,
     UpdateModel, theme_of, theme_set,
 };
 use camcraft_app::geometry::{
@@ -143,6 +144,11 @@ pub enum CommandKind {
         tool: Tool,
     },
     DeleteTool(String),
+    /// The document's workpiece material (M13.2); `None` states none.
+    SetWorkMaterial(Option<camcraft_app::tools::WorkMaterial>),
+    /// The op page's "Apply suggestion" (M13.2): feed + spindle speed
+    /// from the cutting-data table, one undo unit.
+    ApplyCuttingData(String),
     /// New operation entity; deliberately never generated until
     /// [`CommandKind::GenerateOperation`] runs.
     CreateOperation {
@@ -597,6 +603,10 @@ pub struct ToolUi {
     pub material_group: String,
     pub rpm: f64,
     pub feed: f64,
+    /// M13.2: carried through the draft so an editor Apply never wipes
+    /// what the op page's Feeds section stated.
+    pub tool_material: Option<camcraft_app::tools::ToolMaterial>,
+    pub flutes: Option<u32>,
 }
 
 impl Default for ToolUi {
@@ -641,6 +651,8 @@ impl ToolUi {
             material_group: t.material_group.clone(),
             rpm: t.rpm,
             feed: t.feed,
+            tool_material: t.tool_material,
+            flutes: t.flutes,
         }
     }
 
@@ -674,6 +686,8 @@ impl ToolUi {
             material_group: self.material_group.clone(),
             rpm: self.rpm,
             feed: self.feed,
+            tool_material: self.tool_material,
+            flutes: self.flutes,
         }
     }
 }
@@ -2164,6 +2178,23 @@ impl State {
                     Err(err) => self.refuse(ErrorScope::Tool, format!("tool not updated: {err}")),
                 }
             }
+            CommandKind::SetWorkMaterial(m) => match SetWorkMaterial::new(&self.world, m) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("workpiece material: {}", m.map_or("not stated", |m| m.label()));
+                }
+                Err(err) => self.refuse(ErrorScope::Operation, format!("material not set: {err}")),
+            },
+            CommandKind::ApplyCuttingData(name) => match ApplyCuttingData::new(&self.world, &name) {
+                Ok(command) => {
+                    let s = command.suggestion();
+                    self.status = format!("{name}: suggestion applied - {:.0} rpm, {:.0} mm/min", s.rpm, s.feed);
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                }
+                Err(err) => self.refuse(ErrorScope::Operation, format!("suggestion not applied: {err}")),
+            },
             CommandKind::DeleteTool(name) => match DeleteTool::new(&self.world, &name) {
                 Ok(command) => {
                     self.history.execute(&self.world, command);

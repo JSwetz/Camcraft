@@ -1,0 +1,112 @@
+//! Cutting-data commands (M13.2): `SetWorkMaterial` states the
+//! document's workpiece material; `ApplyCuttingData` lands an
+//! operation's feeds-and-speeds suggestion as ONE undo unit - the
+//! feed through `EditOperationParams`, the spindle speed through
+//! `ChangeTool` (the tool's rpm IS the program's spindle word).
+//!
+//! Provenance: our own commands, the theme's snapshot-and-restore law
+//! for the singleton and a composite of our own two edit commands for
+//! the suggestion; specced from ROADMAP M13.2. Never silent: the
+//! suggestion is computed and validated at construction, and a
+//! suggestion equal to what the op already runs is refused (no no-ops
+//! in the history), so a click is the only way numbers move.
+
+use flecs_ecs::prelude::World;
+
+use crate::commands::{ChangeTool, Command, CommandError, EditOperationParams};
+use crate::cutting::{self, Suggestion};
+use crate::model;
+use crate::tools::WorkMaterial;
+
+pub struct SetWorkMaterial {
+    prev: Option<WorkMaterial>,
+    next: Option<WorkMaterial>,
+}
+
+impl SetWorkMaterial {
+    pub fn new(world: &World, next: Option<WorkMaterial>) -> Result<Self, CommandError> {
+        let prev = cutting::material_of(world);
+        if prev == next {
+            return Err(CommandError::Invalid("that workpiece material is already stated".to_owned()));
+        }
+        Ok(Self { prev, next })
+    }
+}
+
+impl Command for SetWorkMaterial {
+    fn apply(&self, world: &World) {
+        cutting::material_set(world, self.next);
+    }
+
+    fn invert(&self, world: &World) {
+        cutting::material_set(world, self.prev);
+    }
+}
+
+/// The suggestion, applied: either half may be absent when that number
+/// already matches, never both.
+pub struct ApplyCuttingData {
+    edit: Option<EditOperationParams>,
+    tool: Option<ChangeTool>,
+    suggestion: Suggestion,
+}
+
+impl ApplyCuttingData {
+    pub fn new(world: &World, name: &str) -> Result<Self, CommandError> {
+        let s = cutting::suggest(world, name).map_err(CommandError::Invalid)?;
+        let op = model::find_by_name(world, name)
+            .and_then(|e| model::operation_of(world, &e))
+            .ok_or_else(|| CommandError::NotFound(name.to_owned()))?;
+        let tool = model::find_by_name(world, &op.tool)
+            .and_then(|t| model::tool_of(world, &t))
+            .ok_or_else(|| CommandError::NotFound(op.tool.clone()))?;
+        let mut params = op.params.clone();
+        let feed = cutting::feed_mut(&mut params).ok_or_else(|| {
+            CommandError::Invalid(format!("a {} operation has no milling feed to suggest", op.params.kind()))
+        })?;
+        let edit = if *feed == s.feed {
+            None
+        } else {
+            *feed = s.feed;
+            Some(EditOperationParams::new(world, name, params)?)
+        };
+        let change = if tool.rpm == s.rpm {
+            None
+        } else {
+            Some(ChangeTool::new(world, &op.tool, crate::tools::Tool { rpm: s.rpm, ..tool })?)
+        };
+        if edit.is_none() && change.is_none() {
+            return Err(CommandError::Invalid(format!(
+                "{name} already runs the suggestion ({:.0} rpm, {:.0} mm/min)",
+                s.rpm, s.feed
+            )));
+        }
+        Ok(Self { edit, tool: change, suggestion: s })
+    }
+
+    /// What was applied, for the status line.
+    #[must_use]
+    pub fn suggestion(&self) -> &Suggestion {
+        &self.suggestion
+    }
+}
+
+impl Command for ApplyCuttingData {
+    fn apply(&self, world: &World) {
+        if let Some(e) = &self.edit {
+            e.apply(world);
+        }
+        if let Some(t) = &self.tool {
+            t.apply(world);
+        }
+    }
+
+    fn invert(&self, world: &World) {
+        if let Some(t) = &self.tool {
+            t.invert(world);
+        }
+        if let Some(e) = &self.edit {
+            e.invert(world);
+        }
+    }
+}

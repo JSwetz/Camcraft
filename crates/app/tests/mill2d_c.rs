@@ -64,6 +64,8 @@ fn thread_mill(diameter: f64, pitch: f64) -> Tool {
         material_group: "steel".into(),
         rpm: 6000.0,
         feed: 400.0,
+        tool_material: None,
+        flutes: None,
     }
 }
 

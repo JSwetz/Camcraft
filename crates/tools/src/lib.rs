@@ -10,4 +10,5 @@
 //! any vendor catalog file. The catalog is user data, not code -
 //! this crate only says what a tool record IS.
 
+pub mod cutting;
 pub mod tools;

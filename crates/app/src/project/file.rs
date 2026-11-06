@@ -105,6 +105,12 @@ pub struct ProjectFile {
     /// table still opens, showing only the kinds this build can name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned: Vec<usize>,
+    /// The document's workpiece material (M13.2), additive (no version
+    /// step): the cutting-data table's word. An absent key states no
+    /// material - what every older document was - and states nothing
+    /// a check could read; an unknown word refuses the file by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
     pub entities: Vec<EntityDto>,
 }
 
@@ -229,6 +235,22 @@ pub struct ToolDto {
     pub material_group: String,
     pub rpm: f64,
     pub feed: f64,
+    /// M13.2 additions, additive (no version step): absent from any
+    /// older file, serde-defaults to "not stated" - exactly what every
+    /// tool of an older file was, since nothing then read either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_material: Option<ToolMaterialDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flutes: Option<u32>,
+}
+
+/// The file mirror of `cutting::ToolMaterial` (M13.2): a word, so an
+/// unknown one is a named refusal at read.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolMaterialDto {
+    Hss,
+    Carbide,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -295,6 +317,11 @@ impl ToolDto {
             material_group: t.material_group.clone(),
             rpm: t.rpm,
             feed: t.feed,
+            tool_material: t.tool_material.map(|m| match m {
+                crate::tools::ToolMaterial::Hss => ToolMaterialDto::Hss,
+                crate::tools::ToolMaterial::Carbide => ToolMaterialDto::Carbide,
+            }),
+            flutes: t.flutes,
         }
     }
 
@@ -327,6 +354,11 @@ impl ToolDto {
             material_group: self.material_group.clone(),
             rpm: self.rpm,
             feed: self.feed,
+            tool_material: self.tool_material.map(|m| match m {
+                ToolMaterialDto::Hss => crate::tools::ToolMaterial::Hss,
+                ToolMaterialDto::Carbide => crate::tools::ToolMaterial::Carbide,
+            }),
+            flutes: self.flutes,
         }
     }
 }

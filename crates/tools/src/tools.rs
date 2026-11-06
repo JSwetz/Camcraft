@@ -17,6 +17,8 @@
 //! component; the operation layer reads radii and lengths out of it for
 //! generation and the shank-reach law in `verify`.
 
+pub use crate::cutting::{ToolMaterial, WorkMaterial};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolKind {
     EndMill,
@@ -159,6 +161,14 @@ pub struct Tool {
     /// material - the machine operator's starting point, not a limit.
     pub rpm: f64,
     pub feed: f64,
+    /// What the cutting edge is made of (M13.2) - the column of the
+    /// cutting-data table the feeds-and-speeds suggestion reads.
+    /// `None` = not stated, and nothing is suggested for it.
+    pub tool_material: Option<ToolMaterial>,
+    /// Cutting edges (flutes, z) (M13.2): the feed-per-tooth multiplier
+    /// and the chip-thickness reading of the power estimate. `None` =
+    /// not stated; a stated count is 1..=32.
+    pub flutes: Option<u32>,
 }
 
 impl Tool {
@@ -199,6 +209,7 @@ impl Tool {
             && self.holder_len >= 0.0
             && self.rpm > 0.0
             && self.feed > 0.0
+            && self.flutes.is_none_or(|z| (1..=32).contains(&z))
             && match self.kind {
                 // A point that cannot self-center is not a drill, and a
                 // tap with no thread pitch has no feed the cycle could
@@ -408,12 +419,14 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         material_group: "aluminum".into(),
         rpm,
         feed,
+        tool_material: None,
+        flutes: None,
     };
     // Cycle tools: straight-shank bodies (a jobber drill's shank is its
     // own diameter), no corner radius, 118-degree points, ISO coarse
     // pitches; a tap's feed number is the rpm x pitch starting value.
     let cy = |kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| {
-        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, nose_radius: 0.0, width: 0.0, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed }
+        Tool { kind, diameter, corner_r: 0.0, tip_angle, pitch, nose_radius: 0.0, width: 0.0, flute_len, shank_d, shank_len: 40.0, holder_d: 44.0, holder_len: 35.0, material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None }
     };
     // Turning (M5.2 A): the facing insert - a plain toolholder shank,
     // no holder stack (the turret IS the holder), an 0.8 nose like the
@@ -422,7 +435,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     let tn = |diameter: f64, nose_radius: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Turning, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
         nose_radius, width: 0.0, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
-        material_group: "aluminum".into(), rpm, feed,
+        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None,
     };
     // Grooving (M5.2 C): the blade insert on the same toolholder body -
     // the ground WIDTH is the tool, the nose and the taper are not
@@ -432,7 +445,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     let gt = |diameter: f64, width: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Groove, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
         nose_radius: 0.0, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
-        material_group: "aluminum".into(), rpm, feed,
+        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None,
     };
     // Threading (M5.2 D): the V-form insert on the same toolholder
     // body - the GROUND PROFILE (width across the crest, the flanks'
@@ -443,7 +456,7 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     let td = |diameter: f64, width: f64, form_angle: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Thread, diameter, corner_r: 0.0, tip_angle: form_angle, pitch: 0.0,
         nose_radius: 0.0, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
-        material_group: "aluminum".into(), rpm, feed,
+        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None,
     };
     // Form gauges (M5.2 E2): the crown radius lives in `nose_radius`
     // (the arc of the ground edge in the work's meridian - the
@@ -454,9 +467,9 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
     let fg = |diameter: f64, crown_r: f64, width: f64, flute_len: f64, shank_d: f64, rpm: f64, feed: f64| Tool {
         kind: ToolKind::Form, diameter, corner_r: 0.0, tip_angle: 0.0, pitch: 0.0,
         nose_radius: crown_r, width, flute_len, shank_d, shank_len: 60.0, holder_d: 0.0, holder_len: 0.0,
-        material_group: "aluminum".into(), rpm, feed,
+        material_group: "aluminum".into(), rpm, feed, tool_material: None, flutes: None,
     };
-    vec![
+    let mut v = vec![
         ("EM-0200-2FL", em(2.0, 0.0, ToolKind::EndMill, 6.0, 4.0, 18000.0, 600.0)),
         ("EM-0300-2FL", em(3.0, 0.0, ToolKind::EndMill, 9.0, 4.0, 15000.0, 900.0)),
         ("EM-0400-2FL", em(4.0, 0.0, ToolKind::EndMill, 12.0, 6.0, 12000.0, 1200.0)),
@@ -498,7 +511,29 @@ pub fn catalog() -> Vec<(&'static str, Tool)> {
         ("TD-1732-60", td(16.0, 1.732, 60.0, 8.0, 16.0, 800.0, 120.0)),
         ("FG-0600-04", fg(16.0, 6.0, 4.0, 8.0, 16.0, 1500.0, 40.0)),
         ("FG-1200-08", fg(16.0, 12.0, 8.0, 8.0, 16.0, 1200.0, 50.0)),
-    ]
+    ];
+    // Cutting data (M13.2): the rotating mills state their edge
+    // material and flute count - carbide, as the speeds above were
+    // set for; the count the name carries (2FL/4FL), two on the ball
+    // and bull noses, one on the single-flute chamfer mills. Drills,
+    // taps and the turning steels state nothing: the table does not
+    // speak for them.
+    for (name, t) in &mut v {
+        let z = if name.ends_with("-4FL") {
+            Some(4)
+        } else if name.starts_with("CM-") {
+            Some(1)
+        } else if name.starts_with("EM-") || name.starts_with("BN-") || name.starts_with("BB-") {
+            Some(2)
+        } else {
+            None
+        };
+        if z.is_some() {
+            t.flutes = z;
+            t.tool_material = Some(ToolMaterial::Carbide);
+        }
+    }
+    v
 }
 
 #[cfg(test)]

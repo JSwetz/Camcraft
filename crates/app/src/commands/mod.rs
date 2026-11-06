@@ -3,6 +3,8 @@
 //! (AGENTS.md). Parsing and validation happen at command *construction*, so
 //! malformed input never enters the history ("validate early").
 
+// M13.2: workpiece material + the feeds-and-speeds suggestion.
+pub mod cutting_data;
 pub mod delete_entity;
 pub mod fixture;
 pub mod import_model;
@@ -24,6 +26,7 @@ pub mod update_model;
 
 use flecs_ecs::prelude::World;
 
+pub use cutting_data::{ApplyCuttingData, SetWorkMaterial};
 pub use delete_entity::DeleteEntity;
 pub use fixture::{
     AddFixtureModel, DeleteFixture, MoveFixture, TagFixture, UntagFixture,

@@ -9530,3 +9530,43 @@ tangency and are not done.
 (6) **One golden regenerated**: contour_bore_arc_entry.cl, 52 -> 26
 moves (three YZ G2 arcs). Known gap: the user's part enters 4.4 deg off
 X, so it stays chords; an axis-aligned lead start is in M11.3's brief.
+
+## M13.2 - machine limits and cutting data: seven decisions (2026-11-06)
+
+(1) **Spindle power joins the machine-check gate.** Pc = ae*ap*vf*kc /
+(60e6*eta), with kc = kc1.1*hm^-mc and hm the mean chip thickness. It
+claims only when machine power, document material, tool flutes and an
+engagement the op fixes are all stated (the unstated-limit law). RPM
+and feed checks already existed and already blocked the post; they now
+have tests proving it.
+
+(2) **Worst case for pocket/offset/slot (ae = D)** - it may over-warn,
+never under-warn. Adaptive ladders use ae = load*D; a face with
+stepdown uses min(stepover, D). Contour, finishing and multi-axis ops
+make no power claim.
+
+(3) **A homegrown table of six materials** (ISO 513 letters as public
+classification; our own numbers inside Machinery's Handbook / Kienzle
+ranges). Suggestions take the middle of each range; fz scales with
+diameter in five bands of our own choosing. Spindle efficiency is a
+fixed 0.8 (a `.mch` key is a possible follow-on).
+
+(4) **Chip thinning raises the suggested feed where the op rides an
+optimal load** (hex = fz*sin(phi), phi = acos(1 - 2ae/D)), floored at 5%
+load so the factor can't run away (at most ~2.29x). Clamped to the
+machine's stated spindle range and XY feed, each clamp named.
+
+(5) **The rpm lives on the tool**, so "Apply suggestion" changes it for
+every op using that tool - one composite undo step (EditOperationParams
++ ChangeTool). Dropped: a per-op spindle override (a schema change on
+every op). The suggestion never overwrites typed numbers (disabled
+while the page has unapplied edits).
+
+(6) **Unstated never means assumed.** No flutes or tool material means
+no suggestion and no power claim. Catalog mills now state carbide and
+their flute count; drills, taps and turning tools don't.
+
+(7) **Format and UI.** The document material, tool material and flutes
+are additive keys, skipped when unset, so no version bump; an unknown
+material word refuses the file by name. They're edited from a "Cutting
+data" group on the Feeds tab, so the tool editor's snapshot holds.

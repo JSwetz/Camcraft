@@ -466,6 +466,8 @@ fn cycle_tool(kind: ToolKind, diameter: f64, tip_angle: f64, pitch: f64) -> Tool
         material_group: String::from("steel"),
         rpm: 500.0,
         feed: 200.0,
+        tool_material: None,
+        flutes: None,
     }
 }
 

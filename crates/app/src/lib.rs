@@ -7,6 +7,7 @@
 pub use camcraft_cl::cl;
 pub mod cli;
 pub mod commands;
+pub mod cutting;
 pub use camcraft_motion::drilling;
 pub mod fixture;
 pub use camcraft_motion::finishing3d;

@@ -104,10 +104,10 @@ pub struct Machine {
     /// single place that decides what is statable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    /// Spindle motor power, kW (stage C's numbers). Display and setup
-    /// sheet today; the per-material power model that could judge a
-    /// program against it belongs to the tool library's speeds/feeds
-    /// work, so checking it would compare against nothing.
+    /// Spindle motor power, kW (stage C's numbers). Since M13.2 the
+    /// machine check judges each op's estimated cutting power (the
+    /// document material's Kienzle constants over the op's removal
+    /// rate, `app::cutting`) against it; unstated checks nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spindle_power: Option<f64>,
     /// Tool changer capacity, slots (stage C): `tooling`'s

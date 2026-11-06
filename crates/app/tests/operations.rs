@@ -6350,6 +6350,8 @@ fn stub_tool() -> Tool {
         material_group: "aluminum".into(),
         rpm: 4000.0,
         feed: 800.0,
+        tool_material: None,
+        flutes: None,
     }
 }
 

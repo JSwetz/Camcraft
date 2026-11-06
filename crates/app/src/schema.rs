@@ -270,6 +270,13 @@ impl ColorVision {
     }
 }
 
+/// The document's workpiece material (M13.2), a flecs singleton set
+/// by `SetWorkMaterial` and saved with the project. `None` (and an
+/// absent singleton) states no material: nothing is suggested for it
+/// and no power estimate is claimed against it.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkMaterialDef(pub Option<crate::tools::WorkMaterial>);
+
 /// Ribbon pins (M6.2): the kind indices the user pinned, in pin order -
 /// the ribbon's own Pinned section reads this singleton. A document
 /// SETTING like the theme reference (saved with the project), but NOT
@@ -308,6 +315,7 @@ pub fn register_schema(world: &World) {
     world.component::<PostRef>();
     world.component::<ThemeRef>();
     world.component::<ColorVision>();
+    world.component::<WorkMaterialDef>();
     world.component::<RibbonPins>();
     world.component::<SetupDef>();
     world.component::<ActiveSetup>();

@@ -489,6 +489,14 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
             "machine definition states a limit that cannot be meant",
         ));
     }
+    // The workpiece material (M13.2): a word of the built-in table, or
+    // a named refusal - never a silent "no material".
+    let material = match file.material.as_deref() {
+        None => None,
+        Some(w) => Some(crate::tools::WorkMaterial::from_word(w).ok_or_else(|| {
+            corrupt(format!("unknown workpiece material {w:?}"))
+        })?),
+    };
     if file.active_setup.as_deref().is_some_and(str::is_empty) {
         return Err(corrupt(
             "the active setup names nothing - an empty setup name",
@@ -539,6 +547,8 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
     // stale singleton from the previous document can never leak in
     // (the theme's law, worn in the pin's clothes).
     crate::ribbon::pinned_set(world, &file.pinned);
+    // Opening lands the material too - including None (the units law).
+    crate::cutting::material_set(world, material);
     for dto in file.entities {
         let kind = dto.kind.unwrap_or(EntityKind::Model);
         let entity = model::spawn(world, &dto.name);

@@ -303,6 +303,8 @@ fn taper(diameter: f64, tip_angle: f64, flute_len: f64) -> Tool {
         material_group: "aluminum".into(),
         rpm: 8000.0,
         feed: 1500.0,
+        tool_material: None,
+        flutes: None,
     }
 }
 

@@ -163,6 +163,27 @@ pub fn check_document(world: &World, machine: &Machine) -> Result<MachineCheck, 
                 say(&mut out, format!("{name}: tool {} runs {:.0} rpm, below the machine's {lo:.0}", op.tool, tool.rpm));
             }
         }
+        // Spindle power (M13.2): the estimate the cutting data makes
+        // of the op's own engagement against the stated motor. Every
+        // input must be stated - machine power, document material,
+        // tool flutes, an engagement the op's numbers fix - or no
+        // claim is made (the unstated-limit law, `crate::cutting`).
+        if let Some(limit) = machine.spindle_power
+            && let Some(mat) = crate::cutting::material_of(world)
+            && let Some(p) = crate::cutting::power_of(&op.params, &tool, mat)
+            && p.kw > limit
+        {
+            say(
+                &mut out,
+                format!(
+                    "{name}: spindle power estimated {:.2} kW ({:.1} cm3/min of {} at kc {:.0} N/mm2), above the machine's {limit:.2} kW",
+                    p.kw,
+                    p.mrr / 1000.0,
+                    mat.label(),
+                    p.kc
+                ),
+            );
+        }
         // The tool table: long or fat cutters the magazine refuses.
         // "Tool length" is the whole protrusion from the spindle nose
         // to the tip - what the magazine's clearance measures: cutter,

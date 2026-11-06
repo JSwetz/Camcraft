@@ -67,6 +67,8 @@ pub(super) fn drill_tool(d: f64) -> Tool {
         material_group: "aluminum".into(),
         rpm: 10_000.0,
         feed: 120.0,
+        tool_material: None,
+        flutes: None,
     }
 }
 

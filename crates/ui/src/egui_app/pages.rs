@@ -462,6 +462,10 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
         }
     }
     params_fields(ui, state, tab);
+    if tab == SEC_FEEDS {
+        // M13.2: material, edge, flutes and the suggestion.
+        super::feeds_page::cutting_group(ui, state, &target);
+    }
     if tab == SEC_GEO {
         // The Boundary group (M11.5): how far the area reaches, under
         // the picks that say where it is.
