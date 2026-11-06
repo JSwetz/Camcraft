@@ -1005,7 +1005,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
         // way: `stepdown` infeeds RADII, `top_z`/`bottom_z` window
         // the STATIONS (the kernel's own `(h - o.z)/u.z` law), and
         // the rapids plane is the kernel's, one infeed and a tool
-        // radius off the skin - what resolves here only stands when
+        // radius off the stock's skin (M13.8) - what resolves here only stands when
         // the axis stands up. The refusal for a model that says
         // nothing of turning comes from the same axis fit the twins
         // invoke, by name.
@@ -1067,7 +1067,15 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // stated here so the field's double life is on record:
             // the kernel chords by its own arc-fit tolerance.
             let _ = tolerance;
-            let path = crate::multiaxis::rotary_offset(&material.facets, &pp, &axis)?;
+            // M13.8: the ladder peels from the setup STOCK's outer
+            // radius about the fitted axis (the part's skin when no
+            // separate stock is set, or when the stock sits inside it).
+            let path = crate::multiaxis::rotary_offset_in(
+                &material.facets,
+                stock_facets.as_deref(),
+                &pp,
+                &axis,
+            )?;
             (region, path)
         }
         // M5.1 stage E3: the stamped ladder. The positions are the

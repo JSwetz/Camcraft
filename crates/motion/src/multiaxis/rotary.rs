@@ -27,6 +27,10 @@
 //! a bar lying nearly flat refuses the contour's height law (its
 //! rings are the parallel passes) - each kind says so by name
 //! rather than invent a frame the parameters cannot speak in.
+//! The raster's links do not survive the laying-down: its Z lifts are
+//! rebuilt RADIAL - out along the radius to the retract cylinder,
+//! index, back in - by [`super::rotary_links`], and both kinds open on
+//! the clearance pose over their first cut (M13.8).
 //!
 //! The world exit is spelled here, not through `world_path`: that
 //! stamps the frame's CONSTANT pose where these paths carry a
@@ -52,6 +56,7 @@ use crate::machining2d::{GenError, ARC_FIT_TOL};
 
 use super::axis::{self, Axis};
 use super::retip::{along, radial_at, tip_of};
+use super::rotary_links;
 use super::tilt::{command_axis, AxisControl};
 
 /// The axis' tilt below which "standing" and "laid" trade places:
@@ -126,7 +131,14 @@ pub fn rotary_parallel(
     let local = f.local_facets(facets);
     let q = stations(&local, p, &f, &|h| h - ax.origin.z);
     let base = finishing3d::swarf(&local, &q, 1.0, 0.0)?;
-    posed(&f, &base, &ax, c, p.tool_diameter * 0.5)
+    // M13.8: the raster's Z lifts become radial links - out along the
+    // radius to the retract cylinder, index, back in along the radius
+    // ([`rotary_links`]); the planes read as radii in the laid frame.
+    let r = p.tool_diameter * 0.5;
+    let hop = q.retract_z.map_or(q.clearance_z, |h| h.min(q.clearance_z));
+    let rho = rotary_links::local_rho_max(&local);
+    let base = rotary_links::radial_relink(&base, r, q.clearance_z, hop, rho, p.feed, p.plunge_feed)?;
+    posed(&f, &base, &ax, c, r)
 }
 
 /// The contour frame: the axis as local z, the canonical foot as
@@ -186,12 +198,26 @@ fn posed(
             "rotary cannot pose drill cycles - the spindle never stands still here".into(),
         ));
     }
+    if base.moves.is_empty() {
+        return Err(GenError::Empty("the rotary ladder planned no moves".into()));
+    }
     let center = |q: Point3| along(f.to_world(q), f.axis, r);
-    let c0 = center(base.start().unwrap_or(Point3::ZERO));
-    let mut b = PathBuilder::new(tip_of(c0, None, r));
-    let mut held: Option<[f64; 3]> = None;
+    // M13.8: the program opens ON the clearance pose its opening
+    // traverse was heading for, holding the pure radial there - never
+    // at the frame's home column (the axis line itself, for rings).
+    let (skip, at) = rotary_links::opening(base);
+    let c0 = center(at);
+    let pose0 = radial_at(ax, c0);
+    if pose0.is_none() {
+        eprintln!("multiaxis: the rotary start {c0:?} stands on the axis; it opens upright");
+    }
+    let t0 = tip_of(c0, pose0, r);
+    let mut b = PathBuilder::new(t0);
+    b.set_axis(pose0);
+    b.push(MoveKind::Rapid, t0, None);
+    let mut held: Option<[f64; 3]> = pose0;
     let mut prev = c0;
-    for mv in &base.moves {
+    for mv in &base.moves[skip..] {
         let air = mv.kind == MoveKind::Rapid;
         let mut ends: Vec<Point3> = match mv.arc {
             None => Vec::new(),

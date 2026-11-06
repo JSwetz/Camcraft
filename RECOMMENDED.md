@@ -9914,3 +9914,34 @@ are refused near tangent points; that is accepted as conservative.
 the entry/exit seam, owned by the lead in / lead out (M11.3), and is
 named in the op notes. Dropped: rounding the seam, which would move
 the lead's tangent point.
+
+## M13.8 A: rotary start, stock radius, radial links: four decisions (2026-11-06)
+
+(1) **A rotary program opens on its clearance pose.** The planner's
+opening traverse from its frame home is skipped. In a rotary frame
+that home is the axis line or angle zero: a Contour started at radius
+0, the others at the wrong angle. The program now opens with a rapid
+at the clearance radius above the first cut, on that cut's own angle,
+holding the pure radial pose (`multiaxis/rotary_links.rs::opening`).
+
+(2) **Rotary Offset peels from the stock's outer radius** about the
+fitted axis, never less than the part's own; with no separate stock
+the output is unchanged move for move. Before: over a d20 bar on an
+r6 part, the first level sat at radius 6, rapids hopped at 9.5
+through uncut bar, and verify convicted RapidInStock. After: the first
+level is at radius 10 and verify gives zero warnings.
+
+(3) **Rotary Parallel links are radial.** Each link is a radial
+retract to the retract cylinder, an index around it (chords sized by
+`ARC_FIT_TOL` sagitta, short way round), and a radial plunge into the
+next pass. A clearance or retract that does not clear the part's
+radius is refused by name. Treated as a correctness fix, not a
+strategy fork: a Z lift on a turned bar is a sideways sweep of a
+radially posed tool, never a valid choice, so it is not a user
+parameter.
+
+(4) **Owed (M13.8):**
+- Offset clears both laps of the developed strip at air levels:
+  11,967 moves on a d20 bar vs about 2,064. Safe, but wasteful.
+- Downward radial retracts below the equator rely on the machine and
+  fixture check for anything inside the clearance cylinder.

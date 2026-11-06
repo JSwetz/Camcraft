@@ -5605,7 +5605,8 @@ fn rotary_offset_params(top_z: f64, bottom_z: f64) -> OpParams {
     // developed arc, plain like the pocket's - no scallop cos-law to
     // fall back on - and the infeed is RADIAL. `clearance_z` is
     // honest window dressing here: the kernel names its own rapids
-    // plane one infeed and one tool radius outside the skin, because
+    // plane one infeed and one tool radius outside the stock's skin
+    // (M13.8; the part's when the stock is the part itself), because
     // a world-Z hop would be a plunge into the bar.
     OpParams::RotaryOffset {
         links: camcraft_app::links::Links::ROUGH3D,
@@ -5758,11 +5759,17 @@ fn rotary_parallel_generates_radial_axes_and_verifies_clean() {
     // there would carry - its center r up the pose from the posted
     // tip, its lowest point r under that (M13 pivot law): the ladder
     // never sinks below its Bottom, and its last line IS the Bottom.
+    // The links are not the raster (M13.8): a pass on the flank under
+    // the equator retracts along ITS radius onto the 25 mm clearance
+    // cylinder, below the Bottom plane and in air - those retract
+    // ends are judged by the verdict above, not by the Bottom law.
     let low = |m: &camcraft_app::cl::Move| m.to.z + 3.0 * m.axis.map_or(1.0, |a| a[2]) - 3.0;
+    let on_clearance = |m: &&camcraft_app::cl::Move| (m.to.y * m.to.y + m.to.z * m.to.z).sqrt() >= 25.0 - 1e-6;
     let lowest = t
         .moves
         .iter()
         .filter(|m| matches!(m.kind, MoveKind::Feed | MoveKind::Plunge))
+        .filter(|m| !on_clearance(m))
         .map(low)
         .fold(f64::INFINITY, f64::min);
     assert!(
@@ -5941,12 +5948,12 @@ fn rotary_offset_peels_the_wrap_ladder_and_verifies_clean() {
     // swept sphere is pose-invariant about its own axis, so Envelope
     // verify tells the truth for a rough). The stock is deliberately
     // a ROUND bar turned to the part's OD (d12.4 about the lathe's
-    // r6): the kernel peels from the PART's skin inward and its hops
-    // ride one infeed and one radius outside that skin (ball center
-    // rho 9.5). M13: on the d30 bar this test once used, those hops
-    // run through 9 mm of skin the ladder never peels - the radial
-    // field law convicts them (rotary_verify's oversized-bar case),
-    // where the old vertical column read them as cleared air.
+    // r6): since M13.8 the kernel peels from the STOCK's r6.2 skin
+    // inward and its opening rides one infeed and one radius outside
+    // that skin. (M13: before that it peeled from the PART's skin, and
+    // on the d30 bar this test once used its hops ran through 9 mm of
+    // skin the ladder never peeled - the radial field law convicted
+    // them, where the old vertical column read them as cleared air.)
     // The infeed is sub-step: the lathe's peel band is the 6.0 skin
     // down to the 5.0 neck, one millimetre of it, so a 4 mm radial
     // stepdown (the helper's) skips the window and the staircase law

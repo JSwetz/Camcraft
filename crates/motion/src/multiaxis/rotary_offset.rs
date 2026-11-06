@@ -32,7 +32,9 @@
 //! part material stands above the current radius wherever the skin
 //! reaches further out than the level, so a level's target is
 //! precisely the columns already turned inside that radius, the
-//! ladder peels ρ_max → ρ_min, and the ledge under a column's last
+//! ladder peels ρ_max → ρ_min (ρ_max the STOCK's outer radius when
+//! the caller hands one over a fatter bar - M13.8, where the levels
+//! above the part's skin are the whole lap), and the ledge under a column's last
 //! legal level is the finishing kinds' job - the same staircase law,
 //! one seam over. End caps ride the wedge law too: their rectangle
 //! stands at the cap's station between the axis and the rim, a real
@@ -86,8 +88,26 @@ const TAU: f64 = std::f64::consts::TAU;
 /// the stations (above), the ρ ladder - `top_z = rho_max`,
 /// `bottom_z = rho_min` - is computed from the mesh, and the rapids
 /// plane sits one infeed and one tool radius outside the skin.
+/// With no stock to read the part's own skin is the top: see
+/// [`rotary_offset_in`].
 pub fn rotary_offset(
     facets: &[Triangle],
+    p: &Pocket3DParams,
+    c: &AxisControl,
+) -> Result<Toolpath, GenError> {
+    rotary_offset_in(facets, None, p, c)
+}
+
+/// The rotary offset rough over its setup's `stock` (M13.8): the ρ
+/// ladder's top, its rapids cylinder and the development's arc-length
+/// radius are the STOCK's outer radius about the fitted axis (its
+/// farthest vertex - a round bar's skin, a block's corner), never less
+/// than the part's - a ladder peeling from the part's skin inside a
+/// fatter bar hops through skin it never cut. The stepover then holds
+/// as an arc length on the outermost level and only tightens inward.
+pub fn rotary_offset_in(
+    facets: &[Triangle],
+    stock: Option<&[Triangle]>,
     p: &Pocket3DParams,
     c: &AxisControl,
 ) -> Result<Toolpath, GenError> {
@@ -133,6 +153,19 @@ pub fn rotary_offset(
             "the work has no radius to wrap - every facet sits on the axis".into(),
         ));
     }
+    let rho_stock = stock.map_or(0.0, |s| {
+        s.iter()
+            .flat_map(|t| [t.a, t.b, t.c])
+            .map(|q| {
+                let d = q - ax.origin;
+                let v = d.dot(u);
+                let w = Point3::new(d.x - u.x * v, d.y - u.y * v, d.z - u.z * v);
+                w.dot(w).sqrt()
+            })
+            .filter(|x| x.is_finite())
+            .fold(0.0f64, f64::max)
+    });
+    let rho_ref = rho_max.max(rho_stock);
 
     // The world stations window, on standing axes only (doc header).
     let uz = u.dot(UP);
@@ -162,7 +195,7 @@ pub fn rotary_offset(
     // duplicated a full period so the seam's chords meet their own
     // copy's ends.
     let r = p.tool_diameter * 0.5;
-    let period = TAU * rho_max;
+    let period = TAU * rho_ref;
     let rho_eps = 1e-12 * rho_max;
     let v_eps = 1e-9 * rho_max.max(1.0);
     let mut wrap: Vec<Triangle> = Vec::with_capacity(facets.len() * 3);
@@ -203,7 +236,7 @@ pub fn rotary_offset(
                 // half a turn off the base rides +Pi, never its -Pi
                 // alias: the two spellings must agree across every
                 // facet that shares the vertex, or the weld splits.
-                rho_max
+                rho_ref
                     * (base
                         + std::f64::consts::PI
                         - (std::f64::consts::PI - (th - base)).rem_euclid(TAU))
@@ -276,9 +309,9 @@ pub fn rotary_offset(
 
     // The ladder in wrap space, run by pocket3d's own entry guards.
     let mut q = *p;
-    q.top_z = rho_max;
+    q.top_z = rho_ref;
     q.bottom_z = rho_min.max(0.0);
-    q.clearance_z = rho_max + p.stepdown + r;
+    q.clearance_z = rho_ref + p.stepdown + r;
     q.retract_z = None;
     if q.top_z < q.bottom_z {
         return Err(GenError::Empty(
@@ -293,7 +326,7 @@ pub fn rotary_offset(
     let pad = r + q.stock_to_leave;
     let rect = wrap_rect(s_lo - pad, s_hi + pad, v_lo, v_hi);
     let base = machining3d::pocket3d(&wrap, &rect, &q)?;
-    wrap_exit::wrap_exit(&base, &ax, &e1, &e2, rho_max, r, c)
+    wrap_exit::wrap_exit(&base, &ax, &e1, &e2, rho_ref, r, c)
 }
 
 /// The wrap's footprint: one rectangle over the covered development

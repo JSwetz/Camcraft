@@ -2,9 +2,11 @@
 //! user builds for them - the turned bar, a coaxial round bar stock a
 //! hair over the part's OD, a 6 mm ball - verify SILENT and post on
 //! the tilting head; the same programs over steel they really drive
-//! through (an oversized bar, a clearance plane inside the stock, a
-//! rough asked to hop through skin it never peels) still convict and
-//! block. And the pose law the verdicts stand on: the ball the stream
+//! through (an oversized bar, a clearance plane inside the stock) still
+//! convict and block, while a rough over an oversized bar peels from
+//! that bar's radius and stays silent (M13.8). The link laws (M13.8):
+//! every program opens on its clearance pose, and Rotary Parallel's
+//! links are radial. And the pose law the verdicts stand on: the ball the stream
 //! puts at the tip-plus-r-along-the-axis is the ball the ladder
 //! planned, tangent to the skin - not one radius off it.
 //! Provenance: our own fixtures (the operations suite's turned bar);
@@ -288,16 +290,91 @@ fn a_clearance_plane_inside_the_bar_convicts_the_rapids() {
 }
 
 #[test]
-fn a_rough_hopping_through_skin_it_never_peels_convicts() {
-    // The wrap ladder peels from the PART's OD inward; a d20 bar's
-    // skin from r6 to r10 is never cut, and the hops one infeed and a
-    // radius outside the part's skin run straight through it.
+fn a_rough_over_an_oversized_bar_peels_from_the_stock_radius() {
+    // M13.8: the wrap ladder once peeled from the PART's OD inward, so
+    // a d20 bar's skin from r6 to r10 was never cut and the hops one
+    // infeed and a radius outside the part's skin ran straight through
+    // it (the radial field law convicted them). It now measures from
+    // the STOCK's radius: the first level peels the bar's own skin,
+    // the rapids ride outside it, and the program verifies silent.
     let world = world_for(Kind::Offset, 20.0, 25.0);
-    let w = cache(&world).warnings;
-    assert!(
-        w.iter().any(|w| matches!(w, Warning::RapidInStock { .. })),
-        "the wrap hops through uncut skin must convict: {:?}",
-        &w[..w.len().min(6)]
-    );
-    blocks(&world, "ro-big");
+    let c = cache(&world);
+    assert!(c.warnings.is_empty(), "the rough over its own bar verifies silent: {:?}", &c.warnings[..c.warnings.len().min(6)]);
+    let rho = |p: Point3| (p.x * p.x + p.y * p.y).sqrt();
+    let top = c.path.moves.iter().filter(|m| m.kind != MoveKind::Rapid).map(|m| rho(m.to)).fold(0.0f64, f64::max);
+    assert!(top >= 10.0 - 0.5 - 1e-6, "the ladder still starts inside the bar's skin: top level {top:.3}");
+    let path = tmp_nc("ro-big");
+    assert!(posting::post_setup(&world, &path).is_ok(), "a clean rough posts");
+    let _ = std::fs::remove_file(&path);
+}
+
+/// (station, radius, azimuth) about the bar's axis (z standing, x laid).
+fn cyl(p: Point3, lying: bool) -> (f64, f64, f64) {
+    let (v, a, b) = if lying { (p.x, p.y, p.z) } else { (p.z, p.x, p.y) };
+    (v, (a * a + b * b).sqrt(), b.atan2(a))
+}
+
+fn dang(a: f64, b: f64) -> f64 {
+    (a - b + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+}
+
+#[test]
+fn every_rotary_program_opens_on_the_clearance_pose() {
+    // M13.8: the first record is a rapid that STANDS at the clearance
+    // pose over the first cut - off the axis, on the first cut's own
+    // azimuth, holding the pure radial - never a sweep in from the
+    // planning frame's home column; and the verdict stays silent.
+    for (kind, lying, tag) in [(Kind::Contour, false, "rc"), (Kind::Parallel, true, "rp"), (Kind::Offset, false, "ro")] {
+        let c = cache(&world_for(kind, 12.4, 25.0));
+        assert!(c.warnings.is_empty(), "{tag}: {:?}", &c.warnings[..c.warnings.len().min(6)]);
+        let m0 = &c.path.moves[0];
+        assert_eq!(m0.kind, MoveKind::Rapid, "{tag}: the program opens at rapid");
+        assert_eq!(m0.from, m0.to, "{tag}: the opening record stands at its pose, sweeping nothing");
+        let fc = c.path.moves.iter().find(|m| m.kind != MoveKind::Rapid).expect("a cut");
+        let (s, f) = (cyl(m0.from, lying), cyl(fc.from, lying));
+        assert!(s.1 > 0.5, "{tag}: the program opens on the axis: {:?}", m0.from);
+        assert!(dang(s.2, f.2).abs() < 1e-6, "{tag}: opening azimuth {:.4} vs first cut {:.4}", s.2, f.2);
+        match kind {
+            Kind::Contour => assert!(s.0 >= 25.0 - 1e-9, "{tag}: opening station {} under the clearance", s.0),
+            // The parallel's 25 above the laid axis and the wrap's
+            // r6.2 bar + 0.5 infeed + 3 ball, as TIP radii.
+            Kind::Parallel => assert!(s.1 >= 25.0 - 1e-6, "{tag}: opening radius {}", s.1),
+            Kind::Offset => assert!(s.1 >= 6.2 + 0.5 + R - 1e-3, "{tag}: opening radius {}", s.1),
+        }
+        let a = m0.axis.expect("the opening pose is stated");
+        let ctr = Point3::new(m0.to.x + R * a[0], m0.to.y + R * a[1], m0.to.z + R * a[2]);
+        let (_, l, az) = cyl(ctr, lying);
+        let want = if lying { [0.0, az.cos(), az.sin()] } else { [az.cos(), az.sin(), 0.0] };
+        assert!(l > 0.5 && a.iter().zip(want).map(|(x, y)| x * y).sum::<f64>() > 1.0 - 1e-9, "{tag}: the opening pose is not the radial: {a:?}");
+    }
+}
+
+#[test]
+fn rotary_parallel_retracts_along_the_radius_and_verifies_clean() {
+    // M13.8: every pass leaves along its radius to the clearance
+    // cylinder (25 above the laid axis), indexes on it, and comes back
+    // in along the next pass's radius - no world-Z lift.
+    let c = cache(&world_for(Kind::Parallel, 12.4, 25.0));
+    assert!(c.warnings.is_empty(), "{:?}", &c.warnings[..c.warnings.len().min(6)]);
+    let radial = |m: &camcraft_app::cl::Move| {
+        let (a, b) = (cyl(m.from, true), cyl(m.to, true));
+        (a.0 - b.0).abs() < 1e-6 && dang(a.2, b.2).abs() < 1e-6
+    };
+    let mut retracts = 0usize;
+    for (i, m) in c.path.moves.iter().enumerate() {
+        let (from, to) = (cyl(m.from, true).1, cyl(m.to, true).1);
+        match m.kind {
+            MoveKind::Rapid => {
+                assert!(to >= 25.0 - 1e-6, "rapid {i} ends inside the clearance radius: {to:.4}");
+                assert!(from >= 25.0 - 1e-6 || radial(m), "rapid {i} climbs off the radius");
+            }
+            MoveKind::Plunge => assert!(radial(m), "plunge {i} comes in off the radius"),
+            MoveKind::Feed if to >= 25.0 - 1e-6 => {
+                assert!(radial(m), "retract {i} is not radial: {:?} -> {:?}", m.from, m.to);
+                retracts += 1;
+            }
+            MoveKind::Feed => {}
+        }
+    }
+    assert!(retracts > 3, "passes retract, got {retracts}");
 }

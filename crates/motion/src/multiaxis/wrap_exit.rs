@@ -36,6 +36,7 @@ use crate::machining2d::{GenError, ARC_FIT_TOL};
 
 use super::axis::Axis;
 use super::retip::tip_of;
+use super::rotary_links;
 use super::tilt::{command_axis, AxisControl};
 use crate::cl::normalize_axis;
 
@@ -77,10 +78,24 @@ pub(super) fn wrap_exit(
     // `map` names the BALL CENTER (the plan's level plus one radius,
     // out along the radial); the emitted point is the tip that center
     // stands on under the pose it holds ([`super::retip`]).
-    let c0 = map(base.start().unwrap_or(Point3::ZERO));
-    let mut b = PathBuilder::new(tip_of(c0, None, r));
-    let mut held: Option<[f64; 3]> = None;
-    for mv in &base.moves {
+    // M13.8: the program opens ON the clearance pose the ladder's
+    // opening traverse was heading for - the wrap's rapids cylinder
+    // over the first cut's own column - holding the pure radial there,
+    // never at the development's home (azimuth zero, station zero).
+    if base.moves.is_empty() {
+        return Err(GenError::Empty("the wrap ladder planned no moves".into()));
+    }
+    let (skip, at) = rotary_links::opening(base);
+    let c0 = map(at);
+    let d0 = c0 - ax.origin;
+    let s0 = d0.dot(ax.dir);
+    let pose0 = normalize_axis([d0.x - ax.dir.x * s0, d0.y - ax.dir.y * s0, d0.z - ax.dir.z * s0]);
+    let t0 = tip_of(c0, pose0, r);
+    let mut b = PathBuilder::new(t0);
+    b.set_axis(pose0);
+    b.push(MoveKind::Rapid, t0, None);
+    let mut held: Option<[f64; 3]> = pose0;
+    for mv in &base.moves[skip..] {
         let air = mv.kind == MoveKind::Rapid;
         let pose = |w: Point3, t: Point3, held: Option<[f64; 3]>| -> Option<[f64; 3]> {
             // The radial computed in world coordinates straight off

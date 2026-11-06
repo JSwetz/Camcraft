@@ -1749,17 +1749,23 @@ None of these may stay open behind a ✅.
 
 ### M13.8 - Multi-axis leftovers after the pivot law
 **Goal: every rotary and 5-axis kind starts, links and judges like the
-3-axis ones - nothing found by the pivot fix stays as prose.** — 📋
+3-axis ones - nothing found by the pivot fix stays as prose.** — ⚠️ partial (owed: swarf_multi rung, all-air finish, ridge rest law, Offset air laps)
 
 - **swarf_multi coarse rung** gouges 0.39 mm. The verifier convicts it,
       so it isn't silent; the fix is to refine the rung.
-- **The rotary first move** is a rapid from the world origin; it should
-      start from the clearance pose.
+- ~~**The rotary first move**~~ - done 2026-11-06 (RECOMMENDED "M13.8 A"
+      (1)): opens on the clearance pose above the first cut.
 - **An upright all-air finish** is reported unjudged; judge it.
 - **The ridge rest law** can never fire; make it reachable, or remove it
       by decision.
-- **Rotary Offset** should measure from the stock radius;
-      **Rotary Parallel** should use radial retracts.
+- ~~**Rotary Offset** from the stock radius; **Rotary Parallel** radial
+      retracts~~ - done 2026-11-06 (RECOMMENDED "M13.8 A" (2)/(3)).
+- **Rotary Offset air laps**: air levels clear both laps of the
+      developed strip (11,967 moves vs ~2,064 on a d20 bar) - trim the
+      seam copy at air levels.
+- **Radial retracts vs fixtures**: Parallel passes below the equator
+      retract downward to the clearance cylinder; the machine/fixture
+      check must cover anything inside that cylinder (a table, a chuck).
 
 | Milestone | Goal | Key Features | Status |
 |-----------|------|--------------|--------|
@@ -1813,7 +1819,7 @@ None of these may stay open behind a ✅.
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); owed: overhang laws, mid-move pose, engine.rs split | ⚠️ |
-| **M13.8** | Multi-axis leftovers | swarf_multi coarse rung, rotary first move from origin, upright all-air finish unjudged, ridge rest law unreachable, Rotary Offset/Parallel radial heights | 📋 |
+| **M13.8** | Multi-axis leftovers | Done: rotary first move on the clearance pose, Rotary Offset from the stock radius, Rotary Parallel radial links; owed: swarf_multi coarse rung, upright all-air finish unjudged, ridge rest law unreachable, Offset air laps | ⚠️ |
 
 ## Open questions & deferred
 
