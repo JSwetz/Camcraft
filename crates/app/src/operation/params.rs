@@ -1408,6 +1408,11 @@ impl OpParams {
                 for f in [a.ramp_to_depth, a.helix_cw, a.axis_start] {
                     h.write_u8(u8::from(f));
                 }
+                // M11.3: the horizontal arc entry - a byte only when on,
+                // so every earlier approach keeps its digest.
+                if a.arc_xy {
+                    h.write_u8(0xC4);
+                }
                 match a.lead_out {
                     None => h.write_u8(0xFF),
                     Some(Lead::None) => h.write_u8(0),

@@ -14,7 +14,7 @@ use crate::geometry::Point3;
 use crate::links::{Link, LinkTally, Links, NOT_PROVED, TOO_LONG};
 
 use super::arcs::Seg;
-use super::descent::{Lvl, feed_down, plan, push, restart, start};
+use super::descent::{Cuts, Lvl, feed_down, plan, push, restart, start};
 use crate::plunge_law;
 use super::levels::{Cert, Motion};
 
@@ -40,19 +40,17 @@ pub(super) struct LinkState {
 }
 
 impl LinkState {
-    /// A new level was entered at `e`; `dove` is its dive link's start.
-    pub(super) fn begin_level(&mut self, e: Point2, dove: Option<Point2>) {
-        self.level.clear();
-        if let Some(d) = dove {
-            self.level.push(vec![d, e]);
-        }
+    /// A new level was entered; `cuts` are its descent's planar cuts
+    /// (the dive link, the horizontal arc).
+    pub(super) fn begin_level(&mut self, cuts: Cuts) {
+        self.level = cuts;
     }
 }
 
 /// A descent onto `lv.pass[0]` at `lv.z`, traversing at `tz`: the
 /// planned arm where a certified area exists, the climb-and-dive (rapid
 /// over the start, plunge) where none does - the slot/trace shape no arm
-/// can change without proofs. Returns the dive link's start, if any.
+/// can change without proofs. Returns the descent's planar cuts.
 pub(super) fn descend(
     b: &mut PathBuilder,
     arm: Entry3D,
@@ -61,7 +59,7 @@ pub(super) fn descend(
     lv: &LevelWalk,
     tz: f64,
     m: &Motion,
-) -> Option<Point2> {
+) -> Cuts {
     let cur = b.at();
     let leg = Point2::new(cur.x, cur.y);
     match cert {
@@ -71,7 +69,9 @@ pub(super) fn descend(
             push(b, &d, &l, lv.z, tz, m)
         }
         None => {
-            let e = lv.pass.first()?;
+            let Some(e) = lv.pass.first() else {
+                return Vec::new();
+            };
             if !m.links.approach.center_cutting {
                 // Nothing certified, so no helix or ramp can stand in: a
                 // tool that may not plunge into solid refuses the op.
@@ -82,7 +82,7 @@ pub(super) fn descend(
             }
             b.push(MoveKind::Rapid, Point3::new(e.x, e.y, tz), None);
             feed_down(b, *e, lv.z, lv.mat_top, m, m.links.approach.plunge(m.plunge_feed));
-            None
+            Vec::new()
         }
     }
 }
@@ -99,7 +99,6 @@ pub(super) fn level_link(
 ) {
     let cur = b.at();
     let at = Point2::new(cur.x, cur.y);
-    let e = lv.pass.first().copied().unwrap_or(at);
     let lift = |b: &mut PathBuilder, to: f64| b.push(MoveKind::Rapid, Point3::new(at.x, at.y, to), None);
     let dove = match (m.links.level, cert) {
         (Link::Clearance, _) => {
@@ -137,7 +136,7 @@ pub(super) fn level_link(
             descend(b, arm, zig, None, lv, m.hop_z, m)
         }
     };
-    st.begin_level(e, dove);
+    st.begin_level(dove);
 }
 
 /// The move between two passes of one level, by the pass link.
@@ -179,9 +178,7 @@ pub(super) fn pass_link(b: &mut PathBuilder, lv: &LevelWalk, m: &Motion, cert: O
         let l = Lvl { cen, passes, pass: lv.pass, walk: lv.walk, mat_top };
         let from = (mat_top + m.links.approach.plunge_height).min(plane);
         let d = restart(&l, at, z, from, m);
-        if let Some(dv) = push(b, &d, &l, z, plane, m) {
-            st.level.push(vec![dv, e]);
-        }
+        st.level.extend(push(b, &d, &l, z, plane, m));
         return;
     }
     b.push(MoveKind::Rapid, Point3::new(e.x, e.y, plane), None);

@@ -113,6 +113,9 @@ pub(super) struct Motion {
     /// Per pass: reached from the last by a microlift return (the HSM
     /// plan's, `microlift`) instead of the pass link; empty: none is.
     pub(super) micro: Vec<Option<super::adaptive::Return>>,
+    /// The pocket's horizontal arc entry (M11.3, `descent_xy`): only a
+    /// ladder that opts in reads `Approach::arc_xy`.
+    pub(super) xy_arc: bool,
 }
 
 impl Motion {
@@ -136,7 +139,15 @@ impl Motion {
             links: Links::PLANAR,
             top_z: clearance_z,
             micro: Vec::new(),
+            xy_arc: false,
         }
+    }
+
+    /// Opt this ladder into the horizontal arc entry (the pocket, when
+    /// its approach asks for it).
+    pub(super) fn with_xy_arc(mut self, on: bool) -> Self {
+        self.xy_arc = on;
+        self
     }
 
     /// The HSM plan's microlift returns, per pass (M11.4 C round 4).
@@ -239,13 +250,12 @@ pub(super) fn run_level_walks(
     let mut st = LinkState::default();
     for &z in zs {
         for (pi, pass) in passes.iter().enumerate() {
-            let Some((entry, rest)) = pass.split_first() else {
+            let Some((_, rest)) = pass.split_first() else {
                 continue;
             };
             if rest.is_empty() {
                 continue;
             }
-            let e = Point2::new(entry.x, entry.y);
             let walk = runs.and_then(|r| r.get(pi)).map(Vec::as_slice);
             let prev_z = last_cut_z.unwrap_or(m.clearance_z);
             // The material's top over this level (M11.3's plunge height):
@@ -259,7 +269,7 @@ pub(super) fn run_level_walks(
             if first {
                 // The first entry: the entry family, from clearance.
                 let dove = descend(b, m.entry, false, center, &lv, m.clearance_z, m);
-                st.begin_level(e, dove);
+                st.begin_level(dove);
             } else if last_cut_z == Some(z) {
                 if let Some(Some(ret)) = m.micro.get(pi) {
                     super::microlift::link(b, ret, z, m);

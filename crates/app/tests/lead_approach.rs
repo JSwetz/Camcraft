@@ -216,6 +216,26 @@ fn roundtrip(params: OpParams, key: Option<&str>) -> OpParams {
 }
 
 #[test]
+fn the_horizontal_arc_entry_on_the_users_pocket_verifies_silent() {
+    // M11.3 (owed): the user's waterline pocket with the G17 arc entry -
+    // every level opens with a planar arc onto its first ring, verified
+    // against the part solid; the stated fallbacks are named, never
+    // silent.
+    for entry in [Entry3D::Helix, Entry3D::Plunge, Entry3D::Ramp] {
+        let mut op = pocket_op(with(Approach { arc_xy: true, ..Approach::DEFAULT }));
+        if let OpParams::Pocket { entry: e, .. } = &mut op {
+            *e = entry;
+        }
+        let (_w, t, warns) = user_job("EM-0600-4FL", false, op);
+        assert!(warns.is_empty(), "{entry:?}: {warns:?} / {:?}", t.notes);
+        assert!(t.is_chained() && t.all_finite());
+        let first = t.moves.iter().find(|m| m.kind == MoveKind::Feed && m.from.z == m.to.z).expect("a cut");
+        assert!(first.arc.is_some_and(|a| a.plane.is_xy()), "{entry:?}: the first cut is the G17 arc: {first:?} / {:?}", t.notes);
+        assert!(!t.notes.iter().any(|n| n.contains("horizontal arc entry does not fit")), "{entry:?}: {:?}", t.notes);
+    }
+}
+
+#[test]
 fn the_approach_round_trips_and_the_defaults_write_no_key() {
     let lead = Lead::Tangential { radius: 5.0 };
     let _ = roundtrip(contour_op(lead, Links::PLANAR), None);
@@ -240,6 +260,7 @@ fn the_approach_round_trips_and_the_defaults_write_no_key() {
         overlap: 2.5,
         axis_start: true,
         axis_tol: 2.0,
+        arc_xy: true,
         ..Approach::DEFAULT
     };
     let back = roundtrip(contour_op(Lead::Perpendicular { length: 4.0 }, with(a)), Some("\"approach\""));
@@ -267,6 +288,7 @@ fn the_stamp_tells_the_approach_apart_and_a_default_op_keeps_its_digest() {
         Approach { plunge_height: 0.0, ..Approach::DEFAULT },
         Approach { lead_out: Some(Lead::None), ..Approach::DEFAULT },
         Approach { axis_start: true, ..Approach::DEFAULT },
+        Approach { arc_xy: true, ..Approach::DEFAULT },
     ] {
         assert_ne!(stamp(with(a)), base, "{a:?}");
         assert_ne!(stamp(Links { approach: a, ..kd }), stamp(kd), "{a:?}");

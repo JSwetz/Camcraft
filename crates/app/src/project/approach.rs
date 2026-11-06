@@ -57,6 +57,9 @@ pub struct ApproachDto {
     pub axis_start: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axis_tol: Option<f64>,
+    /// The pocket's horizontal (G17) arc entry (M11.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc_xy: Option<bool>,
 }
 
 fn lead_dto(l: Lead) -> LeadDto {
@@ -107,6 +110,7 @@ pub fn approach_to_dto(a: &Approach) -> Option<ApproachDto> {
         overlap: num(a.overlap, d.overlap),
         axis_start: flag(a.axis_start, d.axis_start),
         axis_tol: num(a.axis_tol, d.axis_tol),
+        arc_xy: flag(a.arc_xy, d.arc_xy),
     };
     (dto != ApproachDto::default()).then_some(dto)
 }
@@ -141,6 +145,7 @@ pub fn approach_from_dto(d: Option<&ApproachDto>) -> Approach {
         overlap: d.overlap.unwrap_or(a.overlap),
         axis_start: d.axis_start.unwrap_or(a.axis_start),
         axis_tol: d.axis_tol.unwrap_or(a.axis_tol),
+        arc_xy: d.arc_xy.unwrap_or(a.arc_xy),
         center_cutting: true,
     }
 }

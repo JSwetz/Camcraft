@@ -281,6 +281,9 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         }
         s => (plan_passes(&center, p.tiling_step(), p.climb, s)?, s, None, Vec::new()),
     };
+    // The horizontal arc entry (M11.3) lands on the first pass: a closed
+    // first ring starts mid its longest edge, where an arc has room.
+    let passes = if p.links.approach.arc_xy && room.is_none() { super::descent_xy::reseat_first(passes) } else { passes };
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     // Waterline rings circle around material, so they get the arc fitter
     // (rings straight enough to be lines stay exactly that); zigzag rows
@@ -298,6 +301,7 @@ pub fn pocket(region: &Region, p: &PocketParams) -> Result<Toolpath, GenError> {
         .with_arc_radius(p.tool_diameter)
         .with_links(p.links, helix_r)
         .with_top(p.top_z)
+        .with_xy_arc(p.links.approach.arc_xy)
         .with_microlift(joins);
     // The walks: fitted where the strategy fits, then - opted in - the
     // corner fillets, proved inside the cutter-center area. Passes are

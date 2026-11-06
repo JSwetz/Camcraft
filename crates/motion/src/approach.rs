@@ -53,6 +53,12 @@ pub struct Approach {
     /// the drop. A shorter sweep covers less of the drop: the rest is an
     /// axial feed at the arc's start.
     pub arc_sweep: f64,
+    /// The pocket's horizontal arc entry (M11.3, owed): the chosen entry
+    /// descends at the arc's start - in the pocket's legal area - and a
+    /// G17 arc at [`Self::arc_radius`] / [`Self::arc_sweep`] (a quarter
+    /// turn when `0`) runs tangentially onto the first pass. `false` -
+    /// the default - descends onto the pass start itself, as before.
+    pub arc_xy: bool,
     /// Height above the material (mm) a plunge rapids down to before it
     /// feeds (held under the retract plane); also where an angle-bounded
     /// ramp starts on the first level. `0` feeds the whole way from the
@@ -141,6 +147,7 @@ impl Approach {
         helix_cw: false,
         arc_radius: 0.0,
         arc_sweep: 0.0,
+        arc_xy: false,
         plunge_height: DEFAULT_PLUNGE_HEIGHT,
         ramp_feed: 0.0,
         plunge_feed: 0.0,

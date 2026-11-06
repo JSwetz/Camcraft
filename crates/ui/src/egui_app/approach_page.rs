@@ -54,6 +54,21 @@ pub(super) fn arm_fields(ui: &mut Ui, u: Unit, arm: Entry3D, a: &mut Approach) {
     }
 }
 
+/// The pocket's horizontal arc entry (M11.3): an optional feature,
+/// switched in the group header - the entry descends at the arc's start
+/// and a G17 arc runs onto the first pass. The vertical Arc entry is its
+/// own lead, so the group hides under it.
+pub(super) fn pocket_arc_group(ui: &mut Ui, u: Unit, entry: Entry3D, a: &mut Approach) {
+    if entry == Entry3D::Arc {
+        return;
+    }
+    group(ui, "Horizontal arc entry", Some(&mut a.arc_xy), |ui| {
+        auto_value(ui, "Arc radius", "Auto", &mut a.arc_radius, "tool Ø", 3.0, |ui, v| num(ui, u, v));
+        auto_value(ui, "Arc sweep", "Auto", &mut a.arc_sweep, "90°", 90.0, |ui, v| num_unit(ui, v, "°"));
+        consequence(ui, "the arc stays inside the pocket - shrunk where it cannot fit, then left out, named in the status");
+    });
+}
+
 /// Rapid down to a height over the material, feed only the rest - an
 /// optional feature, switched in the group header (off writes 0).
 pub(super) fn plunge_group(ui: &mut Ui, u: Unit, a: &mut Approach) {
@@ -171,6 +186,8 @@ pub(crate) fn entry_status_lines(notes: &[String]) -> Vec<String> {
             "fix: a helix radius that fits at the first cut's start, or Keep down links"
         } else if n.contains("axial dive") || n.contains("fits nowhere") || n.contains("stands down to a ramp") {
             "fix: a smaller helix radius (or a minimum radius), a pre-drilled start hole, or a smaller tool"
+        } else if n.contains("horizontal arc") {
+            "fix: a smaller arc radius or sweep, or a smaller stepover"
         } else if n.starts_with("link: the tool lifted") {
             "fix: Retract plane links, or a smaller stepover so the cuts it crosses are already cleared"
         } else {

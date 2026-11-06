@@ -220,7 +220,8 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
             tilt,
         } => {
             if tab == SEC_LEADS {
-                lead_page::leads_tab(ui, u, "p", Some((entry, helix_radius)), links);
+                lead_page::leads_tab(ui, u, "p", Some((&mut *entry, helix_radius)), links);
+                super::approach_page::pocket_arc_group(ui, u, *entry, &mut links.approach);
             }
             if tab == SEC_HEIGHTS {
                 orientation_editor(ui, u, tilt);

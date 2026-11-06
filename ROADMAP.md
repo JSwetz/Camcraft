@@ -1420,7 +1420,7 @@ we choose to? keepdown is a common strategy we should honor and make definable."
 **Goal: every entry, lead and engagement choice a CAM user expects is a
 parameter on the operation, grouped under its own "Lead in / Lead out"
 section, and every height can be measured from the operation's own
-selection.** — ⚠️ partial (owed: horizontal-plane arc entry for pockets, 3D first-stretch engagement slowing, the 3D ladder's and contour bore side's second dives, Rotary Parallel radial infeeds and Swarf first entry can't ramp - see the Owed bullet below)
+selection.** — ⚠️ partial (owed: the 3D ladder's and contour bore side's second dives, Rotary Parallel radial infeeds and Swarf first entry can't ramp - see the Owed bullet below)
 
 (User review, 2026-11-05: "All heights should have the option Selection ...
 Entry - Arc should have an option of setting radius and length of the arc.
@@ -1453,9 +1453,9 @@ handle engagement.")
       Passes); defaults reproduce every existing golden byte for byte.
 - **Landed (2026-11-06)**: A (5b487cb), B-D and the section (874507a).
 - **Owed** (RECOMMENDED "M11.3 A" (5), "M11.3 B-D" (4)/(8), "M11.3
-      owed" (3)-(5)): the horizontal-plane arc entry for pockets; the
-      first-stretch-only engagement slowing on 3D ops (planar ladders
-      done, 515525c); the 3D ladder's and the contour bore side's named
+      owed" (3)-(5)): [the horizontal-plane arc entry for pockets and the 3D first-stretch
+      slowing - DONE 2026-11-06, RECOMMENDED "M11.3: a horizontal arc entry for
+      pockets" / "M11.3: 3D ladders slow only the first diameter"]; the 3D ladder's and the contour bore side's named
       second dives; the centre-cutting plunge check in finishing3d,
       drilling and face - DONE 2026-11-06 (RECOMMENDED "M11.3: the centre-cutting
       law in finish, drilling and face"); Face entry fallback and 5-axis posed guards also DONE
@@ -1644,8 +1644,8 @@ every consumer Phase 7 promised it to.** — ⚠️ partial (owed: lathe/rotary 
       answer).
 
 - **Traced playback leftovers** (RECOMMENDED "Traced playback off the UI
-      thread"): dirty-brick GPU upload (the whole ~1 MB cut layer per picture
-      today), jump throughput (a full-length jump 14.8 s vs 12.4 s before the
+      thread"): dirty-brick GPU upload DONE 2026-11-06 (2.02 MB -> 57 KB per
+      picture, RECOMMENDED "M13.1: playback uploads only the dirty bricks"); jump throughput (a full-length jump 14.8 s vs 12.4 s before the
       worker), and the CPU-fallback eye still drawing on the UI thread.
 
 ### M13.2 - Machine limits and cutting data
@@ -1828,7 +1828,7 @@ the heavy lane green.
 | **M10.1** | A tool that can cut the operation | Done: the tool law - `KindInfo.tool_kinds` one table (A), `CreateOperation` / tool reassignment / op retype / tool retype refuse the mismatch at command construction by name and the ribbon darkens with the reason (B), an op whose tool is gone or wrong reads BLOCKED - generation and the post refuse, nothing stored, old files load untouched (C), the law tests (D); generator shape refusals stand as the backstop | ✅ |
 | **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); line-to-arc and arc-to-arc corner fillets (M11.1 RECOMMENDED); a closed path's seam corner stays sharp by decision | ✅ |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
-| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, Rotary Parallel infeed / Swarf first-entry ramps (-> M11.3 Owed bullet) | ⚠️ |
+| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; pocket G17 arc entry and 3D first-stretch slowing done 2026-11-06; owed: 3D ladder / contour bore second dives, Rotary Parallel infeed / Swarf first-entry ramps (-> M11.3 Owed bullet) | ⚠️ |
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); star-plan seams at 0 kinks past 5° (done); owed: the slot's entry-orbit 2 breaks, island legal late returns, arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; owed: open-boundary Contour polish (viewport footprint, approach extensions), boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |

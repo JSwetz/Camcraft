@@ -7,14 +7,14 @@
 //! material consulted.
 
 use crate::approach::{CENTER_CUT_REFUSAL, NOT_CENTER_CUTTING};
-use crate::cl::{MoveKind, PathBuilder};
+use crate::cl::{MoveKind, PathBuilder, lattice};
 use crate::entry::Entry3D;
 use crate::plunge_law;
-use crate::entry::chord_hits_plan;
+use crate::entry::{chord_hits_plan, disc_clears, dive_room};
 use crate::geo2d::Point2;
 use crate::geometry::Point3;
 
-use super::descent::{Descent, Lvl, dive_point, plan_arm, ramp_fallback};
+use super::descent::{Descent, Lvl, plan_arm, ramp_fallback};
 use super::levels::{Cert, Motion};
 
 /// The axial feed down onto `(xy, z)` from where the tool stands over
@@ -153,4 +153,70 @@ pub(super) fn substituted_dive(
             None
         }
     }
+}
+
+/// How far a plunge at the pass start must stand off the area's wall so
+/// the dwell never marks a finished face: a twentieth of the tool, at
+/// least 10 um.
+pub(super) fn wall_margin(m: &Motion) -> f64 {
+    (m.arc_radius * 0.05).max(0.01)
+}
+
+/// Points along the first pass past its start, every half millimetre up
+/// to four tool diameters (or the pass's end): where an entry may land
+/// when the start itself sits on the wall, joined back to it by a feed
+/// along the pass's own line.
+pub(super) fn along_pass(l: &Lvl, m: &Motion) -> Vec<Point2> {
+    const STEP: f64 = 0.5;
+    let reach = (m.arc_radius * 4.0).max(4.0);
+    let mut out = Vec::new();
+    let mut run = 0.0;
+    for w in l.pass.windows(2) {
+        let d = (w[1].x - w[0].x).hypot(w[1].y - w[0].y);
+        if !(d.is_finite() && d > 0.0) {
+            continue;
+        }
+        let mut t = (STEP - run % STEP) % STEP;
+        if t == 0.0 {
+            t = STEP;
+        }
+        // The pass point, then the points a wall margin to either side of
+        // it - a row that runs ON the wall still has room just inside.
+        let off = wall_margin(m) * 1.5;
+        let (nx, ny) = (-(w[1].y - w[0].y) / d * off, (w[1].x - w[0].x) / d * off);
+        while t <= d && run + t <= reach && out.len() < 1200 {
+            let f = t / d;
+            let (px, py) = (w[0].x + (w[1].x - w[0].x) * f, w[0].y + (w[1].y - w[0].y) * f);
+            for (dx, dy) in [(0.0, 0.0), (nx, ny), (-nx, -ny)] {
+                out.push(Point2::new(lattice(px + dx), lattice(py + dy)));
+            }
+            t += STEP;
+        }
+        run += d;
+        if run > reach {
+            break;
+        }
+    }
+    out
+}
+
+/// May a dive at `q` link to the pass start `e` at depth - inside the
+/// certified area, crossing no planned pass (the dive link's own law)?
+pub(super) fn links_to(l: &Lvl, q: Point2, e: Point2) -> bool {
+    l.cen.chord_ok(q, e) && !chord_hits_plan(q, e, l.passes)
+}
+
+/// Where an axial dive lands (M11.3, one entry per level): the pass start
+/// when it stands off the wall; else the first point along the first pass
+/// that does and links back to the start at depth; else the floor's room
+/// (the M8.1 dive, its link proved or the second dive named).
+pub(super) fn dive_point(l: &Lvl, e: Point2, m: &Motion) -> Option<Point2> {
+    let margin = wall_margin(m);
+    if disc_clears(l.cen.room(), e, margin) {
+        return Some(e);
+    }
+    along_pass(l, m)
+        .into_iter()
+        .find(|&q| disc_clears(l.cen.room(), q, margin) && links_to(l, q, e))
+        .or_else(|| dive_room(l.cen.room(), 0.0))
 }

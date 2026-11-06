@@ -10466,3 +10466,61 @@ turns with the part as before, and the machine table is always fixed.
 - Owed: the generate-time fixture check (`generate.rs`) still uses the old
   laws (as strict as before, never weaker), and there is no UI toggle for
   `fixed` yet.
+
+## M11.3: a horizontal arc entry for pockets: two decisions (2026-11-06)
+
+(1) **A switch, not a new entry type** (`Approach::arc_xy`, off by default).
+- The chosen plunge, ramp or helix descends at the arc's start, so every
+  descent law stays in force, including the non-centre-cutting fallbacks.
+  A flat G17 arc then runs tangentially onto the first pass.
+- The arc's radius and sweep come from the same Arc lead fields that
+  Contour uses.
+- The arc is proven inside the legal area by two polylines that bracket
+  it: one inside the true arc with chord error ≤ 0.01 mm, and one outside
+  it. Neither may cross a planned pass.
+- If it doesn't fit, the radius halves, up to four times, and the notes
+  say so. Past that, a named fallback descends straight onto the pass
+  start.
+- Zigzag pockets always fall back, because their rows start on the wall.
+- Dropped: a separate "XY arc" entry type, which would have duplicated
+  the descent choice.
+
+(2) **With the switch on, the first ring starts at the midpoint of its
+longest edge** rather than possibly a corner, so the arc has room. The
+ring and its direction are unchanged. This also happens when the arc
+then falls back.
+- The file writes `arc_xy` only when on, and the fingerprint gains a
+  byte only when on, so goldens stay byte-identical.
+
+## M11.3: 3D ladders slow only the first diameter: one decision (2026-11-06)
+
+**The 3D ladder now slows only the first tool diameter of cut after each
+level's entry.** Before, it never slowed the cut: only the descent motions
+were scaled.
+- A per-level `settle` budget of one diameter is spent by the dive link
+  and the first pass. Descent motions, later passes and hops don't spend
+  it.
+- On the plain ladder, a move that straddles the boundary is split at the
+  boundary point. On the offset shell the whole chord is slowed
+  (conservative: D to 1.5 D), since a split needs its own tip solve.
+- Descending chords are slowed but don't spend the budget.
+- A second dive resets the budget, because it bores full-width again.
+- The engagement note is emitted once.
+- With the limit off, output is byte-identical.
+
+## M13.1: playback uploads only the dirty bricks: one decision (2026-11-06)
+
+**The cut layer tracks which bricks changed, and a picture sends only those
+bricks' texel runs.** Release bench: 2,024,224 bytes per picture became
+56,872, about 35x less.
+- The field marks a brick dirty at its single write site (`claim_record`),
+  only when a value actually changed.
+- `pack_cut_patch` builds the texel runs through the same `cut_texel` that
+  `pack_cut` uses, so the two cannot disagree.
+- A whole upload is sent for a session's first picture, after a backward
+  seek (checkpoint restore), when the patch is as large as the layer, or
+  whenever the eye isn't sure what is resident.
+- The eye refuses a patch that doesn't fit before writing anything.
+- A frame the UI skipped is carried in the next patch.
+- Tests check that the patched layer equals a full repack byte for byte,
+  forward and after backward seeks.

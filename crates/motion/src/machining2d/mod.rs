@@ -36,6 +36,7 @@ mod contour_params;
 mod contour_step;
 mod descent;
 mod descent_dive;
+mod descent_xy;
 mod face;
 mod face_entry;
 mod fillet;
