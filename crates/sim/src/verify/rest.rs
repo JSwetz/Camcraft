@@ -41,6 +41,12 @@ impl Steps {
 /// cutting chords the column surface is read from.
 pub(super) struct Rest<'c, 'a> {
     cx: &'c VerifyContext<'a>,
+    /// The per-solid index ranges of `cx.model` when the model is a
+    /// union of touching bodies (M13.11): every plane section below is
+    /// read through `slice::material_above_of`, the 2D union of the
+    /// bodies' own sections. Fewer than two ranges: one body, the
+    /// plain slice, byte for byte.
+    bodies: &'c [std::ops::Range<usize>],
     /// A model-driven path's islands per plane - the generator's own
     /// `material_above`, so one law has two readers (M2.1a). Cached by
     /// the plane's bits: the level ladder repeats its planes across all
@@ -72,7 +78,12 @@ pub(super) struct Rest<'c, 'a> {
 }
 
 impl<'c, 'a> Rest<'c, 'a> {
-    pub(super) fn new(path: &Toolpath, cx: &'c VerifyContext<'a>, chord_tol: f64) -> Self {
+    pub(super) fn new(
+        path: &Toolpath,
+        cx: &'c VerifyContext<'a>,
+        chord_tol: f64,
+        bodies: &'c [std::ops::Range<usize>],
+    ) -> Self {
         let mut cut: Vec<Cut> = path
             .moves
             .iter()
@@ -88,6 +99,7 @@ impl<'c, 'a> Rest<'c, 'a> {
         let index = CutIndex::new(&cut, cx.tool.radius + 1e-9);
         Self {
             cx,
+            bodies,
             island_cache: RefCell::new(HashMap::new()),
             cut,
             index,
@@ -109,7 +121,8 @@ impl<'c, 'a> Rest<'c, 'a> {
         let region = match hit {
             Some(r) => r,
             None => {
-                let fresh = crate::geometry::slice::material_overhead(f, h).ok().map(Rc::new);
+                let fresh =
+                    crate::geometry::slice::material_overhead_of(f, self.bodies, h).ok().map(Rc::new);
                 self.overhead_cache.borrow_mut().entry(key).or_insert_with(|| fresh.clone());
                 fresh
             }
@@ -133,7 +146,7 @@ impl<'c, 'a> Rest<'c, 'a> {
         if let Some(hit) = self.island_cache.borrow().get(&key) {
             return hit.clone();
         }
-        let fresh = crate::geometry::slice::material_above(facets, z).ok();
+        let fresh = crate::geometry::slice::material_above_of(facets, self.bodies, z).ok();
         self.island_cache
             .borrow_mut()
             .entry(key)
@@ -151,7 +164,7 @@ impl<'c, 'a> Rest<'c, 'a> {
         if let Some(hit) = self.island_cache.borrow().get(&key) {
             return hit.as_ref().is_some_and(|s| s.contains(q));
         }
-        let fresh = crate::geometry::slice::material_above(facets, z).ok();
+        let fresh = crate::geometry::slice::material_above_of(facets, self.bodies, z).ok();
         let holds = fresh.as_ref().is_some_and(|s| s.contains(q));
         self.island_cache
             .borrow_mut()

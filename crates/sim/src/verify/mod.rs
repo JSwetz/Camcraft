@@ -172,7 +172,7 @@ mod workholding;
 pub use types::{FixturePart, Mode, VerifyContext, Warning};
 #[doc(hidden)]
 pub use crossing::{crossed_pairs, crossed_pairs_all};
-pub use engine::verify;
+pub use engine::{verify, verify_bodies};
 pub use air::cuts_no_material;
 pub use laws::{bands_vs_fixtures, rapids_vs_fixtures, rapids_vs_fixtures_spindle};
 pub use workholding::{bands_vs_workholding, rapids_vs_workholding, Workholding};

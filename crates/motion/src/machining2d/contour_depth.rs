@@ -8,13 +8,17 @@
 //! above each plane - its section plus the shadow of what hangs over it
 //! (`slice::material_overhead`'s law, read in its two halves), so a ring
 //! under an overhang or a part's underside is never walked through it.
+//! Touching bodies (M13.11) are read as their union: the section is
+//! sliced per body and united (`slice::material_above_of`), so a seam of
+//! two coincident walls between two models is interior, not a refusal.
 //! No vendor material consulted.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Triangle;
-use crate::geometry::slice::{material_above, shadow_above};
+use crate::geometry::slice::{material_above_of, shadow_above};
 
 /// Radial slack of the ring-legality test, mm: the offset ring's round
 /// joins sit a chord sag inside the exact offset (`geo2d`'s 5 um arc
@@ -98,9 +102,11 @@ struct Above {
 }
 
 /// Material above each plane, cached by plane; `None` = a slice failed,
-/// which every reader treats as "not legal" (fail closed).
+/// which every reader treats as "not legal" (fail closed). `bodies`
+/// are the per-solid ranges of `facets` (fewer than two: one body).
 struct Sections<'a> {
     facets: &'a [Triangle],
+    bodies: &'a [Range<usize>],
     cache: HashMap<u64, Option<Above>>,
 }
 
@@ -120,11 +126,11 @@ fn clear_of(s: &Region, pts: &[Point2], need2: f64) -> bool {
 
 impl Sections<'_> {
     fn at(&mut self, z: f64) -> Option<&Above> {
-        let f = self.facets;
+        let (f, bodies) = (self.facets, self.bodies);
         self.cache
             .entry(z.to_bits())
             .or_insert_with(|| {
-                let section = material_above(f, z).ok()?;
+                let section = material_above_of(f, bodies, z).ok()?;
                 let shadow = shadow_above(f, z).ok()?;
                 Some(Above { section, shadow })
             })
@@ -181,10 +187,13 @@ fn legal_at(
 /// over the flat ladder `zs` against the part `facets`. A ring stops at
 /// the first level it is not legal at; the deepest legal vertex plane
 /// above that level (plus `leave`) becomes its floor level. Each dropped
-/// range is named in `notes`.
+/// range is named in `notes`. `bodies`: the per-solid ranges of
+/// `facets` when the part is a union of touching models (empty or one
+/// range reads `facets` as one body).
 pub(super) fn ladder(
     rings: &[Vec<Point2>],
     facets: &[Triangle],
+    bodies: &[Range<usize>],
     zs: &[f64],
     r: f64,
     leave: f64,
@@ -192,7 +201,7 @@ pub(super) fn ladder(
 ) -> Ladder {
     let need = r + leave - LEGAL_SLACK;
     let heights = vertex_heights(facets);
-    let mut sec = Sections { facets, cache: HashMap::new() };
+    let mut sec = Sections { facets, bodies, cache: HashMap::new() };
     let mut per_ring: Vec<Vec<f64>> = Vec::with_capacity(rings.len());
     for ring in rings {
         let pts = samples(ring);

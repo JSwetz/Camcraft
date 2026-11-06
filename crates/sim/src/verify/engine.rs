@@ -11,6 +11,22 @@ use crate::cl::Toolpath;
 /// per sample for the rest; called by the operation layer after
 /// generation, never on a systems hot path.
 pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
+    verify_bodies(path, cx, &[])
+}
+
+/// [`verify`] of a path cut on a model that is the union of touching
+/// bodies (M13.11): `bodies` are the per-solid index ranges of
+/// `cx.model`, and every plane-section reader (the gouge law's islands,
+/// the column surface, the posed rapid's overhead) reads the plane as
+/// the 2D union of the bodies' own sections - a seam of two coincident
+/// walls between two models is interior, never a failed slice that
+/// convicts every move at that plane. Fewer than two ranges is
+/// [`verify`], byte for byte.
+pub fn verify_bodies(
+    path: &Toolpath,
+    cx: &VerifyContext,
+    bodies: &[std::ops::Range<usize>],
+) -> Vec<Warning> {
     let mut warns: Vec<Warning> = Vec::new();
 
     for (i, m) in path.moves.iter().enumerate() {
@@ -28,7 +44,7 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
 
     // The plane-section cache and rest-material surface shared by laws
     // (b), (c), (c3) and (d) - [`Rest`].
-    let rest = Rest::new(path, cx, chord_tol);
+    let rest = Rest::new(path, cx, chord_tol, bodies);
 
     // (b) Gouge, then (b2) the solid law, with the op's real tip
     // (M13.7) - [`section`].

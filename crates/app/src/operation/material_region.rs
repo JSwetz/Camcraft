@@ -134,6 +134,7 @@ fn region_turn_core(
             let local = Material {
                 facets: f.local_facets(&material.facets),
                 top: material.top - f.origin.z,
+                bodies: material.bodies.clone(),
             };
             let local = region_for(
                 world,

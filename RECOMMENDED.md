@@ -11628,3 +11628,19 @@ and every one-body verdict untouched. Pinned: the two-body ring cuts Z 10 and
 Z 0 exactly as the one block (same moves, lengths, extents, warning count,
 no "levels below skipped" note); the merged single mesh still stops at its
 top level with the note.
+
+## Release 0.8.0: cut early to park a stable build (2026-11-06)
+
+**The user asked to park** ("we are starting to run out of credit. Its time
+to wrap up the current phases and park it at a stable dist build"), so 0.8.0
+is cut on Fri 2026-11-06 instead of Mon 2026-11-10 12:00. The train's law
+holds - a release is a cut of what is green - and the cut carries the 0.8.0
+musts plus nearly all of 0.9.0 and 0.10.0 (all gated, heavy lanes included).
+The last full gate (gate 9) ran on the exact tree that is tagged, so
+`release.ps1` runs with `-SkipGate` rather than repeating the 50-minute gate
+on identical bytes. Two in-flight agents were stopped rather than gated
+(the lathe lift on the field and a headless binary per crate); neither left
+code on main and both stay owed in ROADMAP. The 0.9.0 and 0.10.0 rows keep
+their dates for whatever lands next. Dropped: cutting at Monday's date
+(holding a finished build three days for a calendar), and cutting before the
+last four changes were gated (they were done; one gate covers them).

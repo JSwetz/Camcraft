@@ -317,6 +317,67 @@ pub fn material_overhead(facets: &[Triangle], z: f64) -> Result<Region, SliceErr
     Ok(cut.union(&hang)?)
 }
 
+/// [`material_above`] of several bodies that TOUCH, read as the union
+/// they stand for (M13.11): `bodies` are index ranges of `facets`, one
+/// per closed solid. Two bodies butted face to face put two coincident
+/// walls of opposite normal into one soup, which the chord graph of
+/// [`slice`] meets as a non-manifold contact and refuses; sliced each on
+/// its own they are two clean sections, and the 2D boolean union of
+/// those sections is the section of the union solid - the same law the
+/// region builders apply to picks across entities. Fewer than two
+/// bodies is the plain call, byte for byte; a body that will not slice
+/// on its own (a self-intersecting shell) still refuses with its own
+/// error - the seam read never widens what counts as manifold. A range
+/// outside `facets` is an input error, never a silent partial read.
+pub fn material_above_of(
+    facets: &[Triangle],
+    bodies: &[std::ops::Range<usize>],
+    z: f64,
+) -> Result<Region, SliceError> {
+    if bodies.len() < 2 {
+        return material_above(facets, z);
+    }
+    let mut acc: Option<Region> = None;
+    for b in bodies {
+        let Some(part) = facets.get(b.clone()) else {
+            return Err(SliceError::Invalid(format!(
+                "body range {}..{} is outside the {} facets",
+                b.start,
+                b.end,
+                facets.len()
+            )));
+        };
+        let r = material_above(part, z)?;
+        if r.is_empty() {
+            continue;
+        }
+        acc = Some(match acc {
+            None => r,
+            Some(a) => a.union(&r)?,
+        });
+    }
+    Ok(acc.unwrap_or_default())
+}
+
+/// [`material_overhead`] over touching bodies ([`material_above_of`]'s
+/// section united with the shadow of the whole soup - the shadow is a
+/// projection of down-facing faces, which a vertical seam never has).
+pub fn material_overhead_of(
+    facets: &[Triangle],
+    bodies: &[std::ops::Range<usize>],
+    z: f64,
+) -> Result<Region, SliceError> {
+    if bodies.len() < 2 {
+        return material_overhead(facets, z);
+    }
+    let cut = material_above_of(facets, bodies, z)?;
+    let hang = shadow_above(facets, z)?;
+    if hang.is_empty() {
+        return Ok(cut);
+    }
+    Ok(cut.union(&hang)?)
+}
+
 /// The part of a triangle at or above the plane `c` (Sutherland-Hodgman
 /// against one half-space): 0, 3 or 4 vertices, in the input's order.
 fn clip_above(v: [Point3; 3], c: f64) -> Vec<Point3> {

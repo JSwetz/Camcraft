@@ -37,6 +37,12 @@ pub(super) const CAP_SEGMENTS: usize = 16;
 pub(super) struct Material {
     pub(super) facets: Vec<Triangle>,
     pub(super) top: f64,
+    /// The per-entity index ranges of `facets` when the source is a
+    /// selection across several models (M13.11): the depth law and the
+    /// verify read a plane as the 2D union of the bodies' own sections,
+    /// so two models butted face to face are one solid, not a
+    /// non-manifold refusal. Empty for one body - the plain read.
+    pub(super) bodies: Vec<std::ops::Range<usize>>,
 }
 
 pub(super) fn material_of(
@@ -57,6 +63,7 @@ pub(super) fn material_of(
             let mut facets = Vec::new();
             let mut top = f64::NEG_INFINITY;
             let mut seen: Vec<&str> = Vec::new();
+            let mut bodies = Vec::new();
             for g in items {
                 if seen.contains(&g.entity.as_str()) {
                     continue;
@@ -67,10 +74,20 @@ pub(super) fn material_of(
                     &g.entity,
                     &format!("the selection names '{}', which is gone", g.entity),
                 )?;
+                let start = facets.len();
                 facets.extend(m.facets);
+                if facets.len() > start {
+                    bodies.push(start..facets.len());
+                }
                 top = top.max(m.top);
             }
-            usable(facets, top, "the selection")
+            let mut m = usable(facets, top, "the selection")?;
+            // Two or more bodies: each is read as its own solid and the
+            // planes are united; one body keeps the plain read.
+            if bodies.len() > 1 {
+                m.bodies = bodies;
+            }
+            Ok(m)
         }
     }
 }
@@ -124,7 +141,7 @@ pub(super) fn usable(facets: Vec<Triangle>, top: f64, label: &str) -> Result<Mat
             "'{label}' has no usable geometry to machine"
         )));
     }
-    Ok(Material { facets, top })
+    Ok(Material { facets, top, bodies: Vec::new() })
 }
 
 pub(super) fn from_slice(e: SliceError) -> GenError {

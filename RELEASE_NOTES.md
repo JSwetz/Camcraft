@@ -1,3 +1,74 @@
+# CamCraft 0.8.0 (clean-room implementation)
+
+Eighth public release, cut early (2026-11-06) to park a stable build. It
+carries what was planned for three trains (0.8.0, 0.9.0 and most of 0.10.0),
+every piece through the full gate, heavy lanes included. Everything a
+generator cannot prove safe is still refused by name, never posted.
+
+This is an independent, clean-room reimplementation of user-visible HSMWorks
+behavior, specced from published documentation and general machining knowledge.
+"HSMWorks" is a trademark of Autodesk; this project is unaffiliated (see
+AGENTS.md). Third-party notices: `assets/ui/LICENSES.md`.
+
+Please start with `TESTING.md`: a short hand-test list for what changed.
+
+## What's new since 0.7.0
+
+### Machining
+- **G41/G42 cutter compensation** on Contour: *Compensation: In control* emits
+  the part contour with `G41/G42 D<tool>` / `G40` through the Fanuc post. It
+  needs a straight lead of at least the tool radius; anything else is refused
+  by name, and posts that cannot emit it refuse instead of writing a centre path.
+- **Arc output for adaptive clearing**: G2/G3 over the HSM passes, each arc
+  proven inside the area, crossing-free and kink-free (a bore went from 6,650
+  to 1,200 moves).
+- **3D Pocket uses the HSM planner** per level (*Strategy: Adaptive*); a level
+  it cannot plan is cut with offset rings and the summary names its Z.
+- **Facing goes around holes** (*Holes: Lift*, the default); *Cut across air*
+  and *Through* (the old behaviour) are choices.
+- **Contours across two models**: picked edges that meet end to end across
+  bodies become one ring, and the depth ladder cuts every level of the union.
+- **Waterline stepdown reads the slope**, and the finishing march no longer
+  drops rows across mesh fold gaps - most scallop readings are now inside the
+  tolerance.
+- **Boundaries everywhere they apply**: on 3+2-indexed operations (read in the
+  tilted plane), on every 3D finish, and on Trace/Engrave; a clipped finish
+  ramps back in.
+- **Lathe**: axial drilling on the spindle axis, and the first lathe post
+  (`Fanuc Lathe`: diameter X, G96/G97/G50, G99, G83/G84/G85, G32). The Setup
+  pane offers the matching post when you mount a lathe; it never switches it
+  for you. C-axis live tooling is not in this release (refused by name).
+
+### Safety
+- **5-axis swarf** no longer drags the tool's flank through the part on its
+  in-air links (it retracts along the surface normal) and never falls back to
+  an upright pose inside a wall.
+- **Fixtures are checked along the whole move**, not just at its ends, for
+  every pose change.
+- **Scallop is reported** (a non-blocking note) where a finish leaves more
+  than its tolerance.
+
+### Simulation and display
+- **The machined stock** is drawn in the viewport and can be picked; rotary
+  programs now show their stock too.
+- **Playback jumps** no longer stall, and the CPU fallback renders off the UI
+  thread.
+
+### Models and output
+- **Repair mesh** (Model page): weld vertices and fill planar holes, one undo
+  step, never automatic.
+- **The setup sheet** says whether each fixture is fixed or turns with the part.
+- **Windows installer** (preview) beside the zip, and an optional signing step;
+  this build is unsigned.
+
+### Known limits
+- C-axis live tooling, G41/G42 wear mode, and comp on posts other than Fanuc.
+- Lathe operations are not shown in the field stock simulation yet (refused
+  by name; the turning verdict at generation still applies).
+- The adaptive planner still falls back to offset rings on island pockets.
+
+---
+
 # CamCraft 0.7.0 (clean-room implementation)
 
 Seventh public release: the user-review release. Most of what is new came

@@ -66,13 +66,28 @@ pub fn contour_on_part(
     part: &[Triangle],
     p: &ContourParams,
 ) -> Result<Toolpath, GenError> {
-    contour_impl(region, p, Some(part))
+    contour_impl(region, p, Some((part, &[])))
+}
+
+/// [`contour_on_part`] of a part that is the union of touching bodies
+/// (M13.11): `bodies` are the per-solid index ranges of `part`, and the
+/// depth ladder reads each plane as the 2D union of the bodies' own
+/// sections - two models butted face to face cut every level the one
+/// block they stand for cuts. Fewer than two ranges is
+/// [`contour_on_part`], byte for byte.
+pub fn contour_on_bodies(
+    region: &Region,
+    part: &[Triangle],
+    bodies: &[std::ops::Range<usize>],
+    p: &ContourParams,
+) -> Result<Toolpath, GenError> {
+    contour_impl(region, p, Some((part, bodies)))
 }
 
 fn contour_impl(
     region: &Region,
     p: &ContourParams,
-    part: Option<&[Triangle]>,
+    part: Option<(&[Triangle], &[std::ops::Range<usize>])>,
 ) -> Result<Toolpath, GenError> {
     p.validate()?;
     // Control-side compensation (M13.11): its parameter door first.
@@ -141,7 +156,7 @@ fn contour_impl(
     // a flat region; against a part, each ring down to its own floor.
     let lad = match part {
         None => Ladder::uniform(&flat, loops.len()),
-        Some(f) => ladder(&plan, f, &flat, r, p.stock_to_leave, &mut lead_notes),
+        Some((f, bodies)) => ladder(&plan, f, bodies, &flat, r, p.stock_to_leave, &mut lead_notes),
     };
     if lad.zs.is_empty() {
         // Every ring stands in the part at its first level: nothing is
