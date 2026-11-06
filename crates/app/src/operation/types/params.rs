@@ -115,8 +115,8 @@ pub enum OpParams {
         /// Helix, and certified against the bore's wall per level by
         /// the generator's dive room, not by the roughing overlap law.
         helix_radius: f64,
-        /// Turning-point blends (M11.1 B): air-side line-to-line
-        /// corners ride one tangent G2/G3 fillet where the law proves
+        /// Turning-point blends (M11.1 B): air-side corners (line or
+        /// arc on either side) ride one tangent G2/G3 fillet where the law proves
         /// it (`machining2d::fillet_corners`); `false` is the sharp
         /// walk every pre-M11.1 file holds.
         blend_turns: bool,

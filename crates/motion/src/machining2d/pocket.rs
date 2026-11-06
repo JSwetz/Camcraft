@@ -109,9 +109,10 @@ pub struct PocketParams {
     /// validated finite. `crate::load::DEFAULT_OPTIMAL_LOAD` is exactly
     /// the step the old 45-degree default cut.
     pub optimal_load: f64,
-    /// Turning-point blends (M11.1 C): every line-to-line corner of a
-    /// pass - the zigzag's row-to-link jogs, a ring's corners - rides
-    /// one tangent fillet where `fillet.rs`'s law proves it inside the
+    /// Turning-point blends (M11.1 C): every corner of a pass - the
+    /// zigzag's row-to-link jogs, a ring's corners, line or arc on
+    /// either side - rides one tangent fillet where the law of
+    /// `fillet.rs` / `fillet_arc.rs` proves it inside the
     /// cutter-center area; refusals stay sharp and are named in the
     /// path's notes, with the worst corner rest. `false` - every
     /// pre-M11.1 file - is the sharp walk, unchanged to the byte.

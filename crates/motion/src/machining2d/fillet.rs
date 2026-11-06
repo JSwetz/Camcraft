@@ -42,8 +42,10 @@
 //! - **tolerance / resolution**: `rho >= max(tolerance, MIN_BLEND_RADIUS)`;
 //!   an arc under the op's own chord tolerance says nothing the corner
 //!   did not, and below the resolution no control interpolates it.
-//! - **shape**: only line-to-line corners round (a curved neighbour has
-//!   no straight leg to trim), a full reversal has no tangent fillet,
+//! - **shape**: line-to-line corners round here; a corner next to an
+//!   arc rounds by the tangent-circle construction of `fillet_arc.rs`
+//!   (same radius law, same region proof on the arc itself) or stays
+//!   sharp, counted as curved. A full reversal has no tangent fillet,
 //!   and a closed walk's seam - where it starts and ends - stays where
 //!   the entry put it. Each refusal keeps its sharp corner and is counted by
 //!   reason; nothing is silent.
@@ -51,6 +53,7 @@
 use crate::geo2d::{Point2, Region};
 
 use super::arcs::Seg;
+use super::fillet_arc::judge_curved;
 use super::fillet_tally::{FilletTally, Verdict, fillet_floor};
 use super::ring::on_boundary;
 use super::waterscan::chord_crosses_path;
@@ -87,20 +90,20 @@ pub struct Legal<'a> {
 }
 
 #[derive(Clone, Copy)]
-enum El {
+pub(super) enum El {
     Line(Point2, Point2),
     Arc { from: Point2, center: Point2, ccw: bool, to: Point2 },
 }
 
 impl El {
-    fn to(&self) -> Point2 {
+    pub(super) fn to(&self) -> Point2 {
         match *self {
             El::Line(_, b) => b,
             El::Arc { to, .. } => to,
         }
     }
     /// Unit travel direction at the start (`start`) or the end.
-    fn tangent(&self, start: bool) -> Option<Point2> {
+    pub(super) fn tangent(&self, start: bool) -> Option<Point2> {
         match *self {
             El::Line(a, b) => unit(b.x - a.x, b.y - a.y),
             El::Arc { from, center, ccw, to } => {
@@ -112,12 +115,12 @@ impl El {
     }
 }
 
-fn unit(dx: f64, dy: f64) -> Option<Point2> {
+pub(super) fn unit(dx: f64, dy: f64) -> Option<Point2> {
     let m = (dx * dx + dy * dy).sqrt();
     (m > 0.0 && m.is_finite()).then(|| Point2::new(dx / m, dy / m))
 }
 
-fn len(a: Point2, b: Point2) -> f64 {
+pub(super) fn len(a: Point2, b: Point2) -> f64 {
     ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()
 }
 
@@ -215,7 +218,7 @@ fn judge(a: &El, b: &El, r_max: f64, floor: f64, legal: &Legal) -> Verdict {
         return Verdict::Straight;
     }
     let (El::Line(p0, v), El::Line(_, p2)) = (*a, *b) else {
-        return Verdict::Curved;
+        return judge_curved(a, b, s > 0.0, c, r_max, floor, legal);
     };
     if 1.0 + c <= REVERSAL_EPS {
         return Verdict::Reversal;
@@ -250,8 +253,9 @@ fn judge(a: &El, b: &El, r_max: f64, floor: f64, legal: &Legal) -> Verdict {
     Verdict::Blocked
 }
 
-/// Round every legal line-to-line corner of `walk` (a [`Seg`] list
-/// starting at `start`, as [`super::fit_arcs`] hands it) with one
+/// Round every legal corner of `walk` (a [`Seg`] list starting at
+/// `start`, as [`super::fit_arcs`] hands it; corners next to an arc by
+/// the `fillet_arc` construction) with one
 /// tangent arc of radius at most `r_max`, under `legal` and the
 /// tolerance floor [`fillet_floor`]`(tol)`. The walk's first and last
 /// points never move (leads and links still join where they did);
@@ -308,8 +312,11 @@ pub fn fillet_corners(
                 if !line.is_empty() {
                     out.push(Seg::Line(std::mem::take(&mut line)));
                 }
-                out.push(Seg::Arc { center, ccw, to });
-                at = to;
+                // Trimmed to the fillet's T1 when its end corner rounds
+                // (its start already sits at the previous fillet's T2).
+                let end = fillet.map_or(to, |(t1, ..)| t1);
+                out.push(Seg::Arc { center, ccw, to: end });
+                at = end;
             }
         }
         if let Some((_, t2, c, ccw)) = fillet {

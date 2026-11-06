@@ -117,9 +117,9 @@ pub struct ContourParams {
     /// the roughing overlap law: a contour orbit descends air, so a
     /// radius above the tool's is legal wherever the bore holds it.
     pub helix_radius: f64,
-    /// Turning-point blends (M11.1 B): line-to-line corners that turn
-    /// toward the air ride one tangent fillet where `fillet.rs`'s law
-    /// proves it; corners toward the part, and every other refusal,
+    /// Turning-point blends (M11.1 B): corners (line or arc on either
+    /// side) that turn toward the air ride one tangent fillet where the
+    /// law of `fillet.rs` / `fillet_arc.rs` proves it; corners toward the part, and every other refusal,
     /// stay sharp and are named in the notes with the worst corner
     /// rest. `false` - every pre-M11.1 file - is unchanged to the byte.
     pub blend_turns: bool,

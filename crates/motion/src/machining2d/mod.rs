@@ -38,6 +38,7 @@ mod descent;
 mod descent_dive;
 mod face;
 mod fillet;
+mod fillet_arc;
 mod fillet_tally;
 mod lead_ext;
 mod lead_fit;

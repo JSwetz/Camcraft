@@ -1,7 +1,8 @@
 //! The fillet law's books (M11.1 B/C): each corner verdict counted by
 //! reason and spoken as status-line notes, so every refusal is named and
 //! every rounding states the corner rest it leaves. Provenance: ours,
-//! the reporting half of `fillet.rs` (tangent circle to two lines).
+//! the reporting half of `fillet.rs` / `fillet_arc.rs` (tangent circle
+//! to two lines, to a line and a circle, to two circles).
 
 use crate::geo2d::Point2;
 
@@ -33,7 +34,8 @@ pub struct FilletTally {
     pub tiny: usize,
     /// Live geometry refused every radius tried.
     pub blocked: usize,
-    /// A neighbour is an arc.
+    /// A neighbour is an arc and no tangent fillet fits it (too short a
+    /// sweep or leg for the radius, too tight a curve, a cusp).
     pub curved: usize,
     /// A closed walk's seam: the corner where it starts and ends (the
     /// plunge, the lead join) - rounding it would move the entry.
@@ -100,7 +102,7 @@ impl FilletTally {
             &format!("the legs leave room for no arc of at least {floor:.3} mm (tolerance / arc resolution)"),
         );
         say(self.blocked, "live geometry blocks every arc down to the resolution");
-        say(self.curved, "a neighbour is an arc; only line-to-line corners round");
+        say(self.curved, "a neighbour is an arc and no tangent fillet fits it (its sweep, its leg or its curve leave no room)");
         say(self.seam, "the walk starts and ends there; rounding it would move the entry");
         v
     }
