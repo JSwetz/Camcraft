@@ -9,7 +9,8 @@
 //! the published implicit-surface literature: stock minus tool is
 //! `max(phi_stock, -phi_tool)`), the tool solids of RS-274 world
 //! machining (capsule, cylinder, truncated cone - the same three the
-//! dexel atoms sweep), and the chord reduction of this codebase's own
+//! dexel atoms sweep; the bull nose's rounded rectangle, M13.1,
+//! specced in `field_bull`), and the chord reduction of this codebase's own
 //! `arc_chords`. Nothing from vendor binaries.
 //!
 //! ## The laws here
@@ -58,7 +59,8 @@
 //!   refuses by name before a single brick is written.
 
 use super::field::{cell_of, SdfField};
-use super::field_solid::{add, dist_pt_para, dot, flat_tie, pose_dist, scale, sub, tool_kind, RevKind, ToolKind};
+use super::field_bull::{bull_closed, bull_dist, bull_tie};
+use super::field_solid::{add, dist_pt_para, dot, flat_tie, pose_dist, scale, sub, tool_kind, upright_flat_foot, RevKind, ToolKind};
 use super::kernel::StockError;
 use super::scan::dist_pt_seg3;
 
@@ -81,8 +83,9 @@ const PHI: f64 = 0.6180339887498949;
 /// interval, with room to spare: PHI^GS_ITERS is ~2e-7.
 const GS_RESIDUAL: f64 = 1e-6;
 
-/// The tool solids of the field's vocabulary - the same three the
-/// dexel sweeps (`Dexel::subtract`, `subtract_ball`, `subtract_cone`).
+/// The tool solids of the field's vocabulary - the same ones the
+/// dexel sweeps (`Dexel::subtract`, `subtract_ball`, `subtract_cone`,
+/// `subtract_bull`).
 #[derive(Clone, Copy, Debug)]
 pub enum SdfTool {
     /// Ball nose of radius `r`; moves carry tip positions and the
@@ -98,6 +101,11 @@ pub enum SdfTool {
     /// (virtual sharp), side slope `cot` = cotangent of the half
     /// angle from the axis, as the dexel's cone atom reads it.
     Taper { r: f64, cot: f64 },
+    /// Bull nose (M13.1): a cylinder of `r` to `flank` whose bottom
+    /// edge is rounded by `corner` - the rounded-rectangle profile
+    /// revolved (`field_bull`), the dexel's `cut_bull` atom made a
+    /// solid. `0 < corner <= r`, `flank >= corner`.
+    BullNose { r: f64, corner: f64, flank: f64 },
 }
 
 /// One chord's swept solid, prepped for the walk (`field_ray` reads
@@ -124,6 +132,7 @@ impl Sweep {
             Sweep::Revolve { kind, .. } => match kind {
                 RevKind::Flat { r, flank } => r.hypot(*flank),
                 RevKind::Taper { r, cot } => r.hypot(r * cot),
+                RevKind::Bull { r, flank, .. } => r.hypot(*flank),
             },
         }
     }
@@ -141,6 +150,7 @@ impl Sweep {
             Sweep::Revolve { kind, .. } => match kind {
                 RevKind::Flat { r, flank } => (*r, *flank),
                 RevKind::Taper { r, cot } => (*r, r * cot),
+                RevKind::Bull { r, flank, .. } => (*r, *flank),
             },
         }
     }
@@ -198,6 +208,16 @@ impl Sweep {
                     // floor is not.
                     let foot = add(*a, scale(d, t));
                     return flat_tie(foot, q, kind, pose_dist(ax, foot, q, kind));
+                }
+                if let RevKind::Bull { r, corner, flank } = kind {
+                    // Level and plunge moves in closed form, ties the
+                    // column's way (`field_bull`'s law).
+                    let at = |p: Point3| [p.x, p.y, p.z];
+                    if let Some((t, h)) = bull_closed(ax, at(*a), d, at(q), *flank) {
+                        let foot = add(*a, scale(d, t));
+                        let (zl, rho) = (q.z - foot.z, (q.x - foot.x).hypot(q.y - foot.y));
+                        return bull_tie(rho, zl, *r, *corner, h, bull_dist(rho, zl, *r, *corner, h));
+                    }
                 }
                 // Golden section on the convex map t -> phi(q - (a + t*d)).
                 let (mut lo, mut hi) = (0.0f64, 1.0f64);
@@ -301,6 +321,11 @@ impl SdfField {
                         b,
                         kind: RevKind::Taper { r: *r, cot: *cot },
                     },
+                    ToolKind::Bull { r, corner, flank } => Sweep::Revolve {
+                        a,
+                        b,
+                        kind: RevKind::Bull { r: *r, corner: *corner, flank: *flank },
+                    },
                 };
                 // The ceiling bounds the WORK: the window as clipped
                 // to the cut region, the only cells the walk can visit.
@@ -317,32 +342,6 @@ impl SdfField {
         self.cut_batch(&sweeps);
         Ok(())
     }
-}
-
-/// The exact minimizer of `t -> pose_dist` for an upright flat tool
-/// on the two moves 2.5-D paths are made of (M7.3's per-cell cost):
-/// on a level move `zl` is fixed and the distance only grows with the
-/// radial offset, so the minimum sits at the XY foot of the path; on
-/// a plunge `rho` is fixed and the box distance is convex in `zl`
-/// with its minimum at mid-flank. `None` sends every other move to
-/// the golden section.
-fn upright_flat_foot(ax: [f64; 3], a: Point3, d: [f64; 3], q: Point3, kind: &RevKind) -> Option<f64> {
-    let RevKind::Flat { flank, .. } = kind else {
-        return None;
-    };
-    if ax != [0.0, 0.0, 1.0] {
-        return None;
-    }
-    if d[2] == 0.0 {
-        let dd = d[0] * d[0] + d[1] * d[1];
-        let t = ((q.x - a.x) * d[0] + (q.y - a.y) * d[1]) / dd;
-        return t.is_finite().then(|| t.clamp(0.0, 1.0));
-    }
-    if d[0] == 0.0 && d[1] == 0.0 {
-        let t = (q.z - a.z - 0.5 * flank) / d[2];
-        return t.is_finite().then(|| t.clamp(0.0, 1.0));
-    }
-    None
 }
 
 /// The lattice window one sweep can reach: the path's AABB swept

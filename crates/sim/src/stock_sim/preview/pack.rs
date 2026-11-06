@@ -300,7 +300,7 @@ mod tests {
             axis: None,
         }];
         stock
-            .simulate(&[SimOp { moves: &mv, radius: 2.0, ball: false, cone: None }])
+            .simulate(&[SimOp { moves: &mv, radius: 2.0, ball: false, cone: None, corner: None }])
             .unwrap();
         let g = stock.field().unwrap();
         let lat = pack_field(g).expect("a cut field packs");

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use camcraft_app::commands::{
     ActivateSetup, AddTool, ApplyCuttingData, ChangeOperationKind, ChangeTool, CommandError, CreateOperation,
-    CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
+    ClearToolpath, CreateSetup, DeleteEntity, DeleteFixture, DeleteOperation, DeleteSetup, DeleteTool,
     EditOperationLinks, EditOperationParams, GenerateOperation, History, ImportModel, LoadMachine,
     MoveFixture, MoveModel, RegenerateAll, SelectEntity, SelectPost, SetOperationGeometry,
     SetColorVision, SetOperationSetup, SetStock, SetTheme, SetUnits, SetWcsOrigin, SetWorkMaterial, TagFixture,
@@ -187,6 +187,9 @@ pub enum CommandKind {
         items: Vec<GeoSel>,
     },
     DeleteOperation(String),
+    /// Throw away the operation's generated path and keep the operation
+    /// (undoable: the cache comes back byte for byte).
+    ClearToolpath(String),
     /// Generate and verify the cached path. The command does the work at
     /// construction, synchronously; status arrives with the result.
     GenerateOperation(String),
@@ -715,9 +718,15 @@ pub enum DragMode {
 /// selection pick. Ephemeral view state, never a command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoundaryPick {
+    /// A new include boundary: the first pick creates it, and the target
+    /// becomes [`BoundaryPick::Extra`] of it (`boundary_draft::take_pick`).
     Include,
+    /// A new exclude boundary, likewise.
     Exclude,
+    /// The open boundary (created by the first pick if there is none).
     Open,
+    /// An existing entry of `AreaControls::extra` (M11.5 UX re-pick).
+    Extra(usize),
 }
 
 /// What a viewport click selects. Transient view state - the mode
@@ -1023,6 +1032,9 @@ pub struct State {
     /// The Boundary group's pick target (M11.5); `None` routes picks to
     /// the selection as always.
     pub boundary_pick: Option<BoundaryPick>,
+    /// The Boundary group's view state and caches (M11.5 UX): open this
+    /// frame, the draft's machined-area preview, the entries' shapes.
+    pub boundary_view: crate::boundary_draft::BoundaryView,
     /// The Geometry list row under the pointer this frame, if any: the
     /// pane answers "which one is that?" by lighting the feature in the
     /// viewport, like pointer hover does. Ephemeral view state (the
@@ -1079,6 +1091,10 @@ pub struct State {
     /// alone was invisible enough that "Add does nothing" read as a dead
     /// button. Cleared by every command that runs (see [`State::run`]).
     pub feedback: Option<(ErrorScope, String)>,
+    /// What an operation-scope refusal described when it fired (the op,
+    /// the document version, the page draft): once any of it moves, the
+    /// refusal retires - see [`crate::feedback`].
+    pub feedback_ctx: Option<crate::feedback::FeedbackCtx>,
 }
 
 /// Which page of the Operations pane a refused command's message belongs
@@ -1160,6 +1176,7 @@ impl State {
             viewport_hot: false,
             geo_pick: GeoPick::Model,
             boundary_pick: None,
+            boundary_view: Default::default(),
             geo_hover: None,
             op_tab: 0,
             hidden_models: Vec::new(),
@@ -1222,6 +1239,7 @@ impl State {
             tool_synced: (String::new(), 0),
             ui_target: UiTarget::None,
             feedback: None,
+            feedback_ctx: None,
         }
     }
 
@@ -1232,6 +1250,7 @@ impl State {
         self.feedback
             .as_ref()
             .filter(|(s, _)| *s == scope)
+            .filter(|_| self.feedback_live())
             .map(|(_, msg)| msg.as_str())
     }
 
@@ -1245,9 +1264,17 @@ impl State {
     }
 
     /// Record a refusal: status strip for everyone, tagged message for the
-    /// pane that caused it.
+    /// pane that caused it. An operation-scope refusal is stamped with the
+    /// page it was raised on, so it retires with that state.
     fn refuse(&mut self, scope: ErrorScope, msg: String) {
         self.status.clone_from(&msg);
+        // The page's draft as the next frame will show it: a document
+        // bump earlier in this drain re-mirrors now, not after the
+        // snapshot (else the re-mirror would read as a user edit).
+        if scope == ErrorScope::Operation {
+            self.sync_ops_ui();
+        }
+        self.feedback_ctx = self.feedback_ctx_for(scope);
         self.feedback = Some((scope, msg));
     }
 
@@ -1428,6 +1455,20 @@ impl State {
             && model::find_by_name(&self.world, name)
                 .and_then(|e| model::operation_of(&self.world, &e))
                 .is_some_and(|op| op.area != self.op_ui.area);
+        // A Boundary draft the Apply door would refuse (an open chain in an
+        // include / exclude, M11.5 UX) stops here, named, before anything
+        // generates from the committed boundary behind the user's back.
+        if area_dirty {
+            let setup = model::find_by_name(&self.world, name)
+                .and_then(|e| model::operation_of(&self.world, &e))
+                .and_then(|op| op.setup);
+            if let Some(why) =
+                operation::area_pick_issue(&self.world, setup.as_deref(), &self.op_ui.area, &self.op_ui.params)
+            {
+                self.refuse(ErrorScope::Operation, format!("not generated: {why}"));
+                return;
+            }
+        }
         if dirty {
             self.push_param_edit(name, area_dirty);
         }
@@ -1609,7 +1650,7 @@ impl State {
                         let found = model::find_by_name(&self.world, &g.entity)
                             .and_then(|e| model::features_of(&self.world, &e))
                             .map(|f| {
-                                let c = feature::chains(&f).into_iter().find(|c| c.id == id)?;
+                                let c = feature::resolve_chain(&f, id)?;
                                 let pts = feature::chain_points(&f, &c);
                                 Some((c, pts))
                             })
@@ -1825,6 +1866,9 @@ impl State {
             self.run(action);
         }
         self.poll_import();
+        // A refusal that no longer describes the page retires, with its
+        // status-strip mirror (crate::feedback).
+        self.retire_stale_feedback();
         // The editor window's ghost law (M1.4), mirroring `pane_target`:
         // an open editor never keeps pointing at a name the document lost
         // under it - deleted, undone, or swapped by New/Open all land here.
@@ -1861,6 +1905,7 @@ impl State {
         // Whatever ran, the banner shows only the newest outcome: a later
         // command (even a successful one) retires an old refusal.
         self.feedback = None;
+        self.feedback_ctx = None;
         match action {
             CommandKind::OpenModelDialog => {
                 if let Some(path) = pick_mesh_file() {
@@ -2326,6 +2371,16 @@ impl State {
                     }
                 }
             }
+            CommandKind::ClearToolpath(name) => match ClearToolpath::new(&self.world, &name) {
+                Ok(command) => {
+                    self.history.execute(&self.world, command);
+                    self.doc_version += 1;
+                    self.status = format!("cleared the toolpath of {name} - Ctrl+Z restores it");
+                }
+                Err(err) => {
+                    self.refuse(ErrorScope::Operation, format!("toolpath not cleared: {err}"))
+                }
+            },
             CommandKind::RegenerateAll => {
                 // Construction decides everything (validate early: each
                 // stale op's generator runs before anything is written),

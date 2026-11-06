@@ -58,7 +58,7 @@ fn the_sampler_reads_both_stock_engines_alike() {
         arc: None,
         axis: None,
     }];
-    let ops = [SimOp { moves: &pass, radius: 2.0, ball: false, cone: None }];
+    let ops = [SimOp { moves: &pass, radius: 2.0, ball: false, cone: None, corner: None }];
     c.simulate(&ops).unwrap();
     f.simulate(&ops).unwrap();
     let (cc, cf) = (c.columns().unwrap(), f.columns().unwrap());

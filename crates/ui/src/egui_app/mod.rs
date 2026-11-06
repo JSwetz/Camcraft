@@ -29,7 +29,6 @@ pub(crate) mod gpu;
 // glyph tint are the consumers (ratio, on-fill, the follow law, the gate).
 pub mod contrast;
 mod boundary;
-pub(crate) use boundary::take_pick as boundary_take_pick;
 // pub: M13.4's ColorVision layer - the viewport, the traced stock and
 // the overlay lines read the palette; `cvd` is its maths.
 pub mod colorvision;
@@ -65,6 +64,8 @@ pub(crate) mod world;
 mod tests;
 #[cfg(test)]
 mod heights_tests;
+#[cfg(test)]
+mod footer_tests;
 #[cfg(test)]
 mod colorvision_tests;
 

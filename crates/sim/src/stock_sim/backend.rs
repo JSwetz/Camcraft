@@ -261,6 +261,8 @@ impl Stock {
                         SdfTool::Shanked { r: op.radius, shank: flank }
                     } else if let Some(cot) = op.cone {
                         SdfTool::Taper { r: op.radius, cot }
+                    } else if let Some(corner) = op.corner {
+                        SdfTool::BullNose { r: op.radius, corner, flank }
                     } else {
                         SdfTool::Flat { r: op.radius, flank }
                     };

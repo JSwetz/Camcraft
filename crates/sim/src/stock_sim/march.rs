@@ -171,6 +171,16 @@ fn refine(f: &SdfField, cx: &Option<Vec<f64>>, x: f64, y: f64, mat: f64, air: f6
                 let u = f.up_at([ix, iy, j]);
                 if u.is_finite() && u < cell {
                     lift = u.max(0.0);
+                    // An entry ABOVE the mesh's own flip (M13.1: a
+                    // curved tool bottom grazing the stock top from
+                    // above) is air already - when the uncut stock
+                    // itself says air at the next center, its
+                    // boundary binds, as the column's `min(top, cut)`
+                    // does. Where the mesh is still material above,
+                    // only the cut opened the column: the entry stands.
+                    if u > 0.5 * cell && probe(f, cx, x, y, ca, false) >= 0.0 {
+                        lift = 0.5 * cell;
+                    }
                 }
             }
             return cm + lift;

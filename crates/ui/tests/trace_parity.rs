@@ -50,7 +50,7 @@ fn pocketed(floor: f64) -> Stock {
         arc: None,
         axis: None,
     }];
-    s.simulate(&[SimOp { moves: &mv, radius: 2.0, ball: false, cone: None }]).unwrap();
+    s.simulate(&[SimOp { moves: &mv, radius: 2.0, ball: false, cone: None, corner: None }]).unwrap();
     s
 }
 

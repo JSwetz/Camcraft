@@ -51,7 +51,7 @@ fn field_cost_per_move_on_the_golden_programs() {
         let (mut done, mut chunk, mut note) = (0usize, 1usize, String::new());
         while done < pg.moves.len() {
             let end = (done + chunk).min(pg.moves.len());
-            let ops = [SimOp { moves: &pg.moves[done..end], radius: pg.radius, ball: pg.ball, cone: None }];
+            let ops = [SimOp { moves: &pg.moves[done..end], radius: pg.radius, ball: pg.ball, cone: None, corner: pg.corner }];
             if let Err(e) = stock.simulate(&ops) {
                 note = format!("REFUSED at move {done}: {e}");
                 break;

@@ -138,6 +138,12 @@ use super::op_tabs::{SEC_FEEDS, SEC_GEO, SEC_HEIGHTS, SEC_LEADS, SEC_MACHINE, SE
 /// like operations.rs's contents() dispatcher.
 pub fn properties(ui: &mut Ui, state: &mut State, pal: &Tokens) {
     let t = state.pane_target();
+    // Only an open Boundary group draws its viewport marks (M11.5 UX):
+    // any other page this frame hides them and stops the collecting.
+    state.boundary_view.shown = false;
+    if !matches!(t, UiTarget::Operation(_)) {
+        state.boundary_pick = None;
+    }
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| match t {
@@ -445,7 +451,7 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
                 });
             }
         }
-        let notes: Vec<String> = operation::selection_notes(
+        let (notes, refusal) = operation::selection_account(
             &state.world,
             live_setup,
             &state.op_ui.geo.clone(),
@@ -453,6 +459,16 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
         );
         for note in notes {
             ui.colored_label(NOTE, note);
+        }
+        // The pick's own refusal, under the picks it is about: the
+        // stored selection's (the walk Generate would refuse), else the
+        // pick door's when the last pick was turned away.
+        let door = state
+            .error_for(ErrorScope::Operation)
+            .filter(|m| m.starts_with("geometry selection not updated") || m.starts_with("links not updated"))
+            .map(str::to_owned);
+        if let Some(msg) = refusal.or(door) {
+            ui.colored_label(RED, msg);
         }
         if state.op_ui.src_kind == 1 && !state.op_ui.src_name.is_empty() {
             let n = state.op_ui.src_name.clone();
@@ -486,22 +502,46 @@ fn operation_page(ui: &mut Ui, state: &mut State, name: &str, pal: &Tokens) {
     let unchanged = live
         .as_ref()
         .is_some_and(|o| o.params == state.op_ui.params && o.area == state.op_ui.area);
+    // Apply never reads as a dead button: the hint says why it is dark,
+    // or which edited field the door will refuse (crate::feedback).
+    let apply_hint =
+        crate::feedback::apply_hint(live.as_ref().map(|o| &o.params), &state.op_ui.params, unchanged);
+    let has_path = exists
+        && model::find_by_name(&state.world, &target)
+            .and_then(|e| model::toolpath_of(&state.world, &e))
+            .is_some();
     ui.horizontal(|ui| {
-        let apply = ui.add_enabled(!unchanged, egui::Button::new("Apply Parameters"));
+        let mut apply = ui.add_enabled(!unchanged, egui::Button::new("Apply Parameters"));
+        if let Some(why) = &apply_hint {
+            apply = apply.on_hover_text(why).on_disabled_hover_text(why);
+        }
         if apply.clicked() {
             state.apply_operation_params(&target);
         }
         if ui.button("Generate").clicked() {
             state.generate_operation(&target);
         }
-        if ui.button("Delete").clicked() {
+        // Clearing the generated path keeps the operation; deleting the
+        // operation is the other, named verb. Both are one undoable
+        // command, so neither asks for confirmation.
+        let clear = ui
+            .add_enabled(has_path, egui::Button::new("Clear toolpath"))
+            .on_hover_text("Remove the generated path and keep the operation (Ctrl+Z restores it)")
+            .on_disabled_hover_text("Nothing generated yet - there is no toolpath to clear");
+        if clear.clicked() {
+            state.pending.push_back(CommandKind::ClearToolpath(target.clone()));
+        }
+        let delete = ui
+            .button("Delete operation")
+            .on_hover_text("Delete the operation and its toolpath (Ctrl+Z restores both)");
+        if delete.clicked() {
             state
                 .pending
                 .push_back(CommandKind::DeleteOperation(target.clone()));
         }
     });
-    if unchanged {
-        ui.label("Apply is a no-op until a parameter differs from the operation.");
+    if let Some(why) = apply_hint {
+        ui.label(why);
     }
     if let Some(msg) = state.error_for(ErrorScope::Operation).map(str::to_owned) {
         ui.colored_label(RED, msg);

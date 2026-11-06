@@ -6,7 +6,10 @@
 //! is the shell, `interact` and `state` the shared law underneath it.
 
 pub mod actions;
+pub mod boundary_draft;
+pub mod boundary_viz;
 pub mod egui_app;
+pub mod feedback;
 pub mod interact;
 pub mod operations;
 pub mod state;

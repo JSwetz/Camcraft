@@ -1043,6 +1043,17 @@ fn viewport_panel(
                 egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 217, 102)),
             );
         }
+        // The Boundary group's marks (M11.5 UX): role-coloured picked
+        // edges, the edge a click would take, chain ends, machined side.
+        for m in crate::boundary_viz::boundary_marks(state, aspect) {
+            ui.painter().line_segment(
+                [
+                    egui::pos2(rx0 + m.a[0] * rw, ry0 + m.a[1] * rh),
+                    egui::pos2(rx0 + m.b[0] * rw, ry0 + m.b[1] * rh),
+                ],
+                egui::Stroke::new(m.width, super::colorvision::ink(m.rgb)),
+            );
+        }
         // The tool marker, last of the scene-space furniture but under the
         // chrome: a white ring at the tool point with three stubs along the
         // axes it actually moves on, projected through the same camera math

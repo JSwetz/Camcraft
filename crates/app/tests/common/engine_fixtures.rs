@@ -9,6 +9,8 @@
 //! midway between that floor and the stock top (every cut column
 //! gouges, every uncut one is rest: both verdicts at full exercise).
 //! The engines only have to agree; the probes make them say a lot.
+//! Since M13.1 four goldens also replay under a bull nose, so the
+//! bull atom and the bull solid are held to the same agreement.
 //! Provenance: our own test fixtures (tests/golden_cl.rs) - nothing
 //! from vendor material.
 
@@ -27,10 +29,14 @@ pub enum Target {
 
 /// One golden program, ready for either engine.
 pub struct Program {
+    /// The program's label: the golden file's name, plus the tool for
+    /// a golden replayed under a second cutter (the bull-nose rows).
     pub file: &'static str,
     pub moves: Vec<Move>,
     pub radius: f64,
     pub ball: bool,
+    /// The bull nose's corner radius (M13.1), None for every other tool.
+    pub corner: Option<f64>,
     /// The stock block's top.
     pub top: f64,
     pub target: Target,
@@ -38,6 +44,9 @@ pub struct Program {
 
 /// (file, tool radius, ball nose, stock top, part mesh when it has one)
 type Spec = (&'static str, f64, bool, f64, Option<Vec<Triangle>>);
+
+/// (label, golden file, tool radius, corner radius, stock top, part mesh)
+type BullSpec = (&'static str, &'static str, f64, f64, f64, Option<Vec<Triangle>>);
 
 /// Every committed golden that a 3-axis stock sim can replay, with the
 /// tool its golden test named (the drilling cycles sweep the disc,
@@ -68,14 +77,34 @@ pub fn programs() -> Result<Vec<Program>, String> {
         ("finish3d_radial_dome.cl", 3.0, true, 13.0, Some(dome())),
         ("finish3d_project_dome.cl", 3.0, true, 13.0, Some(dome())),
     ];
-    let mut out = Vec::with_capacity(specs.len());
+    let mut out = Vec::with_capacity(specs.len() + 4);
     for (file, radius, ball, top, mesh) in specs {
         let moves = parse_cl(&golden_text(file)?).map_err(|e| format!("{file}: {e}"))?;
         let target = match mesh {
             Some(m) => Target::Mesh(m),
             None => Target::Plates,
         };
-        out.push(Program { file, moves, radius, ball, top, target });
+        out.push(Program { file, moves, radius, ball, corner: None, top, target });
+    }
+    // M13.1: committed goldens replayed under a bull nose - the 2.5-D
+    // floors and walls (level, plunge, helix and arc chords: the
+    // closed-form arms) and a 3D finish (oblique chords: the golden
+    // section). The paths were planned for other cutters, so these
+    // programs gouge and leave rest freely; the engines only have to
+    // agree on what the bull leaves.
+    let bulls: [BullSpec; 4] = [
+        ("pocket_zigzag_plate_with_island.cl+bull(r4,c1)", "pocket_zigzag_plate_with_island.cl", 4.0, 1.0, 0.0, None),
+        ("contour_plate_with_hole.cl+bull(r3,c1)", "contour_plate_with_hole.cl", 3.0, 1.0, 0.0, None),
+        ("slot_wide_channel_rows.cl+bull(r3,c0.5)", "slot_wide_channel_rows.cl", 3.0, 0.5, 0.0, None),
+        ("finish3d_scallop_plateau.cl+bull(r3,c1.5)", "finish3d_scallop_plateau.cl", 3.0, 1.5, 11.0, Some(plateau())),
+    ];
+    for (label, source, radius, corner, top, mesh) in bulls {
+        let moves = parse_cl(&golden_text(source)?).map_err(|e| format!("{source}: {e}"))?;
+        let target = match mesh {
+            Some(m) => Target::Mesh(m),
+            None => Target::Plates,
+        };
+        out.push(Program { file: label, moves, radius, ball: false, corner: Some(corner), top, target });
     }
     Ok(out)
 }

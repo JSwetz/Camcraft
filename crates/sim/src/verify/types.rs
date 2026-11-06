@@ -180,6 +180,29 @@ pub enum Warning {
         gouge_mm: f64,
         rest_mm: f64,
     },
+    /// A 3-D finish's envelope verdict could not judge the material
+    /// hidden under overhangs (M13.1): the hidden-rest scan stopped at
+    /// its budget (`cells` the lattice, `claims` the plane claims
+    /// binned when it stopped), so whatever rest the verdict reports
+    /// speaks for the ridge law alone. "Not judged", never a zero -
+    /// reported at the first cutting move, and like every cached
+    /// warning it holds the post.
+    RestUnjudged { at: usize, cells: usize, claims: usize },
+}
+
+impl Warning {
+    /// The envelope report's unjudged hidden half, as the warning that
+    /// says so (M13.1): `Some(RestUnjudged)` exactly when the scan ran
+    /// out of budget, located at `at` (the path's first cut).
+    #[must_use]
+    pub fn hidden_unjudged(rep: &crate::stock_sim::EnvelopeReport, at: usize) -> Option<Self> {
+        match rep.hidden {
+            crate::stock_sim::HiddenRest::OverBudget { cells, claims } => {
+                Some(Warning::RestUnjudged { at, cells, claims })
+            }
+            crate::stock_sim::HiddenRest::Judged => None,
+        }
+    }
 }
 
 impl core::fmt::Display for Warning {
@@ -225,6 +248,10 @@ impl core::fmt::Display for Warning {
             } => write!(
                 f,
                 "finish envelope near move {at}: {gouge_mm:.4} mm gouge, {rest_mm:.4} mm rest"
+            ),
+            Warning::RestUnjudged { at, cells, claims } => write!(
+                f,
+                "finish envelope from move {at}: hidden rest NOT JUDGED - the scan's budget ran out ({cells} cells, {claims} plane claims); material under an overhang may stand unreported"
             ),
         }
     }

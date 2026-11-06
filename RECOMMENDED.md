@@ -9603,3 +9603,57 @@ would change every shell + Ramp path).
 a cut under an overhang or the part's underside. It is the backstop
 every generator relies on: the shadow-aware verifier is in flight as
 top priority, with boundary_ctx.rs's two plain-section reads.
+
+## Merge batch 2026-11-06: boundary picking, op-page fixes, M13.1 (HSM adaptive round 1 held back)
+
+**M11.4 C round 1 - HELD BACK, not merged.** The batch gate found its path crossing itself on a 60x40 Adaptive pocket (a gouge risk) and 4 descents instead of 2 on the user's bore once merged with the entry work. Round 2 must pass both as acceptance tests. The design notes below stand for round 2.
+(1) Measured, not asserted: a `quality` module runs any path through
+the dexel stock and reports contact angle and load, slotting length,
+direction changes, curvature, air, retracts, descents per level and
+rest. (2) The spiral grows out of the helix bore (Stori & Wright 2000;
+Held & Spielberger 2009), with Dubins-linked open rounds (Otkur &
+Lazoglu 2007) and a rounded wall lap (Pateloup 2004). One descent per
+level - the user's "the first entry should be enough". (3) Acceptance
+was NOT met: the bore peaks at 19.9% (target 14.6%), the rectangle at
+26.7%, there are 14-16 small kinks, and air rose 70x. L-pocket, islands
+and slots fall back to rings by name; an incomplete plan (>2% left) is
+never posted. Round 2 is in flight with hard targets. (4) The old
+behaviour is kept as `PocketStrategy::OffsetRings`, an explicit choice;
+PROJECT_VERSION 48 -> 49 with a migration (existing Adaptive ops go
+Stale once).
+
+**Boundary picking (user: "very unclear how the open boundary selection
+works").** (1) While collecting a boundary, an Edge click takes one
+geometric edge (a run: one straight stretch or one arc; chains split
+where neighbouring stretches differ by >2x). Ctrl toggles, Shift closes
+around the most horizontal face loop, Alt takes a single segment. The
+selection's own Edge pick is unchanged. (2) An open chain in
+Include/Exclude is caught at the pick with a one-click "Use as open
+boundary", and refused at Apply and Generate - never silently
+auto-routed. (3) One boundary list over the existing data model, side
+A/B = Inside/Outside, no file change. (4) Old chain ids resolve first,
+which also fixes Alt-picked segments that never resolved. (5) Role
+colours live in the colour-vision palette; the side arrows are read
+from the machined-area preview, not a second copy of the side rule.
+
+**Op page (user: "the error persists ... delete deletes the operation").**
+(1) A page error is tied to the page, document version and draft it
+was raised on, and clears when any of them change. (2) `ClearToolpath`
+is undoable (cache and stamp restored exactly). The footer reads
+Generate | Clear toolpath | Delete operation, with Delete still
+confirm-free (Ctrl+Z restores). (3) The "projects to a line from above"
+refusal fires at the doors for the pocket family only; other selection
+refusals stay at Generate so chains can be built one edge at a time.
+(4) A disabled Apply explains itself, naming the invalid field by
+comparing the draft to the saved operation.
+
+**M13.1 - stock engine shapes.** (1) The bull nose is an exact
+rounded-rectangle distance (Quilez sdRoundedBox / opRevolution): level
+moves and plunges in closed form, oblique moves by golden section, with
+a column-engine twin; the agreement suite gained four bull replays and
+holds at ~1e-11. (2) A march entry is capped at the mesh boundary where
+the uncut stock is air above. (3) Lathe and rotary cuts are refused by
+name in `plan_program`; the annular-sector sweep is still owed. (4) An
+over-budget hidden-rest scan is `HiddenRest::OverBudget` plus
+`Warning::RestUnjudged` ("NOT JUDGED"), which blocks the post; dropped:
+a non-blocking advisory.

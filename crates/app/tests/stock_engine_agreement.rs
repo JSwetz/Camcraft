@@ -5,7 +5,8 @@
 //! A disagreement is a located finding - which program, which part,
 //! which column, by how much - collected and printed whole before the
 //! suite fails; nothing is rounded away (the M4.2b dome-golden law).
-//! Heavy lane: both engines at full size over 21 programs.
+//! Heavy lane: both engines at full size over 21 programs, and four
+//! of them again under a bull nose (M13.1).
 //! Provenance: our own golden programs, engines and parity law - the
 //! M7.1 C parity suite (camcraft-sim) generalized to the goldens.
 //!
@@ -90,7 +91,7 @@ fn compare(pg: &Program, label: &str, x0: f64, y0: f64, c: &Deviation, f: &Devia
 fn run(pg: &Program, b: Backend) -> Result<Stock, String> {
     let (x0, y0, x1, y1) = pg.stock_box(CELL);
     let mut s = Stock::block(b, x0, y0, x1, y1, pg.top, CELL).map_err(|e| format!("{b:?} block: {e}"))?;
-    let ops = [SimOp { moves: &pg.moves, radius: pg.radius, ball: pg.ball, cone: None }];
+    let ops = [SimOp { moves: &pg.moves, radius: pg.radius, ball: pg.ball, cone: None, corner: pg.corner }];
     s.simulate(&ops).map_err(|e| format!("{b:?} simulate: {e}"))?;
     Ok(s)
 }
@@ -171,7 +172,7 @@ fn the_feed_sampler_reads_every_golden_program_alike() {
                 continue;
             }
         };
-        match compare_engagement(pg.file, &mut col, &mut fld, &pg.moves, pg.radius, pg.ball) {
+        match compare_engagement(pg.file, &mut col, &mut fld, &pg.moves, pg.radius, pg.ball, pg.corner) {
             Ok((found, sampled, loaded)) => {
                 println!("{} | sampled {sampled} | loaded {loaded} | findings {}", pg.file, found.len());
                 findings.extend(found);
@@ -225,7 +226,7 @@ fn the_pocket3d_consumers_read_both_engines_alike() {
         let at = format!("pocket3d {strategy:?}");
         let block = |b: Backend| Stock::block(b, -20.0, -20.0, 20.0, 20.0, 0.0, CELL).expect("the block");
         let (mut col, mut fld) = (block(Backend::Column), block(Backend::Field { band: FIELD_BAND }));
-        match compare_engagement(&at, &mut col, &mut fld, &path.moves, 4.0, false) {
+        match compare_engagement(&at, &mut col, &mut fld, &path.moves, 4.0, false, None) {
             Ok((found, sampled, loaded)) => {
                 println!("{at} | sampled {sampled} | loaded {loaded} | findings {}", found.len());
                 findings.extend(found);
@@ -235,7 +236,7 @@ fn the_pocket3d_consumers_read_both_engines_alike() {
         // The rest ladder's question of the coarse ladder's stock: what
         // stands above each half-step plane (the coarse floors among them).
         let (mut col, mut fld) = (block(Backend::Column), block(Backend::Field { band: FIELD_BAND }));
-        let ops = [SimOp { moves: &path.moves, radius: 4.0, ball: false, cone: None }];
+        let ops = [SimOp { moves: &path.moves, radius: 4.0, ball: false, cone: None, corner: None }];
         col.simulate(&ops).expect("column cut");
         fld.simulate(&ops).expect("field cut");
         let (cc, cf) = (col.columns().expect("column reader"), fld.columns().expect("field reader"));

@@ -10,7 +10,7 @@ use crate::model;
 use crate::operation::{self, OpParams, SrcRef};
 use crate::schema::Operation;
 
-use super::gates::{check_tool, family_gate, heights_gate, tool_gate, valid_src};
+use super::gates::{area_gate, check_tool, family_gate, heights_gate, tool_gate, valid_src};
 
 /// Replace an operation's parameters. The cache is left alone and the
 /// stamp is dropped, so the operation reads Stale immediately: the old
@@ -82,6 +82,15 @@ impl EditOperationParams {
         if !picks.is_empty() {
             valid_src(world, prev.setup.as_deref(), &SrcRef::Selection(picks))?;
         }
+        // The Apply door for the boundary shapes (M11.5 UX): an include /
+        // exclude spelling an open chain is refused here, by name, never
+        // first at Generate. Only a moved Boundary group is judged - a
+        // plain parameter edit of an older document keeps working.
+        if area != prev.area
+            && let Some(msg) = operation::area_pick_issue(world, prev.setup.as_deref(), &area, &params)
+        {
+            return Err(CommandError::Invalid(msg));
+        }
         let next = Operation {
             params,
             stamp: None,
@@ -149,6 +158,7 @@ impl ChangeOperationKind {
         // The retype is a creation of the new kind against the op's
         // current tool: the same tool-law door (M10.1 B).
         tool_gate(world, &params, &prev.tool)?;
+        area_gate(world, prev.setup.as_deref(), &prev.src, &params)?;
         // The area controls ride the retype when the new kind has an
         // area (M11.5); a kind without one keeps the identity, never
         // controls it cannot honor.
@@ -227,6 +237,7 @@ impl EditOperationLinks {
             if reads_sel {
                 heights_gate(world, prev.setup.as_deref(), &src, &next.params)?;
             }
+            area_gate(world, prev.setup.as_deref(), &src, &next.params)?;
             next.src = src;
         }
         Ok(EditOperationLinks { name: name.to_string(), prev, next })

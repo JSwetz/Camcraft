@@ -158,6 +158,7 @@ pub fn compare_engagement(
     moves: &[Move],
     radius: f64,
     ball: bool,
+    corner: Option<f64>,
 ) -> Result<(Vec<String>, usize, usize), String> {
     let mut out = Vec::new();
     let (mut sampled, mut loaded, mut cut_to) = (0usize, 0usize, 0usize);
@@ -167,7 +168,7 @@ pub fn compare_engagement(
         }
         // Bring both stocks to "just before move i".
         if cut_to < i {
-            let ops = [SimOp { moves: &moves[cut_to..i], radius, ball, cone: None }];
+            let ops = [SimOp { moves: &moves[cut_to..i], radius, ball, cone: None, corner }];
             col.simulate(&ops).map_err(|e| format!("{at}: column cut: {e}"))?;
             fld.simulate(&ops).map_err(|e| format!("{at}: field cut: {e}"))?;
             cut_to = i;

@@ -335,6 +335,37 @@ fn hidden_rest_surfaces_under_a_ceiling() {
 }
 
 #[test]
+fn hidden_rest_over_budget_says_not_judged() {
+    // M13.1: the same ceiling fixture under a starved budget. The old
+    // law answered "the stated zero" - a rest that read like a clean
+    // shadow; now the report says the hidden half was NOT judged, the
+    // rest number keeps only what the ridge law measured, and the
+    // verify warning names the state.
+    let mut f = closed_slab(0.0, 2.0);
+    f.extend(closed_slab(9.0, 10.0));
+    let full = stock_sim::envelope_scan(&f, &raster(10.0), 3.0, 0.1).expect("scan");
+    assert_eq!(full.hidden, stock_sim::HiddenRest::Judged, "the shipped budget judges this fixture");
+    for (budget, what) in [
+        (stock_sim::ScanBudget { cells: usize::MAX, claims: 10 }, "claims"),
+        (stock_sim::ScanBudget { cells: 100, claims: usize::MAX }, "cells"),
+    ] {
+        let rep = stock_sim::envelope_scan_within(&f, &raster(10.0), 3.0, 0.1, budget).expect("scan");
+        let stock_sim::HiddenRest::OverBudget { cells, claims } = rep.hidden else {
+            panic!("{what}: over budget must say unjudged, got {:?}", rep.hidden);
+        };
+        assert!(cells > 0, "{what}: the lattice is stated");
+        if what == "claims" {
+            assert!(claims > 10, "{what}: the claim count where it stopped: {claims}");
+        }
+        assert!(rep.rest_mm < 7.0, "{what}: the hidden 8 mm is NOT folded in: {}", rep.rest_mm);
+        assert_eq!(rep.gouge_mm, full.gouge_mm, "{what}: the gouge half is untouched");
+        let w = camcraft_sim::verify::Warning::hidden_unjudged(&rep, 3).expect("the warning");
+        assert!(w.to_string().contains("NOT JUDGED"), "{what}: {w}");
+    }
+    assert_eq!(camcraft_sim::verify::Warning::hidden_unjudged(&full, 3), None, "judged says nothing");
+}
+
+#[test]
 fn a_flat_model_hides_nothing() {
     // The no-false-alarm half of the law: the same slab with no
     // ceiling over it is ordinary milled ground - the height field's
@@ -399,8 +430,8 @@ fn program_chains_ops_in_order() {
         plunge(-2.5, -2.5, 1.0, 5.0),
     ];
     let ops = [
-        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false, cone: None },
-        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false, cone: None },
+        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false, cone: None, corner: None },
+        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false, cone: None, corner: None },
     ];
     stock_sim::simulate(&mut d, &ops).expect("chain");
     let model = flat_top(2.0, 3.2);
@@ -435,9 +466,9 @@ fn program_chains_ops_in_order() {
     // the gouge still stands.
     let o3 = [feed(p(-3.2, 0.0, 2.0), p(3.2, 0.0, 2.0))];
     let ops3 = [
-        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false, cone: None },
-        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false, cone: None },
-        stock_sim::SimOp { moves: &o3, radius: 3.2, ball: false, cone: None },
+        stock_sim::SimOp { moves: &o1, radius: 2.5, ball: false, cone: None, corner: None },
+        stock_sim::SimOp { moves: &o2, radius: 2.0, ball: false, cone: None, corner: None },
+        stock_sim::SimOp { moves: &o3, radius: 3.2, ball: false, cone: None, corner: None },
     ];
     let mut d2 = Dexel::from_shape(&box_stock, cell).unwrap();
     stock_sim::simulate(&mut d2, &ops3).expect("chain 3");
@@ -453,7 +484,7 @@ fn program_chains_ops_in_order() {
     let band = [feed(p(-3.0, 0.0, 2.0), p(3.0, 0.0, 2.0))];
     stock_sim::simulate(
         &mut d3,
-        &[stock_sim::SimOp { moves: &band, radius: 3.5, ball: false, cone: None }],
+        &[stock_sim::SimOp { moves: &band, radius: 3.5, ball: false, cone: None, corner: None }],
     )
     .expect("sweep");
     let dev3 = stock_sim::deviate(&d3, &flat_top(2.0, 3.2), 0.01).expect("deviate 3");
@@ -473,7 +504,7 @@ fn the_cylinders_world_is_air_beside_the_round() {
     let moves = [feed(p(0.0, 0.0, 1.0), p(8.0, 0.0, 1.0))];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &moves, radius: 2.0, ball: false, cone: None }],
+        &[stock_sim::SimOp { moves: &moves, radius: 2.0, ball: false, cone: None, corner: None }],
     )
     .expect("sweep");
     // The witness column the first drafts missed: it must stand in
@@ -503,7 +534,7 @@ fn model_stock_stocks_the_model_itself() {
     let moves = [plunge(0.0, 0.0, 1.0, 5.0)];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &moves, radius: 1.0, ball: false, cone: None }],
+        &[stock_sim::SimOp { moves: &moves, radius: 1.0, ball: false, cone: None, corner: None }],
     )
     .expect("cut");
     assert!(near(d.top_at(inside), 1.0));
@@ -533,17 +564,17 @@ fn simulate_refuses_before_touching_anything() {
     let mut d = Dexel::from_shape(&box_stock, 0.5).unwrap();
     let before = d.clone();
     let bad_moves = [plunge(0.0, 0.0, f64::NAN, 5.0)];
-    let ops = [stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false, cone: None }];
+    let ops = [stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false, cone: None, corner: None }];
     assert!(stock_sim::simulate(&mut d, &ops).is_err());
     assert_eq!(d, before, "the refusal cut anyway");
     let good = [plunge(0.0, 0.0, 1.0, 5.0)];
     let ops = [
-        stock_sim::SimOp { moves: &good, radius: 2.0, ball: false, cone: None },
-        stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false, cone: None },
+        stock_sim::SimOp { moves: &good, radius: 2.0, ball: false, cone: None, corner: None },
+        stock_sim::SimOp { moves: &bad_moves, radius: 2.0, ball: false, cone: None, corner: None },
     ];
     assert!(stock_sim::simulate(&mut d, &ops).is_err(), "op 2's poison ran the program");
     assert_eq!(d, before, "a refused program left its first op cut into the stock");
-    let ops = [stock_sim::SimOp { moves: &good, radius: 0.0, ball: false, cone: None }];
+    let ops = [stock_sim::SimOp { moves: &good, radius: 0.0, ball: false, cone: None, corner: None }];
     assert!(stock_sim::simulate(&mut d, &ops).is_err());
 }
 
@@ -575,8 +606,8 @@ fn the_sim_is_deterministic_including_its_nans() {
         stock_sim::simulate(
             &mut d,
             &[
-                stock_sim::SimOp { moves: &m1, radius: 1.5, ball: false, cone: None },
-                stock_sim::SimOp { moves: &m2, radius: 1.0, ball: true, cone: None },
+                stock_sim::SimOp { moves: &m1, radius: 1.5, ball: false, cone: None, corner: None },
+                stock_sim::SimOp { moves: &m2, radius: 1.0, ball: true, cone: None, corner: None },
             ],
         )
         .unwrap();
@@ -615,7 +646,7 @@ fn a_cut_pays_only_the_tiles_it_reaches() {
     let m = [plunge(-4.0, -4.0, 1.0, 2.0)];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None }],
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None, corner: None }],
     )
     .expect("sweep");
     assert!(
@@ -641,7 +672,7 @@ fn equality_reads_values_not_bytes() {
     let m = [plunge(0.0, 0.0, 5.0, 6.0)];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None }],
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None, corner: None }],
     )
     .expect("sweep");
     assert_eq!(d.tiles_allocated(), 0, "a cut to the standing height is not a cut");
@@ -650,7 +681,7 @@ fn equality_reads_values_not_bytes() {
     let m = [plunge(0.0, 0.0, 1.0, 2.0)];
     stock_sim::simulate(
         &mut d,
-        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None }],
+        &[stock_sim::SimOp { moves: &m, radius: 3.0, ball: false, cone: None, corner: None }],
     )
     .expect("cut");
     assert!(d.tiles_allocated() > 0, "a real cut paid a real tile");
@@ -709,7 +740,7 @@ fn the_cone_atom_leaves_the_face_the_chamfer_promised() {
     let wall_x = 9.0; // the corner depth the kernel posts for top 5,
     let corner_z = 3.0; // width 2 at 45 degrees: 5 - 2 * tan(45).
     let o = [feed(p(wall_x, 1.0, corner_z), p(wall_x, 9.0, corner_z))];
-    let ops = [stock_sim::SimOp { moves: &o, radius: 3.0, ball: false, cone: Some(1.0) }];
+    let ops = [stock_sim::SimOp { moves: &o, radius: 3.0, ball: false, cone: Some(1.0), corner: None }];
     stock_sim::simulate(&mut d, &ops).expect("cone op");
     // Row whose centers stand on the traverse: iy = 5 reads y = 5.5.
     for ix in 0..d.nx {

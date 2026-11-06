@@ -137,3 +137,19 @@ pub(super) fn heights_gate(
     }
     Ok(())
 }
+
+/// The flat-area door: a pocket-family selection that collapses to a
+/// line seen from above (a vertical wall's rim, a non-horizontal face)
+/// is refused when it is picked or the kind is set, with the fix, not
+/// only later at Generate - which keeps the same refusal as backstop.
+pub(super) fn area_gate(
+    world: &World,
+    setup: Option<&str>,
+    src: &SrcRef,
+    params: &OpParams,
+) -> Result<(), CommandError> {
+    match operation::selection_refusal(world, setup, src, params) {
+        Some(why) => Err(CommandError::Invalid(why)),
+        None => Ok(()),
+    }
+}

@@ -10,6 +10,7 @@
 //! selection walk every region already runs. No vendor material consulted.
 
 use super::boundary::{AreaCtx, Family, Native, OpenGeom};
+use super::boundary_picks::picks_geom;
 use super::*;
 
 /// Whether `material` is a finished PART rather than the setup's stock -
@@ -119,6 +120,8 @@ fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_s
         let region = match &b.shape {
             BoundaryShape::Picks(picks) => match picks_geom(world, setup, picks, &op.params)? {
                 OpenGeom::Ring(r) => r,
+                // The backstop: the page and the Apply door
+                // (`area_pick_issue`) catch this first.
                 OpenGeom::Chain(_) => {
                     return Err(GenError::Invalid(
                         "an include / exclude boundary must close - its picks spell an open chain; use it as the open boundary instead".into(),
@@ -238,23 +241,4 @@ pub(super) fn area_stale_reason(world: &World, op: &Operation) -> Option<String>
         .picks()
         .find(|g| model::find_by_name(world, &g.entity).is_none())
         .map(|g| format!("a Boundary pick names '{}', which was deleted", g.entity))
-}
-
-/// Picked boundary features in XY, through the selection walk every
-/// region runs (stitching, rim dedupe and every named refusal included):
-/// one open run, or closed rings - never a mix, never several runs.
-fn picks_geom(world: &World, setup: Option<&str>, picks: &[GeoSel], params: &OpParams) -> Result<OpenGeom, GenError> {
-    // The contour walk is the one that hands open runs back instead of
-    // refusing or running them out - the reading a boundary wants.
-    let probe = retype_params(params, OpType::Contour as usize);
-    let (loops, mut runs, _) = selection_geometry_impl(world, setup, picks, &probe, None)?;
-    match (loops.is_empty(), runs.len()) {
-        (true, 1) => Ok(OpenGeom::Chain(runs.remove(0))),
-        (false, 0) => Ok(OpenGeom::Ring(Region::new(loops)?)),
-        (true, 0) => Err(GenError::Empty("the boundary picks resolve to nothing".into())),
-        (_, n) => Err(GenError::Invalid(format!(
-            "the boundary picks spell {} closed ring(s) and {n} open run(s) - a boundary is one open chain or closed rings; re-pick it",
-            loops.len()
-        ))),
-    }
 }

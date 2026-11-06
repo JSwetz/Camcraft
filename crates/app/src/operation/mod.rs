@@ -95,6 +95,10 @@ pub use boundary::AreaCtx;
 use boundary::AreaApplied;
 mod boundary_turn;
 mod boundary_ctx;
+mod boundary_picks;
+pub use boundary_picks::{
+    PickShape, area_pick_issue, area_refusal, boundary_pick_shape, extend_to_loop, run_pick, toggle_run,
+};
 pub use boundary_ctx::op_stamp;
 use boundary_ctx::*;
 mod job;

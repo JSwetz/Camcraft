@@ -1567,6 +1567,10 @@ pub fn browser(
     ui.allocate_rect(rect, Sense::hover());
 }
 
+/// The tree menu's verb rows, keyed past every kind ordinal.
+const MENU_CLEAR: usize = usize::MAX;
+const MENU_DELETE: usize = usize::MAX - 1;
+
 /// The operation's retype menu (M9.1): what replaced the page's Type
 /// combo. Grouping is the retired combo's law restated once -
 /// `Section::ORDER` headers, `Family::admits` hiding a section the
@@ -1600,6 +1604,12 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
     // The rows: section headers and kinds, in registry order, read
     // from the same taxonomy as the ribbon's cells - never a list.
     let mut lines: Vec<(&'static str, bool, Option<usize>)> = Vec::new();
+    // The row's verbs first: clearing the generated path (keeps the
+    // operation) and deleting the operation are two different asks,
+    // and the menu names both - each one undoable command.
+    lines.push(("Operation", false, None));
+    lines.push(("Clear toolpath", true, Some(MENU_CLEAR)));
+    lines.push(("Delete operation (undoable)", true, Some(MENU_DELETE)));
     let here_section = operation::KindInfo::ALL.get(here).map(|k| k.section);
     for s in operation::Section::ORDER {
         let runnable = s.family().admits(machine);
@@ -1677,7 +1687,11 @@ fn tree_menu(ui: &mut Ui, state: &mut State, pal: &Tokens, rect: Rect, leaves: &
             }
         });
     if let Some(i) = chosen {
-        if i != here {
+        if i == MENU_CLEAR {
+            state.pending.push_back(CommandKind::ClearToolpath(name.clone()));
+        } else if i == MENU_DELETE {
+            state.pending.push_back(CommandKind::DeleteOperation(name.clone()));
+        } else if i != here {
             state.pending.push_back(CommandKind::ChangeOperationKind {
                 name: name.clone(),
                 kind: i,

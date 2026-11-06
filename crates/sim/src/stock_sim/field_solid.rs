@@ -7,7 +7,8 @@
 //!
 //! Provenance: point-to-primitive distances from the published
 //! catalogue (segment, box-orthant, and the revolved profile read as
-//! a planar polygon), and the three solids of RS-274 world machining
+//! a planar polygon; the bull nose's rounded rectangle in
+//! `field_bull`), and the solids of RS-274 world machining
 //! this codebase's dexel atoms already sweep. Nothing from vendor
 //! binaries.
 //!
@@ -34,6 +35,7 @@ pub(crate) enum ToolKind {
     Shanked { r: f64, shank: f64 },
     Flat { r: f64, flank: f64 },
     Taper { r: f64, cot: f64 },
+    Bull { r: f64, corner: f64, flank: f64 },
 }
 
 /// The tool's parameters, refused by name when nonsense.
@@ -74,6 +76,17 @@ pub(crate) fn tool_kind(tool: &SdfTool) -> Result<ToolKind, StockError> {
             length("cone slope", cot)?;
             ToolKind::Taper { r: *r, cot: *cot }
         }
+        SdfTool::BullNose { r, corner, flank } => {
+            radius(r)?;
+            length("corner radius", corner)?;
+            length("flank length", flank)?;
+            if corner > r || flank < corner {
+                return Err(StockError::Invalid(format!(
+                    "field subtract: bull-nose corner {corner} must not exceed the radius {r} or the flank {flank}"
+                )));
+            }
+            ToolKind::Bull { r: *r, corner: *corner, flank: *flank }
+        }
     })
 }
 
@@ -108,6 +121,32 @@ fn cross(a: Vec3, b: Vec3) -> Vec3 {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
 
+/// The exact minimizer of `t -> pose_dist` for an upright flat tool
+/// on the two moves 2.5-D paths are made of (M7.3's per-cell cost):
+/// on a level move `zl` is fixed and the distance only grows with the
+/// radial offset, so the minimum sits at the XY foot of the path; on
+/// a plunge `rho` is fixed and the box distance is convex in `zl`
+/// with its minimum at mid-flank. `None` sends every other move to
+/// the golden section.
+pub(crate) fn upright_flat_foot(ax: [f64; 3], a: Point3, d: [f64; 3], q: Point3, kind: &RevKind) -> Option<f64> {
+    let RevKind::Flat { flank, .. } = kind else {
+        return None;
+    };
+    if ax != [0.0, 0.0, 1.0] {
+        return None;
+    }
+    if d[2] == 0.0 {
+        let dd = d[0] * d[0] + d[1] * d[1];
+        let t = ((q.x - a.x) * d[0] + (q.y - a.y) * d[1]) / dd;
+        return t.is_finite().then(|| t.clamp(0.0, 1.0));
+    }
+    if d[0] == 0.0 && d[1] == 0.0 {
+        let t = (q.z - a.z - 0.5 * flank) / d[2];
+        return t.is_finite().then(|| t.clamp(0.0, 1.0));
+    }
+    None
+}
+
 /// The revolved profiles, in their own frame: radius, and the
 /// along-axis extent from the tip anchor.
 pub(crate) enum RevKind {
@@ -115,6 +154,9 @@ pub(crate) enum RevKind {
     Flat { r: f64, flank: f64 },
     /// truncated cone: apex at the anchor, up to radius `r`
     Taper { r: f64, cot: f64 },
+    /// bull nose (M13.1): cylinder of `r` to `flank`, its bottom edge
+    /// rounded by `corner` (`field_bull`'s profile)
+    Bull { r: f64, corner: f64, flank: f64 },
 }
 
 /// The distance from `q` to the tool solid sitting at anchor `t` with
@@ -146,6 +188,7 @@ pub(crate) fn pose_dist(ax: [f64; 3], t: Point3, q: Point3, kind: &RevKind) -> f
                 )
             }
         }
+        RevKind::Bull { r, corner, flank } => super::field_bull::bull_dist(rho, zl, *r, *corner, *flank),
     }
 }
 

@@ -83,6 +83,10 @@ struct Ahead {
     /// a predecessor's chamfer would evaporate a full disc of
     /// material that is really still standing.
     cone: Option<f64>,
+    /// The bull nose's corner radius (M13.1, `stock_sim::bull_corner`):
+    /// the rest grid sweeps the same corner the program sim does, so a
+    /// bull predecessor's fillet ring reads as the rest it is.
+    corner: Option<f64>,
     cut: bool,
     moves: Vec<Move>,
 }
@@ -178,6 +182,11 @@ fn ahead_of(world: &World, name: &str, consumer_setup: Option<&str>) -> Vec<Ahea
                 .map(|t| (t.tip_angle.to_radians() * 0.5).tan())
                 .filter(|x| x.is_finite() && *x > 0.0)
                 .map(|x| 1.0 / x),
+            // A nonsense corner falls back to the disc: over-reported
+            // removal, the side `Tool::is_sane` keeps unreachable.
+            corner: tool
+                .as_ref()
+                .and_then(|t| stock_sim::bull_corner(t).ok().flatten()),
             cut,
             moves,
         });
@@ -209,6 +218,12 @@ fn digest_of(ahead: &[Ahead]) -> u64 {
                     h.write(&c.to_bits().to_le_bytes());
                 }
                 None => h.write_u8(0),
+            }
+            // The bull's corner (M13.1) is atom too; only a bull
+            // writes the byte, so every other stamp hashes unchanged.
+            if let Some(c) = a.corner {
+                h.write_u8(2);
+                h.write(&c.to_bits().to_le_bytes());
             }
         } else {
             h.write_u8(0);
@@ -270,6 +285,7 @@ pub fn prior_state(
             radius: a.radius,
             ball: a.ball,
             cone: a.cone,
+            corner: a.corner,
         })
         .collect();
     stock_sim::simulate(&mut dex, &ops)

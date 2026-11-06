@@ -101,10 +101,7 @@ fn picks_z_range(world: &World, items: &[GeoSel]) -> Result<(f64, f64), &'static
                 }
             }
             FeatureSel::Chain(cid) => {
-                let c = feature::chains(&features)
-                    .into_iter()
-                    .find(|c| c.id == cid)
-                    .ok_or(gone)?;
+                let c = feature::resolve_chain(&features, cid).ok_or(gone)?;
                 for p in feature::chain_points(&features, &c) {
                     let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
                     lo = lo.min(w.z);

@@ -171,6 +171,9 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             // shank law's two flavors; the key space starts clear of
             // the fixture range's worst case.
             Warning::SweepHit { part, .. } => (200 + *part as u8, false),
+            // The envelope's unjudged hidden half (M13.1) reads apart from
+            // its measured numbers: "not judged" is not a deviation.
+            Warning::RestUnjudged { .. } => (210, false),
         }
     }
     fn last_move(w: &Warning) -> usize {
@@ -182,7 +185,8 @@ pub fn fold_warnings(warnings: &[Warning]) -> Vec<String> {
             | Warning::RapidInStock { at }
             | Warning::FixtureHit { at, .. }
             | Warning::NonFinite { at }
-            | Warning::Envelope { at, .. } => *at,
+            | Warning::Envelope { at, .. }
+            | Warning::RestUnjudged { at, .. } => *at,
         }
     }
     let mut lines: Vec<String> = Vec::new();
@@ -429,6 +433,19 @@ mod warning_fold_tests {
             fold_warnings(&[Warning::Gouge { at: 7 }]),
             ["warning: move 7 cuts past the finish surface"]
         );
+    }
+
+    #[test]
+    fn an_unjudged_hidden_rest_reads_as_unjudged_never_zero() {
+        // M13.1: the pane says "not judged" in words, apart from the
+        // measured envelope line, and never as a 0.0000 mm rest.
+        let w = [
+            Warning::Envelope { at: 4, gouge_mm: 0.0, rest_mm: 0.0 },
+            Warning::RestUnjudged { at: 2, cells: 1_300_000, claims: 0 },
+        ];
+        let folded = fold_warnings(&w);
+        assert_eq!(folded.len(), 2, "{folded:?}");
+        assert!(folded[1].contains("NOT JUDGED") && !folded[1].contains("0.0000"), "{folded:?}");
     }
 
     #[test]

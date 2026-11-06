@@ -35,7 +35,8 @@ pub use import_model::ImportModel;
 pub use load_machine::LoadMachine;
 pub use move_model::MoveModel;
 pub use operation::{
-    ChangeOperationKind, CreateOperation, DeleteOperation, EditOperationLinks, EditOperationParams,
+    ChangeOperationKind, ClearToolpath, CreateOperation, DeleteOperation, EditOperationLinks,
+    EditOperationParams,
     GenerateOperation, RegenerateAll, SetOperationGeometry,
 };
 pub use post::SelectPost;

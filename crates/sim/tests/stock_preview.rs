@@ -62,6 +62,7 @@ fn cut(stock: &mut Stock, moves: &[Move]) {
         radius: 2.0,
         ball: false,
         cone: None,
+        corner: None,
     }];
     stock.simulate(&ops).unwrap();
 }

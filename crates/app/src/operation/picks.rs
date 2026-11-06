@@ -36,12 +36,75 @@ pub fn selection_notes(
     items: &[GeoSel],
     params: &OpParams,
 ) -> Vec<String> {
+    selection_account(world, setup, items, params).0
+}
+
+/// The stable core of the "collapses to a line seen from above" refusal
+/// (`push_loop`): what [`selection_refusal`] keys on, so the pick and
+/// Apply doors and the page say the sentence generation would.
+pub(super) const LINE_FROM_ABOVE: &str = "projects to a line from above and bounds no area";
+
+/// `push_loop`'s refusal for one boundary named by `label`.
+pub(super) fn line_from_above(label: &str) -> GenError {
+    GenError::Invalid(format!(
+        "{label} {LINE_FROM_ABOVE}; select a horizontal face or a closed edge chain around the part"
+    ))
+}
+
+/// [`selection_notes`] plus the early-door refusal the same walk found,
+/// in one pass (the page reads both every frame).
+#[must_use]
+pub fn selection_account(
+    world: &World,
+    setup: Option<&str>,
+    items: &[GeoSel],
+    params: &OpParams,
+) -> (Vec<String>, Option<String>) {
     let mut notes = Vec::new();
     match selection_geometry_impl(world, setup, items, params, Some(&mut notes)) {
-        Ok(_) => notes,
-        // The refusal itself is `region_of`'s and generation's to make,
-        // with detail; notes stay empty rather than contradict it.
-        Err(_) => notes,
+        Ok(_) => (notes, None),
+        // Other refusals stay `region_of`'s and generation's to make,
+        // with detail; notes stay as far as the walk got.
+        Err(err) => (notes, door_refusal(params, err)),
+    }
+}
+
+/// The pocket family's flat-area refusal, decided at the doors (pick,
+/// links edit, creation) instead of only at Generate: a pocket, adaptive
+/// or offset clearing whose picks include a vertical wall's rim or a
+/// non-horizontal face bounds no area seen from above - that is a wrong
+/// pick, and the user should hear it when they make it. `None` for any
+/// other source, kind, or refusal (those stay generation's; an open run
+/// mid-pick is the normal state of building a chain edge by edge).
+#[must_use]
+pub fn selection_refusal(
+    world: &World,
+    setup: Option<&str>,
+    src: &SrcRef,
+    params: &OpParams,
+) -> Option<String> {
+    let SrcRef::Selection(items) = src else {
+        return None;
+    };
+    if !pocket_family(params) || items.is_empty() {
+        return None;
+    }
+    selection_geometry_impl(world, setup, items, params, None)
+        .err()
+        .and_then(|err| door_refusal(params, err))
+}
+
+fn pocket_family(params: &OpParams) -> bool {
+    matches!(
+        params,
+        OpParams::Pocket { .. } | OpParams::Adaptive2D { .. } | OpParams::Offset2D { .. }
+    )
+}
+
+fn door_refusal(params: &OpParams, err: GenError) -> Option<String> {
+    match err {
+        GenError::Invalid(msg) if pocket_family(params) && msg.contains(LINE_FROM_ABOVE) => Some(msg),
+        _ => None,
     }
 }
 

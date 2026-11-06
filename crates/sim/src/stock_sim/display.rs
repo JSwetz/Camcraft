@@ -53,6 +53,9 @@ impl Stock {
                 SdfTool::Ball { r: op.radius }
             } else if let Some(cot) = op.cone {
                 SdfTool::Taper { r: op.radius, cot }
+            } else if let Some(corner) = op.corner {
+                // the bull's flank rides the same stock-height law
+                SdfTool::BullNose { r: op.radius, corner, flank: flank.max(corner) }
             } else {
                 SdfTool::Flat { r: op.radius, flank }
             };
@@ -92,7 +95,7 @@ mod tests {
             feed(Point3::new(4.0, 6.0, 8.0), Point3::new(4.0, 6.0, 3.0)),
             feed(Point3::new(4.0, 6.0, 3.0), Point3::new(16.0, 6.0, 2.0)),
         ];
-        let ops = [SimOp { moves: &mv, radius: 2.0, ball: false, cone: None }];
+        let ops = [SimOp { moves: &mv, radius: 2.0, ball: false, cone: None, corner: None }];
         verdict.simulate(&ops).unwrap();
         picture.simulate_display(&ops).unwrap();
         let cap = verdict.field().unwrap().cap();

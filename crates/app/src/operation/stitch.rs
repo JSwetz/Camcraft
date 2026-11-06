@@ -235,7 +235,7 @@ pub(super) fn stitch_open_runs(world: &World, items: &[GeoSel]) -> Stitched {
         let Some(features) = model::features_of(world, &entity) else {
             continue;
         };
-        let Some(c) = feature::chains(&features).into_iter().find(|c| c.id == cid) else {
+        let Some(c) = feature::resolve_chain(&features, cid) else {
             continue;
         };
         if c.closed {
@@ -360,9 +360,7 @@ pub(super) fn push_loop(
     if key.len() < 3 {
         // A vertical wall seen from above, or a chain that runs up one:
         // nothing encloses.
-        return Err(GenError::Invalid(format!(
-            "{label} projects to a line from above and bounds no area; select a horizontal face or a closed edge chain around the part"
-        )));
+        return Err(line_from_above(label));
     }
     let canon = canon_ring(&key);
     if rims.contains(&canon) {
@@ -370,9 +368,7 @@ pub(super) fn push_loop(
     }
     let loop_ = Loop::new(pts)?;
     if loop_.area().abs() < DEGENERATE_AREA {
-        return Err(GenError::Invalid(format!(
-            "{label} projects to a line from above and bounds no area; select a horizontal face or a closed edge chain around the part"
-        )));
+        return Err(line_from_above(label));
     }
     rims.push(canon);
     loops.push(loop_);

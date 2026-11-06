@@ -37,7 +37,7 @@ use crate::state::{CommandKind, GeoPick, HoverHit, State};
 /// no windowing library. Ctrl/Shift add to a feature pick, Alt in Edge
 /// mode takes the one segment under the cursor.
 #[derive(Clone, Copy, Default, Debug)]
-pub(crate) struct Mods {
+pub struct Mods {
     pub ctrl: bool,
     pub shift: bool,
     pub alt: bool,
@@ -156,8 +156,31 @@ fn pick_face(state: &mut State, p: [f32; 2], mods: Mods) {
         state.status = String::from("no face under the cursor");
         return;
     };
+    let pick = GeoSel { entity, feature: sel };
+    if state.boundary_pick.is_some() {
+        queue_boundary_pick(state, pick, mods);
+        return;
+    }
     let append = mods.ctrl || mods.shift;
-    queue_feature_pick(state, GeoSel { entity, feature: sel }, append);
+    queue_feature_pick(state, pick, append);
+}
+
+/// A Face/Edge pick while the Boundary group collects (M11.5 UX): Ctrl
+/// toggles the pick in or out of the target entry, Shift adds it and
+/// closes the entry around its face loop, a plain click replaces the
+/// entry's picks with this one (`boundary_draft::take_pick`). A draft
+/// write, never a command until Apply.
+pub fn queue_boundary_pick(state: &mut State, pick: GeoSel, mods: Mods) {
+    let Some(target) = state.boundary_pick else {
+        queue_feature_pick(state, pick, mods.ctrl || mods.shift);
+        return;
+    };
+    if state.op_ui.name.is_empty() {
+        state.status = String::from("open an operation first - geometry picks fill the open one");
+        return;
+    }
+    let m = crate::boundary_draft::PickMods { toggle: mods.ctrl, close: mods.shift && !mods.ctrl };
+    crate::boundary_draft::take_pick(state, target, pick, m);
 }
 
 /// Edge pick: the nearest visible feature edge in screen space names a
@@ -177,6 +200,11 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
     };
     let sel = if mods.alt {
         feature::singleton_chain_id(&features, edge).map(FeatureSel::Chain)
+    } else if state.boundary_pick.is_some() {
+        // A boundary takes ONE edge per click (M11.5 UX): the run - one
+        // straight stretch or one arc - never the whole tangent loop a
+        // filleted rim chains into.
+        feature::run_containing(&features, edge).map(|r| FeatureSel::Chain(r.id))
     } else {
         feature::chains(&features)
             .iter()
@@ -201,6 +229,10 @@ fn pick_edge(state: &mut State, p: [f32; 2], mods: Mods) {
         facet,
         feature: Some(sel),
     });
+    if state.boundary_pick.is_some() {
+        queue_boundary_pick(state, GeoSel { entity, feature: sel }, mods);
+        return;
+    }
     let append = mods.ctrl || mods.shift;
     queue_feature_pick(state, GeoSel { entity, feature: sel }, append);
 }
@@ -245,9 +277,12 @@ pub(crate) fn update_hover(state: &mut State, p: [f32; 2], held: bool) {
         && let Some((entity, edge)) = edge_nearest(state, p, PICK_EDGE_PX)
         && let Some(found) = model::find_by_name(&state.world, &entity)
         && let Some(features) = model::features_of(&state.world, &found)
-        && let Some(c) = feature::chains(&features)
-            .into_iter()
-            .find(|c| c.edges.contains(&edge))
+        && let Some(c) = if state.boundary_pick.is_some() {
+            // The run a boundary click takes, not the tangent loop.
+            feature::run_containing(&features, edge)
+        } else {
+            feature::chains(&features).into_iter().find(|c| c.edges.contains(&edge))
+        }
     {
         state.hover = Some(HoverHit {
             entity,
@@ -294,7 +329,8 @@ pub fn queue_feature_pick(state: &mut State, pick: GeoSel, append: bool) {
     }
     // The Boundary group is collecting (M11.5): the pick fills its draft.
     if let Some(target) = state.boundary_pick {
-        crate::egui_app::boundary_take_pick(state, target, pick, append);
+        let mods = crate::boundary_draft::PickMods { toggle: append, close: false };
+        crate::boundary_draft::take_pick(state, target, pick, mods);
         return;
     }
     let base: Vec<GeoSel> = if append {
@@ -601,7 +637,7 @@ pub(crate) fn hover_features(state: &State, aspect: f64) -> Vec<([f32; 2], [f32;
 
 /// One (entity, feature) resolved to viewport-uv segments: gone entities,
 /// hidden models, deleted features and stale ids draw nothing.
-fn feature_segments(
+pub(crate) fn feature_segments(
     state: &State,
     entity: &str,
     sel: FeatureSel,
@@ -634,7 +670,7 @@ fn feature_segments(
             }
         }
         FeatureSel::Chain(cid) => {
-            let Some(chain) = feature::chains(&features).into_iter().find(|c| c.id == cid) else {
+            let Some(chain) = feature::resolve_chain(&features, cid) else {
                 return;
             };
             let pts = feature::chain_points(&features, &chain);
@@ -1568,9 +1604,7 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
                 }
             }
             FeatureSel::Chain(cid) => {
-                let Some(chain) =
-                    feature::chains(&features).into_iter().find(|c| c.id == cid)
-                else {
+                let Some(chain) = feature::resolve_chain(&features, cid) else {
                     continue;
                 };
                 let pts = feature::chain_points(&features, &chain);

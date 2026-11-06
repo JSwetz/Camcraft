@@ -1,7 +1,7 @@
 //! Split from `stock_sim.rs` by M5.0.1; structure only.
 
 use super::kernel::{MAX_CELLS_PER_AXIS, StockError, part_surface};
-use super::dexel::fy0;
+use super::scan_hidden::{hidden_rest, HiddenRest, ScanBudget};
 
 use crate::cl::{Move, MoveKind};
 use crate::geo2d::Point2;
@@ -52,6 +52,11 @@ pub struct EnvelopeReport {
     pub cell: f64,
     /// XY of the largest single deviation.
     pub at: Point2,
+    /// Whether the hidden-rest half was judged (M13.1): over its
+    /// budget the scan answers `OverBudget` and `rest_mm` speaks for
+    /// the ridge law alone - "not judged", never a zero that reads
+    /// like "no rest".
+    pub hidden: HiddenRest,
 }
 
 /// The envelope verdict for a ball-mill path: the moves carry TIP
@@ -63,7 +68,20 @@ pub fn envelope_scan(
     r: f64,
     tol: f64,
 ) -> Result<EnvelopeReport, StockError> {
-    envelope_scan_lift(facets, moves, r, tol, r)
+    envelope_scan_lift(facets, moves, r, tol, r, ScanBudget::SHIPPED)
+}
+
+/// `envelope_scan` under a stated hidden-rest budget (M13.1): the
+/// same verdict, with the budget a caller can name - and a test can
+/// shrink to watch the scan say "not judged".
+pub fn envelope_scan_within(
+    facets: &[Triangle],
+    moves: &[Move],
+    r: f64,
+    tol: f64,
+    budget: ScanBudget,
+) -> Result<EnvelopeReport, StockError> {
+    envelope_scan_lift(facets, moves, r, tol, r, budget)
 }
 
 /// The same law for a path whose positions ARE the envelope centers
@@ -80,7 +98,7 @@ pub fn envelope_scan_centers(
     r: f64,
     tol: f64,
 ) -> Result<EnvelopeReport, StockError> {
-    envelope_scan_lift(facets, moves, r, tol, 0.0)
+    envelope_scan_lift(facets, moves, r, tol, 0.0, ScanBudget::SHIPPED)
 }
 
 fn envelope_scan_lift(
@@ -89,6 +107,7 @@ fn envelope_scan_lift(
     r: f64,
     tol: f64,
     center_lift: f64,
+    budget: ScanBudget,
 ) -> Result<EnvelopeReport, StockError> {
     if !(r.is_finite() && r > 0.0) {
         return Err(StockError::Invalid(format!(
@@ -224,114 +243,16 @@ fn envelope_scan_lift(
     // visible surface OCCLUDES - a ceiling's shadow over a floor -
     // judged by this same distance law. The union lives in the FIELD:
     // the ridge numbers above stand as computed, predicate untouched.
-    let (hidden, hidden_at) = hidden_rest(facets, &segs, &part, x0, y0, cell, nx, ny, r, floor);
-    if hidden > rep.rest_mm {
-        rep.rest_mm = hidden;
-        rep.at = hidden_at;
+    match hidden_rest(facets, &segs, &part, (x0, y0, cell), nx, ny, r, floor, budget) {
+        Ok((hidden, hidden_at)) => {
+            if hidden > rep.rest_mm {
+                rep.rest_mm = hidden;
+                rep.at = hidden_at;
+            }
+        }
+        Err(unjudged) => rep.hidden = unjudged, // said by name, never a zero
     }
     Ok(rep)
-}
-
-/// The hidden-rest scan (M2.2d), paying M2.2b's open debt. Per
-/// column the mesh's SOLID truth is paired (`solid_rest` law (a));
-/// every material top below the height field's own top minus the
-/// quantization floor is occluded material - invisible to a
-/// Z-following measure by construction. Each occluded top is then
-/// judged by the ridge law's own distance truth: nearest ball
-/// center minus the ball minus the floor, so the two reports are
-/// one yardstick reading two depths, never two predicates. An odd
-/// column is an open shell - unknown, and unknown never reports
-/// material (law (b)). Work is binned facet-outer (the
-/// `part_surface` shape); over budget the answer is the stated
-/// zero - the height field's debt stays on the books, never
-/// guessed at.
-#[allow(clippy::too_many_arguments)] // the scan's whole geometry frame, threaded once from envelope_scan
-pub(super) fn hidden_rest(
-    facets: &[Triangle],
-    segs: &[(Point3, Point3)],
-    part: &[f64],
-    x0: f64,
-    y0: f64,
-    cell: f64,
-    nx: usize,
-    ny: usize,
-    r: f64,
-    floor: f64,
-) -> (f64, Point2) {
-    const BUDGET_CELLS: usize = 1_200_000; // ~30 MB of bin headers
-    const BUDGET_CLAIMS: usize = 40_000_000; // plane claims within them
-    if segs.is_empty() || facets.is_empty() || nx * ny > BUDGET_CELLS {
-        return (0.0, Point2::new(0.0, 0.0));
-    }
-    let mut bins: Vec<Vec<crate::solid_rest::Claim>> = (0..nx * ny).map(|_| Vec::new()).collect();
-    let mut claims = 0usize;
-    for t in facets {
-        let (a, b, c) = (t.a, t.b, t.c);
-        if !(a.is_finite() && b.is_finite() && c.is_finite()) {
-            continue;
-        }
-        let fx = |v: f64| ((v - x0) / cell).floor();
-        let i0 = fx(a.x.min(b.x).min(c.x)).max(0.0) as usize;
-        let i1 = fx(a.x.max(b.x).max(c.x)).clamp(0.0, nx as f64 - 1.0) as usize;
-        let j0 = fy0(a.y.min(b.y).min(c.y), y0, cell).max(0.0) as usize;
-        let j1 = fy0(a.y.max(b.y).max(c.y), y0, cell).clamp(0.0, ny as f64 - 1.0) as usize;
-        if i0 >= nx || j0 >= ny {
-            continue;
-        }
-        for iy in j0..=j1 {
-            for ix in i0..=i1 {
-                let (cx, cy) = (x0 + (ix as f64 + 0.5) * cell, y0 + (iy as f64 + 0.5) * cell);
-                if let Some(cl) = crate::solid_rest::plane_claim(&a, &b, &c, cx, cy) {
-                    bins[ix + iy * nx].push(cl);
-                    claims += 1;
-                    if claims > BUDGET_CLAIMS {
-                        return (0.0, Point2::new(0.0, 0.0)); // over budget: the stated zero
-                    }
-                }
-            }
-        }
-    }
-    let mut best = 0.0;
-    let mut at = Point2::new(0.0, 0.0);
-    for iy in 0..ny {
-        for ix in 0..nx {
-            let bin = &bins[ix + iy * nx];
-            if bin.is_empty() {
-                continue;
-            }
-            let t = part[ix + iy * nx];
-            if !t.is_finite() {
-                continue; // the field sees nothing here; nor has this scan's ground
-            }
-            let crate::solid_rest::Crossings::Paired(z) =
-                crate::solid_rest::crossings_from_claims(bin)
-            else {
-                continue; // open shell: unknown never reports material
-            };
-            // Interval tops, high to low: the highest is the visible
-            // surface; every lower one hides under a top above it.
-            for c in z.as_chunks::<2>().0 {
-                let hi = c[1];
-                if hi >= t - floor {
-                    continue; // not occluded: the ridge law already owns this top
-                }
-                let (cx, cy) = (x0 + (ix as f64 + 0.5) * cell, y0 + (iy as f64 + 0.5) * cell);
-                let mut dmin = f64::INFINITY;
-                for (sa, sb) in segs {
-                    let d = dist_pt_seg3(cx, cy, hi, *sa, *sb);
-                    if d < dmin {
-                        dmin = d;
-                    }
-                }
-                let rest = (dmin - r - floor).max(0.0);
-                if rest > best {
-                    best = rest;
-                    at = Point2::new(cx, cy);
-                }
-            }
-        }
-    }
-    (best, at)
 }
 
 /// The ball-center polyline the path sweeps: rapids excluded, arcs

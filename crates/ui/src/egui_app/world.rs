@@ -262,6 +262,15 @@ fn collect_parts(state: &State) -> Vec<GpuPart> {
         }
         parts.push(GpuPart { verts, selected: false, stock: false, fill: true, classes: Vec::new() });
     }
+    // The Boundary group's preview of the area the draft machines (M11.5
+    // UX), filled like the committed region while the group is open.
+    if let Some((z, region)) = crate::boundary_viz::preview_fill(state)
+        && let Ok(tris) = region.triangles()
+        && !tris.is_empty()
+    {
+        let verts = tris.iter().flat_map(|t| t.iter().map(|p| [ftoz(p.x), ftoz(p.y), ftoz(z)])).collect();
+        parts.push(GpuPart { verts, selected: false, stock: false, fill: true, classes: Vec::new() });
+    }
     parts
 }
 

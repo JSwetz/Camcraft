@@ -132,8 +132,12 @@ pub(crate) fn vertical_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> 
 /// ladder asks at exactly that plane. None for every other solid, a
 /// ray outside the footprint, or a floor outside this cell's ray.
 fn flat_floor_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> Option<f64> {
-    let Sweep::Revolve { a, b, kind: RevKind::Flat { r, .. } } = sw else {
-        return None;
+    // The bull nose (M13.1) has the same plane floor inside its
+    // flat disc, `r - corner`; its arc ring is the search's business.
+    let (a, b, r) = match sw {
+        Sweep::Revolve { a, b, kind: RevKind::Flat { r, .. } } => (a, b, *r),
+        Sweep::Revolve { a, b, kind: RevKind::Bull { r, corner, .. } } => (a, b, r - corner),
+        _ => return None,
     };
     if ax != [0.0, 0.0, 1.0] {
         return None;
@@ -153,7 +157,7 @@ fn flat_floor_entry(ax: [f64; 3], sw: &Sweep, q: Point3, cell: f64) -> Option<f6
     // Inside the footprint - the flank inclusive, `field_solid::
     // flat_tie`'s law - floor strictly above the center and inside
     // this cell's ray (the search's own domain).
-    if !(rho.is_finite() && rho <= *r && tip > q.z && tip - q.z <= cell) {
+    if !(rho.is_finite() && rho <= r && tip > q.z && tip - q.z <= cell) {
         return None;
     }
     // The read is `center + u` (`march::refine`): pick the `u` whose

@@ -42,7 +42,7 @@ fn both() -> (Stock, Stock) {
     let block = |b| Stock::block(b, 0.0, 0.0, 9.0, 9.0, 0.0, 0.5).expect("the test block");
     let (mut c, mut f) = (block(Backend::Column), block(Backend::Field { band: FIELD_BAND }));
     let moves = program();
-    let ops = [SimOp { moves: &moves, radius: 1.5, ball: false, cone: None }];
+    let ops = [SimOp { moves: &moves, radius: 1.5, ball: false, cone: None, corner: None }];
     c.simulate(&ops).expect("column program");
     f.simulate(&ops).expect("field program");
     (c, f)
@@ -84,7 +84,7 @@ fn a_column_on_the_flank_is_cut_on_both_arms() {
     // Centers sit at k + 0.25 / k + 0.75; a pass along y = 1.75 with
     // r = 1.5 has the y = 3.25 row on its flank, exactly.
     let moves = [mv(MoveKind::Feed, p(1.0, 1.75, -1.0), p(5.0, 1.75, -1.0))];
-    let ops = [SimOp { moves: &moves, radius: 1.5, ball: false, cone: None }];
+    let ops = [SimOp { moves: &moves, radius: 1.5, ball: false, cone: None, corner: None }];
     c.simulate(&ops).expect("column program");
     f.simulate(&ops).expect("field program");
     let (cc, cf) = (c.columns().expect("column reader"), f.columns().expect("field reader"));

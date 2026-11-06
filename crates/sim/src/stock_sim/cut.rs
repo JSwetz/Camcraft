@@ -8,22 +8,23 @@ use crate::geometry::Triangle;
 /// One operation's claim on the stock: its cached moves and the tool
 /// that cut them. `ball` picks the exact sphere atom for a ball nose
 /// and leaves the flat-disc atom for everything whose final hole or
-/// groove IS its cylinder (end mills, drills, taps); a bull nose's
-/// corner fillet is swept here as if it were flat-bottomed at the
-/// corner's lowest point, which over-reports removal beside a fillet
-/// wall - the law above's one known-biased atom, stated at the type
-/// so no caller mistakes a fillet's clean grid for a proven fillet.
+/// groove IS its cylinder (end mills, drills, taps). `corner` picks
+/// the exact bull-nose atom (M13.1): the corner radius of a
+/// torus-cornered end mill, `0 < corner <= radius`. Before it the
+/// bull nose swept the flat disc, over-reporting removal beside every
+/// fillet wall; now the corner leaves what the real tool leaves.
 /// `cone` picks the exact cone atom for a chamfer mill (M2.4 B): the
 /// cotangent of the cone's half-angle from the axis, moves read as the
-/// path of the virtual sharp on the axis. `ball` and `cone` are the
-/// kind's exclusive choice upstream, and `simulate` refuses the
-/// contradictory pair rather than silently preferring one atom.
+/// path of the virtual sharp on the axis. `ball`, `cone` and `corner`
+/// are the kind's exclusive choice upstream, and `simulate` refuses
+/// any contradictory pair rather than silently preferring one atom.
 #[derive(Clone, Copy, Debug)]
 pub struct SimOp<'a> {
     pub moves: &'a [Move],
     pub radius: f64,
     pub ball: bool,
     pub cone: Option<f64>,
+    pub corner: Option<f64>,
 }
 
 /// The lattice law, stated once (and the same numbers `envelope_scan`
@@ -144,10 +145,11 @@ pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
     let chord_tol = (dex.cell * 0.25).max(1e-9);
     for op in ops {
         for m in op.moves {
-            match op.cone {
-                Some(cot) => dex.subtract_cone(m, op.radius, cot, chord_tol),
-                None if op.ball => dex.subtract_ball(m, op.radius, chord_tol),
-                None => dex.subtract(m, op.radius, chord_tol),
+            match (op.cone, op.corner) {
+                (Some(cot), _) => dex.subtract_cone(m, op.radius, cot, chord_tol),
+                (None, Some(c)) => dex.subtract_bull(m, op.radius, c, chord_tol),
+                (None, None) if op.ball => dex.subtract_ball(m, op.radius, chord_tol),
+                (None, None) => dex.subtract(m, op.radius, chord_tol),
             }
         }
     }
@@ -176,6 +178,19 @@ pub(crate) fn check_ops(ops: &[SimOp]) -> Result<(), StockError> {
             return Err(StockError::Invalid(format!(
                 "op {i} asks for a ball and a cone at once - no tool is both"
             )));
+        }
+        if let Some(c) = op.corner {
+            if op.ball || op.cone.is_some() {
+                return Err(StockError::Invalid(format!(
+                    "op {i} asks for a bull-nose corner on a ball or a cone - no tool is both"
+                )));
+            }
+            if !(c.is_finite() && c > 0.0 && c <= op.radius) {
+                return Err(StockError::Invalid(format!(
+                    "op {i} bull-nose corner radius {c} is not finite-positive within the tool radius {}",
+                    op.radius
+                )));
+            }
         }
         if op.cone.is_some_and(|c| !(c.is_finite() && c > 0.0)) {
             return Err(StockError::Invalid(format!(

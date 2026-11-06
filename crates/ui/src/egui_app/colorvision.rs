@@ -52,6 +52,11 @@ pub struct Semantic {
     pub select_hot: [f32; 3],
     /// Selected edges over shaded faces.
     pub select_warm: [f32; 3],
+    /// Boundary roles (M11.5 UX): picked include / exclude / open
+    /// boundary edges in the viewport and their page labels.
+    pub bound_include: [f32; 3],
+    pub bound_exclude: [f32; 3],
+    pub bound_open: [f32; 3],
 }
 
 /// The unselected edge inks the selection must stand off from: the
@@ -72,6 +77,9 @@ impl Semantic {
         plunge: crate::interact::PLUNGE_RGB,
         select_hot: [0.98, 0.72, 0.20],
         select_warm: [0.55, 0.35, 0.05],
+        bound_include: [0.20, 0.75, 0.95],
+        bound_exclude: [0.92, 0.25, 0.60],
+        bound_open: [0.98, 0.62, 0.12],
     };
 
     /// Protan and deutan share the red-green confusion line, so one
@@ -90,6 +98,9 @@ impl Semantic {
         plunge: [0.75, 0.30, 0.00],
         select_hot: [0.98, 0.85, 0.20],
         select_warm: [0.55, 0.48, 0.10],
+        bound_include: [0.25, 0.45, 1.00],
+        bound_exclude: [0.95, 0.90, 0.30],
+        bound_open: [0.95, 0.95, 0.95],
     };
 
     /// Tritan loses blue-yellow: rest moves to pink (red-cyan survives),
@@ -105,12 +116,16 @@ impl Semantic {
         plunge: crate::interact::PLUNGE_RGB,
         select_hot: [1.00, 0.45, 0.70],
         select_warm: [0.56, 0.25, 0.40],
+        bound_include: [0.10, 0.70, 0.75],
+        bound_exclude: [0.90, 0.15, 0.20],
+        bound_open: [0.95, 0.95, 0.95],
     };
 
-    /// The pairs whose difference IS the message, named for the gate's
+    /// The pairs whose difference IS the message (the boundary roles since
+/// M11.5's pick UX), named for the gate's
     /// refusal sentence.
     #[must_use]
-    pub fn must_distinguish(&self) -> [(&'static str, [f32; 3], [f32; 3]); 13] {
+    pub fn must_distinguish(&self) -> [(&'static str, [f32; 3], [f32; 3]); 16] {
         [
             ("clean/rest", self.clean, self.rest),
             ("clean/gouge", self.clean, self.gouge),
@@ -125,6 +140,9 @@ impl Semantic {
             ("selected/plain edge", self.select_warm, EDGE_DARK),
             ("selected/plain wire", self.select_hot, EDGE_WIRE),
             ("selected/unjudged", self.select_hot, self.unjudged),
+            ("include/exclude boundary", self.bound_include, self.bound_exclude),
+            ("include/open boundary", self.bound_include, self.bound_open),
+            ("exclude/open boundary", self.bound_exclude, self.bound_open),
         ]
     }
 }

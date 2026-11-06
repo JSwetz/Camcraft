@@ -46,6 +46,9 @@ use std::hash::{Hash, Hasher};
 
 use crate::geometry::Triangle;
 
+mod runs;
+pub use runs::{RUN_LENGTH_RATIO, edge_runs, resolve_chain, run_containing, run_of_edges};
+
 /// Weld lattice: 1e6 steps per mm = 1 µm. Coarser than the old viewport
 /// lattice (1/4096 mm), so clean meshes weld at least as aggressively.
 const S: f64 = 1e6;

@@ -1,4 +1,4 @@
-//! Operation commands: create, edit, delete, and generate.
+//! Operation commands: create, edit, delete, generate, and clear the generated path.
 //!
 //! `GenerateOperation` is where this layer's central design choice lives:
 //! generation runs in the constructor, while the world is being read
@@ -10,12 +10,14 @@
 //! Provenance: our own domain model, following the same command pattern
 //! as the import/stock siblings.
 
+mod clear;
 mod create;
 mod edit;
 mod gates;
 mod generate;
 mod geometry;
 
+pub use clear::ClearToolpath;
 pub use create::{CreateOperation, DeleteOperation};
 pub use edit::{ChangeOperationKind, EditOperationLinks, EditOperationParams};
 pub use generate::{GenerateOperation, RegenerateAll};

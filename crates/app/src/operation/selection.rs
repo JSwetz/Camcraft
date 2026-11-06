@@ -127,13 +127,12 @@ pub(super) fn drive_chains(world: &World, items: &[GeoSel]) -> Result<Vec<Vec<Po
         let label = format!("{} of '{}'", g.feature, g.entity);
         match g.feature {
             FeatureSel::Chain(cid) => {
-                let cs = feature::chains(&features);
-                let Some(c) = cs.iter().find(|c| c.id == cid) else {
+                let Some(c) = feature::resolve_chain(&features, cid) else {
                     return Err(GenError::Invalid(format!(
                         "{label} is no longer in the model: re-pick it"
                     )));
                 };
-                let pts: Vec<Point3> = feature::chain_points(&features, c)
+                let pts: Vec<Point3> = feature::chain_points(&features, &c)
                     .iter()
                     .map(|p| transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot))
                     .collect();
@@ -286,13 +285,12 @@ pub(super) fn selection_geometry_impl(
                 }
             }
             FeatureSel::Chain(cid) => {
-                let cs = feature::chains(&features);
-                let Some(c) = cs.iter().find(|c| c.id == cid) else {
+                let Some(c) = feature::resolve_chain(&features, cid) else {
                     return Err(GenError::Invalid(format!(
                         "{label} is no longer in the model: re-pick it"
                     )));
                 };
-                let xy: Vec<Point2> = feature::chain_points(&features, c)
+                let xy: Vec<Point2> = feature::chain_points(&features, &c)
                     .iter()
                     .map(|p| {
                         let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);

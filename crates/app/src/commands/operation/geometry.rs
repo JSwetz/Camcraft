@@ -56,6 +56,9 @@ impl SetOperationGeometry {
         if reads_sel {
             super::gates::heights_gate(world, prev.setup.as_deref(), &src, &prev.params)?;
         }
+        // A pocket-family pick that bounds no area from above is refused
+        // here, at the pick, with the fix - Generate stays the backstop.
+        super::gates::area_gate(world, prev.setup.as_deref(), &src, &prev.params)?;
         let next = Operation { src, ..prev.clone() };
         Ok(SetOperationGeometry { name: name.to_string(), prev, next })
     }
@@ -88,7 +91,7 @@ fn valid_pick(world: &World, g: &GeoSel) -> Result<(), CommandError> {
     };
     let found = match g.feature {
         FeatureSel::Face(id) => features.faces.iter().any(|f| f.id == id),
-        FeatureSel::Chain(id) => feature::chains(&features).iter().any(|c| c.id == id),
+        FeatureSel::Chain(id) => feature::resolve_chain(&features, id).is_some(),
         FeatureSel::Patch(id) => feature::patches(&features).iter().any(|p| p.id == id),
     };
     if !found {

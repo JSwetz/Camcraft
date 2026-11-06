@@ -271,3 +271,36 @@ fn from_model_stock_judges_like_the_analytic_twin() {
     assert!(sim.dev.gouge_cells > 0, "faced 2 under the model top: an undercut");
     assert!((sim.dev.max_gouge - 2.0).abs() < 1e-6);
 }
+
+#[test]
+fn a_bull_nose_face_leaves_its_corner_scallops() {
+    // M13.1: the document sim sweeps a bull nose as itself. A 10 mm
+    // tool faces to the model top at a 9.5 mm stepover: the square
+    // end mill's disc overlaps pass to pass (clean), while the bull's
+    // flat disc is only 8 mm wide - the 1 mm corners leave a ridge
+    // between passes that the disc atom used to erase silently.
+    let judged = |tool: &str| {
+        let world = new_world();
+        let mut history = History::default();
+        let cmd = SetStock::new(&world, StockShape::Box { dx: 60.0, dy: 60.0, dz: 20.0 }, Location::default());
+        history.execute(&world, cmd.expect("box stock"));
+        history.execute(&world, AddTool::new(&world, tool, catalog_tool(tool)).expect("catalog tool"));
+        let (lo, hi) = (Point3::new(-30.0, -30.0, 0.0), Point3::new(30.0, 30.0, 18.0));
+        history.execute(&world, ImportModel::from_mesh("part", cube(lo, hi)));
+        let mut params = face_params(18.0);
+        if let OpParams::Face { stepover, .. } = &mut params {
+            *stepover = 9.5;
+        }
+        let cmd = CreateOperation::new(&world, "Face1", tool, SrcRef::Stock, params);
+        history.execute(&world, cmd.expect("create face"));
+        history.execute(&world, GenerateOperation::new(&world, "Face1").expect("generate face"));
+        simulate_document(&world).expect("the program simulates")
+    };
+    let flat = judged("EM-1000-4FL");
+    let bull = judged("BB-1000-R1");
+    assert_eq!(flat.dev.rest_cells, 0, "the square disc overlaps: clean");
+    assert!(bull.dev.rest_cells > 0, "the bull's corners leave ridges between passes");
+    // The ridge is the corner's own arc: never higher than the corner.
+    assert!(bull.dev.max_rest > DEV_TOL && bull.dev.max_rest <= 1.0 + 1e-9, "ridge {}", bull.dev.max_rest);
+    assert_eq!(bull.dev.gouge_cells, 0, "a corner never cuts deeper than the floor");
+}

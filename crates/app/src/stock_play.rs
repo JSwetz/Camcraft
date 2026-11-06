@@ -43,6 +43,7 @@ struct PlayOp {
     radius: f64,
     ball: bool,
     cone: Option<f64>,
+    corner: Option<f64>,
     /// Global index of this op's first move.
     start: usize,
 }
@@ -79,7 +80,7 @@ impl FieldPlay {
         let mut total = 0usize;
         for p in planned {
             let n = p.moves.len();
-            ops.push(PlayOp { name: p.name, moves: p.moves, radius: p.radius, ball: p.ball, cone: p.cone, start: total });
+            ops.push(PlayOp { name: p.name, moves: p.moves, radius: p.radius, ball: p.ball, cone: p.cone, corner: p.corner, start: total });
             total = total.saturating_add(n);
         }
         let (target, target_note) = if judged {
@@ -191,7 +192,7 @@ impl FieldPlay {
                 continue;
             }
             let moves = op.moves.get(a - op.start..b - op.start).ok_or("playback: a move range fell outside its op")?;
-            let sim = [SimOp { moves, radius: op.radius, ball: op.ball, cone: op.cone }];
+            let sim = [SimOp { moves, radius: op.radius, ball: op.ball, cone: op.cone, corner: op.corner }];
             self.cur
                 .simulate_display(&sim)
                 .map_err(|e| format!("playback could not cut {}: {e}", op.name))?;

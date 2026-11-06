@@ -65,7 +65,7 @@ pub fn field_view(world: &flecs_ecs::prelude::World) -> Result<FieldView, String
 pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result<FieldView, String> {
     let (mut stock, planned, cell) = display_parts(world, texels)?;
     for p in &planned {
-        let op = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone }];
+        let op = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone, corner: p.corner }];
         stock
             .simulate_display(&op)
             .map_err(|e| format!("the field view could not cut the program: {e}"))?;

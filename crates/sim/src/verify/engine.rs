@@ -570,6 +570,11 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
                 crate::stock_sim::envelope_scan(facets, &path.moves, r, tol)
             } {
                 Ok(rep) => {
+                    // The hidden half unjudged (M13.1): said by name,
+                    // beside whatever the judged half found - a rest
+                    // number that covers only the ridge law must never
+                    // pass as the whole verdict.
+                    warns.extend(Warning::hidden_unjudged(&rep, first_cut));
                     let gate = tol + rep.cell * rep.cell / (2.0 * r) + 1e-9;
                     if rep.gouge_mm > gate || rep.rest_mm > gate {
                         let mut at = 0usize;

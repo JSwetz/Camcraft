@@ -5642,6 +5642,10 @@ fn rotary_contour_generates_radial_axes_and_verifies_clean() {
     );
     let t = cache(&world, "RC1").expect("cached").path;
     radial_pose_law("rotary contour", &t, 2);
+    // M13.1: the stock sim has no annular-sector sweep, so the rotary
+    // op is refused by name there - never cut as a chord.
+    let err = camcraft_app::stock_sim::simulate_document(&world).expect_err("a rotary cut is not judged by the stock sim");
+    assert!(err.contains("RC1") && err.contains("rotary cut"), "{err}");
     let plunges: Vec<f64> = t
         .moves
         .iter()

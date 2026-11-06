@@ -12,7 +12,7 @@ use crate::operation::{OpParams, SrcRef};
 use crate::schema::{Location, Operation, Toolpath};
 use crate::verify::Warning;
 
-use super::gates::{check_tool, family_gate, heights_gate, tool_gate, valid_src};
+use super::gates::{area_gate, check_tool, family_gate, heights_gate, tool_gate, valid_src};
 
 /// Create an operation entity. Deliberately does not generate: a new
 /// operation reads "never generated" until `GenerateOperation` runs, the
@@ -59,6 +59,7 @@ impl CreateOperation {
         }
         family_gate(world, &params)?;
         tool_gate(world, &params, tool)?;
+        area_gate(world, setup.as_deref(), &src, &params)?;
         Ok(CreateOperation {
             name: name.to_string(),
             operation: Operation {

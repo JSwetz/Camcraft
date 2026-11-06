@@ -50,7 +50,7 @@ fn block(b: Backend) -> Stock {
 
 fn sim(moves: &[Move], r: f64, ball: bool, cone: Option<f64>) -> (Stock, Stock) {
     let (mut c, mut f) = (block(Backend::Column), block(Backend::Field { band: FIELD_BAND }));
-    let ops = [SimOp { moves, radius: r, ball, cone }];
+    let ops = [SimOp { moves, radius: r, ball, cone, corner: None }];
     c.simulate(&ops).expect("column program must run");
     f.simulate(&ops).expect("field program must run");
     (c, f)
@@ -201,7 +201,7 @@ fn deep_rest_is_heights_not_magnitudes() {
     // verdict marches heights and the capped magnitude only steers it.
     let (mut c, mut f) = (block(Backend::Column), block(Backend::Field { band: FIELD_BAND }));
     let hover = [feed(p(5.0, 5.0, 6.0), p(5.0, 5.0, 6.0))];
-    let ops = [SimOp { moves: &hover[..], radius: 2.0, ball: false, cone: None }];
+    let ops = [SimOp { moves: &hover[..], radius: 2.0, ball: false, cone: None, corner: None }];
     c.simulate(&ops).unwrap();
     f.simulate(&ops).unwrap(); // a tool hovering 1 mm up takes nothing
     let (dc, df) = (
@@ -298,7 +298,7 @@ fn cylinder_stock_agrees_where_both_own_the_column() {
     let part = cube(p(-5.0, -5.0, -5.0), p(5.0, 5.0, 2.0)).facets.to_vec();
     // The plate spans the block; inside the round the untouched top
     // stands 3 over it, and the pocket floor sits on it clean.
-    let ops = [SimOp { moves: &moves[..], radius: 2.0, ball: false, cone: None }];
+    let ops = [SimOp { moves: &moves[..], radius: 2.0, ball: false, cone: None, corner: None }];
     c.simulate(&ops).unwrap();
     f.simulate(&ops).unwrap();
     let (dc, df) = (c.deviate(&part, DEV_TOL).unwrap(), f.deviate(&part, DEV_TOL).unwrap());
@@ -315,7 +315,7 @@ fn cylinder_stock_agrees_where_both_own_the_column() {
 fn refusals_say_the_same_words_either_way() {
     fn sim_err(b: Backend, moves: &[Move], r: f64, ball: bool, cone: Option<f64>) -> String {
         let mut s = block(b);
-        let ops = [SimOp { moves, radius: r, ball, cone }];
+        let ops = [SimOp { moves, radius: r, ball, cone, corner: None }];
         s.simulate(&ops).err().map(|e| e.to_string()).expect("must refuse")
     }
     let m = [feed(p(5.0, 5.0, 2.0), p(5.0, 5.0, 2.0))];
