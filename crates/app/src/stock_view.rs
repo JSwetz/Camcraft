@@ -134,11 +134,17 @@ pub fn field_view(world: &flecs_ecs::prelude::World) -> Result<FieldView, String
 /// honest: classes still come from the same gate).
 pub fn field_view_with(world: &flecs_ecs::prelude::World, texels: f64) -> Result<FieldView, String> {
     let (mut stock, planned, cell) = display_parts(world, texels)?;
+    let pose_tol = crate::stock_sim::rotary_pose_tol(cell);
     for p in &planned {
-        let op = [SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone, corner: p.corner }];
-        stock
-            .simulate_display(&op)
-            .map_err(|e| format!("the field view could not cut the program: {e}"))?;
+        let op = SimOp { moves: &p.moves, radius: p.radius, ball: p.ball, cone: p.cone, corner: p.corner };
+        // A rotary op turns the part: its moves are chorded about the
+        // fitted axis (M13.1, `stock_sim::rotary`), never cut as the
+        // un-chorded posed chords they are written as.
+        let cut = match &p.rotary {
+            Some(ax) => crate::stock_sim::simulate_rotary_slice(&mut stock, &op, &p.moves, 0, ax, pose_tol).map(|_| ()),
+            None => stock.simulate_display(std::slice::from_ref(&op)),
+        };
+        cut.map_err(|e| format!("the field view could not cut the program: {e}"))?;
     }
     let (target, target_note) = display_target(world, cell);
     Ok(FieldView { stock, target: target.map(Arc::new), target_note, cell, packed: None })

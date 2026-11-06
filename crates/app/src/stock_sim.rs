@@ -9,6 +9,14 @@
 
 pub use camcraft_sim::stock_sim::*;
 
+// The rotary clause (M13.1): the eye's chord law, the verdict's
+// refusal, the per-kind lift.
+#[path = "stock_sim_rotary.rs"]
+pub mod rotary;
+pub use rotary::{
+    rotary_kind_lift, rotary_pose_tol, simulate_rotary_slice, ROTARY_KIND_UNMEASURED, ROTARY_VERDICT_REFUSAL,
+};
+
 use crate::geometry::Triangle;
 
 /// The document's stock, as an axis-aligned grid in world. Box and
@@ -113,6 +121,12 @@ pub fn simulate_document(
     // shows as "not judged" (the generator-time verify, which reads
     // the lean, is what governs these ops).
     for p in &planned {
+        // The rotary clause (M13.1): named before the posed one, so
+        // the gate says WHY this posed program is not judged here and
+        // where it is cut (the field eye, `stock_sim::rotary`).
+        if p.rotary.is_some() {
+            return Err(format!("{}: {ROTARY_VERDICT_REFUSAL}", p.name));
+        }
         if let Some(k) = first_posed(&p.moves) {
             return Err(format!("{}: move {k}: {POSED_REFUSAL}", p.name));
         }
@@ -171,6 +185,10 @@ pub(crate) struct Planned {
     /// The bull nose's corner radius (M13.1), `bull_corner`'s law.
     pub corner: Option<f64>,
     pub setup: Option<String>,
+    /// A rotary op's fitted axis (M13.1): the eye chords its turns
+    /// about it (`rotary::simulate_rotary_slice`); the column verdict
+    /// refuses the program by name. `None` for every other kind.
+    pub rotary: Option<crate::verify::RotaryAxis>,
 }
 
 /// The corner radius a tool's atom carries (M13.1): Some only for a
@@ -228,28 +246,17 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
         }
         // The rotary clause (M13.1): between two stations a rotary
         // move turns the WORK, so the tool sweeps an annular sector
-        // about the fitted axis - a torus-family solid neither stock
-        // engine has. Cutting the station-to-station chord instead
-        // would be a silent approximation of that sweep, so the
-        // program is refused by name until the sector sweep exists
-        // (ROADMAP M13.1, "a lathe or rotary cut = torus/annular-
-        // sector sweeps"). Its own verdict stands at generation.
-        // The FIELD arm now chords the turn (`Stock::simulate_rotary`,
-        // the `rotary_chords` pre-pass: pose lerped per sub-chord at
-        // a stated sag) with parity against the radial law on the
-        // sim's own bar (crates/sim/tests/stock_rotary.rs); lifting
-        // this refusal waits on that parity over the app's rotary
-        // fixtures and on the fitted axis riding the plan - owed.
-        if matches!(
-            op.params,
-            crate::operation::OpParams::RotaryContour { .. }
-                | crate::operation::OpParams::RotaryParallel { .. }
-                | crate::operation::OpParams::RotaryOffset { .. }
-        ) {
-            return Err(format!(
-                "{name}: a rotary cut sweeps an annular sector about its axis, which the stock sim does not model - not judged here (its envelope verdict at generation stands)"
-            ));
-        }
+        // about the fitted axis - a torus-family solid no stock engine
+        // has in closed form. The field arm chords the turn
+        // (`Stock::simulate_rotary`, the `rotary_chords` pre-pass:
+        // pose lerped per sub-chord at a stated sag) with parity
+        // against the radial law on the sim's bar and on the app's
+        // fixtures (`rotary_field_parity.rs`), so the plan carries the
+        // fitted axis for the eye; a kind whose parity or cost is not
+        // proved refuses by name here (`rotary::rotary_kind_lift`),
+        // and the column VERDICT refuses every rotary program by name
+        // in `simulate_document` (`ROTARY_VERDICT_REFUSAL`).
+        let rotary = rotary::rotary_plan(world, name, &op)?;
         let tool = model::find_by_name(world, &op.tool)
             .and_then(|t| model::tool_of(world, &t))
             .ok_or_else(|| format!("{name}: tool {} is not in the library", op.tool))?;
@@ -280,6 +287,7 @@ pub(crate) fn plan_program(world: &flecs_ecs::prelude::World) -> Result<Vec<Plan
             cone,
             corner,
             setup: op.setup,
+            rotary,
         });
     }
     Ok(planned)

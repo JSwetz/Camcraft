@@ -12,6 +12,7 @@
 pub mod cl_read;
 pub mod engine_consumers;
 pub mod engine_fixtures;
+pub mod rotary_bar;
 
 use std::path::PathBuf;
 

@@ -114,6 +114,9 @@ struct PlayOp {
     corner: Option<f64>,
     /// Global index of this op's first move.
     start: usize,
+    /// A rotary op's fitted axis: its slices are chorded about it
+    /// (M13.1, `stock_sim::rotary`).
+    rotary: Option<crate::verify::RotaryAxis>,
 }
 
 /// The playback field: the uncut stock, the plan, the stock cut to
@@ -163,7 +166,7 @@ impl FieldPlay {
         let mut total = 0usize;
         for p in planned {
             let n = p.moves.len();
-            ops.push(PlayOp { name: p.name, moves: p.moves, radius: p.radius, ball: p.ball, cone: p.cone, corner: p.corner, start: total });
+            ops.push(PlayOp { name: p.name, moves: p.moves, radius: p.radius, ball: p.ball, cone: p.cone, corner: p.corner, start: total, rotary: p.rotary });
             total = total.saturating_add(n);
         }
         let (target, target_note) = if let Some(part) = &part {
@@ -335,10 +338,17 @@ impl FieldPlay {
                 continue;
             }
             let moves = op.moves.get(a - op.start..b - op.start).ok_or("playback: a move range fell outside its op")?;
-            let sim = [SimOp { moves, radius: op.radius, ball: op.ball, cone: op.cone, corner: op.corner }];
-            self.cur
-                .simulate_display(&sim)
-                .map_err(|e| format!("playback could not cut {}: {e}", op.name))?;
+            let sim = SimOp { moves, radius: op.radius, ball: op.ball, cone: op.cone, corner: op.corner };
+            // A rotary slice is chorded about the fitted axis, turning
+            // from the pose the program held before it (M13.1).
+            let cut = match &op.rotary {
+                Some(ax) => {
+                    let tol = crate::stock_sim::rotary_pose_tol(self.cur.cell());
+                    crate::stock_sim::simulate_rotary_slice(&mut self.cur, &sim, &op.moves, a - op.start, ax, tol).map(|_| ())
+                }
+                None => self.cur.simulate_display(std::slice::from_ref(&sim)),
+            };
+            cut.map_err(|e| format!("playback could not cut {}: {e}", op.name))?;
         }
         Ok(())
     }

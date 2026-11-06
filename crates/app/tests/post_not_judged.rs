@@ -148,7 +148,7 @@ fn a_rotary_program_posts_with_the_visible_not_judged_line() {
     assert!(report.problems.is_empty(), "covered by the generator verdict: {:?}", report.problems);
     let line = report.not_judged.clone().expect("the refusal is visible, never dropped");
     assert!(line.starts_with(posting::NOT_JUDGED), "{line}");
-    assert!(line.contains("RC1") && line.contains("rotary cut"), "named reason: {line}");
+    assert!(line.contains("RC1") && line.contains("rotary program"), "named reason: {line}");
     assert_eq!(posting::verification_gate(&world), report.problems, "one gate, two readings");
 
     let path = tmp_nc("rotary");

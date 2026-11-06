@@ -5793,10 +5793,12 @@ fn rotary_contour_generates_radial_axes_and_verifies_clean() {
     verifies_clean(&world, "RC1");
     let t = cache(&world, "RC1").expect("cached").path;
     radial_pose_law("rotary contour", &t, 2);
-    // M13.1: the stock sim has no annular-sector sweep, so the rotary
-    // op is refused by name there - never cut as a chord.
-    let err = camcraft_app::stock_sim::simulate_document(&world).expect_err("a rotary cut is not judged by the stock sim");
-    assert!(err.contains("RC1") && err.contains("rotary cut"), "{err}");
+    // M13.1: the column VERDICT refuses a rotary program by name (its
+    // height field is blind under the equator; the field EYE chords the
+    // turn, the radial verdict at generation stands) - never judged as
+    // a chord, never silently clean.
+    let err = camcraft_app::stock_sim::simulate_document(&world).expect_err("a rotary program is not judged by the column verdict");
+    assert!(err.contains("RC1") && err.contains("rotary program"), "{err}");
     // The bottom ring's BALL snaps to the bottom (M13 pivot law: the
     // tip of a lying ball stands at its center's height, so the plane
     // the ladder named is met by the ball's lowest point, center - r).
