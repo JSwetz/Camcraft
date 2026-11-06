@@ -14,6 +14,7 @@ pub mod feedback;
 pub mod interact;
 pub mod operations;
 pub mod state;
+pub mod theme_dir;
 pub mod trace;
 pub mod vertex_pick;
 pub mod viewport;

@@ -1185,10 +1185,18 @@ impl UiTarget {
 impl State {
     #[must_use]
     pub fn new() -> Self {
+        // The theme folder is a run-time lookup (M13.3): beside the exe
+        // in the zip, the repo on a dev run. None found is said ONCE,
+        // here, on the status line - the built-in rows stand regardless.
+        let themes = crate::theme_dir::from_process();
+        let status = match &themes {
+            Ok(_) => String::from("ready"),
+            Err(why) => why.clone(),
+        };
         State {
             world: new_world(),
             history: History::default(),
-            status: String::from("ready"),
+            status,
             doc_version: 0,
             selection_version: 0,
             viewport_rect: ([0.0, 0.0], [0.0, 0.0]),
@@ -1254,7 +1262,7 @@ impl State {
             // One walk per window, at construction: the switcher's file
             // rows are furniture, not live filesystem polling (the
             // parse cache re-stats per file on the sync's change edge).
-            theme_paths: theme_files::discover(&theme_dir()).0,
+            theme_paths: themes.map(|dir| theme_files::discover(&dir).0).unwrap_or_default(),
             theme_key: ThemeRef::Dark,
             ui_synced_doc: 0,
             op_synced: (String::new(), 0),
@@ -3229,21 +3237,16 @@ fn titled(s: &str) -> String {
     }
 }
 
-/// The discovered-theme directory (M6.1 C): the repo's assets folder,
-/// anchored to this crate the way the icons are (CARGO_MANIFEST_DIR),
-/// so the headless suites see the same rows from any CWD. A missing
-/// directory is `discover`'s normal empty state, not a diagnostic.
-fn theme_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/themes")
-}
-
 fn pick_theme_file() -> Option<PathBuf> {
     // `.json` is OUR OWN `camcraft-theme/1` format (M6.1 B) - the
-    // filter names it; the selection-time parse decides it.
-    rfd::FileDialog::new()
-        .add_filter("CamCraft Theme", &["json"])
-        .set_directory(theme_dir())
-        .pick_file()
+    // filter names it; the selection-time parse decides it. The dialog
+    // opens on the discovered folder (`theme_dir`, M13.3) when there is
+    // one; `State::new` already said so on the status line when not.
+    let mut dialog = rfd::FileDialog::new().add_filter("CamCraft Theme", &["json"]);
+    if let Ok(dir) = crate::theme_dir::from_process() {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.pick_file()
 }
 
 fn save_project_dialog() -> Option<PathBuf> {
