@@ -118,6 +118,10 @@ pub(crate) const CORNER_PER_R: f64 = 0.5;
 /// The growth rings' wall margin, tried widening (`grow`).
 const MARGIN_SCALES: [f64; 3] = [1.0, 1.6, 2.4];
 
+/// A star plan's walk is smoothed where it turns past this (degrees):
+/// under the 5-degree in-cut break law with a margin.
+const STAR_SMOOTH_DEG: f64 = 4.0;
+
 /// What one planar area is planned with.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AdaptiveSpec {
@@ -216,7 +220,15 @@ pub(crate) fn plan(reach: &Region, center: &Region, s: &AdaptiveSpec) -> Result<
     let mut fronts = false;
     if let Some(star) = &star {
         p.orbit();
+        let from = p.walk.len();
         p.morph(star, orbit_radius(s))?;
+        // The morph seams (the circle phase handing over to the blend,
+        // the opening rows' radius ladder) kink the revolutions a few
+        // degrees: spread out like the fronts' (`tidy::smooth_walk`),
+        // the entry orbit left as it is (its helix lands on it).
+        if let Some(spiral) = p.walk.get_mut(from.saturating_sub(1)..) {
+            tidy::smooth_walk(spiral, center, STAR_SMOOTH_DEG, 24);
+        }
     } else {
         // Round 3: the area grown as one ring family (channels, islands);
         // where it cannot be, the engagement fronts plan it.

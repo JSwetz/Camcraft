@@ -337,16 +337,12 @@ fn judge(name: &str, reg: &Region, (cell, tol): (f64, f64), print: bool) -> Vec<
         bad.push(format!("{name}: load {:.1}% D past {:.1}% + {:.0}%", new.max_load() * 100.0, DEFAULT_OPTIMAL_LOAD * 100.0, tol * 100.0));
     }
     // The 5 deg law is measured honestly since round 4 (main's report had
-    // read 10 deg under a "5 deg" label). The star plans' morph seams on
-    // rectangle and L, and the slot's entry orbit, were never measured at
-    // 5 deg before; their counts are a RATCHET (RECOMMENDED "M11.4 C
-    // round 5" (3)): any rise, or a worse worst angle, fails - driving
-    // them to zero is owed (ROADMAP M11.4).
-    const KINK_RATCHET: &[(&str, usize, f64)] = &[
-        ("rectangle", 110, 6.5),
-        ("L-pocket", 202, 6.7),
-        ("narrow slot", 2, 5.05),
-    ];
+    // read 10 deg under a "5 deg" label). The slot's entry orbit was never
+    // measured at 5 deg before; its count is a RATCHET (RECOMMENDED "M11.4
+    // C round 5" (3)): any rise, or a worse worst angle, fails - driving
+    // it to zero is owed (ROADMAP M11.4). The star plans' morph seams
+    // (rectangle 110, L 202) are smoothed to zero and held at the law.
+    const KINK_RATCHET: &[(&str, usize, f64)] = &[("narrow slot", 2, 5.05)];
     let (cap, worst_cap) = KINK_RATCHET
         .iter()
         .find(|(p, _, _)| name.starts_with(p))
