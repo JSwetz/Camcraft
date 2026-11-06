@@ -10595,3 +10595,29 @@ small. Nice-to-haves ride if green.
 `scripts/release.ps1` that runs gate -> bump -> lock -> tag -> zip in one
 command is a 0.8.0 nice-to-have so the freeze window shrinks further. The
 session never pushes; the push command is handed to the user with the zip.
+
+## The swarf stamp flips hemispheres mid-program: a finding (2026-11-06, Prime Directive)
+
+The mid-move pose law (M13.7, held patch) convicted the swarf goldens at move
+399 with 2.92 mm of rest and no gouge. The diagnosis (numbers, not opinion):
+- move 399 feeds the tip 6.0 mm (= 2r) with the ball centre pinned on the rim
+  edge while the pose goes from (-0.9999, 0.003, 0.011), B = -89.35°, to
+  (1, 0, 0), B = +90°: a 179.3° turn;
+- at the lerped mid-pose the axis is upright and both the ball-centre gap AND
+  the minimum flank-line gap are 2.9226 mm - the tool is off the blade;
+- the rim ring's own steps (0.7-5.3° turns) read within the gate;
+- 23 moves in SWA turn > 150°, all at the ring <-> ruled-raster hand-off at
+  the x = 24 rim; four are exact 180° flips on consecutive 4-6 mm feeds.
+
+Cause: `stamp.rs` forces the ruled pose into one deterministic hemisphere
+(z-then-x-then-y positive) while the rim ring's lean law has no such rule and
+lands on -X. A joint-interpolating controller swings the head end-over-end at
+feed. This is (a) a real program defect, not (b) a verifier contract mismatch:
+the flank discriminator does not hold.
+
+Decision: the mid-move verifier law stays as written and lands TOGETHER with
+the stamp fix (choose the ruled-pose hemisphere continuous with the pose held
+coming in; the ring's lean pose adopts the same hemisphere). The swarf goldens
+are the acceptance: zero turns > 90° between consecutive cutting moves, verify
+clean under the mid-move law. Dropped: restricting f2 to ball-contact kinds,
+which would have hidden a head flip.

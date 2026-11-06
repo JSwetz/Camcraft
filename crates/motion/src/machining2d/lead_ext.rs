@@ -172,6 +172,37 @@ pub(super) fn extend_leads(
     (entry, lead, lead_off)
 }
 
+/// The approach's extensions on an open run's leads (M11.5 owed): the
+/// same straight pieces [`extend_leads`] lays - `ext_in` back along the
+/// lead-in's start (the walk's, with no lead-in), `ext_out` on along
+/// the lead-out's end - with no legal region to hold them to: an open
+/// run bounds no area, and its ends are air by the chain contour's own
+/// law. Both 0 (the default): everything untouched.
+pub(super) fn extend_open(
+    entry: Point2,
+    lead: Vec<Seg>,
+    lead_off: Vec<Seg>,
+    walk: &[Seg],
+    poly: &[Point2],
+    a: &crate::approach::Approach,
+) -> (Point2, Vec<Seg>, Vec<Seg>) {
+    let Some(&e) = poly.last() else {
+        return (entry, lead, lead_off);
+    };
+    let (mut entry, mut lead, mut lead_off) = (entry, lead, lead_off);
+    if a.ext_in > 0.0 && a.ext_in.is_finite() {
+        let u = start_dir(entry, &lead).and_then(unit).unwrap_or_else(|| walk_tangent(walk, poly, true));
+        let q = Point2::new(entry.x - u.x * a.ext_in, entry.y - u.y * a.ext_in);
+        lead.insert(0, Seg::Line(vec![entry]));
+        entry = q;
+    }
+    if a.ext_out > 0.0 && a.ext_out.is_finite() {
+        let (end, u) = end_dir(e, &lead_off).unwrap_or_else(|| (e, walk_tangent(walk, poly, false)));
+        lead_off.push(Seg::Line(vec![Point2::new(end.x + u.x * a.ext_out, end.y + u.y * a.ext_out)]));
+    }
+    (entry, lead, lead_off)
+}
+
 /// The length of `segs` walked from `from`.
 fn length(from: Point2, segs: &[Seg]) -> f64 {
     let mut at = from;

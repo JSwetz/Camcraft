@@ -3,7 +3,9 @@
 //! run's own points level by level. Provenance: open-profile contouring
 //! of published CAM practice (lead off the run's ends, plunge at the
 //! start, retract between levels); RS-274 / ISO 6983 linear and circular
-//! interpolation. No vendor material consulted.
+//! interpolation; the approach's lead extensions are the standard
+//! contour lead vocabulary of published CAM practice. No vendor
+//! material consulted.
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
 use crate::entry::Entry3D;
@@ -55,6 +57,10 @@ pub fn contour_along_chain(
     let n = poly.len();
     let t1 = walk_tangent(&walk, &poly, false);
     let out = lead_out(poly[n - 1], t1, air_side(t1, p.climb), p.lead_out_shape());
+    // The approach's extensions (M11.5 owed): straight pieces before the
+    // lead-in and after the lead-out, as a closed contour's leads carry
+    // them - held to no room law, since an open run's ends are air.
+    let (entry, lead, out) = super::lead_ext::extend_open(entry, lead, out, &walk, &poly, &p.links.approach);
 
     let mut b = PathBuilder::new(Point3::new(0.0, 0.0, p.clearance_z));
     if p.blend_turns {

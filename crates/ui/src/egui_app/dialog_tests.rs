@@ -268,6 +268,7 @@ fn the_summary_says_a_contour_rides_its_open_boundary() {
     let edge = camcraft_app::operation::run_pick(&state.world, "part", i as u32).expect("its run");
     state.op_ui.area.open =
         Some(camcraft_app::operation::OpenBoundary { picks: vec![edge], side: camcraft_app::operation::ChainSide::Outside });
+    state.op_ui.area.extension = 2.0;
     let s = boundary_summary::summarize(&state);
     assert!(
         s.lines[0].starts_with("Contours along the picked open edge as one open pass on side B, the side holding less of"),
@@ -275,6 +276,15 @@ fn the_summary_says_a_contour_rides_its_open_boundary() {
         s.lines
     );
     assert!(s.lines[1].starts_with("Tool edge on the picked edge: its centre runs one tool radius"), "{:?}", s.lines);
+    // The extension runs the pass past the chain's ends - it reaches
+    // past no "exterior edge", and crosses no boundary.
+    assert_eq!(
+        s.lines.get(2).map(String::as_str),
+        Some("The pass runs 2.000 mm past each end of the picked edge's chain, straight on along it."),
+        "{:?}",
+        s.lines
+    );
+    assert!(!s.lines.iter().any(|l| l.contains("exterior edges")), "{:?}", s.lines);
     assert!(s.notices.is_empty(), "no no-effect notice: {:?}", s.notices);
 }
 

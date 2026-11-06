@@ -11,6 +11,8 @@
 //! chain, so the tool edge never crosses it. A chain that crosses itself,
 //! or whose offset folds onto itself (the buffer grows a hole, or the
 //! chosen side breaks into pieces), is refused by name, never trimmed.
+//! The viewport's fill (`footprint`) is that same run dilated by the
+//! tool radius, so the band and the path cannot disagree.
 //!
 //! Provenance: open-profile contouring of published CAM practice (cutter
 //! radius compensation to one side of an open profile, RS-274 G41/G42
@@ -32,6 +34,44 @@ const TOL: f64 = 1e-3;
 /// path riding it. `base` is the operation's own area (what the
 /// selection or source encloses) - it only decides which side is Inside.
 pub(super) fn open_pass(base: &Region, ctx: &AreaCtx, cp: &ContourParams) -> Result<Toolpath, GenError> {
+    let Some((_, side)) = &ctx.open else {
+        return Err(unreached("contour open boundary"));
+    };
+    let c = &ctx.controls;
+    let (run, d) = open_run(base, ctx, cp.stock_to_leave)?;
+    let mut path = contour_along_chain(&run, cp)?;
+    path.notes.push(format!(
+        "contour: rides the open boundary {d:.3} mm to its {} side (tool centre), {} entering and leaving past its ends",
+        if *side == ChainSide::Inside { "Inside (A)" } else { "Outside (B)" },
+        if c.extension > 0.0 { "extended by the Boundary extension," } else { "its leads" },
+    ));
+    Ok(path)
+}
+
+/// The band the open pass sweeps, for the viewport (M11.5 owed): the
+/// SAME tool-centre run the pass rides, run on past its start and end by
+/// the approach's `ext_in` / `ext_out` (the start is the run's last
+/// point under conventional travel), dilated by the tool radius. The
+/// leads are entry and exit motion, not the band - as a closed ring's
+/// region leaves its leads out.
+pub(super) fn open_band(
+    base: &Region,
+    ctx: &AreaCtx,
+    stock_to_leave: f64,
+    climb: bool,
+    ext_in: f64,
+    ext_out: f64,
+) -> Result<Region, GenError> {
+    let (run, _) = open_run(base, ctx, stock_to_leave)?;
+    let (e0, e1) = if climb { (ext_in, ext_out) } else { (ext_out, ext_in) };
+    Ok(Region::sweep(&[extended_ends(&run, e0, e1)], ctx.tool_r)?)
+}
+
+/// The tool-centre run of the open pass and its offset from the chain:
+/// the chain run on past both ends by the Boundary extension, offset to
+/// the chosen side by the containment's placement, the Boundary offset
+/// and the stock to leave. Every refusal of the pass is named here.
+pub(super) fn open_run(base: &Region, ctx: &AreaCtx, stock_to_leave: f64) -> Result<(Vec<Point2>, f64), GenError> {
     let Some((geom, side)) = &ctx.open else {
         return Err(unreached("contour open boundary"));
     };
@@ -76,7 +116,7 @@ pub(super) fn open_pass(base: &Region, ctx: &AreaCtx, cp: &ContourParams) -> Res
         Some(Containment::On) => 0.0,
         Some(Containment::Inside) => -r,
     };
-    let mut d = place + c.offset + cp.stock_to_leave;
+    let mut d = place + c.offset + stock_to_leave;
     if !d.is_finite() {
         return Err(GenError::Invalid("the open boundary's offset is not a finite distance".into()));
     }
@@ -86,13 +126,7 @@ pub(super) fn open_pass(base: &Region, ctx: &AreaCtx, cp: &ContourParams) -> Res
     }
     let ext = extended(&chain, c.extension);
     let run = if d < TOL { ext } else { offset_run(&ext, d, tool_left)? };
-    let mut path = contour_along_chain(&run, cp)?;
-    path.notes.push(format!(
-        "contour: rides the open boundary {d:.3} mm to its {} side (tool centre), {} entering and leaving past its ends",
-        if *side == ChainSide::Inside { "Inside (A)" } else { "Outside (B)" },
-        if c.extension > 0.0 { "extended by the Boundary extension," } else { "its leads" },
-    ));
-    Ok(path)
+    Ok((run, d))
 }
 
 /// Repeated points out, oriented from the lexicographically lower end
@@ -171,18 +205,28 @@ fn crosses_itself(p: &[Point2]) -> bool {
 /// The chain run on straight past both ends by `e` mm along its end
 /// tangents.
 fn extended(p: &[Point2], e: f64) -> Vec<Point2> {
+    extended_ends(p, e, e)
+}
+
+/// The chain run on straight past its first point by `e0` mm and its
+/// last by `e1` mm along its end tangents; a non-positive amount leaves
+/// that end alone.
+fn extended_ends(p: &[Point2], e0: f64, e1: f64) -> Vec<Point2> {
     let mut v = p.to_vec();
     let n = v.len();
-    if !(e > 0.0 && e.is_finite()) || n < 2 {
+    if n < 2 {
         return v;
     }
-    let push = |a: Point2, b: Point2| {
+    let push = |a: Point2, b: Point2, e: f64| {
         let l = dist(a, b);
         Point2::new(a.x + (a.x - b.x) / l * e, a.y + (a.y - b.y) / l * e)
     };
-    let (s, t) = (push(v[0], v[1]), push(v[n - 1], v[n - 2]));
-    v.insert(0, s);
-    v.push(t);
+    if e1 > 0.0 && e1.is_finite() {
+        v.push(push(v[n - 1], v[n - 2], e1));
+    }
+    if e0 > 0.0 && e0.is_finite() {
+        v.insert(0, push(v[0], v[1], e0));
+    }
     v
 }
 

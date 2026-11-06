@@ -229,10 +229,15 @@ pub fn summarize(state: &State) -> Summary {
         out.notices.push("This contour already rides its ring from inside, so Inside changes nothing here.".to_owned());
     }
 
-    // 3. How far the area reaches past its exterior edges.
+    // 3. How far the area reaches past its exterior edges - or, for the
+    //    open pass, how far it runs past the chain's ends.
     if a.extension > 0.0 {
         let open = if a.open.is_some() { ", never across the picked open boundary" } else { "" };
         out.lines.push(match fam {
+            Family::Contour if a.open.is_some() => format!(
+                "The pass runs {} past each end of the picked edge's chain, straight on along it.",
+                len(a.extension)
+            ),
             Family::Face => format!("Runs out to the stock outline and {} past it over the exterior edges{open}.", len(a.extension)),
             _ => format!("Extends {} past the exterior edges - those with no part material beyond them{open}.", len(a.extension)),
         });

@@ -175,13 +175,14 @@ pub(super) fn stadium(a: Point2, b: Point2, h: f64) -> Result<Region, GenError> 
 /// (Prime Directive: a wrong preview is as bad as a wrong toolpath).
 #[must_use]
 pub fn region_of(world: &World, op: &Operation) -> Option<Region> {
-    region_turn_of(world, op).map(|(r, _)| r)
+    region_turn_of(world, op).map(|(r, _, _)| r)
 }
 
 /// [`region_of`] plus the turn the area controls lay Face's rows at
-/// (0 without an open chain) - what `footprint` needs to draw the band
-/// Face really clears.
-pub(super) fn region_turn_of(world: &World, op: &Operation) -> Option<(Region, f64)> {
+/// (0 without an open chain) and the resolved area controls (`None` at
+/// their identity) - what `footprint` needs to draw the band Face
+/// really clears, or the open pass a Contour rides.
+pub(super) fn region_turn_of(world: &World, op: &Operation) -> Option<(Region, f64, Option<AreaCtx>)> {
     // The 3+2 index (M5.1 B): a tilted planar op draws the cutting
     // plane's own shadow - the local region through the frame's door,
     // at the plane its `region_height` names. A tilt that commands no
@@ -214,8 +215,34 @@ pub(super) fn region_turn_of(world: &World, op: &Operation) -> Option<(Region, f
         }
         Some(Err(_)) => return None,
     };
-    let controlled =
-        |r: Option<Region>| r.and_then(|r| apply_area_full(r, ctx.as_ref()).ok()).map(|a| (a.region, a.turn));
+    // A Contour under an open boundary rides the chain itself
+    // (`contour_open`), never the area law: its region is the area that
+    // picks the side, as generation returns it - shown only while the
+    // pass can be built, so the preview never outlines a refused one.
+    let open_contour = match (&op.params, &ctx) {
+        (OpParams::Contour { stock_to_leave, .. }, Some(c)) if c.open.is_some() => Some(*stock_to_leave),
+        _ => None,
+    };
+    let controlled = |r: Option<Region>| {
+        let r = r?;
+        if let (Some(stl), Some(c)) = (open_contour, ctx.as_ref()) {
+            return super::contour_open::open_run(&r, c, stl).ok().map(|_| (r, 0.0));
+        }
+        apply_area_full(r, ctx.as_ref()).ok().map(|a| (a.region, a.turn))
+    };
+    let (region, turn) = region_turn_core(world, op, frame.as_ref(), controlled)?;
+    Some((region, turn, ctx))
+}
+
+/// The region and turn of [`region_turn_of`] with the area controls
+/// applied by `controlled`, split out so the controls' context outlives
+/// its borrow.
+fn region_turn_core(
+    world: &World,
+    op: &Operation,
+    frame: Option<&crate::cl::TiltedFrame>,
+    controlled: impl Fn(Option<Region>) -> Option<(Region, f64)>,
+) -> Option<(Region, f64)> {
     if let SrcRef::Selection(items) = &op.src
         && !matches!(
             op.params,
@@ -243,7 +270,7 @@ pub(super) fn region_turn_of(world: &World, op: &Operation) -> Option<(Region, f
         return controlled(selection_region(world, op.setup.as_deref(), items, &op.params).ok());
     }
     let material = material_of(world, op.setup.as_deref(), &op.src).ok()?;
-    match &frame {
+    match frame {
         None => controlled(
             region_for(world, op.setup.as_deref(), Some(&op.src), &material, &op.params, None).ok(),
         ),

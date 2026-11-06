@@ -5,31 +5,46 @@
 //! each run overrunning both ends by a tool radius - laid along an open
 //! boundary's chain. Showing the region alone would promise a shape the
 //! facing law never follows, so Face's footprint is that band, built by
-//! the same bounds and turn generation uses.
+//! the same bounds and turn generation uses. A Contour riding an open
+//! boundary shows the band of its one open pass the same way: the run
+//! `contour_open` computes, swept by the tool.
 //!
 //! Provenance: our own design notes; the band is `machining2d::face`'s
-//! own row law (bounds, radius overrun) and `boundary_turn`'s turn. No
+//! own row law (bounds, radius overrun) and `boundary_turn`'s turn; the
+//! open pass's band is the cutter's Minkowski sweep of its run. No
 //! vendor material consulted.
 
 use super::boundary_turn::turn_region;
 use super::*;
 
 /// The tool-swept footprint of `op` as the world stands now, at the
-/// region's plane: `region_of` for every kind but Face, Face's laid band
-/// for Face. `None` exactly when `region_of` is `None` (nothing honest
-/// to draw), or when the band cannot be built.
+/// region's plane: `region_of` for every kind but Face and the open
+/// Contour; Face's laid band for Face; for a Contour riding an open
+/// boundary the band its one open pass sweeps (`contour_open`: the
+/// offset run, on past both ends by the extensions, one tool radius
+/// wide each side). `None` exactly when `region_of` is `None` (nothing
+/// honest to draw), or when the band cannot be built.
 #[must_use]
 pub fn machined_footprint(world: &World, op: &Operation) -> Option<Region> {
-    let (region, turn) = region_turn_of(world, op)?;
-    if !matches!(op.params, OpParams::Face { .. }) {
-        return Some(region);
+    let (region, turn, ctx) = region_turn_of(world, op)?;
+    match &op.params {
+        OpParams::Face { .. } => {
+            let r = model::find_by_name(world, &op.tool)
+                .and_then(|e| model::tool_of(world, &e))
+                .map(|t| t.diameter * 0.5)
+                .filter(|r| r.is_finite() && *r > 0.0)
+                .unwrap_or(0.0);
+            face_band(&region, turn, r).ok()
+        }
+        OpParams::Contour { stock_to_leave, climb, .. } => {
+            let Some(ctx) = ctx.filter(|c| c.open.is_some()) else {
+                return Some(region);
+            };
+            let a = op.params.links().copied().unwrap_or_else(|| op.params.default_links()).approach;
+            super::contour_open::open_band(&region, &ctx, *stock_to_leave, *climb, a.ext_in, a.ext_out).ok()
+        }
+        _ => Some(region),
     }
-    let r = model::find_by_name(world, &op.tool)
-        .and_then(|e| model::tool_of(world, &e))
-        .map(|t| t.diameter * 0.5)
-        .filter(|r| r.is_finite() && *r > 0.0)
-        .unwrap_or(0.0);
-    face_band(&region, turn, r).ok()
 }
 
 /// The band Face sweeps over `region` with tool radius `r`, its rows laid

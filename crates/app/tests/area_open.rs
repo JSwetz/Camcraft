@@ -6,11 +6,14 @@
 //! is refused by name (and the default law is caught by the verify); the
 //! controls ride one undoable edit, stamp only when set, round-trip and
 //! are absent from the file at their default; a Contour rides its open
-//! boundary as one open pass offset to the chosen side.
+//! boundary as one open pass offset to the chosen side, the viewport
+//! shades the band that pass sweeps, and the approach's extensions
+//! lengthen it at each end.
 //!
 //! Gate map (M11.5): covers app::operation (boundary, boundary_turn,
-//! boundary_ctx, contour_open, stamp, generate), app::commands (EditOperationParams),
-//! app::project (area), app::verify.
+//! boundary_ctx, contour_open, footprint, stamp, generate), app::commands
+//! (EditOperationParams), app::project (area), app::verify,
+//! motion::machining2d (contour_chain, lead_ext).
 
 mod area_support;
 
@@ -226,6 +229,80 @@ fn a_contour_rides_its_open_boundary_offset_to_the_chosen_side() {
     assert!(!cut.is_empty());
     assert!(cut.iter().all(|p| (p.y - (20.0 - R)).abs() < EPS), "one radius south of the edge: {cut:?}");
     assert!(warns > 0, "a pass inside the part must be flagged");
+}
+
+/// The viewport's fill of an open Contour (M11.5 owed): the band its
+/// one pass sweeps, never nothing.
+#[test]
+fn the_footprint_of_an_open_contour_is_the_band_its_pass_sweeps() {
+    use camcraft_app::geo2d::Point2;
+    let world = block_world();
+    let top = top_face(&world, "part", 10.0);
+    let north = rim_edge(&world, |q| (q[1] - 20.0).abs() < 1e-9);
+    for side in [ChainSide::Outside, ChainSide::Inside] {
+        let a = AreaControls { extension: 3.0, open: Some(OpenBoundary { picks: pick("part", north), side }), ..Default::default() };
+        let o = op(sel("part", top), contour(10.0, 5.0, Side::Auto), a);
+        let band = operation::machined_footprint(&world, &o).expect("the open pass shades its band");
+        assert!(!band.is_empty() && band.area().abs() > 0.0);
+        assert!(operation::region_of(&world, &o).is_some(), "the side-picking area still outlines");
+        // Every cut point of the generated pass, with a half-tool margin
+        // around it, lies in the band.
+        let (t, _) = run(&world, &o).expect("open contour");
+        let cut = cutting(&t);
+        assert!(!cut.is_empty());
+        for p in &cut {
+            for k in 0..8 {
+                let th = std::f64::consts::TAU * k as f64 / 8.0;
+                let q = Point2::new(p.x + 0.5 * R * th.cos(), p.y + 0.5 * R * th.sin());
+                assert!(band.contains(q), "{side:?}: cut point {p:?} with its half-tool margin ({q:?}) lies in the band");
+            }
+        }
+        // The band flips side with the choice: Outside stands north of
+        // the edge, Inside south of it - the tool's edge on the chain.
+        let (lo, hi) = band.bounds().expect("bounds");
+        match side {
+            ChainSide::Outside => assert!(lo.y > 20.0 - 1e-2 && hi.y > 20.0 + R, "{lo:?} {hi:?}"),
+            ChainSide::Inside => assert!(hi.y < 20.0 + 1e-2 && lo.y < 20.0 - R, "{lo:?} {hi:?}"),
+        }
+        // Past both ends by the extension, as the pass runs.
+        assert!((hi.x - (23.0 + R)).abs() < 1e-2 && (lo.x + 23.0 + R).abs() < 1e-2, "{lo:?} {hi:?}");
+    }
+    // A closed-loop contour's footprint is its region, as before.
+    let o = op(sel("part", top), contour(10.0, 5.0, Side::Auto), AreaControls::default());
+    let fp = operation::machined_footprint(&world, &o).expect("footprint");
+    let region = operation::region_of(&world, &o).expect("region");
+    assert_eq!(fp.loops().len(), region.loops().len());
+    assert!((fp.area() - region.area()).abs() < 1e-9 && (region.area().abs() - 1600.0).abs() < 1e-6);
+}
+
+/// The approach's lead extensions lengthen the open pass at each end by
+/// exactly their amounts - and the band follows.
+#[test]
+fn the_approach_extensions_lengthen_the_open_pass_at_each_end() {
+    let world = block_world();
+    let top = top_face(&world, "part", 10.0);
+    let north = rim_edge(&world, |q| (q[1] - 20.0).abs() < 1e-9);
+    let a = AreaControls { extension: 3.0, open: Some(OpenBoundary { picks: pick("part", north), side: ChainSide::Outside }), ..Default::default() };
+    let mut p = contour(10.0, 5.0, Side::Auto);
+    if let OpParams::Contour { links, .. } = &mut p {
+        links.approach.ext_in = 2.0;
+        links.approach.ext_out = 4.5;
+    }
+    let o = op(sel("part", top), p, a);
+    let (t, warns) = run(&world, &o).expect("open contour");
+    assert_eq!(warns, 0, "{:?}", t.notes);
+    let cut = cutting(&t);
+    assert!(cut.iter().all(|q| (q.y - (20.0 + R)).abs() < EPS), "straight on along the run: {cut:?}");
+    // The dive marks the start: ext_in lies at that end, ext_out at the other.
+    let dive = t.moves.iter().find(|m| m.kind == MoveKind::Plunge).map(|m| m.to).expect("a dive");
+    let (east, west) = (max_by(&cut, |q| q.x), -max_by(&cut, |q| -q.x));
+    let (start, end) = if dive.x > 0.0 { (east, -west) } else { (-west, east) };
+    assert!((start - 25.0).abs() < EPS, "ext_in 2.0 past the extension's 23.0: {start}");
+    assert!((end - 27.5).abs() < EPS, "ext_out 4.5 past the extension's 23.0: {end}");
+    let band = operation::machined_footprint(&world, &o).expect("band");
+    let (lo, hi) = band.bounds().expect("bounds");
+    let (bs, be) = if dive.x > 0.0 { (hi.x, -lo.x) } else { (-lo.x, hi.x) };
+    assert!((bs - (25.0 + R)).abs() < 1e-2 && (be - (27.5 + R)).abs() < 1e-2, "the band follows: {lo:?} {hi:?}");
 }
 
 #[test]
