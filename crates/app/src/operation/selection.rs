@@ -151,6 +151,11 @@ pub(super) fn drive_chains(world: &World, items: &[GeoSel]) -> Result<Vec<Vec<Po
                     "{label} is a face - Multi-Axis Contour machines the picked EDGE CHAINS where they stand; machine this face's boundary as a chain, or use 5-Axis Contour for the model's own pattern"
                 )));
             }
+            FeatureSel::Vertex(_) => {
+                return Err(GenError::Invalid(format!(
+                    "{label} is a point - Multi-Axis Contour machines picked EDGE CHAINS; pick the edges through it"
+                )));
+            }
         }
     }
     if out.is_empty() {
@@ -246,6 +251,12 @@ pub(super) fn selection_geometry_impl(
         let loc = model::transform_of(world, &entity).unwrap_or_default();
         let label = format!("{} of '{}'", g.feature, g.entity);
         match g.feature {
+            FeatureSel::Vertex(_) => {
+                // A point bounds no region: refuse by name, never drop it.
+                return Err(GenError::Invalid(format!(
+                    "{label} is a point - a boundary needs faces or edge chains; pick those, or use the vertex as a height or origin reference"
+                )));
+            }
             FeatureSel::Face(fid) => {
                 let Some(f) = features.faces.iter().find(|f| f.id == fid) else {
                     return Err(GenError::Invalid(format!(

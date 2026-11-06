@@ -91,6 +91,49 @@ pub fn first_hit_f(
         .map(|(_, name, facet, xyz)| (name, facet, xyz))
 }
 
+/// Depth test for a point pick (M13.4 vertex picking): is `p` the first
+/// thing the sight line from `eye` meets? Uses the same model-over-stock
+/// ray as [`first_hit_f`], so a vertex behind the translucent stock stays
+/// pickable exactly like the face it sits on. `tol` (mm) absorbs the
+/// facets that meet AT the vertex - they hit at its own distance.
+#[must_use]
+pub fn point_visible(
+    world: &World,
+    eye: [f64; 3],
+    p: [f64; 3],
+    tol: f64,
+    skip: impl Fn(&str) -> bool,
+) -> bool {
+    let d = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
+    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    if !len.is_finite() || len < 1e-12 {
+        return false; // the eye sits on the point: nothing honest to say
+    }
+    let dir = [d[0] / len, d[1] / len, d[2] / len];
+    match first_hit_f(world, eye, dir, skip) {
+        None => true,
+        Some((_, _, h)) => {
+            let hd = ((h[0] - eye[0]).powi(2) + (h[1] - eye[1]).powi(2) + (h[2] - eye[2]).powi(2)).sqrt();
+            hd >= len - tol
+        }
+    }
+}
+
+/// Pure twin of [`point_visible`] over one triangle soup in world space:
+/// true when some facet crosses the open sight segment `eye -> p` more
+/// than `tol` (mm) before `p`. The cube law test's occluder.
+#[must_use]
+pub fn sight_blocked(tris: &[Triangle], eye: [f64; 3], p: [f64; 3], tol: f64) -> bool {
+    let o = Point3::new(eye[0], eye[1], eye[2]);
+    let d = Point3::new(p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]);
+    let len = d.dot(d).sqrt();
+    if !len.is_finite() || len < 1e-12 {
+        return false;
+    }
+    let cut = 1.0 - tol / len; // t along the unnormalized ray: 1 is at p
+    tris.iter().any(|t| ray_triangle(*t, o, d).is_some_and(|hit| hit < cut))
+}
+
 /// Ray/triangle crossing in the entity's local frame; the ray direction need
 /// not be normalized. Returns t along the ray.
 fn ray_triangle(facet: Triangle, origin: Point3, dir: Point3) -> Option<f64> {

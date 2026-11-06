@@ -100,6 +100,9 @@ fn picks_z_range(world: &World, items: &[GeoSel]) -> Result<(f64, f64), &'static
                     f.loops.iter().flat_map(|l| l.verts.iter()).for_each(|&v| take(v));
                 }
             }
+            FeatureSel::Vertex(vid) => {
+                take(feature::resolve_vertex(&features, vid).ok_or(gone)?);
+            }
             FeatureSel::Chain(cid) => {
                 let c = feature::resolve_chain(&features, cid).ok_or(gone)?;
                 for p in feature::chain_points(&features, &c) {

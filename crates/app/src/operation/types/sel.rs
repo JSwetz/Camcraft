@@ -46,6 +46,23 @@ pub enum FeatureSel {
     ///
     /// [`patch_rings`]: crate::geometry::feature::patch_rings
     Patch(crate::geometry::feature::PatchId),
+    /// One feature vertex - a corner where feature edges meet (M13.4),
+    /// keyed by its welded position ([`VertexId`]). A point bounds no
+    /// region: boundary consumers refuse it by name; heights and the WCS
+    /// origin read its position.
+    ///
+    /// [`VertexId`]: crate::geometry::feature::VertexId
+    Vertex(crate::geometry::feature::VertexId),
+}
+
+impl FeatureSel {
+    /// The raw geometry hash, whatever the kind.
+    #[must_use]
+    pub fn id(self) -> u64 {
+        match self {
+            FeatureSel::Face(id) | FeatureSel::Chain(id) | FeatureSel::Patch(id) | FeatureSel::Vertex(id) => id,
+        }
+    }
 }
 
 impl core::fmt::Display for FeatureSel {
@@ -54,6 +71,7 @@ impl core::fmt::Display for FeatureSel {
             FeatureSel::Face(id) => write!(f, "face {id:#x}"),
             FeatureSel::Chain(id) => write!(f, "edge chain {id:#x}"),
             FeatureSel::Patch(id) => write!(f, "welded face {id:#x}"),
+            FeatureSel::Vertex(id) => write!(f, "vertex {id:#x}"),
         }
     }
 }

@@ -1420,7 +1420,7 @@ we choose to? keepdown is a common strategy we should honor and make definable."
 **Goal: every entry, lead and engagement choice a CAM user expects is a
 parameter on the operation, grouped under its own "Lead in / Lead out"
 section, and every height can be measured from the operation's own
-selection.** — ⚠️ partial (owed: horizontal-plane arc entry for pockets, 3D first-stretch engagement slowing, the 3D ladder's and contour bore side's second dives, 3-axis plunge cone (80° ramps pass), multiaxis rough/offset post-stamp audit - see the Owed bullet below)
+selection.** — ⚠️ partial (owed: horizontal-plane arc entry for pockets, 3D first-stretch engagement slowing, the 3D ladder's and contour bore side's second dives, multiaxis rough/offset post-stamp audit - see the Owed bullet below)
 
 (User review, 2026-11-05: "All heights should have the option Selection ...
 Entry - Arc should have an option of setting radius and length of the arc.
@@ -1459,8 +1459,8 @@ handle engagement.")
       second dives; the centre-cutting plunge check in finishing3d,
       drilling and face - DONE 2026-11-06 (RECOMMENDED "M11.3: the centre-cutting
       law in finish, drilling and face"); Face entry fallback and 5-axis posed guards also DONE
-      2026-11-06; still owed: the 3-axis law uniform with the posed 30° cone (a
-      non-centre-cutting 80° unposed ramp passes today), a post-stamp audit for
+      2026-11-06; the 3-axis law uniform with the posed 30° cone also DONE 2026-11-06;
+      still owed: a post-stamp audit for
       Multi-Axis Rough and Rotary Offset, swarf/rotary forced-ramp check, an
       app-level 5-axis plunge test. Done and dropped from this list:
       between-pass centre-cutting checks (`plunge_law`, 515525c),
@@ -1685,7 +1685,7 @@ would.** — 📋
       today only app (`camcraft-cli`), post and ui carry binaries
 
 ### M13.4 - Small owed polish
-**Goal: the named cheap follow-ons stop being named and get done.** — ⚠️ partial (owed: vertex picking + WCS snapping, operation dialog polish)
+**Goal: the named cheap follow-ons stop being named and get done.** — ⚠️ partial (owed: WCS snap to a face)
 
 - **ColorVision remaps** (M6.1, "Their `ColorVision` layer
       (protan/deutan/tritan remaps applied on top of any theme) is a
@@ -1701,19 +1701,10 @@ would.** — 📋
 - **Landed (2026-11-06, 42d9f71)**: the catalog hint in the tool-law
       refusal; the protan/deutan/tritan remaps (Machado 2009, CIEDE2000
       >= 20 gate, Off pixel-identical).
-- **Owed** (RECOMMENDED "M13.4" (4)): vertex picking and WCS face/vertex
-      snapping (not started). Done: warning/error text colours follow the
-      colour-vision setting (RECOMMENDED "Small owed UI items" (1)).
-
-- **Operation dialog polish** (RECOMMENDED "The operation dialog, Fusion-style"):
-      convert the remaining captions above a control (e.g. Contour "Side"); give the
-      Heights tab's loose rows (Stepdown, Retract plane, Depth staging) their own
-      group; audit the kind pages' remaining "0 means auto" fields onto Auto
-      toggles; `boundary_draft.rs` is near the 400-line law.
-
-### M13.5 - Mill-turn completeness
-**Goal: mill-turn machines with the C axis, not only indexed beside it.** — 📋
-
+- **Owed** (RECOMMENDED "M13.4" (4), "M13.4: vertex picking and Set origin"):
+      vertex picking and Set origin DONE 2026-11-06; snapping the WCS origin to a
+      picked face (centroid or plane) stays owed.
+- ~~**Operation dialog polish**~~ - done 2026-11-06 (RECOMMENDED "Operation dialog polish").
 - **Continuous C-axis live-tooling operations** (M5.2, "Mill-turn: live
       tooling operations indexed and continuous (C-axis)"): only the
       indexed half shipped
@@ -1836,14 +1827,14 @@ the heavy lane green.
 | **M10.1** | A tool that can cut the operation | Done: the tool law - `KindInfo.tool_kinds` one table (A), `CreateOperation` / tool reassignment / op retype / tool retype refuse the mismatch at command construction by name and the ribbon darkens with the reason (B), an op whose tool is gone or wrong reads BLOCKED - generation and the post refuse, nothing stored, old files load untouched (C), the law tests (D); generator shape refusals stand as the backstop | ✅ |
 | **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); line-to-arc and arc-to-arc corner fillets (M11.1 RECOMMENDED); a closed path's seam corner stays sharp by decision | ✅ |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
-| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, 3-axis plunge cone, multiaxis rough/offset post-stamp audit (-> M11.3 Owed bullet) | ⚠️ |
+| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, multiaxis rough/offset post-stamp audit (-> M11.3 Owed bullet) | ⚠️ |
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); owed: star-plan morph seams to 0 kinks at 5° (ratcheted 110/202), island legal late returns, arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; owed: open boundary on Contour, boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
 | **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; owed: lathe/rotary annular-sector sweeps (refused by name meanwhile), eikonal, viewer/picking mesh, dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
 | **M13.2** | Machine limits and cutting data | Spindle speed/power checks against a per-material speeds & feeds library (M3.3 C); the homegrown materials database (Open question "Cutting data"); done 2026-11-06 (fixed 0.8 spindle efficiency is a follow-on, not owed) | ✅ |
 | **M13.3** | Builds and distribution | Code signing + installer-vs-zip (M1.7); Docker builds for every target, app/UI on wasm (M4.2); a headless binary per crate (Phase 4 intro) | 📋 |
-| **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint and text colours done; owed: vertex picking + WCS snapping, dialog polish (captions, Heights loose rows, 0-auto audit) (-> M13.4 Owed bullet) | ⚠️ |
+| **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint, text colours, dialog polish, vertex picking + Set origin done; owed: WCS snap to a picked face (-> M13.4 Owed bullet) | ⚠️ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); owed: mid-move pose, cut-order-aware clearing | ⚠️ |

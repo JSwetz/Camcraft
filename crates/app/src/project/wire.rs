@@ -91,6 +91,7 @@ pub fn collect(world: &World) -> ProjectFile {
                                     FeatureSel::Face(id) => FeatureSelDto::Face { id },
                                     FeatureSel::Chain(id) => FeatureSelDto::Chain { id },
                                     FeatureSel::Patch(id) => FeatureSelDto::Patch { id },
+                                    FeatureSel::Vertex(id) => FeatureSelDto::Vertex { id },
                                 },
                             })
                             .collect(),

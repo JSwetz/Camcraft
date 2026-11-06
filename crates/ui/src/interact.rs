@@ -112,6 +112,7 @@ pub(crate) fn pick_at(state: &mut State, p: [f32; 2], mods: Mods) {
         GeoPick::Model => pick_model(state, p),
         GeoPick::Face => pick_face(state, p, mods),
         GeoPick::Edge => pick_edge(state, p, mods),
+        GeoPick::Vertex => crate::vertex_pick::pick_vertex(state, p, mods),
     }
 }
 
@@ -271,6 +272,11 @@ pub(crate) fn update_hover(state: &mut State, p: [f32; 2], held: bool) {
         state.hover = None;
         return;
     }
+    // Vertex mode is screen-space only: a corner or nothing (M13.4).
+    if state.geo_pick == GeoPick::Vertex {
+        crate::vertex_pick::hover_vertex(state, p);
+        return;
+    }
     // Edge mode leads with the screen-space pass: the silhouette of a
     // chain is exactly where a ray misses but an edge pick belongs.
     if state.geo_pick == GeoPick::Edge
@@ -305,7 +311,7 @@ pub(crate) fn update_hover(state: &mut State, p: [f32; 2], held: bool) {
             // replace - Model mode keeps hover free of features. In
             // Edge mode a facet's face is the fallback, matching the
             // click rule (faces own the pixels between edges).
-            GeoPick::Model => None,
+            GeoPick::Model | GeoPick::Vertex => None,
             GeoPick::Face | GeoPick::Edge => feature_of_facet(state, &entity, facet),
         };
         HoverHit { entity, facet, feature }
@@ -688,6 +694,14 @@ pub(crate) fn feature_segments(
                     .collect();
                 push_poly(&mvp, &loc, &pts, r.closed, out);
             }
+        }
+        FeatureSel::Vertex(vid) => {
+            let Some(v) = feature::resolve_vertex(&features, vid).and_then(|vi| features.verts.get(vi as usize))
+            else {
+                return; // stale id: the model re-meshed under the hover
+            };
+            let w = transform_point(Point3::new(v[0], v[1], v[2]), loc.pos, loc.rot);
+            crate::vertex_pick::vertex_marker(&mvp, [w.x, w.y, w.z], aspect, out);
         }
     }
 }
@@ -1624,6 +1638,21 @@ pub(crate) fn selection_feature_lines(state: &State) -> Vec<[f32; 6]> {
                         .filter_map(|&vi| features.verts.get(vi as usize).copied())
                         .collect();
                     draw(&mut out, &pts, r.closed);
+                }
+            }
+            FeatureSel::Vertex(vid) => {
+                // A point has no outline: a small 3-axis cross pins it.
+                let Some(v) = feature::resolve_vertex(&features, vid)
+                    .and_then(|vi| features.verts.get(vi as usize))
+                else {
+                    continue; // stale id: the model re-meshed since the pick
+                };
+                let c = transform_point(Point3::new(v[0], v[1], v[2]), loc.pos, loc.rot);
+                let arm = (gizmo_len(state) * 0.05).max(0.5);
+                for d in [[arm, 0.0, 0.0], [0.0, arm, 0.0], [0.0, 0.0, arm]] {
+                    let a = Point3::new(c.x - d[0], c.y - d[1], c.z - d[2]);
+                    let b = Point3::new(c.x + d[0], c.y + d[1], c.z + d[2]);
+                    push_line(&mut out, a, b, PICK_RGB);
                 }
             }
         }

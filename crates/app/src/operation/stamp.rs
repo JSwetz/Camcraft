@@ -182,12 +182,11 @@ pub fn current_stamp(
                     FeatureSel::Face(_) => 0,
                     FeatureSel::Chain(_) => 1,
                     FeatureSel::Patch(_) => 2,
+                    FeatureSel::Vertex(_) => 3,
                 });
                 h.write_usize(g.entity.len());
                 h.write(g.entity.as_bytes());
-                let id = match g.feature {
-                    FeatureSel::Face(id) | FeatureSel::Chain(id) | FeatureSel::Patch(id) => id,
-                };
+                let id = g.feature.id();
                 h.write_u64(id);
                 // The pick resolves against this entity's LOCAL features
                 // (ids are transform-free) and projects through its
@@ -321,6 +320,10 @@ pub fn stale_reason(
                     FeatureSel::Chain(id) => (
                         revision::chain_ids(&features).binary_search(&id).is_ok(),
                         "edge chain",
+                    ),
+                    FeatureSel::Vertex(id) => (
+                        crate::geometry::feature::vertex_ids(&features).binary_search(&id).is_ok(),
+                        "vertex",
                     ),
                 };
                 if !present {

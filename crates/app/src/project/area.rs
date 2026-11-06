@@ -97,6 +97,7 @@ fn sel_dto(items: &[GeoSel]) -> Vec<GeoSelDto> {
                 FeatureSel::Face(id) => FeatureSelDto::Face { id },
                 FeatureSel::Chain(id) => FeatureSelDto::Chain { id },
                 FeatureSel::Patch(id) => FeatureSelDto::Patch { id },
+                FeatureSel::Vertex(id) => FeatureSelDto::Vertex { id },
             },
         })
         .collect()
@@ -111,6 +112,7 @@ fn sel_of(items: &[GeoSelDto]) -> Vec<GeoSel> {
                 FeatureSelDto::Face { id } => FeatureSel::Face(id),
                 FeatureSelDto::Chain { id } => FeatureSel::Chain(id),
                 FeatureSelDto::Patch { id } => FeatureSel::Patch(id),
+                FeatureSelDto::Vertex { id } => FeatureSel::Vertex(id),
             },
         })
         .collect()

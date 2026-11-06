@@ -632,6 +632,7 @@ pub(super) fn check_and_apply(world: &World, mut file: ProjectFile) -> Result<()
                                     FeatureSelDto::Face { id } => FeatureSel::Face(id),
                                     FeatureSelDto::Chain { id } => FeatureSel::Chain(id),
                                     FeatureSelDto::Patch { id } => FeatureSel::Patch(id),
+                                    FeatureSelDto::Vertex { id } => FeatureSel::Vertex(id),
                                 },
                             })
                             .collect(),

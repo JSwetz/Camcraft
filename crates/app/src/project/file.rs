@@ -407,4 +407,7 @@ pub enum FeatureSelDto {
     Face { id: u64 },
     Chain { id: u64 },
     Patch { id: u64 },
+    /// M13.4: additive - files written before it never carry the tag,
+    /// so they load unchanged.
+    Vertex { id: u64 },
 }

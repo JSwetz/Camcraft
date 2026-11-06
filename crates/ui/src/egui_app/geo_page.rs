@@ -9,7 +9,7 @@
 
 use egui::{RichText, Ui};
 
-use camcraft_app::operation::{self, GeoSel, SrcRef};
+use camcraft_app::operation::{self, FeatureSel, GeoSel, SrcRef};
 
 use crate::state::{CommandKind, ErrorScope, GeoPick, State};
 
@@ -29,13 +29,16 @@ fn body(ui: &mut Ui, state: &mut State, target: &str, live_setup: Option<&str>) 
             GeoPick::Model => 0,
             GeoPick::Face => 1,
             GeoPick::Edge => 2,
+            GeoPick::Vertex => 3,
         };
         ui.radio_value(&mut pick_mode, 0, "Models");
         ui.radio_value(&mut pick_mode, 1, "Faces");
         ui.radio_value(&mut pick_mode, 2, "Edges");
+        ui.radio_value(&mut pick_mode, 3, "Vertices");
         state.geo_pick = match pick_mode {
             1 => GeoPick::Face,
             2 => GeoPick::Edge,
+            3 => GeoPick::Vertex,
             _ => GeoPick::Model,
         };
     });
@@ -72,8 +75,19 @@ fn chips(ui: &mut Ui, state: &mut State, target: &str) {
     let chips: Vec<(String, bool, GeoSel)> =
         state.geo_chips().into_iter().map(|c| (c.label, c.missing, c.sel)).collect();
     for (i, (label, missing, sel)) in chips.into_iter().enumerate() {
+        let vertex = match sel.feature {
+            FeatureSel::Vertex(id) if !missing => Some((sel.entity.clone(), id)),
+            _ => None,
+        };
         let remove = ui
             .horizontal(|ui| {
+                // M13.4 stage 2 hook: a picked corner can place the WCS
+                // slot chosen in the WCS pane, through SetWcsOrigin.
+                if let Some((entity, id)) = &vertex
+                    && ui.small_button("Set origin").on_hover_text("set the work origin at this vertex").clicked()
+                {
+                    crate::vertex_pick::queue_origin_at_vertex(state, entity, *id);
+                }
                 let resp = if missing {
                     ui.colored_label(text_inks(ui, &state.world).missing, &label)
                 } else {

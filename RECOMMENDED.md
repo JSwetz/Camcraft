@@ -10268,3 +10268,55 @@ Results:
 the column for an earlier move, the same as the existing column model. This
 can only under-report, so it is a known blind spot to close: judge each move
 against the cuts before it.
+
+## M11.3: one plunge cone for posed and unposed moves: one decision (2026-11-06)
+
+**An unposed straight move counts as a plunge if it falls within 30° of straight
+down**, the same cone and the same `posed_axial` call the posed law uses. It used
+to count only an exactly vertical descent, so a non-centre-cutting tool
+ramping into solid at 80° from horizontal passed.
+
+- Arcs keep the exact test on purpose. A full-turn helix starts and ends at
+  the same XY, so its net direction reads vertical even though every chord is
+  shallow.
+- No existing verdict changed.
+- 3° ramps and helices stay legal. The 60° boundary is pinned to agree with
+  the posed reading.
+- Untested on a real part: a 3D finish running down a wall steeper than 60°
+  below the stock top, with a non-centre-cutting tool, now retries with a
+  ramp or refuses by name. That is the conservative verdict under the rule
+  that unknown stock counts as solid.
+
+## M13.4: vertex picking and Set origin: three decisions (2026-11-06)
+
+(1) **Only feature corners are pickable** (`FeatureSel::Vertex`):
+- they are the points where feature edges meet;
+- each has an id hashed from its welded position, built like face and chain
+  ids, so a pick survives re-import;
+- points inside a smooth wall's tessellation are not pickable, so what can be
+  picked matches what the wireframe shows.
+
+(2) **Picking happens in screen space, nearest within 8 px, with a depth
+test.** `nearest_vertex` projects each candidate through the viewport MVP and
+tries them nearest first. `pick::point_visible` casts a ray from the eye. It
+uses face picking's "models before stock" rule, so corners behind the
+translucent stock stay pickable. The picking math is written from standard
+practice.
+
+(3) **"Set origin" on a picked vertex sends the existing `SetWcs` command**,
+using the WCS pane's slot and angles, and is undoable.
+
+Other rules:
+- a vertex can drive Selection heights through its Z;
+- pocket and contour refuse a vertex by name ("a point bounds nothing");
+- boundaries refuse vertex picks;
+- the file entry `vertex { id }` is new, so older files load unchanged.
+
+Owed: snapping the origin to a picked face (centroid or plane).
+
+## pick_agnostic test lane split (2026-11-06)
+
+`pick_agnostic` went from 732.6 s to 2.95 s in debug. Its island test ran five
+HSM Adaptive plans. The debug variant now runs Zigzag only, keeping every
+core assertion. The `_full` twin runs Adaptive and Zigzag in the heavy lane,
+71 s in release. No assertion was dropped; the test count went from 6 to 7.

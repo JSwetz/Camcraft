@@ -4262,3 +4262,79 @@ fn a_deleted_tool_marks_the_row_and_the_page_blocked() {
     assert!(!suffix.contains("BLOCKED") && suffix.contains("ok"), "{suffix}");
     assert!(harness.query_by_label_contains("Status: BLOCKED").is_none(), "undo clears the page");
 }
+
+/// M13.4: Vertex mode through the real shell - hovering a block corner
+/// lights it (the hover carries the vertex), and a click queues the face/
+/// edge pick's own SetOperationGeometry with that corner for the open op.
+#[test]
+fn vertex_mode_hover_and_click_pick_a_corner() {
+    let mut harness = shell_harness();
+    harness.run();
+    harness.get_by_label("Vertices").click();
+    harness.run();
+    assert_eq!(harness.state().state.geo_pick, GeoPick::Vertex);
+
+    // The seed block's corner nearest the eye that projects inside the
+    // pane: a convex body's nearest corner is never hidden.
+    let ([x0, y0], [x1, y1]) = harness.state().state.viewport_rect;
+    let (w, hgt) = (x1 - x0, y1 - y0);
+    let mvp = harness.state().state.cam.mvp((w / hgt) as f64);
+    let eye = harness.state().state.cam.eye();
+    let mut best: Option<(f64, [f64; 3], egui::Pos2)> = None;
+    for x in [0.0, 60.0] {
+        for y in [0.0, 60.0] {
+            for z in [0.0, 30.0] {
+                let c = [x, y, z];
+                let Some(uv) = interact::project_uv(&mvp, c) else { continue };
+                if !(uv[0] > 0.05 && uv[0] < 0.95 && uv[1] > 0.05 && uv[1] < 0.95) {
+                    continue;
+                }
+                let d = (c[0] - eye[0]).powi(2) + (c[1] - eye[1]).powi(2) + (c[2] - eye[2]).powi(2);
+                if best.is_none_or(|(bd, _, _)| d < bd) {
+                    best = Some((d, c, egui::pos2(x0 + uv[0] * w, y0 + uv[1] * hgt)));
+                }
+            }
+        }
+    }
+    let (_, corner, p) = best.expect("the block shows a corner to the default camera");
+
+    // Hover a couple of px off the corner: still within the pick radius.
+    set_pos(&mut harness, p + egui::vec2(2.0, 1.0));
+    let hovered = harness.state().state.hover.clone().expect("the corner lights under the cursor");
+    assert_eq!(hovered.entity, "Block");
+    let Some(FeatureSel::Vertex(hid)) = hovered.feature else {
+        panic!("Vertex mode hovers a vertex, got {:?}", hovered.feature);
+    };
+
+    click_viewport(&mut harness, p);
+    let st = &harness.state().state;
+    assert_eq!(st.status, "geometry selection updated for Contour1");
+    let op = model::find_by_name(&st.world, "Contour1").expect("seed has Contour1");
+    let items = match model::operation_of(&st.world, &op).map(|o| o.src) {
+        Some(SrcRef::Selection(items)) => items,
+        other => panic!("Contour1's source became {other:?}"),
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].feature, FeatureSel::Vertex(hid), "the click picks what the hover lit");
+    let block = model::find_by_name(&st.world, "Block").expect("seed has Block");
+    let f = model::features_of(&st.world, &block).expect("features");
+    let vi = camcraft_app::geometry::feature::resolve_vertex(&f, hid).expect("resolves");
+    let loc = model::transform_of(&st.world, &block).unwrap_or_default();
+    let v = f.verts[vi as usize];
+    let at = [v[0] + loc.pos.x, v[1] + loc.pos.y, v[2] + loc.pos.z];
+    assert!(
+        (at[0] - corner[0]).abs() + (at[1] - corner[1]).abs() + (at[2] - corner[2]).abs() < 1e-6,
+        "picked {at:?}, aimed at {corner:?}"
+    );
+
+    // Stage 2 hook: the chip's Origin button places the WCS there.
+    harness.get_by_label("Set origin").click();
+    harness.run_steps(2);
+    let st = &harness.state().state;
+    let g54 = model::find_by_name(&st.world, WCS_SLOTS[0]).expect("G54");
+    let o = model::transform_of(&st.world, &g54).unwrap_or_default().pos;
+    assert!(
+        (o.x - corner[0]).abs() + (o.y - corner[1]).abs() + (o.z - corner[2]).abs() < 1e-6,
+        "G54 moved to the corner: {o:?}"
+    );
+}

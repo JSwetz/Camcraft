@@ -48,6 +48,8 @@ use crate::geometry::Triangle;
 
 mod runs;
 pub use runs::{RUN_LENGTH_RATIO, edge_runs, resolve_chain, run_containing, run_of_edges};
+mod vertex;
+pub use vertex::{VertexId, corner_verts, resolve_vertex, vertex_id, vertex_ids};
 
 /// Weld lattice: 1e6 steps per mm = 1 µm. Coarser than the old viewport
 /// lattice (1/4096 mm), so clean meshes weld at least as aggressively.

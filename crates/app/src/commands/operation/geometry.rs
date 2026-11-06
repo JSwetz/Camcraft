@@ -93,6 +93,7 @@ fn valid_pick(world: &World, g: &GeoSel) -> Result<(), CommandError> {
         FeatureSel::Face(id) => features.faces.iter().any(|f| f.id == id),
         FeatureSel::Chain(id) => feature::resolve_chain(&features, id).is_some(),
         FeatureSel::Patch(id) => feature::patches(&features).iter().any(|p| p.id == id),
+        FeatureSel::Vertex(id) => feature::resolve_vertex(&features, id).is_some(),
     };
     if !found {
         return Err(CommandError::Invalid(format!(

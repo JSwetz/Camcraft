@@ -748,6 +748,9 @@ pub enum GeoPick {
     /// feature edge in screen space (Alt narrows it to that single
     /// segment). Falls back to Face behavior when nothing is close.
     Edge,
+    /// One feature corner (M13.4): the nearest visible vertex in screen
+    /// space, depth-tested against the part. Nothing else falls through.
+    Vertex,
 }
 
 /// How the viewport paints solid geometry. Transient view state - like
@@ -1808,6 +1811,22 @@ impl State {
                                 );
                                 (label, true)
                             }
+                        }
+                    }
+                    FeatureSel::Vertex(id) => {
+                        match crate::vertex_pick::vertex_world(self, &g.entity, id) {
+                            Some(p) => (
+                                format!(
+                                    "Vertex {} · ({}, {}, {}) {}",
+                                    g.entity,
+                                    units::len(p[0], unit, 2),
+                                    units::len(p[1], unit, 2),
+                                    units::len(p[2], unit, 2),
+                                    unit.suffix()
+                                ),
+                                false,
+                            ),
+                            None => (format!("Vertex {} · {} · missing", g.entity, short_id(id)), true),
                         }
                     }
                 };

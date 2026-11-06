@@ -196,6 +196,7 @@ pub fn op_stamp(world: &World, op: &Operation, op_name: &str) -> Option<GenStamp
                 FeatureSel::Face(id) => (0u8, id),
                 FeatureSel::Chain(id) => (1, id),
                 FeatureSel::Patch(id) => (2, id),
+                FeatureSel::Vertex(id) => (3, id),
             };
             h.write_u8(tag);
             h.write_u64(id);

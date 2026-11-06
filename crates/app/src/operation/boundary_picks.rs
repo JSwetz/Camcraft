@@ -205,7 +205,7 @@ fn pick_edges(f: &feature::Features, sel: FeatureSel) -> Option<Vec<Vec<u32>>> {
                 .map(|l| ring_edges(&map, &l.verts))
                 .collect()
         }
-        FeatureSel::Patch(_) => None,
+        FeatureSel::Patch(_) | FeatureSel::Vertex(_) => None,
     }
 }
 
