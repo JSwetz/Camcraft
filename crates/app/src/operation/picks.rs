@@ -9,7 +9,9 @@ use super::*;
 /// it joins a ring the preview does not build.
 #[must_use]
 pub fn stitched_rings(world: &World, items: &[GeoSel]) -> Vec<Option<usize>> {
-    let (_, consumed) = stitch_open_runs(world, items);
+    // The source selection's own walk is world XY (a picked source
+    // under a tilt is refused upstream), so the chips read it there.
+    let (_, consumed) = stitch_open_runs(world, items, None);
     let mut out: Vec<Option<usize>> = vec![None; items.len()];
     for (it, k) in consumed {
         if let Some(slot) = out.get_mut(it) {

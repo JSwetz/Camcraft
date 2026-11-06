@@ -101,15 +101,22 @@ fn join_runs(mut runs: Vec<Vec<Point2>>) -> Option<Vec<Point2>> {
     Some(chain)
 }
 
-/// Picked boundary features in XY, through the selection walk every
-/// region runs (stitching, rim dedupe and every named refusal included):
-/// one open chain - its runs joined end to end - or closed rings, never
-/// a mix, never two separate chains.
-pub(super) fn picks_geom(world: &World, setup: Option<&str>, picks: &[GeoSel], params: &OpParams) -> Result<OpenGeom, GenError> {
+/// Picked boundary features in the operation's plane - world XY, or the
+/// 3+2 index's tilted plane through `frame` - through the selection
+/// walk every region runs (stitching, rim dedupe and every named
+/// refusal included): one open chain - its runs joined end to end - or
+/// closed rings, never a mix, never two separate chains.
+pub(super) fn picks_geom(
+    world: &World,
+    setup: Option<&str>,
+    picks: &[GeoSel],
+    params: &OpParams,
+    frame: Option<&crate::cl::TiltedFrame>,
+) -> Result<OpenGeom, GenError> {
     // The contour walk is the one that hands open runs back instead of
     // refusing or running them out - the reading a boundary wants.
     let probe = retype_params(params, OpType::Contour as usize);
-    let (loops, runs, _) = selection_geometry_impl(world, setup, picks, &probe, None)?;
+    let (loops, runs, _) = selection_geometry_in(world, setup, picks, &probe, None, frame)?;
     match (loops.is_empty(), runs.len()) {
         (false, 0) => Ok(OpenGeom::Ring(Region::new(loops)?)),
         (true, 0) => Err(GenError::Empty("the boundary picks resolve to nothing".into())),
@@ -132,7 +139,15 @@ pub fn boundary_pick_shape(world: &World, setup: Option<&str>, picks: &[GeoSel],
         return PickShape::Invalid("nothing picked yet".into());
     }
     let faces = picks.iter().filter(|g| !matches!(g.feature, FeatureSel::Chain(_))).count();
-    match picks_geom(world, setup, picks, params) {
+    // A 3+2-indexed op reads its picks in the tilted plane (M11.5 owed).
+    let frame = match params.tilt() {
+        None => None,
+        Some(t) => match t.frame() {
+            Some(f) => Some(f),
+            None => return PickShape::Invalid(TILT_NO_DIRECTION.into()),
+        },
+    };
+    match picks_geom(world, setup, picks, params, frame.as_ref()) {
         Ok(OpenGeom::Chain(chain)) => PickShape::Open { picks: picks.len(), chain },
         Ok(OpenGeom::Ring(r)) => PickShape::Closed { picks: picks.len(), faces, rings: r.loops().len() },
         Err(e) => PickShape::Invalid(e.to_string()),

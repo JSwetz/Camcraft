@@ -46,6 +46,12 @@ pub(super) enum Family {
     Face,
     Clearing,
     Contour,
+    /// The 3D finishing family (M11.5 owed): the path is generated on
+    /// the whole model and CLIPPED to the area (`finish_clip`), the
+    /// tool natively reaching a radius past the silhouette - so the
+    /// zones it must keep its whole body out of ride `forbidden`, like
+    /// Face's.
+    Finish,
 }
 
 /// A picked boundary for step 1, resolved to XY.
@@ -239,7 +245,7 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
     if ctx.family != Family::Contour {
         area = check(excludes(area)?, "exclude boundaries")?;
     }
-    if ctx.family == Family::Face {
+    if matches!(ctx.family, Family::Face | Family::Finish) {
         if let Some(f) = far_side {
             forbidden.push(("the far side of the open boundary", f));
         }

@@ -642,7 +642,16 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 super::plunge_solid::plunge_solid(stock_facets.as_deref(), m_gen, frame.as_ref())
             };
             let solid = camcraft_motion::plunge_law::Solid { top: solid_top, footprint: solid_fp.as_ref() };
-            let run = |fp: &Finish3DParams| -> Result<Toolpath, GenError> { Ok(match fp.pattern {
+            // The area controls (M11.5 owed): the whole-model path is
+            // clipped to the tool-centre area the law resolved - the
+            // precompute above put the controlled region in `region`
+            // and its forbidden zones in the band slot Face reads.
+            let clip = match face_band.take() {
+                Some((forbidden, _)) => Some(super::finish_clip::centre_area(&region, &forbidden, d * 0.5)?),
+                None => None,
+            };
+            let run = |fp: &Finish3DParams| -> Result<Toolpath, GenError> {
+                let whole = match fp.pattern {
                 finishing3d::FinishPattern::Waterline => {
                     finishing3d::waterline(&material.facets, fp)?
                 }
@@ -710,7 +719,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 finishing3d::FinishPattern::Flow => {
                     crate::multiaxis::flow3d(&material.facets, fp)?
                 }
-            })};
+                };
+                match &clip {
+                    Some(c) => super::finish_clip::clip_path(whole, c, fp),
+                    None => Ok(whole),
+                }
+            };
             let path = finishing3d::center_cut_guard(tool.center_cutting, &solid, &fp, run)?;
             (region, path)
         }

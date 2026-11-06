@@ -21,7 +21,7 @@
 use egui::{RichText, Ui};
 
 use camcraft_app::operation::{
-    AreaControls, BoundaryMode, BoundaryShape, Containment, CornerStyle, ExtraBoundary, PickShape, area_applies,
+    AreaControls, BoundaryMode, BoundaryShape, Containment, CornerStyle, ExtraBoundary, PickShape, area_unsupported,
 };
 
 use crate::boundary_draft::{self, Entry, EntryRef, Role};
@@ -48,12 +48,12 @@ const CORNER_HINT: &str = "How the offset treats convex corners: Round arcs them
 const EXTEND_HINT: &str = "Carries the area past its exterior edges - edges with no part material beyond them - by this distance. An open boundary is never crossed.";
 
 /// Draw the group for the open operation's draft; a kind without a
-/// machining area says so instead of drawing controls it would ignore.
+/// machining area says why instead of drawing controls it would ignore
+/// - the app's one list (`area_unsupported`), never a UI copy.
 pub(super) fn boundary_group(ui: &mut Ui, state: &mut State) {
-    let kind = state.op_ui.params.kind();
-    if !area_applies(kind) {
+    if let Some(why) = area_unsupported(state.op_ui.params.kind()) {
         state.boundary_pick = None;
-        ui.label(RichText::new(format!("{kind} has no machining area - Boundary settings do not apply to it.")).weak());
+        ui.label(RichText::new(format!("Boundary settings do not apply to it: {why}.")).weak());
         return;
     }
     let u = state.units();

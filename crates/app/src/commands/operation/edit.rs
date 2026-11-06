@@ -72,10 +72,9 @@ impl EditOperationParams {
         }
         let area = area.unwrap_or_else(|| prev.area.clone());
         if !area.is_sane_for(&params) {
-            return Err(CommandError::Invalid(if operation::area_applies(params.kind()) {
-                "the Boundary settings are not usable - distances must be finite, within 10 m, the extension not negative, and every boundary must name its picks".to_string()
-            } else {
-                format!("a {} operation has no machining area - its Boundary settings stay at their defaults", params.kind())
+            return Err(CommandError::Invalid(match operation::area_unsupported(params.kind()) {
+                None => "the Boundary settings are not usable - distances must be finite, within 10 m, the extension not negative, and every boundary must name its picks".to_string(),
+                Some(why) => format!("{why}; its Boundary settings stay at their defaults"),
             }));
         }
         let picks: Vec<_> = area.picks().cloned().collect();

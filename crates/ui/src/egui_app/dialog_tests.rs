@@ -326,7 +326,7 @@ fn a_setting_the_kind_ignores_is_said_not_swallowed() {
     let drill = camcraft_app::operation::KindInfo::ALL.iter().position(|k| k.label == "Drill").expect("drill kind");
     harness.state_mut().op_ui.params = crate::operations::retype(&cur, drill);
     harness.run();
-    assert!(harness.query_by_label_contains("has no machining area - Boundary settings do not apply to it.").is_some());
+    assert!(harness.query_by_label_contains("Boundary settings do not apply to it: Drill rides its hole list").is_some());
 }
 
 #[test]

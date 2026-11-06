@@ -178,7 +178,36 @@ pub(super) fn selection_geometry_impl(
     setup: Option<&str>,
     items: &[GeoSel],
     params: &OpParams,
+    notes: Option<&mut Vec<String>>,
+) -> Result<SelectionGeometry, GenError> {
+    selection_geometry_in(world, setup, items, params, notes, None)
+}
+
+/// A world point in the plane the walk projects to: world XY, or the
+/// 3+2 index's tilted plane (M11.5 owed) - the frame's `to_local` is
+/// the one door `run_job` reads the material through, so a boundary
+/// pick lands exactly where the tilted region's own outline lands.
+pub(super) fn plane_xy(w: Point3, frame: Option<&crate::cl::TiltedFrame>) -> Point2 {
+    match frame {
+        None => Point2::new(w.x, w.y),
+        Some(f) => {
+            let l = f.to_local(w);
+            Point2::new(l.x, l.y)
+        }
+    }
+}
+
+/// [`selection_geometry_impl`] with the projection plane named: `None`
+/// is world XY (every operation's own walk - a picked SOURCE under a
+/// tilt is refused upstream); `Some` projects the picks into the
+/// tilted frame, the boundary picks of a 3+2-indexed op.
+pub(super) fn selection_geometry_in(
+    world: &World,
+    setup: Option<&str>,
+    items: &[GeoSel],
+    params: &OpParams,
     mut notes: Option<&mut Vec<String>>,
+    frame: Option<&crate::cl::TiltedFrame>,
 ) -> Result<SelectionGeometry, GenError> {
     let facing = matches!(params, OpParams::Face { .. });
     // The pocket law is the roughing twins' law too (M2.4 A): all
@@ -216,7 +245,7 @@ pub(super) fn selection_geometry_impl(
     let mut chains: Vec<Vec<Point2>> = Vec::new();
     let mut strips: Vec<Loop> = Vec::new();
     let mut rims: Vec<Vec<(i64, i64)>> = Vec::new();
-    let (rings, stitched) = stitch_open_runs(world, items);
+    let (rings, stitched) = stitch_open_runs(world, items, frame);
     let mut stitched_runs = 0usize;
     let mut stitched_rings = 0usize;
     for (label, pts, runs) in rings {
@@ -287,9 +316,7 @@ pub(super) fn selection_geometry_impl(
                         .iter()
                         .filter_map(|&vi| features.verts.get(vi as usize))
                         .map(|p| {
-                            let w =
-                                transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
-                            Point2::new(w.x, w.y)
+                            plane_xy(transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot), frame)
                         })
                         .collect();
                     push_loop(&label, pts, &mut loops, &mut rims)?;
@@ -303,10 +330,7 @@ pub(super) fn selection_geometry_impl(
                 };
                 let xy: Vec<Point2> = feature::chain_points(&features, &c)
                     .iter()
-                    .map(|p| {
-                        let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
-                        Point2::new(w.x, w.y)
-                    })
+                    .map(|p| plane_xy(transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot), frame))
                     .collect();
                 if !c.closed {
                     if stitched.contains_key(&gi) {
@@ -379,9 +403,7 @@ pub(super) fn selection_geometry_impl(
                         .iter()
                         .filter_map(|&vi| features.verts.get(vi as usize))
                         .map(|p| {
-                            let w =
-                                transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
-                            Point2::new(w.x, w.y)
+                            plane_xy(transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot), frame)
                         })
                         .collect();
                     push_loop(&label, pts, &mut loops, &mut rims)?;

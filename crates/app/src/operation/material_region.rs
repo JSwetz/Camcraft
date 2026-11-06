@@ -132,7 +132,12 @@ fn region_turn_core(
             let zl =
                 resolve_height(world, op.setup.as_deref(), Some(&op.src), op.params.region_height())?
                     - f.origin.z;
-            f.world_region(&local, zl).ok().map(|r| (r, 0.0))
+            // The area controls run in the frame too (M11.5 owed): the
+            // context was built through the same door, so the law
+            // applies to the local region and the result rides the
+            // wrap out - exactly `run_job`'s order.
+            let (local, turn) = controlled(Some(local))?;
+            f.world_region(&local, zl).ok().map(|r| (r, turn))
         }
     }
 }

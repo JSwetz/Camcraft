@@ -219,7 +219,7 @@ type Stitched = (Vec<(String, Vec<Point2>, usize)>, HashMap<usize, usize>);
 /// runs that do not close route exactly as they always did. Failed
 /// lookups are not errors here; the routing loop owns those refusals
 /// and will name them.
-pub(super) fn stitch_open_runs(world: &World, items: &[GeoSel]) -> Stitched {
+pub(super) fn stitch_open_runs(world: &World, items: &[GeoSel], frame: Option<&crate::cl::TiltedFrame>) -> Stitched {
     let mut runs: Vec<Run> = Vec::new();
     for (i, g) in items.iter().enumerate() {
         let FeatureSel::Chain(cid) = g.feature else {
@@ -244,10 +244,7 @@ pub(super) fn stitch_open_runs(world: &World, items: &[GeoSel]) -> Stitched {
         let loc = model::transform_of(world, &entity).unwrap_or_default();
         let pts: Vec<Point2> = feature::chain_points(&features, &c)
             .iter()
-            .map(|p| {
-                let w = transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot);
-                Point2::new(w.x, w.y)
-            })
+            .map(|p| plane_xy(transform_point(Point3::new(p[0], p[1], p[2]), loc.pos, loc.rot), frame))
             .collect();
         let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied()) else {
             continue;

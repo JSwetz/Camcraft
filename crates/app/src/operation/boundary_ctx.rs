@@ -59,16 +59,32 @@ pub(super) fn area_ctx(
     Some(build(world, op, tool_r, material, part_solid))
 }
 
+/// The words a 3+2 index with a non-finite letter refuses by - the
+/// parameter door's own (`collect_job`), repeated so the preview and
+/// the page say the same thing.
+pub(super) const TILT_NO_DIRECTION: &str = "the 3+2 index commands no direction - its angles are not finite";
+
 fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_solid: bool) -> Result<AreaCtx, GenError> {
     let kind = op.params.kind();
-    if !area_applies(kind) {
-        return Err(GenError::Invalid(format!(
-            "a {kind} operation has no machining area - its Boundary settings must stay at their defaults"
-        )));
+    if let Some(why) = area_unsupported(kind) {
+        return Err(GenError::Invalid(format!("{why}; its Boundary settings must stay at their defaults")));
     }
-    if op.params.tilt().is_some() {
+    // The 3+2 index (M11.5 owed): the law runs in the frame the planar
+    // generator runs in - the stock outline, the part silhouette, the
+    // material standing at the cut plane and every pick read through
+    // the frame's door (`TiltedFrame::local_facets` / `to_local`), the
+    // way `region_turn_of` and `run_job` already read the cutting
+    // region. The controls then mean in the tilted plane exactly what
+    // they mean in XY, and the result rides the same wrap back out.
+    let frame = match op.params.tilt() {
+        None => None,
+        Some(t) => Some(t.frame().ok_or_else(|| GenError::Invalid(TILT_NO_DIRECTION.into()))?),
+    };
+    if frame.is_some() && matches!(op.src, SrcRef::Selection(_)) {
+        // The wrap's own refusal (M5.1 B), named here so the preview
+        // never resolves a world-XY pick against a tilted plane.
         return Err(GenError::Invalid(
-            "Boundary settings on a 3+2-indexed plane are not supported yet - reset them or remove the index".into(),
+            "a tilted plane cannot yet index a picked selection - pick a whole model instead".into(),
         ));
     }
     if !(tool_r.is_finite() && tool_r > 0.0) {
@@ -78,11 +94,21 @@ fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_s
     let (family, native) = match &op.params {
         OpParams::Face { .. } => (Family::Face, Native::ToolInside),
         OpParams::Contour { .. } => (Family::Contour, Native::ToolOutside),
+        // The finish's rings reach a radius past the silhouette (the
+        // ball rides a wall with its edge on it): tool outside, natively.
+        OpParams::Finish3D { .. } => (Family::Finish, Native::ToolOutside),
         _ => (Family::Clearing, Native::ToolInside),
     };
+    let oz = frame.map_or(0.0, |f| f.origin.z);
+    let local: Option<Vec<Triangle>> = frame.as_ref().map(|f| f.local_facets(&material.facets));
+    let facets: &[Triangle] = local.as_deref().unwrap_or(&material.facets);
     let stock_name = crate::setup::stock_entity_name(world, setup);
     let stock = model::find_by_name(world, &stock_name)
         .and_then(|e| model::world_facets(world, &e))
+        .map(|f| match &frame {
+            None => f,
+            Some(fr) => fr.local_facets(&f),
+        })
         .and_then(|f| slice::project(&f, FOOTPRINT_SAMPLES).ok())
         .filter(|r| !r.is_empty());
     // Part material standing above the cut plane(s): the pocket island
@@ -115,14 +141,16 @@ fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_s
             let z = hs
                 .bottom
                 .ok_or_else(|| GenError::Invalid("the cut plane does not resolve".into()))?;
-            Some(slice::material_overhead(&material.facets, z).map_err(from_slice)?)
+            // The plane in the frame's own height (`z - origin.z`, the
+            // L1 law `run_job` shifts every height by).
+            Some(slice::material_overhead(facets, z - oz).map_err(from_slice)?)
         }
         _ => None,
     };
     let mut extra = Vec::with_capacity(op.area.extra.len());
     for b in &op.area.extra {
         let region = match &b.shape {
-            BoundaryShape::Picks(picks) => match picks_geom(world, setup, picks, &op.params)? {
+            BoundaryShape::Picks(picks) => match picks_geom(world, setup, picks, &op.params, frame.as_ref())? {
                 OpenGeom::Ring(r) => r,
                 // The backstop: the page and the Apply door
                 // (`area_pick_issue`) catch this first.
@@ -141,15 +169,14 @@ fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_s
                         "a part-silhouette boundary needs a part source - pick the part or choose its model as the source".into(),
                     ));
                 }
-                silhouette(&material.facets)
-                    .ok_or_else(|| GenError::Empty("the part casts no silhouette".into()))?
+                silhouette(facets).ok_or_else(|| GenError::Empty("the part casts no silhouette".into()))?
             }
         };
         extra.push((b.mode, region));
     }
     let open = match &op.area.open {
         None => None,
-        Some(o) => Some((picks_geom(world, setup, &o.picks, &op.params)?, o.side)),
+        Some(o) => Some((picks_geom(world, setup, &o.picks, &op.params, frame.as_ref())?, o.side)),
     };
     Ok(AreaCtx {
         controls: op.area.clone(),

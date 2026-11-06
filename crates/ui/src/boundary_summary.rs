@@ -40,12 +40,15 @@ enum Family {
     Face,
     Contour,
     Clearing,
+    /// The 3D finishing family: the whole-model path clipped to the area.
+    Finish,
 }
 
 fn family(kind: OpType) -> Family {
     match kind {
         OpType::Face => Family::Face,
         OpType::Contour => Family::Contour,
+        OpType::Finish3D => Family::Finish,
         _ => Family::Clearing,
     }
 }
@@ -101,6 +104,7 @@ fn verb(fam: Family) -> &'static str {
         Family::Face => "Faces",
         Family::Contour => "Contours",
         Family::Clearing => "Clears",
+        Family::Finish => "Finishes",
     }
 }
 
@@ -124,6 +128,8 @@ fn native_inside(state: &State, fam: Family) -> Option<bool> {
                 .and_then(|o| o.setup);
             camcraft_app::operation::contour_auto_side(&state.world, setup.as_deref(), &state.op_ui.src(), &state.op_ui.params)
         }
+        // The finish's rings reach a radius past the silhouette.
+        (_, Family::Finish) => Some(false),
         _ => Some(true),
     }
 }
@@ -219,6 +225,9 @@ pub fn summarize(state: &State) -> Summary {
                 ),
                 Family::Contour => "Tool as Contour cuts: it rides the ring on its Side (Passes tab).".to_owned(),
                 Family::Clearing => format!("Tool as {kind} cuts: the whole tool stays inside the area."),
+                Family::Finish => format!(
+                    "Tool as {kind} cuts: the whole-model path is clipped to the area, the centre reaching {r} past its edge; it leaves and re-enters through the clearance plane."
+                ),
             });
         }
     }
@@ -254,7 +263,7 @@ pub fn summarize(state: &State) -> Summary {
     }
     if state.op_ui.params.tilt().is_some() && !a.is_default() {
         out.notices.push(
-            "Boundary settings do not apply on a 3+2 tilted plane - Generate refuses them: reset them or remove the tilt.".to_owned(),
+            "On a 3+2 tilted plane every boundary, offset and pick is read in the tilted plane - the index's own XY.".to_owned(),
         );
     }
     out

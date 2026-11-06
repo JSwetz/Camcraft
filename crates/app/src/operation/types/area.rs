@@ -140,18 +140,73 @@ impl AreaControls {
 
 /// The kinds whose region IS the area the tool works in, so the area
 /// controls mean something: the facing and clearing kinds, the contour
-/// ride, and the 3D pocket ladder. Every other kind's region is a
-/// shadow for the verifier or authored geometry (slot, circle, holes),
-/// and the controls stay the identity there (refused at the door).
+/// ride, the 3D pocket ladder and the 3D finishing family (every
+/// pattern of `Finish3D` - its path is clipped to the area). Every
+/// other kind refuses non-default controls by name: [`area_unsupported`]
+/// is the one list, and this is its `is_none`.
 #[must_use]
 pub fn area_applies(kind: OpType) -> bool {
-    matches!(
-        kind,
+    area_unsupported(kind).is_none()
+}
+
+/// Why the Boundary settings cannot apply to `kind` - the reason the
+/// page shows, the Apply door and the generator refuse with - or `None`
+/// for a kind with a machining area the boundary law can clip. One
+/// source of truth for app and UI alike (M11.5 owed).
+#[must_use]
+pub fn area_unsupported(kind: OpType) -> Option<String> {
+    Some(match kind {
         OpType::Face
-            | OpType::Contour
-            | OpType::Pocket
-            | OpType::Adaptive2D
-            | OpType::Offset2D
-            | OpType::Pocket3D
-    )
+        | OpType::Contour
+        | OpType::Pocket
+        | OpType::Adaptive2D
+        | OpType::Offset2D
+        | OpType::Pocket3D
+        | OpType::Finish3D => return None,
+        // Authored geometry: the numbers ARE the area.
+        OpType::Slot => format!("a {kind} is authored by its two endpoints and width - move those instead of a boundary"),
+        OpType::Circular => format!("a {kind} is authored by its centre and radius - set those instead of a boundary"),
+        // Rides of a line: the picked outline is the path itself, and a
+        // clipped or offset outline would be ridden where nothing was
+        // picked.
+        OpType::Trace | OpType::Engrave => {
+            format!("{kind} rides the picked outline itself as its path - a line bounds no area; pick other edges instead")
+        }
+        OpType::Chamfer2D => {
+            format!("a {kind}'s cone lies on the picked wall - its ride cannot be offset or clipped; pick other edges instead")
+        }
+        // Hole lists.
+        OpType::Drill | OpType::Bore | OpType::Thread => {
+            format!("{kind} rides its hole list - edit the holes instead of a boundary")
+        }
+        OpType::Deburr => format!("{kind} breaks the model's own exposed edges - there is no area to bound"),
+        // Mesh-driven with a moving tool axis: the model's own shadow.
+        OpType::Contour5D
+        | OpType::Parallel5D
+        | OpType::Swarf
+        | OpType::AdvancedSwarf
+        | OpType::RotaryContour
+        | OpType::RotaryParallel
+        | OpType::RotaryOffset
+        | OpType::MultiAxisRough
+        | OpType::Flow5D
+        | OpType::MultiAxisContour => {
+            format!("{kind} is mesh-driven with a moving tool axis - its area is the model's own shadow, not a boundary")
+        }
+        // The turning family: the limit is the turned silhouette.
+        OpType::Facing
+        | OpType::ProfileRough
+        | OpType::ProfileFinish
+        | OpType::GrooveRough
+        | OpType::GrooveFinish
+        | OpType::Part
+        | OpType::Threading
+        | OpType::Chamfering
+        | OpType::TaperTurning
+        | OpType::MultiPassTurning
+        | OpType::FormTurning
+        | OpType::BoringTurning => {
+            format!("{kind} is a turning ride - its limit is the turned profile's own silhouette, not a boundary")
+        }
+    })
 }

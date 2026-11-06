@@ -150,3 +150,162 @@ fn a_boundary_that_leaves_nothing_refuses_by_name() {
     let err = run(&world, &op(SrcRef::Stock, face(10.0), a)).expect_err("face over a hole");
     assert!(err.contains("an exclude boundary"), "{err}");
 }
+
+// ---- M11.5 owed (0.9.0): boundaries on a 3+2 index, the finish family ----
+
+use camcraft_app::geometry::{Mesh, Triangle};
+use camcraft_app::operation::Tilt;
+
+/// The 40 x 30 x 10 block of the tilt suite, and its b = 90 twin by hand
+/// ((x, y, z) -> (y, z, x), outside the frame's door on purpose).
+fn tilt_block() -> Mesh {
+    cube(Point3::new(0.0, 0.0, -20.0), Point3::new(40.0, 30.0, -10.0))
+}
+
+fn rotated_by_90(m: Mesh) -> Mesh {
+    Mesh::from_facets(
+        m.facets
+            .iter()
+            .map(|t| {
+                Triangle::new(
+                    Point3::new(t.a.y, t.a.z, t.a.x),
+                    Point3::new(t.b.y, t.b.z, t.b.x),
+                    Point3::new(t.c.y, t.c.z, t.c.x),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn tilt_pocket(tilt: Option<Tilt>, top: f64) -> OpParams {
+    let mut p = pocket(top, 25.0);
+    if let OpParams::Pocket { tilt: t, clearance_z, retract_z, .. } = &mut p {
+        *t = tilt;
+        *clearance_z = Height::fixed(70.0);
+        *retract_z = Some(Height::fixed(60.0));
+    }
+    p
+}
+
+fn tilt_world() -> World {
+    let world = new_world();
+    let mut h = History::default();
+    let tool = catalog().into_iter().find(|(n, _)| *n == TOOL).map(|(_, t)| t).expect("catalog");
+    h.execute(&world, AddTool::new(&world, TOOL, tool).expect("tool"));
+    h.execute(&world, ImportModel::from_mesh("part", tilt_block()));
+    h.execute(&world, ImportModel::from_mesh("twin", rotated_by_90(tilt_block())));
+    // The tilt suite's tower: tall enough that a b = 35 frame sections it.
+    h.execute(&world, ImportModel::from_mesh("tower", cube(Point3::new(0.0, 0.0, -10.0), Point3::new(40.0, 30.0, 25.0))));
+    world
+}
+
+#[test]
+fn a_boundary_offset_on_a_tilted_pocket_is_the_flat_offset_pocket_rotated() {
+    let world = tilt_world();
+    let area = AreaControls { offset: 3.0, ..Default::default() };
+    let tilt = Tilt { a_deg: 0.0, b_deg: 90.0, origin: [0.0; 3] };
+    let (flat, wf) = run(&world, &op(SrcRef::Entity("twin".into()), tilt_pocket(None, 40.0), area.clone())).expect("flat");
+    let (tilted, wt) = run(&world, &op(SrcRef::Entity("part".into()), tilt_pocket(Some(tilt), 40.0), area)).expect("tilted");
+    assert_eq!(wf, wt);
+    // The offset did something: the flat pocket reaches 3 further than the block's 30.
+    assert!((max_by(&feeds(&flat), |p| p.x) - (30.0 + 3.0 - R)).abs() < EPS);
+    assert_eq!(flat.moves.len(), tilted.moves.len(), "the door adds and drops no move");
+    for (i, (f, t)) in flat.moves.iter().zip(tilted.moves.iter()).enumerate() {
+        assert_eq!(f.kind, t.kind, "move {i}");
+        for (want, got) in [(f.to, t.to), (f.from, t.from)] {
+            let want = Point3::new(want.z, want.x, want.y);
+            assert!(
+                (want.x - got.x).abs() < 1e-6 && (want.y - got.y).abs() < 1e-6 && (want.z - got.z).abs() < 1e-6,
+                "move {i}: {want:?} vs {got:?}"
+            );
+        }
+    }
+    // The preview rides the same law (b = 90 stands edge-on to world
+    // XY, so it is read at b = 35): the +3 offset grows the shadow's
+    // bounds by 3 in the plane, which projects to between 3 cos 35 and
+    // 3 on each side in the world.
+    let t35 = Tilt { a_deg: 0.0, b_deg: 35.0, origin: [0.0; 3] };
+    let bounds = |offset: f64| {
+        operation::region_of(&world, &op(SrcRef::Entity("tower".into()), tilt_pocket(Some(t35), 35.0), AreaControls { offset, ..Default::default() }))
+            .expect("tilted preview")
+            .bounds()
+            .expect("bounds")
+    };
+    let ((l0, h0), (l3, h3)) = (bounds(0.0), bounds(3.0));
+    let c = 3.0 * 35f64.to_radians().cos();
+    for g in [l0.x - l3.x, l0.y - l3.y, h3.x - h0.x, h3.y - h0.y] {
+        assert!(g >= c - 0.01 && g <= 3.01, "the shadow grows by the projected offset ({g})");
+    }
+}
+
+#[test]
+fn a_tilt_with_a_non_finite_angle_still_refuses_by_name_under_a_boundary() {
+    let world = tilt_world();
+    let bad = Tilt { a_deg: f64::NAN, b_deg: 0.0, origin: [0.0; 3] };
+    let o = op(SrcRef::Entity("part".into()), tilt_pocket(Some(bad), 40.0), AreaControls { offset: 3.0, ..Default::default() });
+    let err = run(&world, &o).expect_err("no direction");
+    assert!(err.contains("commands no direction"), "{err}");
+    let why = operation::area_refusal(&world, &o).expect("the page's refusal");
+    assert!(why.contains("commands no direction"), "{why}");
+    assert!(operation::region_of(&world, &o).is_none(), "the preview draws nothing it cannot cut");
+}
+
+fn finish_parallel() -> OpParams {
+    OpParams::Finish3D {
+        pattern: camcraft_app::finishing3d::FinishPattern::Parallel,
+        stepover: Some(2.0),
+        tolerance: 0.05,
+        clearance_z: Height::fixed(40.0),
+        retract_z: None,
+        top_z: Height::fixed(10.0),
+        bottom_z: Height::fixed(0.0),
+        feed: 500.0,
+        plunge_feed: 100.0,
+        climb: true,
+        ramp: false,
+        min_step: None,
+        ramp_angle: 45.0,
+        entry_ramp: false,
+        steep_stepover: None,
+        pencil_reference: None,
+    }
+}
+
+#[test]
+fn the_finish_family_clips_its_path_to_the_boundary() {
+    let world = block_world();
+    let mut h = History::default();
+    let ball = catalog().into_iter().find(|(n, _)| *n == "BN-0600").map(|(_, t)| t).expect("ball");
+    h.execute(&world, AddTool::new(&world, "BN-0600", ball).expect("tool"));
+    let r = 3.0;
+    let mut o = op(SrcRef::Entity("part".into()), finish_parallel(), AreaControls::default());
+    o.tool = "BN-0600".into();
+    let (whole, _) = run(&world, &o).expect("the whole-model finish");
+    let reach = max_by(&feeds(&whole), |p| p.x.abs().max(p.y.abs()));
+    assert!(reach > 20.0 - 1e-6, "natively the ball reaches the block's walls ({reach})");
+    // Inside: the tool's edge stays inside the silhouette - its centre a radius in.
+    o.area = AreaControls { containment: Some(Containment::Inside), ..Default::default() };
+    let (clipped, _) = run(&world, &o).expect("the clipped finish");
+    let f = feeds(&clipped);
+    assert!(!f.is_empty());
+    let worst = max_by(&f, |p| p.x.abs().max(p.y.abs()));
+    assert!(worst <= 20.0 - r + 1e-6, "every cut keeps the tool inside the boundary ({worst})");
+    assert!(clipped.moves.len() < whole.moves.len() * 3, "the relink is not a move storm");
+    // A shrink that leaves nothing refuses by name.
+    o.area = AreaControls { offset: -30.0, ..Default::default() };
+    let err = run(&world, &o).expect_err("nothing left");
+    assert!(err.contains("Boundary settings leave no area"), "{err}");
+}
+
+#[test]
+fn every_kind_without_an_area_refuses_with_its_own_reason() {
+    use camcraft_app::operation::{area_applies, area_unsupported};
+    for k in [OpType::Slot, OpType::Trace, OpType::Chamfer2D, OpType::Drill, OpType::Facing, OpType::Swarf] {
+        let why = area_unsupported(k).expect("a reason");
+        assert!(why.contains(&k.to_string()), "{k}: {why}");
+        assert!(!area_applies(k));
+    }
+    for k in [OpType::Face, OpType::Pocket, OpType::Finish3D, OpType::Pocket3D] {
+        assert!(area_applies(k) && area_unsupported(k).is_none());
+    }
+}

@@ -21,7 +21,7 @@ mod sel;
 
 pub use area::{
     AREA_DISTANCE_MAX, AreaControls, BoundaryMode, BoundaryShape, ChainSide, Containment, CornerStyle,
-    ExtraBoundary, OpenBoundary, area_applies,
+    ExtraBoundary, OpenBoundary, area_applies, area_unsupported,
 };
 pub use height::{Height, HeightReference};
 pub use params::{OpParams, Tilt};

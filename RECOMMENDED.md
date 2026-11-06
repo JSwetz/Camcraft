@@ -10982,3 +10982,110 @@ lands with it: M13.7's owed item closes. Pinned: no swarf cut under the equator
 is upright, no pose below −0.1737, every cutting flank ≥ r − tol from the exact
 prism; a ceiling fixture's fallback states the level ruling; walls across both
 ruling ends refuse by name.
+
+## M11.5: boundaries read in the tilted plane, and the boundary group on the finish family (2026-11-06)
+
+**A 3+2-indexed op resolves its area context in the tilt's frame** instead of
+refusing: `Tilt::frame()` is taken (a non-finite letter refuses with the
+collect job's own words), the stock outline and part silhouette are projected
+over the local facets, the standing-material plane reads `material_overhead`
+in the local frame with the L1 shift `run_job` uses, and every pick goes
+through the selection walk with a projection door (`selection_geometry_in(..,
+frame)`, `to_local` then XY) - the existing callers wrap `None`. The preview's
+tilted arm runs the controls on the local region before `world_region`, so an
+offset grows the shadow by the projected amount. Pinned: a tilted pocket with
+a +3 offset equals the rotated flat pocket move for move; a NaN tilt under a
+boundary refuses by name in generate, in `area_refusal`, and draws no preview.
+Dropped: resolving in world XY and rotating the result (an offset in world XY
+is not an offset in the tilted plane - the shadow is foreshortened).
+
+**The boundary group now covers the whole 3D finish family** (every
+`Finish3D` pattern) through `Family::Finish` and `finish_clip.rs`: the whole-
+model path is generated as before and CLIPPED to the applied region grown by
+r, minus excludes grown by r or the far side of an open boundary; cut moves
+keep their inside pieces (arcs chorded only where they cross), re-entry is
+rapid to clearance, traverse, vertical plunge at plunge feed; a path left with
+no cut refuses by name. Default controls give the byte-identical path
+(`golden_cl` 23/23 unchanged). Dropped: regenerating the finish inside the
+clipped region (every pattern would need its own region law; clipping the
+whole-model path keeps one law for all seventeen and the verify judges the
+result exactly as before).
+
+**One list of the kinds that refuse, each with its reason** (`area::
+area_unsupported`; `area_applies` is its `is_none`, read by `build`,
+`EditOperationParams` and the UI group alike): Slot and Circular (authored
+endpoints / centre and radius), Trace and Engrave (they ride the outline as
+the path), Chamfer2D (the cone lies on the wall), the hole kinds (a hole
+list), Deburr (the model's edges), the 5-axis/rotary kinds (mesh-driven, a
+moving axis), turning (the turned silhouette). Owed: a clipped-entry ramp law
+for a non-centre-cutting ball (today `center_cut_guard` refuses by name rather
+than ramps); Face's open-boundary band preview under a tilt draws the local
+turn on the world shadow (approximate drawing, exact cut); Trace/Engrave could
+take containment through a `ToolOn` native later.
+
+## M13.1: the rotary lift - the eye routes, the verdict refuses (2026-11-06)
+
+**Three decisions.** (1) The field EYE (`stock_view::field_view_with`,
+`stock_play::cut`) routes every rotary op through `simulate_rotary_slice` at
+`rotary_pose_tol(cell) = cell/4` - the field's own arc chord law, one chord
+class throughout; a playback slice prepends a standing rapid at the held pose
+so its first move still turns (whole == two slices, cell for cell). (2) The
+column VERDICT (`simulate_document`) refuses every rotary program by name
+(`ROTARY_VERDICT_REFUSAL`): its height field is blind under the equator, and
+routing it through `simulate_rotary` would read the hidden half silent-clean -
+the posed clause's own prohibition. The refusal text names the eye's chord
+class and the flute flank's L·α error honestly. (3) `plan_program`'s lift is
+PER KIND (`rotary_kind_lift`): Rotary Parallel lifted - parity on its own
+program 1.47e-5 on 1,001 sphere-cut tops, 0 sign misses on 7,025 cells, 4,442
+sub-chords in 12 s release; Rotary Contour and Offset stand by name
+(`ROTARY_KIND_UNMEASURED`). Contour measured 92,727 sub-chords / 179 s release
+at the verdict class, and a standing bar has no sphere-cut column from above
+(the rings cut the flanks) - its height class needs a radial reader or a laid
+fixture; Offset's parity and eye-class cost are unmeasured (~1.9 ms per
+sub-chord says minutes on the 2,064-move ladder). Dropped: lifting on the
+bar fixture's parity alone (the brief's own law: parity per kind on its own
+program), and a single global lift. Owed: the Contour/Offset measurements,
+the flute-rotation bound, and the parity suite's bar fixture moved to
+tests/common (459 lines, over the 400 law). Pre-existing, found: the laid
+fixture's stock entity carries a rotation and `stock_view` refuses rotated
+stock before any cut - tested by name, not fixed here.
+
+## M13.3: code signing and the installer-vs-zip decision - both, Inno Setup, per-user, signing env-gated (2026-11-06)
+
+**Both: the portable zip stays the release, the installer is additive.**
+The user base is machinists testing drops; the zip is what they unpack on
+a shop PC without rights, so it stays first-class and unchanged. The
+installer (`scripts/installer/camcraft.iss`, built by
+`scripts/installer.ps1`) is packed from the SAME staged dist tree, so the
+two can never diverge in content. Cost to change: delete two scripts and
+one workflow step.
+
+**Inno Setup, not WiX or MSIX.** One `.iss` text file, preinstalled on the
+`windows-latest` runner, free for any use. WiX v4 needs its own CLI and XML
+authoring for a layout this small; MSIX cannot be installed at all without
+a signature, which we do not have. Cost to change: a WiX rewrite of ~80
+lines if an MSI is ever required by a site's deployment tooling.
+
+**Per-user install by default, all-users as an option.**
+`PrivilegesRequired=lowest` + `PrivilegesRequiredOverridesAllowed=dialog`:
+no administrator prompt, `%LOCALAPPDATA%\Programs\camcraft`, and the first
+page offers Program Files for those who can elevate. Same reasoning as the
+zip: a machinist's PC rarely grants admin.
+
+**Signing is environment-gated and never blocks.** `scripts/sign.ps1`
+signs with `signtool` (SHA-256, RFC-3161 timestamp) when
+`CAMCRAFT_SIGN_THUMBPRINT` or `CAMCRAFT_SIGN_CERT_PATH` +
+`CAMCRAFT_SIGN_CERT_PASSWORD` are set and prints "unsigned: no certificate
+configured" otherwise; configured-but-broken fails the cut. CI reads
+optional secrets `CAMCRAFT_SIGN_CERT_BASE64` / `CAMCRAFT_SIGN_CERT_PASSWORD`
+(the thumbprint route has no store on a runner). No certificate is owned,
+so every release remains unsigned until one is bought; the path is in
+place. Dropped: signing the Inno-embedded uninstaller via the `SignTool`
+directive (untestable without ISCC and a cert here; one-line follow-on).
+
+**`-Installer` is opt-in on the local cut, required in CI.** Locally a
+missing ISCC.exe is a named skip so the cut never depends on a tool the
+build machine may lack; the runner image ships it, so there it is an
+error. Not validated here: the `.iss` compile itself (no Inno Setup on
+this machine) - the first tag push after merge is the test.
+
