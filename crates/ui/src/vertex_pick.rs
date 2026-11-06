@@ -166,6 +166,46 @@ pub fn queue_origin_at_vertex(state: &mut State, entity: &str, id: VertexId) {
     });
 }
 
+/// Queue the work origin onto a picked face (M13.4): its area-weighted
+/// centroid, or - `z_only`, horizontal planar faces only - the pane's
+/// current XY at the face's plane height. Same `SetWcs` command, same
+/// slot and angles as the vertex chip; the targets come from the app.
+pub fn queue_origin_at_face(state: &mut State, entity: &str, sel: FeatureSel, z_only: bool) {
+    let target = match pick::face_origin(&state.world, entity, sel) {
+        Ok(t) => t,
+        Err(why) => {
+            state.status = format!("origin not set: {why}");
+            return;
+        }
+    };
+    let pos = if z_only {
+        let Some(z) = target.plane_z else {
+            state.status = String::from("origin not set: Z only needs a horizontal planar face");
+            return;
+        };
+        // The slot's placed origin is "the current XY"; an unplaced slot
+        // falls back to the pane's draft numbers.
+        let active = camcraft_app::setup::active(&state.world);
+        let placed = camcraft_app::setup::wcs_entity(&state.world, active.as_deref(), state.wcs_ui.slot)
+            .and_then(|e| model::transform_of(&state.world, &e));
+        match placed {
+            Some(loc) => [loc.pos.x, loc.pos.y, z],
+            None => [state.wcs_ui.x, state.wcs_ui.y, z],
+        }
+    } else {
+        target.centroid
+    };
+    let slot = WCS_SLOTS.get(state.wcs_ui.slot).or(WCS_SLOTS.first()).copied().unwrap_or("G54");
+    state.status = format!("{slot} origin set on a face of '{entity}'");
+    state.pending.push_back(CommandKind::SetWcs {
+        slot: slot.to_string(),
+        pos,
+        roll_deg: state.wcs_ui.roll_deg,
+        pitch_deg: state.wcs_ui.pitch_deg,
+        yaw_deg: state.wcs_ui.yaw_deg,
+    });
+}
+
 /// Screen-space marker for a vertex: a small diamond around its
 /// projection, as viewport-uv segment pairs like `feature_segments`.
 pub(crate) fn vertex_marker(

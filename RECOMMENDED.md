@@ -10415,3 +10415,54 @@ pass** (`operation/contour_open.rs`).
 - approach `ext_in` / `ext_out` on open runs;
 - the summary wording "past the chain's ends";
 - a partial fold is trimmed, leaving rest material (never a gouge).
+
+## M13.4: snap the work origin to a picked face: one decision (2026-11-06)
+
+**A picked face offers "Set origin" at its area-weighted centroid.** Horizontal
+planar faces (world normal within 1° of ±Z) also offer "Set origin (Z only)",
+which keeps the slot's placed XY and takes Z from the plane.
+- The math is pure app-layer code (`pick/face.rs`). Zero-area and non-finite
+  facets weigh nothing, and a face with no area left refuses rather than
+  producing NaN.
+- Curved walls offer the centroid only, with a tooltip noting that for a full
+  bore this is the axis at mid-height.
+- Every option sends the existing `SetWcs` command, so it is undoable like the
+  vertex pick.
+- With this, M13.4's picking and snapping items are done.
+
+## M11.4: star plans smoothed at their morph seams: one decision (2026-11-06)
+
+**Star plans (bore, rectangle, L) run `tidy::smooth_walk` after the morph**:
+- threshold 4°, with margin under the 5° law;
+- 24 passes;
+- starting after the entry orbit, so the helix landing is never moved;
+- points pulled back onto the centre area's boundary, so the walk cannot cross
+  the wall.
+
+Rectangle went from 110 to 0 breaks past 5°, and L from 202 to 0. Their
+`KINK_RATCHET` entries are removed; removing an entry can only tighten the
+check. L's peak load went from 15.4% to 15.7%, still under the 16.1% law.
+Air, move counts, descents, rest and verify are unchanged. Still owed: the
+narrow slot's 2 breaks in its entry orbit, which a grown plan leaves
+untouched by design.
+
+## M13.8: the spindle on posed rapids, and fixed workholding in the machine frame: two decisions (2026-11-06)
+
+(1) **Posed rapids sweep the spindle band too** (`rapids_vs_fixtures_spindle`).
+Law d2 and the post gate pass it. Upright rapids are unchanged.
+
+(2) **Fixtures carry a `fixed` flag**; it defaults to false, meaning the fixture
+turns with the part as before, and the machine table is always fixed.
+- A fixed box is judged in the machine frame. Each sampled tool position is
+  turned about the fitted rotary axis to stand the tool upright.
+- Capsules grow by their distance from the axis times the rotary turn within
+  the step, so the check never under-reports.
+- The machine-frame verdict replaces the path-frame one only when every sample
+  of a posed move transformed cleanly. A hit is therefore removed only where
+  the machine frame PROVES the move clear. With no axis, or an `Unjudged`
+  sample, the old result stands.
+- `SetFixtureFixed` is undoable. The file writes `fixed` only when true, so old
+  files load and re-save unchanged.
+- Owed: the generate-time fixture check (`generate.rs`) still uses the old
+  laws (as strict as before, never weaker), and there is no UI toggle for
+  `fixed` yet.

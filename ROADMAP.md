@@ -541,11 +541,11 @@ the 2.5D/3D ones.
 - ✅ **Facet → feature**: weld mesh facets into planar faces and edge
       chains, exposed as stable ids per model revision (`app::geometry`,
       lifted out of `viewport.rs`)
-- ⚠️ **Pick modes**: whole model, face (raycast through the facet map)
-      and edge (nearest feature-edge search; Ctrl/Shift multi-add) -
-      **vertex picking deferred**: nothing machines a bare vertex today;
-      it lands with the features that ask for it (hole centers, M1.6;
-      WCS snap, below)
+- ✅ **Pick modes**: whole model, face (raycast through the facet map)
+      and edge (nearest feature-edge search; Ctrl/Shift multi-add);
+      vertex picking landed 2026-11-06 under M13.4 (feature corners,
+      screen-space nearest with a depth test - RECOMMENDED "M13.4:
+      vertex picking and Set origin")
 - ✅ **Boundary-driven operations**: contour a selected face or edge
       chain instead of a stock section (`SrcRef::Selection` - the
       shipped name for `SrcRef::Faces` above); islands come from the
@@ -691,8 +691,8 @@ the 2.5D/3D ones.
   note, for selections that resolve to open runs only; the fill law
   scores a lone ring against the selection silhouette and never reuses
   Face's complement comparison, which misfires on a small boss.
-- ⏸ **WCS face/vertex snap**: deferred again, honestly - it needs the
-      vertex pick above; M1.2's box-point placement stands
+- ✅ **WCS face/vertex snap**: done 2026-11-06 under M13.4 - "Set origin"
+      on a picked vertex or face (centroid; Z only on horizontal faces)
 
 Known limits from the M1.5.1-M1.5.4 reworks - each one refuses by name or
 degrades by rule, none guesses silently:
@@ -1472,7 +1472,7 @@ handle engagement.")
 **Goal: the operation's region is what the selection encloses - a picked face
 and its picked boundary edges give the same region and the same toolpath - and
 adaptive clearing is planned by high-speed-machining principles, specified the
-way machinists specify it.** — ⚠️ partial (C rounds 2-5 landed; owed: star-plan kinks at 5° (ratcheted), island late returns, arc output, Pocket3D port - see RECOMMENDED "M11.4 C round 5")
+way machinists specify it.** — ⚠️ partial (C rounds 2-5 landed; owed: slot entry-orbit kinks (ratcheted), island late returns, arc output, Pocket3D port - see RECOMMENDED "M11.4 C round 5")
 
 (User review, 2026-11-05: "there is a misconception that there should be
 different path generations depending on if it's a pocket's edge chosen or a
@@ -1686,7 +1686,7 @@ would.** — 📋
       today only app (`camcraft-cli`), post and ui carry binaries
 
 ### M13.4 - Small owed polish
-**Goal: the named cheap follow-ons stop being named and get done.** — ⚠️ partial (owed: WCS snap to a face)
+**Goal: the named cheap follow-ons stop being named and get done.** — ✅ (vertex picking, Set origin on a vertex or face, dialog polish - all done 2026-11-06)
 
 - **ColorVision remaps** (M6.1, "Their `ColorVision` layer
       (protan/deutan/tritan remaps applied on top of any theme) is a
@@ -1704,7 +1704,7 @@ would.** — 📋
       >= 20 gate, Off pixel-identical).
 - **Owed** (RECOMMENDED "M13.4" (4), "M13.4: vertex picking and Set origin"):
       vertex picking and Set origin DONE 2026-11-06; snapping the WCS origin to a
-      picked face (centroid or plane) stays owed.
+      picked face DONE 2026-11-06 (RECOMMENDED "M13.4: snap the work origin to a picked face").
 - ~~**Operation dialog polish**~~ - done 2026-11-06 (RECOMMENDED "Operation dialog polish").
 - **Continuous C-axis live-tooling operations** (M5.2, "Mill-turn: live
       tooling operations indexed and continuous (C-axis)"): only the
@@ -1796,7 +1796,7 @@ the heavy lane green.
 | **M1.4.1** | The look and feel, fixed at the root | Dear ImGui → egui: decisions recorded (egui adopted, clay considered and rejected, no dual-stack), spike done - GO (`docs/spike-egui-go-no-go.md`) | ✅ |
 | **M1.4.2** | egui is the shell | Per-panel graduation M-a…M-g: ribbon/browser, property pages (tabbed), dialogs + file ops, viewport interaction, shared actions law; dear-imgui deps and the imgui surfaces retired, Tabler glyphs as egui textures | ✅ |
 | **M1.4.3** | A home for every operation | Family-sectioned ribbon per the Operation Catalog, overflow dropdowns, user pinning (a document setting); the home law was overtaken by M5.1's ten ribbon-less kinds - the promise moved to M6.2, which landed it | ✅ |
-| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking, WCS snapping deferred | ⚠️ |
+| **M1.5** | Pick a face, not just a model | Face/edge clustering, face/edge and welded-patch pick modes, selection-driven contour and facing (open runs extend to stock), arc moves, staged facing, retract hops, readable selection rows, honest height planes, From/Offset height references, bore-aware contour side (Auto/Inside/Outside), translucent cut-region fills, folded collision warnings, v5→v7 persistence, view cube + nav bar; vertex picking and WCS snapping done via M13.4 (2026-11-06) | ⚠️ |
 | **M1.6** | Machine the hole list | Spot/drill/peck/deep/tap/bore cycles, hole recognition into editable params, canned-cycle representation beside the move chain; thread milling and the post itself open (done since: thread milling M2.4 thread_mill.rs, the post M1.7) | ✅ |
 | **M1.7** | Verified first output | Move simulation, validation, CPS post engine (`.cps`/`.mch`/our intermediate) + the Fanuc post as its first script, G-code viewer, CI matrix + portable-zip release, 0.1.0 | ✅ |
 | **M2.1** | Rough 3D at constant load | Done: 3D Pocket, rest material and adaptive clearing (level law, computed islands, entries; dexel sim, half-step closing ladder, corner law; engagement-step law, ring join law, closure-as-data) and feed modulation (median-anchor law, two-station chord) - REOPENED 2026-11-05 (user review): trochoidal slot paths and the corner-contact/trochoidal fallbacks were left "open" in the prose while the row read done; owed under M11.4 C | ⚠️ |
@@ -1829,17 +1829,17 @@ the heavy lane green.
 | **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); line-to-arc and arc-to-arc corner fillets (M11.1 RECOMMENDED); a closed path's seam corner stays sharp by decision | ✅ |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
 | **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; owed: horizontal arc entry for pockets, 3D first-stretch slowing, 3D ladder / contour bore second dives, Rotary Parallel infeed / Swarf first-entry ramps (-> M11.3 Owed bullet) | ⚠️ |
-| **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); owed: star-plan morph seams to 0 kinks at 5° (ratcheted 110/202), island legal late returns, arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
+| **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); star-plan seams at 0 kinks past 5° (done); owed: the slot's entry-orbit 2 breaks, island legal late returns, arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; owed: open-boundary Contour polish (viewport footprint, approach extensions), boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |
 | **M13.1** | Stock engine completeness | Bull-nose and lathe/rotary swept solids, eikonal band re-normalization (M7.1); the field mesh for the viewer's stock display and picking, dual contouring (M7.2); the solid hidden-rest scan past its budget (M2.2); bull-nose done, over-budget scan blocks as NOT JUDGED; owed: lathe/rotary annular-sector sweeps (refused by name meanwhile), eikonal, viewer/picking mesh, dual contouring, the field answering past the budget (-> M13.1 Owed bullet) | ⚠️ |
 | **M13.2** | Machine limits and cutting data | Spindle speed/power checks against a per-material speeds & feeds library (M3.3 C); the homegrown materials database (Open question "Cutting data"); done 2026-11-06 (fixed 0.8 spindle efficiency is a follow-on, not owed) | ✅ |
 | **M13.3** | Builds and distribution | Code signing + installer-vs-zip (M1.7); Docker builds for every target, app/UI on wasm (M4.2); a headless binary per crate (Phase 4 intro) | 📋 |
-| **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint, text colours, dialog polish, vertex picking + Set origin done; owed: WCS snap to a picked face (-> M13.4 Owed bullet) | ⚠️ |
+| **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); all done: remaps, catalog hint, text colours, dialog polish, vertex picking, Set origin on a vertex or face | ✅ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
 | **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); cut-order clearing (done); owed: mid-move pose | ⚠️ |
-| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; owed: spindle on posed rapids, continuous pose, fixed-fixture frame | ⚠️ |
+| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; spindle on posed rapids, fixed fixtures in the machine frame; owed: continuous pose, generate-time check wiring, fixed-flag UI toggle | ⚠️ |
 | **M13.9** | Scallop law and finish stepovers | Make the ridge/scallop law reachable and fix the finish generators it convicts (0.13-0.35 mm over a 0.12 gate) | 📋 |
 
 ## Open questions & deferred

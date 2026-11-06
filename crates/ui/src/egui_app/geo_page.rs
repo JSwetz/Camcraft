@@ -79,6 +79,16 @@ fn chips(ui: &mut Ui, state: &mut State, target: &str) {
             FeatureSel::Vertex(id) if !missing => Some((sel.entity.clone(), id)),
             _ => None,
         };
+        // A picked face (or welded curved wall) offers its centroid; a
+        // flat one also offers Z only. The targets are the app's to say.
+        let face = match sel.feature {
+            FeatureSel::Face(_) | FeatureSel::Patch(_) if !missing => {
+                camcraft_app::pick::face_origin(&state.world, &sel.entity, sel.feature)
+                    .ok()
+                    .map(|t| (sel.entity.clone(), sel.feature, t))
+            }
+            _ => None,
+        };
         let remove = ui
             .horizontal(|ui| {
                 // M13.4 stage 2 hook: a picked corner can place the WCS
@@ -87,6 +97,24 @@ fn chips(ui: &mut Ui, state: &mut State, target: &str) {
                     && ui.small_button("Set origin").on_hover_text("set the work origin at this vertex").clicked()
                 {
                     crate::vertex_pick::queue_origin_at_vertex(state, entity, *id);
+                }
+                if let Some((entity, feat, t)) = &face {
+                    let tip = if t.planar {
+                        "set the work origin at this face's centroid"
+                    } else {
+                        "set the work origin at this curved face's centroid (a full bore: its axis at mid-height)"
+                    };
+                    if ui.small_button("Set origin").on_hover_text(tip).clicked() {
+                        crate::vertex_pick::queue_origin_at_face(state, entity, *feat, false);
+                    }
+                    if t.plane_z.is_some()
+                        && ui
+                            .small_button("Set origin (Z only)")
+                            .on_hover_text("keep the origin's X and Y; move Z to this flat face")
+                            .clicked()
+                    {
+                        crate::vertex_pick::queue_origin_at_face(state, entity, *feat, true);
+                    }
                 }
                 let resp = if missing {
                     ui.colored_label(text_inks(ui, &state.world).missing, &label)

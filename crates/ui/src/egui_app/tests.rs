@@ -56,6 +56,7 @@ use super::shell::{Tab, build_dock, headless, shell_layout};
 use super::viewcube;
 use super::{theme, world};
 
+mod face_origin;
 mod layout;
 
 /// What the per-frame state of `Shell` is, minus the GPU half: the fields

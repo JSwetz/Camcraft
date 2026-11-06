@@ -4,6 +4,10 @@
 //! from the published algorithm (Möller & Trumbore, J. Graphics Tools 1997);
 //! no third-party code.
 
+pub mod face;
+
+pub use face::{FaceOrigin, face_origin, facets_centroid};
+
 use flecs_ecs::prelude::World;
 
 use crate::geometry::{
