@@ -237,6 +237,16 @@ fn schedule(out: &mut Lifted, mut pieces: Vec<Piece>, center: &Region, s: &LiftS
                     }
                 }
                 if pick.is_none() && rode.is_none() {
+                    // Round 6: the lead re-read on the re-ordered stock,
+                    // its graze joined to the cut (`LinkLaw::late`).
+                    pick = law.late(at, &tail, &mut pieces[low]).map(|r| (low, r));
+                    if let Some((_, r)) = &pick
+                        && r.high
+                    {
+                        out.highs += 1;
+                    }
+                }
+                if pick.is_none() && rode.is_none() {
                     let map = free_map(&out.ras);
                     pick = law.find(at, &tail, &pieces[low], Some(&map)).map(|r| (low, r));
                 }

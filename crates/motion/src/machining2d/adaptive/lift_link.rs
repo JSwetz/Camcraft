@@ -209,6 +209,40 @@ impl LinkLaw<'_> {
         }
         None
     }
+
+    /// Round 6: a late piece - reached in the walk's own order after
+    /// [`Self::high`] refused it - has its lead re-read on the stock as it
+    /// stands NOW (the re-ordered stock, not the spiral's, where a lead
+    /// the spiral read as air may graze over the bite). Where the lead's
+    /// END grazes, the graze joins the piece's cut (`extend`: walked at
+    /// the floor like the spiral's own air, read like any cut) and the
+    /// lead is trimmed to the air before it, so a return lands on air
+    /// only - graze run by graze run, from the lead's end back, until a
+    /// return (straight, else over the retract plane) reads legal.
+    /// `None` leaves the ladder's hop; a lead grazing from its first point
+    /// is left whole: the cut runs forward from the piece, so a graze
+    /// AHEAD of the only air cannot join it (the island's corner pieces,
+    /// RECOMMENDED "M11.4 C round 6": their 22 mm leads graze 20 deg to
+    /// the last 3 mm, which hold stock inside the tool disc).
+    pub(super) fn late(&self, at: Point2, tail: &[Point2], p: &mut Piece) -> Option<Return> {
+        let marks = self.ras.clone().walk_marks(&p.lead, (self.r, self.rim, self.step));
+        let mut g = marks.len();
+        while let Some(end) = marks[..g].iter().rposition(|&m| m > self.bite) {
+            // The graze run `end` closes starts after the last air mark.
+            let j = marks[..end].iter().rposition(|&m| m <= self.bite).map_or(0, |k| k + 1);
+            if j == 0 {
+                return None;
+            }
+            let &st = p.lead.get(j)?;
+            extend(p, st);
+            p.lead.truncate(j + 1);
+            if let Some(r) = self.find(at, tail, p, None).or_else(|| self.high(p)) {
+                return Some(r);
+            }
+            g = j;
+        }
+        None
+    }
 }
 
 /// The free-space map a routed return is planned on.
