@@ -11,6 +11,13 @@
 //!
 //! Gate map (M11.4 A): covers app::operation (selection, area, stitch,
 //! job, generate), app::machining2d (pocket), app::verify, app::load.
+//!
+//! Lane shape (M13.8): the debug ladder runs every test here in seconds.
+//! The island law runs under Zigzag in debug; its `_full` twin carries
+//! the same assertions under Adaptive and Zigzag (the HSM plan around the
+//! boss, ~12 min debug), and the bore's HSM pick law rides beside it in
+//! the heavy lane (`#[ignore]`, `cargo test --release -p camcraft-app
+//! --test pick_agnostic -- --ignored`).
 
 mod common;
 
@@ -317,8 +324,11 @@ fn block_with_boss() -> Mesh {
     Mesh::from_facets(f)
 }
 
-#[test]
-fn a_face_with_an_island_and_its_rim_loop_cut_the_same_bytes_around_the_boss() {
+/// The island law (M11.4 A) under each of `strategies`: the floor face,
+/// the rim runs at the mouth and at the floor, and face + rim cut the
+/// same bytes, and no feed below the boss top enters its tool-grown
+/// footprint.
+fn island_law(strategies: &[PocketStrategy]) {
     let (world, name) = world_with(ImportModel::from_mesh("part", block_with_boss()), 0.0, 20.0);
     // The pocket's floor face (half-width 18: circumradius 25.46) - its
     // loops carry the boss as a hole.
@@ -355,7 +365,7 @@ fn a_face_with_an_island_and_its_rim_loop_cut_the_same_bytes_around_the_boss() {
         ("floor rim runs".to_owned(), floor),
         ("face + mouth rim".to_owned(), with_face),
     ];
-    for strategy in [PocketStrategy::Adaptive, PocketStrategy::Zigzag] {
+    for &strategy in strategies {
         let params = pocket(strategy, 20.0, 5.0);
         identical_spellings(&world, &name, &spelled, &params);
         // No feed with its center over the boss's tool-grown footprint
@@ -372,6 +382,22 @@ fn a_face_with_an_island_and_its_rim_loop_cut_the_same_bytes_around_the_boss() {
             );
         }
     }
+}
+
+/// Debug lane: the island law under Zigzag - every spelling's bytes and
+/// the boss standoff, in seconds.
+#[test]
+fn a_face_with_an_island_and_its_rim_loop_cut_the_same_bytes_around_the_boss() {
+    island_law(&[PocketStrategy::Zigzag]);
+}
+
+/// Heavy lane: the island law under the HSM Adaptive plan too (five plans
+/// around the boss, each measured against the stock) - the original
+/// Adaptive + Zigzag pair.
+#[test]
+#[ignore = "heavy lane: HSM adaptive around the boss island, five plans, ~12 min debug"]
+fn a_face_with_an_island_and_its_rim_loop_cut_the_same_bytes_around_the_boss_full() {
+    island_law(&[PocketStrategy::Adaptive, PocketStrategy::Zigzag]);
 }
 
 #[test]
