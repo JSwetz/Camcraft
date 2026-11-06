@@ -102,6 +102,12 @@ pub(super) fn profile(a: Point2, ret: &Return) -> Vec<(Point2, f64)> {
 /// Feed from where the tool stands on plane `z` along [`profile`] onto
 /// the next pass's start on plane `z`.
 pub(super) fn link(b: &mut PathBuilder, ret: &Return, z: f64, m: &Motion) {
+    link_at(b, ret, z, m.hop_z, m.feed);
+}
+
+/// [`link`] on bare numbers: the hop plane a `high` return rides and
+/// the cutting feed (the 3-D ladder's per-level port, `machining3d::hsm`).
+pub(crate) fn link_at(b: &mut PathBuilder, ret: &Return, z: f64, hop_z: f64, feed: f64) {
     let at = b.at();
     let prof = profile(Point2::new(at.x, at.y), ret);
     if ret.high {
@@ -109,18 +115,18 @@ pub(super) fn link(b: &mut PathBuilder, ret: &Return, z: f64, m: &Motion) {
         // the cut's own kerf and column; the lateral one over the
         // retract plane), then down the lead at feed.
         let Some(&(top, hz)) = prof.first() else { return };
-        let hop = m.hop_z.max(z + hz);
+        let hop = hop_z.max(z + hz);
         b.push(MoveKind::Rapid, Point3::new(at.x, at.y, hop), None);
         b.push(MoveKind::Rapid, Point3::new(top.x, top.y, hop), None);
         b.push(MoveKind::Rapid, Point3::new(top.x, top.y, lattice(z + hz)), None);
         for (p, dz) in prof.into_iter().skip(1) {
             let zz = if dz > 0.0 { lattice(z + dz) } else { z };
-            b.push(MoveKind::Feed, Point3::new(p.x, p.y, zz), Some(m.feed));
+            b.push(MoveKind::Feed, Point3::new(p.x, p.y, zz), Some(feed));
         }
         return;
     }
     for (p, dz) in prof.into_iter().skip(1) {
         let zz = if dz > 0.0 { lattice(z + dz) } else { z };
-        b.push(MoveKind::Feed, Point3::new(p.x, p.y, zz), Some(m.feed));
+        b.push(MoveKind::Feed, Point3::new(p.x, p.y, zz), Some(feed));
     }
 }

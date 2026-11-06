@@ -85,12 +85,20 @@
 //! machining-handbook side-milling theory; no vendor implementation
 //! inspected). Geometry is byte-identical; only `Move::feed` values
 //! change.
-
+//!
+//! ## HSM adaptive levels (M11.4 owed)
+//!
+//! Under `PocketStrategy::Adaptive` each level's closed area is planned
+//! by the planar HSM planner (`hsm`): the same load, kink and hop laws
+//! and arcs as the 2D Adaptive pocket, inside this ladder's level law,
+//! entries and links. `OffsetRings` is the ring tiling at the load step
+//! every earlier Adaptive 3-D rough posted, byte for byte.
 
 
 mod descent;
 mod entry;
 mod feed;
+mod hsm;
 mod ladder;
 mod level_ctx;
 mod params;
@@ -109,5 +117,6 @@ pub use entry::{
     pocket3d_with_rest_prev,
 };
 pub use feed::{engagement_on, optimize_feed, FFO_FLOOR};
+pub use hsm::{REST_RINGS, SHELL_RINGS};
 pub use params::{engagement_step, Entry3D, Pocket3DParams};
 pub use rest::material_above;

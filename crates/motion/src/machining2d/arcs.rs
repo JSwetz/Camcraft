@@ -41,7 +41,7 @@ pub(super) const ARC_FIT_STRAIGHT_LOOKAHEAD: usize = 64;
 
 /// Walk a polyline's pieces: lines feed through their points, arcs get
 /// one [`PathBuilder::push_arc`] each. At cut level `z` with `feed`.
-pub(super) fn push_segs(b: &mut PathBuilder, segs: &[Seg], z: f64, feed: f64) {
+pub(crate) fn push_segs(b: &mut PathBuilder, segs: &[Seg], z: f64, feed: f64) {
     for seg in segs {
         match seg {
             Seg::Line(qs) => {

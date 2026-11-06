@@ -48,11 +48,13 @@ pub struct Pocket3DParams {
     /// Helix centerline circle radius (mm); validated ≤ tool radius so
     /// successive turns overlap and the dive cuts a clean bore.
     pub helix_radius: f64,
-    /// The `Adaptive` strategy's optimal load: radial width of cut as a
-    /// fraction of the tool diameter (ae/D, M11.4 B - `crate::load`;
-    /// ignored by the other strategies, still validated finite). The
-    /// ring step is `optimal_load x D` - the whole of constant-engagement
-    /// roughing's geometry law (M2.1c), the contact angle derived.
+    /// The `Adaptive` and `OffsetRings` strategies' optimal load: radial
+    /// width of cut as a fraction of the tool diameter (ae/D, M11.4 B -
+    /// `crate::load`; ignored by the other strategies, still validated
+    /// finite). Under `Adaptive` it is the HSM planner's load per level
+    /// (`hsm`, M11.4's port); under `OffsetRings` the ring step is
+    /// `optimal_load x D` - constant-engagement roughing's geometry law
+    /// (M2.1c), the contact angle derived.
     pub optimal_load: f64,
     /// Level transitions and links (M11.2 C/D); [`Links::ROUGH3D`] is
     /// the ladder every earlier 3-D rough posted (its pass links have
@@ -113,7 +115,7 @@ impl Pocket3DParams {
                 ));
             }
         }
-        if self.strategy == PocketStrategy::Adaptive {
+        if matches!(self.strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings) {
             // The law's own bounds: a zero load is a zero step (an
             // infinite ladder), and past half the diameter (90 degrees
             // of contact) the step passes one radius - past where consecutive rings still overlap,
@@ -135,7 +137,7 @@ impl Pocket3DParams {
     /// law's own bands.
     pub(super) fn tiling_step(&self) -> f64 {
         match self.strategy {
-            PocketStrategy::Adaptive => crate::load::load_step(self.tool_diameter, self.optimal_load),
+            PocketStrategy::Adaptive | PocketStrategy::OffsetRings => crate::load::load_step(self.tool_diameter, self.optimal_load),
             _ => self.stepover,
         }
     }

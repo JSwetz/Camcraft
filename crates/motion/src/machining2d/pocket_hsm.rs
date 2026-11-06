@@ -23,7 +23,7 @@ use super::pocket::{PocketParams, PocketStrategy, plan_passes};
 /// ladder must orbit, and the triangle the ladder's `dive_room` finds
 /// the spot in (its centroid, by construction).
 #[derive(Clone, Debug)]
-pub(super) struct EntryRoom {
+pub(crate) struct EntryRoom {
     pub seed: Point2,
     pub clear: f64,
     pub helix_r: f64,
@@ -35,8 +35,10 @@ pub(super) struct EntryRoom {
 /// the load, or run past its budget ([`over_budget`]) - the Offset
 /// rings, named in the notes (an incomplete or impractical plan is
 /// never posted as if it were the clearing). Returns the strategy that
-/// actually planned them and, for the HSM plan, its entry.
-pub(super) fn adaptive_passes(center: &Region, p: &PocketParams) -> Result<Planned, GenError> {
+/// actually planned them and, for the HSM plan, its entry. `what` names
+/// the area in the fallback note ("this pocket"; the 3-D ladder's "the
+/// level at Z ...", M11.4's per-level port) - never a silent switch.
+pub(crate) fn adaptive_passes(center: &Region, p: &PocketParams, what: &str) -> Result<Planned, GenError> {
     let (passes, notes, rest, room, joins, travel) = hsm_passes(center, p)?;
     // A plan that would cross itself is never posted (the verifier's
     // crossing law, asked of the plan first).
@@ -49,12 +51,12 @@ pub(super) fn adaptive_passes(center: &Region, p: &PocketParams) -> Result<Plann
     let s = PocketStrategy::OffsetRings;
     let note = match (cross, budget) {
         (Some(x), _) => format!(
-            "adaptive: the HSM plan for this area crosses itself at ({:.2}, {:.2}) - Offset rings cut this pocket instead",
+            "adaptive: the HSM plan for this area crosses itself at ({:.2}, {:.2}) - Offset rings cut {what} instead",
             x.x, x.y
         ),
-        (None, Some(why)) => format!("adaptive: the HSM plan {why} - Offset rings cut this pocket instead"),
+        (None, Some(why)) => format!("adaptive: the HSM plan {why} - Offset rings cut {what} instead"),
         (None, None) => format!(
-            "adaptive: the HSM plan left {:.0}% of the area it could not cut within twice the load - Offset rings cut this pocket instead",
+            "adaptive: the HSM plan left {:.0}% of the area it could not cut within twice the load - Offset rings cut {what} instead",
             rest * 100.0
         ),
     };
@@ -67,7 +69,7 @@ type Walks = Vec<Vec<Point2>>;
 
 /// The pocket's passes, notes, the strategy that planned them, the HSM
 /// plan's entry and its joins.
-pub(super) type Planned = (Walks, Vec<String>, PocketStrategy, Option<EntryRoom>, Joins);
+pub(crate) type Planned = (Walks, Vec<String>, PocketStrategy, Option<EntryRoom>, Joins);
 
 /// The HSM plan's passes, notes, share of stock left, entry, joins and
 /// travel.
@@ -105,7 +107,7 @@ fn over_budget(t: &Travel, levels: usize) -> Option<String> {
 
 /// Per pass: the microlift's down ramp it is reached by (`None`: the
 /// ladder's own pass link).
-pub(super) type Joins = Vec<Option<Return>>;
+pub(crate) type Joins = Vec<Option<Return>>;
 
 /// The contact-angle margin the planner holds (fraction of the
 /// optimal load; negative = under it): the plan is read on the

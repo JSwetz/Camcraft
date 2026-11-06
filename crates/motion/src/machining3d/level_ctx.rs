@@ -13,7 +13,7 @@ use crate::cl::{MoveKind, PathBuilder, lattice};
 use crate::entry::chord_hits_plan;
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
-use crate::machining2d::chord_clears;
+use crate::machining2d::{Seg, chord_clears, push_segs};
 use crate::plunge_law;
 
 /// The level a dive lands on, bundled once per iteration for the link
@@ -43,6 +43,9 @@ pub(super) struct LevelCtx<'a> {
     /// entry - one tool diameter when the limit is on, consumed by
     /// `feed_leg`; `0` (every pre-limit path) feeds at the cutting feed.
     pub(super) settle: Cell<f64>,
+    /// The HSM plan's proved arc walks per pass (M11.4, `hsm`): `None`
+    /// on every other strategy, where each pass walks its points.
+    pub(super) arcs: Option<&'a [Vec<Seg>]>,
 }
 
 /// Traverse to `to` at the level's plane: a rapid at `tz` - or, after a
@@ -300,8 +303,18 @@ fn seg_reach(a: Point2, b: Point2, c: Point2) -> f64 {
 /// back to the first; for a lone ring that was a zero-length duplicate
 /// of the data's own closing, but for a chained multi-ring pass it
 /// dragged a diagonal across every intermediate ring - the boss crossing
-/// bug. The law is: walk the data, add nothing.
-pub(super) fn walk_pass(b: &mut PathBuilder, pass: &[Point2], lvl: &LevelCtx, skip_first: bool) {
+/// bug. The law is: walk the data, add nothing. Pass `pi` of an HSM
+/// level rides its proved arcs (M11.4) on the plain ladder once the
+/// engagement limit's settling stretch is spent; the points otherwise.
+pub(super) fn walk_pass(b: &mut PathBuilder, pass: &[Point2], lvl: &LevelCtx, pi: usize, skip_first: bool) {
+    if skip_first
+        && lvl.field.is_none()
+        && lvl.settle.get() <= 0.0
+        && let Some(segs) = lvl.arcs.and_then(|a| a.get(pi))
+    {
+        push_segs(b, segs, lvl.z, lvl.p.feed);
+        return;
+    }
     for q in pass.iter().skip(if skip_first { 1 } else { 0 }) {
         feed_leg(b, lvl, *q, 0.0);
     }

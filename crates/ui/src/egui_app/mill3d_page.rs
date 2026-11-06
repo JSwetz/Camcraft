@@ -69,8 +69,9 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Adaptive => 2,
                     PocketStrategy::Auto => 3,
-                    // The 3-D ladder plans both as rings (M11.4 C).
-                    PocketStrategy::OffsetRings => 2,
+                    // M11.4: the HSM plan per level, or the rings at
+                    // the load step every earlier Adaptive posted.
+                    PocketStrategy::OffsetRings => 4,
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
@@ -80,11 +81,15 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                         1 => PocketStrategy::Waterline,
                         2 => PocketStrategy::Adaptive,
                         3 => PocketStrategy::Auto,
+                        4 => PocketStrategy::OffsetRings,
                         _ => PocketStrategy::Zigzag,
                     };
                 }
-                if matches!(strategy, PocketStrategy::Adaptive) {
+                if matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings) {
                     super::load_field::optimal_load_field(ui, optimal_load);
+                }
+                if matches!(strategy, PocketStrategy::Adaptive) {
+                    hint(ui, "HSM adaptive clearing on every level: a spiral at the optimal load, lifted returns, arcs; a level the planner refuses (an island or channel past its budget) cuts Offset rings and says so");
                 }
                 hint(ui, "levels come from the mesh: each shelf cuts around the material standing above it");
                 check_row(ui, "Offset shells", shell);

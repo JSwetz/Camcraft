@@ -1090,6 +1090,10 @@ fn strategy_combo_offers_auto() {
         &["Zigzag", "Waterline", "Adaptive", "Auto", "Offset rings"],
         "the combo offers Adaptive, Auto and (M11.4 C) the pre-HSM Offset rings beside the explicit choices"
     );
+    // M11.4 (the Pocket3D port): the 3-D combo offers the same choice -
+    // Adaptive is the HSM plan per level, Offset rings the rings at the
+    // load step every earlier 3-D Adaptive posted.
+    assert_eq!(camcraft_ui::operations::strategy3d_names(), &["Zigzag", "Waterline", "Adaptive", "Auto", "Offset rings"]);
 }
 
 // ---------------------------------------------------------------------------

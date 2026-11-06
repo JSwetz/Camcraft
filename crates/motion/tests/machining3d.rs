@@ -655,6 +655,8 @@ fn adaptive_is_the_waterline_tiling_at_the_law_step() {
     // The equality is tiling_step made visible: one source for the ring
     // spacing, read by the pass planner (and, for the sim, by the cell
     // law). Any drift between the strategies' plumbing fails here.
+    // M11.4: the rings are `OffsetRings` (Adaptive is the HSM plan per
+    // level, `pocket3d_hsm`).
     let f = slab();
     let region = silhouette(&f);
     let step = engagement_step(4.0, 45.0);
@@ -662,7 +664,7 @@ fn adaptive_is_the_waterline_tiling_at_the_law_step() {
         &f,
         &region,
         &Pocket3DParams {
-            strategy: PocketStrategy::Adaptive,
+            strategy: PocketStrategy::OffsetRings,
             ..params(Entry3D::Plunge, 1.0)
         },
     )
@@ -721,8 +723,9 @@ fn adaptive_refuses_what_the_law_refuses() {
             "{bad} degrees must refuse under Adaptive, got {r:?}"
         );
     }
-    assert!(at(PocketStrategy::Adaptive, 90.0, 3.0).is_ok(), "90 is the closed end");
-    assert!(at(PocketStrategy::Adaptive, 45.0, 3.0).is_ok());
+    assert!(at(PocketStrategy::OffsetRings, 90.0, 3.0).is_ok(), "90 is the closed end");
+    assert!(at(PocketStrategy::OffsetRings, 45.0, 3.0).is_ok());
+    assert!(matches!(at(PocketStrategy::OffsetRings, 0.0, 3.0), Err(GenError::Invalid(_))), "the rings read the door too");
     // Elsewhere the angle is inert: 0 degrees under Waterline changes
     // nothing, because nothing reads it.
     assert!(at(PocketStrategy::Waterline, 0.0, 3.0).is_ok());
@@ -742,14 +745,15 @@ fn adaptive_refuses_what_the_law_refuses() {
 fn adaptive_rings_circle_the_boss() {
     // The boss law is strategy-independent: the ring family is carved
     // from the same standing-material centers, so the computed islands
-    // exclude the boss columns exactly as under Waterline.
+    // exclude the boss columns exactly as under Waterline (the rings;
+    // the HSM plan's island levels are `pocket3d_hsm`'s).
     let f = slab_with_boss();
     let region = silhouette(&f);
     let t = pocket3d(
         &f,
         &region,
         &Pocket3DParams {
-            strategy: PocketStrategy::Adaptive,
+            strategy: PocketStrategy::OffsetRings,
             ..params(Entry3D::Plunge, 1.0)
         },
     )

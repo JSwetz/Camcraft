@@ -36,7 +36,7 @@ pub fn strategy_names() -> &'static [&'static str] {
 /// [`strategy_names`], because it is the same kind of choice - stored,
 /// resolved at generate.
 pub fn strategy3d_names() -> &'static [&'static str] {
-    &["Zigzag", "Waterline", "Adaptive", "Auto"]
+    &["Zigzag", "Waterline", "Adaptive", "Auto", "Offset rings"]
 }
 /// The Side combo's labels, in index order (M1.5.4 issue 2). Auto sits
 /// beside the explicit choices like the pocket's Strategy: picking it

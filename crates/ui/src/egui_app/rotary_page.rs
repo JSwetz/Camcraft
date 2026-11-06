@@ -151,7 +151,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Adaptive => 2,
                     PocketStrategy::Auto => 3,
-                    PocketStrategy::OffsetRings => 2,
+                    PocketStrategy::OffsetRings => 4,
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
@@ -161,10 +161,11 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                         1 => PocketStrategy::Waterline,
                         2 => PocketStrategy::Adaptive,
                         3 => PocketStrategy::Auto,
+                        4 => PocketStrategy::OffsetRings,
                         _ => PocketStrategy::Zigzag,
                     };
                 }
-                if matches!(strategy, PocketStrategy::Adaptive) {
+                if matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings) {
                     super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 prop_row(ui, "Tolerance", |ui| num(ui, u, tolerance));
@@ -244,7 +245,7 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                     PocketStrategy::Waterline => 1,
                     PocketStrategy::Adaptive => 2,
                     PocketStrategy::Auto => 3,
-                    PocketStrategy::OffsetRings => 2,
+                    PocketStrategy::OffsetRings => 4,
                 };
                 let names = strategy3d_names();
                 let before = st_idx;
@@ -254,10 +255,11 @@ pub(super) fn fields(ui: &mut Ui, world: &World, params: &mut OpParams, cx: &mut
                         1 => PocketStrategy::Waterline,
                         2 => PocketStrategy::Adaptive,
                         3 => PocketStrategy::Auto,
+                        4 => PocketStrategy::OffsetRings,
                         _ => PocketStrategy::Zigzag,
                     };
                 }
-                if matches!(strategy, PocketStrategy::Adaptive) {
+                if matches!(strategy, PocketStrategy::Adaptive | PocketStrategy::OffsetRings) {
                     super::load_field::optimal_load_field(ui, optimal_load);
                 }
                 hint(ui, "levels come from the mesh: each shelf cuts around the material standing above it");

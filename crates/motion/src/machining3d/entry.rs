@@ -9,7 +9,7 @@ use crate::cl::Toolpath;
 use crate::geo2d::Region;
 use crate::geometry::Triangle;
 use crate::machining2d::{
-    cut_levels, GenError,
+    cut_levels, GenError, PocketStrategy,
 };
 use crate::stock_sim::{self, Dexel, StockReport};
 /// The per-level cutter plan and its walk, level after level - the 3-D
@@ -107,6 +107,12 @@ pub fn pocket3d_air_split(
     p: &Pocket3DParams,
 ) -> Result<Toolpath, GenError> {
     guard_input(facets, footprint, p)?;
+    // The wrap ladder keeps the rings under Adaptive: its developed
+    // levels are channels the HSM planner refuses by name, and the
+    // rotary programs it posted stay byte for byte (their per-level
+    // port is owed, RECOMMENDED M11.4).
+    let rings = Pocket3DParams { strategy: PocketStrategy::OffsetRings, ..*p };
+    let p = if p.strategy == PocketStrategy::Adaptive { &rings } else { p };
     let zs = cut_levels(p.top_z, p.bottom_z, p.stepdown);
     let k = zs.iter().take_while(|z| **z > air_above).count();
     if k == 0 || air_footprint.is_empty() {

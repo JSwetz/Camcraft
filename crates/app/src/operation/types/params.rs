@@ -411,10 +411,13 @@ pub enum OpParams {
         /// pass aimed at what the dexel sim says still stands
         /// ([`crate::machining3d::pocket3d_with_rest`], M2.1b).
         rest_rough: bool,
-        /// The `Adaptive` strategy's optimal load, ae/D (M11.4 B; the
-        /// M2.1c engagement law with the angle derived - `crate::load`);
-        /// read only when `strategy` is Adaptive, bounds checked there
-        /// at generate.
+        /// The `Adaptive` and `OffsetRings` strategies' optimal load,
+        /// ae/D (M11.4 B; the M2.1c engagement law with the angle
+        /// derived - `crate::load`): the HSM planner's load on every
+        /// level under Adaptive (M11.4's Pocket3D port, the 2D
+        /// planner level by level, refused levels cut by rings and
+        /// said), the ring step under OffsetRings; bounds checked at
+        /// generate.
         optimal_load: f64,
         /// Modulate every planar feed's rate by the engagement the
         /// dexel sim says the move actually meets, median-anchored to

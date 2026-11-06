@@ -3,6 +3,7 @@
 //! `links.rs`, the descents in `descent.rs`).
 
 use super::descent::{self, Ask, descend};
+use super::hsm;
 use super::level_ctx::{LevelCtx, feed_leg, walk_pass};
 use super::params::{Entry3D, Pocket3DParams};
 use super::rest::level_target;
@@ -13,7 +14,7 @@ use crate::entry::chord_hits_plan;
 use crate::geo2d::{Point2, Region};
 use crate::geometry::{Point3, Triangle};
 use crate::links::{Link, LinkTally, NOT_PROVED, TOO_LONG};
-use crate::machining2d::{chord_clears, plan_passes, GenError};
+use crate::machining2d::{chord_clears, GenError};
 use crate::plunge_law;
 use crate::stock_sim::Dexel;
 /// One ladder run: the level loop shared by both entry points. `zs` is
@@ -81,7 +82,6 @@ pub(super) fn ladder(
     };
 
     let mut b = PathBuilder::new(start);
-    let step = p.tiling_step();
     // The last level that actually cut: its plane and center area, the
     // most crowded the entry motions of the next level can meet (a
     // deeper level's target only grows). None until one has cut.
@@ -134,7 +134,11 @@ pub(super) fn ladder(
                       // staircase (or a wall this tool cannot enter) -
                       // rest material's later problem, never a lie now
         }
-        let passes = plan_passes(&center, step, p.climb, p.strategy)?;
+        // The level's plan: the strategy's tiling, or the HSM plan
+        // (M11.4, `hsm`) - whose entry bore the level's params carry.
+        let lp = hsm::plan_level(&mut b, &center, p, z, hop_z, rest.is_some(), shell)?;
+        let passes = &lp.passes;
+        let level_p = lp.params(p);
         let Some(first_pass) = passes.first() else {
             continue;
         };
@@ -164,14 +168,15 @@ pub(super) fn ladder(
         };
         let mut lvl = LevelCtx {
             cen: &center,
-            passes: &passes,
+            passes,
             z,
             hop_z,
-            p,
+            p: &level_p,
             field: field.as_ref(),
             tz: p.clearance_z,
             kept: false,
             settle: std::cell::Cell::new(0.0),
+            arcs: lp.arcs.as_deref(),
         };
         // The level link (M11.2 D). Before the first cut, and always on
         // a rest pass (its planes sit inside floors the coarse run owns,
@@ -236,7 +241,7 @@ pub(super) fn ladder(
         let dove = descend(&mut b, &lvl, &ask);
         lvl.tz = p.clearance_z;
         lvl.kept = false;
-        walk_pass(&mut b, first_pass, &lvl, /*skip_first=*/ true);
+        walk_pass(&mut b, first_pass, &lvl, 0, /*skip_first=*/ true);
         lvl.settle.set(0.0);
         // Remaining passes: connect as far as the floor allows - and no
         // further than the level's own planned paths allow (the boss
@@ -246,15 +251,26 @@ pub(super) fn ladder(
         // (M11.2 D): keep down where proved (every earlier 3-D rough),
         // or always lift - to the retract plane or to clearance.
         let mut restarts: Vec<Vec<Point2>> = Vec::new();
-        for pass in &passes[1..] {
+        for (pi, pass) in passes.iter().enumerate().skip(1) {
             let Some(&next_entry) = pass.first() else {
                 continue;
             };
+            // The HSM plan's microlift return (M11.4): proved by the plan
+            // over the stock it cleared, posted as feeds over the floor.
+            if let Some(Some(ret)) = lp.joins.get(pi) {
+                hsm::microlift(&mut b, ret, z, hop_z, p.feed);
+                walk_pass(&mut b, pass, &lvl, pi, /*skip_first=*/ true);
+                continue;
+            }
             let prev = b.at();
             let p2 = Point2::new(prev.x, prev.y);
-            let plane = match p.links.pass {
+            // An HSM level's unjoined pass takes the hop (M11.4): the
+            // plan's budget counted it, and no chord at depth is proved
+            // against the stock it would cross.
+            let link = if lp.hsm { Link::Retract } else { p.links.pass };
+            let plane = match link {
                 Link::KeepDown => {
-                    let proved = chord_clears(&center, p2, next_entry) && !chord_hits_plan(p2, next_entry, &passes);
+                    let proved = chord_clears(&center, p2, next_entry) && !chord_hits_plan(p2, next_entry, passes);
                     if proved && p.links.within_stay_down((next_entry.x - p2.x).hypot(next_entry.y - p2.y)) {
                         None
                     } else {
@@ -297,7 +313,7 @@ pub(super) fn ladder(
                             restarts.push(vec![d, next_entry]);
                         }
                         lvl.tz = p.clearance_z;
-                        walk_pass(&mut b, pass, &lvl, /*skip_first=*/ true);
+                        walk_pass(&mut b, pass, &lvl, pi, /*skip_first=*/ true);
                         continue;
                     }
                     b.push(MoveKind::Rapid, Point3::new(next_entry.x, next_entry.y, hz), None);
@@ -308,7 +324,7 @@ pub(super) fn ladder(
                     );
                 }
             }
-            walk_pass(&mut b, pass, &lvl, /*skip_first=*/ true);
+            walk_pass(&mut b, pass, &lvl, pi, /*skip_first=*/ true);
         }
         // Hand this level's plan to the next one's entry legality: it
         // is the deepest cut so far, so its center bounds every plane
