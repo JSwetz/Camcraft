@@ -1637,6 +1637,11 @@ every consumer Phase 7 promised it to.** — ⚠️ partial (owed: lathe/rotary 
       hidden-rest budget (today an honest blocking refusal, not an
       answer).
 
+- **Traced playback leftovers** (RECOMMENDED "Traced playback off the UI
+      thread"): dirty-brick GPU upload (the whole ~1 MB cut layer per picture
+      today), jump throughput (a full-length jump 14.8 s vs 12.4 s before the
+      worker), and the CPU-fallback eye still drawing on the UI thread.
+
 ### M13.2 - Machine limits and cutting data
 **Goal: a program is judged against the machine's spindle and the
 material, not only its travel and feed.** — ✅
@@ -1717,7 +1722,7 @@ would.** — 📋
 ### M13.7 - Verifier completeness
 **Goal: the exact solid-law verifier judges every move with the real
 tool, against the real stock, in the real pose - the backstop every
-generator relies on has no known blind spot.** — ⚠️ partial (owed: overhang laws, mid-move pose, ladder/verifier tolerance)
+generator relies on has no known blind spot.** — ⚠️ partial (owed: overhang laws, mid-move pose)
 
 The 2026-11-06 solid-law verifier (0e18091) replaced plane sections for
 the tool-vs-part check; its own entry names what it still does not
@@ -1748,19 +1753,14 @@ None of these may stay open behind a ✅.
       ends are refused for 2D ops at creation) - `real_tip_contour.rs`.
 - ~~**Law (b) leave sign**~~ - fixed 2026-11-06: a positive leave hid a
       gouge of that depth (RECOMMENDED "M13.7 B" (3)).
-- **Ladder vs verifier tolerance**: the 2D depth ladder reads the part
-      with 0.02 mm slack, the verifier with 0.01 mm - a flat-end pass can
-      be convicted for no real gouge (errs safe, blocks a post); align them.
-
-### M13.8 - Multi-axis leftovers after the pivot law
-**Goal: every rotary and 5-axis kind starts, links and judges like the
-3-axis ones - nothing found by the pivot fix stays as prose.** — ⚠️ partial (owed: all-air finish, radial retracts vs fixtures)
-
+- ~~**Ladder vs verifier tolerance**~~ - fixed 2026-11-06: ladder slack 0.008 mm
+      (RECOMMENDED "Ladder tolerance and the all-air finish" (1)).
 - ~~**swarf_multi coarse rung**~~ - fixed 2026-11-06: rungs relax only
       their spacing (RECOMMENDED "M13.8 B" (1)).
 - ~~**The rotary first move**~~ - done 2026-11-06 (RECOMMENDED "M13.8 A"
       (1)): opens on the clearance pose above the first cut.
-- **An upright all-air finish** is reported unjudged; judge it.
+- ~~**An upright all-air finish**~~ - done 2026-11-06: proven all-air finishes get
+      a non-blocking "cuts no material" note.
 - ~~**The ridge rest law**~~ - decided 2026-11-06: proven dead, kept as a
       reading; the reachable law moves to M13.9 with the generator fixes.
 - ~~**Rotary Offset** from the stock radius; **Rotary Parallel** radial
@@ -1835,8 +1835,8 @@ the heavy lane green.
 | **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint and text colours done; owed: vertex picking + WCS snapping (-> M13.4 Owed bullet) | ⚠️ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
-| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); owed: overhang laws, mid-move pose, ladder/verifier tolerance | ⚠️ |
-| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); owed: upright all-air finish unjudged, radial retracts vs fixtures | ⚠️ |
+| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); owed: overhang laws, mid-move pose | ⚠️ |
+| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted; owed: radial retracts vs fixtures | ⚠️ |
 | **M13.9** | Scallop law and finish stepovers | Make the ridge/scallop law reachable and fix the finish generators it convicts (0.13-0.35 mm over a 0.12 gate) | 📋 |
 
 ## Open questions & deferred

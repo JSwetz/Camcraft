@@ -10015,3 +10015,65 @@ stepover verifies silently.
 - Kept as a reading. The reachable law (patch saved in the job tmp as
   ridge-flank-law.patch) lands together with the finish-generator
   stepover fixes as M13.9.
+
+## Traced playback off the UI thread: four decisions (2026-11-06, user report)
+
+The user reported: "Simulation is extremely taxing, the voxel model is not even
+updating as the cutter goes around it. And at times it even locks up."
+
+(1) **The timeline is cached per document version** (`shell::cached_script`).
+It used to be rebuilt twice a frame, cloning every toolpath each time (about
+1.1 MB/frame on the bench).
+
+(2) **A worker thread owns the playback** (`app::stock_play_worker::PlayWorker`):
+- the world is read on the UI thread, then the fields are built on the worker;
+- seeks are latest-wins, cut in adaptive ~15 ms chunks;
+- results are published at 20 Hz or when the worker catches up;
+- failures arrive as errors ("traced playback refused") and never panic;
+- dropping the worker joins it.
+
+Considered and dropped: keeping the work on the UI thread and only throttling
+it. A long jump still froze the window for 12 s.
+
+(3) **Copy-on-write uncut bricks and cut-layer-only GPU rewrites.** A
+checkpoint or snapshot copies only the cut layers. The eye rewrites the cut
+layer in place within one playback session.
+
+Result: the UI frame went from 182 ms mean / 757 ms max to 0.13 / 0.83 ms. A
+full-length jump now takes 14.8 s instead of 12.4 s, but the UI stays live.
+
+(4) **The suspected doc_version reset is refuted.** Only user commands bump it,
+and arming Deviate mid-play correctly restarts. The "not updating" symptom was
+(1)-(3) starving the frame.
+
+Owed:
+- dirty-brick upload (the full ~1 MB cut layer is still sent per picture);
+- jump throughput;
+- the CPU-fallback eye still draws on the UI thread (at 20 Hz max).
+
+## Ladder tolerance and the all-air finish: two decisions (2026-11-06)
+
+(1) **The 2D depth ladder's slack is 0.008 mm, not 0.02** (`contour_depth.rs`
+`LEGAL_SLACK`). The verifier's tangency law allows 0.01 mm, so the generator
+must be stricter than its own judge: 2 µm margin for the two sections'
+separate quantization, and 3 µm above the 5 µm round-join sag so plain walls
+stay walkable. A flat-end Contour beside a 0.0145 mm-leaning facet now ends at
+the wall foot and verifies clean. No golden moved.
+
+(2) **An upright finish proven to cut nothing gets a note, not a warning.**
+`verify::cuts_no_material` proves it: every cutting move is upright, and its
+lowest tool point is at or above the stock and model tops. `air_law` then
+attaches "finish cuts no material: … check the op's heights" once.
+- It informs and does not block the post: cutting air is safe.
+- Anything not provable keeps today's verdict.
+
+## The crossing law bucketed: one decision (2026-11-06)
+
+**Law (a) uses a uniform grid instead of all-pairs** (Franklin 1989). A proper
+crossing lies in both chords' bounding boxes, so both chords are filed in that
+cell. Each pair is tested once, in the first cell both boxes cover. Very long
+and non-finite chords are tested against all chords.
+- Output is sorted and deduped as before, so warnings are byte-identical.
+- The all-pairs version is kept as the reference, and 3 equivalence tests
+  assert identical pair sets.
+- On a 50k-move path: 30.6 ms vs 3.33 s (109x).

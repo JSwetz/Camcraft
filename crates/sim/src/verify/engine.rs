@@ -7,7 +7,7 @@ use super::{crossing, finish, rapids, reach, section};
 
 use crate::cl::Toolpath;
 
-/// Verify a generated path. Quadratic in feed count (crossings), linear
+/// Verify a generated path. Grid-bucketed in feed count (crossings), linear
 /// per sample for the rest; called by the operation layer after
 /// generation, never on a systems hot path.
 pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
