@@ -1461,9 +1461,11 @@ handle engagement.")
       law in finish, drilling and face"); Face entry fallback and 5-axis posed guards also DONE
       2026-11-06; the 3-axis law uniform with the posed 30° cone also DONE 2026-11-06;
       the post-stamp audit for Multi-Axis Rough / Rotary Offset
-      and an app-level 5-axis test also DONE 2026-11-06; still owed: Rotary Parallel's
-      radial infeeds and Swarf's first raster entry always plunge (the ramp retry can't
-      help), Rotary Offset's true cylinder solid. Done and dropped from this list:
+      and an app-level 5-axis test also DONE 2026-11-06; the 3D ladder's and contour bore's second dives also DONE 2026-11-06
+      (one_descent.rs: 1 descent/level on 48 configs); still owed: the bore's LINEAR
+      lead (start 4.5 µm outside the ring) keeps a named second dive; Rotary
+      Parallel's radial infeeds and Swarf's first raster entry always plunge (the
+      ramp retry can't help); Rotary Offset's true cylinder solid. Done and dropped from this list:
       between-pass centre-cutting checks (`plunge_law`, 515525c),
       wall-start zigzag/slot second dives (none exist, test-pinned),
       Selection heights in the clearance notes ("Small owed UI items" (2)).
@@ -1685,13 +1687,9 @@ would.** — 📋
       produce a standalone executable that can be headless tested"):
       today only app (`camcraft-cli`), post and ui carry binaries
 
-- **Themes resolve from the build machine's source tree**: `state.rs` finds
-      `assets/themes` through `CARGO_MANIFEST_DIR`, a compile-time path, so a
-      shipped exe only sees themes on the machine that built it (found packaging
-      0.7.0). Resolve beside the exe (and fall back to the built-ins), the way
-      posts, machines and icons already embed. Until then the zip ships
-      `assets/themes` for reference only.
-
+- ~~**Themes resolve from the build machine's source tree**~~ - fixed 2026-11-06
+      (`ui/theme_dir.rs`: env, beside the exe, repo layout, manifest last; RECOMMENDED
+      "M13.3: themes resolved beside the exe").
 - **`crates/app/src/operation/material.rs` over the 400-line law** (720 lines):
       split `region_of` / `region_turn_of` into their own module.
 
@@ -1838,7 +1836,7 @@ the heavy lane green.
 | **M10.1** | A tool that can cut the operation | Done: the tool law - `KindInfo.tool_kinds` one table (A), `CreateOperation` / tool reassignment / op retype / tool retype refuse the mismatch at command construction by name and the ribbon darkens with the reason (B), an op whose tool is gone or wrong reads BLOCKED - generation and the post refuse, nothing stored, old files load untouched (C), the law tests (D); generator shape refusals stand as the backstop | ✅ |
 | **M11.1** | Smooth transitions | Done: facing reversals (3a73bdf), contour corners and pocket links (ad91fd6) as single tangent G2/G3 fillets, opt-in; circular-ramp arc entry (6d22f07, later true G18/G19 via M11.2 B); line-to-arc and arc-to-arc corner fillets (M11.1 RECOMMENDED); a closed path's seam corner stays sharp by decision | ✅ |
 | **M11.2** | Plane-aware transitions | CL arc plane + G17/G18/G19 in every post; vertical-plane entry/lead arcs as true arcs; plunge/ramp/helix/arc level transitions on every multi-level op; keep-down links with a stay-down limit, all user-chosen; done 2026-11-06 (axis-aligned entries post G18/G19, oblique stays chords by verdict) | ✅ |
-| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; pocket G17 arc entry and 3D first-stretch slowing done 2026-11-06; owed: 3D ladder / contour bore second dives, Rotary Parallel infeed / Swarf first-entry ramps (-> M11.3 Owed bullet) | ⚠️ |
+| **M11.3** | Lead in / lead out, complete | Heights from the selection; ramp angle/length, continuous helix radius/pitch, arc radius/sweep, plunge height/feed; lead extensions and shapes; entry feeds and an engagement limit; one Lead in / Lead out tab; pocket G17 arc entry, 3D first-stretch slowing, 3D ladder / bore second dives done 2026-11-06; owed: the bore's linear-lead second dive, Rotary Parallel infeed / Swarf first-entry ramps (-> M11.3 Owed bullet) | ⚠️ |
 | **M11.4** | Pick-agnostic regions, HSM adaptive | Face / edge / model picks resolve to one enclosed region and the chosen strategy; adaptive optimal load as % of tool diameter; constant engagement, curvature-continuous HSM motion, trochoids in overloaded channels, measured per path; A+B done; C rounds 2-5 done (spiral, crossing bucketing, microlift returns + hop budget: slot 0.9 m air, island named ring fallback); star-plan seams at 0 kinks past 5° (done); owed: the slot's entry-orbit 2 breaks, island legal late returns (round 6 finding: the 9 hops are the west-wall corner pieces k=585..631 whose leads read 16.5-18 deg vs the 15 deg bite on the RE-ORDERED stock - next: re-mark late pieces' leads with out.ras.walk_marks at schedule time and trim them to where they read <= bite, so the graze joins the cut and high() takes them), arc output for <20k moves, Pocket3D port (-> M11.4 Owed bullet) | ⚠️ |
 | **M11.5** | Area control | Tool containment (inside / on / outside the boundary), boundary offset and edge extension, extra include/exclude boundaries, one boundary group on every op with an area; open-boundary Contour band/extensions done; owed: boundaries on 3+2-indexed ops, the group on kinds beyond Face/Contour/Pocket/Adaptive2D/Offset2D/Pocket3D (-> M11.5 Owed bullet) | ⚠️ |
 | **M12.1** | Geometry kernel | Replace the current B-rep engine with Solidcore (Rust port of NVIDIA's SMLib kernel - Apache-2.0, wasm-ready, no-unsafe): booleans/offsets/fillets become kernel-driven; STEP IO rides truck until a ported translator; the dual-kernel agreement bench + corrupt-input corpus are truck's retirement gate | 📋 |

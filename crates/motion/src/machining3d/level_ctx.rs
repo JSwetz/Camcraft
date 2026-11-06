@@ -10,7 +10,7 @@ use super::params::Pocket3DParams;
 use super::shell::Field;
 
 use crate::cl::{MoveKind, PathBuilder, lattice};
-use crate::entry::{chord_hits_plan, dive_room};
+use crate::entry::chord_hits_plan;
 use crate::geo2d::{Point2, Region};
 use crate::geometry::Point3;
 use crate::machining2d::chord_clears;
@@ -197,16 +197,17 @@ pub(super) fn plunge_from_top(b: &mut PathBuilder, lvl: &LevelCtx, xy: Point2, f
 
 /// The entry arm's honorable failure (M8.1): the stated motion could
 /// not be honored at this level for `why`, so the ladder substitutes
-/// the axial dive at the disc's own floor room and says so in the
-/// path's notes. A floor with no room either - an erosion that
+/// the axial dive at `at` - the pass start itself where it stands off
+/// the wall, else a point along the first pass that does and links back
+/// to the start at depth (M11.3 owed: one descent per level, the link
+/// along the pass's own line), else the disc's own floor room
+/// (`descent::plunge_at` chooses, in that order) - and says so in the
+/// path's notes. A floor with no room either (`None`) - an erosion that
 /// vanished, a region past the triangulation cap - falls back to the
 /// wall dive this ladder knew before Phase 8, still loudly.
-pub(super) fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, why: &str) -> Option<Point2> {
+pub(super) fn substituted_dive(b: &mut PathBuilder, lvl: &LevelCtx, e: Point2, at: Option<Point2>, why: &str) -> Option<Point2> {
     let pf = lvl.p.links.approach.plunge(lvl.p.plunge_feed);
-    // M11.3: at the pass start itself where it stands off the wall - one
-    // dive, no link - else the floor's room.
-    let at_e = crate::entry::disc_clears(lvl.cen, e, (lvl.p.tool_diameter * 0.05).max(0.01));
-    match if at_e { Some(e) } else { dive_room(lvl.cen, 0.0) } {
+    match at {
         Some(d) => {
             b.note(format!("entry: {why} - axial dive on the floor instead at ({:.3}, {:.3})", d.x, d.y));
             traverse(b, lvl, d);

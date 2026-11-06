@@ -22,6 +22,7 @@ use crate::links::{helix_turns, plan_zig_capped, push_zig};
 use super::arcs::Seg;
 use super::contour_entry::{Engage, flatten};
 use super::descent::{Lvl, dive_link, feed_down, substituted_dive};
+use super::descent_dive::{along_pass, links_to};
 use super::slots::chord_clears;
 
 /// One bore-side descent's level facts.
@@ -52,7 +53,13 @@ pub(super) fn bore_entry(b: &mut PathBuilder, eng: &Engage, s: &BoreStep, lead: 
     // the plunge height (above it: rapid).
     let mat_top = if s.first || prev_z >= p.clearance_z { p.top_z.min(prev_z) } else { prev_z };
     let from = if s.first || prev_z >= p.clearance_z { (mat_top + a.plunge_height).min(prev_z) } else { prev_z };
-    let lvl = Lvl { cen: cert, passes: plan, pass: &[], walk: None, mat_top };
+    // The level's first cut, as the pocket ladders read theirs: the
+    // lead-in and the ring from the lead-in's start - where an entry that
+    // cannot close on the start lands a little along it and links back
+    // on the cut's own line (M11.3 owed: one descent per level, never the
+    // floor's room and a second dive while the ring has room).
+    let path = flatten(e2, &[lead, walk].concat());
+    let lvl = Lvl { cen: cert, passes: plan, pass: &path, walk: None, mat_top };
     let fd = a.descent_feed(p.feed);
     let pf = a.plunge(p.plunge_feed);
     let cur = b.at();
@@ -69,6 +76,10 @@ pub(super) fn bore_entry(b: &mut PathBuilder, eng: &Engage, s: &BoreStep, lead: 
     }
     match arm {
         Entry3D::Plunge => {
+            // The pass start off the wall, else the floor's room (M8.2's
+            // law the app's bore tests pin: the dive stands in the bounded
+            // room, never near the finished wall; its link to the start
+            // is proved at depth).
             let at_e = disc_clears(center, e2, (p.tool_diameter * 0.05).max(0.01));
             match if at_e { Some(e2) } else { dive_room(center, 0.0) } {
                 Some(d) => {
@@ -84,7 +95,6 @@ pub(super) fn bore_entry(b: &mut PathBuilder, eng: &Engage, s: &BoreStep, lead: 
         Entry3D::Ramp if a.ramp_zigs() => {
             // M11.3 B: zig-zag at the angle along the lead-in and the
             // ring - every point on a path the room law proved.
-            let path = flatten(e2, &[lead, walk].concat());
             let zf = if a.ramp_to_depth { (p.top_z + a.plunge_height).min(prev_z) } else { from };
             match plan_zig_capped(&path, zf - z, a.ramp_angle, a.ramp_max_len) {
                 Some((pre, n)) => {
@@ -146,19 +156,24 @@ pub(super) fn bore_entry(b: &mut PathBuilder, eng: &Engage, s: &BoreStep, lead: 
         }
         Entry3D::Helix => {
             // M11.3: the orbit placed to close ON the lead-in's start
-            // where a center a radius off it has the room, else the
-            // floor's widest room with a link; radii down to the minimum.
+            // where a center a radius off it has the room, else on the
+            // first cut a little along it (linked back to the start on the
+            // cut's own line), else the floor's widest room with a link;
+            // radii down to the minimum.
             let pitch_of = |r: f64| if s.pitch > 0.0 { s.pitch } else { a.entry_pitch(r) };
             let mut why = "the widened disc fits nowhere at this level";
+            let along: Vec<Point2> = along_pass(&lvl, m).into_iter().filter(|&q| links_to(&lvl, q, e2)).collect();
             for r in a.helix_radii(p.helix_radius) {
                 let Some(t) = helix_turns(from - z, r, pitch_of(r)) else {
                     why = "the helix pitch asks too many turns";
                     continue;
                 };
-                let at_e = (0..8).find_map(|k| {
-                    let (sn, cs) = (f64::from(k) * std::f64::consts::FRAC_PI_4).sin_cos();
-                    let c = Point2::new(lattice(e2.x + r * cs), lattice(e2.y + r * sn));
-                    disc_clears(center, c, r + 1e-3).then_some((e2, c))
+                let at_e = std::iter::once(e2).chain(along.iter().copied()).find_map(|q| {
+                    (0..8).find_map(|k| {
+                        let (sn, cs) = (f64::from(k) * std::f64::consts::FRAC_PI_4).sin_cos();
+                        let c = Point2::new(lattice(q.x + r * cs), lattice(q.y + r * sn));
+                        disc_clears(center, c, r + 1e-3).then_some((q, c))
+                    })
                 });
                 let placed = at_e.or_else(|| {
                     dive_room(center, r + 1e-3).map(|c| {

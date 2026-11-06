@@ -10621,3 +10621,49 @@ coming in; the ring's lean pose adopts the same hemisphere). The swarf goldens
 are the acceptance: zero turns > 90° between consecutive cutting moves, verify
 clean under the mid-move law. Dropped: restricting f2 to ball-contact kinds,
 which would have hidden a head flip.
+
+## M11.3: one descent per level on the 3D ladder and the bore contour: two decisions (2026-11-06)
+
+(1) **The 3D ladder's substituted dive takes the 2D pocket's `dive_point`
+search.** Zigzag + Arc entry dived twice: the arc's lead room was blocked at
+the corner pass start, M8.1's substituted dive landed in the floor's widest
+room, and the chord from there to the corner crossed the planned rows, so the
+link hopped and plunged again. The dive now lands on the pass start off the
+wall, else the first along-pass point that links back at depth, else the room.
+Result: one descent on every level of all 48 configurations (slab/boss ×
+Zigzag/Waterline × four entries × three link sets), verify clean.
+
+(2) **The bore contour's helix lands on the lead-in start, then along the
+pass, then the room.** Only the Linear lead still re-dives: lead-fit shrinks
+it to 0.25 mm and its start sits 4.5 µm outside the certified ring, so no
+at-depth link to it is provable. That branch keeps its named second dive
+under `plunge_law::guard` (a non-centre-cutting tool is refused by name).
+Owed: a lead-fit that keeps the linear lead's start inside the disc, or a
+`links_to` that accepts the lead's own certified segment. Dropped, on the
+STOP rule: switching the bore's Plunge arm to `dive_point` moved two pinned
+behaviours ("bores in through its floor's room"), and it was not a second
+dive, so it was reverted rather than re-blessed.
+
+## M13.3: themes resolved beside the exe: one decision (2026-11-06)
+
+**The theme folder is found at runtime** (`ui/theme_dir.rs`): `CAMCRAFT_THEMES`
+if absolute, else `<exe>/assets/themes` (the zip layout), else
+`<exe>/../../assets/themes` (a dev run from target/<profile>), and the
+compile-time `CARGO_MANIFEST_DIR` path LAST as the dev fallback only. The first
+that is a directory wins. With none, the built-ins stand and the status line
+says "no theme folder found beside the exe - the built-in themes stand" once;
+a bad override is named ("CAMCRAFT_THEMES=<v> is not a directory; ..."). The
+resolver is pure (env, exe, manifest, probe) and has nine unit tests. This was
+the 0.7.0 packaging finding; 0.8.0's zip now reads its own themes.
+
+## scripts/release.ps1: one decision (2026-11-06)
+
+**The cut is one command**: `scripts/release.ps1 -Version X.Y.Z -Title "..."`
+runs preflight (clean tree bar the release files, no existing tag), the full
+gate (every crate, ui from crates/ui, clippy, the three heavy lanes), the bump
+and lock sync (asserting the lock diff is version lines only), the two
+`chore(release)` commits and the annotated tag, the release build, a
+`post.exe --version` check, and the zip assembled exactly as release.yml does.
+It prints the zip path and the push command and never pushes. `-DryRun` walks
+every phase without changing state; `-SkipGate` / `-SkipBuild` exist for a
+re-cut after a docs-only fix. PowerShell 5.1 syntax throughout.

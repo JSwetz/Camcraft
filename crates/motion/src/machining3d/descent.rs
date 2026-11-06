@@ -313,7 +313,7 @@ pub(super) fn fallback(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask, why: &str, 
         b.note_once(&format!("{CENTER_CUT_REFUSAL} - {why}, and no helix or ramp fits onto Z {:.3}", lvl.z));
         return None;
     }
-    substituted_dive(b, lvl, a.entry, why)
+    substituted_dive(b, lvl, a.entry, plunge_at(lvl, a), why)
 }
 
 /// Post the descent onto `a.entry` at the level, traversing at `lvl.tz`.
@@ -417,7 +417,7 @@ pub(super) fn descend(b: &mut PathBuilder, lvl: &LevelCtx, a: &Ask) -> Option<Po
                 dive_link(b, lvl, d, entry);
                 Some(d)
             }
-            None => substituted_dive(b, lvl, entry, "the disc fits nowhere here"),
+            None => substituted_dive(b, lvl, entry, None, "the disc fits nowhere here"),
         },
     }
 }
