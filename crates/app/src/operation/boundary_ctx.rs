@@ -87,7 +87,11 @@ fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_s
         .filter(|r| !r.is_empty());
     // Part material standing above the cut plane(s): the pocket island
     // law's ladder for the pocket family on picked part features, the
-    // finished plane for Face and Contour on a part.
+    // finished plane for Face and Contour on a part. ALL of it - the
+    // plane's section plus the shadow of what hangs over the plane
+    // (`slice::material_overhead`): a ledge or lip the plane does not cut
+    // is still steel an extension must not flood and a face must not
+    // sweep.
     let mut islands = false;
     let blocked = match &op.params {
         OpParams::Pocket { .. } | OpParams::Adaptive2D { .. } | OpParams::Offset2D { .. } => {
@@ -97,7 +101,7 @@ fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_s
                         islands = true;
                         let mut b = Region::empty();
                         for z in planes {
-                            b = b.union(&slice::material_above(&part, z).map_err(from_slice)?)?;
+                            b = b.union(&slice::material_overhead(&part, z).map_err(from_slice)?)?;
                         }
                         Some(b)
                     }
@@ -111,7 +115,7 @@ fn build(world: &World, op: &Operation, tool_r: f64, material: &Material, part_s
             let z = hs
                 .bottom
                 .ok_or_else(|| GenError::Invalid("the cut plane does not resolve".into()))?;
-            Some(slice::material_above(&material.facets, z).map_err(from_slice)?)
+            Some(slice::material_overhead(&material.facets, z).map_err(from_slice)?)
         }
         _ => None,
     };

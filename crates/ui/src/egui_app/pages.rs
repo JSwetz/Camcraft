@@ -4937,6 +4937,7 @@ pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
         line,
         blocks,
         trace,
+        not_judged,
         ..
     } = view;
     // The trace pane's selection is DERIVED (the block owning the
@@ -4958,6 +4959,19 @@ pub(crate) fn gcode_window(ctx: &egui::Context, state: &mut State) {
                 // explains. Off by default - the plain viewer draws
                 // exactly as it always did.
                 ui.checkbox(trace, "trace");
+                // The header's not-judged line: same row as the
+                // checkbox, so a judged program's viewer geometry is
+                // untouched. Hover shows the whole reason.
+                if let Some(line) = not_judged.as_deref() {
+                    ui.add(
+                        Label::new(
+                            egui::RichText::new(format!("WARNING: {line}"))
+                                .color(ui.visuals().warn_fg_color),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(line);
+                }
             });
             let trace_on = *trace;
             let sel = owning(*line);

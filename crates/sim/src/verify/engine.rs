@@ -6,6 +6,11 @@ use super::laws::{bands_vs_fixtures, boundary_samples, dist2_seg, law_points, pr
 use std::collections::HashMap;
 use crate::cl::{is_vertical, MoveKind, Toolpath};
 use crate::geo2d::{Point2, Region};
+
+/// Sample spacing of the solid law (b2) along each move, mm - the
+/// operation layer's containment step.
+const SOLID_STEP: f64 = 0.25;
+
 /// Verify a generated path. Quadratic in feed count (crossings), linear
 /// per sample for the rest; called by the operation layer after
 /// generation, never on a systems hot path.
@@ -208,6 +213,24 @@ pub fn verify(path: &Toolpath, cx: &VerifyContext) -> Vec<Warning> {
             }
             if gouged {
                 warns.push(Warning::Gouge { at: i });
+            }
+        }
+        // (b2) The solid law: the plane sections above are blind to what
+        // no level slices - a blind floor between two planes, an
+        // overhang above the ring, an undercut lip - so a model-driven
+        // path also answers to the mesh's solid at every sampled tip,
+        // the square stack of `cx.tool` standing in for the cutter
+        // (never smaller than the real tip, so it can only over-report).
+        if let Some(f) = cx.model {
+            let law = super::SolidLaw {
+                step: SOLID_STEP,
+                allow: cx.gouge_tol + (-cx.stock_to_leave).max(0.0),
+                hole_walls: false,
+            };
+            for w in super::solid_hits(path, f, &super::Cutter::flat(cx.tool), &law) {
+                if !warns.contains(&w) {
+                    warns.push(w);
+                }
             }
         }
     }

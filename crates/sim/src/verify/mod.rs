@@ -100,6 +100,10 @@
 //! laws sample those sections' walls like any other island, and rest
 //! material counts from the deepest plane whose section does not hold
 //! the column - cutting around an island removes nothing inside it.
+//! Sections only see what a plane cuts, so the model also answers the
+//! solid law (b2, [`solid_hits`]): the whole assembly at every sampled
+//! tip along every move, against the mesh's solid - the blind floor no
+//! level slices, the slab hanging over a ring, an undercut lip.
 //!
 //! Conservative by design: it may warn where nothing is wrong (a wall
 //! thinner than the sampling, an exotic holder shape), it must never
@@ -120,11 +124,15 @@ pub use crate::tools::ToolGeom;
 
 mod engine;
 mod laws;
+mod probe;
 mod solid;
+mod solid_index;
 mod sweep;
+mod swept;
 mod types;
 
 pub use types::{FixturePart, Mode, VerifyContext, Warning};
 pub use engine::verify;
 pub use laws::{bands_vs_fixtures, rapids_vs_fixtures};
-pub use solid::solid_hits;
+pub use probe::Cutter;
+pub use solid::{SolidLaw, solid_hits};

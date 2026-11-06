@@ -136,8 +136,14 @@ pub(crate) fn v_verify(env: &mut Env, args: Vec<Value>) -> Result<Value, String>
     // caller named. A judgment that could not run never reads as passed.
     let fresh = all.iter().all(|(_, _, s)| *s == OpStatus::Ok);
     let gate = if fresh {
-        let problems = posting::verification_gate(&env.world);
-        json!({ "ok": problems.is_empty(), "problems": problems })
+        // The not-judged line rides beside the problems: a gate that
+        // passed without the material sim is said so, never silently.
+        let r = posting::verification_report(&env.world);
+        let mut g = json!({ "ok": r.problems.is_empty(), "problems": r.problems });
+        if let Some(line) = r.not_judged {
+            g["not_judged"] = json!(line);
+        }
+        g
     } else {
         json!({ "ok": false, "problems": [], "skipped": "an operation is stale or never generated - regenerate before judging the program" })
     };
@@ -187,6 +193,9 @@ pub(crate) fn v_post(env: &mut Env, args: Vec<Value>) -> Result<Value, String> {
     let posted = posting::post_script(&env.world, &to, &cps).map_err(|e| e.to_string())?;
     env.posted = Some(to.clone());
     let mut out = json!({ "path": to.display().to_string(), "ops": posted.ops, "lines": posted.lines });
+    if let Some(line) = &posted.not_judged {
+        out["not_judged"] = json!(line);
+    }
     if with_program {
         out["program"] = json!(posted.program);
     }

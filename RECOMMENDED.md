@@ -9705,3 +9705,48 @@ horizontal-plane arc entry for pockets, slowing only the first stretch
 for the engagement limit, and removing (not just naming) second dives
 on wall-start rows. Existing ops keep their cached high plunges until
 regenerated.
+
+## The exact solid-law verifier + post-gate visibility: eight decisions (2026-11-06)
+
+(1) **An exact solid law (swept convex atoms + ray parity)**, not plane
+sections. A straight move meets a facet exactly when the tool stack
+meets the facet extruded back along the move (convex Minkowski); the
+height-wise radius difference is convex, found by golden section. XY
+arcs are swept chordwise with 2 um widening; vertical-plane arcs are
+sampled every 0.25 mm (the stated limit). Catches the thin blind floor,
+the overhang slab and the undercut lip, which plane sections missed;
+every judged golden verifies warning for warning as before. 41 ms for a
+full verify of the user's part in release. Dropped: material_overhead
+per sample plane (still samples) and voxel/SDF (resolution-bound).
+
+(2) **Penetration is measured sideways**, which can over-report but
+never hide a cut.
+
+(3) **Edge vs body.** Contact by the fluted length is a Gouge; contact
+by only the shank or holder bands is ShankHit on the part, said once.
+Dropped: reporting band contact as Gouge ("cuts past the finish
+surface" when the edge didn't), found on the demo contour's shank.
+
+(4) **The 2D-op check uses the square stack** (`VerifyContext` has no
+tip shape yet - it may over-report, never hide); drill, bore and thread
+use their real tips plus a hole-wall chord-dip excuse the goldens prove
+needed. Owed: carry `Cutter` into `VerifyContext`; the shank, sweep and
+rapid-in-stock laws still read plain sections for uncut stock under
+overhangs; mid-move pose changes are judged at the end pose.
+
+(5) **The Face/Boundary blocked region uses material_overhead**, so an
+extended face under a ledge refuses by name.
+
+(6) **"Stock sim did not judge this program: <reason>" is visible** on
+the post result, status line and G-code viewer header, never in the NC
+file. It blocks only when some op also lacks a generator-time verdict.
+Dropped: always blocking (every rotary/turn/posed program unpostable)
+and silence.
+
+(7) **The column engine refuses posed moves by name** instead of
+cutting them upright; rest machining after a posed op refuses by name.
+Dropped: routing the verdict to the field engine, whose top-down
+heights can't see a gouge under an overhang that a tilted tool reaches.
+
+(8) **Found: rotary ops can't post** (verify convicts hundreds of
+shank/sweep hits on box/cylinder stock) - under investigation.

@@ -79,7 +79,7 @@ mod tiles;
 
 pub use backend::{Backend, Stock, FIELD_BAND, FIELD_VERDICT_EPS};
 pub use columns::Columns;
-pub use cut::{auto_cell, simulate, SimOp};
+pub use cut::{auto_cell, first_posed, simulate, SimOp, POSED_REFUSAL};
 pub use deviate::{color_classes, deviate, Deviation, DEV_TOL, ProgramSim, SimSurface};
 pub use dexel::{reach, Dexel};
 pub use field::SdfField;

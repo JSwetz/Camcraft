@@ -3,7 +3,7 @@
 use super::kernel::{MAX_CELLS_PER_AXIS, StockError, part_surface};
 use super::dexel::Dexel;
 
-use crate::cl::Move;
+use crate::cl::{Move, MoveKind};
 use crate::geometry::Triangle;
 /// One operation's claim on the stock: its cached moves and the tool
 /// that cut them. `ball` picks the exact sphere atom for a ball nose
@@ -137,6 +137,19 @@ impl Dexel {
 /// half-run grid that looks like a sim.
 pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
     check_ops(ops)?;
+    // The column atom is an UPRIGHT solid: every subtract below reads
+    // the tool as standing on +Z whatever `Move::axis` says. A posed
+    // move cut that way is the tilted program judged as an upright
+    // one - a silent wrong verdict - so the column arm refuses it by
+    // name, before a single column is lowered. The field arm reads the
+    // pose (`field_cut`); a caller that wants posed stock asks it.
+    for (i, op) in ops.iter().enumerate() {
+        if let Some(k) = first_posed(op.moves) {
+            return Err(StockError::Invalid(format!(
+                "op {i} move {k}: {POSED_REFUSAL}"
+            )));
+        }
+    }
     // A display lattice cut: the chord budget follows the cell the
     // viewer chose, which is honest for what this is - a picture of
     // stock being removed. The VERDICT scan (`envelope_scan`) keeps
@@ -154,6 +167,26 @@ pub fn simulate(dex: &mut Dexel, ops: &[SimOp]) -> Result<(), StockError> {
         }
     }
     Ok(())
+}
+
+/// The column engine's refusal of a tilted tool, said once so every
+/// caller (the post gate's not-judged line included) quotes one text.
+pub const POSED_REFUSAL: &str = "posed moves are not modelled by the column engine (its atoms stand upright on +Z; a tilted tool cut upright is a wrong verdict)";
+
+/// The first CUTTING move whose tool axis is not upright: `Some(a)`
+/// with `a` anything but a positive multiple of +Z (a non-finite axis
+/// counts - it states no upright pose either). `None` axes and an
+/// explicit +Z stamp are the prismatic case the column atoms model
+/// exactly; rapids touch nothing on either arm (RS-274 G0), so a
+/// posed rapid changes no verdict and is not refused.
+#[must_use]
+pub fn first_posed(moves: &[Move]) -> Option<usize> {
+    moves.iter().position(|m| {
+        m.kind != MoveKind::Rapid
+            && m.axis.is_some_and(|a| {
+                !(a[0] == 0.0 && a[1] == 0.0 && a[2].is_finite() && a[2] > 0.0)
+            })
+    })
 }
 
 /// The program's input gate, shared by both sim arms (M7.1 C): a

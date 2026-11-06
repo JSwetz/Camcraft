@@ -162,6 +162,26 @@ pub struct Posted {
     /// words. The viewer's trace pane rides the same run that wrote
     /// the file - one source of truth, never a re-post.
     pub blocks: Vec<engine::TraceBlock>,
+    /// The material sim's "did not judge this program: <reason>" line
+    /// when it refused the program and the generator-time verify
+    /// covered every op ([`sim_clause`]'s non-blocking arm). `None`
+    /// means the sim judged it. Never written into the NC text - the
+    /// program a judged post writes stays byte-identical - but every
+    /// surface that reports the post (status line, viewer header,
+    /// script result) shows it.
+    pub not_judged: Option<String>,
+}
+
+#[path = "posting_sim.rs"]
+mod sim_clause_impl;
+pub use sim_clause_impl::{sim_clause, SimClause, NOT_JUDGED};
+
+/// The verification gate's whole answer: the blocking problems, and
+/// the stock sim's visible not-judged line (see [`sim_clause`]).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct GateReport {
+    pub problems: Vec<String>,
+    pub not_judged: Option<String>,
 }
 
 /// Post every operation of the document, in tree order, to one NC
@@ -184,9 +204,9 @@ pub fn post_script(world: &World, out_path: &Path, cps: &str) -> Result<Posted, 
     // computed here and now - never a cached verdict carried in from
     // the viewer (the PostView law: a verdict about an older world
     // must not release this one's metal).
-    let problems = verification_gate(world);
-    if !problems.is_empty() {
-        return Err(format!("post blocked - {}", problems.join("; ")));
+    let report = verification_report(world);
+    if !report.problems.is_empty() {
+        return Err(format!("post blocked - {}", report.problems.join("; ")));
     }
     let stream = cnc::serialize(&records);
     let out = engine::run(cps, &machine_value(world), &stream)
@@ -214,6 +234,7 @@ pub fn post_script(world: &World, out_path: &Path, cps: &str) -> Result<Posted, 
         program: out.program,
         line_pos,
         blocks: out.blocks,
+        not_judged: report.not_judged,
     })
 }
 
@@ -308,24 +329,25 @@ pub fn program_ops(world: &World) -> Result<Vec<(String, Entity)>, String> {
 /// Deviate shows the shortfall, the gate respects the intent; an
 /// authored ask is what turns that promise into a fact), and a sim
 /// that cannot run at all (no stock, rotated stock, a revolved path's
-/// own frame - nothing judged here is claimed).
+/// own frame, a rotary sector, a posed move) WHEN every op carries its
+/// generator-time verify verdict - and then it is never silent: the
+/// not-judged line rides [`GateReport::not_judged`] to every surface
+/// that reports the post. A sim refusal with an op no generator
+/// verdict covers blocks (see [`sim_clause`]).
 #[must_use]
 pub fn verification_gate(world: &World) -> Vec<String> {
+    verification_report(world).problems
+}
+
+/// [`verification_gate`] with the stock sim's not-judged line beside
+/// the problems - what the post, the script API and the status line
+/// read, so the visible line and the binding gate are one run.
+#[must_use]
+pub fn verification_report(world: &World) -> GateReport {
     let mut problems = Vec::new();
 
-    match crate::stock_sim::simulate_document(world) {
-        Ok(sim) if sim.dev.gouge_cells > 0 => {
-            let at = sim.dev.max_gouge_at.map_or_else(
-                || "?".to_owned(),
-                |q| format!(" at ({:.2}, {:.2}, z {:.2})", q.x, q.y, q.z),
-            );
-            problems.push(format!(
-                "gouge: program cuts below the model in {} cell(s), worst {:.2} mm{}",
-                sim.dev.gouge_cells, sim.dev.max_gouge, at
-            ));
-        }
-        Ok(_) | Err(_) => {}
-    }
+    let sim = sim_clause(world);
+    problems.extend(sim.problem);
 
     if let Some(m) = crate::machine::of(world).1 {
         match crate::machine::check_document(world, &m) {
@@ -363,7 +385,7 @@ pub fn verification_gate(world: &World) -> Vec<String> {
     // what came after it). The law and lines live in
     // `operation::probe_problems`.
     problems.extend(crate::operation::probe_problems(world));
-    problems
+    GateReport { problems, not_judged: sim.not_judged }
 }
 
 /// The gate's fixture walk: one problem string per operation with a

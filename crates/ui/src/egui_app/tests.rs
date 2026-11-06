@@ -4012,6 +4012,7 @@ fn gcode_segment_highlights_the_move_the_scroll_line_posts() {
             line,
             blocks: Vec::new(),
             trace: false,
+            not_judged: None,
         });
         super::shell::gcode_segment(&st)
     };
@@ -4125,6 +4126,7 @@ fn the_viewer_window_publishes_the_scroll_cursor() {
         line: 0,
         blocks: Vec::new(),
         trace: false,
+        not_judged: None,
     });
     harness.run();
     {

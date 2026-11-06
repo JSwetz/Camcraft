@@ -210,11 +210,18 @@ fn a_ring_under_an_overhang_stops_above_it() {
     let f = post_and_slab(12.5);
     let region = slice::slice(&f, 20.0 - 1e-3).expect("top section");
     // The pre-fix answer, byte for byte: every plain section left the
-    // ring legal, so it ran the flat ladder - through the slab, and the
-    // per-plane verifier (plain section at each move's depth) is silent.
+    // ring legal, so it ran the flat ladder - through the slab. The
+    // per-plane verifier (plain section at each move's depth) was silent
+    // on it; the solid law (b2) reads the slab itself and convicts the
+    // moves under it - and only those (the first hit is one of them).
     let old = contour(&region, &params(20.0, 0.0, 4.0, 0.0)).expect("flat contour");
-    assert!(first_hit(&old, |q| hits_post_or_slab(q, 12.5, TOL)).is_some(), "the flat ladder runs through the slab");
-    assert_eq!(depth_verify(&old, &region, &f, 20.0, 0.0), Vec::new(), "a silent gouge: the verifier reads plain sections");
+    let (hit, _) = first_hit(&old, |q| hits_post_or_slab(q, 12.5, TOL)).expect("the flat ladder runs through the slab");
+    let w = depth_verify(&old, &region, &f, 20.0, 0.0);
+    assert!(w.contains(&Warning::Gouge { at: hit }), "the solid law sees the slab: {w:?}");
+    for wn in &w {
+        let (Warning::Gouge { at } | Warning::RapidInStock { at }) = wn else { panic!("{wn:?}") };
+        assert!(old.moves[*at].from.z.min(old.moves[*at].to.z) < u(X1, 12.5) + T, "only moves under the slab: {:?}", old.moves[*at]);
+    }
     let t = contour_on_part(&region, &f, &params(20.0, 0.0, 4.0, 0.0)).expect("contour");
     assert!(t.all_finite() && t.is_chained());
     if let Some((i, q)) = first_hit(&t, |q| hits_post_or_slab(q, 12.5, TOL)) {

@@ -101,6 +101,23 @@ pub fn simulate_document(
 ) -> Result<ProgramSim, String> {
     let planned = plan_program(world)?;
 
+    // The posed clause (M13.1 follow-up): the verdict below is the
+    // COLUMN engine, whose atoms stand upright - a 5-axis lean or a
+    // 3+2 frame's tilted moves would be cut as if vertical, a silent
+    // wrong verdict. The field arm does cut a posed move exactly (the
+    // pose rides `field_cut`'s solid), but its verdict reads heights
+    // marched from above, and a tilted tool is precisely the tool that
+    // can reach UNDER an overhang: a gouge there stands beneath an
+    // untouched top and reads clean. So neither arm's height verdict
+    // judges a posed program - refusal by name, which the post gate
+    // shows as "not judged" (the generator-time verify, which reads
+    // the lean, is what governs these ops).
+    for p in &planned {
+        if let Some(k) = first_posed(&p.moves) {
+            return Err(format!("{}: move {k}: {POSED_REFUSAL}", p.name));
+        }
+    }
+
     let min_r = planned.iter().map(|p| p.radius).fold(f64::INFINITY, f64::min);
     // The block the program starts on is the FIRST setup's stock - the
     // implicit-setup law makes that the legacy `Stock` entity exactly,

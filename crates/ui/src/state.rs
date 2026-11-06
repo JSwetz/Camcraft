@@ -856,6 +856,10 @@ pub struct PostView {
     /// undoable, not saved; the block list belongs to the one program
     /// on screen, so a document switch retires the whole viewer.
     pub trace: bool,
+    /// The material sim's not-judged line for this program
+    /// (`posting::Posted::not_judged`), shown in the viewer's header
+    /// row; `None` when the sim judged it.
+    pub not_judged: Option<String>,
 }
 
 /// A dock panel the ribbon's View door can close and reopen. The
@@ -3032,6 +3036,12 @@ impl State {
                     posted.lines,
                     path.display()
                 );
+                // A program the material sim refused to judge posts
+                // only on its generator-time verdicts - and says so on
+                // the status line, never silently.
+                if let Some(line) = &posted.not_judged {
+                    self.status = format!("{} - WARNING: {line}", self.status);
+                }
                 // The viewer shows what the gate just wrote - text and
                 // positions from the same engine run, so highlighting a
                 // line highlights the move that line posts.
@@ -3043,6 +3053,7 @@ impl State {
                     line: 0,
                     blocks: posted.blocks,
                     trace: false,
+                    not_judged: posted.not_judged,
                 });
             }
             // A refused post leaves any previous program (file and viewer)

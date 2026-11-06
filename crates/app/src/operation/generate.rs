@@ -2557,11 +2557,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     *tolerance,
                 ));
             }
-            // Containment rides every depth law: the model law samples a
-            // straight move at its end only, and a facing row or a
-            // stay-down link can cross solid between two clear ends.
-            if depth_law != DepthLaw::None {
-                contain_into(&mut warns, &path, &material.facets);
+            // The containment kinds' solid law (their verify runs without
+            // the model - exact rims): the tool's own tip and stack swept
+            // along every move against the part solid. The Section kinds
+            // answer the same law inside `verify` (b2), square stack.
+            if depth_law == DepthLaw::Contain {
+                contain_into(&mut warns, &path, &material.facets, &tool, depth_law, stl);
             }
             Ok((path, warns))
         }
@@ -2638,11 +2639,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     spindle: None,
                 },
             );
-            // Containment rides every depth law: the model law samples a
-            // straight move at its end only, and a facing row or a
-            // stay-down link can cross solid between two clear ends.
-            if depth_law != DepthLaw::None {
-                contain_into(&mut warns, &path, &m_gen.facets);
+            // The containment kinds' solid law (their verify runs without
+            // the model - exact rims): the tool's own tip and stack swept
+            // along every move against the part solid. The Section kinds
+            // answer the same law inside `verify` (b2), square stack.
+            if depth_law == DepthLaw::Contain {
+                contain_into(&mut warns, &path, &m_gen.facets, &tool, depth_law, stl);
             }
             if !fixture_boxes.is_empty() {
                 warns.extend(verify::bands_vs_fixtures(
@@ -2674,12 +2676,15 @@ pub(super) enum DepthLaw {
     /// The full model law: the gouge tangency and containment checked
     /// against the part's section at every move's deepest plane, and
     /// the reach laws reading those sections as islands - plus the
-    /// containment law sampled ALONG each move.
+    /// solid law (b2): the tool stack swept along every move against
+    /// the part's solid, which no plane section can stand in for.
     Section,
-    /// Containment only (drill, bore, thread mill): their regions carry
-    /// exact rims for the mesh's tessellated hole walls, so tangency to
-    /// the facets would convict a matched tool - but a center inside
-    /// the part's section (a plunge past a blind floor) is a gouge.
+    /// The solid law only (drill, bore, thread mill): their regions
+    /// carry exact rims for the mesh's tessellated hole walls, so
+    /// tangency to the facets would convict a matched tool - the solid
+    /// law excuses exactly those rims, and a stack entering the part
+    /// anywhere else (a plunge past or through a blind floor, a lip
+    /// over the hole) is a gouge.
     Contain,
 }
 
@@ -2712,15 +2717,29 @@ pub(super) fn depth_law_of(params: &OpParams, src: &SrcRef, part_solid: bool) ->
     }
 }
 
-/// Sample spacing of the containment law along a straight move, mm:
-/// finer than any drill the catalog carries, coarse enough to stay
-/// linear on a long traverse.
+/// Sample spacing of the solid law along a vertical-plane arc, mm (every
+/// other move is swept exactly): finer than any drill the catalog
+/// carries.
 const CONTAIN_STEP: f64 = 0.25;
 
-/// Append the containment law's gouges that the region laws did not
-/// already report, keeping the list's move order.
-fn contain_into(warns: &mut Vec<Warning>, path: &Toolpath, facets: &[Triangle]) {
-    for w in verify::solid_hits(path, facets, GOUGE_TOL, CONTAIN_STEP) {
+/// Append the solid law's warnings that the region laws did not
+/// already report, keeping the list's move order: the tool's own tip
+/// and stack against the part solid at every sampled position, the
+/// containment kinds' tessellated hole rims excused (`SolidLaw`).
+fn contain_into(
+    warns: &mut Vec<Warning>,
+    path: &Toolpath,
+    facets: &[Triangle],
+    tool: &crate::tools::Tool,
+    law: DepthLaw,
+    stl: f64,
+) {
+    let law = verify::SolidLaw {
+        step: CONTAIN_STEP,
+        allow: GOUGE_TOL + (-stl).max(0.0),
+        hole_walls: law == DepthLaw::Contain,
+    };
+    for w in verify::solid_hits(path, facets, &verify::Cutter::of(tool), &law) {
         if !warns.contains(&w) {
             warns.push(w);
         }
