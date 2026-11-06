@@ -6,7 +6,7 @@
 //! convicted. Pushed into the floor, the same op's path still convicts
 //! under the real tip. The app's own doors never let the op get there:
 //! a negative stock to leave is refused at creation, and a Bottom below
-//! the floor is held at the fillet's seam by the depth ladder - so the
+//! the floor is held at the wall's foot by the depth ladder - so the
 //! floor case drives the generated path down by hand.
 //!
 //! Why a bull nose and not a ball: the tool law refuses a ball-end
@@ -17,21 +17,26 @@
 //! which exercises the same real-tip path (`Cutter::of`, the section
 //! law's `tip_height` lift, the solid law's real tip).
 //!
-//! Why the margin is thin (documented, not hidden): the Contour
-//! generator keeps the tool off the fillet by itself. Its per-ring
-//! depth ladder (`machining2d::contour_depth`) reads the part solid
-//! with a SQUARE section - a ring ends at the deepest vertex plane whose
-//! material above stands no nearer than `r + leave - 0.02` - so no
-//! generated level ever puts the tip down on the fillet, and a square
-//! tool at those levels is off it to within that 0.02 mm slack. The
-//! verifier's tangency law allows only `gouge_tol` (0.01 mm). The
-//! fillet here is a plain 16-facet R3 quarter round: its first facet
-//! below the wall leans out 0.0145 mm, so the ladder's floor is that
-//! vertex plane, inside the generator's slack and outside the square
-//! verdict's tolerance. The strongest true statement is then: the real
-//! tip, which reaches full radius only `corner_r` above its tip point,
-//! is clear; the square stack, full radius at the tip, bites the fillet
-//! by more than the tolerance; and the ladder never reaches the floor.
+//! Why the square case is hand-placed (M13.7, ladder vs verifier): the
+//! Contour generator keeps the tool off the fillet by itself. Its
+//! per-ring depth ladder (`machining2d::contour_depth`) reads the part
+//! solid with a SQUARE section - a ring ends at the deepest vertex
+//! plane whose material above stands no nearer than `r + leave -
+//! 0.008` - which is stricter than the verifier's tangency law
+//! (`gouge_tol`, 0.01 mm), so no generated level is one the square
+//! verdict convicts. The fillet here is a plain 16-facet R3 quarter
+//! round: its first facet below the wall leans out 0.0145 mm. Before
+//! the ladder was tightened (its slack was 0.02) the ring ended on that
+//! facet's lower vertex plane (the "seam"), inside the generator's
+//! slack and outside the square verdict's tolerance - so a FLAT end
+//! mill's generated Contour was convicted of a gouge that is not real,
+//! blocking its post. Now the ladder stops at the wall's foot (Z = R,
+//! the fillet's top), where a flat and a bull nose are both clean. The
+//! real-tip-vs-square difference is therefore proven on the generated
+//! path with its floor level moved down to the seam by hand: there the
+//! real tip, which reaches full radius only `corner_r` above its tip
+//! point, is clear, and the square stack, full radius at the tip, bites
+//! the leaning facet by more than the tolerance.
 //!
 //! Provenance: our own fixtures, specced from the Prime Directive and
 //! the handbook end-mill side views; no vendor material.
@@ -58,6 +63,7 @@ use flecs_ecs::prelude::World;
 
 const BALL: &str = "BN-1000";
 const BULL: &str = "BB-1000-R1";
+const FLAT: &str = "EM-1000-4FL";
 /// Fillet radius at the wall's foot, and its facet count.
 const FILLET_R: f64 = 3.0;
 const FILLET_N: usize = 16;
@@ -65,6 +71,8 @@ const FILLET_N: usize = 16;
 const WALL: f64 = 10.0;
 const TOP: f64 = 10.0;
 const FLOOR: f64 = 0.0;
+/// The wall's foot, where the fillet meets it: the ladder's floor.
+const FOOT: f64 = FLOOR + FILLET_R;
 
 /// The fillet's profile in (x, z), from the floor (WALL + R, 0) up to
 /// the wall (WALL, R): a quarter round about (WALL + R, R), endpoints
@@ -169,8 +177,13 @@ fn world_with(tool_name: &str) -> (World, History) {
 /// Create + generate a bull-nose Contour on the part through the app's
 /// own path: the cached path and the warnings the app attached.
 fn generate(leave: f64) -> (Toolpath, Vec<Warning>) {
-    let (world, mut h) = world_with(BULL);
-    let op = CreateOperation::new(&world, "C1", BULL, SrcRef::Entity("part".into()), contour_op(leave));
+    generate_with(BULL, leave)
+}
+
+/// The same, with `tool_name` from the catalog.
+fn generate_with(tool_name: &str, leave: f64) -> (Toolpath, Vec<Warning>) {
+    let (world, mut h) = world_with(tool_name);
+    let op = CreateOperation::new(&world, "C1", tool_name, SrcRef::Entity("part".into()), contour_op(leave));
     h.execute(&world, op.expect("create"));
     h.execute(&world, GenerateOperation::new(&world, "C1").expect("generate"));
     let e = model::find_by_name(&world, "C1").expect("op");
@@ -233,6 +246,21 @@ fn seam() -> (f64, f64) {
     (z, x - WALL)
 }
 
+/// `path` with every endpoint on plane `from_z` moved to `to_z` (bit
+/// exact match: the generator's own level values).
+fn relevel(path: &Toolpath, from_z: f64, to_z: f64) -> Toolpath {
+    let mut out = path.clone();
+    for m in &mut out.moves {
+        if m.from.z.to_bits() == from_z.to_bits() {
+            m.from.z = to_z;
+        }
+        if m.to.z.to_bits() == from_z.to_bits() {
+            m.to.z = to_z;
+        }
+    }
+    out
+}
+
 #[test]
 fn a_ball_end_contour_is_refused_at_the_tool_door() {
     let (world, _h) = world_with(BALL);
@@ -244,9 +272,9 @@ fn a_ball_end_contour_is_refused_at_the_tool_door() {
 #[test]
 fn a_bull_nose_contour_along_a_filleted_wall_is_clean_with_its_tip_and_convicted_square() {
     let (seam_z, lean) = seam();
-    // The fixture sits in the window the module law names: inside the
-    // generator's 0.02 slack (with the offset's 0.005 arc sag), outside
-    // the verdict's 0.01 tolerance.
+    // The fixture sits in the window the module law names: outside the
+    // verdict's 0.01 tolerance (so outside the ladder's 0.008 slack
+    // too), inside the old 0.02 ladder slack with the 0.005 arc sag.
     assert!(lean > 0.01 && lean + 0.005 < 0.02, "fillet seam leans {lean}");
     let real_tip = Cutter::of(&tool(BULL));
     assert!(real_tip.corner_r > 0.0 && real_tip.tip_height() > 0.0, "{real_tip:?}");
@@ -254,20 +282,30 @@ fn a_bull_nose_contour_along_a_filleted_wall_is_clean_with_its_tip_and_convicted
     let (path, warns) = generate(0.0);
     assert!(!path.moves.is_empty(), "{:?}", path.notes);
     // The generator keeps the tip off the fillet: the ring ends at the
-    // fillet's top seam, never at the floor - the whole foot is the
-    // next op's rest.
+    // wall's foot, never on the fillet - the whole foot is the next
+    // op's rest.
     let low = deepest(&path);
-    assert!((low - seam_z).abs() < 1e-9, "ring floor {low}, seam {seam_z}: {:?}", path.notes);
-    assert!(low > FLOOR, "the ladder never reaches the floor");
+    assert!((low - FOOT).abs() < 1e-9, "ring floor {low}, foot {FOOT}: {:?}", path.notes);
 
     // The app's own verdict, with the op's real tip: no gouge.
     assert_eq!(gouged_moves(&warns), Vec::<usize>::new(), "app warnings {warns:?}");
-    // The re-run with the same real tip agrees with the app.
+    // The re-run with the same real tip agrees with the app; at the
+    // foot the square stack is clean too (the ladder is stricter than
+    // the verdict, so nothing generated is convicted square).
     let real = judge(&path, Some(real_tip), 0.0);
     assert_eq!(gouged_moves(&real), Vec::<usize>::new(), "real-tip re-run {real:?}");
+    let square = judge(&path, None, 0.0);
+    assert_eq!(gouged_moves(&square), Vec::<usize>::new(), "square at the foot {square:?}");
 
-    // The square stack on the very same path convicts: its rim at the
-    // tip plane bites the fillet's first facet by more than tolerance.
+    // Hand-placed (see the module law): the floor level moved down to
+    // the fillet's seam. The real tip is still clear there...
+    let path = relevel(&path, low, seam_z);
+    assert!((deepest(&path) - seam_z).abs() < 1e-12);
+    let real = judge(&path, Some(real_tip), 0.0);
+    assert_eq!(gouged_moves(&real), Vec::<usize>::new(), "real tip at the seam {real:?}");
+    // ...and the square stack on the very same path convicts: its rim
+    // at the tip plane bites the fillet's first facet by more than
+    // tolerance.
     let square = judge(&path, None, 0.0);
     let convicted = gouged_moves(&square);
     assert!(!convicted.is_empty(), "the square stack must convict: {square:?}");
@@ -286,17 +324,8 @@ fn the_same_contour_pushed_into_the_floor_still_convicts() {
     // plate: the tip now buries itself in the fillet and the floor.
     // The real tip must convict it - its corner is no excuse in steel.
     let (path, _) = generate(0.0);
-    let (seam_z, _) = seam();
     let sunk_z = FLOOR - 0.5;
-    let mut sunk = path.clone();
-    for m in &mut sunk.moves {
-        if m.from.z.to_bits() == seam_z.to_bits() {
-            m.from.z = sunk_z;
-        }
-        if m.to.z.to_bits() == seam_z.to_bits() {
-            m.to.z = sunk_z;
-        }
-    }
+    let sunk = relevel(&path, deepest(&path), sunk_z);
     assert!((deepest(&sunk) - sunk_z).abs() < 1e-12);
     let real = judge(&sunk, Some(Cutter::of(&tool(BULL))), 0.0);
     let convicted = gouged_moves(&real);
@@ -314,7 +343,7 @@ fn the_same_contour_pushed_into_the_floor_still_convicts() {
     let err = op.err().map(|e| format!("{e:?}")).unwrap_or_default();
     assert!(err.contains("not usable"), "negative leave is refused at creation: {err:?}");
     // A Bottom below the floor is held by the ladder: the ring still
-    // ends at the fillet's seam, never in the plate, and stays clean.
+    // ends at the wall's foot, never in the plate, and stays clean.
     let (world, mut h) = world_with(BULL);
     let mut deep = contour_op(0.0);
     if let OpParams::Contour { bottom_z, .. } = &mut deep {
@@ -324,6 +353,27 @@ fn the_same_contour_pushed_into_the_floor_still_convicts() {
     h.execute(&world, GenerateOperation::new(&world, "C2").expect("generate"));
     let e = model::find_by_name(&world, "C2").expect("op");
     let tp = model::toolpath_of(&world, &e).expect("cached path");
-    assert!((deepest(&tp.path) - seam_z).abs() < 1e-9, "bottom below the floor: {:?}", tp.path.notes);
+    assert!((deepest(&tp.path) - FOOT).abs() < 1e-9, "bottom below the floor: {:?}", tp.path.notes);
     assert_eq!(gouged_moves(&tp.warnings), Vec::<usize>::new(), "{:?}", tp.warnings);
+}
+
+#[test]
+fn a_flat_end_contour_beside_a_leaning_facet_verifies_clean() {
+    // The ladder-vs-verifier law (M13.7): the fillet's first facet
+    // leans out of the wall 0.0145 mm, more than the verdict's 0.01
+    // tolerance. With the old 0.02 ladder slack a flat end mill's ring
+    // ended on that facet's seam, where the square verdict (a flat tip
+    // IS square) convicted a gouge that is not real and blocked the
+    // post. The ladder now stops where its own verifier is clean.
+    let (seam_z, lean) = seam();
+    assert!(lean > 0.01, "the fixture's facet must lean past tolerance: {lean}");
+    let (path, warns) = generate_with(FLAT, 0.0);
+    assert!(!path.moves.is_empty(), "{:?}", path.notes);
+    let low = deepest(&path);
+    assert!(low > seam_z + 1e-6, "the flat ring must stop above the leaning facet: floor {low}, seam {seam_z}");
+    assert!((low - FOOT).abs() < 1e-9, "ring floor {low}, foot {FOOT}: {:?}", path.notes);
+    assert!(
+        !warns.iter().any(|w| matches!(w, Warning::Gouge { .. })),
+        "the generated flat-end Contour must verify clean: {warns:?}"
+    );
 }

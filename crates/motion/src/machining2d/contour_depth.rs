@@ -17,9 +17,20 @@ use crate::geometry::Triangle;
 use crate::geometry::slice::{material_above, shadow_above};
 
 /// Radial slack of the ring-legality test, mm: the offset ring's round
-/// joins sit a chord sag inside the exact offset; anything nearer the
-/// part than `r + leave - LEGAL_SLACK` means the wall moved in.
-const LEGAL_SLACK: f64 = 0.02;
+/// joins sit a chord sag inside the exact offset (`geo2d`'s 5 um arc
+/// tolerance); anything nearer the part than `r + leave - LEGAL_SLACK`
+/// means the wall moved in.
+///
+/// Held STRICTER than the verifier's tangency law (b), which convicts
+/// below `r - gouge_tol` with `gouge_tol` = 0.01 mm (M13.7): a ring the
+/// ladder walks keeps every sample - each move end the law reads, plus
+/// the midpoints - at least `r - 0.008`, so the generator never ends a
+/// pass where its own square verdict convicts a gouge that is not real.
+/// The 2 um margin covers the two readers' separate micron-quantized
+/// sections; the 3 um over the arc sag keeps ordinary walls walkable.
+/// (It was 0.02, wider than the verdict: a wall facet leaning out
+/// 0.01-0.02 mm let a flat-end ring down where law (b) blocked the post.)
+const LEGAL_SLACK: f64 = 0.008;
 /// Two heights closer than this are one level (a floor that lands on an
 /// existing level never doubles it).
 const SAME_LEVEL: f64 = 1e-6;

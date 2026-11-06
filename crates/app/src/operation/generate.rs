@@ -2587,6 +2587,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     tol,
                 );
             }
+            // The all-air verdict (M13.8): a finish that provably cuts
+            // nothing says so by name instead of passing silent.
+            let path = super::air_law::air_noted(path, mode, &material.facets, stock_top_z, &geom);
             Ok((path, warns))
         }
         Some(f) => {

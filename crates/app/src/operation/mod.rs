@@ -105,6 +105,8 @@ mod job;
 pub use job::*;
 mod generate;
 mod rotary_law;
+mod air_law;
+pub use air_law::AIR_NOTE;
 pub use generate::*;
 #[cfg(test)]
 mod tests;

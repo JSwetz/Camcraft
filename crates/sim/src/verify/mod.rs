@@ -13,7 +13,9 @@
 //!
 //! - [`Warning::Crossing`] - two Feed moves whose Z ranges overlap cross
 //!   in XY. Proper crossings only: touching at a shared vertex (a closed
-//!   trace loop, a serpentine join) is not a crossing. `Mode::Envelope`
+//!   trace loop, a serpentine join) is not a crossing. Grid-bucketed
+//!   (`crossing`, M11.4 C round 4: the all-pairs pair set exactly,
+//!   [`crossed_pairs_all`] its reference). `Mode::Envelope`
 //!   stands it down - crossed raster families overlap by design, and the
 //!   chord that matters there is measured by law (f) instead;
 //!   `Mode::Revolve` and `Mode::Radial` stand it down because the XY
@@ -104,6 +106,12 @@
 //!   (the ridge rest law only judges points two passes came near, so
 //!   an all-air pass never reaches it).
 //!
+//! Beside the warnings, one positive verdict (M13.8): an upright
+//! program whose every cut stands above all material provably cuts
+//! nothing ([`cuts_no_material`]). The laws above are silent on it -
+//! no ball meets the part - so the operation layer names it with a
+//! note instead of letting that silence pass as a judged finish.
+//!
 //! With [`VerifyContext::model`] set (the 3-D pocket, M2.1a) the
 //! boundary is depth-dependent: the gouge law adds the model's
 //! cross-section strictly above each move's deepest plane, the reach
@@ -132,6 +140,7 @@
 pub use crate::tools::ToolGeom;
 
 
+mod air;
 mod contact;
 mod crossing;
 mod engine;
@@ -151,7 +160,10 @@ mod swept;
 mod types;
 
 pub use types::{FixturePart, Mode, VerifyContext, Warning};
+#[doc(hidden)]
+pub use crossing::{crossed_pairs, crossed_pairs_all};
 pub use engine::verify;
+pub use air::cuts_no_material;
 pub use laws::{bands_vs_fixtures, rapids_vs_fixtures};
 pub use probe::Cutter;
 pub use rotary::{rotary_hits, RotaryAxis, RotaryLaw};

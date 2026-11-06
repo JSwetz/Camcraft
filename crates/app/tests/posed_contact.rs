@@ -7,7 +7,8 @@
 //! and a dome - the two shapes the pivot bug was measured on.
 //!
 //! Gate map (M4.4): covers app::verify (sim::verify contact law, the
-//! Envelope branch of engine), app::multiaxis (contour5d stamp).
+//! Envelope branch of engine, the all-air verdict `cuts_no_material`),
+//! app::multiaxis (contour5d stamp).
 //! Lane shape (M4.4): structural (f2) verdicts run in seconds; the
 //! full envelope scans ride the same binary because these fixtures
 //! are small (a 64-gon bar, a 16x8 dome).
@@ -17,7 +18,7 @@ use camcraft_app::finishing3d::{self, Finish3DParams, FinishPattern};
 use camcraft_app::geo2d::{Loop, Point2, Region};
 use camcraft_app::geometry::{Point3, Triangle};
 use camcraft_app::multiaxis::{contour5d, AxisControl};
-use camcraft_app::verify::{Mode, ToolGeom, VerifyContext, Warning, verify};
+use camcraft_app::verify::{Mode, ToolGeom, VerifyContext, Warning, cuts_no_material, verify};
 
 const TAU: f64 = std::f64::consts::TAU;
 const R: f64 = 3.0;
@@ -238,4 +239,53 @@ fn the_upright_finish_is_not_judged_by_the_contact_law() {
     let t = finishing3d::waterline(&f, &finish(19.0, 2.0)).expect("generates");
     let (region, tool) = (square(25.0), ball());
     assert_eq!(verify(&t, &ctx(&region, &f, &tool)), Vec::new());
+}
+
+/// `t` with every move lifted `dz`.
+fn lift(t: &Toolpath, dz: f64) -> Toolpath {
+    let moves = t
+        .moves
+        .iter()
+        .map(|m| Move { from: p3(m.from.x, m.from.y, m.from.z + dz), to: p3(m.to.x, m.to.y, m.to.z + dz), ..*m })
+        .collect();
+    Toolpath::new(moves)
+}
+
+#[test]
+fn an_upright_all_air_finish_is_judged_clean_and_cutting_nothing() {
+    // The M13.8 owed item: an upright finish lifted wholly above the
+    // material verifies silent - no ball meets the part, so neither
+    // the facet gouge law nor the ridge rest law speaks, and (f2) is
+    // scoped to leans. That silence was unjudged. The all-air verdict
+    // now says it positively: clean, cuts nothing.
+    let f = bar();
+    let t = finishing3d::waterline(&f, &finish(19.0, 2.0)).expect("generates");
+    let (region, tool) = (square(25.0), ball());
+    let c = ctx(&region, &f, &tool);
+    // The bar's top and the stock top are both Z 20; the lowest ring
+    // is at Z 2, so a 30 mm lift puts every cut at Z >= 32.
+    let air = lift(&t, 30.0);
+    assert_eq!(verify(&air, &c), Vec::new(), "an all-air pass gouges and leaves nothing it was near");
+    assert!(cuts_no_material(&air, c.model, c.stock_top_z, &tool, c.gouge_tol), "the all-air pass is proven clean");
+
+    // The finish on the part is NOT all-air: it cuts.
+    assert!(!cuts_no_material(&t, c.model, c.stock_top_z, &tool, c.gouge_tol));
+    // A lift that leaves the low rings inside the stock's height is
+    // not proven either (it may cut stock above the part).
+    assert!(!cuts_no_material(&lift(&t, 10.0), c.model, c.stock_top_z, &tool, c.gouge_tol));
+    // One cut back down at the part ends the proof.
+    let mut one = air.clone();
+    if let Some(k) = one.moves.iter().position(|m| m.kind != MoveKind::Rapid) {
+        one.moves[k].to.z = 19.0;
+    }
+    assert!(!cuts_no_material(&one, c.model, c.stock_top_z, &tool, c.gouge_tol));
+    // A posed all-air pass is not this law's: a leaning stack can
+    // reach below its tip's plane, and (f2) judges leans.
+    let mut posed = air.clone();
+    for m in &mut posed.moves {
+        m.axis = Some([0.5_f64.sqrt(), 0.0, 0.5_f64.sqrt()]);
+    }
+    assert!(!cuts_no_material(&posed, c.model, c.stock_top_z, &tool, c.gouge_tol));
+    // No cut at all states nothing.
+    assert!(!cuts_no_material(&Toolpath::new(Vec::new()), c.model, c.stock_top_z, &tool, c.gouge_tol));
 }
