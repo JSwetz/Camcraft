@@ -1,11 +1,15 @@
 # Release cut (Release train, 0.8.0): automates the 0.7.0 recipe from
 # RECOMMENDED.md ("Release 0.7.0", "The release train"); the zip layout
 # mirrors .github/workflows/release.yml. Never pushes.
+# M13.3: signing rides scripts/sign.ps1 (a no-op without a certificate in
+# the environment) and -Installer adds the Inno Setup build from the same
+# staged tree (skipped by name when ISCC.exe is not installed).
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Title = "release",
     [switch]$SkipGate,
     [switch]$SkipBuild,
+    [switch]$Installer,
     [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
@@ -46,7 +50,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { Fail "-Version must be X.Y.Z, got '$
 if ($DryRun) { Write-Host "DRY RUN: nothing below changes state." }
 
 # ---- 1. Preflight -------------------------------------------------------
-Banner "Phase 1/8: preflight"
+Banner "Phase 1/10: preflight"
 $allowed = @("RELEASE_NOTES.md", "TESTING.md", "Cargo.toml", "Cargo.lock", "RECOMMENDED.md")
 $status = @(git status --porcelain)
 if ($LASTEXITCODE -ne 0) { Fail "git status failed" }
@@ -67,7 +71,7 @@ if ($existing) { Fail "tag $tag already exists" }
 Write-Host "tag $tag is free"
 
 # ---- 2. Gate ------------------------------------------------------------
-Banner "Phase 2/8: gate"
+Banner "Phase 2/10: gate"
 if ($SkipGate) { Write-Host "skipped (-SkipGate)" } else {
     Run "cargo" (@("test", "-j", "6") + (Pkgs $nonUi) + @("--no-fail-fast", "--", "--test-threads=6"))
     Run "cargo" @("test", "-j", "6", "-p", "camcraft-ui", "--", "--test-threads=6") (Join-Path $root "crates/ui")
@@ -81,7 +85,7 @@ if ($SkipGate) { Write-Host "skipped (-SkipGate)" } else {
 }
 
 # ---- 3. Bump ------------------------------------------------------------
-Banner "Phase 3/8: version bump"
+Banner "Phase 3/10: version bump"
 $tomlPath = Join-Path $root "Cargo.toml"
 $toml = [System.IO.File]::ReadAllText($tomlPath)
 $m = [regex]::Match($toml, '(?s)(\[workspace\.package\].*?\r?\nversion\s*=\s*")([^"]+)(")')
@@ -105,7 +109,7 @@ if ($DryRun) {
 }
 
 # ---- 4. Commit and tag --------------------------------------------------
-Banner "Phase 4/8: commit and tag"
+Banner "Phase 4/10: commit and tag"
 $msg1 = "chore(release): $Version - $Title`n`n$coAuthor"
 $msg2 = "chore(release): sync Cargo.lock to $Version`n`n$coAuthor"
 if ($DryRun) {
@@ -124,13 +128,13 @@ if ($DryRun) {
 }
 
 # ---- 5. Build -----------------------------------------------------------
-Banner "Phase 5/8: release build"
+Banner "Phase 5/10: release build"
 if ($SkipBuild) { Write-Host "skipped (-SkipBuild)" } else {
     Run "cargo" @("build", "-j", "6", "--release")
 }
 
 # ---- 6. Verify binary version --------------------------------------------
-Banner "Phase 6/8: verify post.exe version"
+Banner "Phase 6/10: verify post.exe version"
 $postExe = Join-Path $root "target/release/post.exe"
 if ($DryRun) {
     Write-Host "[dry-run] $postExe --version must report $Version"
@@ -143,8 +147,21 @@ if ($DryRun) {
     Write-Host "post.exe reports $reported"
 }
 
-# ---- 7. Assemble --------------------------------------------------------
-Banner "Phase 7/8: assemble zip"
+# ---- 7. Sign ------------------------------------------------------------
+# Before staging, so the zip and the installer carry the same signed exes.
+# sign.ps1 prints "unsigned: no certificate configured" and exits 0 when no
+# CAMCRAFT_SIGN_* variable is set: an unsigned cut is still a cut.
+Banner "Phase 7/10: sign binaries"
+$exes = @("camcraft-ui.exe", "camcraft-cli.exe", "post.exe") | ForEach-Object { Join-Path $root "target/release/$_" }
+$signScript = Join-Path $PSScriptRoot "sign.ps1"
+if ($SkipBuild -and -not $DryRun -and -not (Test-Path $exes[0])) {
+    Write-Host "skipped (no release exes; -SkipBuild)"
+} else {
+    Run "powershell" (@("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $signScript, "-Path") + $exes)
+}
+
+# ---- 8. Assemble --------------------------------------------------------
+Banner "Phase 8/10: assemble zip"
 $stage = Join-Path $root "dist/camcraft-$Version-win-x64"
 $zip = Join-Path $root "dist/camcraft-$Version-win-x64.zip"
 if ($DryRun) {
@@ -166,9 +183,28 @@ if ($DryRun) {
     Compress-Archive -Path $stage -DestinationPath $zip -Force
 }
 
-# ---- 8. Summary ---------------------------------------------------------
-Banner "Phase 8/8: done"
+# ---- 9. Installer (opt-in) ----------------------------------------------
+# Same staged tree as the zip; the zip stays the primary test vehicle.
+Banner "Phase 9/10: installer"
+$setup = Join-Path $root "dist/camcraft-$Version-win-x64-setup.exe"
+if (-not $Installer) {
+    Write-Host "skipped (pass -Installer to build camcraft-$Version-win-x64-setup.exe with Inno Setup)"
+} else {
+    $installerScript = Join-Path $PSScriptRoot "installer.ps1"
+    Run "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $installerScript, "-Version", $Version, "-Stage", $stage, "-OutDir", (Join-Path $root "dist"))
+    if ($DryRun) {
+        Write-Host "[dry-run] sign.ps1 -Path $setup (if ISCC produced it)"
+    } elseif (Test-Path $setup) {
+        Run "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $signScript, "-Path", $setup)
+    } else {
+        Write-Host "no installer produced (ISCC.exe missing); the zip is the release"
+    }
+}
+
+# ---- 10. Summary --------------------------------------------------------
+Banner "Phase 10/10: done"
 Write-Host "Zip: $zip"
+if ($Installer -and (Test-Path $setup)) { Write-Host "Installer: $setup" }
 Write-Host "To publish: git push origin main && git push origin $tag"
 Write-Host "NOTHING WAS PUSHED. Pushing is left to you."
 exit 0

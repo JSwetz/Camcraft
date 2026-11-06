@@ -1,8 +1,10 @@
-# Release build (M1.7e): a v* tag builds the release binaries, assembles
-# the portable zip - app exe, the `post` CLI, and the post/machine data
-# files it reads from disk - and attaches it to the GitHub Release.
-# Unsigned until a code-signing certificate exists; the decision and the
-# installer-vs-zip choice are logged in RECOMMENDED.md.
+# Release build (M1.7e, M13.3): a v* tag builds the release binaries,
+# assembles the portable zip - app exe, the `post` CLI, and the post/machine
+# data files it reads from disk - builds the Inno Setup installer from the
+# same staged tree, and attaches both to the GitHub Release.
+# Signing is optional and secret-gated (scripts/sign.ps1): with no
+# CAMCRAFT_SIGN_* secret the binaries ship unsigned, as every release so
+# far has. The decision is logged in RECOMMENDED.md ("M13.3").
 name: Release
 on:
   push:
@@ -22,6 +24,25 @@ jobs:
         shell: bash
         run: cargo build --release -p camcraft-ui -p camcraft-app
           -p camcraft-post
+      - name: Sign release binaries (no-op without a certificate secret)
+        shell: pwsh
+        # Optional repository secrets: CAMCRAFT_SIGN_CERT_BASE64 (a PFX,
+        # base64-encoded) and CAMCRAFT_SIGN_CERT_PASSWORD. Absent, sign.ps1
+        # prints "unsigned: no certificate configured" and the release goes
+        # on. The PFX exists only in RUNNER_TEMP and is deleted below.
+        env:
+          CAMCRAFT_SIGN_CERT_BASE64: ${{ secrets.CAMCRAFT_SIGN_CERT_BASE64 }}
+          CAMCRAFT_SIGN_CERT_PASSWORD: ${{ secrets.CAMCRAFT_SIGN_CERT_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:CAMCRAFT_SIGN_CERT_BASE64) {
+            $pfx = Join-Path $env:RUNNER_TEMP "camcraft-sign.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CAMCRAFT_SIGN_CERT_BASE64))
+            $env:CAMCRAFT_SIGN_CERT_PATH = $pfx
+            "CAMCRAFT_SIGN_CERT_PATH=$pfx" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          }
+          & scripts/sign.ps1 -Path target/release/camcraft-ui.exe, target/release/camcraft-cli.exe, target/release/post.exe
+          if ($LASTEXITCODE -ne 0) { throw "sign.ps1 exited with $LASTEXITCODE" }
       - name: Assemble portable zip
         shell: pwsh
         run: |
@@ -31,6 +52,7 @@ jobs:
           # host-dependent (empty workspace_version under PowerShell 5.1).
           $ver = ((& ".\target\release\post.exe" --version) -split '\s+')[1]
           if (-not $ver) { throw "cannot read the version from post.exe" }
+          "CAMCRAFT_VERSION=$ver" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           $stage = "dist/camcraft-$ver-win-x64"
           New-Item -ItemType Directory -Force `
               "$stage/assets/posts", "$stage/assets/machines", "$stage/assets/ui", `
@@ -46,14 +68,38 @@ jobs:
           Copy-Item RELEASE_NOTES.md, TESTING.md $stage
           Compress-Archive -Path $stage -DestinationPath "dist/camcraft-$ver-win-x64.zip" -Force
           Get-ChildItem dist
+      - name: Build installer (Inno Setup, same staged tree as the zip)
+        shell: pwsh
+        # windows-latest ships Inno Setup 6; -Required makes a missing ISCC
+        # an error here (locally it is a named skip).
+        run: |
+          $ErrorActionPreference = "Stop"
+          & scripts/installer.ps1 -Version $env:CAMCRAFT_VERSION -Required
+          if ($LASTEXITCODE -ne 0) { throw "installer.ps1 exited with $LASTEXITCODE" }
+          & scripts/sign.ps1 -Path "dist/camcraft-$env:CAMCRAFT_VERSION-win-x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "sign.ps1 exited with $LASTEXITCODE" }
+          Get-ChildItem dist
+      - name: Remove the signing certificate from the runner
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:CAMCRAFT_SIGN_CERT_PATH -and (Test-Path $env:CAMCRAFT_SIGN_CERT_PATH)) {
+            Remove-Item -Force $env:CAMCRAFT_SIGN_CERT_PATH
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: portable-zip
           path: dist/*.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: dist/*-setup.exe
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          files: |
+            dist/*.zip
+            dist/*-setup.exe
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
