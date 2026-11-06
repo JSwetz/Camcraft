@@ -10367,3 +10367,51 @@ convictions but never lose one. No golden program gained a warning.
 One test fixture (`overhang_laws` `rapid_under`) had been clean only because of
 the bug: its far side was cut after the judged rapid. It was reordered so both
 sides are cut first.
+
+## M11.3: the plunge audit after the stamp and wrap: two decisions (2026-11-06)
+
+(1) **Multi-Axis Rough and Rotary Offset audit their FINAL posed path**
+(`plunge_solid::audit_posed`). This is refuse-only: their pocket and wrap
+entries already are their own ramp or helix fallback. A centre-cutting
+tool reads no stock and its output is unchanged.
+
+Rotary Offset uses the coarse "solid" reading (below top Z, over the
+outline). It covers the bar and the air around it, so it errs toward
+refusing.
+
+The first app-level 5-axis test (Contour5D) lands in
+`center_cut_multiaxis.rs`.
+
+(2) **Multi-Axis Rough refusing a non-centre-cutting tool on slab-and-boss
+is kept, not softened.** The stamp poses the tool along the wall normal
+(+X), and the row then feeds along that same axis: the tip goes first
+into the wall. For a tool with an uncut core that is a real axial
+plunge.
+
+Owed:
+- Rotary Parallel's `radial_relink` always rebuilds infeeds as radial
+  plunges, so the ramp retry cannot change them.
+- Swarf's first raster entry always plunges.
+- Rotary Offset needs a true cylinder solid.
+
+## M11.5: open boundary on Contour: two decisions (2026-11-06)
+
+(1) **A Contour with an open boundary rides the picked chain as one open
+pass** (`operation/contour_open.rs`).
+- Inside and Outside mean the same as for the area kinds (the shared
+  `pick_side_left` tie rule). The tool centre runs one radius plus leave
+  off the chain, plus the Boundary offset. On puts the centre on the
+  chain.
+- The chain is extended straight past both ends by the Boundary extension,
+  then `contour_along_chain` cuts it: levels, links, plunge law, leads.
+- The offset is the kept side of the existing `Region::sweep` boundary
+  (clipper2), so no new offsetter was written.
+- Refused by name: a self-touching chain, an offset that folds, a single
+  point or closed chain, and open combined with include/exclude.
+- A closed-loop Contour is byte-identical.
+
+(2) **Owed:**
+- a viewport footprint for the open Contour;
+- approach `ext_in` / `ext_out` on open runs;
+- the summary wording "past the chain's ends";
+- a partial fold is trimmed, leaving rest material (never a gouge).

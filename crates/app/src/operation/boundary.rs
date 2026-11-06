@@ -143,8 +143,10 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
         None => base,
         Some((geom, side)) => {
             if ctx.family == Family::Contour {
+                // The generator's Contour arm rides an open boundary
+                // itself (`contour_open`); it never reaches the area law.
                 return Err(GenError::Invalid(
-                    "a Contour rides an open chain as its own centerline pass - pick the chain as the selection instead of a Boundary".into(),
+                    "a Contour rides its open boundary as one open pass - the boundary bounds no area for it".into(),
                 ));
             }
             let Some(stock) = &ctx.stock else {
@@ -166,9 +168,7 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
                 }
                 OpenGeom::Ring(ring) => (reach.intersect(ring)?, reach.difference(ring)?, None),
             };
-            let in_l = left.intersect(&base)?.area().abs();
-            let in_r = right.intersect(&base)?.area().abs();
-            let left_inside = (in_l - in_r).abs() <= 0.01 * in_l.max(in_r) || in_l > in_r;
+            let left_inside = pick_side_left(&base, &left, &right)?;
             let keep_left = (*side == ChainSide::Inside) == left_inside;
             let (keep, drop) = if keep_left { (left, right) } else { (right, left) };
             if let Some(theta) = dir {
@@ -253,6 +253,15 @@ pub(super) fn resolve(base: Region, ctx: &AreaCtx) -> Result<AreaApplied, GenErr
         }
     }
     Ok(AreaApplied { region: area, forbidden, turn })
+}
+
+/// Whether the left side of an open boundary is its Inside: the side
+/// holding more of the operation's own area `base` (a near tie, within
+/// 1 %, reads as left).
+pub(super) fn pick_side_left(base: &Region, left: &Region, right: &Region) -> Result<bool, GenError> {
+    let in_l = left.intersect(base)?.area().abs();
+    let in_r = right.intersect(base)?.area().abs();
+    Ok((in_l - in_r).abs() <= 0.01 * in_l.max(in_r) || in_l > in_r)
 }
 
 /// The pieces of `all` that overlap `seed` - extension never jumps to a

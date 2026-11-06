@@ -108,8 +108,11 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
     // is only known there). Face keeps the band constraints and turn.
     let contour_sel_arm = matches!((&params, &src), (OpParams::Contour { .. }, SrcRef::Selection(_)));
     let mut area = area.transpose()?;
+    // A Contour under an open boundary rides the chain itself (its arm
+    // below, `contour_open`): no area law runs for it.
+    let contour_open = matches!(params, OpParams::Contour { .. }) && area.as_ref().is_some_and(|c| c.open.is_some());
     let mut face_band: Option<(Vec<(&'static str, Region)>, f64)> = None;
-    if !contour_sel_arm && let Some(ctx) = area.take() {
+    if !contour_sel_arm && !contour_open && let Some(ctx) = area.take() {
         let base = region_for_job(&mut picked_region, &mut section_z, &src, &params, m_gen, frame.as_ref())?;
         let applied = apply_area_full(base, Some(&ctx))?;
         face_band = Some((applied.forbidden, applied.turn));
@@ -224,7 +227,23 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 blend_turns: *blend_turns,
             links: lk,
             };
-            let (region, path) = match &src {
+            let (region, path) = if contour_open {
+                // The open boundary replaces the selection's own path:
+                // the selection's area only says which side is Inside,
+                // and is what the verify keeps the tool out of.
+                let base = match &src {
+                    SrcRef::Selection(_) => {
+                        let (loops, _, _) = contour_sel
+                            .take()
+                            .ok_or_else(|| unreached("contour selection geometry"))??;
+                        if loops.is_empty() { Region::empty() } else { Region::new(loops)? }
+                    }
+                    _ => region_for_job(&mut picked_region, &mut section_z, &src, &params, m_gen, frame.as_ref())?,
+                };
+                let ctx = area.take().ok_or_else(|| unreached("contour open boundary"))?;
+                let path = super::contour_open::open_pass(&base, &ctx, &cp)?;
+                (base, path)
+            } else { match &src {
                 SrcRef::Selection(_) => {
                     // The boundary path cuts the loops the picks bound;
                     // each open run in the picks adds a centerline pass
@@ -296,7 +315,7 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                     };
                     (region, path)
                 }
-            };
+            } };
             (region, path)
         }
         OpParams::Pocket {
@@ -1110,6 +1129,14 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 &pp,
                 &axis,
             )?;
+            // M11.3 owed (2): the wrap-space entry guard judged the
+            // ladder before the wrap posed it; the law judges the FINAL
+            // posed path. Solid is the coarse stock reading (below its
+            // top Z, over its XY outline) - a superset of the bar, so
+            // it errs toward refusal.
+            super::plunge_solid::audit_posed(
+                "Rotary Offset", tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &path, d * 0.5,
+            )?;
             (region, path)
         }
         // M5.1 stage E3: the stamped ladder. The positions are the
@@ -1204,6 +1231,12 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 }
                 Err(e) => return Err(e),
             };
+            // M11.3 owed (2): the pocket's own entry guard judged the
+            // ladder before the stamp posed it; the law judges the
+            // FINAL posed path along each move's axis.
+            super::plunge_solid::audit_posed(
+                "Multi-Axis Rough", tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &path, d * 0.5,
+            )?;
             (region, path)
         }
         // M5.1 tail, stage I: flowline finishing. The pass is the

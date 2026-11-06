@@ -96,6 +96,7 @@ mod boundary;
 pub use boundary::AreaCtx;
 use boundary::AreaApplied;
 mod boundary_turn;
+mod contour_open;
 mod boundary_ctx;
 mod boundary_picks;
 pub use boundary_picks::{

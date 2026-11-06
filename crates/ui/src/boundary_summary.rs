@@ -145,9 +145,13 @@ pub fn summarize(state: &State) -> Summary {
     let includes = a.extra.iter().filter(|b| b.mode == BoundaryMode::Include).count();
     let excludes = a.extra.len() - includes;
     match &a.open {
-        Some(_) if fam == Family::Contour => out.notices.push(
-            "Contour cannot use an open boundary - Generate refuses it: pick the chain as the selection, and the contour rides it as its centreline pass.".to_owned(),
-        ),
+        Some(o) if fam == Family::Contour => {
+            let side = if o.side == ChainSide::Inside { "side A, the side holding more of" } else { "side B, the side holding less of" };
+            let ext = if a.extension > 0.0 { format!(", run on {} past both ends", len(a.extension)) } else { String::new() };
+            out.lines.push(format!(
+                "Contours along the picked open edge as one open pass on {side} {what}: the tool rides beside the edge{ext}, entering and leaving past its ends."
+            ));
+        }
         Some(o) => {
             let ab = if o.side == ChainSide::Inside { "side A" } else { "side B" };
             let side = match open_side_word(state) {
@@ -210,15 +214,18 @@ pub fn summarize(state: &State) -> Summary {
             }
             out.lines.push(match fam {
                 Family::Face => "Tool as Face cuts: the rows clear the area's whole bounding band, each run overrunning both ends.".to_owned(),
+                Family::Contour if a.open.is_some() => format!(
+                    "Tool edge on the picked edge: its centre runs {r} off it, plus the stock to leave."
+                ),
                 Family::Contour => "Tool as Contour cuts: it rides the ring on its Side (Passes tab).".to_owned(),
                 Family::Clearing => format!("Tool as {kind} cuts: the whole tool stays inside the area."),
             });
         }
     }
-    if a.containment == Some(Containment::Outside) && fam == Family::Contour && native_inside(state, fam) == Some(false) {
+    if a.containment == Some(Containment::Outside) && fam == Family::Contour && a.open.is_none() && native_inside(state, fam) == Some(false) {
         out.notices.push("This contour already rides its ring from outside, so Outside changes nothing here.".to_owned());
     }
-    if a.containment == Some(Containment::Inside) && fam == Family::Contour && native_inside(state, fam) == Some(true) {
+    if a.containment == Some(Containment::Inside) && fam == Family::Contour && a.open.is_none() && native_inside(state, fam) == Some(true) {
         out.notices.push("This contour already rides its ring from inside, so Inside changes nothing here.".to_owned());
     }
 

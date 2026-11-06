@@ -253,6 +253,32 @@ fn the_summary_says_what_an_open_face_boundary_machines() {
 }
 
 #[test]
+fn the_summary_says_a_contour_rides_its_open_boundary() {
+    let contour = crate::operations::retype(&face(), camcraft_app::operation::OpType::Contour as usize);
+    let mut state = opened(contour);
+    let f = model::find_by_name(&state.world, "part").and_then(|e| model::features_of(&state.world, &e)).expect("features");
+    let i = f
+        .edges
+        .iter()
+        .position(|t| {
+            let (a, b) = (f.verts[t.a as usize], f.verts[t.b as usize]);
+            a[2] == 10.0 && b[2] == 10.0 && a[1] == 20.0 && b[1] == 20.0
+        })
+        .expect("the north rim edge");
+    let edge = camcraft_app::operation::run_pick(&state.world, "part", i as u32).expect("its run");
+    state.op_ui.area.open =
+        Some(camcraft_app::operation::OpenBoundary { picks: vec![edge], side: camcraft_app::operation::ChainSide::Outside });
+    let s = boundary_summary::summarize(&state);
+    assert!(
+        s.lines[0].starts_with("Contours along the picked open edge as one open pass on side B, the side holding less of"),
+        "{:?}",
+        s.lines
+    );
+    assert!(s.lines[1].starts_with("Tool edge on the picked edge: its centre runs one tool radius"), "{:?}", s.lines);
+    assert!(s.notices.is_empty(), "no no-effect notice: {:?}", s.notices);
+}
+
+#[test]
 fn the_summary_says_a_closed_loop_inside_with_an_offset() {
     let mut state = opened(pocket(Entry3D::Plunge));
     state.op_ui.area.extra.push(ExtraBoundary { mode: BoundaryMode::Include, shape: BoundaryShape::Picks(Vec::new()) });

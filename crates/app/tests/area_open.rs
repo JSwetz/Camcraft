@@ -5,10 +5,11 @@
 //! verify of what is left is silent; a facing band across part material
 //! is refused by name (and the default law is caught by the verify); the
 //! controls ride one undoable edit, stamp only when set, round-trip and
-//! are absent from the file at their default.
+//! are absent from the file at their default; a Contour rides its open
+//! boundary as one open pass offset to the chosen side.
 //!
 //! Gate map (M11.5): covers app::operation (boundary, boundary_turn,
-//! boundary_ctx, stamp, generate), app::commands (EditOperationParams),
+//! boundary_ctx, contour_open, stamp, generate), app::commands (EditOperationParams),
 //! app::project (area), app::verify.
 
 mod area_support;
@@ -185,4 +186,78 @@ fn the_controls_round_trip_and_are_absent_from_the_file_at_their_default() {
     project::save(&back, &again).expect("save");
     assert_eq!(std::fs::read(&file).expect("a"), std::fs::read(&again).expect("b"), "save-load-save is stable");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A Contour of the block's top face under an open boundary on its
+/// north rim edge.
+fn contour_open(world: &World, side: ChainSide, extension: f64) -> Result<(Toolpath, usize), String> {
+    let top = top_face(world, "part", 10.0);
+    let north = rim_edge(world, |q| (q[1] - 20.0).abs() < 1e-9);
+    let a = AreaControls { extension, open: Some(OpenBoundary { picks: pick("part", north), side }), ..Default::default() };
+    run(world, &op(sel("part", top), contour(10.0, 5.0, Side::Auto), a))
+}
+
+fn cutting(t: &Toolpath) -> Vec<Point3> {
+    feeds(t).into_iter().filter(|p| p.z < 10.0 - EPS).collect()
+}
+
+#[test]
+fn a_contour_rides_its_open_boundary_offset_to_the_chosen_side() {
+    let world = block_world();
+    // Outside (B): north of the edge - one open pass with the tool's edge
+    // on the chain, run on past both ends; the verify is silent (the
+    // tool never enters the block).
+    let (t, warns) = contour_open(&world, ChainSide::Outside, 3.0).expect("open contour");
+    assert_eq!(warns, 0, "{:?}", t.notes);
+    let cut = cutting(&t);
+    assert!(!cut.is_empty(), "the pass cuts");
+    assert!(cut.iter().all(|p| (p.y - (20.0 + R)).abs() < EPS), "one radius north of the edge: {cut:?}");
+    assert!((max_by(&cut, |p| p.x) - 23.0).abs() < EPS, "past the east end by the extension");
+    assert!((max_by(&cut, |p| -p.x) - 23.0).abs() < EPS, "past the west end by the extension");
+    // One open pass per level: every dive at the same end of the run.
+    let dives: Vec<Point3> = t.moves.iter().filter(|m| m.kind == MoveKind::Plunge).map(|m| m.to).collect();
+    assert!(!dives.is_empty(), "{:?}", t.moves);
+    assert!(dives.iter().all(|p| (p.x - dives[0].x).abs() < EPS && (p.y - dives[0].y).abs() < EPS), "{dives:?}");
+    assert!(t.notes.iter().any(|n| n.contains("rides the open boundary")), "{:?}", t.notes);
+    // Flipping the side flips the offset: into the block - which the
+    // verify flags, never passes silently.
+    let (t, warns) = contour_open(&world, ChainSide::Inside, 0.0).expect("generated, then judged");
+    let cut = cutting(&t);
+    assert!(!cut.is_empty());
+    assert!(cut.iter().all(|p| (p.y - (20.0 - R)).abs() < EPS), "one radius south of the edge: {cut:?}");
+    assert!(warns > 0, "a pass inside the part must be flagged");
+}
+
+#[test]
+fn a_contour_without_an_open_boundary_still_rides_its_closed_ring() {
+    let world = block_world();
+    let top = top_face(&world, "part", 10.0);
+    let o = op(sel("part", top), contour(10.0, 5.0, Side::Auto), AreaControls::default());
+    let (t, warns) = run(&world, &o).expect("ring");
+    assert_eq!(warns, 0, "{:?}", t.notes);
+    let cut = cutting(&t);
+    let sides: [fn(&Point3) -> f64; 4] = [|p| p.y, |p| -p.y, |p| p.x, |p| -p.x];
+    for f in sides {
+        assert!((max_by(&cut, f) - (20.0 + R)).abs() < EPS, "all four sides, one radius out");
+    }
+    assert!(!t.notes.iter().any(|n| n.contains("open boundary")), "{:?}", t.notes);
+}
+
+#[test]
+fn a_contour_open_boundary_that_is_no_open_chain_is_refused_by_name() {
+    let world = block_world();
+    let top = top_face(&world, "part", 10.0);
+    // The top face's own rim is a closed ring, not an open chain.
+    let a = AreaControls { open: Some(OpenBoundary { picks: pick("part", top), side: ChainSide::Outside }), ..Default::default() };
+    let err = run(&world, &op(sel("part", top), contour(10.0, 5.0, Side::Auto), a)).expect_err("refused");
+    assert!(err.contains("must be an open chain"), "{err}");
+    // Include / exclude boundaries cannot shape an open pass: said.
+    let north = rim_edge(&world, |q| (q[1] - 20.0).abs() < 1e-9);
+    let a = AreaControls {
+        extra: vec![ExtraBoundary { mode: BoundaryMode::Exclude, shape: BoundaryShape::Stock }],
+        open: Some(OpenBoundary { picks: pick("part", north), side: ChainSide::Outside }),
+        ..Default::default()
+    };
+    let err = run(&world, &op(sel("part", top), contour(10.0, 5.0, Side::Auto), a)).expect_err("refused");
+    assert!(err.contains("do not shape a Contour riding an open boundary"), "{err}");
 }
