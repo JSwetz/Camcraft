@@ -14,6 +14,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Creating a GitHub Release and uploading its assets needs write access to
+# the repo's contents; the default GITHUB_TOKEN is read-only (403 "Resource
+# not accessible by integration" on v0.8.1's first run).
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: windows-latest
