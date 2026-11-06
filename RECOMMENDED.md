@@ -10320,3 +10320,50 @@ Owed: snapping the origin to a picked face (centroid or plane).
 HSM Adaptive plans. The debug variant now runs Zigzag only, keeping every
 core assertion. The `_full` twin runs Adaptive and Zigzag in the heavy lane,
 71 s in release. No assertion was dropped; the test count went from 6 to 7.
+
+## M13.8: posed moves against the fixtures: two decisions (2026-11-06)
+
+(1) **Every posed move sweeps the whole tool against the fixture boxes**
+(`verify/posed_steel.rs`). This is a real defect fix. A leaning rapid was enclosed
+around the flute only, and a feed's enclosure was a vertical column at its lower
+endpoint. So Rotary Parallel's downward radial index could carry the holder
+60-90 mm under the bar, through a chuck, with no verdict. With the new sweep
+disabled, a sim test of that case returned `[]`.
+
+How the sweep works:
+- The pose held coming in is interpolated to the pose the move states, the same
+  way `rotary.rs` does it. Arcs are cut into chords.
+- Flute, shank, holder and (in the bands law) spindle are each tested as a
+  capsule.
+- Each move is cut into intervals of at most 0.5 mm of travel at the tool's far
+  end. Each capsule's radius is grown by how far its points move within an
+  interval.
+- Capsule-to-box distance is exact.
+
+The sweep can only add verdicts; upright moves never enter it.
+
+(2) **Owed:**
+- posed rapids sweep flute, shank and holder but not the spindle;
+- the pose is sampled per interval, not checked continuously;
+- boxes are judged in the path frame, which assumes the workholding turns with
+  the part (a chuck). A fixed tailstock or table judged this way errs toward a
+  hit.
+
+## M13.7: a move is judged against the cuts before it: one decision (2026-11-06)
+
+**Law (d), (c), (c3) and the hidden-stock backstop count only earlier cuts as
+cleared** (`verify/cut_index.rs`):
+- every chord carries its move index;
+- a uniform grid files each chord into every cell whose centre lies within
+  reach plus half the cell diagonal, so a clearing chord is never missed, and
+  very wide chords are always checked;
+- a rapid counts cuts strictly before it;
+- a shank band also counts its own move's cut, since its flute is cutting
+  beneath it.
+
+This filter only removes chords from "cleared", so verdicts can gain
+convictions but never lose one. No golden program gained a warning.
+
+One test fixture (`overhang_laws` `rapid_under`) had been clean only because of
+the bug: its far side was cut after the judged rapid. It was reordered so both
+sides are cut first.

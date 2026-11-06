@@ -85,7 +85,11 @@
 //!   holder band - against every box, where a jaw in the path is a
 //!   crash like uncut material is, and (d2), the tool body along a
 //!   rapid - with no clearance or kerf exemptions, because steel is
-//!   never removed material. Z contact within
+//!   never removed material. A POSED move (held or stated pose off
+//!   the upright) is also swept with its real pose - the whole stack
+//!   as capsules along the lerped pose ([`posed_steel`], M13.8): a
+//!   radial index under a bar's equator carries its holder toward the
+//!   chuck, and the column enclosures never looked there. Z contact within
 //!   [`crate::fixture::FIXTURE_HIT_TOL`]
 //!   of a face is silent (mating surfaces touch by design); everything
 //!   else errs toward HIT.
@@ -143,10 +147,12 @@ pub use crate::tools::ToolGeom;
 mod air;
 mod contact;
 mod crossing;
+mod cut_index;
 mod engine;
 mod finish;
 mod hidden;
 mod laws;
+mod posed_steel;
 mod probe;
 mod rapids;
 mod reach;

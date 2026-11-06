@@ -26,6 +26,7 @@ use crate::geo2d::Point2;
 use crate::geometry::Point3;
 
 use super::laws::dist2_seg;
+use super::rest::Steps;
 use super::types::Warning;
 
 /// Path fractions sampled INSIDE the move (its endpoints are law (c)'s
@@ -56,6 +57,9 @@ const POSE_FRACS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 /// functions of the sample column alone - the cut list, the island
 /// slices and the stock are fixed for the whole path - so their
 /// answers ride a memo keyed by the column's exact bits, built once
+/// (the surface as its cut-order staircase, M13.7: move i reads the
+/// column as the cuts up to and including move i left it, never a
+/// later move's clearing - the same answer `surface_before` gives)
 /// per path and read by every move's `swing_hit`. Without it the
 /// grid's price is states x samples x PATH per move: a flowline's
 /// 800 posed moves ask the same ten-odd thousand columns forty
@@ -73,9 +77,9 @@ pub(super) fn mid_turn_sweeps(
     shanked: &[usize],
     samples: &[Point2],
     in_stock: &dyn Fn(Point2) -> bool,
-    surface: &dyn Fn(Point2) -> f64,
+    surface: &dyn Fn(Point2) -> Steps,
     part_at: &dyn Fn(Point2) -> bool,
-    hidden: &dyn Fn(Point2, f64, f64, f64) -> bool,
+    hidden: &dyn Fn(Point2, f64, f64, f64, usize) -> bool,
 ) -> Vec<Warning> {
     let mut warns = Vec::new();
     // The column memo, one per path (see the module law above): a
@@ -83,7 +87,7 @@ pub(super) fn mid_turn_sweeps(
     // column's exact bits. Eager per column seen near any move's
     // sweep; the three laws are pure, so asking early asks the same
     // answer the old lazy ask would have got.
-    let mut reach: std::collections::HashMap<(u64, u64), (bool, f64, bool)> = std::collections::HashMap::new();
+    let mut reach: std::collections::HashMap<(u64, u64), (bool, Steps, bool)> = std::collections::HashMap::new();
     // The held letters, exactly as `sim::script` threads them (the
     // same modal law, the same canonical form): a path's first move
     // turns FROM home - the cross-operation swing belongs to the
@@ -102,7 +106,7 @@ pub(super) fn mid_turn_sweeps(
             && held != next
             && !shanked.contains(&i)
             && let Some(part) = swing_hit(
-                m, held, next, bands, r, gouge_tol, chord_tol, samples, &mut reach, in_stock, surface, part_at, hidden,
+                m, i + 1, held, next, bands, r, gouge_tol, chord_tol, samples, &mut reach, in_stock, surface, part_at, hidden,
             )
         {
             warns.push(Warning::SweepHit { at: i, part });
@@ -130,6 +134,7 @@ pub(super) fn mid_turn_sweeps(
 #[allow(clippy::too_many_arguments)]
 fn swing_hit(
     m: &Move,
+    upto: usize,
     from_abc: [f64; 3],
     to_abc: [f64; 3],
     bands: &[(f64, f64, f64)],
@@ -137,11 +142,11 @@ fn swing_hit(
     gouge_tol: f64,
     chord_tol: f64,
     samples: &[Point2],
-    reach: &mut std::collections::HashMap<(u64, u64), (bool, f64, bool)>,
+    reach: &mut std::collections::HashMap<(u64, u64), (bool, Steps, bool)>,
     in_stock: &dyn Fn(Point2) -> bool,
-    surface: &dyn Fn(Point2) -> f64,
+    surface: &dyn Fn(Point2) -> Steps,
     part_at: &dyn Fn(Point2) -> bool,
-    hidden: &dyn Fn(Point2, f64, f64, f64) -> bool,
+    hidden: &dyn Fn(Point2, f64, f64, f64, usize) -> bool,
 ) -> Option<bool> {
     // (pc, r2, h0): the band's column, its outer reach squared, its
     // bottom. Plus the union box of every disc, for the filter.
@@ -206,8 +211,8 @@ fn swing_hit(
     let mut vals: Vec<(Point2, bool, f64, bool)> = Vec::with_capacity(near.len());
     for q in near {
         let k = (q.x.to_bits(), q.y.to_bits());
-        let v = *reach.entry(k).or_insert_with(|| (in_stock(q), surface(q), part_at(q)));
-        vals.push((q, v.0, v.1, v.2));
+        let v = reach.entry(k).or_insert_with(|| (in_stock(q), surface(q), part_at(q)));
+        vals.push((q, v.0, v.1.before(upto), v.2));
     }
     let inner2 = (r + gouge_tol) * (r + gouge_tol);
     let mut worst = None;
@@ -231,7 +236,7 @@ fn swing_hit(
     // The overhang backstop (M13.7 B, [`super::hidden`]): stock hidden
     // under a ledge is in no column sample; asked only when the column
     // law found nothing, so it adds convictions, never removes one.
-    if worst.is_none() && bands_at.iter().any(|&(pc, rb, h0)| hidden(pc, r + gouge_tol, rb, h0)) {
+    if worst.is_none() && bands_at.iter().any(|&(pc, rb, h0)| hidden(pc, r + gouge_tol, rb, h0, upto)) {
         worst = Some(false);
     }
     worst

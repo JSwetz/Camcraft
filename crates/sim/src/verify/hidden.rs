@@ -11,9 +11,10 @@
 //! under the stock top, part material hangs over (q, h)
 //! (`shadow_above(h)` holds q), the part itself is not at (q, h) (the
 //! section at h does not hold q - that is the solid law b2's steel), and
-//! no cutting chord at a plane at or below h passed within the tool
-//! radius of q on a plane whose section left q open (the column clear
-//! law of [`Rest::surface`], read at h instead of as a surface height).
+//! no cutting chord of a move BEFORE the judged one, at a plane at or
+//! below h, passed within the tool radius of q on a plane whose section
+//! left q open (the column clear law of [`Rest::surface_before`], read
+//! at h instead of as a surface height; cut order per M13.7).
 //!
 //! The stock solid is therefore "stock minus what earlier cuts of the
 //! same path swept", with the sweep read the way `surface` reads it: a
@@ -115,21 +116,19 @@ impl Rest<'_, '_> {
         fresh
     }
 
-    /// Whether (q, h) is uncut stock: hidden at `h` and in no cutting
-    /// chord's cleared column at or below `h`.
-    fn uncut(&self, hid: &Hidden, q: Point2, h: f64) -> bool {
+    /// Whether (q, h) is uncut stock before move `upto`: hidden at `h`
+    /// and in no cleared column of a cutting chord at or below `h` whose
+    /// move comes before `upto` (M13.7 cut order - stock a LATER move
+    /// removes still stands when this move passes).
+    fn uncut(&self, hid: &Hidden, q: Point2, h: f64, upto: usize) -> bool {
         let cx = self.cx();
         if !(hid.region.contains(q) && self.in_stock(q)) {
             return false;
         }
-        let r = cx.tool.radius;
-        let r2 = (r + 1e-9) * (r + 1e-9);
         let top = h + cx.z_tol;
-        let cut = self.cut();
-        let n = cut.partition_point(|c| c.2 <= top);
-        !cut[..n].iter().any(|(a, b, z)| {
-            dist2_seg(q, *a, *b) <= r2 && cx.model.is_none_or(|f| !self.island_holds(f, *z, q))
-        })
+        // Candidates walk deepest first, so the planes at or below h are
+        // a prefix of the walk.
+        !self.near(q, 0).take_while(|c| c.2 <= top).any(|c| c.3 < upto && self.clears(c, q))
     }
 
     /// The plane's hidden stock when it can stand within `reach` of the
@@ -151,8 +150,9 @@ impl Rest<'_, '_> {
     }
 
     /// Law (c)/(c3) backstop: uncut hidden stock inside the band annulus
-    /// `r_in < |q - pc| <= r_out` at the band's bottom `h`.
-    pub(super) fn hidden_in_annulus(&self, pc: Point2, r_in: f64, r_out: f64, h: f64) -> bool {
+    /// `r_in < |q - pc| <= r_out` at the band's bottom `h`, against the
+    /// cuts of the moves before `upto`.
+    pub(super) fn hidden_in_annulus(&self, pc: Point2, r_in: f64, r_out: f64, h: f64, upto: usize) -> bool {
         if !(r_out > r_in && pc.x.is_finite() && pc.y.is_finite()) {
             return false;
         }
@@ -175,12 +175,13 @@ impl Rest<'_, '_> {
         rings
             .chain(hid.samples.iter().copied())
             .filter(in_ring)
-            .any(|q| self.uncut(&hid, q, h))
+            .any(|q| self.uncut(&hid, q, h, upto))
     }
 
     /// Law (d) backstop: uncut hidden stock inside the tool disc of
-    /// half-width `w` swept from `a` to `b` at height `h`.
-    pub(super) fn hidden_along(&self, a: Point2, b: Point2, h: f64, w: f64) -> bool {
+    /// half-width `w` swept from `a` to `b` at height `h`, against the
+    /// cuts of the moves before `upto`.
+    pub(super) fn hidden_along(&self, a: Point2, b: Point2, h: f64, w: f64, upto: usize) -> bool {
         let w = if w.is_finite() { w.max(0.0) } else { 0.0 };
         let lo = Point2::new(a.x.min(b.x), a.y.min(b.y));
         let hi = Point2::new(a.x.max(b.x), a.y.max(b.y));
@@ -204,6 +205,6 @@ impl Rest<'_, '_> {
         });
         lines
             .chain(hid.samples.iter().copied().filter(|q| dist2_seg(*q, a, b) <= w2))
-            .any(|q| self.uncut(&hid, q, h))
+            .any(|q| self.uncut(&hid, q, h, upto))
     }
 }

@@ -9,8 +9,12 @@
 //! Provenance: our own fixtures, specced from the Prime Directive and the
 //! shop rule "never traverse through uncut stock"; no vendor material.
 //!
-//! Gate map (M13.7 B): covers camcraft_sim::verify (rest, hidden, reach,
-//! sweep, rapids).
+//! M13.7 cut order: a move is judged against the cuts BEFORE it - a
+//! rapid through stock a later feed removes convicts, column law and
+//! hidden-stock backstop alike.
+//!
+//! Gate map (M13.7 B, cut order): covers camcraft_sim::verify (rest,
+//! cut_index, hidden, reach, sweep, rapids).
 
 use camcraft_sim::cl::{Move, MoveKind, Toolpath};
 use camcraft_sim::geo2d::{Loop, Point2, Region};
@@ -107,19 +111,32 @@ fn wide_shank() -> ToolGeom {
     }
 }
 
-/// Floor cuts at X 17 on both sides of the ledge, then a lateral rapid
-/// at `z` along X 17 from one cleared column to the other: the disc
-/// X [14, 20] crosses the hidden band X [14, 15] under the ledge. The
-/// rapid's three column samples are all cleared, so the section law
-/// alone stays silent.
+/// Floor cuts at X 17 on both sides of the ledge (the far side first,
+/// reached over the clearance plane), then a lateral rapid at `z` along
+/// X 17 from one cleared column to the other: the disc X [14, 20]
+/// crosses the hidden band X [14, 15] under the ledge. The rapid's three
+/// column samples are all cleared BEFORE it (M13.7 cut order - the old
+/// fixture cut the far side after the rapid, and only the order-blind
+/// rest model called that column clear), so the section law alone stays
+/// silent. The judged rapid is move [`RAPID`].
 fn rapid_under(z: f64) -> Toolpath {
-    path(vec![
+    path(rapid_under_moves(z))
+}
+
+/// The judged lateral rapid's index in [`rapid_under`].
+const RAPID: usize = 6;
+
+fn rapid_under_moves(z: f64) -> Vec<Move> {
+    vec![
+        mv(MoveKind::Feed, Point3::new(17.0, 45.0, 0.0), Point3::new(17.0, 8.5, 0.0)),
+        mv(MoveKind::Rapid, Point3::new(17.0, 8.5, 0.0), Point3::new(17.0, 8.5, 30.0)),
+        mv(MoveKind::Rapid, Point3::new(17.0, 8.5, 30.0), Point3::new(17.0, -25.0, 30.0)),
+        mv(MoveKind::Feed, Point3::new(17.0, -25.0, 30.0), Point3::new(17.0, -25.0, 0.0)),
         mv(MoveKind::Feed, Point3::new(17.0, -25.0, 0.0), Point3::new(17.0, -8.5, 0.0)),
         mv(MoveKind::Rapid, Point3::new(17.0, -8.5, 0.0), Point3::new(17.0, -8.5, z)),
         mv(MoveKind::Rapid, Point3::new(17.0, -8.5, z), Point3::new(17.0, 45.0, z)),
         mv(MoveKind::Rapid, Point3::new(17.0, 45.0, z), Point3::new(17.0, 45.0, 0.0)),
-        mv(MoveKind::Feed, Point3::new(17.0, 45.0, 0.0), Point3::new(17.0, 8.5, 0.0)),
-    ])
+    ]
 }
 
 /// A floor cut at height `z` along X 19 up to Y 0: the shank annulus
@@ -131,7 +148,7 @@ fn shank_under(z: f64, x: f64) -> Toolpath {
 #[test]
 fn a_rapid_under_the_ledge_through_hidden_stock_is_a_rapid_in_stock() {
     let w = judge(&rapid_under(5.0), &part(true), &necked());
-    assert_eq!(w, vec![Warning::RapidInStock { at: 2 }], "{w:?}");
+    assert_eq!(w, vec![Warning::RapidInStock { at: RAPID }], "{w:?}");
 }
 
 #[test]
@@ -190,5 +207,76 @@ fn a_2d_path_without_a_model_is_unchanged() {
         spindle: None,
     };
     let w = verify(&rapid_under(5.0), &cx);
+    assert!(w.is_empty(), "{w:?}");
+}
+
+// --- M13.7 cut order: a move is judged against the cuts BEFORE it ---
+
+/// The no-model context of [`a_2d_path_without_a_model_is_unchanged`].
+fn judge_2d(p: &Toolpath, tool: &ToolGeom) -> Vec<Warning> {
+    let region = rect(-40.0, -40.0, 60.0, 60.0);
+    let cx = VerifyContext {
+        region: &region,
+        stock: Some(&region),
+        model: None,
+        tool,
+        cutter: None,
+        mode: Mode::Area,
+        stock_top_z: 20.0,
+        clearance_z: 30.0,
+        stock_to_leave: 0.0,
+        gouge_tol: 0.01,
+        z_tol: 1e-3,
+        finish_tol: None,
+        fixtures: &[],
+        spindle: None,
+    };
+    verify(p, &cx)
+}
+
+#[test]
+fn a_rapid_through_stock_a_later_feed_removes_is_a_rapid_in_stock() {
+    // The rapid at Z 5 slides through full stock; the feed that clears
+    // its columns down to Z 5 comes after it. An order-blind rest model
+    // read those columns as cleared and stayed silent.
+    let p = path(vec![
+        mv(MoveKind::Rapid, Point3::new(0.0, 0.0, 5.0), Point3::new(20.0, 0.0, 5.0)),
+        mv(MoveKind::Feed, Point3::new(20.0, 0.0, 5.0), Point3::new(0.0, 0.0, 5.0)),
+    ]);
+    let w = judge_2d(&p, &necked());
+    assert_eq!(w, vec![Warning::RapidInStock { at: 0 }], "{w:?}");
+}
+
+#[test]
+fn the_same_rapid_after_the_feed_is_clean() {
+    let p = path(vec![
+        mv(MoveKind::Feed, Point3::new(0.0, 0.0, 5.0), Point3::new(20.0, 0.0, 5.0)),
+        mv(MoveKind::Rapid, Point3::new(20.0, 0.0, 5.0), Point3::new(0.0, 0.0, 5.0)),
+    ]);
+    let w = judge_2d(&p, &necked());
+    assert!(w.is_empty(), "{w:?}");
+}
+
+/// The floor pass along X 17 the whole way under the ledge: its disc
+/// X [14, 20] clears the hidden band X [14, 15] the judged rapid crosses.
+fn clearing_pass(from_y: f64, to_y: f64) -> Move {
+    mv(MoveKind::Feed, Point3::new(17.0, from_y, 0.0), Point3::new(17.0, to_y, 0.0))
+}
+
+#[test]
+fn a_rapid_under_the_ledge_before_the_clearing_pass_is_a_rapid_in_stock() {
+    // The pass comes after the rapid: the hidden stock still stands when
+    // the rapid slides through it - the backstop's own cut-order clause.
+    let mut moves = rapid_under_moves(5.0);
+    moves.push(clearing_pass(45.0, -25.0));
+    let w = judge(&path(moves), &part(true), &necked());
+    assert_eq!(w, vec![Warning::RapidInStock { at: RAPID }], "{w:?}");
+}
+
+#[test]
+fn the_same_rapid_after_the_clearing_pass_is_clean() {
+    let mut moves = vec![clearing_pass(-25.0, 45.0)];
+    moves.extend(rapid_under_moves(5.0));
+    let w = judge(&path(moves), &part(true), &necked());
     assert!(w.is_empty(), "{w:?}");
 }

@@ -49,10 +49,12 @@ pub(super) fn rapids_in_stock(
             // tool disc swept through stock hidden under a ledge, which
             // no column surface shows - asked only when the column law
             // is silent, so it adds convictions, never removes one.
+            // Cut order (M13.7): the rapid meets the stock as the cuts
+            // BEFORE it left it - a later feed's clearing is no alibi.
             let bad = [a, mid, b]
                 .into_iter()
-                .any(|q| rest.in_stock(q) && low < rest.surface(q))
-                || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol);
+                .any(|q| rest.in_stock(q) && low < rest.surface_before(q, i))
+                || rest.hidden_along(a, b, low, cx.tool.radius - cx.gouge_tol, i);
             if bad {
                 warns.push(Warning::RapidInStock { at: i });
             }

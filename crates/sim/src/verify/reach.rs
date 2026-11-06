@@ -60,7 +60,7 @@ pub(super) fn band_reach(
             samples.extend(boundary_samples(s));
         }
         if let Some(f) = cx.model {
-            let mut zs: Vec<u64> = rest.cut().iter().map(|(_, _, z)| z.to_bits()).collect();
+            let mut zs: Vec<u64> = rest.cut().iter().map(|c| c.2.to_bits()).collect();
             zs.sort_unstable();
             zs.dedup();
             for k in zs {
@@ -79,7 +79,10 @@ pub(super) fn band_reach(
                     .is_some_and(|s| s.contains(q))
         };
         let in_stock = |q: Point2| -> bool { rest.in_stock(q) };
-        let surface = |q: Point2| -> f64 { rest.surface(q) };
+        // Cut order (M13.7): a band at move i meets the stock the cuts
+        // up to and including move i left - its own flute cuts beneath
+        // it, a later move's clearing is no alibi.
+        let surface = |q: Point2, upto: usize| -> f64 { rest.surface_before(q, upto) };
         // Pose (M5.1 stage A): a leaning band is enclosed, exactly as
         // in [`super::bands_vs_fixtures`], in a vertical column that is
         // never smaller - shifted to the band's mid-height point on the
@@ -142,7 +145,7 @@ pub(super) fn band_reach(
                             if !in_stock(*q) {
                                 continue;
                             }
-                            if h0 < surface(*q) {
+                            if h0 < surface(*q, i + 1) {
                                 hit = Some(part_at(*q));
                                 if hit == Some(true) {
                                     break 'worst; // report the worst offender
@@ -158,7 +161,7 @@ pub(super) fn band_reach(
                 if hit.is_none()
                     && pts.iter().any(|p| {
                         let pc = Point2::new(p.x + offx, p.y + offy);
-                        rest.hidden_in_annulus(pc, r + cx.gouge_tol, r_band, h0)
+                        rest.hidden_in_annulus(pc, r + cx.gouge_tol, r_band, h0, i + 1)
                     })
                 {
                     hit = Some(false);
@@ -192,9 +195,9 @@ pub(super) fn band_reach(
                 &shanked,
                 &samples,
                 &in_stock,
-                &surface,
+                &|q: Point2| rest.surface_steps(q),
                 &part_at,
-                &|pc, r_in, r_out, h| rest.hidden_in_annulus(pc, r_in, r_out, h),
+                &|pc, r_in, r_out, h, upto| rest.hidden_in_annulus(pc, r_in, r_out, h, upto),
             ));
         }
     }

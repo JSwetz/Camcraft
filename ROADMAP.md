@@ -1724,7 +1724,7 @@ would.** — 📋
 ### M13.7 - Verifier completeness
 **Goal: the exact solid-law verifier judges every move with the real
 tool, against the real stock, in the real pose - the backstop every
-generator relies on has no known blind spot.** — ⚠️ partial (owed: mid-move pose, cut-order-aware clearing)
+generator relies on has no known blind spot.** — ⚠️ partial (owed: mid-move pose)
 
 The 2026-11-06 solid-law verifier (0e18091) replaced plane sections for
 the tool-vs-part check; its own entry names what it still does not
@@ -1737,7 +1737,7 @@ None of these may stay open behind a ✅.
       tips. Carry `Cutter` into `VerifyContext`.
 - ~~**Uncut stock under overhangs**~~ - done 2026-11-06 (RECOMMENDED "M13.7: stock
       under overhangs"); owed from it: judge each move against the cuts BEFORE it
-      (the column model ignores cut order and can under-report).
+      (the column model ignores cut order and can under-report) - DONE 2026-11-06 (cut_index.rs).
 - **Mid-move pose changes**: a move whose pose changes along it is
       judged at its end pose only; judge the swept pose.
 - ~~**Rotary ops can't post**~~ - resolved 2026-11-06: a pivot bug
@@ -1769,9 +1769,9 @@ None of these may stay open behind a ✅.
       retracts~~ - done 2026-11-06 (RECOMMENDED "M13.8 A" (2)/(3)).
 - ~~**Rotary Offset air laps**~~ - fixed 2026-11-06: 11,967 -> 7,082 moves
       on a d20 bar (RECOMMENDED "M13.8 B" (2)).
-- **Radial retracts vs fixtures**: Parallel passes below the equator
-      retract downward to the clearance cylinder; the machine/fixture
-      check must cover anything inside that cylinder (a table, a chuck).
+- ~~**Radial retracts vs fixtures**~~ - fixed 2026-11-06: posed moves sweep the whole tool
+      against fixtures (RECOMMENDED "M13.8: posed moves against the fixtures"); owed: spindle
+      on posed rapids, continuous pose, fixed (non-rotating) fixtures in the path frame.
 
 
 ### M13.9 - The scallop law and finish stepovers
@@ -1837,8 +1837,8 @@ the heavy lane green.
 | **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint, text colours, dialog polish, vertex picking + Set origin done; owed: WCS snap to a picked face (-> M13.4 Owed bullet) | ⚠️ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
-| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); owed: mid-move pose, cut-order-aware clearing | ⚠️ |
-| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted; owed: radial retracts vs fixtures | ⚠️ |
+| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); ladder tolerance (done); overhang laws (done); cut-order clearing (done); owed: mid-move pose | ⚠️ |
+| **M13.8** | Multi-axis leftovers | Done: rotary first move, Offset from stock radius, Parallel radial links, swarf_multi rung, Offset air laps; ridge law decided (-> M13.9); all-air finish noted, posed moves vs fixtures; owed: spindle on posed rapids, continuous pose, fixed-fixture frame | ⚠️ |
 | **M13.9** | Scallop law and finish stepovers | Make the ridge/scallop law reachable and fix the finish generators it convicts (0.13-0.35 mm over a 0.12 gate) | 📋 |
 
 ## Open questions & deferred
