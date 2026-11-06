@@ -40,10 +40,12 @@
 //!   screen (the Prime Directive's "never crash" includes it).
 
 pub mod pack;
+pub mod patch;
 
 mod march;
 
 pub use pack::{pack_cut, pack_field, pack_target, DistanceLattice, FieldLattice, LatticeMeta};
+pub use patch::{pack_cut_patch, CutPatch};
 
 use std::collections::HashMap;
 

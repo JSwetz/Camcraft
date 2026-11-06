@@ -165,15 +165,19 @@ pub fn pack_field(f: &SdfField) -> Option<FieldLattice> {
 /// the region, which is the shell's box.
 #[must_use]
 pub fn pack_cut(f: &SdfField, meta: &LatticeMeta) -> Vec<f32> {
-    let floor = -4.0 * f.cap();
-    fill(meta, |_, key| {
-        let c = f.cut_at(key);
-        if c == f64::NEG_INFINITY {
-            floor
-        } else {
-            c
-        }
-    })
+    fill(meta, |_, key| cut_texel(f, key))
+}
+
+/// One cut-layer texel: the claimed value, or the floor (`-4 cap`)
+/// where no tool has claimed the cell - shared by the full pack and
+/// the playback patch (`patch`), so the two cannot disagree.
+pub(crate) fn cut_texel(f: &SdfField, key: [i32; 3]) -> f64 {
+    let c = f.cut_at(key);
+    if c == f64::NEG_INFINITY {
+        -4.0 * f.cap()
+    } else {
+        c
+    }
 }
 
 /// The deviation target: signed distance per cell, mesh layer only

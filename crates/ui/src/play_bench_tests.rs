@@ -15,7 +15,7 @@ use camcraft_app::geometry::{Point3, IDENTITY_Q};
 use camcraft_app::operation::{Height, OpParams, SrcRef};
 use camcraft_app::schema::Location;
 use camcraft_app::stock::StockShape;
-use camcraft_app::stock_view::FieldView;
+use camcraft_app::stock_view::{CutLayer, FieldView};
 use camcraft_app::tools::catalog;
 
 use crate::actions::ensure_field_view;
@@ -73,8 +73,14 @@ fn ui_frame(state: &mut State, last: &mut Option<Arc<FieldView>>, sent: &mut usi
     {
         match &fv.packed {
             Some(p) => {
-                let bytes: Vec<u8> = p.cut.iter().flat_map(|x| x.to_le_bytes()).collect();
-                *sent += bytes.len();
+                // The eye's choice (M13.1): the patch when its chain
+                // covers the resident frame, else the whole layer.
+                let held = last.as_ref().and_then(|l| l.packed.as_ref()).filter(|h| Arc::ptr_eq(&h.base, &p.base));
+                let bytes = match &p.cut {
+                    CutLayer::Patch { patch, .. } if held.is_some_and(|h| p.patches(h.seq)) => patch.bytes(),
+                    _ => p.base.mesh.len() * 4,
+                };
+                *sent += bytes;
             }
             None => {
                 let _ = fv.stock.field().and_then(camcraft_app::stock_sim::preview::pack_field);
@@ -109,11 +115,15 @@ fn traced_playback_cost_per_frame_and_per_jump() {
     let (mean, max) = stats(&times);
     println!("(a) ui frame while playing: mean {mean:.3} ms, max {max:.3} ms over {frames} frames; {views} new views shown, at move {:?}", shown(&state));
     let worker_bytes = match &state.field_view {
-        Some(Ok(fv)) => fv.stock.field().map_or(0, |f| f.cut_layer_bytes()) + fv.packed.as_ref().map_or(0, |p| p.cut.len() * 4),
+        Some(Ok(fv)) => fv.stock.field().map_or(0, |f| f.cut_layer_bytes()) + fv.packed.as_ref().map_or(0, |p| p.cut_bytes()),
+        _ => 0,
+    };
+    let full = match &state.field_view {
+        Some(Ok(fv)) => fv.packed.as_ref().map_or(0, |p| p.base.mesh.len() * 4),
         _ => 0,
     };
     println!(
-        "(c) bytes cloned per frame on the ui thread: 0 (script and view are Arc hand-offs); cut layer sent to the GPU: {} per new view; worker clones {worker_bytes} per publication (<= 20/s)",
+        "(c) bytes cloned per frame on the ui thread: 0 (script and view are Arc hand-offs); cut layer sent to the GPU: {} per new view (a whole-layer upload is {full}); worker clones {worker_bytes} per publication (<= 20/s)",
         sent / views.max(1)
     );
     let end = state.field_play.as_ref().map_or(0, |w| w.index().total());

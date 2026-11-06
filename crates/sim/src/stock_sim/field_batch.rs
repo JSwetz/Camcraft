@@ -29,7 +29,7 @@
 //!   brick, while it is hot) answers exactly what move-major does -
 //!   and a long program stops re-walking the same brick per move.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::field::{brick_of, center_of, cell_of, SdfField, BRICK, BRICK3};
 use super::field_cut::Sweep;
@@ -50,11 +50,14 @@ pub(crate) struct CostLedger {
     pub(crate) region: [(i32, i32); 3],
     pub(crate) full: HashMap<[i32; 3], u16>,
     pub(crate) stats: CutStats,
+    /// M13.1's upload ledger: the cut bricks whose values moved since
+    /// the last `take_dirty_bricks` - what a playback picture re-sends.
+    pub(crate) dirty: HashSet<[i32; 3]>,
 }
 
 impl Default for CostLedger {
     fn default() -> Self {
-        CostLedger { region: [(0, -1); 3], full: HashMap::new(), stats: CutStats::default() }
+        CostLedger { region: [(0, -1); 3], full: HashMap::new(), stats: CutStats::default(), dirty: HashSet::new() }
     }
 }
 
@@ -91,6 +94,29 @@ impl SdfField {
     #[must_use]
     pub fn cut_layer_bytes(&self) -> usize {
         (self.cuts.len() + self.cut_ups.len()).saturating_mul(BRICK3 * std::mem::size_of::<f64>())
+    }
+
+    /// Cut bricks (brick keys) whose cut-layer values changed since the
+    /// last take: a superset of what moved, never a subset.
+    #[must_use]
+    pub fn dirty_bricks(&self) -> &HashSet<[i32; 3]> {
+        &self.cost.dirty
+    }
+
+    /// Hand over the dirty-brick set and start a fresh one.
+    pub fn take_dirty_bricks(&mut self) -> HashSet<[i32; 3]> {
+        std::mem::take(&mut self.cost.dirty)
+    }
+}
+
+impl super::backend::Stock {
+    /// The field arm's dirty-brick set, taken (see
+    /// `SdfField::take_dirty_bricks`); `None` for a column stock.
+    pub fn take_dirty_bricks(&mut self) -> Option<HashSet<[i32; 3]>> {
+        match self {
+            super::backend::Stock::Field(f) => Some(f.take_dirty_bricks()),
+            super::backend::Stock::Column(_) => None,
+        }
     }
 }
 
@@ -278,6 +304,9 @@ impl SdfField {
             if v >= cap && !was_full {
                 *self.cost.full.entry(brick_of(key)).or_insert(0) += 1;
             }
+            // The only write into the cut layer: every value change
+            // marks its brick for the next upload (M13.1).
+            self.cost.dirty.insert(brick_of(key));
         }
     }
 

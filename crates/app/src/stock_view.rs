@@ -27,7 +27,7 @@ use crate::model;
 use std::sync::Arc;
 
 use crate::stock_sim::preview::pack::MAX_TEXELS;
-use crate::stock_sim::preview::{pack_field, pack_target, DistanceLattice, LatticeMeta};
+use crate::stock_sim::preview::{pack_field, pack_target, CutPatch, DistanceLattice, LatticeMeta};
 use crate::stock_sim::{auto_cell, part_facets, plan_program, Backend, SimOp, Stock, FIELD_BAND};
 
 /// The texels the stock's display cell is sized for by default: a
@@ -63,12 +63,43 @@ pub struct FieldView {
 
 /// A view's lattice, packed where the cutting ran: the session's
 /// constant layers behind one `Arc` (an eye holding the same `base`
-/// re-sends only `cut`), and this frame's cut layer.
+/// re-sends only `cut`), and this frame's cut layer - whole, or as a
+/// patch over an earlier frame of the session (M13.1).
 #[derive(Clone, Debug)]
 pub struct Packed {
     pub base: Arc<PackedBase>,
-    /// The cut layer over `base.meta`'s extent.
-    pub cut: Arc<Vec<f32>>,
+    /// This frame's number in its session (ascending, from 1).
+    pub seq: u64,
+    pub cut: CutLayer,
+}
+
+/// A frame's cut layer over `base.meta`'s extent.
+#[derive(Clone, Debug)]
+pub enum CutLayer {
+    /// The whole layer.
+    Full(Arc<Vec<f32>>),
+    /// Only what changed since frame `from`: valid on top of ANY frame
+    /// `m` of the session with `from <= m < seq` (cuts only grow, and
+    /// the patch covers every brick that moved from `from` to here).
+    /// An eye holding anything else repacks the layer whole.
+    Patch { from: u64, patch: Arc<CutPatch> },
+}
+
+impl Packed {
+    /// Bytes this frame sends to the GPU as a cut-layer rewrite.
+    #[must_use]
+    pub fn cut_bytes(&self) -> usize {
+        match &self.cut {
+            CutLayer::Full(c) => c.len().saturating_mul(4),
+            CutLayer::Patch { patch, .. } => patch.bytes(),
+        }
+    }
+
+    /// True when the patch applies over a resident frame `held`.
+    #[must_use]
+    pub fn patches(&self, held: u64) -> bool {
+        matches!(&self.cut, CutLayer::Patch { from, .. } if *from <= held && held < self.seq)
+    }
 }
 
 /// What a playback session never re-packs: the stock's mesh layer

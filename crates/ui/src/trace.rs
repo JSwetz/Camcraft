@@ -28,7 +28,7 @@ use egui_wgpu::wgpu;
 use wgpu::util::DeviceExt;
 
 use camcraft_app::stock_sim::preview::{
-    gate_tol, step_eps, DistanceLattice, FieldLattice, LatticeMeta, Preview, PreviewCamera,
+    gate_tol, step_eps, CutPatch, DistanceLattice, FieldLattice, LatticeMeta, Preview, PreviewCamera,
 };
 
 const SHADER: &str = include_str!("trace.wgsl");
@@ -215,6 +215,21 @@ impl TracePass {
             return Err("trace pass: the cut layer disagrees with the resident extent".into());
         }
         queue.write_buffer(&scene.cut, 0, &f32_bytes(cut));
+        Ok(())
+    }
+
+    /// Rewrite only a patch's runs of the resident cut layer (M13.1),
+    /// each at its texel offset. A patch that does not fit the
+    /// resident extent is refused before anything is written.
+    pub fn write_cut_patch(&self, queue: &wgpu::Queue, patch: &CutPatch) -> Result<(), String> {
+        let scene = self.scene.as_ref().ok_or("trace pass: no lattice to patch")?;
+        let n = scene.meta.dims.iter().try_fold(1usize, |n, &d| n.checked_mul(d as usize));
+        if !n.is_some_and(|n| patch.fits(n)) {
+            return Err("trace pass: the cut patch disagrees with the resident extent".into());
+        }
+        for (o, run) in patch.chunks() {
+            queue.write_buffer(&scene.cut, (o as u64).saturating_mul(4), &f32_bytes(run));
+        }
         Ok(())
     }
 

@@ -288,7 +288,9 @@ impl SdfField {
             .or_insert_with(|| Box::new([f64::NAN; BRICK3]))
     }
 
-    /// The cut layer's slot for a cell, allocating its brick.
+    /// The cut layer's slot for a cell, allocating its brick. A caller
+    /// that changes the value must mark the brick dirty (the only one,
+    /// `claim_record`, does) - the playback upload trusts that ledger.
     pub(crate) fn cut_mut(&mut self, key: [i32; 3]) -> &mut f64 {
         &mut self
             .cuts

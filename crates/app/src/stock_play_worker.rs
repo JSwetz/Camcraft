@@ -18,19 +18,25 @@
 //! - **Publication is throttled.** A view is snapshotted (cut layers
 //!   cloned, cut lattice packed) at most every `MIN_PUBLISH`, or when
 //!   the worker catches up - the per-frame clone is bounded by time.
+//! - **Only the touched bricks travel (M13.1).** After the session's
+//!   first picture, a frame carries the cut bricks changed since the
+//!   last frame the UI took (unioned over any it never took) as a
+//!   patch; a checkpoint restore, a broken chain, or a patch as big as
+//!   the layer sends the whole layer instead.
 //! - **Refuse, never crash.** A build or cut failure is published as
 //!   `Err` and the worker ends; a poisoned lock reads as a lost worker
 //!   by name. Dropping the handle stops and joins the thread: no
 //!   playback outlives its document.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::stock_play::{FieldPlay, PlayIndex, PlaySeed};
-use crate::stock_view::{FieldView, Packed, PackedBase};
-use crate::stock_sim::preview::pack_cut;
+use crate::stock_view::{CutLayer, FieldView, Packed, PackedBase};
+use crate::stock_sim::preview::{pack_cut, pack_cut_patch, LatticeMeta};
 
 /// The publication floor: at most ~20 views a second while cutting.
 pub const MIN_PUBLISH: Duration = Duration::from_millis(50);
@@ -199,11 +205,63 @@ fn next_target(shared: &Shared, at: usize, published: Option<usize>, total: usiz
     }
 }
 
-fn snapshot(play: &FieldPlay, base: Option<&Arc<PackedBase>>) -> PlayFrame {
+/// Cells in a brick (the field's 8^3): the patch-size yardstick.
+const BRICK_TEXELS: usize = 512;
+
+/// What the worker last published: the patch base of the next frame.
+#[derive(Default)]
+struct Chain {
+    seq: u64,
+    last: Option<Last>,
+}
+
+enum Last {
+    Full,
+    Patch { from: u64, set: HashSet<[i32; 3]> },
+}
+
+fn texels(meta: &LatticeMeta) -> usize {
+    meta.dims.iter().fold(1usize, |n, &d| n.saturating_mul(d as usize))
+}
+
+/// This frame's cut layer relation: `Some((from, bricks))` for a patch
+/// over frame `from`, `None` for the whole layer (the module law).
+fn delta(
+    dirty: Option<HashSet<[i32; 3]>>,
+    last: Option<Last>,
+    untaken: bool,
+    seq: u64,
+) -> Option<(u64, HashSet<[i32; 3]>)> {
+    match (dirty?, last?) {
+        // The frame before still sits untaken and this one replaces
+        // it: the patch must also carry that frame's bricks.
+        (d, Last::Patch { from, mut set }) if untaken => {
+            set.extend(d);
+            Some((from, set))
+        }
+        (_, Last::Full) if untaken => None,
+        (d, _) => Some((seq.saturating_sub(1), d)),
+    }
+}
+
+fn snapshot(shared: &Shared, play: &mut FieldPlay, base: Option<&Arc<PackedBase>>, chain: &mut Chain) -> PlayFrame {
+    let dirty = play.take_dirty();
     let mut view = play.view();
     if let (Some(base), Some(f)) = (base, view.stock.field()) {
-        let cut = Arc::new(pack_cut(f, &base.meta));
-        view.packed = Some(Packed { base: Arc::clone(base), cut });
+        chain.seq = chain.seq.saturating_add(1);
+        let seq = chain.seq;
+        let untaken = lock(&shared.out).is_some_and(|g| matches!(g.latest, Some(Ok(_))));
+        let d = delta(dirty, chain.last.take(), untaken, seq)
+            .filter(|(_, set)| set.len().saturating_mul(BRICK_TEXELS) < texels(&base.meta));
+        let (cut, last) = match d {
+            Some((from, set)) => {
+                let patch = Arc::new(pack_cut_patch(f, &base.meta, &set));
+                (CutLayer::Patch { from, patch }, Last::Patch { from, set })
+            }
+            None => (CutLayer::Full(Arc::new(pack_cut(f, &base.meta))), Last::Full),
+        };
+        chain.last = Some(last);
+        view.packed = Some(Packed { base: Arc::clone(base), seq, cut });
     }
     PlayFrame { at: play.at(), view: Arc::new(view) }
 }
@@ -218,6 +276,7 @@ fn run(shared: &Shared, seed: PlaySeed) {
         PackedBase::of(&v.stock, v.target.as_deref()).map(|(b, _)| Arc::new(b))
     };
     let (mut published, mut last, mut chunk) = (None, None::<Instant>, 64usize);
+    let mut chain = Chain::default();
     while let Some(k) = next_target(shared, play.at(), published, play.total()) {
         // A backward target restores its checkpoint first (no cutting),
         // then walks forward in chunks like any other.
@@ -238,7 +297,7 @@ fn run(shared: &Shared, seed: PlaySeed) {
         }
         let due = last.is_none_or(|t| t.elapsed() >= MIN_PUBLISH);
         if published != Some(play.at()) && (play.at() == k || due) {
-            publish(shared, Ok(snapshot(&play, base.as_ref())));
+            publish(shared, Ok(snapshot(shared, &mut play, base.as_ref(), &mut chain)));
             published = Some(play.at());
             last = Some(Instant::now());
         }

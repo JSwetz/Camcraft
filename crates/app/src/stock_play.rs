@@ -127,6 +127,9 @@ pub struct FieldPlay {
     checkpoints: Vec<(usize, Stock)>,
     cur: Stock,
     at: usize,
+    /// A checkpoint replaced `cur` since the last `take_dirty`: its
+    /// dirty ledger is not relative to anything uploaded (M13.1).
+    restored: bool,
     target: Option<Arc<Stock>>,
     target_note: Option<String>,
     cell: f64,
@@ -174,6 +177,7 @@ impl FieldPlay {
             checkpoints: vec![(0, stock.clone())],
             cur: stock,
             at: 0,
+            restored: true,
             target: target.map(Arc::new),
             target_note,
             cell,
@@ -243,6 +247,7 @@ impl FieldPlay {
                 .ok_or("playback lost its uncut stock")?;
             self.cur = snap.clone();
             self.at = *at;
+            self.restored = true;
         }
         // Forward in stride-sized runs, snapshotting each boundary
         // passed for the first time.
@@ -272,6 +277,16 @@ impl FieldPlay {
             cell: self.cell,
             packed: None,
         }
+    }
+
+    /// The cut bricks changed since the last take, as one contiguous
+    /// forward run; `None` when the delta is not provable that way (a
+    /// checkpoint restore, the first take, a column stock) and the
+    /// caller must re-send the whole cut layer.
+    pub fn take_dirty(&mut self) -> Option<std::collections::HashSet<[i32; 3]>> {
+        let d = self.cur.take_dirty_bricks();
+        let restored = std::mem::replace(&mut self.restored, false);
+        d.filter(|_| !restored)
     }
 
     /// Subtract global moves `[from, to)` from the shown stock.

@@ -22,7 +22,8 @@ use camcraft_app::stock::StockShape;
 use camcraft_app::stock_play::{progress, FieldPlay, PlaySeed, Progress, MAX_CHECKPOINTS};
 use camcraft_app::stock_play_worker::{PlayFrame, PlayWorker};
 use camcraft_app::stock_sim::{Preview, PreviewCamera, Stock, DEV_TOL};
-use camcraft_app::stock_view::field_view_with;
+use camcraft_app::stock_sim::preview::pack_cut;
+use camcraft_app::stock_view::{field_view_with, CutLayer};
 use camcraft_app::tools::catalog;
 use camcraft_app::world::new_world;
 
@@ -191,7 +192,76 @@ fn the_worker_publishes_a_model_that_follows_the_cutter() {
     let p = f.view.packed.as_ref().expect("a field view is packed on the worker");
     let p0 = first[0].view.packed.as_ref().expect("packed");
     assert!(std::sync::Arc::ptr_eq(&p.base, &p0.base), "the mesh layer is packed once per session");
-    assert_eq!(p.cut.len(), p.base.mesh.len(), "the cut layer covers the base's extent");
+    // The session's first picture sends its cut layer whole (M13.1).
+    let CutLayer::Full(c) = &p0.cut else { panic!("the first frame carries the whole cut layer") };
+    assert_eq!(c.len(), p0.base.mesh.len(), "the cut layer covers the base's extent");
+}
+
+/// An eye's cut layer in miniature (M13.1): a whole layer is copied, a
+/// patch is applied when its chain covers the held frame, and anything
+/// else repacks from the frame's own stock - `eye::rewrite_cut`'s law.
+/// Every frame checks the held layer against a full repack, bit for bit.
+fn apply(held: &mut Option<(u64, Vec<f32>)>, f: &PlayFrame) -> bool {
+    let p = f.view.packed.as_ref().expect("a field view is packed on the worker");
+    let field = f.view.stock.field().expect("a field stock");
+    let patched = match (&p.cut, held.as_mut()) {
+        (CutLayer::Patch { patch, .. }, Some((seq, layer))) if p.patches(*seq) => {
+            patch.apply(layer).expect("the patch fits the layer");
+            true
+        }
+        _ => false,
+    };
+    if !patched {
+        let layer = match &p.cut {
+            CutLayer::Full(c) => c.as_ref().clone(),
+            CutLayer::Patch { .. } => pack_cut(field, &p.base.meta),
+        };
+        *held = Some((p.seq, layer));
+    }
+    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let full = bits(&pack_cut(field, &p.base.meta));
+    let (seq, layer) = held.as_mut().expect("a layer is held");
+    *seq = p.seq;
+    assert_eq!(bits(layer), full, "frame {} (move {}): the held cut layer IS a full repack", p.seq, f.at);
+    patched
+}
+
+#[test]
+fn patched_playback_layers_equal_a_full_repack_including_backward_seeks() {
+    let world = faced_doc();
+    // Half-size cells: at the coarse cell the whole lattice is a few
+    // bricks, and a patch that big rightly travels as the full layer.
+    let w = PlayWorker::spawn(PlaySeed::gather(&world, false, COARSE * 8.0).expect("seed")).expect("worker");
+    let t = w.index().total();
+    // Eye A takes every frame; eye B draws only every other one (a UI
+    // that took a frame it never drew), so its chain breaks and heals.
+    let (mut a, mut b, mut patches, mut n) = (None, None, 0usize, 0usize);
+    for k in [0, t / 8, t / 4, 3 * t / 8, t / 2, t / 16, 5 * t / 8, 3 * t / 4, 1, 7 * t / 8, t] {
+        w.request(k);
+        for f in frames_until(&w, k) {
+            patches += usize::from(apply(&mut a, &f));
+            if n % 2 == 0 {
+                apply(&mut b, &f);
+            }
+            n += 1;
+        }
+    }
+    assert!(patches > 0, "forward playback sends patches ({n} frames)");
+}
+
+#[test]
+fn the_dirty_ledger_follows_cuts_and_refuses_a_restore() {
+    let world = faced_doc();
+    let mut play = FieldPlay::from_seed(PlaySeed::gather(&world, false, COARSE).expect("seed")).expect("play");
+    let total = play.total();
+    assert!(play.take_dirty().is_none(), "the first take is a whole upload");
+    assert_eq!(play.take_dirty().map(|d| d.len()), Some(0), "nothing cut, nothing dirty");
+    play.seek(total).expect("cut to the end");
+    assert!(play.take_dirty().is_some_and(|d| !d.is_empty()), "a cut dirties bricks");
+    play.seek(total / 2).expect("seek back");
+    assert!(play.take_dirty().is_none(), "a checkpoint restore is a whole upload");
+    play.seek(total / 2).expect("stand still");
+    assert_eq!(play.take_dirty().map(|d| d.len()), Some(0), "standing still dirties nothing");
 }
 
 #[test]
