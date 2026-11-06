@@ -1,12 +1,39 @@
+# --- build output -------------------------------------------------------
 /target
-/graphify-out
+/target-*
 /dist
 *.exe
 *.dll
+*.pdb
+*.stackdump
+
+# --- generated / local tooling ------------------------------------------
+/graphify-out
+/gate-logs
+*.log
+# UI snapshot test outputs (the blessed goldens live in crates/ui/tests/snapshots)
+*.new.png
+/tests/
+
+# --- editor / agent / personal local config -----------------------------
+# .github/ stays tracked: CI + the release pipeline that builds the artifact.
+/.claude/
+/.vscode/
+/.idea/
+run.sh
+loops.cmd
+
+# --- research material, not source (sizable, licence-unclear) -----------
+/raw/
+/pdf-sources/
+/spike-shots/
+*.pdf
+*.m4a
+*.mp4
+
+# --- stray CAM working files at the repo root ----------------------------
 /*.cps
 *.hsmproj
 /*.cnc
 /*.png
 /*.mch
-/tests/raw/*.m4a
-raw/*.mp4
