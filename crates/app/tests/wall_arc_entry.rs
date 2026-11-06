@@ -167,6 +167,12 @@ fn the_reported_outside_contour_enters_every_level_on_one_arc() {
     // The bore ring of the section has no room for the arc beside its
     // wall: refused by name, its graze stands.
     assert!(notes.contains("no arc fits beside the wall at the lead-in"), "{notes}");
+    // M11.2 B: the outer ring's lead-in starts about 4.4 deg off the X
+    // axis - an oblique vertical plane, which no G17/G18/G19 names - so
+    // its entries stay certified chord fans, and the path says so once.
+    let oblique = "entry: oblique vertical arc posted as chords - no standard plane";
+    assert_eq!(t.notes.iter().filter(|n| *n == oblique).count(), 1, "{notes}");
+    assert!(!t.moves.iter().any(|m| m.arc.is_some_and(|a| !a.plane.is_xy())), "no axis-plane entry here");
 
     let levels = [20.0, 15.0, 10.0, 5.0, 0.0, -5.0, -7.0];
     // The outer ring's entries stand beyond the part's R30 arc; the bore

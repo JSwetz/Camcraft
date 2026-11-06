@@ -11,15 +11,21 @@
 //! The model is the FINAL part: inside the pocket footprint, material
 //! below the model surface must stay; material above it must go. A
 //! cutter standing at level z therefore cuts the footprint minus the
-//! model's cross-section strictly above z:
+//! model material standing strictly above z:
 //!
 //! ```text
-//! cut_target(z) = footprint ∖ slice(model, z + ε)
+//! cut_target(z) = footprint ∖ (slice(model, z + ε) ∪ shadow_down(z))
 //! ```
 //!
 //! `slice(model, z+ε)` = columns whose solid reaches above the plane -
-//! the per-level islands, computed, not picked. A column whose surface
-//! T(x,y) ≤ z is fair game; the ladder then leaves a staircase of at
+//! the per-level islands, computed, not picked - united with the XY
+//! shadow of every down-facing face above the plane (`rest::hanging_above`):
+//! a plane under the part's underside or an overhang sections nothing
+//! there, yet the material above shadows those columns all the same (the
+//! blind-floor gouge: a level run to the stock bottom under a blind
+//! bore's solid floor). With the shadow the islands only grow as z
+//! falls, the superset law every entry arm's proof rests on. A column
+//! whose surface T(x,y) ≤ z is fair game; the ladder then leaves a staircase of at
 //! most `stepdown` above T on anything raised (the rest-material bullet,
 //! M2.1's simulation work, is what reads that staircase later; a flat
 //! floor at `bottom_z` comes out exact, the last level snapped there by

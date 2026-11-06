@@ -116,6 +116,37 @@ fn the_quarter_turn_starts_one_drop_behind_and_vertical() {
 }
 
 #[test]
+fn a_micron_skew_turns_the_lead_onto_its_axis_plane_and_a_real_one_does_not() {
+    // M11.2 B: a tessellated wall's first cut is axis-aligned only to
+    // its fit residual. Within the chord tolerance of sideways travel
+    // the lead lies IN the axis plane through the (off-lattice) entry -
+    // one G19 arc downstream - and its chord is what `clears` proved.
+    let e = Point2::new(3.000_000_9, -11.999_623_9);
+    let skew = Point2::new(3.5e-7, 1.0);
+    let seen = std::cell::RefCell::new(Vec::new());
+    let room = |s: Point2, q: Point2| {
+        seen.borrow_mut().push(s);
+        q == e
+    };
+    let l = arc_lead(e, skew, 5.0, 0.0, 10.0, 0.01, room).expect("snapped");
+    assert_eq!(l.start.x, e.x, "the lead lies in the YZ plane through e: {:?}", l.start);
+    assert!(l.fan.iter().all(|q| q.x == e.x), "every fan vertex too");
+    assert_eq!(seen.borrow().last(), Some(&l.start), "the snapped chord is the proved one");
+    // Refused room for the snapped lead: the exact tangent is asked
+    // next, and certifies on its own chord.
+    let exact = |s: Point2, _: Point2| s.x != e.x;
+    let l = arc_lead(e, skew, 5.0, 0.0, 10.0, 0.01, exact).expect("exact");
+    assert_ne!(l.start.x, e.x, "the unsnapped lead: {:?}", l.start);
+    assert_lead_laws(&l, e, Point2::new(3.5e-7, 1.0), 5.0, 0.0, 0.01);
+    // A real angle (sideways travel far past the tolerance) is not
+    // snapped: the tangent is the cut's own.
+    let d = Point2::new(0.1, 1.0);
+    let l = arc_lead(e, d, 5.0, 0.0, 10.0, 0.01, free).expect("oblique");
+    let n = d.x.hypot(d.y);
+    assert_lead_laws(&l, e, Point2::new(d.x / n, d.y / n), 5.0, 0.0, 0.01);
+}
+
+#[test]
 fn a_tight_room_shrinks_the_radius_toward_the_drop() {
     // The room admits a lead of 4 mm only: the nominal 20 (lead ~13.7
     // for h = 5) is refused, the halvings land on one that fits.
@@ -211,15 +242,20 @@ fn cp() -> ContourParams {
     }
 }
 
-/// The feed fans that descend into each level: maximal runs of Feed
-/// moves whose Z falls, ending on a plane.
+/// The descents into each level: maximal runs of Feed moves whose Z
+/// falls - chord fans, or (M11.2 B) true G18/G19 arcs, sampled along
+/// their sweep so one law reads both - ending on a plane.
 fn descents(t: &Toolpath) -> Vec<Vec<Point3>> {
     let mut out = Vec::new();
     let mut run: Vec<Point3> = Vec::new();
     for m in &t.moves {
-        if m.kind == MoveKind::Feed && m.arc.is_none() && m.to.z < m.from.z {
+        let vertical = m.arc.is_none_or(|a| !a.plane.is_xy());
+        if m.kind == MoveKind::Feed && vertical && m.to.z < m.from.z {
             if run.is_empty() {
                 run.push(m.from);
+            }
+            if let Some(a) = m.arc {
+                run.extend((1..16).filter_map(|k| a.point_at(m.from, m.to, f64::from(k) / 16.0)));
             }
             run.push(m.to);
         } else if !run.is_empty() {

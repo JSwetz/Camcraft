@@ -313,20 +313,31 @@ fn the_stamp_tells_the_choices_apart() {
 }
 
 /// Found while building M11.2 (pre-existing, not a links defect): the
-/// 3-D ladder run to the STOCK bottom on this part finds a sliver level
-/// at Z -7 under the bore's solid floor, and a helix entry there orbits
-/// from Z 0 down through the floor. The depth-aware verifier convicts it
-/// (Gouge), so it never posts silently; this pins exactly that - a helix
-/// below the floor is never warning-free.
+/// 3-D ladder run to the STOCK bottom on this part found a sliver level
+/// at Z -7 under the part's underside (Z -5) - the plane sections no
+/// part there, so the old islands law read it as open - and a helix
+/// entry there orbited from Z 0 down through the bore's solid floor (the
+/// depth-aware verifier convicted it, so it never posted silently). The
+/// islands law now subtracts all the material standing above a level
+/// (`machining3d::material_above`): under the closed floor no level
+/// exists, so no move of any entry arm goes below the bore floor inside
+/// the bore - nor anywhere under the part - and the path verifies clean.
 #[test]
 fn a_helix_under_the_bore_floor_is_never_silent() {
-    let mut op = pocket_op(Entry3D::Helix, Links::ROUGH3D);
-    if let OpParams::Pocket3D { bottom_z, .. } = &mut op {
-        *bottom_z = Height::of(HeightReference::BottomOfStock, 0.0);
+    for entry in [Entry3D::Helix, Entry3D::Plunge, Entry3D::Ramp, Entry3D::Arc] {
+        let mut op = pocket_op(entry, Links::ROUGH3D);
+        if let OpParams::Pocket3D { bottom_z, .. } = &mut op {
+            *bottom_z = Height::of(HeightReference::BottomOfStock, 0.0);
+        }
+        let (_w, _h, t, warns) = user_job(op);
+        assert!(!t.moves.is_empty(), "{entry:?}: the bore is still cut");
+        let in_bore = |p: &Point3| p.x.hypot(p.y) < 12.5;
+        let under = t.moves.iter().find(|m| [m.from, m.to].iter().any(|q| in_bore(q) && q.z < -1e-6));
+        assert!(under.is_none(), "{entry:?}: a move under the bore floor: {under:?}");
+        let low = t.moves.iter().map(|m| m.to.z.min(m.from.z)).fold(f64::INFINITY, f64::min);
+        assert!(low >= -1e-6, "{entry:?}: the part shadows everything below Z 0, got {low}");
+        assert!(warns.is_empty(), "{entry:?}: {warns:?} / {:?}", t.notes);
     }
-    let (_w, _h, t, warns) = user_job(op);
-    let below_floor = t.moves.iter().any(|m| m.arc.is_some() && m.to.z < -1e-6);
-    assert!(!below_floor || !warns.is_empty(), "a helix under the floor passed silently: {:?}", t.notes);
 }
 
 #[test]

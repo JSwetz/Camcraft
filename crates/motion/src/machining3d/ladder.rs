@@ -5,7 +5,7 @@
 use super::descent::{self, Ask, descend};
 use super::level_ctx::{LevelCtx, feed_leg, walk_pass};
 use super::params::Pocket3DParams;
-use super::rest::material_above;
+use super::rest::level_target;
 use super::shell::Field;
 
 use crate::cl::{MoveKind, PathBuilder, Toolpath};
@@ -92,10 +92,14 @@ pub(super) fn ladder(
     // that plane, which the Crossing law reads like any pass.)
     let mut lifted = LinkTally::default();
     for &z in zs {
-        // The level law, in two region ops: islands from the model, the
-        // cutter-center area by one erosion.
-        let islands = material_above(facets, z)?;
-        let target = footprint.difference(&islands)?;
+        // The level law, in two region ops: the footprint minus the part
+        // material standing above the plane - its cross-section and the
+        // shadow of anything hanging over it (a blind floor's underside,
+        // an overhang), so a level under a closed floor has no area
+        // there - then the cutter-center area by one erosion. The shadow
+        // is what keeps the superset law below true: target(z) only
+        // grows as z falls, so a center point at z is open from above.
+        let target = level_target(facets, footprint, z)?;
         let target = match rest {
             // The level law on rest terms: only columns the simulated
             // state still has standing above this plane. The islands

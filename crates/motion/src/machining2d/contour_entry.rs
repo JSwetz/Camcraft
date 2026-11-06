@@ -4,7 +4,8 @@
 //!
 //! Provenance: the vertical-plane arc lead-in of general machining
 //! practice (RS-274 / ISO 6983 circular interpolation in a vertical
-//! plane, posted as chords - see `entry_arc`) and the standard
+//! plane, posted as one G18/G19 arc or, oblique, as chords - see
+//! `entry_arc`) and the standard
 //! multi-depth profile transition of published CAM practice: lead out,
 //! retract to the retract plane, traverse, feed back in - or stay down
 //! and link at feed where the link runs in air. Legality is

@@ -36,8 +36,9 @@ pub enum Entry3D {
     Helix,
     /// Circular ramp (M11.1): an arc in the vertical plane of the first
     /// cut, tangent to it at the bottom, from the plane the ramp starts
-    /// at - certified by the ramp's chord law and posted as a chord fan
-    /// (see `entry_arc`). Opt-in: no existing operation chose it.
+    /// at - certified by the ramp's chord law and posted as one G18/G19
+    /// arc, or as a chord fan when its plane is oblique (see
+    /// `entry_arc`). Opt-in: no existing operation chose it.
     Arc,
 }
 

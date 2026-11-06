@@ -177,6 +177,15 @@ impl PathBuilder {
         self.notes.push(msg.into());
     }
 
+    /// [`note`](Self::note) unless the very same statement was already
+    /// made on this path: a law that fires per level or per pass is
+    /// said once, not once per occurrence.
+    pub fn note_once(&mut self, msg: &str) {
+        if !self.notes.iter().any(|n| n == msg) {
+            self.notes.push(msg.to_owned());
+        }
+    }
+
     pub fn at(&self) -> Point3 {
         self.at
     }

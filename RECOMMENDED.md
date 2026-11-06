@@ -9495,3 +9495,38 @@ doesn't promise). Dropped: algorithmic daltonisation.
 
 (4) **Owed:** the warning/error text colours in pages.rs are not
 remapped yet.
+
+## 3D ladder blind floor + M11.2 B true vertical arcs: six decisions (2026-11-06)
+
+(1) **Island law = section union the down-facing shadow** (`machining3d::
+rest::material_above`/`level_target`). The plain cross-section at a
+level is empty below a part's underside, so a level under a closed
+blind floor read as open air and a helix dove through solid to reach it.
+The shadow of every down-facing facet above the plane closes that. The
+shadow is subtracted only when it overlaps the target by more than
+1e-6 mm^2, so existing outputs stay byte-identical. The verifier keeps
+the plain section (`geometry::slice::material_above`).
+
+(2) **Entry legality reuses the cutter-centre proof**, which the new
+law makes sound again (the target only grows as z falls). A 1152-run
+fuzz over blind-hole depths, bottoms, stepdowns, entries and shells
+holds it. Same bug class owed in app `area.rs` and motion
+`contour_depth.rs` (in flight), plus a pre-existing shell + Ramp
+`Crossing` warning the fuzz pins.
+
+(3) **M11.2 B: the plane follows exact axis alignment of the entry
+chord.** X gives G18 (XZ), Y gives G19 (YZ), with the arc centre above
+the end so it's tangent at the bottom; oblique stays chords plus one
+note ("no standard plane"). Dropped: posting oblique arcs as single
+moves.
+
+(4) **Near-axis snap.** A cut within the chord tolerance of an axis is
+turned onto that plane and proven again by the same room test
+(tessellated bores entered with a 3 um skew). Larger rotations break
+tangency and are not done.
+
+(5) **The oblique note is said once per path** (`PathBuilder::note_once`).
+
+(6) **One golden regenerated**: contour_bore_arc_entry.cl, 52 -> 26
+moves (three YZ G2 arcs). Known gap: the user's part enters 4.4 deg off
+X, so it stays chords; an axis-aligned lead start is in M11.3's brief.
