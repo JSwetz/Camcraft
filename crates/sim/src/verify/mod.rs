@@ -133,11 +133,17 @@ pub use crate::tools::ToolGeom;
 
 
 mod contact;
+mod crossing;
 mod engine;
+mod finish;
 mod laws;
 mod probe;
+mod rapids;
+mod reach;
+mod rest;
 mod rotary;
 mod rotary_geom;
+mod section;
 mod solid;
 mod solid_index;
 mod sweep;

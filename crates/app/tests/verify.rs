@@ -265,19 +265,50 @@ fn feeds_on_different_levels_may_cross() {
     assert_eq!(verify(&t, &ctx(&r, None, &tool, Mode::Area)), Vec::new());
 }
 
-#[test]
-fn gouge_ring_is_flagged() {
-    // A square ring 0.5 mm closer to the walls than the r = 4 tool's
-    // tangency circle, in a 20x20 plate: every point of it bites past
-    // the finish surface.
+/// A square ring 0.5 mm closer to the walls of a 20x20 plate than the
+/// r = 4 tool's tangency circle: every point of it bites past the
+/// finish surface.
+fn gouge_ring() -> Toolpath {
     let mut moves = vec![Move::new(MoveKind::Plunge, p(3.5, 3.5, 5.0), p(3.5, 3.5, -1.0), Some(100.0))];
     for (from, to) in [((3.5, 3.5), (16.5, 3.5)), ((16.5, 3.5), (16.5, 16.5)), ((16.5, 16.5), (3.5, 16.5)), ((3.5, 16.5), (3.5, 3.5))] {
         moves.push(Move::new(MoveKind::Feed, p(from.0, from.1, -1.0), p(to.0, to.1, -1.0), Some(500.0)));
     }
-    let t = Toolpath {
+    Toolpath {
         moves,
         ..Toolpath::default()
-    };
+    }
+}
+
+#[test]
+fn a_positive_leave_never_licenses_cutting_the_wall() {
+    // The 0.5 mm-deep ring with a 0.5 mm leave: the old tangency law
+    // read `r - leave` (3.49 mm) and let the 3.5 mm ring pass - a
+    // silent 0.5 mm gouge into the finished wall (Prime Directive).
+    let t = gouge_ring();
+    let r = rect(0.0, 0.0, 20.0, 20.0);
+    let tool = deep_tool();
+    let cx = VerifyContext { stock_to_leave: 0.5, ..ctx(&r, None, &tool, Mode::Boundary) };
+    let warns = verify(&t, &cx);
+    assert_eq!(warns.len(), 5, "{warns:?}");
+    assert!(warns.iter().all(|w| matches!(w, Warning::Gouge { .. })), "{warns:?}");
+}
+
+#[test]
+fn a_negative_leave_is_the_overcut_asked_for() {
+    // A -0.6 mm leave asks the tool 0.6 mm past the wall: the 0.5 mm
+    // ring is inside that request and stays clean; -0.4 mm is not.
+    let t = gouge_ring();
+    let r = rect(0.0, 0.0, 20.0, 20.0);
+    let tool = deep_tool();
+    let asked = VerifyContext { stock_to_leave: -0.6, ..ctx(&r, None, &tool, Mode::Boundary) };
+    assert_eq!(verify(&t, &asked), Vec::new());
+    let short = VerifyContext { stock_to_leave: -0.4, ..ctx(&r, None, &tool, Mode::Boundary) };
+    assert!(verify(&t, &short).iter().any(|w| matches!(w, Warning::Gouge { .. })));
+}
+
+#[test]
+fn gouge_ring_is_flagged() {
+    let t = gouge_ring();
     let r = rect(0.0, 0.0, 20.0, 20.0);
     let tool = deep_tool();
     let warns = verify(&t, &ctx(&r, None, &tool, Mode::Boundary));

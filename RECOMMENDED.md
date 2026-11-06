@@ -9945,3 +9945,36 @@ parameter.
   11,967 moves on a d20 bar vs about 2,064. Safe, but wasteful.
 - Downward radial retracts below the equator rely on the machine and
   fixture check for anything inside the clearance cylinder.
+
+## M13.7 B: the verifier split, a real-tip end-to-end test, and the leave sign in law (b): four decisions (2026-11-06)
+
+(1) **`sim/verify/engine.rs` split along its law seams** into
+`crossing.rs` (a), `rest.rs` (the shared rest-material model),
+`section.rs` (b + b2, which share one mode gate), `reach.rs`
+(c, c3, e), `rapids.rs` (d) and `finish.rs` (f, f2). The dispatcher
+dropped from 658 to 60 lines. It is a pure move: until the scaffolding
+was removed, the old engine ran beside the new one and any difference
+in warnings was a panic. No difference showed over 889 debug tests and
+the release heavy lane.
+
+(2) **The end-to-end real-tip test uses a bull nose, not a ball.**
+The tool law refuses ball ends for 2D ops when the op is created, so
+no ball Contour can exist. `real_tip_contour.rs` runs a catalog bull
+nose along a filleted wall through the real app path, clean with its
+tip, and the square stack convicts the same path.
+
+(3) **Law (b) had the leave sign backwards (Prime Directive).** It
+convicted at `d < r - leave - tol`. A positive leave therefore let the
+tool sink `leave` into the finished wall unconvicted: a 0.5 mm leave
+hid a 0.5 mm gouge. A negative leave, a deliberate overcut,
+over-reported. It now uses b2's own allowance, `r - max(-leave, 0) -
+tol`; both directions are pinned in `crates/app/tests/verify.rs`.
+Dropped: `r + leave - tol`, which would convict a path for cutting
+into its own finishing allowance, a quality question rather than a
+gouge.
+
+(4) **Owed (tracked in M13.7):** the 2D depth ladder reads the part
+with 0.02 mm of slack where the verifier allows 0.01 mm. A flat-end
+pass can therefore end where the square reading reports a gouge.
+That errs safe, but can block a post for no real gouge; align the two
+tolerances.

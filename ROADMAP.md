@@ -1717,7 +1717,7 @@ would.** — 📋
 ### M13.7 - Verifier completeness
 **Goal: the exact solid-law verifier judges every move with the real
 tool, against the real stock, in the real pose - the backstop every
-generator relies on has no known blind spot.** — ⚠️ partial (owed: overhang laws, mid-move pose, engine.rs split)
+generator relies on has no known blind spot.** — ⚠️ partial (owed: overhang laws, mid-move pose, ladder/verifier tolerance)
 
 The 2026-11-06 solid-law verifier (0e18091) replaced plane sections for
 the tool-vs-part check; its own entry names what it still does not
@@ -1742,10 +1742,15 @@ None of these may stay open behind a ✅.
       engine refuses posed moves by name at the stock-sim door, but
       motion's direct `Dexel::subtract` calls are not gated for posed
       moves - gate them (refuse by name) or route them through the door.
-- **`sim/verify/engine.rs` over the 400-line law** (658 lines): split
-      along the law seams (section, solid, reach) at the next verifier change.
-- **An app-level ball-Contour verify test**: the real tip is tested at
-      the verifier; drive one real ball Contour op through generate.rs too.
+- ~~**`sim/verify/engine.rs` over the 400-line law**~~ - done 2026-11-06:
+      split into crossing/rest/section/reach/rapids/finish (RECOMMENDED "M13.7 B" (1)).
+- ~~**An app-level real-tip Contour test**~~ - done with a bull nose (ball
+      ends are refused for 2D ops at creation) - `real_tip_contour.rs`.
+- ~~**Law (b) leave sign**~~ - fixed 2026-11-06: a positive leave hid a
+      gouge of that depth (RECOMMENDED "M13.7 B" (3)).
+- **Ladder vs verifier tolerance**: the 2D depth ladder reads the part
+      with 0.02 mm slack, the verifier with 0.01 mm - a flat-end pass can
+      be convicted for no real gouge (errs safe, blocks a post); align them.
 
 ### M13.8 - Multi-axis leftovers after the pivot law
 **Goal: every rotary and 5-axis kind starts, links and judges like the
@@ -1818,7 +1823,7 @@ None of these may stay open behind a ✅.
 | **M13.4** | Small owed polish | ColorVision protan/deutan/tritan remaps (M6.1); the tool-law refusal suggesting a starter-catalog entry (M10.1); vertex picking + WCS face/vertex snapping (M1.2/M1.5); remaps, catalog hint and text colours done; owed: vertex picking + WCS snapping (-> M13.4 Owed bullet) | ⚠️ |
 | **M13.5** | Mill-turn completeness | Continuous C-axis live-tooling operations and axial drilling (M5.2) | 📋 |
 | **M13.6** | Feature recognition beyond holes | Pocket/slot recognition on the B-rep (Open question; buildable after M12.1) | 📋 |
-| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); owed: overhang laws, mid-move pose, engine.rs split | ⚠️ |
+| **M13.7** | Verifier completeness | The solid-law verifier's named limits: `Cutter` tip shape in `VerifyContext` for 2D ops (done); shank/sweep/rapid-in-stock laws off plain sections (uncut stock under overhangs); mid-move pose changes judged along the move, not at the end pose; rotary ops postable (done, b09e885); motion's direct `Dexel::subtract` gated for posed moves (done); engine.rs split, law (b) leave sign (done); owed: overhang laws, mid-move pose, ladder/verifier tolerance | ⚠️ |
 | **M13.8** | Multi-axis leftovers | Done: rotary first move on the clearance pose, Rotary Offset from the stock radius, Rotary Parallel radial links; owed: swarf_multi coarse rung, upright all-air finish unjudged, ridge rest law unreachable, Offset air laps | ⚠️ |
 
 ## Open questions & deferred
