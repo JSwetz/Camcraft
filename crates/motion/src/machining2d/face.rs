@@ -113,7 +113,20 @@ impl FaceParams {
 /// the overrun, where `blend.rs`'s law proves it; every refusal keeps its
 /// sharp corner and rides the path's notes. Rows never change.
 pub fn face(region: &Region, p: &FaceParams) -> Result<Toolpath, GenError> {
+    face_led(region, p, 0.0)
+}
+
+/// [`face`] with the entry run on by `lead` past its usual radius
+/// overrun, along the first row's own direction (M11.3 owed): the plunge
+/// stands `lead` farther out and the first row feeds in from there. Only
+/// the entry point moves - rows, reversals and the exit are [`face`]'s.
+/// `lead = 0` is [`face`] to the byte; a negative or non-finite lead is
+/// refused.
+pub fn face_led(region: &Region, p: &FaceParams, lead: f64) -> Result<Toolpath, GenError> {
     p.validate()?;
+    if !(lead.is_finite() && lead >= 0.0) {
+        return Err(GenError::Invalid("the facing lead-in must be finite and not negative".into()));
+    }
     let (lo, hi) = match region.bounds() {
         Some(b) => b,
         None => return Err(GenError::Empty("empty footprint".into())),
@@ -130,7 +143,7 @@ pub fn face(region: &Region, p: &FaceParams) -> Result<Toolpath, GenError> {
     // decided once, its refusals stated once.
     let (turns, blend_notes) = plan_reversals(&ys, r, p.blend_turns);
 
-    let start_x = if p.climb { x_in } else { x_out };
+    let start_x = if p.climb { x_in - lead } else { x_out + lead };
     let mut b = PathBuilder::new(Point3::new(start_x, ys[0], p.clearance_z));
     for n in blend_notes {
         b.note(n);

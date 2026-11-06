@@ -105,6 +105,7 @@ pub use params::{
     scallop_stepdown, scallop_stepover, Finish3DParams, FinishPattern,
 };
 pub use center_cut::guard as center_cut_guard;
+pub use center_cut::guard_as as center_cut_guard_as;
 pub use deburr::{deburr, DeburrParams};
 pub use flat::flat;
 pub use geodesic::geodesic;

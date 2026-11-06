@@ -4,7 +4,9 @@
 //! a radius off the stock - air - so a non-centre-cutting face mill
 //! posts the very path a centre-cutting one does; a drill cycle with a
 //! non-centre-cutting drill is refused by name (the M10.1 tool law is a
-//! family match and lets it through, so the cycle's door says no).
+//! family match and lets it through, so the cycle's door says no). An
+//! inner-patch Face runs its entry on along the first row out to air
+//! (M11.3 owed (4)) instead of refusing.
 //!
 //! Gate map (M11.3): covers app::operation (generate, plunge_solid),
 //! app::drilling, app::machining2d (face).
@@ -61,6 +63,89 @@ fn a_stock_face_enters_from_air_for_a_tool_that_is_not_centre_cutting() {
         let (cc, _) = operation::generate(&world, &op("EM-0800-4FL", face.clone()), "F").expect("cc face");
         let (nc, _) = operation::generate(&world, &op("NC", face), "F").expect("the facer enters from air");
         assert_eq!(cc.moves, nc.moves, "the same path for either tool");
+    }
+}
+
+/// The inner-patch Face (M11.3 owed (4)): a 20 x 20 part standing in
+/// the middle of the 60 x 60 stock, faced at its top. The plain entry
+/// lands on the stock around the part; for the non-centre-cutting tool
+/// it runs on along the first row out past the stock's edge, so the
+/// plunge is air, and the path verifies as clean as the centre-cutting
+/// one - which is the facer's own, unchanged.
+#[test]
+fn an_inner_patch_face_runs_its_entry_out_to_air_for_a_tool_that_is_not_centre_cutting() {
+    use camcraft_app::commands::ImportModel;
+    use camcraft_app::geo2d::{Loop, Region};
+    use camcraft_app::geometry::{cube, Point3};
+    use camcraft_app::machining2d::{face, FaceParams};
+    use camcraft_motion::plunge_law::{audit, Solid};
+
+    let (world, mut h) = world_with("EM-0800-4FL");
+    let part = cube(Point3::new(-10.0, -10.0, 0.0), Point3::new(10.0, 10.0, 18.0));
+    h.execute(&world, ImportModel::from_mesh("part", part));
+    let stock = Region::new(vec![Loop::new(vec![
+        Point2::new(-30.0, -30.0),
+        Point2::new(30.0, -30.0),
+        Point2::new(30.0, 30.0),
+        Point2::new(-30.0, 30.0),
+    ])
+    .expect("loop")])
+    .expect("region");
+    let solid = Solid { top: 20.0, footprint: Some(&stock) };
+    for (top_z, stepdown, climb) in
+        [(None, None, true), (None, None, false), (Some(Height::fixed(20.0)), Some(1.0), true)]
+    {
+        let params = OpParams::Face {
+            blend_turns: false,
+            tilt: None,
+            stepover: 4.0,
+            clearance_z: Height::fixed(30.0),
+            cut_z: Height::fixed(18.0),
+            top_z,
+            stepdown,
+            feed: 1200.0,
+            plunge_feed: 300.0,
+            climb,
+        };
+        let on_part = |tool: &str| Operation { src: SrcRef::Entity("part".into()), ..op(tool, params.clone()) };
+        let (cc, cc_w) = operation::generate(&world, &on_part("EM-0800-4FL"), "F").expect("cc face");
+        // The centre-cutting path is the facer's own, byte for byte, and
+        // its plain entry is the one that lands on the stock.
+        let own = face(
+            &Region::new(vec![Loop::new(vec![
+                Point2::new(-10.0, -10.0),
+                Point2::new(10.0, -10.0),
+                Point2::new(10.0, 10.0),
+                Point2::new(-10.0, 10.0),
+            ])
+            .expect("loop")])
+            .expect("region"),
+            &FaceParams {
+                tool_diameter: 8.0,
+                stepover: 4.0,
+                clearance_z: 30.0,
+                cut_z: 18.0,
+                top_z: top_z.map(|_| 20.0),
+                stepdown,
+                feed: 1200.0,
+                plunge_feed: 300.0,
+                climb,
+                blend_turns: false,
+            },
+        )
+        .expect("face");
+        assert_eq!(cc.moves, own.moves, "centre-cutting output unchanged");
+        assert!(audit(&cc, false, 4.0, &solid, "the facing entry").is_err(), "the plain entry is over stock");
+
+        let (nc, nc_w) = operation::generate(&world, &on_part("NC"), "F").expect("the entry runs out to air");
+        assert_eq!(audit(&nc, false, 4.0, &solid, "the facing entry"), Ok(()), "{climb} {top_z:?}");
+        assert_eq!(nc.moves.len(), cc.moves.len(), "only the entry point moved");
+        assert_ne!(nc.moves, cc.moves, "the entry moved");
+        assert_eq!(nc_w, cc_w, "verifies as clean as the centre-cutting path");
+        assert!(
+            !nc_w.iter().any(|w| format!("{w:?}").to_lowercase().contains("gouge")),
+            "no gouge: {nc_w:?}"
+        );
     }
 }
 

@@ -3,11 +3,13 @@
 //! tool that is not centre-cutting never feeds axially into solid on a
 //! 3-D finish's descents, a facer's entry, or a drill cycle - it is
 //! refused by name instead; the same op is clean with a centre-cutting
-//! tool, or where the entry falls through air (off the stock).
+//! tool, or where the entry falls through air (off the stock). A facer
+//! whose entry lands on the stock runs it on along its first row out to
+//! air (M11.3 owed (4)); it is refused only when no air is in reach.
 //!
 //! Gate map (M11.3): covers camcraft_motion::plunge_law (Solid,
 //! first_solid_plunge, audit), camcraft_motion::finishing3d (center_cut),
-//! camcraft_motion::machining2d (face), camcraft_motion::drilling (cycle,
+//! camcraft_motion::machining2d (face, face_entry),camcraft_motion::drilling (cycle,
 //! cross).
 
 use camcraft_motion::approach::CENTER_CUT_REFUSAL;
@@ -16,7 +18,8 @@ use camcraft_motion::drilling::{drill, CycleChoice, CycleParams, Hole};
 use camcraft_motion::finishing3d::{center_cut_guard, contour, parallel, waterline, Finish3DParams, FinishPattern};
 use camcraft_motion::geo2d::{Loop, Point2, Region};
 use camcraft_motion::geometry::{Point3, Triangle};
-use camcraft_motion::machining2d::{face, FaceParams, GenError};
+use camcraft_motion::cl::MoveKind;
+use camcraft_motion::machining2d::{air_lead, face, face_led, FaceParams, GenError, AIR_MARGIN};
 use camcraft_motion::plunge_law::{audit, first_solid_plunge, Solid};
 use camcraft_motion::tools::{Tool, ToolKind};
 
@@ -145,24 +148,66 @@ fn the_facer_enters_from_outside_the_stock_so_its_plunge_is_air() {
         for climb in [true, false] {
             let t = face(&stock, &FaceParams { climb, ..face_p(top) }).expect("face");
             assert_eq!(audit(&t, false, 5.0, &solid, "the facing entry"), Ok(()), "{top:?} {climb}");
+            assert_eq!(air_lead(&t, 5.0, &solid, &[]), Ok(None), "nothing to run on: {top:?} {climb}");
         }
     }
 }
 
 #[test]
-fn a_facer_entry_over_the_stock_refuses_a_tool_that_is_not_centre_cutting() {
-    // Facing only an inner patch of a wider stock: the entry plunges
-    // onto the stock itself - refused by name for the non-centre-cutting
-    // tool, clean for the centre-cutting one. Unseen stock is solid.
+fn a_facer_entry_over_the_stock_runs_on_along_its_row_out_to_air() {
+    // Facing only an inner patch of a wider stock: the plain entry lands
+    // on the stock (refused for a non-centre-cutting tool); the run-on
+    // moves the plunge back along the first row until the disc clears
+    // the stock by the margin, and the row feeds in from there.
     let patch = rect(10.0, 10.0, 50.0, 30.0);
     let stock = rect(0.0, 0.0, 60.0, 40.0);
-    for solid in [Solid { top: 20.0, footprint: Some(&stock) }, Solid { top: 20.0, footprint: None }] {
-        for top in [None, Some(20.0)] {
-            let t = face(&patch, &face_p(top)).expect("face");
-            let e = audit(&t, false, 5.0, &solid, "the facing entry").expect_err("a plunge onto the stock");
-            refused("face patch", &e);
-            assert_eq!(audit(&t, true, 5.0, &solid, "the facing entry"), Ok(()));
+    let solid = Solid { top: 20.0, footprint: Some(&stock) };
+    for top in [None, Some(20.0)] {
+        for climb in [true, false] {
+            let p = FaceParams { climb, ..face_p(top) };
+            let plain = face(&patch, &p).expect("face");
+            refused("face patch", &audit(&plain, false, 5.0, &solid, "the facing entry").expect_err("onto the stock"));
+            assert_eq!(audit(&plain, true, 5.0, &solid, "the facing entry"), Ok(()));
+            // The centre-cutting path is the facer's own, byte for byte.
+            assert_eq!(face_led(&patch, &p, 0.0).expect("face"), plain, "{top:?} {climb}");
+
+            let lead = air_lead(&plain, 5.0, &solid, &[]).expect("air beside the stock").expect("a run-on");
+            let led = face_led(&patch, &p, lead).expect("led face");
+            assert_eq!(audit(&led, false, 5.0, &solid, "the facing entry"), Ok(()), "{top:?} {climb}");
+            assert_eq!(first_solid_plunge(&led, 5.0, &solid), None);
+            // Every plunge stands clear of the stock by the margin, on
+            // the first row's line, within a sane run-on.
+            for m in led.moves.iter().filter(|m| m.kind == MoveKind::Plunge) {
+                let gap = if climb { -m.to.x } else { m.to.x - 60.0 };
+                assert!(gap >= 5.0 + AIR_MARGIN - 1e-9, "{top:?} {climb}: plunge at {:?}", m.to);
+                assert!(gap <= 5.0 + AIR_MARGIN + 5.0, "a sane run-on, not a wander: {:?}", m.to);
+                assert!((m.to.y - 15.0).abs() < 1e-9, "on the first row: {:?}", m.to);
+            }
+            // The run-on rides the first row's own feed: no extra moves.
+            assert_eq!(led.moves.len(), plain.moves.len(), "{top:?} {climb}");
         }
+    }
+}
+
+#[test]
+fn a_facer_entry_that_cannot_reach_air_is_still_refused_by_name() {
+    let patch = rect(10.0, 10.0, 50.0, 30.0);
+    let stock = rect(0.0, 0.0, 60.0, 40.0);
+    let plain = face(&patch, &face_p(None)).expect("face");
+    // Unseen stock is solid everywhere: no point beside it is air.
+    let blind = Solid { top: 20.0, footprint: None };
+    assert!(air_lead(&plain, 5.0, &blind, &[]).expect_err("no air").contains("unknown"));
+    // A forbidden zone (an exclude boundary) stands on the run-on line.
+    let solid = Solid { top: 20.0, footprint: Some(&stock) };
+    let keep_out = rect(-3.0, 12.0, -1.0, 18.0);
+    let why = air_lead(&plain, 5.0, &solid, &[("an exclude boundary", &keep_out)]).expect_err("blocked");
+    assert!(why.contains("an exclude boundary"), "{why}");
+    // A zone well off the line (clear of the swept disc) is no bar.
+    let aside = rect(-8.0, 26.0, -1.0, 30.0);
+    assert!(air_lead(&plain, 5.0, &solid, &[("an exclude boundary", &aside)]).is_ok_and(|l| l.is_some()));
+    // A bad lead never generates.
+    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(face_led(&patch, &face_p(None), bad).is_err(), "{bad}");
     }
 }
 

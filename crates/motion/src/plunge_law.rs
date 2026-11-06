@@ -19,6 +19,12 @@
 //! "solid" only costs a helix, a ramp or a named refusal; a wrong
 //! "cleared" would snap a tool, so there is none.
 //!
+//! Posed paths (the multiaxis kinds) are judged by the same law read in
+//! the tool's own frame: a descent is axial when it runs down the posed
+//! axis (within the core's cone, [`posed_axial`]), and a column is
+//! cleared along that axis ([`cleared_along`]). An unposed move keeps
+//! the vertical reading exactly.
+//!
 //! Provenance: the centre-cutting / non-centre-cutting end mill
 //! distinction of machining handbooks (a non-centre-cutting end mill may
 //! ramp or helix into material but not plunge); the cleared-column test
@@ -27,6 +33,7 @@
 use crate::approach::CENTER_CUT_REFUSAL;
 use crate::cl::{Move, MoveKind, PathBuilder, Toolpath};
 use crate::geo2d::{Point2, Region};
+use crate::geometry::Point3;
 use crate::machining2d::GenError;
 
 /// The uncut core of a non-centre-cutting end mill, as a fraction of its
@@ -115,32 +122,119 @@ pub struct Solid<'a> {
 
 impl Solid<'_> {
     /// Does a tool disc of radius `tool_r` at `xy` overlap the stock?
-    fn under(&self, xy: Point2, tool_r: f64) -> bool {
-        let Some(f) = self.footprint else { return true };
-        if f.contains(xy) {
-            return true;
-        }
-        f.loops().iter().any(|l| {
-            let pts = l.points();
-            pts.iter().zip(pts.iter().cycle().skip(1)).any(|(a, b)| seg_dist(xy, *a, *b) < tool_r - Z_EPS)
-        })
+    #[must_use]
+    pub fn under(&self, xy: Point2, tool_r: f64) -> bool {
+        self.footprint.is_none_or(|f| disc_overlaps(f, xy, tool_r))
     }
 }
 
-/// The first axial descent of `t` into solid: a cutting move with no XY
-/// run going down below `solid.top`, over the stock, onto a column no
-/// earlier cut of the path has cleared. `Some((xy, z))` names it.
+/// Does a disc of radius `r` at `xy` overlap `region` - its centre
+/// inside, or its rim reaching past an edge?
+#[must_use]
+pub fn disc_overlaps(region: &Region, xy: Point2, r: f64) -> bool {
+    if region.contains(xy) {
+        return true;
+    }
+    region.loops().iter().any(|l| {
+        let pts = l.points();
+        pts.iter().zip(pts.iter().cycle().skip(1)).any(|(a, b)| seg_dist(xy, *a, *b) < r - Z_EPS)
+    })
+}
+
+/// The first axial descent of `t` into solid: a cutting move going
+/// down its tool's axis below `solid.top`, over the stock, onto a
+/// column no earlier cut of the path has cleared. `Some((xy, z))` names
+/// it (the tip's end). An unposed move is read the 3-axis way (no XY
+/// run, going down Z); a posed one (M11.3 owed, multiaxis) by
+/// [`posed_axial`] and [`cleared_along`] - axial with respect to the
+/// pose, not world Z.
 #[must_use]
 pub fn first_solid_plunge(t: &Toolpath, tool_r: f64, solid: &Solid) -> Option<(Point2, f64)> {
     t.moves.iter().enumerate().find_map(|(i, m)| {
-        let axial = m.kind != MoveKind::Rapid
-            && (m.to.x - m.from.x).hypot(m.to.y - m.from.y) <= Z_EPS
-            && m.to.z < m.from.z - Z_EPS
-            && m.to.z < solid.top - Z_EPS;
         let xy = Point2::new(m.to.x, m.to.y);
-        (axial && solid.under(xy, tool_r) && !column_cleared(&t.moves[..i], xy, m.to.z, tool_r))
-            .then_some((xy, m.to.z))
+        let hit = match m.axis {
+            None => {
+                let axial = m.kind != MoveKind::Rapid
+                    && (m.to.x - m.from.x).hypot(m.to.y - m.from.y) <= Z_EPS
+                    && m.to.z < m.from.z - Z_EPS
+                    && m.to.z < solid.top - Z_EPS;
+                axial && solid.under(xy, tool_r) && !column_cleared(&t.moves[..i], xy, m.to.z, tool_r)
+            }
+            Some(ax) => {
+                let a = Point3::new(ax[0], ax[1], ax[2]);
+                m.kind != MoveKind::Rapid
+                    && m.arc.is_none()
+                    && posed_axial(m, a)
+                    && m.to.z < solid.top - Z_EPS
+                    && solid.under(xy, tool_r)
+                    && !cleared_along(&t.moves[..i], m.to, a, tool_r)
+            }
+        };
+        hit.then_some((xy, m.to.z))
     })
+}
+
+/// Is the straight move `m` a descent along the posed unit axis `a`
+/// (tip toward shank)? It must advance toward the tip, and lean off
+/// `-a` by no more than the core's half-angle: `sin θ <= CORE`. Inside
+/// that cone the tool's leading point lies in its uncut core (for a
+/// ball the core spans the sphere within `asin(CORE)` of the tip; a
+/// flat end drags its whole face, core included) - so a 5-axis
+/// stamp's world-vertical drop under a lean of less than 30 degrees is
+/// a plunge, as is a drop straight down a tilted axis. Wider leans are
+/// ramps, the sloped-entry laws' business.
+#[must_use]
+pub fn posed_axial(m: &Move, a: Point3) -> bool {
+    let d = m.to - m.from;
+    let len = d.dot(d).sqrt();
+    let along = -d.dot(a);
+    if !(len.is_finite() && along.is_finite() && along > Z_EPS) {
+        return false;
+    }
+    let lateral = (len * len - along * along).max(0.0).sqrt();
+    lateral <= CORE * len
+}
+
+/// [`column_cleared`] along a posed axis: has an earlier cutting move
+/// cleared the column down the unit axis `a` to the tip `end`? The
+/// cut must lie wholly at or below `end` both along `a` and in world Z
+/// (the stricter reading of the two - errs to solid), within
+/// `(1 - CORE)` radii of the axis line, measured across the axis. A
+/// degenerate axis or radius clears nothing.
+#[must_use]
+pub fn cleared_along(moves: &[Move], end: Point3, a: Point3, tool_r: f64) -> bool {
+    let reach = tool_r * (1.0 - CORE);
+    let Some((u, v)) = across(a) else { return false };
+    if !(reach.is_finite() && reach > 0.0 && end.is_finite()) {
+        return false;
+    }
+    let h = end.dot(a);
+    let flat = |p: Point3| Point2::new(p.dot(u), p.dot(v));
+    let e2 = flat(end);
+    moves.iter().rev().filter(|m| m.kind != MoveKind::Rapid).any(|m| {
+        m.segments3(CHORD_TOL).iter().any(|(p, q)| {
+            p.z.max(q.z) <= end.z + Z_EPS
+                && p.dot(a).max(q.dot(a)) <= h + Z_EPS
+                && seg_dist(e2, flat(*p), flat(*q)) <= reach
+        })
+    })
+}
+
+/// An orthonormal pair spanning the plane across the unit axis `a`;
+/// None for an axis that states no direction.
+fn across(a: Point3) -> Option<(Point3, Point3)> {
+    let n = a.dot(a).sqrt();
+    if !(n.is_finite() && (n - 1.0).abs() < 1e-6) {
+        return None;
+    }
+    let helper = if a.z.abs() < 0.9 { Point3::new(0.0, 0.0, 1.0) } else { Point3::new(1.0, 0.0, 0.0) };
+    let w = a.cross(helper);
+    let wn = w.dot(w).sqrt();
+    if !(wn.is_finite() && wn > 1e-9) {
+        return None;
+    }
+    let u = Point3::new(w.x / wn, w.y / wn, w.z / wn);
+    Some((u, a.cross(u)))
 }
 
 /// The audit's verdict: a centre-cutting tool always passes; otherwise

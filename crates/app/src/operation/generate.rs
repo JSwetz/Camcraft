@@ -149,29 +149,34 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             if let Some(forbidden) = &band {
                 boundary_turn::face_band_sane(&laid, forbidden, turn, d, *stepover)?;
             }
-            let path = machining2d::face(
-                &laid,
-                &FaceParams {
-                    tool_diameter: d,
-                    stepover: *stepover,
-                    clearance_z: hl.clearance,
-                    cut_z: req_z(hl.bottom, "Cut Z")?,
-                    top_z: hl.face_top,
-                    stepdown: *stepdown,
-                    feed: *feed,
-                    plunge_feed: *plunge_feed,
-                    climb: *climb,
-                    blend_turns: *blend_turns,
-                },
-            )?;
-            let path = boundary_turn::turn_path(path, -turn)?;
+            let fparams = FaceParams {
+                tool_diameter: d,
+                stepover: *stepover,
+                clearance_z: hl.clearance,
+                cut_z: req_z(hl.bottom, "Cut Z")?,
+                top_z: hl.face_top,
+                stepdown: *stepdown,
+                feed: *feed,
+                plunge_feed: *plunge_feed,
+                climb: *climb,
+                blend_turns: *blend_turns,
+            };
+            let path = boundary_turn::turn_path(machining2d::face(&laid, &fparams)?, -turn)?;
             // M11.3 owed: the facer enters a radius off the footprint -
-            // from air over the stock's edge, or refused by name.
-            if !tool.center_cutting {
-                let (top, fp) = super::plunge_solid::plunge_solid(stock_facets.as_deref(), m_gen, frame.as_ref());
-                let solid = camcraft_motion::plunge_law::Solid { top, footprint: fp.as_ref() };
-                camcraft_motion::plunge_law::audit(&path, false, d * 0.5, &solid, "the facing entry")?;
-            }
+            // from air over the stock's edge; over the stock (an inner
+            // patch) the entry runs on along its row out to air, or the
+            // op is refused by name. A centre-cutting tool reads nothing.
+            let path = if tool.center_cutting {
+                path
+            } else {
+                super::plunge_solid::face_air_entry(
+                    path,
+                    (stock_facets.as_deref(), m_gen, frame.as_ref()),
+                    band.as_deref().unwrap_or(&[]),
+                    |lead| boundary_turn::turn_path(machining2d::face_led(&laid, &fparams, lead)?, -turn),
+                    d * 0.5,
+                )?
+            };
             (region, path)
         }
         OpParams::Contour {
@@ -839,11 +844,16 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // None means the stamp never measures the shank, so the
             // paths of every v28 document regenerate byte-identical.
             let shank = (*shank_avoid).then(|| shank_of(&tool));
-            let path = if is_contour {
-                crate::multiaxis::contour5d(&material.facets, &fp, &axis, shank.as_ref())?
+            // M11.3 owed: the centre-cutting law, read along the pose.
+            let run = |q: &Finish3DParams| if is_contour {
+                crate::multiaxis::contour5d(&material.facets, q, &axis, shank.as_ref())
             } else {
-                crate::multiaxis::parallel5d(&material.facets, &fp, &axis, shank.as_ref())?
+                crate::multiaxis::parallel5d(&material.facets, q, &axis, shank.as_ref())
             };
+            let kind = if is_contour { "5-Axis Contour" } else { "5-Axis Parallel" };
+            let path = super::plunge_solid::guard_posed(
+                kind, tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
+            )?;
             (region, path)
         }
         // M5.1 stage D: the swarf family. The path is the raster run
@@ -922,11 +932,15 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 lag_deg: *lag_deg,
                 max_tilt_deg: Some(*max_tilt_deg),
             };
-            let path = if is_ladder {
-                crate::multiaxis::swarf5d_advanced(&material.facets, &fp, &axis, passes)?
+            let run = |q: &Finish3DParams| if is_ladder {
+                crate::multiaxis::swarf5d_advanced(&material.facets, q, &axis, passes)
             } else {
-                crate::multiaxis::swarf5d(&material.facets, &fp, &axis)?
+                crate::multiaxis::swarf5d(&material.facets, q, &axis)
             };
+            let kind = if is_ladder { "Advanced Swarf" } else { "Swarf" };
+            let path = super::plunge_solid::guard_posed(
+                kind, tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
+            )?;
             (region, path)
         }
         // M5.1 stage E: the rotary twins. The path is the finish's
@@ -1008,11 +1022,15 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 lag_deg: *lag_deg,
                 max_tilt_deg: Some(*max_tilt_deg),
             };
-            let path = if is_contour {
-                crate::multiaxis::rotary_contour(&material.facets, &fp, &axis)?
+            let run = |q: &Finish3DParams| if is_contour {
+                crate::multiaxis::rotary_contour(&material.facets, q, &axis)
             } else {
-                crate::multiaxis::rotary_parallel(&material.facets, &fp, &axis)?
+                crate::multiaxis::rotary_parallel(&material.facets, q, &axis)
             };
+            let kind = if is_contour { "Rotary Contour" } else { "Rotary Parallel" };
+            let path = super::plunge_solid::guard_posed(
+                kind, tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
+            )?;
             (region, path)
         }
         // M5.1 stage E2: the rotary rough. The pocket ladder runs in
@@ -1250,7 +1268,10 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
             // Stage F's law again, opt-in: None stamps the flow lines
             // with the plain lean, as every v30 path regenerates.
             let shank = (*shank_avoid).then(|| shank_of(&tool));
-            let path = crate::multiaxis::flow5d(&material.facets, &fp, &axis, shank.as_ref())?;
+            let run = |q: &Finish3DParams| crate::multiaxis::flow5d(&material.facets, q, &axis, shank.as_ref());
+            let path = super::plunge_solid::guard_posed(
+                "5-Axis Flow", tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &fp, run,
+            )?;
             (region, path)
         }
         // The drive-curve contour (M5.1 J): the picked chains, in
@@ -1329,6 +1350,9 @@ pub fn run_job(job: GenJob) -> Result<(Toolpath, Vec<Warning>), GenError> {
                 &cp,
                 &axis,
                 shank.as_ref(),
+            )?;
+            super::plunge_solid::audit_posed(
+                "Multi-Axis Contour", tool.center_cutting, stock_facets.as_deref(), m_gen, frame.as_ref(), &path, d * 0.5,
             )?;
             (region, path)
         }

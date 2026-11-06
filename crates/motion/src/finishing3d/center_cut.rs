@@ -27,18 +27,36 @@ pub fn guard<F>(center_cutting: bool, solid: &Solid, fp: &Finish3DParams, run: F
 where
     F: Fn(&Finish3DParams) -> Result<Toolpath, GenError>,
 {
+    guard_as("the finish", center_cutting, solid, fp, run)
+}
+
+/// [`guard`] for a kind built on finish params that names itself in
+/// the refusal (M11.3 owed: the multiaxis kinds - 5-Axis Contour,
+/// Parallel and Flow, the swarf and rotary twins - whose posed descents
+/// the law reads along the tool's own axis, `plunge_law::posed_axial`).
+/// `kind` reads as the subject of "{kind}'s entry descent".
+pub fn guard_as<F>(
+    kind: &str,
+    center_cutting: bool,
+    solid: &Solid,
+    fp: &Finish3DParams,
+    run: F,
+) -> Result<Toolpath, GenError>
+where
+    F: Fn(&Finish3DParams) -> Result<Toolpath, GenError>,
+{
     let path = run(fp)?;
     let r = fp.tool_diameter * 0.5;
     if center_cutting || plunge_law::first_solid_plunge(&path, r, solid).is_none() {
         return Ok(path);
     }
     if fp.ramp && fp.entry_ramp {
-        plunge_law::audit(&path, false, r, solid, "the finish's entry descent")?;
+        plunge_law::audit(&path, false, r, solid, &format!("{kind}'s entry descent"))?;
         return Ok(path);
     }
     let sloped = Finish3DParams { ramp: true, entry_ramp: true, ..*fp };
     let mut path = run(&sloped)?;
-    plunge_law::audit(&path, false, r, solid, "the finish's entry descent, even with ramped entries,")?;
-    path.notes.push(format!("{NOT_CENTER_CUTTING} - the finish's entries ramp instead of plunging"));
+    plunge_law::audit(&path, false, r, solid, &format!("{kind}'s entry descent, even with ramped entries,"))?;
+    path.notes.push(format!("{NOT_CENTER_CUTTING} - {kind}'s entries ramp instead of plunging"));
     Ok(path)
 }
