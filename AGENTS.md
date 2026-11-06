@@ -260,3 +260,11 @@ Format: `<type>(<optional scope>): <subject>` - e.g. `fix:` or
 `feat:`.
 
 Version is `0.x.0` until the clean-room audit and release.
+
+**Every cut tag is published.** A release cut is not done until it is on
+GitHub: after the tag is made locally (`scripts/release.ps1`), push the
+branch, then the tag - `git push origin main && git push origin vX.Y.Z` -
+which fires `release.yml` and attaches the built artifact to a GitHub
+release. A tag that exists only locally is an unfinished cut. Never move or
+re-push an existing tag; a fix after a cut is the next patch version. Never
+force-push.

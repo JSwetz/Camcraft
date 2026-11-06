@@ -1906,8 +1906,9 @@ fixed dates; the scope is what is green at the cut. Each train carries at most
 three MUSTS; a must that is not green 4 h before the cut slips to the next
 train, never the date. The last 4 h are the freeze: no new agents, the full
 gate (every crate, ui from crates/ui, clippy, all heavy lanes), bump, lock
-sync, tag, zip - the 0.7.0 recipe in RECOMMENDED "Release 0.7.0". Nothing is
-pushed by the session; the user pushes the tag.
+sync, tag, zip - the 0.7.0 recipe in RECOMMENDED "Release 0.7.0". Every cut is
+published by the session: the cut pushes main, then the tag, which fires
+release.yml (AGENTS.md "Every cut tag is published", user 2026-11-07).
 
 | Train | Cut (local) | Theme | Musts | Nice-to-have |
 |---|---|---|---|---|
