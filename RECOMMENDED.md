@@ -10524,3 +10524,25 @@ bricks' texel runs.** Release bench: 2,024,224 bytes per picture became
 - A frame the UI skipped is carried in the next patch.
 - Tests check that the patched layer equals a full repack byte for byte,
   forward and after backward seeks.
+
+## Release 0.7.0: three decisions (2026-11-06)
+
+(1) **Cut now, from a frozen main.** The user asked for a dist release at a
+convenient test point. The point chosen is the moment every in-flight
+worktree landed (face snap, star-plan smoothing, fixed workholding, pocket
+arc entry, 3D first-stretch, dirty-brick upload): all of the day's user
+reports are on main together, and the freeze gate ran every crate, the UI
+suites, clippy and all three heavy lanes green (debug 1595 / 0, ui 298 / 0).
+No new agents were started during the freeze.
+
+(2) **Minor bump, 0.6.0 -> 0.7.0.** Per AGENTS.md the version stays 0.x.0
+until the clean-room audit; 108 commits with a project-format change (v42 ->
+v49, older files load) is a minor, not a patch. Same shape as v0.6.0: the
+bump and the notes in one `chore(release)` commit, the lock sync in the
+next, a local `v0.7.0` tag, the portable zip under `dist/` (gitignored).
+
+(3) **Local only; the push is the user's.** `release.yml` publishes on a
+`v*` tag push, and local main is hundreds of commits ahead of origin. The
+session builds and packages but does not push; the user gets the zip path
+and the exact push command. A `TESTING.md` hand-test list ships in the zip
+and at the repo root, aimed at the day's reports.
